@@ -207,7 +207,8 @@ export function Composer({
     const acceptedWithoutIntermediateRender = settlementChanged
       && submittedDraftRef.current !== undefined
       && prompt === "";
-    if (promptChanged || acceptedWithoutIntermediateRender) {
+    const externallyChanged = promptChanged && prompt !== draftRef.current;
+    if (externallyChanged || acceptedWithoutIntermediateRender) {
       draftRef.current = prompt;
       renderEditorText(prompt);
     }
@@ -402,10 +403,6 @@ export function Composer({
             });
             return;
           }
-          const text = event.clipboardData?.getData?.("text/plain");
-          if (!text) return;
-          event.preventDefault();
-          insertEditorText(text);
         }}
         onKeyDown={(event) => {
           if (filePicker) {

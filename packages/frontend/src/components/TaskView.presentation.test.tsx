@@ -531,7 +531,7 @@ describe("TaskView timeline presentation", () => {
 
     expect(JSON.stringify(tree.toJSON())).not.toContain("Reconnecting to App Server.");
     const editor = tree.root.findByProps({ role: "textbox", "aria-label": "Message" });
-    expect(editor.props.contentEditable).toBe(true);
+    expect(editor.props.contentEditable).toBe("plaintext-only");
     expect(editor.props["aria-placeholder"]).toBe("Reconnecting. Draft is saved here.");
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
 
@@ -566,7 +566,7 @@ describe("TaskView timeline presentation", () => {
     expect(rendered).toContain("Unable to refresh task.");
     expect(rendered).toContain("Earlier response");
     expect(rendered).toContain("Connection closed.");
-    expect(tree.root.findByProps({ role: "textbox", "aria-label": "Message" }).props.contentEditable).toBe(true);
+    expect(tree.root.findByProps({ role: "textbox", "aria-label": "Message" }).props.contentEditable).toBe("plaintext-only");
     const retryButton = tree.root.find((node) => node.type === "button" && node.children.includes("Retry"));
     act(() => retryButton.props.onClick());
     expect(retry).toHaveBeenCalledOnce();

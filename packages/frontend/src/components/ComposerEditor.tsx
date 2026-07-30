@@ -84,6 +84,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
       placeholder={placeholder}
       renderRevision={renderRevision}
       ref={ref}
+      value={value}
       valueLength={value.length}
     />
   );
@@ -103,6 +104,7 @@ type ComposerEditorSurfaceProps = {
   html: string;
   placeholder: string;
   renderRevision: number;
+  value: string;
   valueLength: number;
 };
 
@@ -115,10 +117,12 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
   html,
   placeholder,
   renderRevision,
+  value,
   valueLength,
 }, ref) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const restoreSelectionRef = useRef<EditorSelection | undefined>(undefined);
+  const lastRenderRevisionRef = useRef(renderRevision);
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
@@ -140,9 +144,18 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
-    // Keep React from rewriting the focused contenteditable before selection can be captured.
-    if (editor && editor.innerHTML !== html) editor.innerHTML = html;
-  }, [html, renderRevision]);
+    const renderRevisionChanged = lastRenderRevisionRef.current !== renderRevision;
+    lastRenderRevisionRef.current = renderRevision;
+    // Preserve browser-authored edits so Chromium retains its native undo transaction.
+    // Explicit composer edits still replace markup through renderRevision.
+    if (
+      editor
+      && editor.innerHTML !== html
+      && (renderRevisionChanged || editableText(editor) !== value)
+    ) {
+      editor.innerHTML = html;
+    }
+  }, [html, renderRevision, value]);
 
   useLayoutEffect(() => {
     const selection = restoreSelectionRef.current;
@@ -165,7 +178,7 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
         aria-label={ariaLabel}
         aria-placeholder={placeholder}
         className="composer-editor"
-        contentEditable={!disabled}
+        contentEditable={disabled ? false : "plaintext-only"}
         data-empty={valueLength === 0 ? true : undefined}
         data-placeholder={placeholder}
         onInput={(event) => {
@@ -202,6 +215,7 @@ function sameEditorSurfaceProps(previous: ComposerEditorSurfaceProps, next: Comp
     && previous.html === next.html
     && previous.placeholder === next.placeholder
     && previous.renderRevision === next.renderRevision
+    && previous.value === next.value
     && previous.valueLength === next.valueLength;
 }
 

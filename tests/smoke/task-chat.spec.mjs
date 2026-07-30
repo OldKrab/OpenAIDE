@@ -41,6 +41,23 @@ test("keeps shared typography when an App Shell supplies body defaults", async (
   await expect(body).toHaveCSS("font-size", "14px");
 });
 
+test("pastes Windows multiline text without blank lines and undoes it as one edit", async ({ context, page }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
+  await openPreparedNewTask(page);
+
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await page.evaluate(async () => navigator.clipboard.writeText("alpha\r\nbeta\r\ngamma"));
+  await composer.focus();
+  await page.keyboard.press("Control+V");
+
+  await expect.poll(() => composer.evaluate((element) => element.innerText))
+    .toBe("alpha\nbeta\ngamma");
+
+  await page.keyboard.press("Control+Z");
+
+  await expect.poll(() => composer.evaluate((element) => element.innerText)).toBe("");
+});
+
 test("keeps the New Task form stable across constrained editor heights", async ({ page }) => {
   await page.setViewportSize({ width: 1_000, height: 525 });
   await openPreparedNewTask(page);
@@ -453,7 +470,8 @@ async function openPreparedNewTask(page) {
       .getByRole("menuitemradio", { name: /OpenAIDE Test Agent/ })
       .click({ force: true });
   }
-  await expect(page.getByRole("textbox", { name: "Message" })).toHaveAttribute("contenteditable", "true");
+  await expect(page.getByRole("textbox", { name: "Message" }))
+    .toHaveAttribute("contenteditable", "plaintext-only");
   await expect(page.getByLabel("Send message")).toBeDisabled();
 }
 
