@@ -275,6 +275,56 @@ describe("AppServerHostClient", () => {
       recoverable: true,
     });
   });
+
+  it("logs a classified reliable-session rejection without its response body", async () => {
+    const fetch = reliableFetch(
+      async (request) => (
+        "method" in request && request.method === CLIENT_INITIALIZE
+          ? [response(request.id!, { result: initializeResult() })]
+          : []
+      ),
+      () => fetchResponse({
+        code: "missing_after",
+        privateDetail: "must-not-reach-diagnostics",
+      }, 400),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    };
+    client = new AppServerHostClient(providerReturningConnection(), logger);
+    const messages: unknown[] = [];
+    client.attachView("task-1", (message) => messages.push(message));
+    await client.handleViewMessage("task-1", {
+      type: "appServer.session.initialize",
+      requestId: "initialize",
+    });
+    await vi.waitFor(() => {
+      expect(fetch.mock.calls.filter(([, init]) => init.method === "GET")).toHaveLength(2);
+    });
+
+    await client.handleViewMessage("task-1", {
+      type: "appServer.session.request",
+      requestId: "open-task",
+      method: TASK_OPEN,
+      params: { taskId: "task-1" },
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "app server view bridge operation failed",
+      expect.objectContaining({
+        operation: "appServer.session.request",
+        error_kind: "reliable_http",
+        transport_operation_kind: "receive",
+        http_status: 400,
+        response_code: "missing_after",
+      }),
+    );
+    const diagnosticFields = logger.warn.mock.calls[0]?.[1] ?? {};
+    const { error: _redactedByExtensionLogger, ...supportExportFields } = diagnosticFields;
+    expect(JSON.stringify(supportExportFields)).not.toContain("must-not-reach-diagnostics");
+  });
 });
 
 function providerReturningConnection() {
@@ -301,6 +351,7 @@ const uploadedMessages = new WeakMap<object, RpcMessage[]>();
 
 function reliableFetch(
   respond: (message: RpcMessage) => Promise<RpcMessage[]> | RpcMessage[],
+  emptyPollResponse?: () => ReturnType<typeof fetchResponse>,
 ) {
   const uploaded: RpcMessage[] = [];
   const frames: Array<{ sequence: number; message: RpcMessage }> = [];
@@ -313,6 +364,7 @@ function reliableFetch(
       const after = Number(init.headers["X-OpenAIDE-After"] ?? "0");
       const available = frames.filter((frame) => frame.sequence > after);
       if (available.length > 0) return fetchResponse({ frames: available });
+      if (emptyPollResponse) return emptyPollResponse();
       return new Promise((resolve) => pendingPolls.push({ after, resolve }));
     }
     const body = JSON.parse(init.body ?? "{}") as {

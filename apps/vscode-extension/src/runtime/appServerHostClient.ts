@@ -5,6 +5,7 @@ import {
   CLIENT_DETACH,
   createReliableLocalHttpBackendConnection,
   isAppServerSessionViewMessage,
+  reliableHttpErrorDiagnosticFields,
   serializeBridgeError,
   serializeSessionStatus,
   type AppServerSession,
@@ -208,6 +209,7 @@ export class AppServerHostClient {
       this.logger?.warn("app server view bridge operation failed", {
         operation: message.type,
         error: error instanceof Error ? error.message : String(error),
+        ...reliableHttpErrorDiagnosticFields(error),
       });
       if ("requestId" in message && typeof message.requestId === "string") {
         view.post({

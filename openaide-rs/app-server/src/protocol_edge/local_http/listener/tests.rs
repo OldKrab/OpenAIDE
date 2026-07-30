@@ -40,6 +40,16 @@ fn contextual_socket_errors_include_request_diagnostics() {
 }
 
 #[test]
+fn malformed_requests_include_a_safe_reason_code() {
+    let error = LocalHttpProbeListenerError::MalformedRequest("missing Content-Length");
+
+    let fields = error.diagnostic_fields();
+
+    assert_eq!(fields["error_kind"], "malformed_request");
+    assert_eq!(fields["reason_code"], "missing_content_length");
+}
+
+#[test]
 fn handles_post_and_delegates_authorization_and_body() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -146,6 +156,32 @@ fn get_routes_to_reliable_session_receive_with_acknowledgement() {
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with(r#"{"frames":[]}"#));
+}
+
+#[test]
+fn reliable_session_receive_reports_the_missing_after_header() {
+    let response = reliable_receive_rejection(
+        "GET /probe HTTP/1.1\r\nX-OpenAIDE-Session-Id: session-1\r\n\r\n",
+    );
+
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(response.ends_with(r#"{"code":"missing_after"}"#));
+}
+
+#[test]
+fn reliable_session_receive_reports_an_invalid_after_header() {
+    let response = reliable_receive_rejection(
+        "GET /probe HTTP/1.1\r\nX-OpenAIDE-Session-Id: session-1\r\nX-OpenAIDE-After: nope\r\n\r\n",
+    );
+
+    assert!(response.ends_with(r#"{"code":"invalid_after"}"#));
+}
+
+#[test]
+fn reliable_session_receive_reports_the_missing_session_header() {
+    let response = reliable_receive_rejection("GET /probe HTTP/1.1\r\nX-OpenAIDE-After: 0\r\n\r\n");
+
+    assert!(response.ends_with(r#"{"code":"missing_session_id"}"#));
 }
 
 #[test]
@@ -333,6 +369,26 @@ fn options_preflight_returns_cors_headers_without_delegating() {
     assert!(response.contains("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"));
     assert!(response.contains("Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name"));
     assert!(called_rx.try_recv().is_err());
+}
+
+fn reliable_receive_rejection(request: &str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        handle_stream_with_routes(
+            &mut stream,
+            |_request| panic!("GET must not enter upload handling"),
+            |_stream, _request| panic!("GET must not enter event-stream handling"),
+            |_stream, request| Ok(reliable_session_poll_request_error(&request).unwrap()),
+            |_stream, _request| panic!("session GET must not enter file upload handling"),
+            |_stream, _request| panic!("session GET must not enter file download handling"),
+        )
+        .unwrap();
+    });
+    let response = send(addr, request);
+    server.join().unwrap();
+    response
 }
 
 fn send(addr: std::net::SocketAddr, request: &str) -> String {

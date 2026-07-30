@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RpcMessage } from "./rpcPeer";
 import {
   createReliableHttpMessageChannel,
+  reliableHttpErrorDiagnosticFields,
   type ReliableHttpFetch,
 } from "./reliableHttpChannel";
 
@@ -147,6 +148,42 @@ describe("ReliableHttpMessageChannel", () => {
     await vi.waitFor(() => expect(errors).toHaveLength(1));
     expect(String(errors[0])).toContain("HTTP 410");
     expect(fetch.mock.calls.filter(([, init]) => init.method === "GET")).toHaveLength(1);
+    channel.close();
+  });
+
+  it("classifies a safe reliable-session rejection without exposing its body", async () => {
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST") {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      return response(400, JSON.stringify({
+        code: "missing_after",
+        privateDetail: "must-not-reach-diagnostics",
+      }));
+    });
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://127.0.0.1:4321",
+      connectionId: "client-1",
+      fetch,
+      retryDelayMs: 0,
+    });
+    const errors: unknown[] = [];
+    channel.subscribeErrors?.((error) => errors.push(error));
+
+    await vi.waitFor(() => expect(errors).toHaveLength(1));
+
+    expect(reliableHttpErrorDiagnosticFields(errors[0])).toEqual({
+      error_kind: "reliable_http",
+      transport_operation_kind: "receive",
+      http_status: 400,
+      response_code: "missing_after",
+    });
+    expect(JSON.stringify(reliableHttpErrorDiagnosticFields(errors[0])))
+      .not.toContain("must-not-reach-diagnostics");
     channel.close();
   });
 

@@ -134,6 +134,57 @@ describe("support diagnostics bundle", () => {
     expect(archiveText).toContain('"agent_id": "agent:1"');
   });
 
+  it("retains safe reliable-session rejection reasons", async () => {
+    const logDirectory = await temporaryDirectory();
+    await writeFile(path.join(logDirectory, "openaide-extension.jsonl"), `${JSON.stringify({
+      timestamp: "2026-07-18T09:55:00.000Z",
+      scope: "openaide-extension",
+      level: "warn",
+      event: "app_server_view_bridge_operation_failed",
+      fields: {
+        error: "private response body",
+        error_kind: "reliable_http",
+        transport_operation_kind: "receive",
+        http_status: 400,
+        response_code: "missing_after",
+      },
+    })}\n`);
+    await writeFile(path.join(logDirectory, "openaide-app-server.jsonl"), `${JSON.stringify({
+      timestamp_ms: Date.parse("2026-07-18T09:55:00.000Z"),
+      scope: "openaide-app-server",
+      level: "warn",
+      event: "reliable_session_poll_rejected",
+      fields: {
+        reason_code: "missing_after",
+        after_header_present: false,
+      },
+    })}\n`);
+
+    const result = await buildSupportBundle({
+      snapshot: snapshot(),
+      environment: {
+        platform: "linux",
+        architecture: "x64",
+        vscode_version: "1.100.0",
+        extension_version: "0.0.1-alpha.4",
+      },
+      diagnosticsLogDirectory: logDirectory,
+      now: new Date("2026-07-18T10:00:00.000Z"),
+    });
+    const entries = readStoredZip(result.bytes);
+    const exported = [
+      entries.get("logs/openaide-extension.jsonl"),
+      entries.get("logs/openaide-app-server.jsonl"),
+    ].join("\n");
+
+    expect(exported).toContain('"transport_operation_kind":"receive"');
+    expect(exported).toContain('"http_status":400');
+    expect(exported).toContain('"response_code":"missing_after"');
+    expect(exported).toContain('"reason_code":"missing_after"');
+    expect(exported).not.toContain("private response body");
+    expect(exported).not.toContain("after_header_present");
+  });
+
   it("creates a partial bundle when logs are missing or malformed", async () => {
     const logDirectory = await temporaryDirectory();
     await writeFile(path.join(logDirectory, "openaide-extension.jsonl"), [
