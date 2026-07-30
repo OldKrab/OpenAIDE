@@ -17,7 +17,7 @@
 }
 
 .composer-config-control-anchor {
-  margin-inline: 2px;
+  margin-inline: 1px;
 }
 
 .composer-option-info {
@@ -97,14 +97,13 @@
 
 .composer-boolean-control-content {
   height: 16px;
-  display: block;
-  line-height: 16px;
+  display: flex;
+  align-items: center;
 }
 
 .composer-boolean-label {
   display: inline-block;
-  line-height: 16px;
-  vertical-align: baseline;
+  line-height: normal;
 }
 
 .composer-boolean-indicator {
