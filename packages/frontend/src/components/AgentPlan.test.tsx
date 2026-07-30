@@ -29,11 +29,19 @@ describe("Agent Plan", () => {
     const disclosure = tree.root.findByProps({ "aria-label": "Expand Agent Plan" });
     expect(disclosure.props["aria-expanded"]).toBe(false);
     expect(JSON.stringify(tree.toJSON())).toContain("Persist replacement");
-    expect(JSON.stringify(tree.toJSON())).not.toContain("Render plan");
+    expect(tree.root.findByProps({ className: "agent-plan-disclosure" }).props).toMatchObject({
+      "aria-hidden": true,
+      "data-open": false,
+      inert: true,
+    });
 
     act(() => disclosure.props.onClick());
 
-    expect(JSON.stringify(tree.toJSON())).toContain("Render plan");
+    expect(tree.root.findByProps({ className: "agent-plan-disclosure" }).props).toMatchObject({
+      "aria-hidden": false,
+      "data-open": true,
+      inert: undefined,
+    });
   });
 
   it("restores a live plan's disclosure state after remounting", () => {
@@ -65,18 +73,20 @@ describe("Agent Plan", () => {
     act(() => {
       tree = create(<AgentPlanView plan={plan} taskId="task-motion" taskStatus="active" />);
     });
-    expect(tree.root.findByProps({
+    expect(tree.root.findAllByProps({
       className: "agent-plan-status",
+      "data-animated": true,
       "data-status": "in_progress",
-    }).props["data-animated"]).toBe(true);
+    })).toHaveLength(1);
 
     act(() => {
       tree.update(<AgentPlanView plan={plan} taskId="task-motion" taskStatus="waiting" />);
     });
-    expect(tree.root.findByProps({
+    expect(tree.root.findAllByProps({
       className: "agent-plan-status",
+      "data-animated": true,
       "data-status": "in_progress",
-    }).props["data-animated"]).toBe(false);
+    })).toHaveLength(0);
   });
 
   it("keeps a completed Plan Chat row collapsed by default", () => {
@@ -87,7 +97,11 @@ describe("Agent Plan", () => {
 
     const disclosure = tree.root.findByProps({ "aria-label": "Expand completed Plan" });
     expect(disclosure.props["aria-expanded"]).toBe(false);
-    expect(JSON.stringify(tree.toJSON())).not.toContain("Inspect projection");
+    expect(tree.root.findByProps({ className: "agent-plan-disclosure" }).props).toMatchObject({
+      "aria-hidden": true,
+      "data-open": false,
+      inert: true,
+    });
   });
 });
 

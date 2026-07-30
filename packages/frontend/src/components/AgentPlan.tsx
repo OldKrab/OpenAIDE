@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import type { AgentPlan, AgentPlanEntry, TaskStatus } from "@openaide/app-shell-contracts";
 
@@ -42,7 +42,9 @@ export function AgentPlanView({
         ) : null}
         <small>{completed} of {plan.entries.length} complete</small>
       </button>
-      {open ? <PlanEntries entries={plan.entries} taskRunning={taskStatus === "active"} /> : null}
+      <PlanDisclosure open={open}>
+        <PlanEntries entries={plan.entries} taskRunning={open && taskStatus === "active"} />
+      </PlanDisclosure>
     </section>
   );
 }
@@ -76,8 +78,26 @@ export function CompletedPlanView({ entries }: { entries: AgentPlanEntry[] }) {
         <span>Plan completed</span>
         <small>{entries.length} steps</small>
       </button>
-      {open ? <PlanEntries entries={entries} taskRunning={false} /> : null}
+      <PlanDisclosure open={open}>
+        <PlanEntries entries={entries} taskRunning={false} />
+      </PlanDisclosure>
     </section>
+  );
+}
+
+/** Keeps disclosure content mounted so both opening and closing can animate. */
+function PlanDisclosure({ children, open }: { children: ReactNode; open: boolean }) {
+  return (
+    <div
+      aria-hidden={!open}
+      className="agent-plan-disclosure"
+      data-open={open}
+      inert={open ? undefined : true}
+    >
+      <div className="agent-plan-disclosure-content">
+        {children}
+      </div>
+    </div>
   );
 }
 
