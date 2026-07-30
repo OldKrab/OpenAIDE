@@ -278,7 +278,7 @@ describe("task list row styles", () => {
     );
   });
 
-  it("truncates a semantic title once rather than clipping every clause", () => {
+  it("bounds long Search patterns before truncating the whole semantic title", () => {
     expect(appCss).toMatch(
       /\.activity-step-title\s*{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
     );
@@ -288,7 +288,10 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(
       /\.activity-step-title\.semantic\s*>\s*\*\s*\+\s*\*\s*{[^}]*margin-inline-start:\s*4px;/,
     );
-    expect(appCss).not.toMatch(/\.activity-step-semantic-subject-list(?:\.[a-z]+)?\s*{[^}]*text-overflow:/);
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-subject-list\.technical\.bounded\s*{[^}]*display:\s*inline-block;[^}]*inline-size:\s*clamp\(12ch,\s*30vw,\s*32ch\);[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
+    );
+    expect(appCss).not.toMatch(/\.activity-step-semantic-subject-list\.(?:identity|resource)\s*{[^}]*text-overflow:/);
     expect(appCss).not.toMatch(/\.activity-step-semantic-scope\s*{[^}]*text-overflow:/);
     expect(appCss).toMatch(
       /\.activity-step-semantic-subject\s*{[^}]*font-weight:\s*400;/,
@@ -296,6 +299,9 @@ describe("task list row styles", () => {
     expect(appCss).not.toMatch(/\.activity-step-semantic-subject\s*{[^}]*(?:background|border-radius|padding):/);
     expect(appCss).toMatch(
       /\.activity-step-semantic-subject,\s*\.activity-step-semantic-scope\s*{[^}]*color:\s*inherit;[^}]*font:\s*inherit;/,
+    );
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-action-separator\s*{[^}]*margin-inline:\s*7px 3px;[^}]*color:\s*color-mix\(in oklch, var\(--oa-text\) 60%, var\(--oa-muted\)\);[^}]*font-weight:\s*500;/,
     );
     expect(appCss).toMatch(
       /\.activity-step-semantic-connector\s*{[^}]*color:\s*inherit;/,

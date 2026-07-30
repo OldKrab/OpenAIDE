@@ -389,6 +389,21 @@
   font: inherit;
 }
 
+.activity-step-semantic-subject-list.technical.bounded {
+  display: inline-block;
+  inline-size: clamp(12ch, 30vw, 32ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.activity-step-semantic-action-separator {
+  margin-inline: 7px 3px;
+  color: color-mix(in oklch, var(--oa-text) 60%, var(--oa-muted));
+  font-weight: 500;
+}
+
 .activity-step-semantic-connector {
   color: inherit;
 }
