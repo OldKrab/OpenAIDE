@@ -5,6 +5,9 @@ prototype_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${prototype_root}/../../.." && pwd)"
 
 cd "${repo_root}"
+if [[ ! -f node_modules/react/package.json ]]; then
+  npm install
+fi
 cargo build -p openaide-app-server
 
 cd "${prototype_root}"

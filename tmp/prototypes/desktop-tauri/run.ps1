@@ -5,6 +5,9 @@ $repoRoot = (Resolve-Path (Join-Path $prototypeRoot "../../..")).Path
 
 Push-Location $repoRoot
 try {
+    if (-not (Test-Path "node_modules/react/package.json")) {
+        npm install
+    }
     cargo build -p openaide-app-server
 }
 finally {
