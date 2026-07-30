@@ -587,6 +587,9 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer-controls\s*{[^}]*position:\s*relative;/);
     expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer-controls\s*{[^}]*position:\s*static;/);
     expect(appCss).toMatch(/\.composer-adaptive-options\s*{[^}]*position:\s*static;/);
+    expect(appCss).toMatch(/\.composer-config-control-anchor\s*{[^}]*margin-inline:\s*1px;/);
+    expect(appCss).toMatch(/\.composer-boolean-control-content\s*{[^}]*display:\s*flex;[^}]*align-items:\s*center;/);
+    expect(appCss).toMatch(/\.composer-boolean-label\s*{[^}]*line-height:\s*normal;/);
     expect(appCss).toMatch(/\.composer-overflow-options-anchor\s*{[^}]*position:\s*static;/);
     expect(appCss).toMatch(/\.composer-options-measurement\s*{[^}]*position:\s*fixed;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;/);
     expect(appCss).toMatch(/\.composer-overflow-options-anchor > \.composer-popover\s*{[^}]*left:\s*auto;[^}]*right:\s*0;/);
