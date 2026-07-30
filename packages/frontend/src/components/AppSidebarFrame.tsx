@@ -191,7 +191,8 @@ function writeState(state: SidebarFrameState) {
 }
 
 function defaultWidth() {
-  return typeof document !== "undefined" && document.body.dataset.shell === "web" ? 304 : 248;
+  const shell = typeof document === "undefined" ? undefined : document.body.dataset.shell;
+  return shell === "web" || shell === "desktop" ? 304 : 248;
 }
 
 function clampWidth(width: number) {

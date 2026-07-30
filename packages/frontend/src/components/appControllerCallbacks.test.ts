@@ -1347,7 +1347,7 @@ describe("app controller callbacks", () => {
     const dispatch = vi.fn();
     const setPreferences = vi.fn();
     const request = vi.fn(async () => ({
-      preferences: { composerSubmitShortcut: "enter" },
+      preferences: { composerSubmitShortcut: "enter", theme: "system" },
     }));
 
     callbacks({
@@ -1357,7 +1357,7 @@ describe("app controller callbacks", () => {
     }).settings.setComposerSubmitShortcut("enter");
     await settlePromises();
 
-    const preferences = { composer_submit_shortcut: "enter" };
+    const preferences = { composer_submit_shortcut: "enter", theme: "system" };
     expect(setPreferences).toHaveBeenNthCalledWith(1, preferences);
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "settings:preferences", preferences });
     expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_PREFERENCES, {
@@ -1374,12 +1374,42 @@ describe("app controller callbacks", () => {
 
     callbacks({ dispatch, setPreferences }).settings.setComposerSubmitShortcut("enter");
 
-    expect(setPreferences).toHaveBeenCalledWith({ composer_submit_shortcut: "enter" });
+    expect(setPreferences).toHaveBeenCalledWith({
+      composer_submit_shortcut: "enter",
+      theme: "system",
+    });
     expect(dispatch).toHaveBeenCalledWith({
       type: "settings:error",
       message: "Agent catalog changes require the App Server.",
     });
     expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("updates the global theme without replacing the composer preference", async () => {
+    const dispatch = vi.fn();
+    const setPreferences = vi.fn();
+    const request = vi.fn(async () => ({
+      preferences: { composerSubmitShortcut: "modEnter", theme: "dark" },
+    }));
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      preferences: { composer_submit_shortcut: "mod_enter", theme: "system" },
+      setPreferences,
+    }).settings.setTheme("dark");
+    await settlePromises();
+
+    const preferences = { composer_submit_shortcut: "mod_enter", theme: "dark" };
+    expect(setPreferences).toHaveBeenNthCalledWith(1, preferences);
+    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_PREFERENCES, {
+      preferences: { theme: "dark" },
+    });
+    expect(setPreferences).toHaveBeenLastCalledWith(preferences);
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "settings:preferences",
+      preferences,
+    });
   });
 
   it("resets Task history through BackendConnection", async () => {
@@ -3632,6 +3662,7 @@ function callbacks({
   dispatch = vi.fn(),
   newTaskStartAttempt = { current: undefined },
   pendingPreparedNewTask = vi.fn(() => undefined),
+  preferences = { composer_submit_shortcut: "enter", theme: "system" },
   newTaskController,
   setAgents = vi.fn(),
   setPreferences = vi.fn(),
@@ -3656,6 +3687,7 @@ function callbacks({
     dispatch,
     newTaskStartAttempt,
     pendingPreparedNewTask,
+    preferences,
     newTaskController: ownedNewTaskController,
     setAgents,
     setPreferences,

@@ -4,6 +4,7 @@ import { getClientInstanceId, initializeParamsForBootstrap, taskNavigationScopeF
 
 const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
 const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
+const DESKTOP_SHELL = { kind: "desktop", navigationMode: "project" } as const;
 
 describe("backend initialization", () => {
   it("builds initialize params from the current shell surface", () => {
@@ -94,6 +95,24 @@ describe("backend initialization", () => {
     expect(initialized.shell).toEqual({ kind: "web" });
     expect(initialized.capabilities?.shell ?? []).not.toContain("readSecret");
     expect(initialized.capabilities?.shell ?? []).not.toContain("writeSecret");
+  });
+
+  it("initializes Desktop as a distinct App Shell over local HTTP", () => {
+    const initialized = initializeParamsForBootstrap(
+      {
+        surface: "task",
+        shell: DESKTOP_SHELL,
+        appServerConnection: {
+          kind: "localHttp",
+          endpointUrl: "http://127.0.0.1:43123",
+          authToken: "test-token",
+        },
+      },
+      "client-desktop" as ClientInstanceId,
+    );
+
+    expect(initialized.shell).toEqual({ kind: "desktop" });
+    expect(initialized.requestedSurface).toEqual({ kind: "newTask" });
   });
 
   it("scopes VS Code Navigation to its workspace Projects", () => {

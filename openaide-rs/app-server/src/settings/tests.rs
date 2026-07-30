@@ -1,7 +1,7 @@
 use openaide_app_server_protocol::client::SettingsSection;
 use openaide_app_server_protocol::settings::{
     AppPreferences, AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams,
-    ComposerSubmitShortcut, RuntimeAcpTraceSettings, RuntimeDeveloperSettings,
+    AppTheme, ComposerSubmitShortcut, RuntimeAcpTraceSettings, RuntimeDeveloperSettings,
     RuntimeSettingsResult,
 };
 use std::sync::Arc;
@@ -86,6 +86,7 @@ fn snapshot_includes_backend_settings_when_available() {
         Some(AppPreferencesResult {
             preferences: AppPreferences {
                 composer_submit_shortcut: ComposerSubmitShortcut::Enter,
+                theme: AppTheme::System,
             },
         })
     );
@@ -113,6 +114,7 @@ impl AppPreferencesWorkflow for FixedAppPreferences {
         Ok(AppPreferencesResult {
             preferences: AppPreferences {
                 composer_submit_shortcut: ComposerSubmitShortcut::Enter,
+                theme: AppTheme::System,
             },
         })
     }

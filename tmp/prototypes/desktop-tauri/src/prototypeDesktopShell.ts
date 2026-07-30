@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
   requestPermission,
@@ -32,11 +33,7 @@ type DesktopCommand =
   | "settings"
   | "test-notification";
 
-/**
- * PROTOTYPE: adapts Tauri-native commands to the existing Frontend shell seam.
- * The cast isolates the known transitional contract gap: App Server Protocol
- * already supports "desktop", while app-shell-contracts still lists Web/VS Code.
- */
+/** Adapts Tauri-native commands to the shared Frontend shell seam. */
 export function createDesktopPrototypeShell(
   connection: LocalHttpConnection,
 ): FrontendShell {
@@ -73,6 +70,9 @@ export function createDesktopPrototypeShell(
   });
 
   return {
+    appearance: {
+      setTheme: (theme) => getCurrentWindow().setTheme(theme === "system" ? null : theme),
+    },
     bootstrap,
     messages: {
       post: (message) => handleHostMessage(message),
@@ -116,12 +116,12 @@ function desktopBootstrap(
   const shared = {
     shell: { kind: "desktop", navigationMode: "project" },
     appServerConnection: connection,
-    preferences: { composer_submit_shortcut: "mod_enter" },
-  };
+    preferences: { composer_submit_shortcut: "mod_enter", theme: "system" },
+  } as const;
   return {
     ...route,
     ...shared,
-  } as unknown as WebviewBootstrap;
+  };
 }
 
 function handleHostMessage(message: HostChannelMessage) {

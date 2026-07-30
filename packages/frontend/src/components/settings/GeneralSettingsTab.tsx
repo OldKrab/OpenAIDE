@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import type {
   AppPreferencesRecord,
+  AppTheme,
   ComposerSubmitShortcut,
   RuntimeSettingsResult,
 } from "@openaide/app-shell-contracts";
@@ -17,6 +18,7 @@ export function GeneralSettingsTab({
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
   onSetDesktopNotifications,
+  onSetTheme,
   preferences,
   runtimeSettings,
 }: {
@@ -26,6 +28,7 @@ export function GeneralSettingsTab({
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
+  onSetTheme?: (theme: AppTheme) => void;
   preferences: AppPreferencesRecord;
   runtimeSettings?: RuntimeSettingsResult;
 }) {
@@ -34,8 +37,36 @@ export function GeneralSettingsTab({
   const enterSends = preferences.composer_submit_shortcut === "enter";
   const newLineShortcut = enterSends ? "Ctrl/Cmd+Enter" : "Enter";
   const developerSettings = runtimeSettings?.developer;
-  const groups: GeneralSettingsGroup[] = mobileComposerBehavior ? [] : [
-    {
+  const groups: GeneralSettingsGroup[] = [];
+  if (onSetTheme) {
+    groups.push({
+      id: "appearance",
+      label: "Appearance",
+      rows: [{
+        id: "theme",
+        label: "Theme",
+        detail: "Choose how OpenAIDE looks in standalone apps.",
+        searchText: `appearance theme system light dark ${preferences.theme ?? "system"}`,
+        value: (
+          <select
+            aria-label="Theme"
+            className="settings-theme-select"
+            onChange={(event) => {
+              const theme = event.currentTarget.value;
+              if (theme === "system" || theme === "light" || theme === "dark") onSetTheme(theme);
+            }}
+            value={preferences.theme ?? "system"}
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        ),
+      }],
+    });
+  }
+  if (!mobileComposerBehavior) {
+    groups.push({
       id: "composer",
       label: "Composer",
       rows: [
@@ -63,8 +94,8 @@ export function GeneralSettingsTab({
           value: <span className="settings-row-value">{newLineShortcut}</span>,
         },
       ],
-    },
-  ];
+    });
+  }
 
   if (desktopNotifications && onSetDesktopNotifications) {
     groups.push({

@@ -27,6 +27,42 @@
   font-size: 14px;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --oa-bg: var(--vscode-editor-background, oklch(98% 0.004 250));
+  --oa-panel: var(--vscode-sideBar-background, oklch(95.5% 0.006 250));
+  --oa-raised: var(--vscode-list-hoverBackground, oklch(92.5% 0.008 250));
+  --oa-selected: var(--vscode-list-activeSelectionBackground, oklch(88% 0.02 250));
+  --oa-text: var(--vscode-foreground, oklch(25% 0.015 250));
+  --oa-muted: var(--vscode-descriptionForeground, oklch(48% 0.018 250));
+  --oa-border-strong: var(--vscode-widget-border, oklch(78% 0.015 250));
+  --oa-focus: var(--vscode-focusBorder, oklch(56% 0.17 255));
+  --oa-warning: var(--vscode-problemsWarningIcon-foreground, oklch(54% 0.11 85));
+  --oa-danger: var(--vscode-errorForeground, oklch(56% 0.18 25));
+  --oa-success: var(--vscode-testing-iconPassed, oklch(48% 0.12 145));
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    color-scheme: light;
+    --oa-bg: var(--vscode-editor-background, oklch(98% 0.004 250));
+    --oa-panel: var(--vscode-sideBar-background, oklch(95.5% 0.006 250));
+    --oa-raised: var(--vscode-list-hoverBackground, oklch(92.5% 0.008 250));
+    --oa-selected: var(--vscode-list-activeSelectionBackground, oklch(88% 0.02 250));
+    --oa-text: var(--vscode-foreground, oklch(25% 0.015 250));
+    --oa-muted: var(--vscode-descriptionForeground, oklch(48% 0.018 250));
+    --oa-border-strong: var(--vscode-widget-border, oklch(78% 0.015 250));
+    --oa-focus: var(--vscode-focusBorder, oklch(56% 0.17 255));
+    --oa-warning: var(--vscode-problemsWarningIcon-foreground, oklch(54% 0.11 85));
+    --oa-danger: var(--vscode-errorForeground, oklch(56% 0.18 25));
+    --oa-success: var(--vscode-testing-iconPassed, oklch(48% 0.12 145));
+  }
+}
+
 body[data-shell="web"],
 body.vscode-light,
 body.vscode-high-contrast-light {

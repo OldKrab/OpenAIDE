@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type {
   AppPreferencesRecord,
+  AppTheme,
   ComposerSubmitShortcut,
   CustomAgentCreateParams,
   CustomAgentMetadataUpdateParams,
@@ -76,6 +77,7 @@ export function SettingsView({
   onSetComposerSubmitShortcut,
   onSelectTab,
   onSetDesktopNotifications,
+  onSetTheme,
   preferences,
   preferredAgentId,
   projects = [],
@@ -105,6 +107,7 @@ export function SettingsView({
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSelectTab: (tab: SettingsTabId) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
+  onSetTheme?: (theme: AppTheme) => void;
   preferences: AppPreferencesRecord;
   preferredAgentId?: string;
   projects?: ProjectOption[];
@@ -329,6 +332,7 @@ export function SettingsView({
             onUpdateCustomAgentMetadata={onUpdateCustomAgentMetadata}
             onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
             onSetDesktopNotifications={onSetDesktopNotifications}
+            onSetTheme={onSetTheme}
             preferences={preferences}
             preferredAgentId={preferredAgentId}
             projects={projects}
@@ -373,6 +377,7 @@ function SettingsTabContent({
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
   onSetDesktopNotifications,
+  onSetTheme,
   onUpdateCustomAgentMetadata,
   authPending,
   agents,
@@ -408,6 +413,7 @@ function SettingsTabContent({
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
+  onSetTheme?: (theme: AppTheme) => void;
   onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
   deletedAgentId?: string;
   developerSettingsUnlocked: boolean;
@@ -455,6 +461,7 @@ function SettingsTabContent({
           onResetTaskHistory={onResetTaskHistory}
           onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
           onSetDesktopNotifications={onSetDesktopNotifications}
+          onSetTheme={onSetTheme}
           preferences={preferences}
           runtimeSettings={runtimeSettings}
         />

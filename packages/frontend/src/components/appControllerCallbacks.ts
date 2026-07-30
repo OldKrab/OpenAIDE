@@ -23,6 +23,7 @@ export function createAppCallbacks({
   dispatch,
   newTaskStartAttempt,
   pendingPreparedNewTask,
+  preferences,
   newTaskController = new NewTaskController(),
   setAgents,
   setPreferences,
@@ -49,7 +50,14 @@ export function createAppCallbacks({
       newTaskController,
       state,
     }),
-    settings: createSettingsCallbacks({ backendConnection, dispatch, setAgents, setPreferences, state }),
+    settings: createSettingsCallbacks({
+      backendConnection,
+      dispatch,
+      preferences,
+      setAgents,
+      setPreferences,
+      state,
+    }),
     task: createTaskCallbacks({
       attachmentResources,
       backendConnection,

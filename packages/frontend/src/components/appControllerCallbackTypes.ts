@@ -2,6 +2,7 @@ import type { Dispatch } from "react";
 import type {
   AgentListedSession,
   AppPreferencesRecord,
+  AppTheme,
   CustomAgentCreateParams,
   CustomAgentMetadataUpdateParams,
   CustomAgentReplaceParams,
@@ -77,6 +78,7 @@ export type SettingsCallbacks = {
   setAgentEnabled: (agentId: string, enabled: boolean) => void;
   setMcpServerEnabled: (id: string, enabled: boolean) => void;
   setComposerSubmitShortcut: (shortcut: AppPreferencesRecord["composer_submit_shortcut"]) => void;
+  setTheme: (theme: AppTheme) => void;
   updateCustomAgentMetadata: (payload: CustomAgentMetadataUpdateParams) => void;
   unlockDeveloperSettings: () => void;
 };
@@ -174,6 +176,7 @@ export type AppCallbacksDependencies = {
   dispatch: Dispatch<AppAction>;
   newTaskStartAttempt: { current: NewTaskStartAttempt | undefined };
   pendingPreparedNewTask: (key: string) => Promise<PendingNewTaskPreparationResult> | undefined;
+  preferences: AppPreferencesRecord;
   newTaskController?: NewTaskController;
   setAgents?: (agents: AgentOption[]) => void;
   setPreferences: (preferences: AppPreferencesRecord) => void;

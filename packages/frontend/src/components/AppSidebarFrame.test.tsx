@@ -48,6 +48,25 @@ describe("AppSidebarFrame", () => {
     );
   });
 
+  it("uses the standalone Project Navigation width in Desktop", () => {
+    vi.stubGlobal("document", { body: { dataset: { shell: "desktop" } } });
+    vi.stubGlobal("window", {
+      localStorage: { getItem: vi.fn(() => null), setItem: vi.fn() },
+    });
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AppSidebarFrame sidebar={<nav>Tasks</nav>}>
+          <article>Task</article>
+        </AppSidebarFrame>,
+      );
+    });
+
+    expect(tree.root.findByProps({ className: "app-sidebar-frame" })
+      .props.style["--app-sidebar-width"]).toBe("304px");
+  });
+
   it("collapses at the left edge and restores the previous width", () => {
     const setItem = vi.fn();
     vi.stubGlobal("window", {

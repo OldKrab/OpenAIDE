@@ -396,6 +396,22 @@ code.settings-row-value {
   text-overflow: clip;
 }
 
+.settings-theme-select {
+  min-width: 128px;
+  height: 30px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  outline: 0;
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  padding: 0 28px 0 9px;
+}
+
+.settings-theme-select:focus-visible {
+  border-color: var(--oa-focus);
+  box-shadow: 0 0 0 1px var(--oa-focus);
+}
+
 .settings-danger-button {
   color: var(--oa-danger);
 }

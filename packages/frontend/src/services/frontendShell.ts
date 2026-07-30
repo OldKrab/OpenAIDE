@@ -1,4 +1,5 @@
 import type {
+  AppTheme,
   HostToWebviewMessage,
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
@@ -39,6 +40,10 @@ export type FrontendFileAcquisition =
 
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
+  /** Applies shell-native chrome appearance alongside the shared Frontend theme. */
+  appearance?: {
+    setTheme(theme: AppTheme): void | Promise<void>;
+  };
   /** Supplies a shell-owned logical session when the renderer must not own transport. */
   backendConnection?: () => AppServerSession;
   messages: {

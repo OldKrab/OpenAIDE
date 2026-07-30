@@ -22,7 +22,7 @@ describe("App Server initial snapshot ingestion", () => {
           },
         },
         preferences: {
-          preferences: { composerSubmitShortcut: "enter" },
+          preferences: { composerSubmitShortcut: "enter", theme: "system" },
         },
       },
     }));
@@ -31,7 +31,10 @@ describe("App Server initial snapshot ingestion", () => {
       { type: "projects", projects: [{ projectId: "project-1", label: "Project" }] },
       { type: "newTask:agent", agentId: "codex" },
       { type: "settings:runtimeSettings", settings: { developer: { acp_trace: { enabled: true } } } },
-      { type: "settings:preferences", preferences: { composer_submit_shortcut: "enter" } },
+      {
+        type: "settings:preferences",
+        preferences: { composer_submit_shortcut: "enter", theme: "system" },
+      },
       { type: "snapshot", intent: "open", snapshot: { task: { task_id: "task-1" } } },
     ]);
     expect(ingestion.requiresNativeSurface).toBe(false);

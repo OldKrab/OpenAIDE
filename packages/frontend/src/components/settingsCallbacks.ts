@@ -3,8 +3,14 @@ import {
   SETTINGS_UPDATE_PREFERENCES,
   SETTINGS_UPDATE_RUNTIME,
 } from "@openaide/app-server-client";
+import type { AppPreferencesPatch } from "@openaide/app-server-client";
+import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import { postHostMessage, replaceSettingsTabRoute } from "../services/hostBridge";
-import { mapProtocolAppPreferences, protocolComposerSubmitShortcut } from "../state/appPreferencesMapping";
+import {
+  mapProtocolAppPreferences,
+  protocolAppTheme,
+  protocolComposerSubmitShortcut,
+} from "../state/appPreferencesMapping";
 import { mapProtocolRuntimeSettings } from "../state/runtimeSettingsMapping";
 import type { AppCallbacksDependencies, SettingsCallbacks } from "./appControllerCallbackTypes";
 import {
@@ -29,16 +35,44 @@ import {
 
 type SettingsDependencies = Pick<
   AppCallbacksDependencies,
-  "backendConnection" | "dispatch" | "setAgents" | "setPreferences" | "state"
+  "backendConnection" | "dispatch" | "preferences" | "setAgents" | "setPreferences" | "state"
 >;
 
 export function createSettingsCallbacks({
   backendConnection,
   dispatch,
+  preferences,
   setAgents,
   setPreferences,
   state,
 }: SettingsDependencies): SettingsCallbacks {
+  let optimisticPreferences: Required<AppPreferencesRecord> = {
+    composer_submit_shortcut: preferences.composer_submit_shortcut,
+    theme: preferences.theme ?? "system",
+  };
+  const updatePreferences = (
+    nextPreferences: Required<AppPreferencesRecord>,
+    patch: AppPreferencesPatch,
+  ) => {
+    optimisticPreferences = nextPreferences;
+    setPreferences(nextPreferences);
+    dispatch({ type: "settings:preferences", preferences: nextPreferences });
+    if (!backendConnection?.request) {
+      dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+      return;
+    }
+    void backendConnection.request(SETTINGS_UPDATE_PREFERENCES, { preferences: patch })
+      .then((result) => {
+        const confirmedPreferences = mapProtocolAppPreferences(result);
+        optimisticPreferences = {
+          composer_submit_shortcut: confirmedPreferences.composer_submit_shortcut,
+          theme: confirmedPreferences.theme ?? "system",
+        };
+        setPreferences(confirmedPreferences);
+        dispatch({ type: "settings:preferences", preferences: confirmedPreferences });
+      })
+      .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+  };
   const agentSettingsContext = () => ({
     backendConnection: backendConnection?.request ? { request: backendConnection.request } : undefined,
     currentAgentId: state.newTask.selection.agentId,
@@ -136,22 +170,16 @@ export function createSettingsCallbacks({
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
     setComposerSubmitShortcut: (shortcut) => {
-      const nextPreferences = { composer_submit_shortcut: shortcut };
-      setPreferences(nextPreferences);
-      dispatch({ type: "settings:preferences", preferences: nextPreferences });
-      if (!backendConnection?.request) {
-        dispatch({ type: "settings:error", message: appServerRequiredMessage() });
-        return;
-      }
-      void backendConnection.request(SETTINGS_UPDATE_PREFERENCES, {
-        preferences: { composerSubmitShortcut: protocolComposerSubmitShortcut(shortcut) },
-      })
-        .then((result) => {
-          const preferences = mapProtocolAppPreferences(result);
-          setPreferences(preferences);
-          dispatch({ type: "settings:preferences", preferences });
-        })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+      updatePreferences(
+        { ...optimisticPreferences, composer_submit_shortcut: shortcut },
+        { composerSubmitShortcut: protocolComposerSubmitShortcut(shortcut) },
+      );
+    },
+    setTheme: (theme) => {
+      updatePreferences(
+        { ...optimisticPreferences, theme },
+        { theme: protocolAppTheme(theme) },
+      );
     },
     unlockDeveloperSettings: () => {
       dispatch({ type: "settings:start" });
