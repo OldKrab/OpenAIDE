@@ -17,7 +17,7 @@ use openaide_app_server_protocol::methods::{
     TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::settings::{
-    AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
+    AppPreferencesPatch, AppPreferencesUpdateParams, AppTheme, ComposerSubmitShortcut,
     RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettingsPatch, RuntimeSettingsUpdateParams,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
@@ -838,10 +838,12 @@ fn app_preferences_get_and_update_use_app_server_protocol() {
         request("2", SETTINGS_GET_PREFERENCES, serde_json::json!({})),
         AppServerTime(2),
     );
+    let initial = response_value(initial);
     assert_eq!(
-        response_value(initial)["result"]["preferences"]["composerSubmitShortcut"],
+        initial["result"]["preferences"]["composerSubmitShortcut"],
         json!("enter")
     );
+    assert_eq!(initial["result"]["preferences"]["theme"], json!("system"));
 
     let updated = gateway.handle_inbound(
         connection_id,
@@ -850,17 +852,20 @@ fn app_preferences_get_and_update_use_app_server_protocol() {
             SETTINGS_UPDATE_PREFERENCES,
             AppPreferencesUpdateParams {
                 preferences: AppPreferencesPatch {
-                    composer_submit_shortcut: ComposerSubmitShortcut::ModEnter,
+                    composer_submit_shortcut: Some(ComposerSubmitShortcut::ModEnter),
+                    theme: Some(AppTheme::Light),
                 },
             },
         ),
         AppServerTime(3),
     );
 
+    let updated = response_value(updated);
     assert_eq!(
-        response_value(updated)["result"]["preferences"]["composerSubmitShortcut"],
+        updated["result"]["preferences"]["composerSubmitShortcut"],
         json!("modEnter")
     );
+    assert_eq!(updated["result"]["preferences"]["theme"], json!("light"));
 }
 
 #[test]

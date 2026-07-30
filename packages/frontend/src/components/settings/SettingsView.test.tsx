@@ -43,6 +43,26 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(tree.root.findAllByType("strong").some((item) => item.children.includes("New line shortcut"))).toBe(false);
   });
 
+  it("changes the persisted application theme from General settings", () => {
+    const setTheme = vi.fn();
+    const tree = render(
+      <GeneralSettingsTab
+        onSetAcpTrace={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onSetTheme={setTheme}
+        preferences={{ composer_submit_shortcut: "enter", theme: "system" }}
+      />,
+    );
+
+    act(() => {
+      tree.root.findByProps({ "aria-label": "Theme" }).props.onChange({
+        currentTarget: { value: "dark" },
+      });
+    });
+
+    expect(setTheme).toHaveBeenCalledWith("dark");
+  });
+
   it("requires explicit confirmation before resetting Task history", async () => {
     const resetTaskHistory = vi.fn(async () => undefined);
     const tree = render(

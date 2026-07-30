@@ -37,6 +37,7 @@ describe("webview surface routing", () => {
     expect(shouldLoadNativeSessions({ surface: "task", shell: { kind: "vscodeExtension" } }, "project_1")).toBe(false);
     expect(shouldLoadNativeSessions({ surface: "settings", shell: { kind: "vscodeExtension" } }, "project_1")).toBe(false);
     expect(shouldLoadNativeSessions({ surface: "task", shell: { kind: "web" } }, "project_1")).toBe(true);
+    expect(shouldLoadNativeSessions({ surface: "task", shell: { kind: "desktop" } }, "project_1")).toBe(true);
     expect(shouldLoadNativeSessions({ surface: "task" }, undefined)).toBe(false);
     expect(shouldLoadNativeSessions({ surface: "task" }, "")).toBe(false);
     expect(shouldLoadNativeSessions({ surface: "invalid" }, "project_1")).toBe(false);
@@ -47,6 +48,7 @@ describe("webview surface routing", () => {
     expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "vscodeExtension" } })).toBe(false);
     expect(shouldLoadTaskNavigation({ surface: "settings", shell: { kind: "vscodeExtension" } })).toBe(false);
     expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "web" } })).toBe(true);
+    expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "desktop" } })).toBe(true);
   });
 
   it("keys prepared options by agent and project", () => {

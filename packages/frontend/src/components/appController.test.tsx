@@ -475,7 +475,7 @@ describe("app controller mounted lifecycle", () => {
     backendConnection = {
       initialize: vi.fn(async () => ({
         snapshot: clientSnapshot({
-          appPreferences: { preferences: { composerSubmitShortcut: "enter" } },
+          appPreferences: { preferences: { composerSubmitShortcut: "enter", theme: "system" } },
         }),
       })),
       request: vi.fn(),
@@ -487,7 +487,10 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(latestController?.preferences).toEqual({ composer_submit_shortcut: "enter" });
+    expect(latestController?.preferences).toEqual({
+      composer_submit_shortcut: "enter",
+      theme: "system",
+    });
   });
 
   it("loads settings details through App Server on connected settings startup", async () => {

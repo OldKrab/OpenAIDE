@@ -9,6 +9,7 @@ type TestController = AppController & { state: AppState };
 
 const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
 const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
+const DESKTOP_SHELL = { kind: "desktop", navigationMode: "project" } as const;
 
 const surfaceMocks = vi.hoisted(() => ({
   newTask: vi.fn(() => null),
@@ -403,6 +404,76 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({ activeTaskId: "task_2" }),
       undefined,
     );
+  });
+
+  it("renders Task Navigation alongside the Desktop Task surface", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: DESKTOP_SHELL,
+      appServerConnection: {
+        kind: "localHttp",
+        endpointUrl: "http://127.0.0.1:43123",
+        authToken: "test-token",
+      },
+    } as AppController["bootstrap"];
+
+    const tree = render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onNewTask: expect.any(Function),
+        onOpenTask: expect.any(Function),
+      }),
+      undefined,
+    );
+    expect(tree.root.findByType("main").props.className)
+      .toContain("web-workbench-shell");
+  });
+
+  it("keeps Desktop Task Navigation visible in a narrow resizable window", () => {
+    stubMobileWindow();
+    const controller = controllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: DESKTOP_SHELL,
+    } as AppController["bootstrap"];
+
+    render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hiddenFromAccessibility: false,
+        modal: false,
+      }),
+      undefined,
+    );
+  });
+
+  it("applies the persisted theme and Desktop identity to the document", () => {
+    const body = { dataset: {} as Record<string, string> };
+    const documentElement = { dataset: {} as Record<string, string> };
+    vi.stubGlobal("document", {
+      activeElement: null,
+      addEventListener: vi.fn(),
+      body,
+      documentElement,
+      removeEventListener: vi.fn(),
+    });
+    const controller = controllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: DESKTOP_SHELL,
+    } as AppController["bootstrap"];
+    controller.preferences = {
+      composer_submit_shortcut: "mod_enter",
+      theme: "light",
+    };
+
+    render(controller);
+
+    expect(body.dataset.shell).toBe("desktop");
+    expect(documentElement.dataset.theme).toBe("light");
   });
 
   it("opens mobile web navigation after a left-edge swipe", () => {
@@ -1235,6 +1306,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         setAgentEnabled: vi.fn(),
         setMcpServerEnabled: vi.fn(),
         setComposerSubmitShortcut: vi.fn(),
+        setTheme: vi.fn(),
         updateCustomAgentMetadata: vi.fn(),
         unlockDeveloperSettings: vi.fn(),
       },

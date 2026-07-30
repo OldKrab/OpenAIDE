@@ -22,11 +22,13 @@ dependencies when needed, and starts `tauri dev`.
 The spike intentionally proves only:
 
 - shared Frontend rendering as `shellKind: "desktop"`;
+- shared, resizable Project and Task Navigation alongside the Task surface;
 - authenticated App Server attach-or-launch;
 - native File/Edit/View/Help menus and accelerators;
 - a native folder picker;
 - a native test notification;
 - desktop navigation between New Task, Settings, and existing Tasks.
+- a persisted System, Light, or Dark theme applied to shared UI and native window chrome.
 
 It does not prove signed macOS/Windows packaging, credential storage, updater
 behavior, screen-reader quality, or production recovery.

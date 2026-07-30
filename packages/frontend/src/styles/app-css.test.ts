@@ -41,6 +41,13 @@ describe("task list row styles", () => {
     expect(tokensCss).not.toContain("var(--vscode-font-size");
   });
 
+  it("supports explicit and operating-system light themes for standalone shells", () => {
+    expect(tokensCss).toMatch(/:root\[data-theme="dark"\]\s*{[^}]*color-scheme:\s*dark;/);
+    expect(tokensCss).toMatch(/:root\[data-theme="light"\]\s*{[^}]*color-scheme:\s*light;/);
+    expect(tokensCss).toMatch(/@media \(prefers-color-scheme:\s*light\)\s*{[^}]*:root\[data-theme="system"\]\s*{[^}]*color-scheme:\s*light;/);
+    expect(tokensCss).toMatch(/--oa-bg:\s*var\(--vscode-editor-background,\s*oklch\(/);
+  });
+
   it("uses one token-based scrollbar style across the webview", () => {
     expect(appCss).toMatch(/\*\s*{[^}]*scrollbar-width:\s*thin;/);
     expect(appCss).toMatch(/\*\s*{[^}]*scrollbar-color:\s*var\(--oa-border-strong\) transparent;/);

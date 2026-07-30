@@ -293,7 +293,10 @@ pub struct AppPreferencesUpdateParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AppPreferencesPatch {
-    pub composer_submit_shortcut: ComposerSubmitShortcut,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composer_submit_shortcut: Option<ComposerSubmitShortcut>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<AppTheme>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -306,6 +309,7 @@ pub struct AppPreferencesResult {
 #[serde(rename_all = "camelCase")]
 pub struct AppPreferences {
     pub composer_submit_shortcut: ComposerSubmitShortcut,
+    pub theme: AppTheme,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -315,10 +319,19 @@ pub enum ComposerSubmitShortcut {
     Enter,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AppTheme {
+    System,
+    Light,
+    Dark,
+}
+
 impl Default for AppPreferences {
     fn default() -> Self {
         Self {
             composer_submit_shortcut: ComposerSubmitShortcut::Enter,
+            theme: AppTheme::System,
         }
     }
 }

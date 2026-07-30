@@ -1,5 +1,5 @@
 use openaide_app_server_protocol::settings::{
-    AppPreferences, AppPreferencesPatch, ComposerSubmitShortcut,
+    AppPreferences, AppPreferencesPatch, AppTheme, ComposerSubmitShortcut,
 };
 use serde::{Deserialize, Serialize};
 
@@ -12,12 +12,15 @@ use super::{atomic, Store};
 struct StoredAppPreferences {
     #[serde(default = "default_submit_shortcut")]
     composer_submit_shortcut: ComposerSubmitShortcut,
+    #[serde(default = "default_theme")]
+    theme: AppTheme,
 }
 
 impl From<StoredAppPreferences> for AppPreferences {
     fn from(value: StoredAppPreferences) -> Self {
         Self {
             composer_submit_shortcut: value.composer_submit_shortcut,
+            theme: value.theme,
         }
     }
 }
@@ -26,6 +29,7 @@ impl From<AppPreferences> for StoredAppPreferences {
     fn from(value: AppPreferences) -> Self {
         Self {
             composer_submit_shortcut: value.composer_submit_shortcut,
+            theme: value.theme,
         }
     }
 }
@@ -46,7 +50,12 @@ impl Store {
         patch: AppPreferencesPatch,
     ) -> Result<AppPreferences, RuntimeError> {
         let mut preferences = self.read_app_preferences()?;
-        preferences.composer_submit_shortcut = patch.composer_submit_shortcut;
+        if let Some(shortcut) = patch.composer_submit_shortcut {
+            preferences.composer_submit_shortcut = shortcut;
+        }
+        if let Some(theme) = patch.theme {
+            preferences.theme = theme;
+        }
         self.write_app_preferences(&preferences)?;
         Ok(preferences)
     }
@@ -66,6 +75,10 @@ impl Store {
 
 fn default_submit_shortcut() -> ComposerSubmitShortcut {
     ComposerSubmitShortcut::ModEnter
+}
+
+fn default_theme() -> AppTheme {
+    AppTheme::System
 }
 
 #[cfg(test)]

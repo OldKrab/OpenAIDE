@@ -130,7 +130,9 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
   const initialBootstrap = useMemo(() => getBootstrap(), []);
   const clientInstanceId = useMemo(() => clientInstanceIdForBootstrap(initialBootstrap), [initialBootstrap]);
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
-  const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "enter" });
+  const [preferences, setPreferences] = useState<AppPreferencesRecord>(
+    initialBootstrap.preferences ?? { composer_submit_shortcut: "enter", theme: "system" },
+  );
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
   const [navigationFocusedTaskId, setNavigationFocusedTaskId] = useState<string | null | undefined>(
     initialBootstrap.surface === "invalid" ? undefined : initialBootstrap.focusedTaskId,
@@ -252,6 +254,7 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
     dispatch: newTaskDispatch,
     newTaskStartAttempt,
     pendingPreparedNewTask: newTaskWorkspace.pendingPreparationForKey,
+    preferences,
     newTaskController: newTaskController,
     setAgents,
     setPreferences,

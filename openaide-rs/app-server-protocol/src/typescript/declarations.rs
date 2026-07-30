@@ -62,7 +62,7 @@ use crate::server_requests::{
 };
 use crate::settings::{
     AppPreferences, AppPreferencesParams, AppPreferencesPatch, AppPreferencesResult,
-    AppPreferencesUpdateParams, ComposerSubmitShortcut, McpCreateServerParams,
+    AppPreferencesUpdateParams, AppTheme, ComposerSubmitShortcut, McpCreateServerParams,
     McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
     McpServerConfiguration, McpServerDefinition, McpServerScope, McpSetServerEnabledParams,
     McpUpdateServerParams, ResetTaskHistoryParams, ResetTaskHistoryResult, RuntimeAcpTraceSettings,
@@ -268,6 +268,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AppPreferencesPatch>(output, config);
     push_decl::<AppPreferencesResult>(output, config);
     push_decl::<AppPreferences>(output, config);
+    push_decl::<AppTheme>(output, config);
     push_decl::<ComposerSubmitShortcut>(output, config);
     push_decl::<RuntimeSettingsParams>(output, config);
     push_decl::<RuntimeSettingsUpdateParams>(output, config);

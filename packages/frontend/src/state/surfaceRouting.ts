@@ -3,7 +3,7 @@ import type { WebviewSurface } from "./surfaceTypes";
 type SurfaceState = {
   surface: WebviewSurface;
   taskId?: string;
-  shell?: { kind: "web" | "vscodeExtension" };
+  shell?: { kind: "desktop" | "web" | "vscodeExtension" };
 };
 
 export function shouldLoadNewTaskConfigOptions(
@@ -29,10 +29,12 @@ export function shouldLoadNativeSessions(
     && projectId.trim().length > 0;
 }
 
-/** Native VS Code editor panels render no Task Navigation and must not refresh its data. */
+/** VS Code editor panels render no Task Navigation and must not refresh its data. */
 export function shouldLoadTaskNavigation(bootstrap: SurfaceState) {
   if (bootstrap.surface === "invalid") return false;
-  return bootstrap.surface === "navigation" || bootstrap.shell?.kind === "web";
+  return bootstrap.surface === "navigation"
+    || bootstrap.shell?.kind === "desktop"
+    || bootstrap.shell?.kind === "web";
 }
 
 export function shouldRequestWorkspaceRoots(bootstrap: SurfaceState) {

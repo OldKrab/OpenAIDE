@@ -67,7 +67,7 @@ function focusedTaskId(): string | null | undefined {
 function shellBootstrap() {
   const kind = document.body.dataset.shell;
   const navigationMode = document.body.dataset.navigationMode;
-  if ((kind !== "web" && kind !== "vscodeExtension")
+  if ((kind !== "desktop" && kind !== "web" && kind !== "vscodeExtension")
     || (navigationMode !== "project" && navigationMode !== "currentProject")) {
     return undefined;
   }
@@ -92,9 +92,11 @@ export function appServerConnection(): WebviewAppServerConnection | undefined {
 }
 
 export function shellPreferences() {
+  const theme = document.documentElement?.dataset.theme;
   return {
     composer_submit_shortcut:
       document.body.dataset.composerSubmitShortcut === "enter" ? "enter" : "mod_enter",
+    theme: theme === "light" || theme === "dark" ? theme : "system",
   } as const;
 }
 

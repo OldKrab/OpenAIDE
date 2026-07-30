@@ -390,11 +390,13 @@ export type AppPreferencesParams = Record<symbol, never>;
 
 export type AppPreferencesUpdateParams = { preferences: AppPreferencesPatch, };
 
-export type AppPreferencesPatch = { composerSubmitShortcut: ComposerSubmitShortcut, };
+export type AppPreferencesPatch = { composerSubmitShortcut?: ComposerSubmitShortcut | null, theme?: AppTheme | null, };
 
 export type AppPreferencesResult = { preferences: AppPreferences, };
 
-export type AppPreferences = { composerSubmitShortcut: ComposerSubmitShortcut, };
+export type AppPreferences = { composerSubmitShortcut: ComposerSubmitShortcut, theme: AppTheme, };
+
+export type AppTheme = "system" | "light" | "dark";
 
 export type ComposerSubmitShortcut = "modEnter" | "enter";
 

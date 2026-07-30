@@ -10,6 +10,7 @@ import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
+import { currentFrontendShell } from "../services/frontendShell";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -33,17 +34,35 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
-  const isWebWorkbench = isWebShell && (
+  const isWorkbenchShell = bootstrap.surface !== "invalid"
+    && (bootstrap.shell.kind === "web" || bootstrap.shell.kind === "desktop");
+  const isWorkbenchSurface = isWorkbenchShell && (
     bootstrap.surface === "task"
     || bootstrap.surface === "nativeSession"
     || bootstrap.surface === "settings"
   );
+  const mobileWebLayoutActive = isWebShell && mobileLayoutActive;
+  useEffect(() => {
+    if (bootstrap.surface === "invalid" || typeof document === "undefined") return;
+    document.body.dataset.shell = bootstrap.shell.kind;
+    if (bootstrap.shell.kind === "vscodeExtension") {
+      delete document.documentElement.dataset.theme;
+      return;
+    }
+    const theme = preferences.theme ?? "system";
+    document.documentElement.dataset.theme = theme;
+    Promise.resolve(currentFrontendShell()?.appearance?.setTheme(theme))
+      .catch((error) => console.warn("App Shell theme update failed", error));
+  }, [
+    bootstrap.surface === "invalid" ? undefined : bootstrap.shell.kind,
+    preferences.theme,
+  ]);
   const sidebarActiveTaskId = bootstrap.surface === "settings"
     ? undefined
     : bootstrap.surface === "task"
       ? bootstrap.taskId
       : activeNavigationTaskId;
-  const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
+  const mobileNavigation = useMobileNavigation(isWorkbenchSurface && mobileWebLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
   const taskRecoveryActions = createAgentRecoveryActions(controller);
@@ -74,7 +93,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     });
     callbacks.navigation.openNewTask(project.projectId);
   };
-  const backFromSettings = isWebShell
+  const backFromSettings = isWorkbenchShell
     ? () => {
         if (activeNavigationTaskId) {
           callbacks.navigation.openTask(activeNavigationTaskId);
@@ -123,7 +142,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNavigationOpen]);
   useEffect(() => {
-    if (!isWebWorkbench || typeof window === "undefined") return;
+    if (!isWebShell || !isWorkbenchSurface || typeof window === "undefined") return;
     const mediaQuery = typeof window.matchMedia === "function"
       ? window.matchMedia("(max-width: 760px)")
       : undefined;
@@ -133,7 +152,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     syncMobileLayout();
     mediaQuery?.addEventListener?.("change", syncMobileLayout);
     return () => mediaQuery?.removeEventListener?.("change", syncMobileLayout);
-  }, [isWebWorkbench]);
+  }, [isWebShell, isWorkbenchSurface]);
   useEffect(() => {
     const mainSurface = webMainSurfaceRef.current;
     if (!mainSurface) return;
@@ -217,7 +236,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (appServerError && !isWebShell) {
+  if (appServerError && !isWorkbenchShell) {
     return (
       <main className="app-shell editor-shell">
         <AppServerErrorView message={appServerError} />
@@ -242,6 +261,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onResetTaskHistory={callbacks.settings.resetTaskHistory}
         onSelectTab={callbacks.settings.selectSettingsTab}
         onSetDesktopNotifications={taskNotifications?.setEnabled}
+        onSetTheme={isWorkbenchShell ? callbacks.settings.setTheme : undefined}
         onSetAcpTrace={callbacks.settings.setAcpTrace}
         onSetAgentEnabled={callbacks.settings.setAgentEnabled}
         onSetMcpServerEnabled={callbacks.settings.setMcpServerEnabled}
@@ -260,7 +280,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (isWebWorkbench) {
+  if (isWorkbenchSurface) {
     const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = renderableTaskSnapshot?.task.title
       ?? routedActiveTask?.title
@@ -284,8 +304,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <Sidebar
         activeTaskId={sidebarActiveTaskId}
         groupByProject={true}
-        hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
-        modal={mobileLayoutActive && mobileNavigation.active}
+        hiddenFromAccessibility={mobileWebLayoutActive && !mobileNavigation.active}
+        modal={mobileWebLayoutActive && mobileNavigation.active}
         loadingTasks={!backendReady}
         nativeSessions={navigation.nativeSessions}
         nativeSessionMutations={navigation.nativeSessionMutations}

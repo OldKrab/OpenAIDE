@@ -9,6 +9,8 @@ type LocalHttpConnection = {
 };
 
 async function main() {
+  document.body.dataset.shell = "desktop";
+  document.documentElement.dataset.theme = "system";
   const connection = await invoke<LocalHttpConnection>("app_server_connection");
   startFrontend(createDesktopPrototypeShell(connection));
 }
