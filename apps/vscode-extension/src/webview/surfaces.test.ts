@@ -7,6 +7,7 @@ const vscodeMocks = vi.hoisted(() => ({
   asExternalUri: vi.fn(async (uri: { toString(): string }) => ({
     toString: () => uri.toString(),
   })),
+  configuredAgents: [] as unknown[],
   createWebviewPanel: vi.fn(),
   panels: [] as Array<ReturnType<typeof createPanelMock>>,
 }));
@@ -24,7 +25,7 @@ vi.mock("vscode", () => ({
     createWebviewPanel: vscodeMocks.createWebviewPanel,
   },
   workspace: {
-    getConfiguration: () => ({ get: vi.fn(() => []) }),
+    getConfiguration: () => ({ get: vi.fn(() => vscodeMocks.configuredAgents) }),
   },
 }));
 
@@ -47,18 +48,20 @@ describe("VS Code webview surfaces", () => {
       toString: () => uri.toString(),
     }));
     vscodeMocks.panels.length = 0;
+    vscodeMocks.configuredAgents = [];
     vscodeMocks.createWebviewPanel.mockReset();
     vi.mocked(handleWebviewMessage).mockReset();
     vi.mocked(handleWebviewMessage).mockImplementation(async (message, context: {
-      adoptTask?: (taskId: string, title?: string) => void;
-      surfaces?: { openTask: (taskId: string, title?: string) => void };
+      adoptTask?: (taskId: string, title?: string, agentId?: string) => void;
+      surfaces?: { openTask: (taskId: string, title?: string, agentId?: string) => void };
     }) => {
       if (!isObject(message) || message.type !== "surface.openTask" || !isObject(message.payload)) return;
       const taskId = typeof message.payload.task_id === "string" ? message.payload.task_id : undefined;
       if (!taskId) return;
       const title = typeof message.payload.title === "string" ? message.payload.title : undefined;
-      context.adoptTask?.(taskId, title);
-      context.surfaces?.openTask(taskId, title);
+      const agentId = typeof message.payload.agent_id === "string" ? message.payload.agent_id : undefined;
+      context.adoptTask?.(taskId, title, agentId);
+      context.surfaces?.openTask(taskId, title, agentId);
     });
     vscodeMocks.createWebviewPanel.mockImplementation(() => {
       const panel = createPanelMock();
@@ -108,7 +111,7 @@ describe("VS Code webview surfaces", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
     manager.openNewTask();
-    manager.openTask("task_1", "Fix ACP");
+    manager.openTask("task_1", "Fix ACP", "codex");
     manager.openSettings(undefined, undefined, "project-current", "worktrees");
 
     expect(vscodeMocks.createWebviewPanel).toHaveBeenNthCalledWith(
@@ -145,6 +148,9 @@ describe("VS Code webview surfaces", () => {
     );
     expect(vscodeMocks.panels[2].webview.html).toContain('data-surface="settings"');
     expect(vscodeMocks.panels[2].webview.html).toContain('data-settings-tab="worktrees"');
+    expect(vscodeMocks.panels[0].iconPath).toEqual({ fsPath: "/extension/media/tab-icons/new-task.svg" });
+    expect(vscodeMocks.panels[1].iconPath).toEqual({ fsPath: "/extension/media/tab-icons/openai.svg" });
+    expect(vscodeMocks.panels[2].iconPath).toEqual({ fsPath: "/extension/media/tab-icons/settings.svg" });
   });
 
   it("keeps Task editor tab labels concise without changing the Task title", () => {
@@ -159,6 +165,17 @@ describe("VS Code webview surfaces", () => {
       1,
       expect.any(Object),
     );
+  });
+
+  it("uses a custom Agent's configured icon for its Task tab", () => {
+    vscodeMocks.configuredAgents = [{ id: "custom.builder", icon: "hammer" }];
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openTask("task_1", "Build release", "custom.builder");
+
+    expect(vscodeMocks.panels[0].iconPath).toEqual({
+      fsPath: "/extension/media/tab-icons/hammer.svg",
+    });
   });
 
   it("updates an existing Task tab title without revealing the editor", () => {
@@ -213,10 +230,12 @@ describe("VS Code webview surfaces", () => {
       payload: {
         task_id: "created_task",
         title: "Read-only bounded lookup in upstream OpenCode at /home/example/provider-support",
+        agent_id: "opencode",
       },
     });
 
     expect(panel.title).toBe("Read-only bounded lookup in upstream OpenCode at…");
+    expect(panel.iconPath).toEqual({ fsPath: "/extension/media/tab-icons/opencode.svg" });
   });
 
   it("attaches task webviews to the host broker without exposing client credentials", () => {
@@ -431,6 +450,7 @@ function createViewMock() {
 function createPanelMock() {
   return {
     active: true,
+    iconPath: undefined as { fsPath: string } | undefined,
     title: "",
     webview: createWebviewMock(),
     onDidChangeViewState: vi.fn(),

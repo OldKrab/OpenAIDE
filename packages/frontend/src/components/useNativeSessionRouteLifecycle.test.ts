@@ -41,7 +41,7 @@ describe("Native Session route lifecycle", () => {
       sessionId: "session-1",
     });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "open" }));
-    expect(openTaskSurface).toHaveBeenCalledWith("task-adopted", "Adopted session");
+    expect(openTaskSurface).toHaveBeenCalledWith("task-adopted", "Adopted session", undefined);
   });
 
   it("discards a Prepared Task before loading the routed Native Session", async () => {

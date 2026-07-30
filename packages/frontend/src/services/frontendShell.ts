@@ -49,7 +49,7 @@ export type FrontendShell = {
     openNewTask(projectId?: string): void;
     openNativeSession(agentId: string, nativeSessionId: string, projectId?: string): void;
     openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId): void;
-    openTask(taskId: string, title?: string): void;
+    openTask(taskId: string, title?: string, agentId?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;
     subscribe(listener: (bootstrap: WebviewBootstrap) => void): () => void;
   };

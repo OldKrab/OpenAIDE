@@ -13,6 +13,7 @@ import {
   type WebviewHost,
 } from "./types";
 import { currentWorkspaceRoot, workspaceRoots } from "../workspace/roots";
+import { agentTabIcon, newTaskTabIcon, settingsTabIcon } from "./tabIcons";
 
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
@@ -47,6 +48,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       // Sidebar Project actions still pass an explicit hint.
       projectId,
     });
+    panel.iconPath = newTaskTabIcon(this.context);
     this.newTaskPanel = panel;
     this.focusPanel(panel);
     panel.onDidDispose(() => {
@@ -71,6 +73,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       nativeSessionId,
       projectId: projectId ?? currentWorkspaceRoot()?.projectId,
     });
+    panel.iconPath = agentTabIcon(this.context, agentId);
     this.nativeSessionPanels.set(key, panel);
     this.focusPanel(panel);
     panel.onDidDispose(() => {
@@ -79,14 +82,16 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     });
   }
 
-  openTask(taskId: string, title = "Task") {
+  openTask(taskId: string, title = "Task", agentId?: string) {
     const existing = this.taskPanels.get(taskId);
     if (existing) {
+      if (agentId) existing.iconPath = agentTabIcon(this.context, agentId);
       existing.reveal(vscode.ViewColumn.Active);
       this.focusPanel(existing);
       return;
     }
     const panel = this.createPanel("openaide.task", taskPanelTitle(title), { surface: "task", taskId });
+    panel.iconPath = agentTabIcon(this.context, agentId);
     this.taskPanels.set(taskId, panel);
     this.focusPanel(panel);
     panel.onDidDispose(() => {
@@ -128,6 +133,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       projectId,
       settingsTab,
     });
+    panel.iconPath = settingsTabIcon(this.context);
     this.settingsPanel = panel;
     this.focusPanel(panel);
     panel.onDidDispose(() => {
@@ -188,7 +194,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         logger: this.logger,
         developerSettingsStore: this.context.globalState,
         agentSecretStore: this.context.secrets,
-        adoptTask: (taskId, taskTitle) => this.adoptTaskPanel(panel, taskId, taskTitle),
+        adoptTask: (taskId, taskTitle, agentId) => this.adoptTaskPanel(panel, taskId, taskTitle, agentId),
         surfaces: this,
       });
     });
@@ -200,7 +206,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     panel.webview.html = renderWebviewHtml(this.context, panel.webview, bootstrap);
   }
 
-  private adoptTaskPanel(panel: vscode.WebviewPanel, taskId: string, title = "Task") {
+  private adoptTaskPanel(panel: vscode.WebviewPanel, taskId: string, title = "Task", agentId?: string) {
     const adoptingNewTaskPanel = this.newTaskPanel === panel;
     const current = this.panelBootstraps.get(panel);
     const adoptingNativeSessionPanel = current?.surface === "nativeSession";
@@ -217,6 +223,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       return;
     }
     panel.title = taskPanelTitle(title);
+    panel.iconPath = agentTabIcon(this.context, agentId);
     this.panelBootstraps.set(panel, {
       ...(current ?? { surface: "task", shell: VSCODE_SHELL }),
       surface: "task",
