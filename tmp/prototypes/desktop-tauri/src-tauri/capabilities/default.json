@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-prototype",
+  "description": "Narrow capabilities for the disposable OpenAIDE desktop spike",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "notification:default",
+    "opener:allow-open-url"
+  ]
+}
