@@ -98,6 +98,7 @@ pub(crate) struct LocalHttpRequest {
     pub upload_size: Option<usize>,
     pub upload_cancel: bool,
     pub session_id: Option<String>,
+    pub after_header_present: bool,
     pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
     pub content_length: usize,
@@ -177,6 +178,7 @@ fn handle_stream_with_routes(
             upload_size: request.upload_size,
             upload_cancel: request.upload_cancel,
             session_id: request.session_id,
+            after_header_present: request.after_header_present,
             after_sequence: request.after_sequence,
             accepts_event_stream: request.accepts_event_stream,
             content_length: request.content_length,
@@ -333,13 +335,16 @@ fn handle_session_poll(
     handler: &LocalHttpAppHandler,
     request: LocalHttpRequest,
 ) -> LocalHttpResponse {
-    let (Some(session_id), Some(after)) = (request.session_id.as_deref(), request.after_sequence)
-    else {
-        return LocalHttpResponse {
-            status: 400,
-            body: String::new(),
-        };
-    };
+    if let Some(response) = reliable_session_poll_request_error(&request) {
+        return response;
+    }
+    let session_id = request
+        .session_id
+        .as_deref()
+        .expect("validated reliable-session poll has a session id");
+    let after = request
+        .after_sequence
+        .expect("validated reliable-session poll has an acknowledgement");
     let deadline = std::time::Instant::now() + Duration::from_secs(25);
     loop {
         let response = handler.poll_session(
@@ -353,6 +358,31 @@ fn handle_session_poll(
         }
         std::thread::sleep(Duration::from_millis(16));
     }
+}
+
+/// Reports only the safe shape of a rejected poll; header values remain private.
+fn reliable_session_poll_request_error(request: &LocalHttpRequest) -> Option<LocalHttpResponse> {
+    let reason_code = if request.session_id.is_none() {
+        "missing_session_id"
+    } else if !request.after_header_present {
+        "missing_after"
+    } else if request.after_sequence.is_none() {
+        "invalid_after"
+    } else {
+        return None;
+    };
+    crate::logging::warn(
+        "reliable_session_poll_rejected",
+        json!({
+            "reason_code": reason_code,
+            "session_id_present": request.session_id.is_some(),
+            "after_header_present": request.after_header_present,
+        }),
+    );
+    Some(LocalHttpResponse {
+        status: 400,
+        body: json!({ "code": reason_code }).to_string(),
+    })
 }
 
 fn handle_event_stream(
@@ -458,6 +488,10 @@ impl LocalHttpProbeListenerError {
             "error": self.to_string(),
             "transient": self.is_transient_io(),
         });
+        if let Self::MalformedRequest(reason) = self {
+            fields["error_kind"] = json!("malformed_request");
+            fields["reason_code"] = json!(diagnostic_reason_code(reason));
+        }
         if let Some(kind) = self.io_error_kind() {
             fields["ioKind"] = json!(format!("{kind:?}"));
         }
@@ -490,6 +524,23 @@ impl LocalHttpProbeListenerError {
             _ => None,
         }
     }
+}
+
+fn diagnostic_reason_code(reason: &str) -> String {
+    let mut code = String::with_capacity(reason.len());
+    let mut needs_separator = false;
+    for character in reason.chars() {
+        if character.is_ascii_alphanumeric() {
+            if needs_separator && !code.is_empty() {
+                code.push('_');
+            }
+            code.push(character.to_ascii_lowercase());
+            needs_separator = false;
+        } else {
+            needs_separator = true;
+        }
+    }
+    code
 }
 
 fn is_transient_socket_kind(kind: ErrorKind) -> bool {

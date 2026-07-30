@@ -314,9 +314,43 @@ function httpError(operation: string, status: number, body: string) {
 }
 
 class ReliableHttpError extends Error {
-  constructor(operation: string, readonly status: number, readonly body: string) {
+  constructor(
+    readonly operation: string,
+    readonly status: number,
+    readonly body: string,
+  ) {
     super(`App Server reliable-session ${operation} failed with HTTP ${status}: ${body}`);
   }
+}
+
+const SAFE_RELIABLE_HTTP_RESPONSE_CODES = new Set([
+  "invalid_connection_id",
+  "invalid_after",
+  "missing_after",
+  "missing_session_id",
+]);
+
+/**
+ * Extracts Support Export-safe transport facts without retaining a response
+ * body, endpoint, connection identity, session identity, or credential.
+ */
+export function reliableHttpErrorDiagnosticFields(error: unknown): Record<string, unknown> {
+  if (!(error instanceof ReliableHttpError)) return {};
+  let responseCode: string | undefined;
+  try {
+    const code = (JSON.parse(error.body) as { code?: unknown }).code;
+    if (typeof code === "string" && SAFE_RELIABLE_HTTP_RESPONSE_CODES.has(code)) {
+      responseCode = code;
+    }
+  } catch {
+    // Empty and non-JSON intermediary bodies remain classified by operation and status.
+  }
+  return {
+    error_kind: "reliable_http",
+    transport_operation_kind: error.operation,
+    http_status: error.status,
+    ...(responseCode ? { response_code: responseCode } : {}),
+  };
 }
 
 /** A gone session is safe to replace, but the interrupted RPC is still ambiguous. */

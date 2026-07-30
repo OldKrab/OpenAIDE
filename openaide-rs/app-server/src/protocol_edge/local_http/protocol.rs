@@ -528,7 +528,11 @@ fn handle_reliable_session_poll(
         AuthStatus::Invalid => return empty_response(403),
     }
     let Some(connection_id) = valid_connection_id(connection_id) else {
-        return empty_response(400);
+        crate::logging::warn(
+            "reliable_session_poll_rejected",
+            json!({ "reason_code": "invalid_connection_id" }),
+        );
+        return json_response(400, json!({ "code": "invalid_connection_id" }));
     };
     if sessions.connection_id(session_id).as_ref() != Some(&connection_id) {
         return empty_response(410);

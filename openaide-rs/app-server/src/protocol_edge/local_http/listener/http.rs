@@ -21,6 +21,7 @@ pub(super) struct HttpRequest {
     pub upload_size: Option<usize>,
     pub upload_cancel: bool,
     pub session_id: Option<String>,
+    pub after_header_present: bool,
     pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
     pub content_length: usize,
@@ -51,8 +52,9 @@ pub(super) fn read_http_request(
         .and_then(|value| value.parse::<usize>().ok());
     let upload_cancel = header_value(&headers, "x-openaide-upload-cancel") == Some("true");
     let session_id = header_value(&headers, "x-openaide-session-id").map(str::to_string);
-    let after_sequence =
-        header_value(&headers, "x-openaide-after").and_then(|value| value.parse::<u64>().ok());
+    let after_header = header_value(&headers, "x-openaide-after");
+    let after_header_present = after_header.is_some();
+    let after_sequence = after_header.and_then(|value| value.parse::<u64>().ok());
     let accepts_event_stream = header_value(&headers, "accept").is_some_and(|value| {
         value
             .split(',')
@@ -101,6 +103,7 @@ pub(super) fn read_http_request(
         upload_size,
         upload_cancel,
         session_id,
+        after_header_present,
         after_sequence,
         accepts_event_stream,
         content_length,

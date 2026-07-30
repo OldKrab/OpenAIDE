@@ -367,6 +367,31 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
 }
 
 #[test]
+fn reliable_poll_reports_an_invalid_connection_id() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let opened =
+        handle_reliable_session_open(Some("Bearer token"), "token", Some("client-1"), &sessions);
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap();
+
+    let response = handle_reliable_session_poll(
+        Some("Bearer token"),
+        "token",
+        Some("invalid/connection"),
+        session_id,
+        0,
+        &sessions,
+        |_| None,
+    );
+
+    assert_eq!(response.status, 400);
+    assert_eq!(
+        serde_json::from_str::<Value>(&response.body).unwrap(),
+        json!({"code": "invalid_connection_id"})
+    );
+}
+
+#[test]
 fn reliable_chunk_upload_reassembles_one_in_memory_client_frame() {
     use base64::Engine;
 
