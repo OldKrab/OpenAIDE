@@ -421,24 +421,35 @@ function CommandStepTitle({ command, status }: { command: string; status: "runni
   );
 }
 
+function semanticSubjectListClassName(
+  action: ActivityStepSemanticTitle["actions"][number],
+) {
+  const tone = action.action === "Activated"
+    ? "identity"
+    : action.action === "Read" || action.action === "View"
+      ? "resource"
+      : "technical";
+  // Preserve short patterns at natural width; only long Search subjects need a local text window.
+  const bounded = action.action.startsWith("Search")
+    && action.subjects.some((subject) => Array.from(subject).length > 32);
+  return ["activity-step-semantic-subject-list", tone, bounded ? "bounded" : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function SemanticStepTitle({ title }: { title: ActivityStepSemanticTitle }) {
   return (
     <>
       {title.actions.map((action, actionIndex) => (
         <Fragment key={`${action.action}-${actionIndex}`}>
           {actionIndex > 0 ? (
-            <span className="activity-step-semantic-connector">then</span>
+            <span className="activity-step-semantic-action-separator" aria-label="then">
+              →
+            </span>
           ) : null}
           <span className="activity-step-semantic-action">{action.action}</span>
           <span
-            className={[
-              "activity-step-semantic-subject-list",
-              action.action === "Activated"
-                ? "identity"
-                : action.action === "Read" || action.action === "View"
-                  ? "resource"
-                  : "technical",
-            ].join(" ")}
+            className={semanticSubjectListClassName(action)}
           >
             {action.subjects.map((subject, subjectIndex) => (
               <Fragment key={`${subject}-${subjectIndex}`}>

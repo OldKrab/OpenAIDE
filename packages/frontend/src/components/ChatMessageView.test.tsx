@@ -1105,8 +1105,11 @@ describe("ChatRow", () => {
     );
 
     expect(html).toContain("lucide-file-search");
-    expect(html).toContain('class="activity-step-semantic-connector">then</span>');
+    expect(html).toContain(
+      'class="activity-step-semantic-action-separator" aria-label="then">→</span>',
+    );
     expect(html).toContain('class="activity-step-semantic-action">Search</span>');
+    expect(html).toContain('class="activity-step-semantic-subject-list technical bounded">');
     expect(html).toContain('class="activity-step-semantic-subject">2 more</span>');
     expect(html).toContain('class="activity-step-semantic-scope">src/components');
     expect(html).toContain("styles/components");
@@ -1150,7 +1153,7 @@ describe("ChatRow", () => {
       + '<span class="activity-step-semantic-subject">diagnosing-bugs skill</span>',
     );
     expect(html).toContain(
-      'class="activity-step-semantic-subject-list technical">'
+      'class="activity-step-semantic-subject-list technical bounded">'
       + '<span class="activity-step-semantic-subject">'
       + '“parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command”</span>',
     );
@@ -1232,6 +1235,11 @@ describe("ChatRow", () => {
 
     expect(html).toContain("lucide-search");
     expect(html).not.toContain("lucide-file-search");
+    expect(html).toContain(
+      'class="activity-step-semantic-subject-list technical">'
+      + '<span class="activity-step-semantic-subject">“(test|command)”</span>',
+    );
+    expect(html).not.toContain("technical bounded");
     expect(html).toContain(
       'title="Search file names for “(test|command)” in '
       + 'openaide-rs/app-server/src/agent/command_presentation"',
