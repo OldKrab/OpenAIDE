@@ -208,6 +208,7 @@ export class AppServerHostClient {
     } catch (error) {
       this.logger?.warn("app server view bridge operation failed", {
         operation: message.type,
+        bridge_operation_kind: bridgeOperationKind(message.type),
         error: error instanceof Error ? error.message : String(error),
         ...reliableHttpErrorDiagnosticFields(error),
       });
@@ -436,6 +437,27 @@ export class AppServerHostClient {
     } finally {
       if (this.workspaceSync === sync) this.workspaceSync = undefined;
     }
+  }
+}
+
+function bridgeOperationKind(type: AppServerSessionViewMessage["type"]) {
+  switch (type) {
+    case "appServer.session.detach":
+      return "detach";
+    case "appServer.session.initialize":
+      return "initialize";
+    case "appServer.session.request":
+      return "request";
+    case "appServer.session.serverResponse":
+      return "server_response";
+    case "appServer.session.subscribe":
+      return "subscribe";
+    case "appServer.session.registerRequestHandler":
+      return "register_request_handler";
+    case "appServer.session.unregisterRequestHandler":
+      return "unregister_request_handler";
+    case "appServer.session.unsubscribe":
+      return "unsubscribe";
   }
 }
 

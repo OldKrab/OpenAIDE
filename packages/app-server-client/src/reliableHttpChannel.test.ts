@@ -187,6 +187,47 @@ describe("ReliableHttpMessageChannel", () => {
     channel.close();
   });
 
+  it("classifies a safe upload rejection without exposing its body", async () => {
+    let postCount = 0;
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "GET") return new Promise(() => undefined);
+      postCount += 1;
+      if (postCount === 1) {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      return response(400, JSON.stringify({
+        code: "invalid_upload_envelope",
+        privateDetail: "must-not-reach-diagnostics",
+      }));
+    });
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://127.0.0.1:4321",
+      connectionId: "client-1",
+      fetch,
+      retryDelayMs: 0,
+      deferReceiveUntilFirstUpload: true,
+    });
+    const errors: unknown[] = [];
+    channel.subscribeErrors?.((error) => errors.push(error));
+
+    channel.send({ jsonrpc: "2.0", id: "rpc-1", method: "task/list", params: {} });
+    await vi.waitFor(() => expect(errors).toHaveLength(1));
+
+    expect(reliableHttpErrorDiagnosticFields(errors[0])).toEqual({
+      error_kind: "reliable_http",
+      transport_operation_kind: "upload",
+      http_status: 400,
+      response_code: "invalid_upload_envelope",
+    });
+    expect(JSON.stringify(reliableHttpErrorDiagnosticFields(errors[0])))
+      .not.toContain("must-not-reach-diagnostics");
+    channel.close();
+  });
+
   it("restarts a suspended receive poll and replays from the last delivered sequence", async () => {
     let wake: (() => void) | undefined;
     let pollAttempt = 0;

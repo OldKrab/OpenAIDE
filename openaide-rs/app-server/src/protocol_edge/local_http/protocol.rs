@@ -148,11 +148,11 @@ impl LocalHttpProtocolHandler {
         }
         let raw_connection_id = connection_id;
         let Some(connection_id) = valid_connection_id(raw_connection_id) else {
-            return empty_response(400);
+            return reliable_upload_rejection("invalid_connection_id", "chunk");
         };
         let chunk = match serde_json::from_str::<ReliableUploadChunk>(body) {
             Ok(chunk) => chunk,
-            Err(_) => return empty_response(400),
+            Err(_) => return reliable_upload_rejection("invalid_chunk_envelope", "chunk"),
         };
         match self.sessions.connection_id(&chunk.session_id) {
             None => return empty_response(410),
@@ -162,7 +162,7 @@ impl LocalHttpProtocolHandler {
         let bytes =
             match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, chunk.data) {
                 Ok(bytes) => bytes,
-                Err(_) => return empty_response(400),
+                Err(_) => return reliable_upload_rejection("invalid_chunk_base64", "chunk"),
             };
         match self.upload_chunks.append(
             &chunk.session_id,
@@ -285,8 +285,8 @@ fn handle_local_http_protocol(
     }
     let raw_connection_id = connection_id;
     let Some(connection_id) = valid_connection_id(raw_connection_id) else {
-        return json_response(
-            400,
+        return protocol_rejection(
+            "invalid_connection_id",
             wire_value(wire_invalid_request(
                 None,
                 "missing or invalid X-OpenAIDE-Connection-Id".to_string(),
@@ -295,7 +295,7 @@ fn handle_local_http_protocol(
     };
     let value = match serde_json::from_str::<Value>(body) {
         Ok(value) => value,
-        Err(error) => return json_response(400, wire_value(parse_error(error))),
+        Err(error) => return protocol_rejection("malformed_json", wire_value(parse_error(error))),
     };
     if let Some(response) = client_response(&value) {
         let InboundProtocolMessage::ClientResponse { request_id, .. } = &response else {
@@ -337,16 +337,16 @@ fn handle_local_http_protocol(
     let request = match serde_json::from_value::<WireRequest>(value) {
         Ok(request) => request,
         Err(error) => {
-            return json_response(
-                400,
+            return protocol_rejection(
+                "invalid_request_envelope",
                 wire_value(wire_invalid_request(None, error.to_string())),
             )
         }
     };
     let id = match request.id {
         WireRequestId::Notification => {
-            return json_response(
-                400,
+            return protocol_rejection(
+                "unsupported_notification",
                 wire_value(wire_invalid_request(
                     None,
                     "notifications are not supported".into(),
@@ -354,8 +354,8 @@ fn handle_local_http_protocol(
             );
         }
         WireRequestId::Invalid => {
-            return json_response(
-                400,
+            return protocol_rejection(
+                "invalid_request_id",
                 wire_value(wire_invalid_request(
                     Some(Value::Null),
                     "invalid JSON-RPC id".into(),
@@ -365,14 +365,14 @@ fn handle_local_http_protocol(
         WireRequestId::Request(id) => id,
     };
     if request.jsonrpc != "2.0" {
-        return json_response(
-            400,
+        return protocol_rejection(
+            "invalid_jsonrpc_version",
             wire_value(wire_invalid_request(Some(id), "jsonrpc must be 2.0".into())),
         );
     }
     let Some(method) = request.method else {
-        return json_response(
-            400,
+        return protocol_rejection(
+            "missing_method",
             wire_value(wire_invalid_request(Some(id), "method is required".into())),
         );
     };
@@ -411,11 +411,19 @@ fn handle_local_http_protocol(
 }
 
 fn reliable_chunk_error_response(error: ReliableChunkError) -> LocalHttpResponse {
+    let rejection_code = match error {
+        ReliableChunkError::InvalidChunk => Some("invalid_chunk"),
+        ReliableChunkError::InvalidUtf8 => Some("invalid_chunk_utf8"),
+        _ => None,
+    };
+    if let Some(rejection_code) = rejection_code {
+        return reliable_upload_rejection(rejection_code, "chunk");
+    }
     let status = match error {
         ReliableChunkError::ChunkTooLarge | ReliableChunkError::UploadTooLarge => 413,
         ReliableChunkError::MetadataMismatch | ReliableChunkError::OffsetMismatch => 409,
         ReliableChunkError::StateUnavailable => 500,
-        ReliableChunkError::InvalidChunk | ReliableChunkError::InvalidUtf8 => 400,
+        ReliableChunkError::InvalidChunk | ReliableChunkError::InvalidUtf8 => unreachable!(),
     };
     empty_response(status)
 }
@@ -461,11 +469,11 @@ fn handle_reliable_session_upload(
     }
     let raw_connection_id = connection_id;
     let Some(connection_id) = valid_connection_id(raw_connection_id) else {
-        return empty_response(400);
+        return reliable_upload_rejection("invalid_connection_id", "single");
     };
     let upload = match serde_json::from_str::<ReliableUpload>(body) {
         Ok(upload) => upload,
-        Err(_) => return empty_response(400),
+        Err(_) => return reliable_upload_rejection("invalid_upload_envelope", "single"),
     };
     let session_id = upload.session_id.clone();
     let mut dispatched = None;
@@ -498,6 +506,11 @@ fn handle_reliable_session_upload(
         return empty_response(500);
     };
     if response.status != 200 {
+        if response.status == 400 {
+            let reason_code =
+                response_code(&response).unwrap_or_else(|| "nested_protocol_rejected".to_string());
+            log_reliable_upload_rejection(&reason_code, "single");
+        }
         return response;
     }
     if let Ok(value) = serde_json::from_str::<Value>(&response.body) {
@@ -506,6 +519,44 @@ fn handle_reliable_session_upload(
         }
     }
     empty_response(204)
+}
+
+/// Adds a stable, non-sensitive reason to protocol-level HTTP 400 responses.
+fn protocol_rejection(reason_code: &'static str, mut value: Value) -> LocalHttpResponse {
+    crate::logging::warn(
+        "local_http_protocol_rejected",
+        json!({ "reason_code": reason_code }),
+    );
+    if let Some(object) = value.as_object_mut() {
+        object.insert("code".to_string(), json!(reason_code));
+    }
+    json_response(400, value)
+}
+
+fn reliable_upload_rejection(
+    reason_code: &'static str,
+    upload_kind: &'static str,
+) -> LocalHttpResponse {
+    log_reliable_upload_rejection(reason_code, upload_kind);
+    json_response(400, json!({ "code": reason_code }))
+}
+
+fn log_reliable_upload_rejection(reason_code: &str, upload_kind: &'static str) {
+    crate::logging::warn(
+        "reliable_session_upload_rejected",
+        json!({
+            "reason_code": reason_code,
+            "upload_kind": upload_kind,
+        }),
+    );
+}
+
+fn response_code(response: &LocalHttpResponse) -> Option<String> {
+    serde_json::from_str::<Value>(&response.body)
+        .ok()?
+        .get("code")?
+        .as_str()
+        .map(str::to_string)
 }
 
 fn handle_reliable_session_poll(
