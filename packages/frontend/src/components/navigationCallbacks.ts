@@ -140,7 +140,7 @@ export function createNavigationCallbacks({
       asyncOperations.beginNavigation(taskNavigationTarget(taskId));
       const task = state.tasks.find((item) => item.task_id === taskId);
       dispatch({ type: "selection:set", taskId });
-      openTaskSurface(taskId, task?.title);
+      openTaskSurface(taskId, task?.title, task?.agent_id);
     },
     restoreTask: (taskId) => {
       if (backendConnection?.request) {
@@ -152,7 +152,8 @@ export function createNavigationCallbacks({
           dispatch({ type: "taskInput:clear", taskId });
           asyncOperations.beginNavigation(taskNavigationTarget(taskId), false);
           dispatch({ type: "archive:set", showArchived: false });
-          openTaskSurface(taskId);
+          const restoredTask = state.tasks.find((task) => task.task_id === taskId);
+          openTaskSurface(taskId, undefined, restoredTask?.agent_id);
         }).catch((error) => dispatch({
           type: "tasks:error",
           message: error instanceof Error ? error.message : "Unable to restore task.",

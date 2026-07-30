@@ -661,7 +661,7 @@ describe("webview messaging composer routes", () => {
       payload: { agent_id: "codex", native_session_id: "session_1", project_id: "project_1" },
     }, context({}, posted, surfaces));
     await handleWebviewMessage(
-      { type: "surface.openTask", payload: { task_id: "task_1", title: "Fix ACP" } },
+      { type: "surface.openTask", payload: { task_id: "task_1", title: "Fix ACP", agent_id: "codex" } },
       context({}, posted, surfaces, undefined, undefined, { adoptTask }),
     );
     await handleWebviewMessage(
@@ -675,8 +675,8 @@ describe("webview messaging composer routes", () => {
     expect(surfaces.openSettings)
       .toHaveBeenCalledWith(undefined, undefined, "project_1", "worktrees");
     expect(surfaces.openNativeSession).toHaveBeenCalledWith("codex", "session_1", "project_1");
-    expect(adoptTask).toHaveBeenCalledWith("task_1", "Fix ACP");
-    expect(surfaces.openTask).toHaveBeenCalledWith("task_1", "Fix ACP");
+    expect(adoptTask).toHaveBeenCalledWith("task_1", "Fix ACP", "codex");
+    expect(surfaces.openTask).toHaveBeenCalledWith("task_1", "Fix ACP", "codex");
     expect(surfaces.updateTaskTitle).toHaveBeenCalledWith("task_1", "Renamed Task");
     expect(calls).toEqual(["adopt", "open"]);
     expect(posted).toEqual([]);

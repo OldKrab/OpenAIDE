@@ -53,7 +53,7 @@ export type WebviewToHostMessage =
   | { type: "surface.openNativeSession"; payload: { agent_id: string; native_session_id: string; project_id?: string } }
   | { type: "surface.openArchive" }
   | { type: "surface.openSettings"; payload?: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId } }
-  | { type: "surface.openTask"; payload: { task_id: string; title?: string } }
+  | { type: "surface.openTask"; payload: { task_id: string; title?: string; agent_id?: string } }
   | { type: "surface.updateTaskTitle"; payload: { task_id: string; title: string } }
   | { type: "shell.openExternal"; payload: { url: string } }
   | { type: "shell.reload" }

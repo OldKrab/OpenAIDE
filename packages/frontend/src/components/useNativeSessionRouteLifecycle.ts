@@ -125,7 +125,7 @@ export async function adoptRoutedNativeSession({
     dispatch({ type: "snapshot", snapshot, intent: "open" });
     dispatch({ type: "newTask:nativeSessions:remove", sessionId: nativeSessionId });
     asyncOperations.expectNavigation(taskNavigationTarget(snapshot.task.task_id));
-    openTaskSurface(snapshot.task.task_id, snapshot.task.title);
+    openTaskSurface(snapshot.task.task_id, snapshot.task.title, snapshot.task.agent_id);
   } catch (error) {
     const ownsOperation = asyncOperations.owns(operation);
     sendWebviewTelemetry(postHostMessage, "native_session_route_adoption_failed", {

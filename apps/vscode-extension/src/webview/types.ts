@@ -12,7 +12,7 @@ export type WebviewHost = {
   openNewTask: (projectId?: string) => void;
   openNativeSession: (agentId: string, nativeSessionId: string, projectId?: string) => void;
   openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: WebviewBootstrap["settingsTab"]) => void;
-  openTask: (taskId: string, title?: string) => void;
+  openTask: (taskId: string, title?: string, agentId?: string) => void;
 };
 
 /** Exposes shell-local editor focus without promoting it into App Server product state. */

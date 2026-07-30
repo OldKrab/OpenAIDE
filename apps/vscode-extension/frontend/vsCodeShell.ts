@@ -100,9 +100,13 @@ export function createVsCodeShell(): FrontendShell {
           ...(settingsTab ? { settings_tab: settingsTab } : {}),
         },
       }),
-      openTask: (taskId, title) => vscode?.postMessage({
+      openTask: (taskId, title, agentId) => vscode?.postMessage({
         type: "surface.openTask",
-        payload: { task_id: taskId, ...(title ? { title } : {}) },
+        payload: {
+          task_id: taskId,
+          ...(title ? { title } : {}),
+          ...(agentId ? { agent_id: agentId } : {}),
+        },
       }),
       replaceSettingsTab: () => undefined,
       subscribe(listener) {
