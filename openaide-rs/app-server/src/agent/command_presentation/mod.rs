@@ -87,7 +87,8 @@ fn classify_pipeline(stages: &[Vec<String>]) -> Option<SemanticAction> {
             let action = classify_search(search)?;
             matches!(action, SemanticAction::Search { .. }).then_some(action)
         }
-        [files, filter] => classify_file_name_search(files, filter),
+        [source, filter] => classify_file_name_search(source, filter)
+            .or_else(|| classify_numbered_read_slice(source, filter)),
         _ => None,
     }
 }
@@ -134,6 +135,24 @@ fn classify_file_name_search(files: &[String], filter: &[String]) -> Option<Sema
         scopes,
         target: ToolSearchTarget::Paths,
     })
+}
+
+/// Proves the exact read-only composition commonly used to retain source line
+/// numbers while selecting a bounded excerpt.
+fn classify_numbered_read_slice(source: &[String], filter: &[String]) -> Option<SemanticAction> {
+    let [nl, body_numbering, path] = source else {
+        return None;
+    };
+    if command_name(nl)? != "nl" || body_numbering != "-ba" {
+        return None;
+    }
+    let [sed, print_flag, script] = filter else {
+        return None;
+    };
+    if command_name(sed)? != "sed" || print_flag != "-n" || !sed_print_script().is_match(script) {
+        return None;
+    }
+    action(ToolPresentationKind::Read, vec![safe_subject(path)?])
 }
 
 enum SemanticAction {
@@ -420,7 +439,9 @@ fn command_name(program: &str) -> Option<&str> {
 
 fn sed_print_script() -> &'static Regex {
     static SCRIPT: OnceLock<Regex> = OnceLock::new();
-    SCRIPT.get_or_init(|| Regex::new(r"^\d+(?:,\d+)?p$").expect("valid sed print regex"))
+    SCRIPT.get_or_init(|| {
+        Regex::new(r"^\d+(?:,\d+)?p(?:;\d+(?:,\d+)?p)*$").expect("valid numeric sed print regex")
+    })
 }
 
 fn safe_subject(value: &str) -> Option<String> {
