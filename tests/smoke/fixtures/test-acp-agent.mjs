@@ -88,6 +88,10 @@ function createSession(message) {
     availableCommands: [
       { name: "permission", description: "Exercise a live ACP permission request." },
       { name: "hold", description: "Keep a prompt active for steering and cancellation." },
+      {
+        name: "describe-release",
+        description: "Write reviewer-facing release notes from branch context, verification output, and explicit deployment requirements.",
+      },
     ],
   });
 }

@@ -233,8 +233,8 @@
   color: var(--oa-danger);
 }
 
-.composer-slash-popover {
-  width: min(640px, calc(100vw - 32px));
+.oa-popup-surface.composer-slash-popover {
+  width: min(640px, calc(100% - 18px));
   max-height: 220px;
   border: 1px solid var(--oa-border);
   border-radius: var(--oa-radius-md);

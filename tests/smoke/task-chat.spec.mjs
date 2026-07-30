@@ -315,6 +315,13 @@ test("applies Agent options and inserts prepared slash commands", async ({ page 
   await editor.fill("/");
   const commands = page.getByRole("listbox", { name: "Slash commands" });
   await expect(commands.getByRole("option", { name: /permission/ })).toBeVisible();
+  const [composerBounds, commandBounds] = await Promise.all([
+    page.locator(".composer").boundingBox(),
+    commands.boundingBox(),
+  ]);
+  expect(composerBounds).not.toBeNull();
+  expect(commandBounds).not.toBeNull();
+  expect(commandBounds.width).toBeLessThanOrEqual(composerBounds.width);
   await commands.getByRole("option", { name: /permission/ }).click();
   await expect(editor).toHaveText("/permission ");
 });
