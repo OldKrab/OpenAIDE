@@ -44,9 +44,23 @@ jobs:
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          version="${REQUESTED_VERSION:-$(node -p "require('./package.json').version")}"
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            version="$REQUESTED_VERSION"
+            artifact_name="vsix-${{ matrix.target }}"
+          else
+            base_version="$(node -p "require('./package.json').version")"
+            short_sha="${GITHUB_SHA:0:7}"
+            # Manual packages identify their source commit without changing release versions.
+            if [[ "$base_version" == *-* ]]; then
+              version="${base_version}.g${short_sha}"
+            else
+              version="${base_version}-g${short_sha}"
+            fi
+            artifact_name="vsix-${{ matrix.target }}-g${short_sha}"
+          fi
           node scripts/set-release-artifact-version.mjs "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
       - run: cargo build --release -p openaide-app-server
       - run: npm run build:frontend
       - name: Add extension license
@@ -64,7 +78,7 @@ jobs:
             --out "../../artifacts/openaide-vscode-${{ matrix.target }}-${{ steps.version.outputs.version }}.vsix"
       - uses: actions/upload-artifact@v7
         with:
-          name: vsix-${{ matrix.target }}
+          name: ${{ steps.version.outputs.artifact_name }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

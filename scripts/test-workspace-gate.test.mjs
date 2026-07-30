@@ -149,6 +149,10 @@ test("manual VSIX builds upload every platform without publishing a release", ()
   assert.match(workflow, /target: darwin-arm64/);
   assert.match(workflow, /actions\/upload-artifact@v7/);
   assert.match(workflow, /@vscode\/vsce@3\.6\.0 package/);
+  assert.match(workflow, /short_sha="\$\{GITHUB_SHA:0:7\}"/);
+  assert.match(workflow, /version="\$\{base_version\}\.g\$\{short_sha\}"/);
+  assert.match(workflow, /version="\$\{base_version\}-g\$\{short_sha\}"/);
+  assert.match(workflow, /name: \$\{\{ steps\.version\.outputs\.artifact_name \}\}/);
   assert.doesNotMatch(workflow, /@vscode\/vsce@3\.6\.0 publish/);
   assert.doesNotMatch(workflow, /action-gh-release|contents: write|push:\s*\n\s*tags:/);
 });
