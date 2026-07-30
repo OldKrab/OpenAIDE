@@ -2784,6 +2784,65 @@ fn execute_tool_call_presents_search_through_a_proven_head_limiter() {
 }
 
 #[test]
+fn execute_tool_call_presents_numbered_read_slice_pipelines() {
+    let command = "/usr/bin/zsh -lc \"nl -ba crates/core/src/context/layer/mcp/layer.rs | sed -n '80,155p' && nl -ba crates/core/src/context/manager/mcp/mod.rs | sed -n '75,150p' && nl -ba crates/core/src/session/agent_environment/registry.rs | sed -n '90,180p'\"";
+    let AgentEvent::ToolCall(tool_call) = tool_call_event(
+        &ToolCall::new("tool_call_execute_numbered_read_slices", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    ) else {
+        panic!("expected tool call event");
+    };
+
+    assert_eq!(
+        tool_call.presentation,
+        Some(crate::protocol::model::ToolPresentation::single(
+            ToolPresentationKind::Read,
+            vec![
+                "layer.rs".to_string(),
+                "mod.rs".to_string(),
+                "registry.rs".to_string(),
+            ],
+        ))
+    );
+}
+
+#[test]
+fn execute_tool_call_presents_multi_range_numbered_reads_with_search() {
+    let command = "/usr/bin/zsh -lc \"nl -ba crates/core/src/tools/layer/event.rs | sed -n '1,90p' && nl -ba crates/core/src/tools/mod.rs | sed -n '30,100p;780,860p' && rg -n \\\"enum ToolOutput|enum ToolArguments\\\" crates/core/src/tools/mod.rs\"";
+    let AgentEvent::ToolCall(tool_call) = tool_call_event(
+        &ToolCall::new("tool_call_execute_multi_range_read_search", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    ) else {
+        panic!("expected tool call event");
+    };
+
+    assert_eq!(
+        serde_json::to_value(
+            tool_call
+                .presentation
+                .expect("multi-range read + search presentation")
+        )
+        .unwrap(),
+        serde_json::json!({
+            "actions": [
+                {
+                    "kind": "read",
+                    "subjects": ["event.rs", "mod.rs"]
+                },
+                {
+                    "kind": "search",
+                    "query": "enum ToolOutput|enum ToolArguments",
+                    "scopes": ["crates/core/src/tools/mod.rs"],
+                    "target": "contents"
+                }
+            ]
+        })
+    );
+}
+
+#[test]
 fn execute_tool_call_presents_proven_file_name_search_pipeline() {
     let command = "rg --files openaide-rs/app-server/src/agent/command_presentation openaide-rs/app-server/tests packages/frontend | rg '(test|command)'";
     let AgentEvent::ToolCall(tool_call) = tool_call_event(
@@ -2869,6 +2928,11 @@ fn execute_tool_call_falls_back_for_ambiguous_or_effectful_commands() {
         "rg TODO src | head -10 file",
         "rg --files src | grep test",
         "rg TODO src | head -80 && git status --short",
+        "nl -w 4 file.rs | sed -n '1,20p'",
+        "nl -ba file.rs | sed -n '1,20p' other.rs",
+        "nl -ba file.rs | sed -n '1,20w copy.rs'",
+        "nl -ba file.rs | sed -n '1,20p;e id'",
+        "nl -ba file.rs | sed -n '1,20p' | head",
         "rg TODO src && npm test",
         "rg TODO src && ls src",
         "find . -delete",

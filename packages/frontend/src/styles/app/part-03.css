@@ -372,38 +372,11 @@
 }
 
 .activity-step-title.semantic {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+  display: block;
 }
 
-.activity-step-semantic-action,
-.activity-step-semantic-connector,
-.activity-step-semantic-scope {
-  flex: 0 0 auto;
-}
-
-.activity-step-semantic-subject-list {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Preserve semantic identity while long patterns, paths, and scopes absorb compression first. */
-.activity-step-semantic-subject-list.identity {
-  flex: 0 0 auto;
-  max-width: 24ch;
-}
-
-.activity-step-semantic-subject-list.resource {
-  flex: 0 0 auto;
-  max-width: 28ch;
-}
-
-.activity-step-semantic-subject-list.technical {
-  flex: 1 8 auto;
-  min-width: 6ch;
+.activity-step-title.semantic > * + * {
+  margin-inline-start: 4px;
 }
 
 .activity-step-semantic-subject {
@@ -421,12 +394,6 @@
 }
 
 .activity-step-semantic-scope {
-  flex: 0 4 18ch;
-  min-width: 6ch;
-  max-width: 18ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 400;
 }
 
@@ -478,6 +445,10 @@
 
 .activity-step.tool-presentation-search .activity-kind-icon {
   color: color-mix(in oklch, var(--oa-success) 70%, var(--oa-muted));
+}
+
+.activity-step.tool-presentation-inspect .activity-kind-icon {
+  color: color-mix(in oklch, var(--oa-focus) 50%, var(--oa-success));
 }
 
 .activity-tool-details {

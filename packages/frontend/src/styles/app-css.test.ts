@@ -278,22 +278,18 @@ describe("task list row styles", () => {
     );
   });
 
-  it("uses quiet typography rather than chips for search queries, scopes, and read files", () => {
+  it("truncates a semantic title once rather than clipping every clause", () => {
     expect(appCss).toMatch(
-      /\.activity-step-title\.semantic\s*{[^}]*display:\s*inline-flex;[^}]*align-items:\s*baseline;[^}]*gap:\s*4px;/,
+      /\.activity-step-title\s*{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
     );
     expect(appCss).toMatch(
-      /\.activity-step-semantic-subject-list\s*{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
+      /\.activity-step-title\.semantic\s*{[^}]*display:\s*block;/,
     );
     expect(appCss).toMatch(
-      /\.activity-step-semantic-subject-list\.identity\s*{[^}]*flex:\s*0 0 auto;[^}]*max-width:\s*24ch;/,
+      /\.activity-step-title\.semantic\s*>\s*\*\s*\+\s*\*\s*{[^}]*margin-inline-start:\s*4px;/,
     );
-    expect(appCss).toMatch(
-      /\.activity-step-semantic-subject-list\.resource\s*{[^}]*flex:\s*0 0 auto;[^}]*max-width:\s*28ch;/,
-    );
-    expect(appCss).toMatch(
-      /\.activity-step-semantic-subject-list\.technical\s*{[^}]*flex:\s*1 8 auto;[^}]*min-width:\s*6ch;/,
-    );
+    expect(appCss).not.toMatch(/\.activity-step-semantic-subject-list(?:\.[a-z]+)?\s*{[^}]*text-overflow:/);
+    expect(appCss).not.toMatch(/\.activity-step-semantic-scope\s*{[^}]*text-overflow:/);
     expect(appCss).toMatch(
       /\.activity-step-semantic-subject\s*{[^}]*font-weight:\s*400;/,
     );
@@ -305,7 +301,10 @@ describe("task list row styles", () => {
       /\.activity-step-semantic-connector\s*{[^}]*color:\s*inherit;/,
     );
     expect(appCss).toMatch(
-      /\.activity-step-semantic-scope\s*{[^}]*flex:\s*0 4 18ch;[^}]*min-width:\s*6ch;[^}]*max-width:\s*18ch;[^}]*font-weight:\s*400;/,
+      /\.activity-step-semantic-scope\s*{[^}]*font-weight:\s*400;/,
+    );
+    expect(appCss).toMatch(
+      /\.activity-step\.tool-presentation-inspect \.activity-kind-icon\s*{[^}]*color:\s*color-mix\(in oklch, var\(--oa-focus\) 50%, var\(--oa-success\)\);/,
     );
   });
 
