@@ -1600,7 +1600,7 @@ describe("Composer view behavior", () => {
   it("renders the editor enabled when the composer should regain keyboard flow", () => {
     const renderer = renderComposer({ autoFocus: true });
 
-    expect(textarea(renderer.root).props.contentEditable).toBe(true);
+    expect(textarea(renderer.root).props.contentEditable).toBe("plaintext-only");
   });
 
   it("does not refocus the composer after sending on a mobile pointer", () => {
