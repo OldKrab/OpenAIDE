@@ -315,6 +315,7 @@ describe("AppServerHostClient", () => {
       "app server view bridge operation failed",
       expect.objectContaining({
         operation: "appServer.session.request",
+        bridge_operation_kind: "request",
         error_kind: "reliable_http",
         transport_operation_kind: "receive",
         http_status: 400,

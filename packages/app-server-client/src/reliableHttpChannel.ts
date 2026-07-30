@@ -326,8 +326,20 @@ class ReliableHttpError extends Error {
 const SAFE_RELIABLE_HTTP_RESPONSE_CODES = new Set([
   "invalid_connection_id",
   "invalid_after",
+  "invalid_chunk",
+  "invalid_chunk_base64",
+  "invalid_chunk_envelope",
+  "invalid_chunk_utf8",
+  "invalid_jsonrpc_version",
+  "invalid_request_envelope",
+  "invalid_request_id",
+  "invalid_upload_envelope",
+  "malformed_json",
+  "missing_method",
   "missing_after",
   "missing_session_id",
+  "nested_protocol_rejected",
+  "unsupported_notification",
 ]);
 
 /**

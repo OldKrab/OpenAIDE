@@ -302,6 +302,42 @@ fn product_transport_rejects_client_response_with_result_and_error() {
 }
 
 #[test]
+fn product_protocol_rejections_have_safe_reason_codes() {
+    let cases = [
+        ("{", "malformed_json"),
+        (
+            r#"{"jsonrpc":"2.0","id":true,"method":"task/list"}"#,
+            "invalid_request_envelope",
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":null,"method":"task/list"}"#,
+            "invalid_request_id",
+        ),
+        (
+            r#"{"jsonrpc":"1.0","id":"1","method":"task/list"}"#,
+            "invalid_jsonrpc_version",
+        ),
+    ];
+
+    for (body, expected_code) in cases {
+        let response = handle_local_http_protocol(
+            Some("Bearer token"),
+            "token",
+            Some("client-1"),
+            body,
+            |_, _| GatewayOutcome::Noop,
+            |_| Vec::new(),
+        );
+
+        assert_eq!(response.status, 400);
+        assert_eq!(
+            serde_json::from_str::<Value>(&response.body).unwrap()["code"],
+            expected_code
+        );
+    }
+}
+
+#[test]
 fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
     let sessions = ReliableSessionRegistry::new("server-1");
     let opened =
@@ -364,6 +400,129 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
         batch["frames"][0]["message"]["result"]["result"]["tasks"],
         json!([])
     );
+}
+
+#[test]
+fn reliable_upload_reports_an_invalid_connection_id() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+
+    let response = handle_reliable_session_upload(
+        Some("Bearer token"),
+        "token",
+        Some("invalid/connection"),
+        "{}",
+        &sessions,
+        |_, _| GatewayOutcome::Noop,
+    );
+
+    assert_eq!(response.status, 400);
+    assert_eq!(
+        serde_json::from_str::<Value>(&response.body).unwrap(),
+        json!({"code": "invalid_connection_id"})
+    );
+}
+
+#[test]
+fn reliable_upload_reports_an_invalid_upload_envelope() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+
+    let response = handle_reliable_session_upload(
+        Some("Bearer token"),
+        "token",
+        Some("client-1"),
+        "{}",
+        &sessions,
+        |_, _| GatewayOutcome::Noop,
+    );
+
+    assert_eq!(response.status, 400);
+    assert_eq!(
+        serde_json::from_str::<Value>(&response.body).unwrap(),
+        json!({"code": "invalid_upload_envelope"})
+    );
+}
+
+#[test]
+fn reliable_upload_preserves_the_nested_protocol_rejection_code() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let opened =
+        handle_reliable_session_open(Some("Bearer token"), "token", Some("client-1"), &sessions);
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap();
+
+    let response = handle_reliable_session_upload(
+        Some("Bearer token"),
+        "token",
+        Some("client-1"),
+        &json!({
+            "sessionId": session_id,
+            "sequence": 1,
+            "message": {
+                "jsonrpc": "2.0",
+                "method": "state/subscribe",
+                "params": {}
+            }
+        })
+        .to_string(),
+        &sessions,
+        |_, _| GatewayOutcome::Noop,
+    );
+
+    assert_eq!(response.status, 400);
+    assert_eq!(
+        serde_json::from_str::<Value>(&response.body).unwrap()["code"],
+        "unsupported_notification"
+    );
+}
+
+#[test]
+fn reliable_chunk_upload_reports_invalid_boundary_inputs() {
+    let gateway = SharedRpcGateway::new(crate::protocol_edge::tests::initialized_gateway(
+        "client-1",
+        "local-http:client-1",
+    ));
+    let handler = LocalHttpProtocolHandler::new(gateway, "token", "server-1");
+    let opened = handler.handle(
+        Some("Bearer token"),
+        Some("client-1"),
+        &json!({ "transport": "open" }).to_string(),
+    );
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap();
+    let cases = [
+        (
+            Some("invalid/connection"),
+            json!({"transport": "chunk"}).to_string(),
+            "invalid_connection_id",
+        ),
+        (
+            Some("client-1"),
+            json!({"transport": "chunk"}).to_string(),
+            "invalid_chunk_envelope",
+        ),
+        (
+            Some("client-1"),
+            json!({
+                "transport": "chunk",
+                "sessionId": session_id,
+                "sequence": 1,
+                "offset": 0,
+                "totalSize": 1,
+                "data": "not base64!"
+            })
+            .to_string(),
+            "invalid_chunk_base64",
+        ),
+    ];
+
+    for (connection_id, body, expected_code) in cases {
+        let response = handler.handle(Some("Bearer token"), connection_id, &body);
+        assert_eq!(response.status, 400);
+        assert_eq!(
+            serde_json::from_str::<Value>(&response.body).unwrap(),
+            json!({"code": expected_code})
+        );
+    }
 }
 
 #[test]

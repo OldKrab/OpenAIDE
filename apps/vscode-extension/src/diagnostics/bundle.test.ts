@@ -143,6 +143,7 @@ describe("support diagnostics bundle", () => {
       event: "app_server_view_bridge_operation_failed",
       fields: {
         error: "private response body",
+        bridge_operation_kind: "request",
         error_kind: "reliable_http",
         transport_operation_kind: "receive",
         http_status: 400,
@@ -178,6 +179,7 @@ describe("support diagnostics bundle", () => {
     ].join("\n");
 
     expect(exported).toContain('"transport_operation_kind":"receive"');
+    expect(exported).toContain('"bridge_operation_kind":"request"');
     expect(exported).toContain('"http_status":400');
     expect(exported).toContain('"response_code":"missing_after"');
     expect(exported).toContain('"reason_code":"missing_after"');
