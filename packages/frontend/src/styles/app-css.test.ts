@@ -129,6 +129,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.chat-agent a\s*{\s*color:\s*var\(--oa-focus\);/);
     expect(appCss).toMatch(/\.chat-agent code\s*{[^}]*font-family:\s*var\(--oa-mono-font\);/);
     expect(appCss).toMatch(/\.chat-agent :not\(pre\) > code\s*{[^}]*overflow-wrap:\s*anywhere;/);
+    expect(appCss).toMatch(/\.chat-agent blockquote\s*{[^}]*background:\s*transparent;/);
     expect(appCss).toMatch(/\.chat-agent table\s*{[^}]*width:\s*100%;[^}]*table-layout:\s*fixed;/);
     expect(appCss).toMatch(/\.chat-agent th,\s*\.chat-agent td\s*{[^}]*overflow-wrap:\s*anywhere;/);
   });
