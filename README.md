@@ -9,7 +9,7 @@ requests, session configuration, and errors together. Work stays visible when a
 run fails or is interrupted, and OpenAIDE does not silently retry actions that
 may have changed your files.
 
-The packaged alpha runs inside VS Code. A local Web App is available when
+The packaged extension runs inside VS Code. A local Web App is available when
 building from source. Both use the same Rust App Server and shared Frontend;
 Desktop and Mobile App Shells are planned, not included today.
 
@@ -32,22 +32,16 @@ session discovery before OpenAIDE can find and adopt its existing sessions.
 - Finds and adopts existing Agent sessions when the Agent supports it.
 - Stops running Tasks and can recover sessions left stuck after a crash.
 
-## Alpha status
-
-> [!WARNING]
-> The `0.0.1-alpha` release line is for hands-on testing, not production use.
-> Features may be incomplete, APIs and storage formats may change without
-> migration support, and defects may cause lost local Task history. Back up
-> important work.
-
 When reporting a problem, run **OpenAIDE: Export Support Diagnostics** from the
 VS Code Command Palette and attach the redacted Support Export when possible.
 
-## Install the VS Code alpha
+## Install the VS Code extension
 
-Download the VSIX for your platform from
-[GitHub Releases](https://github.com/OldKrab/OpenAIDE/releases). Alpha versions
-are marked as prereleases.
+In VS Code, open Extensions, search for **OpenAIDE**, and select **Install**.
+
+For manual installation, download the VSIX for your platform from
+[GitHub Releases](https://github.com/OldKrab/OpenAIDE/releases). Testing builds
+are marked as prereleases on GitHub.
 
 | Platform | Release file |
 | --- | --- |
@@ -55,8 +49,10 @@ are marked as prereleases.
 | Windows x64 | `openaide-vscode-win32-x64-VERSION.vsix` |
 | macOS Apple Silicon | `openaide-vscode-darwin-arm64-VERSION.vsix` |
 
-Other operating-system and CPU combinations are not packaged in the current
-alpha. VS Code 1.100 or newer is required.
+Other operating-system and CPU combinations are not currently packaged. VS Code
+1.100 or newer is required.
+
+### Manual VSIX installation
 
 1. Download the VSIX matching your platform.
 2. In VS Code, run **Extensions: Install from VSIX...** and select the file, or
@@ -74,7 +70,7 @@ compatible Agent commands already on `PATH` and may fall back to `npx`, which
 requires Node.js, npm, and network access on first launch.
 
 Each VSIX bundles the matching App Server executable. Standalone App Server,
-Web App archive, and container artifacts are not published in the current alpha.
+Web App archive, and container artifacts are not currently published.
 
 ## Build from source
 

@@ -18,9 +18,6 @@ leaving your editor.
 2. Open the OpenAIDE view from the Activity Bar.
 3. Check Agent Settings, then create a Task and send your first message.
 
-This extension is alpha software. Back up important work; task storage and Agent
-integration behavior may change between alpha releases.
-
 ## Requirements
 
 - VS Code 1.100 or newer
