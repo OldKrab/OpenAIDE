@@ -2,6 +2,7 @@ use std::io::{Error, ErrorKind};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
+use std::time::Duration;
 
 use super::*;
 
@@ -207,6 +208,34 @@ fn malformed_request_returns_400_without_delegating() {
 
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(called_rx.try_recv().is_err());
+}
+
+#[test]
+fn incomplete_request_timeout_closes_without_a_terminal_http_rejection() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        configure_timeouts(&stream, Duration::from_millis(20)).unwrap();
+        let error = handle_stream(&mut stream, |_request| {
+            panic!("a partial request must not reach protocol handling")
+        })
+        .unwrap_err();
+        assert!(error.is_transient_io());
+    });
+
+    let mut stream = TcpStream::connect(addr).unwrap();
+    stream
+        .write_all(b"POST /probe HTTP/1.1\r\nContent-Length: 10\r\n\r\n{")
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    server.join().unwrap();
+
+    // A network close is retryable by the reliable channel; HTTP 400 is terminal.
+    assert_eq!(response, "");
 }
 
 #[test]
