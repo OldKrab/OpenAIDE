@@ -2,7 +2,8 @@ import type { PreSendAttachment } from "@openaide/app-server-client";
 
 const UPLOAD_PATH = "/__openaide-app-server/upload";
 const CHUNK_UPLOAD_PATH = `${UPLOAD_PATH}/chunk`;
-const MAX_CHUNK_BYTES = 512 * 1024;
+const MAX_CHUNK_BYTES = 64 * 1024;
+const CHUNK_REQUEST_TIMEOUT_MS = 5 * 60_000;
 const chunkPreferredFiles = new WeakSet<File>();
 
 type UploadProgress = { loaded: number; total: number };
@@ -89,6 +90,7 @@ async function uploadFileInChunks(
         },
         body: chunk,
         signal,
+        timeoutMs: CHUNK_REQUEST_TIMEOUT_MS,
         onProgress: (loaded) => onProgress({
           loaded: chunkOffset + loaded,
           total: file.size,
@@ -102,6 +104,7 @@ async function uploadFileInChunks(
       }
       if (response.status !== 202) throw new Error(uploadErrorMessage(response.body));
       offset = end;
+      if (signal.aborted) throw new DOMException("Upload cancelled", "AbortError");
     }
     throw new Error("Chunked upload completed without an attachment.");
   } catch (error) {
@@ -115,12 +118,14 @@ function sendUploadRequest({
   headers,
   body,
   signal,
+  timeoutMs,
   onProgress,
 }: {
   path: string;
   headers: Record<string, string>;
   body: Blob;
   signal: AbortSignal;
+  timeoutMs?: number;
   onProgress?: (loaded: number, total?: number) => void;
 }): Promise<{ status: number; body: string; contentType: string | null }> {
   return new Promise((resolve, reject) => {
@@ -136,6 +141,7 @@ function sendUploadRequest({
     };
     signal.addEventListener("abort", abort, { once: true });
     request.open("POST", path);
+    if (timeoutMs !== undefined) request.timeout = timeoutMs;
     for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
     request.upload.addEventListener("progress", (event) => {
       onProgress?.(event.loaded, event.lengthComputable ? event.total : undefined);
@@ -147,6 +153,9 @@ function sendUploadRequest({
     })));
     request.addEventListener("error", () => finish(() => reject(
       new UploadFallbackError("File upload failed.", "transportError"),
+    )));
+    request.addEventListener("timeout", () => finish(() => reject(
+      new Error("File upload timed out. Retry the upload."),
     )));
     request.addEventListener("abort", () => finish(() => reject(new DOMException("Upload cancelled", "AbortError"))));
     request.send(body);
