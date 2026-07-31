@@ -106,6 +106,80 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("keeps the context meter on the composer's rounded edge as a draft grows", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 640 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:context-usage-curve");
+  await expect(page.getByText("Context usage rendered", { exact: true })).toBeVisible();
+
+  const editor = page.getByRole("textbox", { name: "Message" });
+  await editor.fill(Array.from({ length: 80 }, (_, index) => `line ${index + 1}`).join("\n"));
+
+  const composer = page.locator(".composer");
+  const meterEdge = page.locator(".context-usage-edge");
+  const geometry = await composer.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    radius: getComputedStyle(element).borderTopRightRadius,
+  }));
+  const edgeGeometry = await measureContextEdge(meterEdge, Number.parseFloat(geometry.radius));
+
+  expect(geometry.height).toBeGreaterThan(300);
+  expect(edgeGeometry.height).toBe(geometry.height);
+  expect(edgeGeometry.viewBoxHeight).toBe(geometry.height);
+  expect(edgeGeometry.width).toBe(20);
+  expect(edgeGeometry.straightThickness).toBeCloseTo(1.5, 1);
+  expect(edgeGeometry.cornerEndThickness).toBeGreaterThan(0.1);
+  expect(edgeGeometry.cornerEndThickness).toBeLessThan(0.75);
+  expect(edgeGeometry.cornerThicknesses).toEqual(
+    edgeGeometry.cornerThicknesses.toSorted((a, b) => b - a),
+  );
+  expect(edgeGeometry.cornerThicknesses).toEqual([
+    expect.closeTo(1.3, 1),
+    expect.closeTo(0.88, 1),
+    expect.closeTo(0.45, 1),
+    expect.closeTo(0.26, 1),
+  ]);
+
+  const meter = page.locator(".context-usage-meter");
+  await meter.hover();
+  const tooltip = page.getByRole("tooltip", { name: "Context used: 12%" });
+  await expect(tooltip).toBeVisible();
+  const tooltipGeometry = await tooltip.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return { centerY: bounds.y + bounds.height / 2, right: bounds.right };
+  });
+  const composerBounds = await composer.boundingBox();
+  expect(composerBounds).not.toBeNull();
+  expect(tooltipGeometry.centerY).toBeCloseTo(
+    composerBounds.y + composerBounds.height * 0.88,
+    0,
+  );
+  const edgeBounds = await meterEdge.boundingBox();
+  expect(edgeBounds).not.toBeNull();
+  const tooltipGap = edgeBounds.x + edgeBounds.width - tooltipGeometry.right;
+  expect(tooltipGap).toBeGreaterThan(4);
+  expect(tooltipGap).toBeLessThan(7);
+
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  const desktopGeometry = await composer.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    radius: getComputedStyle(element).borderTopRightRadius,
+  }));
+  const desktopEdgeGeometry = await measureContextEdge(
+    meterEdge,
+    Number.parseFloat(desktopGeometry.radius),
+  );
+  expect(desktopEdgeGeometry.height).toBe(desktopGeometry.height);
+  expect(desktopEdgeGeometry.viewBoxHeight).toBe(desktopGeometry.height);
+  expect(desktopEdgeGeometry.width).toBe(20);
+  expect(desktopEdgeGeometry.straightThickness).toBeCloseTo(1.5, 1);
+  expect(desktopEdgeGeometry.cornerEndThickness).toBeGreaterThan(0.1);
+  expect(desktopEdgeGeometry.cornerEndThickness).toBeLessThan(0.75);
+  expect(desktopEdgeGeometry.cornerThicknesses).toEqual(
+    desktopEdgeGeometry.cornerThicknesses.toSorted((a, b) => b - a),
+  );
+});
+
 test("keeps collapsed tool rows equally spaced with and without details", async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 320 });
   await openPreparedNewTask(page);
@@ -491,6 +565,52 @@ test("renders, validates, submits, and persists an Agent question", async ({ pag
   await expect(page.getByLabel("Task chat").locator(".chat-agent").last()).toContainText("Question result: Alpha");
   await expect(page.getByLabel("Task status: Ready")).toBeVisible();
 });
+
+async function measureContextEdge(meterEdge, radius) {
+  return meterEdge.evaluate((element, curveRadius) => {
+    const path = element.querySelector(".context-usage-edge-track");
+    if (!(element instanceof SVGSVGElement) || !(path instanceof SVGGeometryElement)) {
+      throw new Error("Context edge SVG geometry is missing");
+    }
+
+    const containsPoint = (x, y) => {
+      const point = element.createSVGPoint();
+      point.x = x;
+      point.y = y;
+      return path.isPointInFill(point);
+    };
+    const filledRun = (start, end, pointAt) => {
+      const step = 0.01;
+      let first;
+      let last;
+      for (let position = start; position <= end; position += step) {
+        const [x, y] = pointAt(position);
+        if (!containsPoint(x, y)) continue;
+        first ??= position;
+        last = position;
+      }
+      return first === undefined ? 0 : last - first + step;
+    };
+
+    const bounds = element.getBoundingClientRect();
+    const curveStartX = 20 - curveRadius;
+    const radialThickness = (progress) => {
+      const angle = progress * Math.PI / 2;
+      return filledRun(curveRadius - 2, curveRadius, (sampleRadius) => [
+        curveStartX + sampleRadius * Math.cos(angle),
+        curveRadius - sampleRadius * Math.sin(angle),
+      ]);
+    };
+    return {
+      height: bounds.height,
+      width: bounds.width,
+      viewBoxHeight: element.viewBox.baseVal.height,
+      straightThickness: filledRun(0, 20, (x) => [x, bounds.height / 2]),
+      cornerEndThickness: filledRun(0, curveRadius, (y) => [curveStartX + 0.05, y]),
+      cornerThicknesses: [0.25, 0.5, 0.75, 0.95].map(radialThickness),
+    };
+  }, radius);
+}
 
 async function openPreparedNewTask(page) {
   await page.goto(`${harness.baseUrl}/new-task`);
