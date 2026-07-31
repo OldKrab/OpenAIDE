@@ -76,6 +76,28 @@ jobs:
             npx --yes @vscode/vsce@3.6.0 publish --packagePath "$package"
           done
 
+  open-vsx:
+    name: Publish Open VSX packages
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs: [validate, artifacts]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: vsix-*
+          path: release
+          merge-multiple: true
+      - name: Publish platform packages
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          for package in release/*.vsix; do
+            npx --yes ovsx@1.0.2 publish "$package"
+          done
+
   github-release:
     name: Publish GitHub release
     needs: [validate, artifacts]
