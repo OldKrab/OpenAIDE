@@ -1,7 +1,7 @@
 {
   "name": "openaide-vscode-extension",
   "displayName": "OpenAIDE",
-  "description": "Run local ACP coding agents from an inspectable, recoverable task workbench.",
+  "description": "Run coding agents in VS Code with visible tool activity, permissions, and recoverable task history.",
   "version": "0.0.0",
   "publisher": "openaide",
   "icon": "media/openaide.png",
