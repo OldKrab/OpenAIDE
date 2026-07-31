@@ -1,8 +1,22 @@
 # OpenAIDE for VS Code
 
-OpenAIDE runs local ACP-compatible coding agents from an inspectable task
-workbench. Tasks keep chat, permissions, tool activity, Agent configuration, and
-recovery state visible inside VS Code.
+OpenAIDE brings coding agents into a VS Code-native task workspace. Follow what
+they do, approve sensitive actions, and return to saved task history without
+leaving your editor.
+
+## What you can do
+
+- Run ACP-compatible coding agents such as Codex and OpenCode.
+- Follow chat, tool activity, and terminal output in one Task.
+- Review permission requests before an Agent takes sensitive actions.
+- Reopen saved Tasks and continue from their existing Agent sessions.
+- Configure Agent models, modes, and other supported options inside VS Code.
+
+## Getting started
+
+1. Install and authenticate a supported coding Agent.
+2. Open the OpenAIDE view from the Activity Bar.
+3. Check Agent Settings, then create a Task and send your first message.
 
 This extension is alpha software. Back up important work; task storage and Agent
 integration behavior may change between alpha releases.
@@ -12,8 +26,6 @@ integration behavior may change between alpha releases.
 - VS Code 1.100 or newer
 - A supported ACP Agent, such as Codex or OpenCode, authenticated separately
 - Node.js and npm when an Agent must be launched through `npx`
-
-Open the OpenAIDE activity-bar view, check Agent Settings, then create a Task.
 
 ## Reporting a problem
 
