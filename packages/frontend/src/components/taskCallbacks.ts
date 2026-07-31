@@ -29,7 +29,7 @@ import { cancelTaskIntent, sendTaskPromptIntent } from "../intents/taskMutationI
 import { requestComposerHistory } from "../intents/taskReadIntents";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
 import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
-import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
+import { mapProtocolConfigOptions } from "../state/appServerProtocolMapping";
 import { configOptionsMutable } from "../state/configOptionState";
 import { mapProtocolChatPage } from "../state/taskReadMapping";
 import type { AppCallbacksDependencies, TaskCallbacks } from "./appControllerCallbackTypes";
@@ -259,9 +259,13 @@ export function createTaskCallbacks({
         clientMutationId: mutationId,
       })
         .then((result) => {
-          // The request result remains authoritative if the event stream is interrupted.
-          // Revision-aware ingestion makes a duplicate event/result pair idempotent.
-          dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
+          // The result remains authoritative if the event stream is interrupted,
+          // but it owns only the Agent Configuration Option projection.
+          dispatch({
+            type: "taskConfig:result",
+            taskId,
+            catalog: mapProtocolConfigOptions(result.agentConfig, state.snapshot!.task.agent_id),
+          });
         })
         .catch((error) => {
           dispatch({

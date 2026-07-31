@@ -14,7 +14,7 @@ use openaide_app_server_protocol::methods::{
     MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
     SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
     SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY,
+    TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -1304,6 +1304,30 @@ fn current_task_subscriber_can_answer_before_server_request_delivery_drains() {
         .server_requests
         .pending_for_task(&TaskId::from("task-1"))
         .is_empty());
+}
+
+#[test]
+fn task_config_mutation_returns_only_agent_config() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.task_set_config_option = Arc::new(FixedTaskSetConfigOption);
+
+    let response = response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            TASK_SET_CONFIG_OPTION,
+            json!({
+                "taskId": "task-1",
+                "configId": "brave_mode",
+                "value": { "type": "boolean", "value": true },
+                "clientMutationId": "mutation-1"
+            }),
+        ),
+        AppServerTime(2),
+    ));
+
+    assert_eq!(response["result"]["agentConfig"]["state"], "ready");
+    assert!(response["result"].get("task").is_none());
 }
 
 #[test]
@@ -3044,6 +3068,28 @@ impl TaskHistoryWorkflow for FixedTaskHistory {
 
 struct RejectingTaskSetConfigOption;
 
+struct FixedTaskSetConfigOption;
+
+impl TaskSetConfigOptionWorkflow for FixedTaskSetConfigOption {
+    fn set_config_option_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskSetConfigOptionParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskAgentConfigSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(
+            openaide_app_server_protocol::snapshot::TaskAgentConfigSnapshot {
+                state: openaide_app_server_protocol::snapshot::LiveSessionDataState::Ready,
+                options: Vec::new(),
+                pending_change: None,
+                error: None,
+            },
+        )
+    }
+}
+
 struct RejectingTaskHistory;
 
 impl TaskHistoryWorkflow for RejectingTaskHistory {
@@ -3125,7 +3171,7 @@ impl TaskSetConfigOptionWorkflow for RejectingTaskSetConfigOption {
         _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskSetConfigOptionParams,
     ) -> Result<
-        openaide_app_server_protocol::snapshot::TaskSnapshot,
+        openaide_app_server_protocol::snapshot::TaskAgentConfigSnapshot,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
         Err(openaide_app_server_protocol::errors::ProtocolError {

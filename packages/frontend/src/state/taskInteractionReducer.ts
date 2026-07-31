@@ -7,6 +7,7 @@ import { configOptionsCatalogKey } from "./configOptionState";
 import { toolDetailCacheKey, type AppState, type TaskOpenError } from "./store";
 
 type TaskInteractionAction =
+  | { type: "taskConfig:result"; taskId: string; catalog: import("@openaide/app-shell-contracts").ConfigOptionsCatalog }
   | { type: "taskInput:prompt"; taskId: string; prompt: string }
   | { type: "taskInput:attachment:add"; taskId: string; attachment: Attachment }
   | { type: "taskInput:attachment:addAppServer"; taskId: string; attachment: ComposerAttachment }
@@ -42,6 +43,28 @@ type TaskInteractionAction =
 export function reduceTaskInteractionState(state: AppState, action: AppAction): AppState | undefined {
   if (!isTaskInteractionAction(action)) return undefined;
   switch (action.type) {
+    case "taskConfig:result": {
+      const cachedSnapshot = state.taskSnapshots[action.taskId];
+      const activeSnapshot = state.snapshot?.task.task_id === action.taskId
+        ? state.snapshot
+        : undefined;
+      if (!cachedSnapshot && !activeSnapshot) return state;
+      // Config mutation responses confirm only Agent-owned controls. They must not
+      // replace unrelated Task state such as Chat, permissions, or runtime status.
+      const nextCachedSnapshot = cachedSnapshot
+        ? { ...cachedSnapshot, agent_config: action.catalog }
+        : undefined;
+      const nextActiveSnapshot = activeSnapshot
+        ? { ...activeSnapshot, agent_config: action.catalog }
+        : state.snapshot;
+      return {
+        ...state,
+        snapshot: nextActiveSnapshot,
+        taskSnapshots: nextCachedSnapshot
+          ? { ...state.taskSnapshots, [action.taskId]: nextCachedSnapshot }
+          : state.taskSnapshots,
+      };
+    }
     case "taskInput:prompt":
       const input = state.taskInputs[action.taskId];
       if (input?.pending) return state;
@@ -381,7 +404,8 @@ function acceptedInputIdentity(input: AppState["taskInputs"][string] | undefined
 }
 
 function isTaskInteractionAction(action: AppAction): action is TaskInteractionAction {
-  return action.type.startsWith("taskInput:")
+  return action.type === "taskConfig:result"
+    || action.type.startsWith("taskInput:")
     || action.type === "taskSend:accepted"
     || action.type === "taskOpen:start"
     || action.type === "taskOpen:error"

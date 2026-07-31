@@ -242,7 +242,7 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for config changes");
-        let task = match self
+        let agent_config = match self
             .task_set_config_option
             .set_config_option_for_client(&client.client_instance_id, params)
         {
@@ -253,7 +253,7 @@ impl RpcGateway {
             connection_id,
             id,
             meta,
-            TaskSetConfigOptionResult { task },
+            TaskSetConfigOptionResult { agent_config },
         )
     }
 
