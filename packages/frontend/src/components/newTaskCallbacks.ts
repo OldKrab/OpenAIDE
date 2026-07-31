@@ -9,7 +9,7 @@ import {
   attachmentHandleResource,
   releaseAttachmentResources,
 } from "../services/attachmentResources";
-import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
+import { mapProtocolConfigOptions } from "../state/appServerProtocolMapping";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type { AppCallbacksDependencies, NewTaskCallbacks } from "./appControllerCallbackTypes";
 import { createNewTaskBrowserCallbacks } from "./newTaskBrowserCallbacks";
@@ -90,7 +90,11 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
           clientMutationId: createNewTaskMutationId(configId),
         }).then((result) => {
           if (!asyncOperations.owns(operation)) return;
-          dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
+          dispatch({
+            type: "taskConfig:result",
+            taskId,
+            catalog: mapProtocolConfigOptions(result.agentConfig, state.snapshot!.task.agent_id),
+          });
         }).catch(() => {
           if (!asyncOperations.owns(operation)) return;
           dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });

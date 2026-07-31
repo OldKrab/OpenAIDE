@@ -474,8 +474,10 @@ impl TaskSetConfigOptionWorkflow for TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
+    ) -> Result<openaide_app_server_protocol::snapshot::TaskAgentConfigSnapshot, ProtocolError>
+    {
         self.set_config_option_on_task(client_instance_id, params)
+            .map(|snapshot| snapshot.agent_config)
     }
 }
 

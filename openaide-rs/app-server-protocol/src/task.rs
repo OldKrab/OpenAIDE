@@ -6,7 +6,9 @@ use crate::ids::{
     TaskId, TaskListCursor, TurnId, WorktreeId,
 };
 use crate::snapshot::AgentConfigOptionCurrentValue;
-use crate::snapshot::{ChatItem, TaskLifecycle, TaskSnapshot, TaskSummary};
+use crate::snapshot::{
+    ChatItem, TaskAgentConfigSnapshot, TaskLifecycle, TaskSnapshot, TaskSummary,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -156,7 +158,8 @@ pub struct TaskSetConfigOptionParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSetConfigOptionResult {
-    pub task: TaskSnapshot,
+    /// Complete Agent-owned Configuration Option state confirmed by the mutation.
+    pub agent_config: TaskAgentConfigSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

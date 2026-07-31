@@ -98,7 +98,7 @@ pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
-    ) -> Result<TaskSnapshot, ProtocolError>;
+    ) -> Result<openaide_app_server_protocol::snapshot::TaskAgentConfigSnapshot, ProtocolError>;
 }
 
 pub(crate) trait TaskMetadataWorkflow: Send + Sync {

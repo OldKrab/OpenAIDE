@@ -9,6 +9,23 @@ type PermissionChatMessage = ChatMessage & {
 };
 
 describe("app reducer composer state", () => {
+  it("applies a config result without replacing a pending permission request", () => {
+    const initial = snapshot("task_1");
+    initial.agent_config = configCatalog("off");
+    initial.active_requests = [permissionMessage("permission-1")];
+    let state = appReducer(createInitialState(), { type: "snapshot", intent: "open", snapshot: initial });
+
+    state = appReducer(state, {
+      type: "taskConfig:result",
+      taskId: "task_1",
+      catalog: configCatalog("on"),
+    });
+
+    expect(state.snapshot?.agent_config).toEqual(configCatalog("on"));
+    expect(state.snapshot?.active_requests).toEqual([permissionMessage("permission-1")]);
+    expect(state.taskSnapshots.task_1.active_requests).toEqual([permissionMessage("permission-1")]);
+  });
+
   it("keeps a config error until its timer or a changed Agent catalog clears it", () => {
     const initial = snapshot("task_1");
     initial.agent_config = configCatalog("off");

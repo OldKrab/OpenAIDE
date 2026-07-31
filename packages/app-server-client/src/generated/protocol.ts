@@ -654,7 +654,11 @@ export type TaskSendResult = { task: TaskSnapshot, turnId: TurnId, userMessageId
 
 export type TaskSetConfigOptionParams = { taskId: TaskId, configId: AgentConfigOptionId, value: AgentConfigOptionCurrentValue, clientMutationId: ClientMutationId, };
 
-export type TaskSetConfigOptionResult = { task: TaskSnapshot, };
+export type TaskSetConfigOptionResult = {
+/**
+ * Complete Agent-owned Configuration Option state confirmed by the mutation.
+ */
+agentConfig: TaskAgentConfigSnapshot, };
 
 export type TaskSetTitleParams = { taskId: TaskId, title: TaskTitleSelection, };
 

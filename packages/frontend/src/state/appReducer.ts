@@ -117,6 +117,7 @@ type AppActionPayload =
   | { type: "taskInput:sendError"; taskId: string; message?: string }
   | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
   | { type: "taskInput:error"; taskId: string; message?: string }
+  | { type: "taskConfig:result"; taskId: string; catalog: ConfigOptionsCatalog }
   | {
       type: "taskInput:configError";
       taskId: string;

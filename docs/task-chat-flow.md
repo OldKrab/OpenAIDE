@@ -309,6 +309,8 @@ Expanded mixed Tool/Thought groups may hide Thought rows by default and expose o
 
 A pending ACP `session/request_permission` is transient workflow state, not Chat history. App Server keeps the active request and Agent response channel in memory, changes Task status to `waiting`, and delivers or redelivers the request to eligible clients. Clients pin it after the latest Chat content while continuing to apply later session updates.
 
+`task/setConfigOption` returns only the complete confirmed Agent Configuration Option state. It does not return or replace a full Task snapshot, so concurrent transient Task state such as a pending permission or question remains owned by its independent App Server event stream.
+
 The first valid client response closes the request for every client. App Server returns the outcome to the Agent and durably appends it to the exact Tool identified by Native Session plus `toolCallId`; it creates no resolved Permission Chat row. Tool execution status remains Agent-owned and independent of permission outcome. A Tool may receive multiple permission requests, and every decision remains visible in its details.
 
 Prompt cancellation uses this same resolution path with the ACP `cancelled` outcome and a cancelled decision on the linked Tool.

@@ -109,7 +109,7 @@ describe("app controller callbacks", () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_1", "New task") };
-      if (method === TASK_SET_CONFIG_OPTION) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
+      if (method === TASK_SET_CONFIG_OPTION) return { agentConfig: protocolTaskSnapshot("task_1", "New task").agentConfig };
       if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 4 } };
       throw new Error(method);
     });
@@ -1088,7 +1088,7 @@ describe("app controller callbacks", () => {
           return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
         }
         if (method === TASK_SET_CONFIG_OPTION) {
-          return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 4 } };
+          return { agentConfig: protocolTaskSnapshot("task_1", "New task").agentConfig };
         }
         if (method === TASK_SEND) {
           return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 5 } };
@@ -1133,10 +1133,25 @@ describe("app controller callbacks", () => {
     }
   });
 
-  it("updates config options for an existing Task through the typed task request", async () => {
+  it("updates only config options for an existing Task through the typed task request", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_SET_CONFIG_OPTION) return { task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 2 } };
+      if (method === TASK_SET_CONFIG_OPTION) {
+        return {
+          agentConfig: {
+            state: "ready" as const,
+            options: [{
+              configId: "model" as never,
+              label: "Model",
+              description: null,
+              category: null,
+              kind: "select" as const,
+              currentValue: { type: "id" as const, value: "gpt-5" },
+              values: [{ value: "gpt-5", label: "GPT-5", description: null }],
+            }],
+          },
+        };
+      }
       throw new Error(method);
     });
     const state = createInitialState();
@@ -1156,14 +1171,26 @@ describe("app controller callbacks", () => {
       value: { type: "id", value: "gpt-5" },
       clientMutationId: expect.stringMatching(/^frontend-task-config-model-/),
     });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskConfig:result",
+      taskId: "task_1",
+      catalog: expect.objectContaining({
+        agent_id: "codex",
+        status: "ready",
+        options: [expect.objectContaining({
+          id: "model",
+          current_value: { type: "id", value: "gpt-5" },
+        })],
+      }),
+    });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot" }));
   });
 
   it("ingests config option results even when the event stream is subscribed", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_SET_CONFIG_OPTION) {
-        return { task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 2 } };
+        return { agentConfig: protocolTaskSnapshot("task_1", "Task").agentConfig };
       }
       throw new Error(method);
     });
@@ -1183,7 +1210,7 @@ describe("app controller callbacks", () => {
       configId: "model",
       value: { type: "id", value: "gpt-5" },
     }));
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "taskConfig:result", taskId: "task_1" }));
   });
 
   it("does not mutate config options while the authoritative catalog is changing", async () => {
@@ -3418,7 +3445,7 @@ describe("app controller callbacks", () => {
 
   it("uses the prepared Task Native Session for config option changes", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task-prepared", "New task") }));
+    const request = vi.fn(async () => ({ agentConfig: protocolTaskSnapshot("task-prepared", "New task").agentConfig }));
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -3443,7 +3470,7 @@ describe("app controller callbacks", () => {
       value: { type: "id", value: "gpt-5" },
       clientMutationId: expect.any(String),
     });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "taskConfig:result", taskId: "task-prepared" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "session.setConfigOption" }));
   });
 
