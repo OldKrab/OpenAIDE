@@ -186,13 +186,18 @@ fn handle_stream_with_routes(
             body: request.body,
         },
         Err(error) => {
-            let _ = write_http_response(
-                stream,
-                &LocalHttpResponse {
-                    status: 400,
-                    body: String::new(),
-                },
-            );
+            // A suspended App Shell can pause after opening the socket but before
+            // finishing its request. Closing on transient I/O lets the reliable
+            // channel retry the identical frame; HTTP 400 would terminate it.
+            if !error.is_transient_io() {
+                let _ = write_http_response(
+                    stream,
+                    &LocalHttpResponse {
+                        status: 400,
+                        body: String::new(),
+                    },
+                );
+            }
             return Err(error);
         }
     };
