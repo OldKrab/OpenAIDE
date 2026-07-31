@@ -51,7 +51,7 @@ describe("Composer context usage", () => {
     expect(textContent(panel)).toContain("Session cost");
   });
 
-  it("keeps details closed on hover and positions only the percentage tooltip near the pointer", () => {
+  it("keeps details closed on hover and anchors the tooltip to the filled percentage", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
@@ -69,19 +69,13 @@ describe("Composer context usage", () => {
     const meter = tree.root.findByProps({
       "aria-label": "Context usage: 50% used. Show details",
     });
-    act(() => meter.props.onPointerEnter({
-      clientX: 720,
-      clientY: 480,
-      pointerType: "mouse",
-    }));
+    expect(meter.props.onPointerEnter).toBeUndefined();
     expect(meter.props.onPointerMove).toBeUndefined();
 
     expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
     const tooltip = tree.root.findByProps({ role: "tooltip" });
-    expect(tooltip.props.className).toContain("context-usage-tooltip-cursor");
     expect(tooltip.props.style).toMatchObject({
-      "--context-usage-cursor-x": "720px",
-      "--context-usage-cursor-y": "480px",
+      "--context-usage-percent": "50%",
     });
   });
 });

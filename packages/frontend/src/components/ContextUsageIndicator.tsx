@@ -1,10 +1,10 @@
 import { X } from "lucide-react";
 import {
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -14,7 +14,6 @@ import type {
 } from "@openaide/app-shell-contracts";
 
 type UsageTone = "normal" | "high" | "critical";
-type PointerPosition = { x: number; y: number };
 
 export function ComposerWithContextUsage({
   children,
@@ -26,7 +25,6 @@ export function ComposerWithContextUsage({
   usage?: TaskContextUsage;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [pointerPosition, setPointerPosition] = useState<PointerPosition>();
   const hostRef = useRef<HTMLDivElement>(null);
   const detailsId = useId().replaceAll(":", "");
   const capacity = usage?.capacity_tokens ?? 0;
@@ -39,10 +37,6 @@ export function ComposerWithContextUsage({
 
   const closeDetails = () => {
     setDetailsOpen(false);
-  };
-  const rememberPointer = (event: ReactPointerEvent) => {
-    if (event.pointerType !== "mouse") return;
-    setPointerPosition({ x: event.clientX, y: event.clientY });
   };
 
   useEffect(() => {
@@ -77,40 +71,14 @@ export function ComposerWithContextUsage({
             aria-label={`Context usage: ${usagePercent}% used. Show details`}
             className={`context-usage-meter context-usage-meter-${tone}`}
             onClick={() => setDetailsOpen((open) => !open)}
-            onPointerEnter={(event) => {
-              rememberPointer(event);
-            }}
-            onPointerLeave={() => setPointerPosition(undefined)}
             type="button"
           >
-            <svg
-              aria-hidden="true"
-              className="context-usage-edge"
-              preserveAspectRatio="none"
-              viewBox="0 0 20 100"
-            >
-              <path
-                className="context-usage-edge-track"
-                d="M 0 100 C 11 100 20 91 20 80 L 20 20 C 20 9 11 0 0 0 L 0 .8 C 10.6 .8 17.8 9.8 17.8 20 L 17.8 80 C 17.8 90.2 10.6 99.2 0 99.2 Z"
-              />
-              <path
-                className="context-usage-edge-fill"
-                d="M 0 100 C 11 100 20 91 20 80 L 20 20 C 20 9 11 0 0 0 L 0 .8 C 10.6 .8 17.8 9.8 17.8 20 L 17.8 80 C 17.8 90.2 10.6 99.2 0 99.2 Z"
-                style={{ "--context-usage-percent": `${usagePercent}%` } as CSSProperties}
-              />
-            </svg>
+            <ContextUsageEdge usagePercent={usagePercent} />
             {!detailsOpen ? (
               <span
-                className={`context-usage-tooltip${
-                  pointerPosition ? " context-usage-tooltip-cursor" : ""
-                }`}
+                className="context-usage-tooltip"
                 role="tooltip"
-                style={pointerPosition
-                  ? {
-                    "--context-usage-cursor-x": `${pointerPosition.x}px`,
-                    "--context-usage-cursor-y": `${pointerPosition.y}px`,
-                  } as CSSProperties
-                  : undefined}
+                style={{ "--context-usage-percent": `${usagePercent}%` } as CSSProperties}
               >
                 Context used: {usagePercent}%
               </span>
@@ -130,6 +98,87 @@ export function ComposerWithContextUsage({
       ) : null}
     </div>
   );
+}
+
+function ContextUsageEdge({ usagePercent }: { usagePercent: number }) {
+  const edgeRef = useRef<SVGSVGElement>(null);
+  const [geometry, setGeometry] = useState({ height: 0, radius: 20 });
+
+  useLayoutEffect(() => {
+    const edge = edgeRef.current;
+    if (!edge) return undefined;
+    const updateGeometry = () => {
+      const composer = edge.closest(".composer-context-host")?.querySelector<HTMLElement>(".composer");
+      const height = edge.getBoundingClientRect().height;
+      const radius = composer ? Number.parseFloat(getComputedStyle(composer).borderTopRightRadius) : 20;
+      setGeometry((current) => current.height === height && current.radius === radius
+        ? current
+        : { height, radius });
+    };
+    updateGeometry();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(updateGeometry);
+    observer.observe(edge);
+    return () => observer.disconnect();
+  }, []);
+
+  const path = contextUsageEdgePath(geometry.height, geometry.radius);
+  return (
+    <svg
+      aria-hidden="true"
+      className="context-usage-edge"
+      preserveAspectRatio="none"
+      ref={edgeRef}
+      viewBox={`0 0 20 ${Math.max(1, geometry.height)}`}
+    >
+      {path ? <path className="context-usage-edge-track" d={path} /> : null}
+      {path ? (
+        <path
+          className="context-usage-edge-fill"
+          d={path}
+          style={{ "--context-usage-percent": `${usagePercent}%` } as CSSProperties}
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+function contextUsageEdgePath(height: number, radius: number) {
+  if (height <= 0) return "";
+  const width = 20;
+  const curveRadius = Math.min(radius, width, height / 2);
+  const startX = width - curveRadius;
+  const fullThickness = 1.5;
+  const endThickness = 0.25;
+  const innerX = width - fullThickness;
+  const bottomCurveStart = height - curveRadius;
+  const cornerSteps = 12;
+
+  // Follow the composer's circular corner while smoothly narrowing the band
+  // along its normal, from the full rail width to a hairline at each endpoint.
+  const innerCornerPoints = (bottom: boolean, reverse: boolean) =>
+    Array.from({ length: cornerSteps + 1 }, (_, index) => {
+      const progress = (reverse ? cornerSteps - index : index) / cornerSteps;
+      const angle = progress * Math.PI / 2;
+      const easedProgress = progress * progress * (3 - 2 * progress);
+      const thickness = fullThickness + (endThickness - fullThickness) * easedProgress;
+      const innerRadius = curveRadius - thickness;
+      const x = startX + innerRadius * Math.cos(angle);
+      const centerY = bottom ? bottomCurveStart : curveRadius;
+      const y = centerY + (bottom ? 1 : -1) * innerRadius * Math.sin(angle);
+      return `L ${x} ${y}`;
+    });
+
+  return [
+    `M ${startX} 0`,
+    `A ${curveRadius} ${curveRadius} 0 0 1 ${width} ${curveRadius}`,
+    `L ${width} ${bottomCurveStart}`,
+    `A ${curveRadius} ${curveRadius} 0 0 1 ${startX} ${height}`,
+    ...innerCornerPoints(true, true),
+    `L ${innerX} ${curveRadius}`,
+    ...innerCornerPoints(false, false),
+    "Z",
+  ].join(" ");
 }
 
 function ContextUsageDetails({
