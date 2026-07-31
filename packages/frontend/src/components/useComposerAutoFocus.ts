@@ -18,6 +18,16 @@ export function useComposerAutoFocus({
 }: ComposerAutoFocusOptions) {
   useEffect(() => {
     if (!autoFocus || disabled || usesMobileComposerBehavior()) return;
-    editorRef.current?.focus();
+    const focusEditor = () => editorRef.current?.focus();
+    focusEditor();
+
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+    const restoreDroppedFocus = () => {
+      // VS Code can return a retained webview with focus on its document body.
+      // Preserve any real control focus instead of always stealing it back.
+      if (document.activeElement === document.body) focusEditor();
+    };
+    window.addEventListener("focus", restoreDroppedFocus);
+    return () => window.removeEventListener("focus", restoreDroppedFocus);
   }, [autoFocus, disabled, editorRef, focusRequestKey]);
 }
