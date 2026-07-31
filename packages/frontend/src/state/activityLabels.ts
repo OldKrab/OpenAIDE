@@ -259,6 +259,7 @@ export function activityStepPreview(step: ActivityStep) {
 
 type ActivitySummaryKind =
   | "thought"
+  | "skill"
   | "read"
   | "edit"
   | "delete"
@@ -332,7 +333,6 @@ export function activityToolKind(
 
 function summaryKindForTool(kind: ActivityToolKind): ActivitySummaryKind {
   if (kind === "collaboration") return "subagentInteraction";
-  if (kind === "skill") return "other";
   if (kind === "web_search") return "search";
   if (kind === "move") return "edit";
   if (kind === "execute") return "run";
@@ -368,6 +368,7 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
   if (count === 0) return undefined;
   const labels: Record<ActivitySummaryKind, { verb?: string; single: string; plural: string }> = {
     thought: { single: "thought", plural: "thoughts" },
+    skill: { verb: "activated", single: "skill", plural: "skills" },
     read: { verb: "read", single: "file", plural: "files" },
     edit: { verb: "updated", single: "file", plural: "files" },
     delete: { verb: "deleted", single: "file", plural: "files" },
