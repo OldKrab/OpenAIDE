@@ -1,15 +1,15 @@
 # Prototyping
 
-Prototypes answer a specific product or engineering question quickly. They are disposable working material, not an alternate path for shipping production code.
+Prototypes answer a specific product or engineering question quickly. They are production-aligned working material used to approve an appearance, interaction, or behavior before production hardening.
 
 ## Principles
 
 - State the decision the prototype must enable before writing it.
 - Reuse production components, styles, and realistic density whenever the question concerns an existing surface.
 - Keep data in memory and mutations stubbed unless persistence or integration is the question.
-- Build only enough behavior to evaluate the decision.
+- Build only enough behavior and accessibility to evaluate the decision reliably.
 - Keep prototype implementations ignored by Git and delete them after recording the result.
-- Rewrite the selected direction to production standards. Do not promote prototype code directly.
+- Harden only the selected direction to production standards. Internal code may change, but preserve the approved appearance and behavior; discuss any required drift before implementing it.
 
 ## UI Prototype Workspace
 
@@ -70,11 +70,11 @@ Do not treat a bare Target path as the final handoff when a reviewer-facing Targ
 
 ### Variants
 
-The harness reads `?variant=<key>` and supplies the standard bottom switcher. Use variants to compare different hierarchy, layout, or interaction approaches, not cosmetic color changes. Put additional prototype state in query parameters when a reviewer must share or reload a specific case.
+The harness reads `?variant=<key>` and supplies the standard bottom switcher. It updates the URL and rendered variant in place without reloading the page. Use variants to compare different hierarchy, layout, or interaction approaches, not cosmetic color changes. Put additional prototype state in query parameters when a reviewer must share or reload a specific case.
 
 ### Finish and clean up
 
-Record the selected direction and why in the relevant issue, ADR, task, or implementation commit. Then delete the ignored prototype:
+Record the selected direction, why it won, and the approved visual and interaction contract in the relevant issue, ADR, task, or implementation commit. Integrate and harden the selected direction without changing that contract. If a production constraint requires visible or behavioral drift, discuss it before proceeding. Then delete the ignored prototype:
 
 ```sh
 npm run prototype:clean -- live-activity
@@ -84,7 +84,7 @@ The prototype server can be stopped when no review is active. A request made whi
 
 ## Logic Prototypes
 
-For a state model or algorithm that does not benefit from the UI harness, create an ignored throwaway program under `tmp/prototypes/<prototype-name>/`. Give it one command to run, print the complete relevant state after each action, avoid production persistence, and delete it after the result is recorded.
+For a state model or algorithm that does not benefit from the UI harness, create an ignored exploratory program under `tmp/prototypes/<prototype-name>/`. Give it one command to run, print the complete relevant state after each action, avoid production persistence, and delete it after the approved semantics are recorded and implemented with production tests.
 
 ## Committed Boundaries
 
@@ -93,6 +93,6 @@ Only reusable infrastructure belongs in Git:
 - Prototype harness and lifecycle scripts.
 - General fixture or shell utilities with demonstrated reuse value.
 - This workflow documentation.
-- The durable decision produced by a prototype, when it belongs in an issue, ADR, test, or production implementation.
+- The approved experience or semantics produced by a prototype, captured in an issue, ADR, test, or production implementation.
 
 Prototype implementations, screenshots used only during review, transient data, and abandoned variants do not belong in Git.
