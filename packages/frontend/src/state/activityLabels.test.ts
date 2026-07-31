@@ -330,7 +330,7 @@ describe("activity labels", () => {
       input_summary: "rg -n activityLabels frontend",
     };
 
-    expect(activitySummary(activity("Commands", "completed", [skill]))).toBe("Called tool");
+    expect(activitySummary(activity("Commands", "completed", [skill]))).toBe("Activated skill");
     expect(activityStepLabel(skill)).toBe("Activated tdd, diagnosing-bugs, and impeccable skills");
     expect(activityStepProgressLabel({ ...skill, status: "running" })).toBe(
       "Activating tdd, diagnosing-bugs, and impeccable skills",
@@ -381,7 +381,7 @@ describe("activity labels", () => {
         ],
       },
     };
-    expect(activitySummary(activity("Commands", "completed", [skillSearch]))).toBe("Called tool, ran search");
+    expect(activitySummary(activity("Commands", "completed", [skillSearch]))).toBe("Activated skill, ran search");
   });
 
   it("summarizes mixed grouped tool activity by work type", () => {
@@ -412,19 +412,27 @@ describe("activity labels", () => {
     );
   });
 
-  it("keeps skill detail while grouping skills as generic tools", () => {
+  it("summarizes skill activation events while keeping their detail", () => {
     const message = activity("Tool activity", "completed", [
       { kind: "tool", name: "skill", status: "completed", input_summary: "tdd" },
       { kind: "tool", name: "read", status: "completed", input_summary: "PRODUCT.md" },
-      { kind: "tool", name: "skill", status: "completed", input_summary: "impeccable" },
+      { kind: "tool", name: "skill", status: "completed", input_summary: "tdd" },
       { kind: "tool", name: "execute", status: "completed", input_summary: "npm test" },
     ]);
 
-    expect(activitySummary(message)).toBe("Called 2 tools, read file, ran command");
+    expect(activitySummary(message)).toBe("Activated 2 skills, read file, ran command");
     expect(activityStepLabel(message.steps[0])).toBe("Activated tdd skill");
     expect(activityStepProgressLabel(message.steps[0])).toBe("Activating tdd skill");
     expect(activityStepCompletedLabel(message.steps[0])).toBe("Activated tdd skill");
-    expect(activityStepLabel(message.steps[2])).toBe("Activated impeccable skill");
+    expect(activityStepLabel(message.steps[2])).toBe("Activated tdd skill");
+
+    const repeatedActivations = Array.from({ length: 5 }, () => ({
+      kind: "tool" as const,
+      name: "skill",
+      status: "completed" as const,
+      input_summary: "tdd",
+    }));
+    expect(activitySummary(activity("Tool activity", "completed", repeatedActivations))).toBe("Activated 5 skills");
   });
 
   it("classifies generic tool rows from their visible summaries", () => {
