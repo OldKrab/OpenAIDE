@@ -5,6 +5,8 @@ import { uploadFile } from "./fileUpload";
 type PlannedResponse = {
   kind: "error";
 } | {
+  kind: "timeout";
+} | {
   kind: "load";
   status: number;
   body?: string;
@@ -28,6 +30,7 @@ class FakeXMLHttpRequest {
   method = "";
   url = "";
   status = 0;
+  timeout = 0;
   responseText = "";
   responseContentType: string | null = null;
   sentBody?: Blob;
@@ -68,6 +71,10 @@ class FakeXMLHttpRequest {
       for (const listener of this.listeners.get("error") ?? []) listener();
       return;
     }
+    if (response.kind === "timeout") {
+      for (const listener of this.listeners.get("timeout") ?? []) listener();
+      return;
+    }
     this.status = response.status;
     this.responseText = response.body ?? "";
     this.responseContentType = response.contentType ?? null;
@@ -79,6 +86,14 @@ class FakeXMLHttpRequest {
   }
 }
 
+function fixedChunkSizes(totalBytes: number, chunkBytes: number) {
+  const sizes: number[] = [];
+  for (let offset = 0; offset < totalBytes; offset += chunkBytes) {
+    sizes.push(Math.min(chunkBytes, totalBytes - offset));
+  }
+  return sizes;
+}
+
 describe("web file upload transport", () => {
   afterEach(() => {
     FakeXMLHttpRequest.planned = [];
@@ -86,13 +101,14 @@ describe("web file upload transport", () => {
     vi.unstubAllGlobals();
   });
 
-  it("falls back from one failed request to sequential chunks no larger than 512 KiB", async () => {
+  it("falls back to sequential chunks no larger than 64 KiB", async () => {
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    const expectedChunkSizes = fixedChunkSizes(1_200_000, 64 * 1024);
     FakeXMLHttpRequest.planned = [
       { kind: "error" },
-      { kind: "load", status: 202, body: '{"received":524288}' },
-      { kind: "load", status: 202, body: '{"received":1048576}' },
-      { kind: "load", status: 200, body: '{"attachment":{"handleId":"attachment-1"}}' },
+      ...expectedChunkSizes.map((_, index) => index === expectedChunkSizes.length - 1
+        ? { kind: "load" as const, status: 200, body: '{"attachment":{"handleId":"attachment-1"}}' }
+        : { kind: "load" as const, status: 202, body: '{"received":true}' }),
     ];
     const file = new File([new Uint8Array(1_200_000)], "large.bin");
     const onProgress = vi.fn();
@@ -108,14 +124,12 @@ describe("web file upload transport", () => {
     expect(attachment).toEqual({ handleId: "attachment-1" });
     expect(FakeXMLHttpRequest.requests.map((request) => request.url)).toEqual([
       "/__openaide-app-server/upload",
-      "/__openaide-app-server/upload/chunk",
-      "/__openaide-app-server/upload/chunk",
-      "/__openaide-app-server/upload/chunk",
+      ...expectedChunkSizes.map(() => "/__openaide-app-server/upload/chunk"),
     ]);
     const chunks = FakeXMLHttpRequest.requests.slice(1);
-    expect(chunks.map((request) => request.sentBody?.size)).toEqual([524_288, 524_288, 151_424]);
+    expect(chunks.map((request) => request.sentBody?.size)).toEqual(expectedChunkSizes);
     expect(chunks.map((request) => request.headers.get("X-OpenAIDE-Upload-Offset")))
-      .toEqual(["0", "524288", "1048576"]);
+      .toEqual(expectedChunkSizes.map((_, index) => String(index * 64 * 1024)));
     expect(new Set(chunks.map((request) => request.headers.get("X-OpenAIDE-Upload-Id"))).size).toBe(1);
     expect(chunks.every((request) => request.headers.get("X-OpenAIDE-Upload-Size") === "1200000")).toBe(true);
     expect(onProgress).toHaveBeenLastCalledWith({ loaded: 1_200_000, total: 1_200_000 });
@@ -123,11 +137,12 @@ describe("web file upload transport", () => {
 
   it("falls back when an intermediary rejects the single request with an HTML 403", async () => {
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    const expectedChunkSizes = fixedChunkSizes(1_300_000, 64 * 1024);
     FakeXMLHttpRequest.planned = [
       { kind: "load", status: 403, contentType: "text/html; charset=utf-8", body: "<html>Denied</html>" },
-      { kind: "load", status: 202, body: '{"received":524288}' },
-      { kind: "load", status: 202, body: '{"received":1048576}' },
-      { kind: "load", status: 200, body: '{"attachment":{"handleId":"attachment-403"}}' },
+      ...expectedChunkSizes.map((_, index) => index === expectedChunkSizes.length - 1
+        ? { kind: "load" as const, status: 200, body: '{"attachment":{"handleId":"attachment-403"}}' }
+        : { kind: "load" as const, status: 202, body: '{"received":true}' }),
     ];
 
     const attachment = await uploadFile(
@@ -141,10 +156,28 @@ describe("web file upload transport", () => {
     expect(attachment).toEqual({ handleId: "attachment-403" });
     expect(FakeXMLHttpRequest.requests.map((request) => request.url)).toEqual([
       "/__openaide-app-server/upload",
-      "/__openaide-app-server/upload/chunk",
-      "/__openaide-app-server/upload/chunk",
-      "/__openaide-app-server/upload/chunk",
+      ...expectedChunkSizes.map(() => "/__openaide-app-server/upload/chunk"),
     ]);
+  });
+
+  it("fails a stalled fallback chunk with a retryable timeout", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    FakeXMLHttpRequest.planned = [
+      { kind: "error" },
+      { kind: "timeout" },
+      { kind: "load", status: 204 },
+    ];
+
+    await expect(uploadFile(
+      "task-1",
+      new File([new Uint8Array(600_000)], "stalled.bin"),
+      "client-1",
+      vi.fn(),
+      new AbortController().signal,
+    )).rejects.toThrow("File upload timed out. Retry the upload.");
+
+    expect(FakeXMLHttpRequest.requests[1].timeout).toBe(300_000);
+    expect(FakeXMLHttpRequest.requests[2].headers.get("X-OpenAIDE-Upload-Cancel")).toBe("true");
   });
 
   it("does not hide an App Server validation error behind chunk fallback", async () => {
