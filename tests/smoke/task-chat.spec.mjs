@@ -156,8 +156,19 @@ test("keeps the context meter on the composer's rounded edge as a draft grows", 
   );
   const edgeBounds = await meterEdge.boundingBox();
   expect(edgeBounds).not.toBeNull();
-  const tooltipGap = edgeBounds.x + edgeBounds.width - tooltipGeometry.right;
-  expect(tooltipGap).toBeGreaterThan(4);
+  // Visibility can become observable while the 100 ms hover transform is still settling.
+  await expect.poll(async () => {
+    const tooltipBounds = await tooltip.boundingBox();
+    const currentEdgeBounds = await meterEdge.boundingBox();
+    if (!tooltipBounds || !currentEdgeBounds) return 0;
+    return currentEdgeBounds.x + currentEdgeBounds.width - tooltipBounds.x - tooltipBounds.width;
+  }).toBeGreaterThan(4);
+  const settledTooltipBounds = await tooltip.boundingBox();
+  const settledEdgeBounds = await meterEdge.boundingBox();
+  expect(settledTooltipBounds).not.toBeNull();
+  expect(settledEdgeBounds).not.toBeNull();
+  const tooltipGap = settledEdgeBounds.x + settledEdgeBounds.width
+    - settledTooltipBounds.x - settledTooltipBounds.width;
   expect(tooltipGap).toBeLessThan(7);
 
   await page.setViewportSize({ width: 1_200, height: 800 });

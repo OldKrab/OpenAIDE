@@ -16,7 +16,7 @@ use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots, StorageP
 use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
 use crate::storage::records::TaskPreparationRecord;
-use crate::storage::Store;
+use crate::storage::{Store, StoreOpenError};
 use crate::task_events::TaskUpdateNotifier;
 use crate::tasks::product_api::AgentListSessionsWorkflow;
 use crate::tasks::product_api::{TaskAdoptNativeSessionWorkflow, TaskProductApi};
@@ -255,7 +255,7 @@ fn incomplete_acp_plan_is_published_in_the_authoritative_task_snapshot() {
     drop(api);
     drop(store);
 
-    let reopened = Store::open(temp.path().join("store")).expect("reopen store");
+    let reopened = reopen_store_after_fixture_shutdown(temp.path().join("store"));
     let restored = crate::tasks::snapshot::build_snapshot(&reopened, task_id.as_str(), 100)
         .expect("restore durable task snapshot");
     assert_eq!(
@@ -680,6 +680,20 @@ fn wait_until(mut predicate: impl FnMut() -> bool) {
     while !predicate() {
         assert!(Instant::now() < deadline, "timed out waiting for predicate");
         std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn reopen_store_after_fixture_shutdown(root: std::path::PathBuf) -> Store {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match Store::open(root.clone()) {
+            Ok(store) => return store,
+            Err(StoreOpenError::LockedByLiveServer) if Instant::now() < deadline => {
+                // Allow detached ACP fixture teardown to release its last Store clone.
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("reopen store after fixture shutdown: {error}"),
+        }
     }
 }
 
