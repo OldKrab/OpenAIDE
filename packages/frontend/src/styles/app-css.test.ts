@@ -257,6 +257,10 @@ describe("task list row styles", () => {
 
   it("uses one geometry for every grouped activity row", () => {
     expect(appCss).toMatch(
+      /\.activity-step\s*{[^}]*min-height:\s*26px;[^}]*column-gap:\s*6px;[^}]*row-gap:\s*0;/,
+    );
+    expect(appCss).toMatch(/\.activity-step\.open\s*{[^}]*row-gap:\s*2px;/);
+    expect(appCss).toMatch(
       /\.activity-step > summary,\s*\.activity-step > \.activity-disclosure-trigger\s*{[^}]*align-items:\s*center;[^}]*min-height:\s*26px;/,
     );
     expect(appCss).toMatch(/\.activity-step \.activity-step-title\s*{[^}]*font-size:\s*13px;[^}]*font-weight:\s*400;/);

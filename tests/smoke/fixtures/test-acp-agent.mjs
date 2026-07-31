@@ -172,6 +172,35 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:activity-row-spacing")) {
+    const readToolCallId = `activity-read-${promptNumber}`;
+    toolUpdate(sessionId, {
+      sessionUpdate: "tool_call",
+      toolCallId: readToolCallId,
+      title: "Read activity fixture",
+      kind: "read",
+      status: "in_progress",
+      rawInput: { path: "README.md" },
+    });
+    toolUpdate(sessionId, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: readToolCallId,
+      status: "completed",
+      content: [{ type: "content", content: { type: "text", text: "fixture output" } }],
+      rawOutput: { ok: true },
+    });
+    toolUpdate(sessionId, {
+      sessionUpdate: "tool_call",
+      toolCallId: `activity-empty-${promptNumber}`,
+      title: "Wait for subagents",
+      kind: "other",
+      status: "completed",
+    });
+    textUpdate(sessionId, "agent_message_chunk", "Activity rows rendered", `agent-${promptNumber}`);
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
 
   if (session.activePrompts.size > 1) {
     textUpdate(sessionId, "agent_message_chunk", `Steering received: ${text}`, `agent-${promptNumber}`);

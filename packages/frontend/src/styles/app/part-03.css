@@ -223,11 +223,18 @@
 
 .activity-step {
   min-width: 0;
+  min-height: 26px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 6px;
+  column-gap: 6px;
+  row-gap: 0;
   color: color-mix(in oklch, var(--oa-muted) 84%, var(--oa-text));
   font-size: 13px;
+}
+
+/* A collapsed zero-height detail track must not make expandable rows taller. */
+.activity-step.open {
+  row-gap: 2px;
 }
 
 .activity-step > summary,
