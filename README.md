@@ -134,8 +134,8 @@ checks.
 
 Pull requests are checked by GitHub Actions. A versioned tag builds Linux x64,
 Windows x64, and macOS Apple Silicon VSIX packages and creates a GitHub Release
-according to the [release policy](docs/release-policy.md). Stable tags also
-publish those packages to the VS Code Marketplace; prerelease tags such as
+according to the [release policy](docs/release-policy.md). Stable packages are
+published manually to the VS Code Marketplace; prerelease tags such as
 `v0.0.1-alpha.1` remain GitHub prereleases.
 
 ## Contributing and security
