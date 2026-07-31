@@ -7,11 +7,14 @@ const MAX_NOTIFICATION_TASK_TITLE_LENGTH = 80;
 export type TaskNotificationEnvironment = {
   now(): number;
   focusedTaskId(): string | undefined;
+  windowFocused(): boolean;
   readHandledEventIds(): string[];
   rememberHandledEventIds(eventIds: string[]): void;
   showNotification(message: string, action: string): Promise<string | undefined>;
+  showNativeNotification(message: string, action: string): Promise<string | undefined>;
   openTask(taskId: string, title: string): void;
   subscribeFocusedTask(listener: (taskId: string | undefined) => void): () => void;
+  subscribeWindowFocus(listener: () => void): () => void;
   reportError?(error: unknown): void;
 };
 
@@ -29,9 +32,13 @@ export function createTaskNotificationManager(
   let disposed = false;
   let focusedTaskId = currentFocusedTaskId();
   let focusedSince = focusedTaskId ? environment.now() : undefined;
+  let windowFocused = environment.windowFocused();
+  let windowUnfocusedSince = windowFocused ? undefined : environment.now();
+  let lastUnfocusedInterval: { from: number; until: number } | undefined;
   const lastFocusedIntervals = new Map<string, { from: number; until: number }>();
 
   const stopFocusedTask = environment.subscribeFocusedTask(updateFocusedTask);
+  const stopWindowFocus = environment.subscribeWindowFocus(updateWindowFocus);
 
   return {
     reconcile(tasks) {
@@ -51,6 +58,7 @@ export function createTaskNotificationManager(
       if (disposed) return;
       disposed = true;
       stopFocusedTask();
+      stopWindowFocus();
     },
   };
 
@@ -61,17 +69,25 @@ export function createTaskNotificationManager(
     // Claim before showing so repeated snapshots cannot duplicate an active toast.
     rememberHandled(attention.eventId);
     const occurredAt = notificationTimestamp(attention.occurredAt);
-    if (!Number.isFinite(occurredAt) || wasTaskFocusedAt(task.taskId, occurredAt)) return;
+    if (!Number.isFinite(occurredAt)) return;
 
     const title = task.title?.value.trim() || "Untitled task";
-    void environment.showNotification(
-      attentionMessage(attention.reason, notificationTaskTitle(title)),
-      OPEN_TASK_ACTION,
-    ).then((selection) => {
-      if (!disposed && selection === OPEN_TASK_ACTION) {
-        environment.openTask(task.taskId, title);
-      }
+    const message = attentionMessage(attention.reason, notificationTaskTitle(title));
+    if (!wasWindowFocusedAt(occurredAt)) {
+      void environment.showNativeNotification(message, OPEN_TASK_ACTION)
+        .then((selection) => openSelectedTask(selection, task.taskId, title))
+        .catch((error) => environment.reportError?.(error));
+      return;
+    }
+    if (wasTaskFocusedAt(task.taskId, occurredAt)) return;
+
+    void environment.showNotification(message, OPEN_TASK_ACTION).then((selection) => {
+      openSelectedTask(selection, task.taskId, title);
     }).catch((error) => environment.reportError?.(error));
+  }
+
+  function openSelectedTask(selection: string | undefined, taskId: string, title: string) {
+    if (!disposed && selection === OPEN_TASK_ACTION) environment.openTask(taskId, title);
   }
 
   function updateFocusedTask() {
@@ -85,6 +101,21 @@ export function createTaskNotificationManager(
     focusedSince = nextTaskId ? changedAt : undefined;
   }
 
+  function updateWindowFocus() {
+    const nextFocused = environment.windowFocused();
+    if (nextFocused === windowFocused) return;
+    const changedAt = environment.now();
+    if (nextFocused) {
+      if (windowUnfocusedSince !== undefined) {
+        lastUnfocusedInterval = { from: windowUnfocusedSince, until: changedAt };
+      }
+      windowUnfocusedSince = undefined;
+    } else {
+      windowUnfocusedSince = changedAt;
+    }
+    windowFocused = nextFocused;
+  }
+
   function currentFocusedTaskId() {
     return environment.focusedTaskId();
   }
@@ -96,6 +127,18 @@ export function createTaskNotificationManager(
     const previous = lastFocusedIntervals.get(taskId);
     return currentFocusIncludesEvent
       || focusIntervalIncludes(previous?.from, previous?.until, occurredAt);
+  }
+
+  function wasWindowFocusedAt(occurredAt: number) {
+    const currentUnfocusedIncludesEvent = !windowFocused
+      && windowUnfocusedSince !== undefined
+      && windowUnfocusedSince <= occurredAt;
+    return !currentUnfocusedIncludesEvent
+      && !focusIntervalIncludes(
+        lastUnfocusedInterval?.from,
+        lastUnfocusedInterval?.until,
+        occurredAt,
+      );
   }
 
   function rememberHandled(eventId: string, persist = true) {

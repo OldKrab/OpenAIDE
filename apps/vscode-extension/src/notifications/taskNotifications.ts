@@ -6,6 +6,7 @@ import type {
   SubscriptionScope,
 } from "@openaide/app-server-client";
 import { createTaskNotificationManager } from "./taskNotificationManager";
+import { createSystemNotificationSender } from "./systemNotifications";
 import { workspaceRoots } from "../workspace/roots";
 
 const HANDLED_EVENTS_KEY = "openaide.taskNotifications.handled";
@@ -37,9 +38,11 @@ export async function registerTaskNotifications(
   surfaces: TaskSurface,
   logger: TaskNotificationLogger,
 ): Promise<vscode.Disposable> {
+  const showSystemNotification = createSystemNotificationSender(process.platform);
   const manager = createTaskNotificationManager({
     now: () => Date.now(),
     focusedTaskId: () => surfaces.currentFocusedTaskId(),
+    windowFocused: () => vscode.window.state.focused,
     readHandledEventIds: () => globalState.get<string[]>(HANDLED_EVENTS_KEY, []),
     rememberHandledEventIds: (eventIds) => {
       void globalState.update(HANDLED_EVENTS_KEY, eventIds).then(undefined, (error) => {
@@ -52,9 +55,25 @@ export async function registerTaskNotifications(
       logger.info("showing VS Code Task notification");
       return vscode.window.showInformationMessage(message, action);
     },
+    showNativeNotification: async (message, action) => {
+      logger.info("showing OS Task notification");
+      try {
+        await showSystemNotification(message);
+        return undefined;
+      } catch (error) {
+        logger.warn("OS Task notification unavailable; falling back to VS Code", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return vscode.window.showInformationMessage(message, action);
+      }
+    },
     openTask: (taskId, title) => surfaces.openTask(taskId, title),
     subscribeFocusedTask(listener) {
       const subscription = surfaces.onDidChangeFocusedTask(listener);
+      return () => subscription.dispose();
+    },
+    subscribeWindowFocus(listener) {
+      const subscription = vscode.window.onDidChangeWindowState(listener);
       return () => subscription.dispose();
     },
     reportError: (error) => {
