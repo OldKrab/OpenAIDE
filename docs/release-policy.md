@@ -23,7 +23,7 @@ promoted to production.
 The `main` ruleset must require the repository's CI checks for pull requests and
 allow the release GitHub App to push the automated version commit and tag. The
 `Version Bump` workflow requires `RELEASE_APP_CLIENT_ID` and
-`RELEASE_APP_PRIVATE_KEY`. Stable Marketplace releases also require `VSCE_PAT`.
+`RELEASE_APP_PRIVATE_KEY`.
 
 ## Creating a release
 
@@ -56,10 +56,12 @@ allow the release GitHub App to push the automated version commit and tag. The
 5. The tag starts the `Release` workflow. It repeats the release checks, stamps
    the exact version into packaged manifests, builds Linux x64, Windows x64, and
    macOS Apple Silicon VSIX packages, and creates the GitHub Release from the
-   version commit message. Prerelease versions create GitHub prereleases; stable
-   versions also publish all platform packages to the VS Code Marketplace.
-6. Confirm that the Release workflow completed successfully, then install and
-   smoke-test each published VSIX before promoting the release.
+   version commit message. Prerelease versions create GitHub prereleases.
+6. For a stable release, download all three VSIX packages from the GitHub
+   Release and upload them manually under the `openaide` publisher in the
+   Visual Studio Marketplace. Confirm that the Marketplace lists the expected
+   version and platforms.
+7. Install and smoke-test each published VSIX before promoting the release.
 
 The root `package.json` is the release-version source of truth. Package manifests
 that are stamped only during artifact creation stay at their neutral source
