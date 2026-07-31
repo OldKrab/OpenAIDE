@@ -106,6 +106,39 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("keeps collapsed tool rows equally spaced with and without details", async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 320 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:activity-row-spacing");
+  const chat = page.getByLabel("Task chat");
+  await expect(chat.getByText("Activity rows rendered", { exact: true })).toBeVisible();
+
+  const activity = chat.locator(".activity-group").filter({
+    hasText: "Wait for subagents",
+  });
+  await activity.locator(":scope > .activity-disclosure-trigger").click();
+  const rows = activity.locator(".activity-step");
+  await expect(rows).toHaveCount(2);
+
+  const heights = await rows.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().height));
+  expect(heights).toEqual([26, 26]);
+
+  const constrainedGeometry = await activity.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(constrainedGeometry.scrollWidth).toBe(constrainedGeometry.clientWidth);
+
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  const desktopHeights = await rows.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().height));
+  expect(desktopHeights).toEqual([26, 26]);
+
+  await rows.first().getByRole("button").click();
+  await expect(rows.first().getByText("fixture output", { exact: true })).toBeVisible();
+});
+
 test("copies fenced Markdown code independently at desktop and constrained widths", async ({ context, page }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
   await openPreparedNewTask(page);
