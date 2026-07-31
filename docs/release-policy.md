@@ -23,7 +23,22 @@ promoted to production.
 The `main` ruleset must require the repository's CI checks for pull requests and
 allow the release GitHub App to push the automated version commit and tag. The
 `Version Bump` workflow requires `RELEASE_APP_CLIENT_ID` and
-`RELEASE_APP_PRIVATE_KEY`. Stable Marketplace releases also require `VSCE_PAT`.
+`RELEASE_APP_PRIVATE_KEY`. Stable registry releases also require `VSCE_PAT` for
+the VS Code Marketplace and `OVSX_PAT` for Open VSX.
+
+Before the first Open VSX release:
+
+1. Create an [Eclipse account](https://accounts.eclipse.org/user/register), sign
+   in to [Open VSX](https://open-vsx.org/), connect the same GitHub and Eclipse
+   accounts, and accept the Publisher Agreement from the Open VSX profile page.
+2. Generate a dedicated CI token from the
+   [Open VSX token settings](https://open-vsx.org/user-settings/tokens). Open VSX
+   account and publishing setup does not require payment details.
+3. With that token available locally as `OVSX_PAT`, run
+   `npx --yes ovsx@1.0.2 create-namespace openaide`, then
+   [claim namespace ownership](https://github.com/EclipseFdn/open-vsx.org/wiki/Managing-Namespaces).
+4. Run `gh secret set OVSX_PAT` in this repository and enter the token at the
+   hidden prompt. Do not pass it in command arguments or commit it to a file.
 
 ## Creating a release
 
@@ -57,7 +72,8 @@ allow the release GitHub App to push the automated version commit and tag. The
    the exact version into packaged manifests, builds Linux x64, Windows x64, and
    macOS Apple Silicon VSIX packages, and creates the GitHub Release from the
    version commit message. Prerelease versions create GitHub prereleases; stable
-   versions also publish all platform packages to the VS Code Marketplace.
+   versions also publish all platform packages to the VS Code Marketplace and
+   Open VSX.
 6. Confirm that the Release workflow completed successfully, then install and
    smoke-test each published VSIX before promoting the release.
 
@@ -67,5 +83,5 @@ version and must not be updated by hand.
 
 Releases are never rebuilt in place. Correct a bad release with a new patch
 or prerelease version. For example, replace a bad `0.0.1-alpha.1` build with
-`0.0.1-alpha.2`. Marketplace releases are immutable; correct them with a new
-version rather than rebuilding an existing tag.
+`0.0.1-alpha.2`. Registry releases are immutable; correct them with a new version
+rather than rebuilding an existing tag.

@@ -135,6 +135,9 @@ test("release publishing produces every supported platform VSIX package", () => 
   assert.doesNotMatch(release, /generate_release_notes: true/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 publish/);
   assert.match(release, /VSCE_PAT: \$\{\{ secrets\.VSCE_PAT \}\}/);
+  assert.match(release, /name: Publish Open VSX packages/);
+  assert.match(release, /ovsx@1\.0\.2 publish "\$package"/);
+  assert.match(release, /OVSX_PAT: \$\{\{ secrets\.OVSX_PAT \}\}/);
   assert.match(release, /if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
   assert.doesNotMatch(release, /openaide-web-assets|docker\/build-push-action|openaide-app-server-linux/);
 });
