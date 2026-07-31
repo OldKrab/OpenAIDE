@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenAIDE Prototype"
+  short_description: "Explore production-aligned UI and logic candidates"
+  default_prompt: "Use $openaide-prototype to compare implementation candidates for this OpenAIDE design question."
