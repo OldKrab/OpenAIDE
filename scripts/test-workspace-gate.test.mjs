@@ -102,7 +102,7 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.match(versionBump, /release_notes:/);
   assert.match(versionBump, /type: string/);
   assert.match(versionBump, /actions\/create-github-app-token@v3/);
-  assert.match(versionBump, /RELEASE_APP_ID/);
+  assert.match(versionBump, /client-id: \$\{\{ secrets\.RELEASE_APP_CLIENT_ID \}\}/);
   assert.match(versionBump, /RELEASE_APP_PRIVATE_KEY/);
   assert.match(versionBump, /npm version "\$RELEASE_VERSION".*--no-git-tag-version/);
   assert.match(versionBump, /git commit --file "\$notes_path"/);

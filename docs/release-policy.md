@@ -22,7 +22,7 @@ promoted to production.
 
 The `main` ruleset must require the repository's CI checks for pull requests and
 allow the release GitHub App to push the automated version commit and tag. The
-`Version Bump` workflow requires `RELEASE_APP_ID` and
+`Version Bump` workflow requires `RELEASE_APP_CLIENT_ID` and
 `RELEASE_APP_PRIVATE_KEY`. Stable Marketplace releases also require `VSCE_PAT`.
 
 ## Creating a release
