@@ -288,17 +288,17 @@ impl TaskProductApi {
             user_message_id,
         };
 
-        let native_sessions = self.native_sessions.clone();
-        std::thread::spawn(move || {
-            if let Err(error) =
-                native_sessions.steer(committed_task, prompt_text, attachments.agent_attachments())
-            {
-                crate::logging::error(
-                    "task_steering_prompt_failed",
-                    serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
-                );
-            }
-        });
+        // Register the ACP request before releasing Task send serialization. Otherwise
+        // primary settlement can overtake this accepted steer and orphan its response.
+        if let Err(error) =
+            self.native_sessions
+                .steer(committed_task, prompt_text, attachments.agent_attachments())
+        {
+            crate::logging::error(
+                "task_steering_prompt_failed",
+                serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
+            );
+        }
         Ok(accepted)
     }
 

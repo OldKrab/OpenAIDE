@@ -4151,6 +4151,60 @@ fn send_while_working_accepts_a_steering_message_without_replacing_primary_work(
 }
 
 #[test]
+fn send_after_prompt_settlement_starts_a_new_turn() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let primary = api
+        .send(send_params("task-existing", "start work"))
+        .unwrap();
+    wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Active);
+    let earlier_steer = api
+        .send(send_params("task-existing", "also check tests"))
+        .unwrap();
+    assert_eq!(earlier_steer.turn_id, primary.turn_id);
+
+    api.turn_runner.pause_next_settlement_for_test();
+    agent.release_prompt.store(true, Ordering::SeqCst);
+    api.turn_runner.wait_for_settlement_pause_for_test();
+
+    let send_api = api.clone();
+    let (send_tx, send_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ =
+            send_tx.send(send_api.send(send_params("task-existing", "continue after completion")));
+    });
+    let early_send = send_rx.recv_timeout(Duration::from_millis(250)).ok();
+    api.turn_runner.release_settlement_for_test();
+    let next = early_send
+        .unwrap_or_else(|| send_rx.recv_timeout(Duration::from_secs(2)).unwrap())
+        .unwrap();
+
+    assert_ne!(next.turn_id, primary.turn_id);
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) >= 2);
+    wait_until(|| agent.prompt_completions.load(Ordering::SeqCst) >= 2);
+    wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Inactive);
+}
+
+#[test]
 fn send_starts_agent_session_and_prompts_after_commit() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

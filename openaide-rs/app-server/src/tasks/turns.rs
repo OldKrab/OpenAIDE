@@ -13,6 +13,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestRuntime;
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::transitions::TaskTransitions;
+use crate::tasks::turn_acceptance::TurnAcceptanceCoordinator;
 use crate::tasks::turn_events::{TaskEventSink, TaskSessionEventSink};
 use openaide_app_server_protocol::ids::TaskId;
 
@@ -26,6 +27,17 @@ pub struct TurnRunner {
     server_requests: ServerRequestRuntime,
     native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     cancel_grace_period: Arc<Mutex<Duration>>,
+    turn_acceptance: TurnAcceptanceCoordinator,
+    #[cfg(test)]
+    settlement_pause: Arc<(Mutex<TestSettlementPause>, Condvar)>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestSettlementPause {
+    enabled: bool,
+    reached: bool,
+    released: bool,
 }
 
 impl TurnRunner {
@@ -46,6 +58,12 @@ impl TurnRunner {
             server_requests,
             native_catalog: None,
             cancel_grace_period: Arc::new(Mutex::new(DEFAULT_CANCEL_GRACE_PERIOD)),
+            turn_acceptance: TurnAcceptanceCoordinator::default(),
+            #[cfg(test)]
+            settlement_pause: Arc::new((
+                Mutex::new(TestSettlementPause::default()),
+                Condvar::new(),
+            )),
         };
         runner.start_storage_failure_monitor(storage_failures);
         runner
@@ -125,6 +143,48 @@ impl TurnRunner {
             .expect("cancel grace period poisoned") = grace_period;
     }
 
+    #[cfg(test)]
+    pub(crate) fn pause_next_settlement_for_test(&self) {
+        let (state, _) = &*self.settlement_pause;
+        *state.lock().expect("turn settlement pause poisoned") = TestSettlementPause {
+            enabled: true,
+            reached: false,
+            released: false,
+        };
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wait_for_settlement_pause_for_test(&self) {
+        let (state, changed) = &*self.settlement_pause;
+        let mut state = state.lock().expect("turn settlement pause poisoned");
+        while !state.reached {
+            state = changed.wait(state).expect("turn settlement pause poisoned");
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn release_settlement_for_test(&self) {
+        let (state, changed) = &*self.settlement_pause;
+        let mut state = state.lock().expect("turn settlement pause poisoned");
+        state.released = true;
+        changed.notify_all();
+    }
+
+    #[cfg(test)]
+    fn pause_before_settlement_for_test(&self) {
+        let (state, changed) = &*self.settlement_pause;
+        let mut state = state.lock().expect("turn settlement pause poisoned");
+        if !state.enabled {
+            return;
+        }
+        state.reached = true;
+        changed.notify_all();
+        while !state.released {
+            state = changed.wait(state).expect("turn settlement pause poisoned");
+        }
+        state.enabled = false;
+    }
+
     pub(crate) fn active_turn_is_live(&self, task_id: &str, turn_id: &str) -> bool {
         self.active_turns
             .turns
@@ -132,6 +192,12 @@ impl TurnRunner {
             .expect("active turn registry poisoned")
             .get(turn_id)
             .is_some_and(|active| active.task_id == task_id)
+    }
+
+    /// Shares the Task admission boundary with Send so prompt settlement and a
+    /// concurrent user message have one authoritative order.
+    pub(super) fn turn_acceptance(&self) -> TurnAcceptanceCoordinator {
+        self.turn_acceptance.clone()
     }
 
     pub(crate) fn spawn_agent_turn(
@@ -215,7 +281,11 @@ impl TurnRunner {
                 },
                 sink.clone(),
             );
-            let _ = runner.transitions().finish_turn(&task_id, &turn_id, result);
+            let _ = runner.turn_acceptance.serialize(&task_id, || {
+                #[cfg(test)]
+                runner.pause_before_settlement_for_test();
+                runner.transitions().finish_turn(&task_id, &turn_id, result)
+            });
         });
     }
 

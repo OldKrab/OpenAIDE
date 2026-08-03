@@ -5,7 +5,7 @@ use std::time::Duration;
 use agent_client_protocol::{Agent, SessionMessage};
 use tokio::sync::mpsc as tokio_mpsc;
 
-use crate::agent::acp_active_prompt::send_steering_prompt_request;
+use crate::agent::acp_active_prompt::{cancel_active_prompt, send_steering_prompt_request};
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
 use crate::agent::acp_prompt_runner::{
     dispatch_session_notification, run_prompt, PromptRunContext,
@@ -104,6 +104,14 @@ pub(super) async fn run_native_session_worker(
                 let _ = reply_tx.send(Ok(()));
                 break;
             }
+            Some(()) = cancel_rx.recv() => {
+                if let Err(error) = cancel_active_prompt(&active_session, trace.as_ref()).await {
+                    crate::logging::error(
+                        "acp_idle_prompt_cancel_failed",
+                        serde_json::json!({ "error": error.to_string() }),
+                    );
+                }
+            }
             command = command_rx.recv() => {
                 let Some(command) = command else {
                     break;
@@ -180,6 +188,7 @@ pub(super) async fn run_native_session_worker(
                         prompt,
                         sink,
                         done_tx,
+                        request_guard,
                     } => {
                         let result = run_prompt(
                             &mut active_session,
@@ -195,6 +204,7 @@ pub(super) async fn run_native_session_worker(
                             },
                             prompt,
                             sink,
+                            request_guard,
                             &mut command_rx,
                             &mut config_rx,
                             &mut config_catalog,
@@ -208,7 +218,10 @@ pub(super) async fn run_native_session_worker(
                         }
                         let _ = done_tx.send(result);
                     }
-                    AcpSessionCommand::Steer { prompt } => {
+                    AcpSessionCommand::Steer {
+                        prompt,
+                        request_guard,
+                    } => {
                         if let Err(error) = send_steering_prompt_request(
                             &active_session,
                             prompt,
@@ -216,6 +229,7 @@ pub(super) async fn run_native_session_worker(
                             trace.as_ref(),
                             None,
                             None,
+                            request_guard,
                         ) {
                             crate::logging::error(
                                 "acp_steering_prompt_start_failed",

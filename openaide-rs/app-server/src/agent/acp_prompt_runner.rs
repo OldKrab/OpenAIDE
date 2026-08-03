@@ -49,6 +49,7 @@ pub(super) async fn run_prompt(
     context: PromptRunContext<'_>,
     prompt: AgentPrompt,
     sink: Arc<dyn AgentEventSink>,
+    request_guard: crate::agent::acp_session_client::PromptRequestGuard,
     command_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionCommand>,
     config_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
     config_catalog: &mut ConfigOptionsCatalog,
@@ -71,6 +72,7 @@ pub(super) async fn run_prompt(
         prompt,
         sink.clone(),
         session_projection.as_ref(),
+        request_guard,
     )?;
 
     let mut cancel_sent = false;
@@ -168,7 +170,10 @@ pub(super) async fn run_prompt(
                             "ACP session already has an active prompt".to_string(),
                         )));
                     }
-                    AcpSessionCommand::Steer { prompt } => {
+                    AcpSessionCommand::Steer {
+                        prompt,
+                        request_guard,
+                    } => {
                         if let Err(error) = send_steering_prompt_request(
                             active_session,
                             prompt,
@@ -176,6 +181,7 @@ pub(super) async fn run_prompt(
                             context.trace.as_ref(),
                             Some(active_prompt.steering_settlement()),
                             Some(sink.clone()),
+                            request_guard,
                         ) {
                             logging::error(
                                 "acp_steering_prompt_start_failed",
