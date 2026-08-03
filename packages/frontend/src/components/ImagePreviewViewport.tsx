@@ -15,7 +15,8 @@ export type ImagePreviewViewportSource = {
   url: string;
 };
 
-const MIN_SCALE = 1;
+const MIN_SCALE = 0.25;
+const FIT_SCALE = 1;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 0.25;
 
@@ -25,7 +26,7 @@ type ImageView = {
   y: number;
 };
 
-const FITTED_VIEW: ImageView = { scale: MIN_SCALE, x: 0, y: 0 };
+const FITTED_VIEW: ImageView = { scale: FIT_SCALE, x: 0, y: 0 };
 
 /** Provides bounded zoom and pan controls for the shared image inspection surface. */
 export function ImagePreviewViewport({
@@ -54,7 +55,6 @@ export function ImagePreviewViewport({
   const zoomAt = (nextScale: number, clientX?: number, clientY?: number) => {
     setView((current) => {
       const scale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
-      if (scale === MIN_SCALE) return current.scale === MIN_SCALE ? current : FITTED_VIEW;
       const stage = stageRef.current;
       if (!stage) return { ...current, scale };
       const bounds = stage.getBoundingClientRect();
@@ -137,7 +137,7 @@ export function ImagePreviewViewport({
 
   const onDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
-    zoomAt(view.scale === MIN_SCALE ? 2 : MIN_SCALE, event.clientX, event.clientY);
+    zoomAt(view.scale === FIT_SCALE ? 2 : FIT_SCALE, event.clientX, event.clientY);
   };
 
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -186,7 +186,7 @@ export function ImagePreviewViewport({
   const imageStyle: CSSProperties = {
     transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
   };
-  const isCenteredFit = view.scale === MIN_SCALE && view.x === 0 && view.y === 0;
+  const isCenteredFit = view.scale === FIT_SCALE && view.x === 0 && view.y === 0;
 
   return (
     <>
@@ -209,7 +209,7 @@ export function ImagePreviewViewport({
             onClick={() => setView(FITTED_VIEW)}
             type="button"
           >
-            {view.scale === MIN_SCALE ? "Fit" : `${Math.round(view.scale * 100)}%`}
+            {view.scale === FIT_SCALE ? "Fit" : `${Math.round(view.scale * 100)}%`}
           </button>
           <button
             aria-label="Zoom image in"
@@ -236,7 +236,7 @@ export function ImagePreviewViewport({
         aria-label={`${image.label} zoomable preview`}
         className={[
           "attachment-preview-stage",
-          view.scale > MIN_SCALE ? "is-zoomed" : "",
+          view.scale !== FIT_SCALE ? "is-zoomed" : "",
           interacting ? "is-interacting" : "",
         ].filter(Boolean).join(" ")}
         onClick={onClick}
