@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
+use crate::agent::acp_session_client::PromptRequestGuard;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::events::{AgentEvent, AgentTurnUsage};
@@ -43,6 +44,7 @@ impl ActivePrompt {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
         session_projection: Option<&LivePromptProjection>,
+        request_guard: PromptRequestGuard,
     ) -> Result<Self, RuntimeError> {
         let projection_slot =
             CurrentPromptSlot::new(current_prompts, &active_session.session_id().to_string());
@@ -65,6 +67,7 @@ impl ActivePrompt {
             completion_tx.clone(),
             settlement.clone(),
             sink,
+            request_guard,
         )?;
         Ok(Self {
             completion_tx,
@@ -205,6 +208,8 @@ impl Drop for CurrentPromptSlot {
     }
 }
 
+// Prompt dispatch keeps response projection and generation ownership explicit at this boundary.
+#[allow(clippy::too_many_arguments)]
 fn send_prompt_request(
     active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
     prompt: AgentPrompt,
@@ -213,6 +218,7 @@ fn send_prompt_request(
     completion_tx: mpsc::UnboundedSender<PromptCompletion>,
     settlement: Arc<PromptSettlementState>,
     sink: Arc<dyn AgentEventSink>,
+    request_guard: PromptRequestGuard,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -230,6 +236,7 @@ fn send_prompt_request(
         .connection()
         .send_request_to(Agent, request)
         .on_receiving_result(async move |result| {
+            let _request_guard = request_guard;
             let result = match result {
                 Ok(response) => {
                     if let Some(trace) = &result_trace {
@@ -298,6 +305,7 @@ pub(super) fn send_steering_prompt_request(
     trace: Option<&AcpTraceSession>,
     settlement: Option<PromptSettlement>,
     usage_sink: Option<Arc<dyn AgentEventSink>>,
+    request_guard: PromptRequestGuard,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -313,6 +321,7 @@ pub(super) fn send_steering_prompt_request(
         .connection()
         .send_request_to(Agent, request)
         .on_receiving_result(async move |result| {
+            let _request_guard = request_guard;
             match result {
                 Ok(response) => {
                     if let Some(trace) = &result_trace {

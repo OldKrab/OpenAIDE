@@ -599,6 +599,15 @@ for line in sys.stdin:
             prompt_mode == "delay_first_cancel_response" and prompt_request_count == 1
         ):
             pending_prompt_ids.append(message.get("id"))
+        elif prompt_mode == "primary_ends_while_steer_pending" and prompt_request_count == 1:
+            pending_prompt_ids.append(message.get("id"))
+        elif prompt_mode == "primary_ends_while_steer_pending" and prompt_request_count == 2:
+            pending_prompt_ids.append(message.get("id"))
+            respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
+        elif prompt_mode == "steer_ends_while_primary_pending" and prompt_request_count == 1:
+            pending_prompt_ids.append(message.get("id"))
+        elif prompt_mode == "steer_ends_while_primary_pending" and prompt_request_count == 2:
+            respond(message, {"stopReason": "end_turn"})
         elif prompt_mode == "late_text_after_response":
             respond(message, {"stopReason": "end_turn"})
             notify_text_chunk("late response text")
@@ -617,6 +626,11 @@ for line in sys.stdin:
         params = message.get("params", {})
         if log_details:
             log("config:" + json.dumps(params, sort_keys=True))
+        if prompt_mode in (
+            "primary_ends_while_steer_pending",
+            "steer_ends_while_primary_pending",
+        ) and pending_prompt_ids:
+            respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
         if config_response_delay > 0:
             time.sleep(config_response_delay)
         config_id = params.get("configId", "model")
@@ -2507,6 +2521,212 @@ fn steering_sends_an_additional_prompt_while_primary_prompt_is_running() {
     runtime
         .close_session(&session.key())
         .expect("close session");
+}
+
+#[test]
+fn next_prompt_waits_for_prior_steering_request_to_settle() {
+    assert_next_prompt_waits_for_prior_request("primary_ends_while_steer_pending");
+}
+
+#[test]
+fn next_prompt_waits_for_prior_primary_request_to_settle() {
+    assert_next_prompt_waits_for_prior_request("steer_ends_while_primary_pending");
+}
+
+#[test]
+fn cancelling_next_prompt_cancels_a_draining_prior_generation() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
+        &temp,
+        "cancel-draining-generation-session",
+        "primary_ends_while_steer_pending",
+    ) else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-cancel-generation", cwd_string()))
+        .expect("start session");
+    let primary_session_id = session.session_id.clone();
+    let primary = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-cancel-generation".to_string(),
+                    session_id: primary_session_id,
+                    text: "start first turn".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+    wait_for_method_count(&log_path, "session/prompt", 1);
+    runtime
+        .steer(AgentPrompt {
+            agent_id: "codex".to_string(),
+            task_id: "task-cancel-generation".to_string(),
+            session_id: session.session_id.clone(),
+            text: "leave this pending".to_string(),
+            attachments: Vec::new(),
+            cancellation: TurnCancellation::new(),
+        })
+        .expect("steering should be admitted");
+    wait_for_method_count(&log_path, "session/prompt", 2);
+    primary
+        .join()
+        .expect("primary prompt thread")
+        .expect("primary response should settle the first turn");
+
+    let cancellation = TurnCancellation::new();
+    let next_prompt_cancellation = cancellation.clone();
+    let next_session_id = session.session_id.clone();
+    let next_prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-cancel-generation".to_string(),
+                    session_id: next_session_id,
+                    text: "start second turn".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: next_prompt_cancellation,
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+    std::thread::sleep(Duration::from_millis(150));
+    cancellation.cancel();
+    runtime
+        .cancel_session(&session.key())
+        .expect("cancel draining prompt generation");
+
+    assert_eq!(
+        next_prompt.join().expect("next prompt thread").unwrap(),
+        AgentPromptOutcome::Cancelled
+    );
+    wait_for_method(&log_path, "session/cancel");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+    assert_eq!(
+        read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| method.as_str() == "session/prompt")
+            .count(),
+        2,
+        "a cancelled next turn must never dispatch its ACP prompt"
+    );
+}
+
+fn assert_next_prompt_waits_for_prior_request(prompt_mode: &str) {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "prompt-generation-session", prompt_mode)
+    else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-prompt-generation", cwd_string()))
+        .expect("start session");
+
+    let primary_session_id = session.session_id.clone();
+    let primary = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-prompt-generation".to_string(),
+                    session_id: primary_session_id,
+                    text: "start first turn".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+    wait_for_method_count(&log_path, "session/prompt", 1);
+
+    runtime
+        .steer(AgentPrompt {
+            agent_id: "codex".to_string(),
+            task_id: "task-prompt-generation".to_string(),
+            session_id: session.session_id.clone(),
+            text: "steer first turn".to_string(),
+            attachments: Vec::new(),
+            cancellation: TurnCancellation::new(),
+        })
+        .expect("steering should be admitted");
+    wait_for_method_count(&log_path, "session/prompt", 2);
+    primary
+        .join()
+        .expect("primary prompt thread")
+        .expect("primary response should settle the first turn");
+
+    let next_session_id = session.session_id.clone();
+    let next_prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-prompt-generation".to_string(),
+                    session_id: next_session_id,
+                    text: "start second turn".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+
+    std::thread::sleep(Duration::from_millis(150));
+    let prompt_count_before_prior_steer_settles = read_fixture_methods(&log_path)
+        .iter()
+        .filter(|method| method.as_str() == "session/prompt")
+        .count();
+
+    runtime
+        .set_session_config_option(AgentSessionSetConfigOptionRequest {
+            agent_id: "codex".to_string(),
+            session_id: session.session_id.clone(),
+            config_id: "model".to_string(),
+            value: config_id("gpt-5.5"),
+        })
+        .expect("config request should release the pending steering response");
+    next_prompt
+        .join()
+        .expect("next prompt thread")
+        .expect("next prompt should run after prior steering settles");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+
+    assert_eq!(
+        prompt_count_before_prior_steer_settles, 2,
+        "the next turn must not dispatch while a request from the prior prompt set is pending"
+    );
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        [
+            "initialize",
+            "session/new",
+            "session/prompt",
+            "session/prompt",
+            "session/set_config_option",
+            "session/prompt",
+            "session/close"
+        ]
+    );
 }
 
 #[test]

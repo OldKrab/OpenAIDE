@@ -197,6 +197,7 @@ impl TaskProductApi {
             server_requests.clone(),
         )
         .with_native_catalog(native_catalog.clone());
+        let turn_acceptance = turn_runner.turn_acceptance();
         let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
         let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
             store.clone(),
@@ -219,7 +220,7 @@ impl TaskProductApi {
             workspace_files: Default::default(),
             turn_runner,
             native_sessions,
-            turn_acceptance: Default::default(),
+            turn_acceptance,
             config_operations: Default::default(),
             preparing_session_ids,
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),

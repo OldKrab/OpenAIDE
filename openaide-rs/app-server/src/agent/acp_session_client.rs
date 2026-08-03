@@ -64,7 +64,9 @@ impl AcpSessionClient {
         }
         // Loading replaces the worker's attached ACP session, so it must not overlap
         // a prompt that is using the same binding.
-        let _settlement = self.prompt_lifecycle.admit(&request.cancellation)?;
+        let Some(_admission) = self.prompt_lifecycle.admit(&request.cancellation)? else {
+            return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
+        };
         let (reply_tx, reply_rx) = mpsc::channel();
         self.command_tx
             .send(AcpSessionCommand::Load { request, reply_tx })
@@ -98,7 +100,9 @@ impl AcpSessionClient {
         }
         // A cancelled prompt still owns the Native Session until its worker observes
         // the Agent's response. Session updates use the independent permanent listener.
-        let _settlement = self.prompt_lifecycle.admit(&cancellation)?;
+        let Some(admission) = self.prompt_lifecycle.admit(&cancellation)? else {
+            return Ok(AgentPromptOutcome::Cancelled);
+        };
         if cancellation.is_cancelled() {
             return Ok(AgentPromptOutcome::Cancelled);
         }
@@ -116,6 +120,7 @@ impl AcpSessionClient {
                 prompt,
                 sink,
                 done_tx,
+                request_guard: admission.request,
             })
             .map_err(|_| self.worker_stopped_error())?;
         loop {
@@ -133,7 +138,7 @@ impl AcpSessionClient {
         }
     }
 
-    /// Queues a second ACP prompt without joining the primary prompt lifecycle.
+    /// Queues a second ACP prompt in the current prompt generation.
     pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
         if prompt.cancellation.is_cancelled() {
             return Ok(());
@@ -141,8 +146,12 @@ impl AcpSessionClient {
         if self.has_terminal_error() {
             return Err(self.worker_stopped_error());
         }
+        let request_guard = self.prompt_lifecycle.register_steering_request()?;
         self.command_tx
-            .send(AcpSessionCommand::Steer { prompt })
+            .send(AcpSessionCommand::Steer {
+                prompt,
+                request_guard,
+            })
             .map_err(|_| self.worker_stopped_error())
     }
 
@@ -225,29 +234,50 @@ impl AcpSessionClient {
 
 #[derive(Default)]
 struct PromptLifecycle {
-    active: Mutex<Option<TurnCancellation>>,
+    active: Mutex<Option<PromptGeneration>>,
     settled: Condvar,
+}
+
+struct PromptGeneration {
+    cancellation: TurnCancellation,
+    accepting_steering: bool,
+    outstanding_requests: usize,
 }
 
 impl PromptLifecycle {
     fn admit(
         self: &Arc<Self>,
         cancellation: &TurnCancellation,
-    ) -> Result<PromptSettlementGuard, RuntimeError> {
+    ) -> Result<Option<PromptAdmission>, RuntimeError> {
         let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
         loop {
             match active.as_ref() {
                 None => {
-                    *active = Some(cancellation.clone());
-                    return Ok(PromptSettlementGuard {
-                        lifecycle: self.clone(),
+                    *active = Some(PromptGeneration {
+                        cancellation: cancellation.clone(),
+                        accepting_steering: true,
+                        outstanding_requests: 1,
                     });
+                    return Ok(Some(PromptAdmission {
+                        _settlement: PromptSettlementGuard {
+                            lifecycle: self.clone(),
+                        },
+                        request: PromptRequestGuard {
+                            lifecycle: self.clone(),
+                        },
+                    }));
                 }
-                Some(current) if current.is_cancelled() => {
-                    active = self
+                Some(current)
+                    if !current.accepting_steering || current.cancellation.is_cancelled() =>
+                {
+                    let (next_active, _) = self
                         .settled
-                        .wait(active)
+                        .wait_timeout(active, Duration::from_millis(100))
                         .expect("ACP prompt lifecycle poisoned");
+                    active = next_active;
+                    if cancellation.is_cancelled() {
+                        return Ok(None);
+                    }
                 }
                 Some(_) => {
                     return Err(RuntimeError::NotReady(
@@ -257,6 +287,42 @@ impl PromptLifecycle {
             }
         }
     }
+
+    fn register_steering_request(self: &Arc<Self>) -> Result<PromptRequestGuard, RuntimeError> {
+        let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
+        let Some(generation) = active
+            .as_mut()
+            .filter(|generation| generation.accepting_steering)
+        else {
+            return Err(RuntimeError::NotReady(
+                "ACP session has no active prompt to steer".to_string(),
+            ));
+        };
+        generation.outstanding_requests += 1;
+        Ok(PromptRequestGuard {
+            lifecycle: self.clone(),
+        })
+    }
+
+    fn finish_request(&self) {
+        let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
+        let Some(generation) = active.as_mut() else {
+            return;
+        };
+        generation.outstanding_requests = generation
+            .outstanding_requests
+            .checked_sub(1)
+            .expect("ACP prompt request count underflow");
+        if !generation.accepting_steering && generation.outstanding_requests == 0 {
+            active.take();
+            self.settled.notify_all();
+        }
+    }
+}
+
+struct PromptAdmission {
+    _settlement: PromptSettlementGuard,
+    request: PromptRequestGuard,
 }
 
 struct PromptSettlementGuard {
@@ -265,12 +331,30 @@ struct PromptSettlementGuard {
 
 impl Drop for PromptSettlementGuard {
     fn drop(&mut self) {
-        self.lifecycle
+        let mut active = self
+            .lifecycle
             .active
             .lock()
-            .expect("ACP prompt lifecycle poisoned")
-            .take();
-        self.lifecycle.settled.notify_all();
+            .expect("ACP prompt lifecycle poisoned");
+        let Some(generation) = active.as_mut() else {
+            return;
+        };
+        generation.accepting_steering = false;
+        if generation.outstanding_requests == 0 {
+            active.take();
+            self.lifecycle.settled.notify_all();
+        }
+    }
+}
+
+/// Keeps one ACP request in its originating prompt generation until its response arrives.
+pub(super) struct PromptRequestGuard {
+    lifecycle: Arc<PromptLifecycle>,
+}
+
+impl Drop for PromptRequestGuard {
+    fn drop(&mut self) {
+        self.lifecycle.finish_request();
     }
 }
 
@@ -286,9 +370,11 @@ pub(super) enum AcpSessionCommand {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
         done_tx: mpsc::Sender<Result<AgentPromptOutcome, RuntimeError>>,
+        request_guard: PromptRequestGuard,
     },
     Steer {
         prompt: AgentPrompt,
+        request_guard: PromptRequestGuard,
     },
     Delete {
         reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
