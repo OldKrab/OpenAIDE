@@ -1059,6 +1059,7 @@ fn task_projection(task_id: &str) -> TaskProjection {
             agent_name: "Agent".to_string(),
             isolation: IsolationKind::Local,
             workspace_root: "/workspace".to_string(),
+            project_id: None,
             project_root: Some("/workspace".to_string()),
             worktree_id: None,
             lifecycle: TaskLifecycle::Open,

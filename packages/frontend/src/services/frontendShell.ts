@@ -68,6 +68,11 @@ export type FrontendShell = {
   workspace?: {
     openFolder(): void;
   };
+  /** Native Project-root acquisition. Browser shells use the App Server folder browser. */
+  projects?: {
+    pickRoot(): Promise<{ path: string; label: string } | undefined>;
+    subscribeAddRequest?(listener: (root: { path: string; label: string }) => void): () => void;
+  };
   /** Shell-specific acquisition; shared Frontend receives only opaque handles. */
   files?: FrontendFileAcquisition;
   /** Opens a durable sent file using the host-native interaction. */

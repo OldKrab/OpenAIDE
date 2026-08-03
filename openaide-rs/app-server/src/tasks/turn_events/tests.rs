@@ -2002,6 +2002,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         agent_id: "codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/tmp/workspace".to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Open,

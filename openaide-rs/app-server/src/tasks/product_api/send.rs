@@ -5,7 +5,6 @@ use openaide_app_server_protocol::task::TaskSendParams;
 use uuid::Uuid;
 
 use crate::attachment_runtime::{AttachmentSendReservation, ResolvedSendAttachments};
-use crate::projects::ProjectIdentity;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
@@ -194,9 +193,8 @@ impl TaskProductApi {
         // Handles remain retryable until the user message is durably accepted.
         let attachments = attachment_reservation.commit_with(attachments);
         if promoted_new_task {
-            let project = ProjectIdentity::from_workspace_root(&committed_task.workspace_root);
             let defaults = NewTaskDefaultsSnapshot {
-                project_id: Some(project.project_id),
+                project_id: Some(crate::projects::task_record_project_id(&committed_task)),
                 agent_id: Some(committed_task.agent_id.clone().into()),
             };
             // Defaults are auxiliary initialization state. A preference write failure must not
@@ -348,11 +346,7 @@ fn record_composer_history(task: &mut TaskRecord, entry_id: &str, text: &str, ac
     if text.is_empty() {
         return;
     }
-    let project_id = crate::projects::project_id_for_workspace(
-        task.project_root
-            .as_deref()
-            .unwrap_or(task.workspace_root.as_str()),
-    );
+    let project_id = crate::projects::task_record_project_id(task);
     task.composer_history.record(
         crate::storage::composer_history::ComposerHistoryEntryRecord {
             entry_id: entry_id.to_string(),

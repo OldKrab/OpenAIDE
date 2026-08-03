@@ -8,6 +8,10 @@ import {
   AGENT_PROBE,
   NATIVE_SESSION_ARCHIVE,
   NATIVE_SESSION_RESTORE,
+  PROJECT_RECONNECT,
+  PROJECT_REGISTER,
+  PROJECT_REMOVE,
+  PROJECT_RENAME,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
   TASK_SET_PINNED,
@@ -53,6 +57,22 @@ export function createNavigationCallbacks({
   state,
 }: NavigationDependencies): NavigationCallbacks {
   return {
+    registerProject: async (root, label) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      await backendConnection.request(PROJECT_REGISTER, { root, label });
+    },
+    renameProject: async (projectId, label) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      await backendConnection.request(PROJECT_RENAME, { projectId: projectId as ProjectId, label });
+    },
+    reconnectProject: async (projectId, root) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      await backendConnection.request(PROJECT_RECONNECT, { projectId: projectId as ProjectId, root });
+    },
+    removeProject: async (projectId) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      await backendConnection.request(PROJECT_REMOVE, { projectId: projectId as ProjectId });
+    },
     archiveNativeSession: (session) => {
       mutateNativeSessionArchive("archive", session);
     },

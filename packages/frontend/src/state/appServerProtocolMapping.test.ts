@@ -1208,6 +1208,6 @@ function protocolSummary(overrides: Partial<ProtocolTaskSummary> = {}): Protocol
 function mappingContext() {
   return {
     agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "connected" as const }],
-    projects: [{ projectId: "project-1" as ProjectId, label: "App", workspaceRoot: "/workspace/App", available: true }],
+    projects: [{ projectId: "project-1" as ProjectId, label: "App", workspaceRoot: "/workspace/App", lifecycle: "active" as const, available: true }],
   };
 }

@@ -1,10 +1,7 @@
-use std::collections::HashMap;
-
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::snapshot::{ProjectCollectionSnapshot, ProjectSummary};
 
-use crate::projects::{ConfiguredProjectRoots, ProjectIdentity};
-use crate::storage::records::TaskRecord;
+use crate::projects::{ConfiguredProjectRoots, Project, ProjectCatalog, ProjectLifecycleFilter};
 use crate::storage::Store;
 use crate::worktrees::{ProjectWorktreeStatus, WorktreeManager};
 
@@ -14,8 +11,9 @@ pub trait ProjectCollectionSnapshotSource: Send + Sync {
 
 #[derive(Clone)]
 pub struct ProjectCollectionStore {
-    store: Store,
+    catalog: ProjectCatalog,
     configured_roots: ConfiguredProjectRoots,
+    store: Store,
 }
 
 impl ProjectCollectionStore {
@@ -28,6 +26,7 @@ impl ProjectCollectionStore {
         configured_roots: ConfiguredProjectRoots,
     ) -> Self {
         Self {
+            catalog: ProjectCatalog::new(store.clone()),
             store,
             configured_roots,
         }
@@ -36,80 +35,43 @@ impl ProjectCollectionStore {
 
 impl ProjectCollectionSnapshotSource for ProjectCollectionStore {
     fn snapshot(&self) -> Result<ProjectCollectionSnapshot, ProtocolError> {
-        let identities = project_identities(
-            self.store.list_tasks().map_err(snapshot_read_error)?,
-            &self.configured_roots,
-        );
+        self.catalog
+            .import_legacy_roots(
+                self.configured_roots
+                    .projects()
+                    .into_iter()
+                    .map(|project| project.workspace_root),
+            )
+            .map_err(snapshot_read_error)?;
+        let projects = self
+            .catalog
+            .projects(ProjectLifecycleFilter::All)
+            .map_err(snapshot_read_error)?;
         let manager = WorktreeManager::new(self.store.clone());
-        let projects = identities
+        let projects = projects
             .into_iter()
-            .map(|identity| {
+            .map(|project| {
                 let status = manager
-                    .project_status(std::path::Path::new(&identity.workspace_root))
+                    .project_status(std::path::Path::new(&project.root))
                     .map_err(snapshot_read_error)?;
-                Ok(project_summary(identity, status))
+                Ok(project_summary(project, status))
             })
             .collect::<Result<Vec<_>, ProtocolError>>()?;
         Ok(ProjectCollectionSnapshot { projects })
     }
 }
 
-fn project_identities(
-    records: Vec<TaskRecord>,
-    configured_roots: &ConfiguredProjectRoots,
-) -> Vec<ProjectIdentity> {
-    let mut latest_by_workspace = HashMap::<String, TaskRecord>::new();
-    for record in records {
-        let identity = ProjectIdentity::from_workspace_root(
-            record
-                .project_root
-                .as_deref()
-                .unwrap_or(&record.workspace_root),
-        );
-        let entry = latest_by_workspace
-            .entry(identity.workspace_root)
-            .or_insert_with(|| record.clone());
-        if project_sort_key(&record) > project_sort_key(entry) {
-            *entry = record;
-        }
-    }
-
-    let mut projects = configured_roots
-        .projects()
-        .into_iter()
-        .map(|project| ProjectIdentity::from_workspace_root(&project.workspace_root))
-        .collect::<Vec<_>>();
-    projects.extend(latest_by_workspace.into_values().map(|record| {
-        ProjectIdentity::from_workspace_root(
-            record
-                .project_root
-                .as_deref()
-                .unwrap_or(&record.workspace_root),
-        )
-    }));
-    projects.sort_by(|left, right| {
-        left.label
-            .cmp(&right.label)
-            .then_with(|| left.project_id.cmp(&right.project_id))
-    });
-    projects.dedup_by(|left, right| left.project_id == right.project_id);
-    projects
-}
-
-fn project_summary(identity: ProjectIdentity, status: ProjectWorktreeStatus) -> ProjectSummary {
+fn project_summary(project: Project, status: ProjectWorktreeStatus) -> ProjectSummary {
     ProjectSummary {
-        project_id: identity.project_id,
-        label: identity.label,
-        workspace_root: identity.workspace_root,
+        project_id: project.project_id,
+        label: project.label,
+        workspace_root: project.root,
+        lifecycle: project.lifecycle,
         available: status.available,
         worktree_repository_id: status.repository_id,
         project_worktree_id: status.project_worktree_id,
         worktree_error: status.discovery_error,
     }
-}
-
-fn project_sort_key(record: &TaskRecord) -> (&str, &str, &str) {
-    (&record.last_activity, &record.updated_at, &record.task_id)
 }
 
 fn snapshot_read_error(error: impl std::fmt::Display) -> ProtocolError {

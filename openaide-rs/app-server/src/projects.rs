@@ -6,8 +6,13 @@ use std::sync::{Arc, RwLock};
 use crate::protocol::model::IsolationKind;
 use crate::storage::Store;
 
+mod catalog;
 mod identity;
+mod product_api;
+pub use catalog::{Project, ProjectCatalog, ProjectLifecycleFilter};
 pub use identity::{project_id_for_workspace, ProjectIdentity};
+pub use openaide_app_server_protocol::snapshot::ProjectLifecycle;
+pub(crate) use product_api::{ProjectManagementService, ProjectManagementWorkflow};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectTaskContext {
@@ -15,6 +20,18 @@ pub struct ProjectTaskContext {
     pub workspace_root: String,
     pub label: String,
     pub isolation: IsolationKind,
+}
+
+/// Resolves durable Task ownership while retaining compatibility with path-owned legacy Tasks.
+pub(crate) fn task_record_project_id(task: &crate::storage::records::TaskRecord) -> ProjectId {
+    task.project_id.clone().unwrap_or_else(|| {
+        ProjectIdentity::from_workspace_root(
+            task.project_root
+                .as_deref()
+                .unwrap_or(task.workspace_root.as_str()),
+        )
+        .project_id
+    })
 }
 
 #[derive(Clone, Default)]
@@ -172,6 +189,7 @@ fn project_context_from_workspace(
 
 #[derive(Clone)]
 pub struct StorageProjectResolver {
+    catalog: ProjectCatalog,
     store: Store,
     configured_roots: ConfiguredProjectRoots,
 }
@@ -186,6 +204,7 @@ impl StorageProjectResolver {
         configured_roots: ConfiguredProjectRoots,
     ) -> Self {
         Self {
+            catalog: ProjectCatalog::new(store.clone()),
             store,
             configured_roots,
         }
@@ -197,6 +216,25 @@ impl ProjectResolver for StorageProjectResolver {
         &self,
         project_id: &ProjectId,
     ) -> Result<ProjectTaskContext, ProtocolError> {
+        if let Some(project) = self
+            .catalog
+            .project(project_id)
+            .map_err(|error| ProtocolError {
+                code: ProtocolErrorCode::Internal,
+                message: format!("Failed to resolve Project: {error}"),
+                recoverable: true,
+                target: None,
+            })?
+        {
+            if project.lifecycle == ProjectLifecycle::Active {
+                return Ok(ProjectTaskContext {
+                    project_id: project.project_id,
+                    workspace_root: project.root,
+                    label: project.label,
+                    isolation: IsolationKind::Local,
+                });
+            }
+        }
         if let Some(project) = self.configured_roots.resolve(project_id) {
             return Ok(project);
         }

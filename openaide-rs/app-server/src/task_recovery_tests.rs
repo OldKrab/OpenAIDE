@@ -84,6 +84,7 @@ fn task_record() -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace".to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Prepared {

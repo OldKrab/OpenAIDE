@@ -5,6 +5,165 @@ use crate::storage::Store;
 use super::*;
 
 #[test]
+fn registered_project_survives_catalog_reopen() {
+    let state = tempfile::tempdir().unwrap();
+    let project_root = state.path().join("workspaces/app");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let store = Store::open(state.path().join("state")).unwrap();
+
+    let registered = ProjectCatalog::new(store.clone())
+        .register_root(&project_root, None)
+        .unwrap();
+    let projects = ProjectCatalog::new(store)
+        .projects(ProjectLifecycleFilter::Active)
+        .unwrap();
+
+    assert_eq!(projects, vec![registered.clone()]);
+    assert_eq!(registered.label, "app");
+    assert_eq!(registered.root, project_root.to_string_lossy());
+    assert_eq!(registered.lifecycle, ProjectLifecycle::Active);
+}
+
+#[test]
+fn registering_the_same_root_reuses_the_existing_project() {
+    let state = tempfile::tempdir().unwrap();
+    let project_root = state.path().join("workspaces/app");
+    std::fs::create_dir_all(project_root.join("src")).unwrap();
+    let catalog = ProjectCatalog::new(Store::open(state.path().join("state")).unwrap());
+
+    let first = catalog.register_root(&project_root, None).unwrap();
+    let repeated = catalog
+        .register_root(&project_root.join("src/.."), Some("Replacement name"))
+        .unwrap();
+
+    assert_eq!(repeated, first);
+    assert_eq!(
+        catalog.projects(ProjectLifecycleFilter::All).unwrap(),
+        vec![first]
+    );
+}
+
+#[test]
+fn removed_project_is_restored_when_its_root_is_registered_again() {
+    let state = tempfile::tempdir().unwrap();
+    let project_root = state.path().join("workspaces/app");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let catalog = ProjectCatalog::new(Store::open(state.path().join("state")).unwrap());
+    let registered = catalog.register_root(&project_root, None).unwrap();
+
+    let removed = catalog.remove(&registered.project_id).unwrap();
+
+    assert_eq!(removed.lifecycle, ProjectLifecycle::Removed);
+    assert!(catalog
+        .projects(ProjectLifecycleFilter::Active)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        catalog.projects(ProjectLifecycleFilter::Removed).unwrap(),
+        vec![removed]
+    );
+
+    let restored = catalog.register_root(&project_root, None).unwrap();
+
+    assert_eq!(restored.project_id, registered.project_id);
+    assert_eq!(restored.lifecycle, ProjectLifecycle::Active);
+}
+
+#[test]
+fn first_catalog_read_migrates_project_from_archived_task_history() {
+    let state = tempfile::tempdir().unwrap();
+    let project_root = state.path().join("workspaces/legacy-app");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let store = Store::open(state.path().join("state")).unwrap();
+    let mut archived = task_record("task-archived", project_root.to_str().unwrap());
+    archived.lifecycle = crate::storage::records::TaskLifecycle::Archived;
+    store.write_task(&archived).unwrap();
+
+    let projects = ProjectCatalog::new(store)
+        .projects(ProjectLifecycleFilter::Active)
+        .unwrap();
+
+    assert_eq!(projects.len(), 1);
+    assert_eq!(
+        projects[0].project_id,
+        project_id_for_workspace(project_root.to_str().unwrap())
+    );
+    assert_eq!(projects[0].label, "legacy-app");
+    assert_eq!(projects[0].root, project_root.to_string_lossy());
+}
+
+#[test]
+fn project_can_be_renamed_without_changing_identity_or_root() {
+    let state = tempfile::tempdir().unwrap();
+    let project_root = state.path().join("workspaces/app");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let store = Store::open(state.path().join("state")).unwrap();
+    let catalog = ProjectCatalog::new(store.clone());
+    let registered = catalog.register_root(&project_root, None).unwrap();
+
+    let renamed = catalog
+        .rename(&registered.project_id, "  Client application  ")
+        .unwrap();
+
+    assert_eq!(renamed.project_id, registered.project_id);
+    assert_eq!(renamed.root, registered.root);
+    assert_eq!(renamed.label, "Client application");
+    assert_eq!(
+        ProjectCatalog::new(store)
+            .projects(ProjectLifecycleFilter::Active)
+            .unwrap(),
+        vec![renamed]
+    );
+}
+
+#[test]
+fn project_can_reconnect_to_a_new_root_without_changing_identity() {
+    let state = tempfile::tempdir().unwrap();
+    let old_root = state.path().join("workspaces/old-app");
+    let new_root = state.path().join("workspaces/moved-app");
+    std::fs::create_dir_all(&old_root).unwrap();
+    std::fs::create_dir_all(&new_root).unwrap();
+    let catalog = ProjectCatalog::new(Store::open(state.path().join("state")).unwrap());
+    let registered = catalog
+        .register_root(&old_root, Some("Application"))
+        .unwrap();
+
+    let reconnected = catalog
+        .reconnect(&registered.project_id, &new_root)
+        .unwrap();
+
+    assert_eq!(reconnected.project_id, registered.project_id);
+    assert_eq!(reconnected.label, "Application");
+    assert_eq!(reconnected.root, new_root.to_string_lossy());
+    assert_eq!(reconnected.lifecycle, ProjectLifecycle::Active);
+}
+
+#[test]
+fn task_context_resolution_uses_the_reconnected_project_root() {
+    let state = tempfile::tempdir().unwrap();
+    let old_root = state.path().join("workspaces/old-app");
+    let new_root = state.path().join("workspaces/moved-app");
+    std::fs::create_dir_all(&old_root).unwrap();
+    std::fs::create_dir_all(&new_root).unwrap();
+    let store = Store::open(state.path().join("state")).unwrap();
+    let catalog = ProjectCatalog::new(store.clone());
+    let registered = catalog
+        .register_root(&old_root, Some("Application"))
+        .unwrap();
+    catalog
+        .reconnect(&registered.project_id, &new_root)
+        .unwrap();
+
+    let context = StorageProjectResolver::new(store)
+        .resolve_task_context(&registered.project_id)
+        .unwrap();
+
+    assert_eq!(context.project_id, registered.project_id);
+    assert_eq!(context.workspace_root, new_root.to_string_lossy());
+    assert_eq!(context.label, "Application");
+}
+
+#[test]
 fn resolves_project_context_from_configured_roots_without_task_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -158,6 +317,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Open,

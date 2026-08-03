@@ -205,6 +205,29 @@ describe("app reducer composer state", () => {
     expect(state.newTask.selection.workspaceLabel).toBe("Renamed App");
   });
 
+  it("moves New Task selection away from a newly Removed Project", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "projects",
+      initialProjectId: "project-removed",
+      projects: [
+        { projectId: "project-removed", label: "Old", lifecycle: "active" },
+        { projectId: "project-active", label: "Current", lifecycle: "active" },
+      ],
+    });
+
+    state = appReducer(state, {
+      type: "projects",
+      projects: [
+        { projectId: "project-removed", label: "Old", lifecycle: "removed" },
+        { projectId: "project-active", label: "Current", lifecycle: "active" },
+      ],
+    });
+
+    expect(state.newTask.selection.projectId).toBe("project-active");
+    expect(state.projects).toHaveLength(2);
+  });
+
   it("keeps loaded new-task Agent options when the same project id is selected again", () => {
     let state = createInitialState();
     state = appReducer(state, {

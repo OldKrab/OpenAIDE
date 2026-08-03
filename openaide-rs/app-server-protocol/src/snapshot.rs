@@ -114,6 +114,8 @@ pub struct ProjectSummary {
     pub project_id: ProjectId,
     pub label: String,
     pub workspace_root: String,
+    #[serde(default)]
+    pub lifecycle: ProjectLifecycle,
     pub available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_repository_id: Option<WorktreeRepositoryId>,
@@ -121,6 +123,14 @@ pub struct ProjectSummary {
     pub project_worktree_id: Option<WorktreeId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectLifecycle {
+    #[default]
+    Active,
+    Removed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

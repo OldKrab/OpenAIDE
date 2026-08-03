@@ -1396,6 +1396,37 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "project-task-group-new" })).toHaveLength(0);
   });
 
+  it("keeps removed Projects in a separate reversible management view", async () => {
+    const reconnectProject = vi.fn(async () => undefined);
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessions={nativeSessions()}
+        onReconnectProject={reconnectProject}
+        onRegisterProject={vi.fn(async () => undefined)}
+        projects={[{ projectId: "project_active", label: "Active" }]}
+        removedProjects={[{
+          projectId: "project_removed",
+          label: "Old app",
+          lifecycle: "removed",
+          workspaceRoot: "/workspace/old-app",
+          available: true,
+        }]}
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    act(() => buttonWithText(tree, "Removed").props.onClick());
+
+    expect(textContent(tree)).toContain("Removed Projects");
+    expect(textContent(tree)).toContain("Old app");
+    await act(async () => buttonWithText(tree, "Restore").props.onClick());
+    expect(reconnectProject).toHaveBeenCalledWith("project_removed", "/workspace/old-app");
+    expect(tree.root.findAllByProps({ "aria-label": "Active" })).toHaveLength(0);
+  });
+
   it("shows the first five workspace groups and reveals more workspaces in batches", () => {
     const projects = Array.from({ length: 7 }, (_, index) => ({
       projectId: `project_${index + 1}`,

@@ -8,6 +8,43 @@ use crate::storage::Store;
 use super::*;
 
 #[test]
+fn projects_snapshot_reads_durable_catalog_without_task_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let registered = crate::projects::ProjectCatalog::new(store.clone())
+        .register_root(&project, Some("Product"))
+        .unwrap();
+
+    let snapshot = ProjectCollectionStore::new(store).snapshot().unwrap();
+
+    assert_eq!(snapshot.projects.len(), 1);
+    assert_eq!(snapshot.projects[0].project_id, registered.project_id);
+    assert_eq!(snapshot.projects[0].label, "Product");
+    assert_eq!(snapshot.projects[0].workspace_root, registered.root);
+}
+
+#[test]
+fn projects_snapshot_includes_removed_projects_for_management_surfaces() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let catalog = crate::projects::ProjectCatalog::new(store.clone());
+    let registered = catalog.register_root(&project, None).unwrap();
+    catalog.remove(&registered.project_id).unwrap();
+
+    let snapshot = ProjectCollectionStore::new(store).snapshot().unwrap();
+
+    assert_eq!(snapshot.projects.len(), 1);
+    assert_eq!(
+        snapshot.projects[0].lifecycle,
+        openaide_app_server_protocol::snapshot::ProjectLifecycle::Removed
+    );
+}
+
+#[test]
 fn includes_configured_roots_without_task_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -140,7 +177,7 @@ fn deduplicates_projects_by_canonical_workspace_root() {
 }
 
 #[test]
-fn omits_archived_and_tombstoned_records() {
+fn preserves_projects_from_archived_history_and_omits_tombstoned_records() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut archived = task_record(
@@ -160,7 +197,8 @@ fn omits_archived_and_tombstoned_records() {
 
     let snapshot = ProjectCollectionStore::new(store).snapshot().unwrap();
 
-    assert!(snapshot.projects.is_empty());
+    assert_eq!(snapshot.projects.len(), 1);
+    assert_eq!(snapshot.projects[0].label, "archived");
 }
 
 #[test]
@@ -216,6 +254,7 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Open,

@@ -10,6 +10,7 @@ mod client_handlers;
 mod diagnostics_handlers;
 pub mod local_http;
 mod messages;
+mod project_handlers;
 mod responses;
 mod routing;
 mod server_request_handlers;
@@ -39,7 +40,7 @@ use crate::agent::product_api::{
 use crate::app_lifecycle::{AppLifecycle, InitializeAdmission, LifecycleState};
 use crate::client_lifecycle::{AppServerTime, ClientHub, ConnectionId};
 use crate::diagnostics::RuntimeDiagnosticsWorkflow;
-use crate::projects::ConfiguredProjectRoots;
+use crate::projects::{ConfiguredProjectRoots, ProjectManagementWorkflow};
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestRuntime;
 use crate::settings::{
@@ -78,6 +79,7 @@ pub struct RpcGateway {
     skills_settings: Arc<dyn SkillsSettingsWorkflow>,
     app_preferences: Arc<dyn AppPreferencesWorkflow>,
     runtime_settings: Arc<dyn RuntimeSettingsWorkflow>,
+    project_management: Arc<dyn ProjectManagementWorkflow>,
     agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
     attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
     task_acquire: Arc<dyn TaskAcquireWorkflow>,
@@ -154,6 +156,7 @@ impl RpcGateway {
         skills_settings: Arc<dyn SkillsSettingsWorkflow>,
         app_preferences: Arc<dyn AppPreferencesWorkflow>,
         runtime_settings: Arc<dyn RuntimeSettingsWorkflow>,
+        project_management: Arc<dyn ProjectManagementWorkflow>,
         agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
         attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
         task_acquire: Arc<dyn TaskAcquireWorkflow>,
@@ -190,6 +193,7 @@ impl RpcGateway {
             skills_settings,
             app_preferences,
             runtime_settings,
+            project_management,
             agent_list_sessions,
             attachments,
             task_acquire,

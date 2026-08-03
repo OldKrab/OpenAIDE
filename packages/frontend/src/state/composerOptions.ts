@@ -29,6 +29,8 @@ export type ProjectOption = {
   projectId: string;
   label: string;
   workspaceRoot?: string;
+  /** Absent only in legacy shell-provided project fixtures; App Server snapshots always set it. */
+  lifecycle?: "active" | "removed";
   available?: boolean;
   worktreeRepositoryId?: string;
   projectWorktreeId?: string;

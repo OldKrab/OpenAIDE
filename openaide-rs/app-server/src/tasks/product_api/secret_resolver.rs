@@ -13,7 +13,6 @@ use crate::agent::acp_schema::{
 };
 use crate::agent::AgentSecretResolver;
 use crate::client_lifecycle::AppServerTime;
-use crate::projects::ProjectIdentity;
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestRuntime;
 use crate::storage::Store;
@@ -93,8 +92,7 @@ impl AgentSecretResolver for TaskSecretResolver {
             Some(project_id) => project_id.clone(),
             None => {
                 let task = self.store.read_task(self.task_id.as_str())?;
-                let project_root = task.project_root.as_deref().unwrap_or(&task.workspace_root);
-                ProjectIdentity::from_workspace_root(project_root).project_id
+                crate::projects::task_record_project_id(&task)
             }
         };
         let definitions = self.store.effective_mcp_servers(Some(&project_id))?;

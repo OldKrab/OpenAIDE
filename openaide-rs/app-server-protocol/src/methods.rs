@@ -26,6 +26,10 @@ use crate::client::{
 };
 use crate::diagnostics::{RuntimeDiagnosticsParams, RuntimeDiagnosticsResult};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
+use crate::project::{
+    ProjectMutationResult, ProjectReconnectParams, ProjectRegisterParams, ProjectRemoveParams,
+    ProjectRenameParams,
+};
 use crate::server_requests::{
     PendingRequestResolveParams, PendingRequestResolveResult, ShellResolveFileRevealParams,
     ShellResolveFileRevealResult,
@@ -307,6 +311,30 @@ protocol_method!(
     WORKSPACE_LIST_DIRECTORY,
     WorkspaceListDirectoryParams,
     WorkspaceListDirectoryResult
+);
+protocol_method!(
+    ProjectRegister,
+    PROJECT_REGISTER,
+    ProjectRegisterParams,
+    ProjectMutationResult
+);
+protocol_method!(
+    ProjectRename,
+    PROJECT_RENAME,
+    ProjectRenameParams,
+    ProjectMutationResult
+);
+protocol_method!(
+    ProjectReconnect,
+    PROJECT_RECONNECT,
+    ProjectReconnectParams,
+    ProjectMutationResult
+);
+protocol_method!(
+    ProjectRemove,
+    PROJECT_REMOVE,
+    ProjectRemoveParams,
+    ProjectMutationResult
 );
 protocol_method!(
     WorktreeRefresh,

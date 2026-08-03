@@ -51,6 +51,10 @@ use crate::ids::{
     FileBrowserRootId, MessageId, ProjectId, RequestId, ServerId, StateRootId, TaskId,
     TaskListCursor, TurnId, WorktreeId, WorktreeOperationId, WorktreeRepositoryId,
 };
+use crate::project::{
+    ProjectMutationResult, ProjectReconnectParams, ProjectRegisterParams, ProjectRemoveParams,
+    ProjectRenameParams,
+};
 use crate::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
@@ -84,8 +88,8 @@ use crate::snapshot::{
     ChatItem, ChatItemStatus, ChatRole, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
     NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
-    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
-    QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectLifecycle, ProjectSummary,
+    ProtocolVersion, QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     SubagentActivitySnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
     TaskAttentionEvent, TaskAttentionReason, TaskContextUsage, TaskHistorySyncSnapshot,
@@ -457,6 +461,12 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<NewTaskDefaultsSnapshot>(output, config);
     push_decl::<ProjectCollectionSnapshot>(output, config);
     push_decl::<ProjectSummary>(output, config);
+    push_decl::<ProjectLifecycle>(output, config);
+    push_decl::<ProjectRegisterParams>(output, config);
+    push_decl::<ProjectRenameParams>(output, config);
+    push_decl::<ProjectReconnectParams>(output, config);
+    push_decl::<ProjectRemoveParams>(output, config);
+    push_decl::<ProjectMutationResult>(output, config);
     push_decl::<AgentCollectionSnapshot>(output, config);
     push_decl::<AgentSummary>(output, config);
     push_decl::<AgentStatus>(output, config);

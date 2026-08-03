@@ -50,11 +50,7 @@ pub(super) fn query(
 }
 
 fn task_project_id(task: &crate::storage::records::TaskRecord) -> String {
-    crate::projects::project_id_for_workspace(
-        task.project_root
-            .as_deref()
-            .unwrap_or(task.workspace_root.as_str()),
-    )
-    .as_str()
-    .to_string()
+    crate::projects::task_record_project_id(task)
+        .as_str()
+        .to_string()
 }

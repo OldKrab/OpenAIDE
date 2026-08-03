@@ -187,6 +187,27 @@ describe("AppSurfaces callback wiring", () => {
     expect(visibleRows("Other")).toHaveLength(10);
   });
 
+  it("keeps Removed Projects out of normal Desktop Project Navigation", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: DESKTOP_SHELL } as AppController["bootstrap"];
+    const active = { projectId: "project_active", label: "Active", lifecycle: "active" as const };
+    const removed = { projectId: "project_removed", label: "Removed", lifecycle: "removed" as const };
+    controller.state.projects = [active, removed];
+    controller.view.navigation.projects = controller.state.projects;
+    const removedTask = snapshot("task_removed").task;
+    removedTask.project_id = removed.projectId;
+    controller.visibleTasks = [removedTask];
+
+    render(controller);
+
+    const sidebar = latestMockProps<React.ComponentProps<typeof import("./Sidebar").Sidebar>>(
+      surfaceMocks.sidebar,
+    );
+    expect(sidebar?.projects).toEqual([active]);
+    expect(sidebar?.removedProjects).toEqual([removed]);
+    expect(sidebar?.tasks).toEqual([]);
+  });
+
   it("limits current-Project Task Navigation to Projects in the workspace", () => {
     const controller = controllerFor("navigation");
     const currentProject = { projectId: "project_current", label: "ai-bench-runner" };
@@ -1269,6 +1290,10 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
     bootstrap: surface === "invalid" ? { surface } : { surface, shell: VSCODE_SHELL },
     callbacks: {
       navigation: {
+        registerProject: vi.fn(),
+        renameProject: vi.fn(),
+        reconnectProject: vi.fn(),
+        removeProject: vi.fn(),
         archiveNativeSession: vi.fn(),
         archiveTask: vi.fn(),
         changeSearch: vi.fn(),

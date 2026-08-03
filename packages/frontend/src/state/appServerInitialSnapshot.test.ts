@@ -28,7 +28,7 @@ describe("App Server initial snapshot ingestion", () => {
     }));
 
     expect(ingestion.actions).toMatchObject([
-      { type: "projects", projects: [{ projectId: "project-1", label: "Project" }] },
+      { type: "projects", projects: [{ projectId: "project-1", label: "Project", lifecycle: "active" }] },
       { type: "newTask:agent", agentId: "codex" },
       { type: "settings:runtimeSettings", settings: { developer: { acp_trace: { enabled: true } } } },
       {
@@ -64,8 +64,8 @@ describe("App Server initial snapshot ingestion", () => {
       },
       projects: {
         projects: [
-          { projectId: "project-1" as ProjectId, label: "API", workspaceRoot: "/workspace/API", available: true },
-          { projectId: "project-2" as ProjectId, label: "App", workspaceRoot: "/workspace/App", available: true },
+          { projectId: "project-1" as ProjectId, label: "API", workspaceRoot: "/workspace/API", lifecycle: "active", available: true },
+          { projectId: "project-2" as ProjectId, label: "App", workspaceRoot: "/workspace/App", lifecycle: "active", available: true },
         ],
       },
       agents: {
@@ -92,6 +92,7 @@ describe("App Server initial snapshot ingestion", () => {
           projectId: "project-1",
           label: "API",
           workspaceRoot: "/workspace/API",
+          lifecycle: "active",
           available: true,
           projectWorktreeId: undefined,
           worktreeError: undefined,
@@ -101,6 +102,7 @@ describe("App Server initial snapshot ingestion", () => {
           projectId: "project-2",
           label: "App",
           workspaceRoot: "/workspace/App",
+          lifecycle: "active",
           available: true,
           projectWorktreeId: undefined,
           worktreeError: undefined,
@@ -131,7 +133,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     },
     newTaskDefaults: {},
     projects: {
-      projects: [{ projectId: "project-1" as ProjectId, label: "Project", workspaceRoot: "/workspace/Project", available: true }],
+      projects: [{ projectId: "project-1" as ProjectId, label: "Project", workspaceRoot: "/workspace/Project", lifecycle: "active", available: true }],
     },
     agents: {
       agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "connected" }],

@@ -2604,6 +2604,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
             "projectId": project_id_for_workspace(workspace_root),
             "label": "configured-project",
             "workspaceRoot": workspace_root,
+            "lifecycle": "active",
             "available": true,
         }])
     );
@@ -2778,6 +2779,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Open,

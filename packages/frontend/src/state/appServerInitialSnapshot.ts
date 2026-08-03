@@ -39,6 +39,7 @@ export function actionsFromInitialSnapshot(
     projectId: project.projectId,
     label: project.label,
     workspaceRoot: project.workspaceRoot,
+    lifecycle: project.lifecycle ?? "active",
     available: project.available,
     worktreeRepositoryId: project.worktreeRepositoryId ?? undefined,
     projectWorktreeId: project.projectWorktreeId ?? undefined,

@@ -1,4 +1,4 @@
-use openaide_app_server_protocol::ids::ClientInstanceId;
+use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
@@ -413,6 +413,9 @@ pub struct TaskRecord {
     pub agent_name: String,
     pub isolation: IsolationKind,
     pub workspace_root: String,
+    /// Durable Project identity. Legacy Tasks omit it and fall back to their Project root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
     /// Stable Project identity root; differs from `workspace_root` for Worktree Tasks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
@@ -487,6 +490,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             isolation: IsolationKind,
             workspace_root: String,
             #[serde(default)]
+            project_id: Option<ProjectId>,
+            #[serde(default)]
             project_root: Option<String>,
             #[serde(default)]
             worktree_id: Option<String>,
@@ -547,6 +552,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             agent_name: stored.agent_name,
             isolation: stored.isolation,
             workspace_root: stored.workspace_root,
+            project_id: stored.project_id,
             project_root: stored.project_root,
             worktree_id: stored.worktree_id,
             lifecycle,

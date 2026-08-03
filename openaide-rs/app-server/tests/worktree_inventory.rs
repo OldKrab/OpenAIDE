@@ -649,6 +649,7 @@ fn task_record(
         agent_id: "codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace.to_string_lossy().to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: TaskLifecycle::Open,

@@ -143,6 +143,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             agent_id: "codex".to_string(),
             isolation: IsolationKind::Local,
             workspace_root: tmp.path().to_string_lossy().to_string(),
+            project_id: None,
             project_root: None,
             worktree_id: None,
             lifecycle: openaide_app_server::storage::records::TaskLifecycle::Open,

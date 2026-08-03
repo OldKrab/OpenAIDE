@@ -21,6 +21,10 @@ import {
   NATIVE_SESSION_ARCHIVE,
   NATIVE_SESSION_RESTORE,
   PENDING_REQUEST_RESOLVE,
+  PROJECT_RECONNECT,
+  PROJECT_REGISTER,
+  PROJECT_REMOVE,
+  PROJECT_RENAME,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILL_DETAILS,
@@ -3677,6 +3681,23 @@ describe("app controller callbacks", () => {
 
     expect(dispatch).not.toHaveBeenCalled();
     expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("routes Project management through the App Server catalog methods", async () => {
+    const request = vi.fn(async () => ({ project: {} }));
+    const navigation = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+    }).navigation;
+
+    await navigation.registerProject("/workspace/app", "App");
+    await navigation.renameProject("project-1", "Renamed");
+    await navigation.reconnectProject("project-1", "/workspace/moved");
+    await navigation.removeProject("project-1");
+
+    expect(request).toHaveBeenNthCalledWith(1, PROJECT_REGISTER, { root: "/workspace/app", label: "App" });
+    expect(request).toHaveBeenNthCalledWith(2, PROJECT_RENAME, { projectId: "project-1", label: "Renamed" });
+    expect(request).toHaveBeenNthCalledWith(3, PROJECT_RECONNECT, { projectId: "project-1", root: "/workspace/moved" });
+    expect(request).toHaveBeenNthCalledWith(4, PROJECT_REMOVE, { projectId: "project-1" });
   });
 
 });

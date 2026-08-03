@@ -37,6 +37,7 @@ struct StoreInner {
     recovery: RecoveryClassification,
     open_guard: StorageOpenGuard,
     settings_write_lock: Mutex<()>,
+    project_write_lock: Mutex<()>,
     worktree_write_lock: Mutex<()>,
     /// Sole durable owner for Task, Chat, and Tool-detail state.
     task_journal: task_journal::TaskJournalStore,
@@ -122,6 +123,7 @@ impl Store {
                 recovery: open.recovery,
                 open_guard: open.guard,
                 settings_write_lock: Mutex::new(()),
+                project_write_lock: Mutex::new(()),
                 worktree_write_lock: Mutex::new(()),
                 task_journal,
                 task_commit_handler,
@@ -205,6 +207,13 @@ impl Store {
             .settings_write_lock
             .lock()
             .expect("settings write lock poisoned")
+    }
+
+    pub(crate) fn lock_project_write(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .project_write_lock
+            .lock()
+            .expect("Project Catalog write lock poisoned")
     }
 
     pub(crate) fn lock_worktree_write(&self) -> std::sync::MutexGuard<'_, ()> {

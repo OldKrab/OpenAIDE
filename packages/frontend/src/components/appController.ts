@@ -473,6 +473,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
               projectId: project.projectId as ProjectId,
               label: project.label,
               workspaceRoot: project.workspaceRoot ?? "",
+              lifecycle: project.lifecycle ?? "active",
               available: project.available !== false,
               worktreeRepositoryId: project.worktreeRepositoryId as WorktreeRepositoryId | undefined,
               projectWorktreeId: project.projectWorktreeId as WorktreeId | undefined,

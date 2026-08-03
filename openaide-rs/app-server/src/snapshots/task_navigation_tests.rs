@@ -27,6 +27,17 @@ fn task_summary_uses_canonical_project_identity() {
 }
 
 #[test]
+fn task_summary_preserves_durable_project_identity_after_reconnect() {
+    let mut record = task_record("task-reconnected", "Task", "2026-01-01T00:00:00.000Z");
+    record.project_id = Some(ProjectId::from("project-durable"));
+    record.project_root = Some("/workspace/moved-app".to_string());
+
+    let summary = project_task_summary_with_has_messages(record, false);
+
+    assert_eq!(summary.project_id, ProjectId::from("project-durable"));
+}
+
+#[test]
 fn preparing_task_projects_preparing_status() {
     let mut record = task_record("task-preparing", "New task", "2026-01-01T00:00:00.000Z");
     record.preparation = TaskPreparationRecord::Preparing;
@@ -457,6 +468,7 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/a".to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Open,

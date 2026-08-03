@@ -281,6 +281,7 @@ impl ProjectCollectionSnapshotSource for StaticProjectCollection {
                 project_id: "project-1".into(),
                 label: "Project".to_string(),
                 workspace_root: "/workspace/project".to_string(),
+                lifecycle: openaide_app_server_protocol::snapshot::ProjectLifecycle::Active,
                 available: true,
                 worktree_repository_id: None,
                 project_worktree_id: None,

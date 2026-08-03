@@ -260,7 +260,7 @@ describe("app controller mounted lifecycle", () => {
     initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
     initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
     initializedSnapshot.projects = {
-      projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
+      projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", lifecycle: "active", available: true }],
     };
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
@@ -355,7 +355,7 @@ describe("app controller mounted lifecycle", () => {
     initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
     initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
     initializedSnapshot.projects = {
-      projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
+      projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", lifecycle: "active", available: true }],
     };
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
@@ -712,8 +712,8 @@ describe("app controller mounted lifecycle", () => {
     initializedSnapshot.newTaskDefaults.projectId = "project_2" as never;
     initializedSnapshot.projects = {
       projects: [
-        { projectId: "project_1" as never, label: "Web", workspaceRoot: "/workspace/web", available: true },
-        { projectId: "project_2" as never, label: "API", workspaceRoot: "/workspace/api", available: true },
+        { projectId: "project_1" as never, label: "Web", workspaceRoot: "/workspace/web", lifecycle: "active", available: true },
+        { projectId: "project_2" as never, label: "API", workspaceRoot: "/workspace/api", lifecycle: "active", available: true },
       ],
     };
     backendConnection = {
@@ -734,7 +734,7 @@ describe("app controller mounted lifecycle", () => {
         projectId: "project_2",
         label: "API",
         workspaceRoot: "/workspace/api",
-        available: true,
+        lifecycle: "active", available: true,
       });
     });
 
@@ -3301,6 +3301,15 @@ function clientSnapshot(
     agents: {
       agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", status: "connected" }],
     },
+    projects: {
+      projects: [{
+        projectId: "project_1" as never,
+        label: "Project",
+        workspaceRoot: "/workspace/project",
+        lifecycle: "active",
+        available: true,
+      }],
+    },
     settings: {
       sections: options.settingsSections ?? [],
       preferences: options.appPreferences ?? null,
@@ -3410,7 +3419,15 @@ function nonTaskSubscriptionSnapshot(
       scope,
       snapshot: {
         kind: "projects" as const,
-        projects: { projects: [] },
+        projects: {
+          projects: [{
+            projectId: "project_1" as never,
+            label: "Project",
+            workspaceRoot: "/workspace/project",
+            lifecycle: "active" as const,
+            available: true,
+          }],
+        },
       },
     };
   }

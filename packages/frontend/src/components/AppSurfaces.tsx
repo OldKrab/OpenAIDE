@@ -19,14 +19,20 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const { appServerError, navigation, settings } = view;
   // The App Server Project catalog is global; current-Project shells expose only
   // the ordered Project identities represented by this App Shell workspace.
+  const activeNavigationProjects = navigation.projects.filter((project) => project.lifecycle !== "removed");
+  const removedNavigationProjects = navigation.projects.filter((project) => project.lifecycle === "removed");
+  const removedNavigationProjectIds = new Set(removedNavigationProjects.map((project) => project.projectId));
+  const visibleNavigationTasks = visibleTasks.filter(
+    (task) => !task.project_id || !removedNavigationProjectIds.has(task.project_id),
+  );
   const currentNavigationProjectIds = bootstrap.surface !== "invalid"
     && bootstrap.shell.navigationMode === "currentProject"
     ? bootstrap.projectIds ?? (bootstrap.projectId ? [bootstrap.projectId] : undefined)
     : undefined;
   const navigationProjects = currentNavigationProjectIds === undefined
-    ? navigation.projects
+    ? activeNavigationProjects
     : currentNavigationProjectIds.flatMap((projectId) => {
-        const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
+        const project = activeNavigationProjects.find((candidate) => candidate.projectId === projectId);
         return project ? [project] : [];
       });
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
@@ -212,6 +218,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
           onManageWorktrees={manageWorktrees}
+          onReconnectProject={callbacks.navigation.reconnectProject}
+          onRegisterProject={callbacks.navigation.registerProject}
+          onRemoveProject={callbacks.navigation.removeProject}
+          onRenameProject={callbacks.navigation.renameProject}
           onNewTask={callbacks.navigation.openNewTask}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
           onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
@@ -227,10 +237,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSettings={() => callbacks.navigation.openSettings()}
           onToggleArchived={callbacks.navigation.toggleArchived}
           projects={navigationProjects}
+          removedProjects={removedNavigationProjects}
           searchQuery={navigation.searchQuery}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
-          tasks={visibleTasks}
+          tasks={visibleNavigationTasks}
+          workspaceBrowser={callbacks.newTask.workspaceBrowser}
         />
       </main>
     );
@@ -316,6 +328,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onArchiveTask={callbacks.navigation.archiveTask}
         onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
         onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
+        onReconnectProject={callbacks.navigation.reconnectProject}
+        onRegisterProject={callbacks.navigation.registerProject}
+        onRemoveProject={callbacks.navigation.removeProject}
+        onRenameProject={callbacks.navigation.renameProject}
         onNewTask={openNewTaskFromNavigation}
         onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
         onOpenTask={closeAfter(callbacks.navigation.openTask)}
@@ -329,11 +345,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onSearchChange={callbacks.navigation.changeSearch}
         onSettings={closeAfter(() => callbacks.navigation.openSettings())}
         onToggleArchived={callbacks.navigation.toggleArchived}
-        projects={navigation.projects}
+        projects={navigationProjects}
+        removedProjects={removedNavigationProjects}
         searchQuery={navigation.searchQuery}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
-        tasks={visibleTasks}
+        tasks={visibleNavigationTasks}
+        workspaceBrowser={callbacks.newTask.workspaceBrowser}
       />
     );
     return (

@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
 use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
-use crate::projects::ProjectIdentity;
 use crate::storage::records::TaskRecord;
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 
@@ -195,10 +194,7 @@ impl TaskProductApi {
                 .iter()
                 .filter(|task| !task.tombstoned)
                 .map(|task| {
-                    let project_id = ProjectIdentity::from_workspace_root(
-                        task.project_root.as_deref().unwrap_or(&task.workspace_root),
-                    )
-                    .project_id;
+                    let project_id = crate::projects::task_record_project_id(task);
                     (project_id.as_str().to_string(), task.workspace_root.clone())
                 }),
         );
@@ -385,12 +381,7 @@ impl TaskProductApi {
                 !task.tombstoned
                     && task.lifecycle.is_open()
                     && enabled_agents.contains(&task.agent_id)
-                    && ProjectIdentity::from_workspace_root(
-                        task.project_root.as_deref().unwrap_or(&task.workspace_root),
-                    )
-                    .project_id
-                    .as_str()
-                        == project_id
+                    && crate::projects::task_record_project_id(task).as_str() == project_id
             })
             .map(|task| crate::time::activity_millis(&task.last_activity))
             .collect::<Vec<_>>();
@@ -447,12 +438,7 @@ impl TaskProductApi {
                 !task.tombstoned
                     && task.lifecycle.is_open()
                     && enabled_agents.contains(&task.agent_id)
-                    && ProjectIdentity::from_workspace_root(
-                        task.project_root.as_deref().unwrap_or(&task.workspace_root),
-                    )
-                    .project_id
-                    .as_str()
-                        == project_id
+                    && crate::projects::task_record_project_id(task).as_str() == project_id
             })
             .count();
         let session_count = self

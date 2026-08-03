@@ -1,6 +1,33 @@
 use serde_json::json;
 
 use super::*;
+
+#[test]
+fn project_summary_serializes_lifecycle_and_defaults_legacy_records_to_active() {
+    let removed = ProjectSummary {
+        project_id: ProjectId::from("project-1"),
+        label: "Application".to_string(),
+        workspace_root: "/workspace/app".to_string(),
+        lifecycle: ProjectLifecycle::Removed,
+        available: false,
+        worktree_repository_id: None,
+        project_worktree_id: None,
+        worktree_error: None,
+    };
+
+    assert_eq!(
+        serde_json::to_value(removed).unwrap()["lifecycle"],
+        serde_json::json!("removed")
+    );
+    let legacy: ProjectSummary = serde_json::from_value(serde_json::json!({
+        "projectId": "project-legacy",
+        "label": "Legacy",
+        "workspaceRoot": "/workspace/legacy",
+        "available": true
+    }))
+    .unwrap();
+    assert_eq!(legacy.lifecycle, ProjectLifecycle::Active);
+}
 use crate::client::SettingsSection;
 
 #[test]

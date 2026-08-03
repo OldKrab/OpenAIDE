@@ -8,7 +8,7 @@ use crate::agent::{
 use crate::app_lifecycle::AppLifecycle;
 use crate::client_lifecycle::{ClientHub, ClientLivenessPolicy};
 use crate::diagnostics::RuntimeDiagnosticsService;
-use crate::projects::{ConfiguredProjectRoots, StorageProjectResolver};
+use crate::projects::{ConfiguredProjectRoots, ProjectManagementService, StorageProjectResolver};
 use crate::protocol_edge::{AppServerProbeFacts, RpcGateway};
 use crate::server_requests::ServerRequestRuntime;
 use crate::settings::{
@@ -152,6 +152,7 @@ pub(super) fn gateway(
         skills_settings,
         app_preferences,
         runtime_settings,
+        Arc::new(ProjectManagementService::new(store.clone())),
         task_product_api.clone(),
         task_product_api.clone(),
         task_product_api.clone(),

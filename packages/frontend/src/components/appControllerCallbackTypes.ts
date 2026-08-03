@@ -43,6 +43,10 @@ export type AppControllerCallbacks = {
 };
 
 export type NavigationCallbacks = {
+  registerProject: (root: string, label?: string) => Promise<void>;
+  renameProject: (projectId: string, label: string) => Promise<void>;
+  reconnectProject: (projectId: string, root: string) => Promise<void>;
+  removeProject: (projectId: string) => Promise<void>;
   archiveNativeSession: (session: AgentListedSession) => void;
   archiveTask: (taskId: string) => void;
   changeSearch: (query: string) => void;

@@ -415,12 +415,19 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
     case "taskChat:liveText":
       return applyTaskLiveTextPresentation(state, action.taskId, action);
     case "projects": {
+      const activeProjects = action.projects.filter((project) => project.lifecycle !== "removed");
       const selected = state.newTask.selection.projectId
-        ? action.projects.find((project) => project.projectId === state.newTask.selection.projectId)
-        : selectedProject(action.projects, action.initialProjectId);
+        ? activeProjects.find((project) => project.projectId === state.newTask.selection.projectId)
+          ?? selectedProject(activeProjects, action.initialProjectId)
+        : selectedProject(activeProjects, action.initialProjectId);
       const selection = selected
         ? selectionWithProject(state.newTask.selection, selected)
-        : state.newTask.selection;
+        : {
+            ...state.newTask.selection,
+            projectId: undefined,
+            workspaceRoot: "",
+            workspaceLabel: "",
+          };
       return {
         ...state,
         projects: action.projects,

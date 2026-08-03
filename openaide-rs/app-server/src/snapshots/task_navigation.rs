@@ -9,7 +9,7 @@ use openaide_app_server_protocol::task::TaskNavigationSection;
 
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::native_sessions::catalog::NativeSessionCatalog;
-use crate::projects::{ConfiguredProjectRoots, ProjectIdentity};
+use crate::projects::{task_record_project_id, ConfiguredProjectRoots, ProjectIdentity};
 use crate::protocol::model::{TaskStatus, TaskSummary as LegacyTaskSummary};
 use crate::storage::records::{
     TaskAttentionEvent as StoredTaskAttentionEvent,
@@ -306,15 +306,10 @@ pub(crate) fn project_task_summary_with_has_messages(
     let status = project_status_with_preparation(record.status, &record.preparation);
     let lifecycle = project_task_lifecycle(&record.lifecycle);
     let workspace_available = std::path::Path::new(&record.workspace_root).is_dir();
+    let project_id = task_record_project_id(&record);
     TaskSummary {
         task_id: TaskId::from(record.task_id),
-        project_id: ProjectIdentity::from_workspace_root(
-            record
-                .project_root
-                .as_deref()
-                .unwrap_or(&record.workspace_root),
-        )
-        .project_id,
+        project_id,
         agent_id: AgentId::from(record.agent_id),
         lifecycle,
         title,

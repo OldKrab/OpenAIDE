@@ -30,7 +30,9 @@ export function selectInitialNewTaskContext({
 }): NewTaskContextIds {
   return {
     projectId: firstValid(
-      projects.map((project) => project.projectId),
+      projects
+        .filter((project) => project.lifecycle !== "removed")
+        .map((project) => project.projectId),
       retained?.projectId,
       shellProjectId,
       defaults.projectId ?? undefined,

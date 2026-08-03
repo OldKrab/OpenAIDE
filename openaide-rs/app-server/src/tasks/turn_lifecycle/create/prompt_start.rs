@@ -59,6 +59,7 @@ impl TaskTurnLifecycle {
                 agent_id: params.selected_agent_id,
                 isolation: params.selected_isolation,
                 workspace_root: params.workspace_root,
+                project_id: None,
                 project_root: None,
                 worktree_id: None,
                 lifecycle: TaskLifecycle::Open,

@@ -44,6 +44,18 @@ describe("New Task initial selection", () => {
     })).toEqual({ projectId: "project-a", agentId: "codex" });
   });
 
+  it("never selects a Removed Project for a new Task", () => {
+    expect(selectInitialNewTaskContext({
+      retained: { projectId: "project-removed" },
+      defaults: { projectId: "project-removed" as never, agentId: "codex" as never },
+      projects: [
+        { projectId: "project-removed", label: "Old", lifecycle: "removed" },
+        { projectId: "project-active", label: "Current", lifecycle: "active" },
+      ],
+      agents,
+    })).toEqual({ projectId: "project-active", agentId: "codex" });
+  });
+
   it("does not erase retained ids while initialization is still missing a choice", () => {
     const values = new Map<string, string>();
     const storage = {

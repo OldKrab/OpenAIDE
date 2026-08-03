@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
+        " | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof PROJECT_REGISTER | typeof PROJECT_RENAME | typeof PROJECT_RECONNECT | typeof PROJECT_REMOVE",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -57,6 +57,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;\n");
+    output.push_str("  [PROJECT_REGISTER]: ProjectRegisterParams;\n");
+    output.push_str("  [PROJECT_RENAME]: ProjectRenameParams;\n");
+    output.push_str("  [PROJECT_RECONNECT]: ProjectReconnectParams;\n");
+    output.push_str("  [PROJECT_REMOVE]: ProjectRemoveParams;\n");
     output.push_str("  [WORKTREE_REFRESH]: WorktreeRefreshParams;\n");
     output.push_str("  [WORKTREE_CREATE]: WorktreeCreateParams;\n");
     output.push_str("  [WORKTREE_RECREATE]: WorktreeRecreateParams;\n");
@@ -138,6 +142,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;\n");
+    output.push_str("  [PROJECT_REGISTER]: ProjectMutationResult;\n");
+    output.push_str("  [PROJECT_RENAME]: ProjectMutationResult;\n");
+    output.push_str("  [PROJECT_RECONNECT]: ProjectMutationResult;\n");
+    output.push_str("  [PROJECT_REMOVE]: ProjectMutationResult;\n");
     output.push_str("  [WORKTREE_REFRESH]: WorktreeRefreshResult;\n");
     output.push_str("  [WORKTREE_CREATE]: WorktreeCreateResult;\n");
     output.push_str("  [WORKTREE_RECREATE]: WorktreeRecreateResult;\n");

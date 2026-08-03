@@ -1,5 +1,5 @@
-import { memo, useRef, useState } from "react";
-import { Archive, ArrowLeft, Plus, RefreshCcw, Search, Settings } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
+import { Archive, ArrowLeft, FolderPlus, FolderSync, FolderX, Plus, RefreshCcw, RotateCcw, Search, Settings } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
 import type { AppState } from "../state/store";
@@ -15,6 +15,9 @@ import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
 import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
+import { NewWorkspacePicker } from "./NewWorkspacePicker";
+import type { WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
+import { currentFrontendShell } from "../services/frontendShell";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -26,6 +29,10 @@ type SidebarProps = {
   onArchiveNativeSession: (session: AgentListedSession) => void;
   onLoadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   onManageWorktrees?: (projectId: string) => void;
+  onRegisterProject?: (root: string, label?: string) => Promise<void>;
+  onReconnectProject?: (projectId: string, root: string) => Promise<void>;
+  onRemoveProject?: (projectId: string) => Promise<void>;
+  onRenameProject?: (projectId: string, label: string) => Promise<void>;
   onNewTask: (projectId?: string) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenWorkspaceFolder?: () => void;
@@ -51,6 +58,8 @@ type SidebarProps = {
   hiddenFromAccessibility?: boolean;
   modal?: boolean;
   projects?: ProjectOption[];
+  removedProjects?: ProjectOption[];
+  workspaceBrowser?: WorkspaceBrowserCallbacks;
   maxTasksPerProject?: number;
   maxVisibleProjects?: number;
   loadingTasks?: boolean;
@@ -67,6 +76,10 @@ export const Sidebar = memo(function Sidebar({
   onArchiveNativeSession,
   onLoadNativeSessions,
   onManageWorktrees,
+  onRegisterProject,
+  onReconnectProject,
+  onRemoveProject,
+  onRenameProject,
   onNewTask,
   onOpenNativeSession,
   onOpenWorkspaceFolder,
@@ -89,6 +102,8 @@ export const Sidebar = memo(function Sidebar({
   hiddenFromAccessibility = false,
   modal = false,
   projects = [],
+  removedProjects = [],
+  workspaceBrowser,
   maxTasksPerProject,
   maxVisibleProjects = 5,
   loadingTasks = false,
@@ -99,6 +114,11 @@ export const Sidebar = memo(function Sidebar({
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
   const [projectRowLimits, setProjectRowLimits] = useState<Map<string, number>>(() => new Map());
   const [visibleProjectLimit, setVisibleProjectLimit] = useState(maxVisibleProjects);
+  const [showRemovedProjects, setShowRemovedProjects] = useState(false);
+  const [projectFolderIntent, setProjectFolderIntent] = useState<
+    { kind: "register" } | { kind: "reconnect"; projectId: string } | undefined
+  >();
+  const [projectMutationError, setProjectMutationError] = useState<string>();
   const displayedNativeSessions = showNativeSessions
     ? nativeSessions
     : { adoptingSessionId: undefined, error: undefined, items: [], loaded: true, loading: false, nextCursor: undefined };
@@ -142,31 +162,73 @@ export const Sidebar = memo(function Sidebar({
     nativeSessionProjectId !== undefined &&
     collapsedProjectKeys.has(nativeSessionProjectId);
   const showEmptyState = !taskListError && (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
-  const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
+  const showWorkspaceSetup = !showArchived && !showRemovedProjects && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
+  const chooseProjectRoot = async (intent: NonNullable<typeof projectFolderIntent>) => {
+    const nativePicker = currentFrontendShell()?.projects;
+    if (nativePicker) {
+      const nativeRoot = await nativePicker.pickRoot();
+      if (nativeRoot) await applyProjectRoot(intent, nativeRoot);
+      return;
+    }
+    if (workspaceBrowser) setProjectFolderIntent(intent);
+  };
+  const applyProjectRoot = async (
+    intent: NonNullable<typeof projectFolderIntent>,
+    root: { path: string; label: string },
+  ) => {
+    setProjectMutationError(undefined);
+    try {
+      if (intent.kind === "register") await onRegisterProject?.(root.path, root.label);
+      else await onReconnectProject?.(intent.projectId, root.path);
+      setProjectFolderIntent(undefined);
+    } catch (error) {
+      setProjectMutationError(error instanceof Error ? error.message : "Unable to update Project.");
+    }
+  };
+  useEffect(() => currentFrontendShell()?.projects?.subscribeAddRequest?.((root) => {
+    setProjectMutationError(undefined);
+    void onRegisterProject?.(root.path, root.label).catch((error: unknown) => {
+      setProjectMutationError(error instanceof Error ? error.message : "Unable to add Project.");
+    });
+  }), [onRegisterProject]);
+  useEffect(() => {
+    if (!projectFolderIntent) return undefined;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setProjectFolderIntent(undefined);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [projectFolderIntent]);
 
   return (
     <aside
-      className={`sidebar ${showArchived ? "archive-sidebar" : ""}`}
+      className={`sidebar ${showArchived ? "archive-sidebar" : ""} ${showRemovedProjects ? "removed-projects-sidebar" : ""}`}
       aria-hidden={hiddenFromAccessibility ? true : undefined}
       aria-label="Task navigation"
       aria-modal={modal ? true : undefined}
       inert={hiddenFromAccessibility ? true : undefined}
       role={modal ? "dialog" : undefined}
     >
-      {showArchived ? (
+      {showRemovedProjects ? (
+        <div className="archive-section-head">
+          <button aria-label="Back to tasks" onClick={() => setShowRemovedProjects(false)} type="button"><ArrowLeft size={15} /></button>
+          <FolderX size={15} />
+          <span><strong>Removed Projects</strong><small>History is kept</small></span>
+        </div>
+      ) : showArchived ? (
         <div className="archive-section-head">
           <button aria-label="Back to tasks" onClick={onToggleArchived} type="button"><ArrowLeft size={15} /></button>
           <Archive size={15} />
           <span><strong>Archive</strong><small>Tasks and Native Sessions</small></span>
         </div>
       ) : null}
-      <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
-        {!showArchived ? <button type="button" onClick={() => onNewTask()}>
+      <div className={`sidebar-actions ${showArchived || showRemovedProjects ? "archive-actions" : ""}`}>
+        {!showArchived && !showRemovedProjects ? <button type="button" onClick={() => onNewTask()}>
           <Plus size={15} />
           New task
         </button> : null}
-        <label className="sidebar-search">
+        {!showRemovedProjects ? <label className="sidebar-search">
           <Search size={15} />
           <input
             aria-label={showArchived ? "Search archive" : "Search tasks"}
@@ -174,9 +236,9 @@ export const Sidebar = memo(function Sidebar({
             placeholder={showArchived ? "Search archive" : "Search"}
             value={searchQuery}
           />
-        </label>
+        </label> : null}
       </div>
-      {!showArchived ? <div className="task-section-head">
+      {!showArchived && !showRemovedProjects ? <div className="task-section-head">
         <span className="task-section-title">Tasks</span>
         {showSessionRefresh ? (
           <span className="task-section-tools">
@@ -195,6 +257,12 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
         <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>
       </div> : null}
+      {!showArchived && !showRemovedProjects && groupByProject && onRegisterProject ? <div className="project-section-head">
+        <span>Projects</span>
+        <button aria-label="Add Project" onClick={() => void chooseProjectRoot({ kind: "register" })} title="Add Project" type="button"><FolderPlus size={13} />Add</button>
+        {removedProjects.length > 0 ? <button onClick={() => setShowRemovedProjects(true)} type="button"><FolderX size={13} />Removed</button> : null}
+      </div> : null}
+      {!showArchived && !showRemovedProjects && projectMutationError ? <p className="project-sidebar-error" role="status">{projectMutationError}</p> : null}
       <SidebarTaskPreviewProvider><div className="task-list-shell" data-more-below={String(taskListOverflow.moreBelow)}><div
         className="task-list"
         role="list"
@@ -202,17 +270,34 @@ export const Sidebar = memo(function Sidebar({
         onScroll={taskListOverflow.onScroll}
         ref={taskListRef}
       >
-        {!showWorkspaceSetup && taskListError ? <p className="empty-list">{taskListError}</p> : null}
+        {showRemovedProjects ? <div className="removed-project-list">
+          {projectMutationError ? <p className="project-folder-dialog-error" role="status">{projectMutationError}</p> : null}
+          {removedProjects.length === 0 ? <p className="empty-list">No removed Projects.</p> : removedProjects.map((project) => (
+            <article className="removed-project-row" key={project.projectId}>
+              <span><strong>{project.label}</strong><small>{project.workspaceRoot}</small></span>
+              <div>
+                {project.workspaceRoot && project.available !== false ? <button onClick={() => {
+                  setProjectMutationError(undefined);
+                  void onReconnectProject?.(project.projectId, project.workspaceRoot!).catch((error: unknown) => {
+                    setProjectMutationError(error instanceof Error ? error.message : "Unable to restore Project.");
+                  });
+                }} title="Restore using the saved folder" type="button"><RotateCcw size={13} />Restore</button> : null}
+                <button onClick={() => void chooseProjectRoot({ kind: "reconnect", projectId: project.projectId })} type="button"><FolderSync size={13} />Choose folder</button>
+              </div>
+            </article>
+          ))}
+        </div> : null}
+        {!showRemovedProjects && !showWorkspaceSetup && taskListError ? <p className="empty-list">{taskListError}</p> : null}
         {showWorkspaceSetup
           ? <WorkspaceSetupPrompt compact onOpenFolder={onOpenWorkspaceFolder} />
           : null}
-        {!showWorkspaceSetup && showEmptyState
+        {!showRemovedProjects && !showWorkspaceSetup && showEmptyState
           ? <p className="empty-list">{viewModel.emptyMessage}</p>
           : null}
-        {!showWorkspaceSetup && activeTaskShownOutsideSearch ? (
+        {!showRemovedProjects && !showWorkspaceSetup && activeTaskShownOutsideSearch ? (
           <p className="search-context-note">Selected task is shown outside the search results.</p>
         ) : null}
-        {!showWorkspaceSetup && !showArchived && showNativeSessions && nativeSessions.error ? (
+        {!showRemovedProjects && !showWorkspaceSetup && !showArchived && showNativeSessions && nativeSessions.error ? (
           <div className="native-session-recovery" role="status">
             <span>{nativeSessions.error}</span>
             {nativeSessions.recoveryKind && onRecoverNativeSessions ? (
@@ -224,7 +309,7 @@ export const Sidebar = memo(function Sidebar({
             ) : null}
           </div>
         ) : null}
-        {!showWorkspaceSetup && (groupByProject
+        {!showRemovedProjects && !showWorkspaceSetup && (groupByProject
           ? visibleGroups.map((group) => (
               <SidebarProjectTaskGroup
                 activeTaskId={activeTaskId}
@@ -256,6 +341,9 @@ export const Sidebar = memo(function Sidebar({
                   }
                 }
                 onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(group.key) : undefined}
+                onReconnectProject={onReconnectProject ? () => void chooseProjectRoot({ kind: "reconnect", projectId: group.key }) : undefined}
+                onRemoveProject={onRemoveProject ? () => onRemoveProject(group.key) : undefined}
+                onRenameProject={onRenameProject ? (label) => onRenameProject(group.key, label) : undefined}
                 onNewTask={() => onNewTask(group.key)}
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}
@@ -312,7 +400,7 @@ export const Sidebar = memo(function Sidebar({
                 />
               ),
             ))}
-        {!showWorkspaceSetup && !groupByProject && !showArchived && showNativeSessions && nativeSessions.nextCursor && !selectedSessionProjectCollapsed ? (
+        {!showRemovedProjects && !showWorkspaceSetup && !groupByProject && !showArchived && showNativeSessions && nativeSessions.nextCursor && !selectedSessionProjectCollapsed ? (
           <button
             className="session-more"
             disabled={nativeSessions.adoptingSessionId !== undefined || nativeSessions.loading}
@@ -328,7 +416,7 @@ export const Sidebar = memo(function Sidebar({
               : hasSearchQuery ? "Search more tasks" : "Load more tasks"}
           </button>
         ) : null}
-        {!showWorkspaceSetup && groupByProject && hiddenProjectCount > 0 ? (
+        {!showRemovedProjects && !showWorkspaceSetup && groupByProject && hiddenProjectCount > 0 ? (
           <button
             className="project-more"
             onClick={() => setVisibleProjectLimit((current) => current + maxVisibleProjects)}
@@ -338,6 +426,13 @@ export const Sidebar = memo(function Sidebar({
           </button>
         ) : null}
       </div></div></SidebarTaskPreviewProvider>
+      {projectFolderIntent && workspaceBrowser ? <div className="project-folder-dialog-backdrop" role="presentation">
+        <section aria-label={projectFolderIntent.kind === "register" ? "Add Project" : "Reconnect Project"} aria-modal="true" className="project-folder-dialog" role="dialog">
+          <header><strong>{projectFolderIntent.kind === "register" ? "Add Project" : "Reconnect Project"}</strong><button aria-label="Close" autoFocus onClick={() => setProjectFolderIntent(undefined)} type="button">×</button></header>
+          {projectMutationError ? <p className="project-folder-dialog-error" role="status">{projectMutationError}</p> : null}
+          <NewWorkspacePicker browser={workspaceBrowser} onSelect={(root) => void applyProjectRoot(projectFolderIntent, root)} />
+        </section>
+      </div> : null}
       <div className="sidebar-footer">
         <button
           aria-current={settingsActive ? "page" : undefined}
@@ -370,6 +465,8 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.hiddenFromAccessibility === next.hiddenFromAccessibility &&
     prev.modal === next.modal &&
     prev.projects === next.projects &&
+    prev.removedProjects === next.removedProjects &&
+    prev.workspaceBrowser === next.workspaceBrowser &&
     prev.maxTasksPerProject === next.maxTasksPerProject &&
     prev.maxVisibleProjects === next.maxVisibleProjects &&
     prev.loadingTasks === next.loadingTasks &&

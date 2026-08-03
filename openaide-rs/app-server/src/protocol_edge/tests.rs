@@ -11,10 +11,11 @@ use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE,
     DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
-    MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
-    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
-    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY, TASK_SET_CONFIG_OPTION,
+    MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, PROJECT_REGISTER, SETTINGS_GET_MCP_SERVERS,
+    SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
+    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY,
+    TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, AppTheme, ComposerSubmitShortcut,
@@ -28,6 +29,55 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+#[test]
+fn project_register_persists_and_returns_the_shared_project() {
+    let project_dir = tempfile::tempdir().unwrap();
+    let (mut gateway, _store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-projects");
+    response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request("1", CLIENT_INITIALIZE, init_params("client-projects")),
+        AppServerTime(1),
+    ));
+
+    let registered = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "2",
+            PROJECT_REGISTER,
+            json!({
+                "root": project_dir.path().to_string_lossy(),
+                "label": "Application"
+            }),
+        ),
+        AppServerTime(2),
+    ));
+
+    assert_eq!(
+        registered["result"]["project"]["label"],
+        json!("Application")
+    );
+    assert_eq!(
+        registered["result"]["project"]["lifecycle"],
+        json!("active")
+    );
+    let projects = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(3),
+    ));
+    assert_eq!(
+        projects["result"]["snapshot"]["projects"]["projects"][0]["projectId"],
+        registered["result"]["project"]["projectId"]
+    );
+}
 
 use crate::agent::product_api::{
     AgentAuthenticateWorkflow, AgentCatalogMutationWorkflow, AgentProbeWorkflow,
@@ -162,7 +212,7 @@ fn initialize_unknown_task_route_keeps_the_client_usable() {
 }
 
 #[test]
-fn client_capabilities_changed_replaces_reported_workspace_roots() {
+fn client_capabilities_changed_registers_new_roots_without_removing_durable_projects() {
     let mut gateway = gateway_with_project_context();
     let connection_id = ConnectionId::new("conn-1");
     let mut params = init_params("client-1");
@@ -193,8 +243,9 @@ fn client_capabilities_changed_replaces_reported_workspace_roots() {
     let projects = changed["result"]["projects"]["projects"]
         .as_array()
         .expect("Project collection");
-    assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0]["label"], json!("beta"));
+    assert_eq!(projects.len(), 2);
+    assert_eq!(projects[0]["label"], json!("alpha"));
+    assert_eq!(projects[1]["label"], json!("beta"));
 }
 
 #[test]
@@ -312,11 +363,11 @@ fn workspace_root_replacement_preserves_other_clients_projects() {
         .iter()
         .map(|project| project["label"].as_str().expect("Project label"))
         .collect::<Vec<_>>();
-    assert_eq!(labels, vec!["beta", "gamma"]);
+    assert_eq!(labels, vec!["alpha", "beta", "gamma"]);
 }
 
 #[test]
-fn expired_client_workspace_roots_leave_the_project_collection() {
+fn expired_client_workspace_roots_leave_durable_projects_registered() {
     let mut gateway = gateway_with_project_context();
     let first_connection = ConnectionId::new("conn-1");
     let second_connection = ConnectionId::new("conn-2");
@@ -360,12 +411,13 @@ fn expired_client_workspace_roots_leave_the_project_collection() {
     let projects = current["result"]["projects"]["projects"]
         .as_array()
         .expect("Project collection");
-    assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0]["label"], json!("beta"));
+    assert_eq!(projects.len(), 2);
+    assert_eq!(projects[0]["label"], json!("alpha"));
+    assert_eq!(projects[1]["label"], json!("beta"));
 }
 
 #[test]
-fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
+fn expired_client_workspace_roots_publish_the_unchanged_durable_projects() {
     let mut gateway = gateway_with_project_context();
     let host_connection = ConnectionId::new("conn-host");
     let webview_connection = ConnectionId::new("conn-webview");
@@ -414,7 +466,7 @@ fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
             && matches!(
                 &delivery.event.payload,
                 AppServerEventPayload::ProjectCollectionUpdated { projects }
-                    if projects.projects.is_empty()
+                    if projects.projects.len() == 1 && projects.projects[0].label == "alpha"
             )
     }));
 }
@@ -479,8 +531,9 @@ fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
     else {
         unreachable!("filtered to Project collection update")
     };
-    assert_eq!(projects.projects.len(), 1);
-    assert_eq!(projects.projects[0].label, "beta");
+    assert_eq!(projects.projects.len(), 2);
+    assert_eq!(projects.projects[0].label, "alpha");
+    assert_eq!(projects.projects[1].label, "beta");
 }
 
 #[test]
@@ -2113,6 +2166,9 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
+        Arc::new(crate::projects::ProjectManagementService::new(
+            store.clone(),
+        )),
         Arc::new(RejectingAgentListSessions),
         Arc::new(RejectingAttachments),
         Arc::new(RejectingTaskAcquire),
@@ -2152,6 +2208,7 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
         std::sync::Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
+        project_management(),
         std::sync::Arc::new(RejectingAgentListSessions),
         attachments,
         std::sync::Arc::new(RejectingTaskAcquire),
@@ -2186,6 +2243,13 @@ fn mcp_servers() -> Arc<McpServersSettingsService> {
     let dir = tempfile::tempdir().unwrap().keep();
     let store = crate::storage::Store::open(dir).unwrap();
     Arc::new(McpServersSettingsService::new(store))
+}
+
+fn project_management() -> Arc<crate::projects::ProjectManagementService> {
+    let dir = tempfile::tempdir().unwrap().keep();
+    Arc::new(crate::projects::ProjectManagementService::new(
+        crate::storage::Store::open(dir).unwrap(),
+    ))
 }
 
 fn test_worktrees() -> Arc<crate::worktrees::WorktreeManager> {
@@ -2246,6 +2310,7 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
+        project_management(),
         agent_list_sessions,
         Arc::new(RejectingAttachments),
         std::sync::Arc::new(RejectingTaskAcquire),
@@ -2286,6 +2351,7 @@ fn gateway_with_agent_authenticate(
         std::sync::Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
+        project_management(),
         Arc::new(RejectingAgentListSessions),
         Arc::new(RejectingAttachments),
         std::sync::Arc::new(RejectingTaskAcquire),
@@ -3322,6 +3388,7 @@ fn client_new_task_record(
         agent_name: "Codex".to_string(),
         isolation: crate::protocol::model::IsolationKind::Local,
         workspace_root: "/workspace/app".to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Prepared {

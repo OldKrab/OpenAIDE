@@ -9,6 +9,9 @@ pub mod errors;
 pub mod events;
 pub mod ids;
 pub mod methods;
+pub mod project;
+#[cfg(test)]
+mod project_tests;
 pub mod server_requests;
 pub mod settings;
 pub mod snapshot;

@@ -59,6 +59,7 @@ impl TaskProductApi {
             agent_id: params.agent_id.into_string(),
             isolation: workspace.isolation,
             workspace_root: workspace.path.to_string_lossy().to_string(),
+            project_id: Some(project.project_id),
             project_root: Some(project.workspace_root),
             worktree_id: workspace.worktree_id.map(|id| id.into_string()),
             lifecycle: TaskLifecycle::Prepared {

@@ -39,6 +39,7 @@ export function createDesktopPrototypeShell(
 ): FrontendShell {
   let route: DesktopRoute = { surface: "task" };
   const routeListeners = new Set<(bootstrap: WebviewBootstrap) => void>();
+  const projectAddListeners = new Set<(root: { path: string; label: string }) => void>();
   const bootstrap = () => desktopBootstrap(route, connection);
   const publishRoute = () => {
     const next = bootstrap();
@@ -61,7 +62,9 @@ export function createDesktopPrototypeShell(
         window.location.reload();
         return;
       case "choose-folder":
-        void chooseFolder();
+        void chooseFolder().then((root) => {
+          if (root) for (const listener of projectAddListeners) listener(root);
+        });
         return;
       case "test-notification":
         void showTestNotification();
@@ -105,6 +108,13 @@ export function createDesktopPrototypeShell(
     },
     workspace: {
       openFolder: () => void chooseFolder(),
+    },
+    projects: {
+      pickRoot: chooseFolder,
+      subscribeAddRequest(listener) {
+        projectAddListeners.add(listener);
+        return () => projectAddListeners.delete(listener);
+      },
     },
   };
 }
@@ -158,6 +168,12 @@ async function chooseFolder() {
   await invoke("record_folder_picker_result", {
     selected: typeof selected === "string",
   });
+  if (typeof selected !== "string") return undefined;
+  const normalized = selected.replace(/[\\/]+$/, "");
+  return {
+    path: selected,
+    label: normalized.split(/[\\/]/).pop() || selected,
+  };
 }
 
 async function showTestNotification() {

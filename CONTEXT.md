@@ -109,8 +109,12 @@ A registered worktree located outside OpenAIDE-managed storage, even when OpenAI
 _Avoid_: Treating every worktree OpenAIDE can operate on as Managed
 
 **Project**:
-A lightweight OpenAIDE record for a user work area, such as a folder, workspace, or repository.
-_Avoid_: Git remote or shell-specific workspace identity as the primary identity
+An explicit, durable OpenAIDE record for a user work area with stable identity and one configured Project root. It remains registered independently of Tasks and App Shell connections until the user removes it.
+_Avoid_: Project inferred from Task history, attached editor folder, Git remote or filesystem path as identity
+
+**Removed Project**:
+A Project excluded from normal navigation and new Task creation while its existing Task history and stable identity remain available. Registering the same Project root restores it.
+_Avoid_: Deleted Project, deleting Tasks or project files
 
 **Task Page**:
 The main user-facing page for one Task's Chat, composer, permissions, and folded activity.
@@ -271,6 +275,9 @@ _Avoid_: Treating every unread update or status change as an alert
 - The leased **Prepared Task** becomes a visible **Task** when its first user message is durably accepted.
 - A **Task** belongs to the OpenAIDE task list and has **Project Context**.
 - **Project Context** is always a **Project**.
+- A **Project** has one **Project root** and stable identity independent of that root's path.
+- Opening a folder in VS Code registers it as a durable **Project** when it is not already registered.
+- Removing a **Project** preserves its existing Tasks and makes it a **Removed Project**; registering the same Project root restores it.
 - A **Task** has one **Task Workspace**.
 - Project folders that are top-level checkouts of the same **Worktree Repository** share its worktree inventory and management surface.
 - An **Unavailable Worktree** remains visible while Git continues to register it, but it cannot be selected as a **Task Workspace**.

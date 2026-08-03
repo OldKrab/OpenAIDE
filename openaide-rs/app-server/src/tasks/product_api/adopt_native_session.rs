@@ -138,6 +138,7 @@ impl TaskProductApi {
         let persist_result = self.persist_adopted_session_task(
             &params,
             &catalog_entry.workspace_root,
+            &project.project_id,
             &project.workspace_root,
             if catalog_entry.workspace_root == project.workspace_root {
                 project.isolation
@@ -183,6 +184,7 @@ impl TaskProductApi {
         &self,
         params: &TaskAdoptNativeSessionParams,
         workspace_root: &str,
+        project_id: &openaide_app_server_protocol::ids::ProjectId,
         project_root: &str,
         isolation: IsolationKind,
         task_id: &str,
@@ -214,6 +216,7 @@ impl TaskProductApi {
             agent_id: selected_agent_id.clone(),
             isolation,
             workspace_root: workspace_root.clone(),
+            project_id: Some(project_id.clone()),
             project_root: Some(project_root.to_string()),
             worktree_id: None,
             lifecycle: TaskLifecycle::Open,

@@ -845,6 +845,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/a".to_string(),
+        project_id: None,
         project_root: None,
         worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Open,
