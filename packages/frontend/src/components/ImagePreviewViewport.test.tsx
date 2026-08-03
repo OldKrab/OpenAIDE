@@ -8,6 +8,28 @@ const imageNodeMock = { offsetHeight: 360, offsetWidth: 560 };
 const removeEventListener = vi.fn();
 
 describe("ImagePreviewViewport", () => {
+  it("zooms out below the fitted size and resets back to fit", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ImagePreviewViewport image={{ label: "diagram.png", url: "data:image/png;base64,aW1hZ2U=" }} />,
+        { createNodeMock: viewportNodeMock },
+      );
+    });
+    const zoomOut = tree.root.findByProps({ "aria-label": "Zoom image out" });
+
+    expect(zoomOut.props.disabled).toBe(false);
+    act(() => zoomOut.props.onClick());
+
+    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(0.75)");
+    expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("75%");
+
+    act(() => tree.root.findByProps({ "aria-label": "Reset image zoom" }).props.onClick());
+
+    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1)");
+    expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("Fit");
+  });
+
   it("zooms toward the pointer with the wheel and resets from the zoom control", () => {
     const preventDefault = vi.fn();
     addEventListener.mockClear();
