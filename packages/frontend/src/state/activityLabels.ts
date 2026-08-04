@@ -54,9 +54,10 @@ function summarizeKinds(kinds: ActivitySummaryKind[]) {
   for (const kind of kinds) {
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
-  const parts = Array.from(counts, ([kind, count], index) => countLabel(kind, count, index === 0)).filter(
-    (part): part is string => part !== undefined,
-  );
+  const parts = ACTIVITY_SUMMARY_ORDER
+    .filter((kind) => counts.has(kind))
+    .map((kind, index) => countLabel(kind, counts.get(kind) ?? 0, index === 0))
+    .filter((part): part is string => part !== undefined);
 
   return parts.length ? parts.join(", ") : undefined;
 }
@@ -267,6 +268,19 @@ type ActivitySummaryKind =
   | "search"
   | "subagentInteraction"
   | "other";
+
+// Keep folded summaries stable and surface consequential work before supporting activity.
+const ACTIVITY_SUMMARY_ORDER: readonly ActivitySummaryKind[] = [
+  "delete",
+  "edit",
+  "run",
+  "skill",
+  "subagentInteraction",
+  "search",
+  "read",
+  "thought",
+  "other",
+];
 
 function classifyStep(step: ActivityStep, legacyToolName?: string): ActivitySummaryKind {
   if (step.kind === "thought") return "thought";

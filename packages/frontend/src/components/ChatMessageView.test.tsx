@@ -191,7 +191,7 @@ describe("ChatRow", () => {
       />,
     );
 
-    expect(html).toContain("Thought, read file");
+    expect(html).toContain("Read file, thought");
     expect(html).not.toContain('class="activity-reasoning-toggle"');
     expect(html).toContain("activity-thought-block");
     expect(html).toContain("Check current files first.");

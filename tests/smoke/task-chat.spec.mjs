@@ -95,7 +95,7 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(chat.locator("p.chat-user").filter({ hasText: "smoke:basic" })).toHaveText("smoke:basic");
   await expect(chat.getByText("Smoke answer", { exact: true })).toBeVisible();
   await expect(chat.locator(".task-header-title > strong")).toHaveText("Smoke task");
-  await page.getByRole("button", { name: "Thought, read file" }).click();
+  await page.getByRole("button", { name: "Read file, thought" }).click();
   const readStep = chat.locator(".activity-step").filter({
     has: page.locator(".activity-step-semantic-action", { hasText: /^Read$/ }),
   }).filter({

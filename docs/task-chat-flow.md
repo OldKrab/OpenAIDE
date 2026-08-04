@@ -305,6 +305,8 @@ For high-confidence, read-only shell forms, App Server may persist ordered seman
 
 Frontend identifies each uninterrupted run of Tool and Thought rows. One Thought remains a standalone `Thinking` disclosure. Every other run becomes one activity disclosure, including a single Tool, multiple Thoughts, or any Tool/Thought combination. Adjacent groupable rows extend the group while preserving its open state. User, Agent, Permission, Question, and Live Activity rows end the group. The group preserves every underlying message id and chronological order.
 
+The folded group title aggregates action counts in one stable user-impact order rather than first-seen order: deleted files, updated files, commands, skills, subagent interactions, searches, reads, thoughts, then generic Tool calls.
+
 Expanded mixed Tool/Thought groups may hide Thought rows by default and expose one leading control with the hidden count. Showing reasoning restores Thoughts at their original positions among Tools. Thought-only groups always show every Thought when expanded, regardless of the mixed-group visibility default. This presentation does not affect `think` Tool calls.
 
 ### Permission requests
