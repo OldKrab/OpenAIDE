@@ -12,9 +12,10 @@ use crate::projects::{project_id_for_workspace, ProjectTaskContext, StorageProje
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentCommand,
     AgentCommandsCatalog, AgentListSessionsResult, AgentListedSession, AgentMessagePart,
-    AgentMessageRole, Attachment, ChatMessage, ConfigOption, ConfigOptionCategory,
-    ConfigOptionCurrentValue, ConfigOptionKind, ConfigOptionValue, ConfigOptionsCatalog,
-    ConfigOptionsStatus, InterruptionReason, IsolationKind, NormalizedMessage, TaskStatus,
+    AgentMessageRole, AgentPlan, AgentPlanEntry, AgentPlanPriority, AgentPlanStatus, Attachment,
+    ChatMessage, ConfigOption, ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind,
+    ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus, InterruptionReason,
+    IsolationKind, NormalizedMessage, TaskStatus,
 };
 use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
@@ -36,9 +37,9 @@ use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
     ComposerHistoryParams, ComposerHistoryScope, ComposerImage, ComposerMessage,
     NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
-    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskMarkReadParams,
-    TaskOpenParams, TaskReleaseParams, TaskSendParams, TaskSetConfigOptionParams,
-    TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
+    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskClosePlanParams,
+    TaskMarkReadParams, TaskOpenParams, TaskReleaseParams, TaskSendParams,
+    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -1814,6 +1815,69 @@ fn set_pinned_persists_without_advancing_task_activity_and_is_idempotent() {
         store.read_task("task-pinned").unwrap().revision,
         committed_revision
     );
+}
+
+#[test]
+fn user_can_close_an_incomplete_plan_and_retain_it_in_chat() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut record = task_record("task-close-plan", "/tmp/openaide-close-plan-workspace/app");
+    record.current_plan = Some(AgentPlan {
+        entries: vec![
+            AgentPlanEntry {
+                content: "Inspect projection".to_string(),
+                priority: AgentPlanPriority::High,
+                status: AgentPlanStatus::Completed,
+            },
+            AgentPlanEntry {
+                content: "Render close action".to_string(),
+                priority: AgentPlanPriority::Medium,
+                status: AgentPlanStatus::InProgress,
+            },
+        ],
+    });
+    store.write_task(&record).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = crate::attachment_runtime::AttachmentOwner::test_client_instance_id();
+
+    let snapshot = api
+        .close_task_plan(
+            &client,
+            TaskClosePlanParams {
+                task_id: "task-close-plan".into(),
+            },
+        )
+        .unwrap();
+
+    assert!(snapshot.current_plan.is_none());
+    let closed_plan = snapshot
+        .chat
+        .items
+        .iter()
+        .flat_map(|item| &item.parts)
+        .find_map(|part| match part {
+            MessagePart::ClosedPlan { entries } => Some(entries),
+            _ => None,
+        })
+        .expect("the user-closed Plan remains in Chat");
+    assert_eq!(closed_plan.len(), 2);
+    assert_eq!(closed_plan[1].content, "Render close action");
+    assert_eq!(
+        closed_plan[1].status,
+        openaide_app_server_protocol::snapshot::AgentPlanStatusSnapshot::InProgress
+    );
+    assert!(store
+        .read_task("task-close-plan")
+        .unwrap()
+        .current_plan
+        .is_none());
 }
 
 #[test]

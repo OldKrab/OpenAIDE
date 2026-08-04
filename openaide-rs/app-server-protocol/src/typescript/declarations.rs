@@ -111,16 +111,16 @@ use crate::task::{
     NativeSessionRestoreResult, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
     TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
     TaskAdoptNativeSessionResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
-    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskLifecycleChanged,
-    TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
-    TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
-    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult,
-    TaskSetTitleParams, TaskSetTitleResult, TaskTitleSelection, TaskToolImagePreviewParams,
-    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
-    WorkspaceFileSearchState,
+    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
+    TaskClosePlanResult, TaskLifecycleChanged, TaskListLifecycle, TaskListParams, TaskListResult,
+    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
+    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    TaskNavigationSection, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
+    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -395,6 +395,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskSetTitleResult>(output, config);
     push_decl::<TaskSetPinnedParams>(output, config);
     push_decl::<TaskSetPinnedResult>(output, config);
+    push_decl::<TaskClosePlanParams>(output, config);
+    push_decl::<TaskClosePlanResult>(output, config);
     push_decl::<TaskToolImagePreviewParams>(output, config);
     push_decl::<TaskToolImagePreviewResult>(output, config);
     push_decl::<ToolImagePreview>(output, config);

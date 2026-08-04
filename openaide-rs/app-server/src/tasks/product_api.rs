@@ -9,8 +9,9 @@ use openaide_app_server_protocol::support::{
 };
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
-    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskLifecycleChanged,
-    TaskRestoreParams, TaskSendParams, TaskSetPinnedParams, TaskSetTitleParams,
+    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskClosePlanParams,
+    TaskLifecycleChanged, TaskRestoreParams, TaskSendParams, TaskSetPinnedParams,
+    TaskSetTitleParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -41,6 +42,7 @@ mod archive;
 mod attachments;
 mod cancel;
 mod chat_page;
+mod close_plan;
 mod composer_history;
 mod create;
 mod discard;
@@ -575,6 +577,16 @@ impl TaskMetadataWorkflow for TaskProductApi {
         params: TaskSetPinnedParams,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSummary, ProtocolError> {
         self.set_task_pinned(client_instance_id, params)
+    }
+}
+
+impl TaskPlanWorkflow for TaskProductApi {
+    fn close_plan_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskClosePlanParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.close_task_plan(client_instance_id, params)
     }
 }
 

@@ -4,11 +4,12 @@ use openaide_app_server_protocol::task::{
     TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
     TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
-    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
-    TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
-    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult,
-    TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TaskClosePlanParams, TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams,
+    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
+    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use serde_json::Value;
 
@@ -311,6 +312,33 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<TaskSetPinnedResult>(connection_id, id, meta, TaskSetPinnedResult { task })
+    }
+
+    pub(super) fn handle_task_close_plan(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskClosePlanParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Plan close");
+        let task = match self
+            .task_plan
+            .close_plan_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => task,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<TaskClosePlanResult>(connection_id, id, meta, TaskClosePlanResult { task })
     }
 
     pub(super) fn handle_task_tool_image_preview(

@@ -112,6 +112,9 @@ pub enum MessagePart {
     CompletedPlan {
         entries: Vec<AgentPlanEntrySnapshot>,
     },
+    ClosedPlan {
+        entries: Vec<AgentPlanEntrySnapshot>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

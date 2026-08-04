@@ -1,20 +1,23 @@
 import { useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, CircleX, X } from "lucide-react";
 import type { AgentPlan, AgentPlanEntry, TaskStatus } from "@openaide/app-shell-contracts";
 
 const currentPlanDisclosure = new Map<string, boolean>();
 const PLAN_DISCLOSURE_STORAGE_PREFIX = "openaide.agentPlanDisclosure:";
 
 export function AgentPlanView({
+  onClose,
   plan,
   taskId,
   taskStatus,
 }: {
+  onClose?: () => Promise<void> | void;
   plan: AgentPlan;
   taskId: string;
   taskStatus: TaskStatus;
 }) {
   const [open, setOpen] = useState(() => readAgentPlanDisclosure(taskId));
+  const [closing, setClosing] = useState(false);
   const completed = plan.entries.filter((entry) => entry.status === "completed").length;
   const current = plan.entries.find((entry) => entry.status === "in_progress")
     ?? plan.entries.find((entry) => entry.status === "pending");
@@ -42,6 +45,21 @@ export function AgentPlanView({
         ) : null}
         <small>{completed} of {plan.entries.length} complete</small>
       </button>
+      {onClose ? (
+        <button
+          aria-label="Close Plan"
+          className="agent-plan-close"
+          disabled={closing}
+          onClick={() => {
+            setClosing(true);
+            void Promise.resolve(onClose()).finally(() => setClosing(false));
+          }}
+          title="Close Plan"
+          type="button"
+        >
+          <X aria-hidden="true" size={14} />
+        </button>
+      ) : null}
       <PlanDisclosure open={open}>
         <PlanEntries entries={plan.entries} taskRunning={open && taskStatus === "active"} />
       </PlanDisclosure>
@@ -76,6 +94,29 @@ export function CompletedPlanView({ entries }: { entries: AgentPlanEntry[] }) {
           taskRunning={false}
         />
         <span>Plan completed</span>
+        <small>{entries.length} steps</small>
+      </button>
+      <PlanDisclosure open={open}>
+        <PlanEntries entries={entries} taskRunning={false} />
+      </PlanDisclosure>
+    </section>
+  );
+}
+
+export function ClosedPlanView({ entries }: { entries: AgentPlanEntry[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="completed-plan-row" data-open={open}>
+      <button
+        aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} Plan closed by user`}
+        className="completed-plan-heading"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <ChevronDown aria-hidden="true" className="agent-plan-chevron" size={14} />
+        <CircleX aria-hidden="true" className="closed-plan-icon" size={14} />
+        <span>Plan closed by user</span>
         <small>{entries.length} steps</small>
       </button>
       <PlanDisclosure open={open}>

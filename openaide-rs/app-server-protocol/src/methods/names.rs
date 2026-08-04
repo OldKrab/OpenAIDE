@@ -60,6 +60,7 @@ pub const TASK_SEND: &str = "task/send";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
 pub const TASK_SET_TITLE: &str = "task/setTitle";
 pub const TASK_SET_PINNED: &str = "task/setPinned";
+pub const TASK_CLOSE_PLAN: &str = "task/closePlan";
 pub const TASK_TOOL_IMAGE_PREVIEW: &str = "task/toolImagePreview";
 pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
@@ -138,6 +139,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_SET_CONFIG_OPTION,
     TASK_SET_TITLE,
     TASK_SET_PINNED,
+    TASK_CLOSE_PLAN,
     TASK_TOOL_IMAGE_PREVIEW,
     TASK_CANCEL,
     TASK_OPEN,

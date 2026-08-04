@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import {
+  TASK_CLOSE_PLAN,
   TASK_SEND,
   type AttachmentHandleId,
 } from "@openaide/app-server-client";
@@ -10,6 +11,30 @@ afterEach(() => {
 });
 
 describe("task mutation intents", () => {
+  it("requests a durable close for the current Plan", async () => {
+    const { closeTaskPlanIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("connection closed"));
+    const dispatch = vi.fn();
+
+    closeTaskPlanIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch,
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot());
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(TASK_CLOSE_PLAN, {
+      taskId: "task-a",
+    }));
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:error",
+      taskId: "task-a",
+      message: "connection closed",
+    }));
+  });
+
   it("sends only the Task identity, message text, and attachments", async () => {
     const { sendTaskPromptIntent } = await import("./taskMutationIntents");
     const request = vi.fn().mockRejectedValue(new Error("connection closed"));

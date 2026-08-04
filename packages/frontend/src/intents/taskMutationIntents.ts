@@ -1,6 +1,7 @@
 import {
   AppServerProtocolError,
   TASK_CANCEL,
+  TASK_CLOSE_PLAN,
   TASK_SEND,
   type BackendConnection,
   type ClientInstanceId,
@@ -63,6 +64,38 @@ export function cancelTaskIntent(
         message: taskMutationErrorMessage(error, "Unable to stop task."),
       });
     });
+}
+
+export async function closeTaskPlanIntent(
+  dependencies: TaskMutationIntentDependencies,
+  snapshot: TaskSnapshot | undefined,
+) {
+  if (!snapshot) return;
+  const taskId = snapshot.task.task_id;
+  if (!dependencies.backendConnection?.request) {
+    dependencies.dispatch({
+      type: "taskInput:error",
+      taskId,
+      message: "App Server connection unavailable.",
+    });
+    return;
+  }
+  try {
+    const result = await dependencies.backendConnection.request(TASK_CLOSE_PLAN, {
+      taskId: taskId as TaskId,
+    });
+    dependencies.dispatch({
+      type: "snapshot",
+      snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
+      intent: "refresh",
+    });
+  } catch (error) {
+    dependencies.dispatch({
+      type: "taskInput:error",
+      taskId,
+      message: taskMutationErrorMessage(error, "Unable to close Plan."),
+    });
+  }
 }
 
 export function sendTaskPromptIntent(

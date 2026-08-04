@@ -2119,6 +2119,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingTaskHistory),
         Arc::new(RejectingTaskSetConfigOption),
         Arc::new(RejectingTaskSetTitle),
+        Arc::new(RejectingTaskSetTitle),
         Arc::new(RejectingTaskRelease),
         Arc::new(RejectingTaskArchive),
         Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
@@ -2157,6 +2158,7 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(FixedTaskHistory),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
+        std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
@@ -2252,6 +2254,7 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(RejectingTaskHistory),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskSetTitle),
+        std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         test_worktrees(),
@@ -2291,6 +2294,7 @@ fn gateway_with_agent_authenticate(
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(RejectingTaskHistory),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
+        std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
@@ -3213,6 +3217,24 @@ impl TaskMetadataWorkflow for RejectingTaskSetTitle {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task set pinned unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+}
+
+impl TaskPlanWorkflow for RejectingTaskSetTitle {
+    fn close_plan_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskClosePlanParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "task close Plan unavailable in test gateway".to_string(),
             recoverable: true,
             target: None,
         })

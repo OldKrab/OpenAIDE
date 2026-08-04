@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
+        " | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -73,6 +73,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleParams;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedParams;\n");
+    output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanParams;\n");
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewParams;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelParams;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenParams;\n");
@@ -154,6 +155,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleResult;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedResult;\n");
+    output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanResult;\n");
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewResult;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelResult;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenResult;\n");
