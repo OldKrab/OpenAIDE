@@ -15,6 +15,8 @@ use crate::storage_runtime::{
 use thiserror::Error;
 use uuid::Uuid;
 
+const NATIVE_SESSION_CATALOG_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
 const LOCAL_HTTP_ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(25);
 
 pub struct PublishedAppServerEndpoint {
@@ -178,7 +180,7 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
         loop {
             thread::sleep(Duration::from_secs(1));
             if gateway.has_task_navigation_subscribers()
-                && last_native_catalog_refresh.elapsed() >= Duration::from_secs(60)
+                && native_session_catalog_refresh_due(last_native_catalog_refresh.elapsed())
             {
                 gateway.request_native_session_catalog_refresh();
                 last_native_catalog_refresh = Instant::now();
@@ -186,6 +188,10 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
             expire_local_http_clients(&gateway, AppServerTime::now());
         }
     });
+}
+
+fn native_session_catalog_refresh_due(elapsed: Duration) -> bool {
+    elapsed >= NATIVE_SESSION_CATALOG_REFRESH_INTERVAL
 }
 
 /// Expires abandoned client-scoped state without coupling silence to process lifetime.

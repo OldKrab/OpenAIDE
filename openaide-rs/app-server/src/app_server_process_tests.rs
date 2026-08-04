@@ -12,7 +12,18 @@ use crate::client_lifecycle::AppServerTime;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 use crate::storage_runtime::{EndpointRecordStore, StateRoot};
 
-use super::{expire_local_http_clients, publish_local_http_probe_endpoint};
+use super::{
+    expire_local_http_clients, native_session_catalog_refresh_due,
+    publish_local_http_probe_endpoint,
+};
+
+#[test]
+fn native_session_catalog_periodic_refresh_is_due_after_five_minutes() {
+    assert!(!native_session_catalog_refresh_due(Duration::from_secs(
+        299
+    )));
+    assert!(native_session_catalog_refresh_due(Duration::from_secs(300)));
+}
 
 #[test]
 fn published_local_http_endpoint_is_reused_by_attach_or_launch() {

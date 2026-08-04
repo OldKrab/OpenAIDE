@@ -4305,7 +4305,7 @@ fn send_starts_agent_session_and_prompts_after_commit() {
 }
 
 #[test]
-fn send_requests_native_catalog_refresh_after_prompt_start() {
+fn send_does_not_request_native_catalog_refresh_after_prompt_start() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -4324,10 +4324,14 @@ fn send_requests_native_catalog_refresh_after_prompt_start() {
     )
     .unwrap();
 
-    api.send(send_params("task-existing", "hello")).unwrap();
+    let accepted = api.send(send_params("task-existing", "hello")).unwrap();
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= 2);
+    wait_until(|| {
+        !api.turn_acceptance
+            .owns_pending_turn("task-existing", accepted.turn_id.as_str())
+    });
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
