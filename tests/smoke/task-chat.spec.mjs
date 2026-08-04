@@ -461,6 +461,29 @@ test("applies Agent options and inserts prepared slash commands", async ({ page 
   await expect(editor).toHaveText("/permission ");
 });
 
+test("keeps text typed at a slash-command boundary outside the highlighted token", async ({ page }) => {
+  await openPreparedNewTask(page);
+  const editor = page.getByRole("textbox", { name: "Message" });
+  await editor.fill("/");
+  await page.getByRole("listbox", { name: "Slash commands" })
+    .getByRole("option", { name: /permission/ })
+    .click();
+
+  const command = editor.locator(".composer-command-token");
+  await command.evaluate((token) => {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(token);
+    range.collapse(false);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.type(" details");
+
+  await expect(command).toHaveText("/permission");
+  await expect(editor).toHaveText("/permission details ");
+});
+
 test("sends an attachment-only first message through the real resolver boundary", async ({ page }) => {
   await openPreparedNewTask(page);
   await page.getByRole("button", { name: "Add context" }).click();
