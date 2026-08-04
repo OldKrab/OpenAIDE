@@ -168,7 +168,7 @@ describe("activity labels", () => {
       "Switch mode to Plan",
     ]);
     expect(activitySummary(activity("Tool activity", "completed", steps))).toBe(
-      "Deleted file, updated file, thought, ran search, called tool",
+      "Deleted file, updated file, ran search, thought, called tool",
     );
   });
 
@@ -356,7 +356,7 @@ describe("activity labels", () => {
       },
       input_summary: "zsh -lc ...",
     };
-    expect(activitySummary(activity("Commands", "completed", [inspect]))).toBe("Read file, ran search");
+    expect(activitySummary(activity("Commands", "completed", [inspect]))).toBe("Ran search, read file");
     expect(activityStepLabel(inspect)).toBe(
       "Read agent-settings-catalog.css and mcp-settings.css; "
       + "Search “skill” in part-09.css, part-10.css, and settings-shell.css",
@@ -364,7 +364,7 @@ describe("activity labels", () => {
     expect(activityStepProgressLabel({ ...inspect, status: "running" })).toBe("Inspecting files");
     expect(activityStepCompletedLabel(inspect)).toBe("Inspected files");
     expect(activitySummary(activity("Commands", "completed", [inspect, inspect]))).toBe(
-      "Read 2 files, ran 2 searches",
+      "Ran 2 searches, read 2 files",
     );
 
     const skillSearch = {
@@ -394,7 +394,28 @@ describe("activity labels", () => {
           { kind: "tool", name: "execute", status: "completed", input_summary: "npm run check" },
         ]),
       ),
-    ).toBe("Read 2 files, updated file, ran command");
+    ).toBe("Updated file, ran command, read 2 files");
+  });
+
+  it("orders grouped activity by user impact instead of event arrival", () => {
+    expect(
+      activitySummary(
+        activity("Tool activity", "completed", [
+          { kind: "thought", text: "Choose the next step." },
+          { kind: "tool", name: "other", status: "completed", input_summary: "Custom tool" },
+          { kind: "tool", name: "read", status: "completed", input_summary: "PRODUCT.md" },
+          { kind: "tool", name: "search", status: "completed", input_summary: "activity summary" },
+          { kind: "tool", name: "collaboration", status: "completed", input_summary: "Wait for subagents" },
+          { kind: "tool", name: "skill", status: "completed", input_summary: "tdd" },
+          { kind: "tool", name: "execute", status: "completed", input_summary: "npm test" },
+          { kind: "tool", name: "edit", status: "completed", input_summary: "activityLabels.ts" },
+          { kind: "tool", name: "delete", status: "completed", input_summary: "obsolete.ts" },
+        ]),
+      ),
+    ).toBe(
+      "Deleted file, updated file, ran command, activated skill, interacted with subagent, "
+      + "ran search, read file, thought, called tool",
+    );
   });
 
   it.each([
@@ -407,9 +428,7 @@ describe("activity labels", () => {
       { kind: "tool" as const, name: "edit", status: "completed" as const, input_summary: "app.ts" },
     ],
   ])("keeps each Tool's kind authoritative in a mixed activity group", (...steps) => {
-    expect(activitySummary(activity("Updated file", "completed", steps))).toBe(
-      steps[0].name === "edit" ? "Updated file, ran search" : "Ran search, updated file",
-    );
+    expect(activitySummary(activity("Updated file", "completed", steps))).toBe("Updated file, ran search");
   });
 
   it("summarizes skill activation events while keeping their detail", () => {
@@ -420,7 +439,7 @@ describe("activity labels", () => {
       { kind: "tool", name: "execute", status: "completed", input_summary: "npm test" },
     ]);
 
-    expect(activitySummary(message)).toBe("Activated 2 skills, read file, ran command");
+    expect(activitySummary(message)).toBe("Ran command, activated 2 skills, read file");
     expect(activityStepLabel(message.steps[0])).toBe("Activated tdd skill");
     expect(activityStepProgressLabel(message.steps[0])).toBe("Activating tdd skill");
     expect(activityStepCompletedLabel(message.steps[0])).toBe("Activated tdd skill");
@@ -445,7 +464,7 @@ describe("activity labels", () => {
           { kind: "tool", name: "other", status: "completed", input_summary: "Updated src/activity.ts" },
         ]),
       ),
-    ).toBe("Read 2 files, ran search, updated file");
+    ).toBe("Updated file, ran search, read 2 files");
   });
 
   it("classifies tool-like text rows from their visible labels", () => {
@@ -457,12 +476,12 @@ describe("activity labels", () => {
           { kind: "text", text: "/usr/bin/zsh -lc \"sed -n '1,180p' packages/frontend/src/state/activityLabels.ts\"" },
         ]),
       ),
-    ).toBe("Read 2 files, ran command");
+    ).toBe("Ran command, read 2 files");
 
     expect(activitySummary(activity("Editing files", "completed", [{ kind: "text", text: "Editing files" }]))).toBe("Updated file");
   });
 
-  it("omits the count for single grouped actions and includes thoughts in order", () => {
+  it("omits the count for single grouped actions and places thoughts after concrete work", () => {
     expect(
       activitySummary(
         activity("Tool activity", "completed", [
@@ -471,7 +490,7 @@ describe("activity labels", () => {
           { kind: "tool", name: "search", status: "completed", input_summary: "tool activity" },
         ]),
       ),
-    ).toBe("Thought, read file, ran search");
+    ).toBe("Ran search, read file, thought");
 
     expect(
       activitySummary(
