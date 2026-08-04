@@ -151,7 +151,11 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
     if (
       editor
       && editor.innerHTML !== html
-      && (renderRevisionChanged || editableText(editor) !== value)
+      && (
+        renderRevisionChanged
+        || editableText(editor) !== value
+        || hasStaleCommandMarkup(editor)
+      )
     ) {
       editor.innerHTML = html;
     }
@@ -308,4 +312,10 @@ function escapeHtml(value: string) {
 function editableText(root: HTMLElement) {
   const text = root.innerText ?? root.textContent ?? "";
   return text.replace(/\n$/, "");
+}
+
+/** Detects native edits that extended a slash-command span past its recorded token. */
+function hasStaleCommandMarkup(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLElement>(".composer-command-token"))
+    .some((token) => token.textContent !== token.dataset.referenceLabel);
 }
