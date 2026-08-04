@@ -111,6 +111,7 @@ export function TaskView({
   chatPageState,
   intents,
   onCancel,
+  onClosePlan,
   fileBrowser,
   onLoadChatPage,
   onLoadComposerHistory,
@@ -147,6 +148,7 @@ export function TaskView({
   chatPageState: AppState["chatPages"][string] | undefined;
   intents: TaskViewIntents;
   onCancel: () => void;
+  onClosePlan?: () => Promise<void>;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadComposerHistory?: () => Promise<string[]>;
@@ -364,6 +366,7 @@ export function TaskView({
         {snapshot.current_plan ? (
           <AgentPlanView
             key={snapshot.task.task_id}
+            onClose={onClosePlan}
             plan={snapshot.current_plan}
             taskId={snapshot.task.task_id}
             taskStatus={snapshot.task.status}

@@ -98,6 +98,7 @@ export type NewTaskDraftInput = {
 
 export type TaskCallbacks = {
   cancel: () => void;
+  closePlan?: () => Promise<void>;
   fileBrowser?: TaskFileBrowserCallbacks;
   /** Starts one earlier-page request and returns its viewport/reducer generation. */
   loadChatPage: (beforeCursor: string) => number | undefined;

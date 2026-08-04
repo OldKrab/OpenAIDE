@@ -25,7 +25,7 @@ import {
   releaseAttachmentResources,
 } from "../services/attachmentResources";
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
-import { cancelTaskIntent, sendTaskPromptIntent } from "../intents/taskMutationIntents";
+import { cancelTaskIntent, closeTaskPlanIntent, sendTaskPromptIntent } from "../intents/taskMutationIntents";
 import { requestComposerHistory } from "../intents/taskReadIntents";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
 import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
@@ -76,6 +76,17 @@ export function createTaskCallbacks({
       );
       cancel();
     },
+    closePlan: () => closeTaskPlanIntent(
+      {
+        backendConnection,
+        clientInstanceId,
+        createSnapshotRequestId,
+        dispatch,
+        postHostMessage,
+        stateRootId: state.appServerStateRootId,
+      },
+      state.snapshot,
+    ),
     fileBrowser: createTaskFileBrowserCallbacks(backendConnection, dispatch, state, attachmentResources),
     loadComposerHistory: () => {
       const taskId = state.snapshot?.task.task_id;

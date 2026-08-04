@@ -13,7 +13,7 @@ import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
 import { useLiveMessagePresentation } from "./useLiveMessagePresentation";
 import { currentFrontendShell } from "../services/frontendShell";
-import { CompletedPlanView } from "./AgentPlan";
+import { ClosedPlanView, CompletedPlanView } from "./AgentPlan";
 
 export { firstToolPath } from "../state/toolDetailsViewModel";
 
@@ -97,6 +97,9 @@ export const ChatRow = memo(function ChatRow({
   }
   if (body.kind === "completed_plan") {
     return <CompletedPlanView entries={body.entries} />;
+  }
+  if (body.kind === "closed_plan") {
+    return <ClosedPlanView entries={body.entries} />;
   }
   if (body.kind === "interruption") {
     if (body.recoverable) {

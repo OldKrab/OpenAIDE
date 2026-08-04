@@ -110,6 +110,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
         onCancel={renderableTaskSnapshot.task.has_messages || renderableTaskSnapshot.task.status === "active"
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
+        onClosePlan={callbacks.task.closePlan}
         onLoadChatPage={callbacks.task.loadChatPage}
         onLoadComposerHistory={callbacks.task.loadComposerHistory}
         onLoadToolImagePreview={callbacks.task.loadToolImagePreview}

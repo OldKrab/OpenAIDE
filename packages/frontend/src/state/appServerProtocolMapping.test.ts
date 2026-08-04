@@ -1063,7 +1063,7 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
-  it("maps the current Agent Plan and completed Plan Chat row into product state", () => {
+  it("maps the current Agent Plan and its terminal Chat rows into product state", () => {
     const entries = [
       { content: "Inspect projection", priority: "high" as const, status: "completed" as const },
       { content: "Render plan", priority: "medium" as const, status: "inProgress" as const },
@@ -1080,6 +1080,11 @@ describe("App Server Protocol state mapping", () => {
             kind: "completedPlan",
             entries: entries.map((entry) => ({ ...entry, status: "completed" as const })),
           }],
+        }, {
+          messageId: "closed-plan-1" as MessageId,
+          role: "system",
+          status: "complete",
+          parts: [{ kind: "closedPlan", entries }],
         }],
       },
     }));
@@ -1096,6 +1101,15 @@ describe("App Server Protocol state mapping", () => {
       entries: [
         { content: "Inspect projection", priority: "high", status: "completed" },
         { content: "Render plan", priority: "medium", status: "completed" },
+      ],
+      created_at: "2026-06-27T12:00:00.000Z",
+    });
+    expect(mapping.snapshot.chat.items[1]?.message).toEqual({
+      kind: "closed_plan",
+      id: "closed-plan-1",
+      entries: [
+        { content: "Inspect projection", priority: "high", status: "completed" },
+        { content: "Render plan", priority: "medium", status: "in_progress" },
       ],
       created_at: "2026-06-27T12:00:00.000Z",
     });

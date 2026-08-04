@@ -3,7 +3,7 @@
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentPlan } from "@openaide/app-shell-contracts";
-import { AgentPlanView, CompletedPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
+import { AgentPlanView, ClosedPlanView, CompletedPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -89,6 +89,25 @@ describe("Agent Plan", () => {
     })).toHaveLength(0);
   });
 
+  it("lets the user close the current Plan", () => {
+    const onClose = vi.fn(() => new Promise<void>(() => undefined));
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentPlanView
+          onClose={onClose}
+          plan={plan}
+          taskId="task-close"
+          taskStatus="active"
+        />,
+      );
+    });
+
+    act(() => tree.root.findByProps({ "aria-label": "Close Plan" }).props.onClick());
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("keeps a completed Plan Chat row collapsed by default", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
@@ -102,6 +121,16 @@ describe("Agent Plan", () => {
       "data-open": false,
       inert: true,
     });
+  });
+
+  it("labels a user-closed Plan distinctly from completion", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ClosedPlanView entries={plan.entries} />);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("Plan closed by user");
+    expect(tree.root.findByProps({ "aria-label": "Expand Plan closed by user" }).props["aria-expanded"]).toBe(false);
   });
 });
 

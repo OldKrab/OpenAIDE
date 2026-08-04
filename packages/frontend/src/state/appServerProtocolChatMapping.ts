@@ -120,6 +120,21 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       created_at: createdAt,
     };
   }
+  const closedPlan = item.parts.find(
+    (part): part is Extract<MessagePart, { kind: "closedPlan" }> => part.kind === "closedPlan",
+  );
+  if (closedPlan) {
+    return {
+      kind: "closed_plan",
+      id: item.messageId,
+      entries: closedPlan.entries.map((entry) => ({
+        content: entry.content,
+        priority: entry.priority,
+        status: entry.status === "inProgress" ? "in_progress" : entry.status,
+      })),
+      created_at: createdAt,
+    };
+  }
   const activity = firstActivityPart(item.parts);
   if (activity) {
     return {

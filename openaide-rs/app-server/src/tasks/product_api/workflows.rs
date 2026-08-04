@@ -7,9 +7,10 @@ use openaide_app_server_protocol::support::{
 };
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
-    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskLifecycleChanged,
-    TaskReleaseParams, TaskRestoreParams, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams,
+    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskClosePlanParams,
+    TaskLifecycleChanged, TaskReleaseParams, TaskRestoreParams, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSetConfigOptionParams, TaskSetPinnedParams,
+    TaskSetTitleParams,
 };
 
 pub(crate) trait TaskAcquireWorkflow: Send + Sync {
@@ -113,6 +114,14 @@ pub(crate) trait TaskMetadataWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskSetPinnedParams,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSummary, ProtocolError>;
+}
+
+pub(crate) trait TaskPlanWorkflow: Send + Sync {
+    fn close_plan_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskClosePlanParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
 pub(crate) trait TaskReleaseWorkflow: Send + Sync {

@@ -56,6 +56,12 @@ pub enum NormalizedMessage {
         entries: Vec<AgentPlanEntry>,
         created_at: String,
     },
+    /// Final incomplete Plan snapshot retained after an explicit user close.
+    ClosedPlan {
+        id: String,
+        entries: Vec<AgentPlanEntry>,
+        created_at: String,
+    },
     Question {
         id: String,
         request_id: String,
@@ -95,6 +101,7 @@ impl NormalizedMessage {
             } => "thought_message",
             NormalizedMessage::Activity { .. } => "activity",
             NormalizedMessage::CompletedPlan { .. } => "completed_plan",
+            NormalizedMessage::ClosedPlan { .. } => "closed_plan",
             NormalizedMessage::Question { .. } => "question",
             NormalizedMessage::Interruption { .. } => "interruption",
         }
@@ -106,6 +113,7 @@ impl NormalizedMessage {
             | NormalizedMessage::AgentMessage { id, .. }
             | NormalizedMessage::Activity { id, .. }
             | NormalizedMessage::CompletedPlan { id, .. }
+            | NormalizedMessage::ClosedPlan { id, .. }
             | NormalizedMessage::Question { id, .. }
             | NormalizedMessage::Interruption { id, .. } => id.clone(),
         }
@@ -117,6 +125,7 @@ impl NormalizedMessage {
             | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
             | NormalizedMessage::CompletedPlan { created_at, .. }
+            | NormalizedMessage::ClosedPlan { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
             | NormalizedMessage::Interruption { created_at, .. } => created_at.clone(),
         };
@@ -125,6 +134,7 @@ impl NormalizedMessage {
             | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
             | NormalizedMessage::CompletedPlan { created_at, .. }
+            | NormalizedMessage::ClosedPlan { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
             | NormalizedMessage::Interruption { created_at, .. } => {
                 *created_at = existing_created_at

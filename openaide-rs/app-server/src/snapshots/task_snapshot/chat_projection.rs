@@ -83,6 +83,16 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 .entries,
             }],
         ),
+        NormalizedMessage::ClosedPlan { entries, .. } => (
+            ChatRole::System,
+            ChatItemStatus::Complete,
+            vec![MessagePart::ClosedPlan {
+                entries: super::project_agent_plan(crate::protocol::model::AgentPlan {
+                    entries: entries.clone(),
+                })
+                .entries,
+            }],
+        ),
         NormalizedMessage::Question {
             request_id,
             message,

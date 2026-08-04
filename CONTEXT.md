@@ -156,6 +156,10 @@ _Avoid_: OpenAIDE workflow, Tool activity, one plan per prompt
 The final non-empty, all-complete snapshot of an Agent Plan retained in Chat. A later snapshot with incomplete work begins a new Agent Plan.
 _Avoid_: Archived Plan, treating repeated completion snapshots as separate plans
 
+**Closed Plan**:
+The final snapshot of an incomplete Agent Plan retained in Chat after the user explicitly closes it. Its entries keep their last reported statuses and the row is labeled **Plan closed by user**.
+_Avoid_: Completed Plan, silently dismissed Plan
+
 **Agent Identity**:
 The stable App Server-owned identity for one Agent definition and launch configuration.
 _Avoid_: Display name or executable path as identity

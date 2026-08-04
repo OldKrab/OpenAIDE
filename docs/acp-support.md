@@ -37,7 +37,7 @@ This document tracks three things:
 | tool calls | partial | session updates | Track create/update, status, kind, normalized summaries, locations, readable input fields, content blocks, and output fields with stable `toolCallId` identity. Lazy per-tool artifacts and linked resolved permission state remain in progress. |
 | diff tool content | partial | tool content | Normalizes semantic old/new text into expanded edit details. Unified-diff styling and delete/move-specific renderers remain in progress. |
 | terminal tool content | partial | tool content | Preserves terminal references and command output fields in expanded tool details. Embedded terminal replay remains in progress. |
-| plan updates | supported | session updates | Complete ordered snapshots replace one durable current Agent Plan. Incomplete Plans stay pinned above the Composer; all-completed snapshots move once into a replaceable Completed Plan Chat row. Empty snapshots clear the current Plan. |
+| plan updates | supported | session updates | Complete ordered snapshots replace one durable current Agent Plan. Incomplete Plans stay pinned above the Composer; all-completed snapshots move once into a replaceable Completed Plan Chat row. Empty snapshots clear the current Plan. Users may close an incomplete Plan into local Chat; ACP has no client-originated close operation, so a later Plan update or authoritative history replay may start it again. |
 | slash commands | planned | `available_commands_update` | UI command discovery and invocation. |
 | session info update | supported | session updates | Agent titles and activity timestamps update the persisted Task projection; an explicit clear supersedes provisional Prompt or Agent-owned titles. |
 
