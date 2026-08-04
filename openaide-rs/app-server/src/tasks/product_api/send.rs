@@ -319,10 +319,7 @@ impl TaskProductApi {
                 text: prompt_text,
                 attachments: attachments.agent_attachments(),
             }) {
-            Ok(()) => {
-                self.request_native_session_catalog_refresh();
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(error) => committed_send.fail(self, error).map(|_| ()),
         };
         // Ownership must retire even when recovery itself reports a storage error;

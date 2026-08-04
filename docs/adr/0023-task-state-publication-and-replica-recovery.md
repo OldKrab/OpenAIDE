@@ -36,9 +36,8 @@ Bounded discovery validates each raw Agent page before normalization. Descending
 
 It refreshes active catalogs:
 
-- once when Task Navigation gains a subscriber and once per minute while subscribers remain;
-- on explicit user Refresh;
-- after a user prompt successfully starts.
+- once when Task Navigation gains a subscriber and once every five minutes while subscribers remain;
+- on explicit user Refresh.
 
 `taskNavigation/loadMore` raises a Project's process-local depth target without exposing Agent cursors to Frontend. Concurrent requests coalesce with one trailing generation. Disabling or removing an Agent hides both its durable Tasks and unadopted sessions without deleting retained data.
 

@@ -190,7 +190,6 @@ export const Sidebar = memo(function Sidebar({
             >
               <RefreshCcw size={13} />
             </button>
-            {nativeSessions.loading ? <small>Refreshing tasks</small> : null}
           </span>
         ) : null}
         <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>

@@ -904,7 +904,7 @@ describe("Sidebar", () => {
     expect(settings.props.className).toContain("settings-button selected");
   });
 
-  it("labels native-session refresh in the sidebar header", () => {
+  it("shows only the animated refresh control while refreshing native sessions", () => {
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
@@ -914,9 +914,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    expect(tree.root.findByProps({ className: "task-section-head" }).findByType("small").children.join("")).toBe(
-      "Refreshing tasks",
-    );
+    expect(textContent(tree)).not.toContain("Refreshing tasks");
     expect(tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.disabled).toBe(true);
     expect(tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.className).toContain("refreshing");
   });
