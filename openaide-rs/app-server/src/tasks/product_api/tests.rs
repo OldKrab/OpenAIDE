@@ -21,7 +21,8 @@ use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::storage::composer_history::ComposerHistoryEntryRecord;
 use crate::storage::records::{
-    TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
+    QueuedMessageRecord, TaskLifecycle, TaskMessageQueuePauseRecord, TaskPreparationRecord,
+    TaskRecord, TaskTitle, TaskTitleSource,
 };
 use crate::storage::Store;
 use crate::task_events::{TaskUpdateKind, TaskUpdateNotifier};
@@ -38,8 +39,10 @@ use openaide_app_server_protocol::task::{
     ComposerHistoryParams, ComposerHistoryScope, ComposerImage, ComposerMessage,
     NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
     TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskClosePlanParams,
-    TaskMarkReadParams, TaskOpenParams, TaskReleaseParams, TaskSendParams,
-    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
+    TaskMarkReadParams, TaskOpenParams, TaskQueueAppendParams, TaskQueueMoveParams,
+    TaskQueueRemoveParams, TaskQueueSendSelection, TaskQueueTakeParams, TaskReleaseParams,
+    TaskSendParams, TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams,
+    TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -4269,6 +4272,546 @@ fn send_after_prompt_settlement_starts_a_new_turn() {
 }
 
 #[test]
+fn queued_message_append_and_remove_are_durable_without_entering_chat() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record(
+            "task-queue-durable",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.send(send_params("task-queue-durable", "start work"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-durable").unwrap().status == TaskStatus::Active);
+
+    let appended = api
+        .queue_append_for_test(TaskQueueAppendParams {
+            task_id: "task-queue-durable".into(),
+            message: ComposerMessage {
+                text: Some("follow up later".to_string()),
+                ..ComposerMessage::default()
+            },
+        })
+        .unwrap();
+    assert_eq!(appended.message_queue.items.len(), 1);
+    assert_eq!(appended.message_queue.items[0].text, "follow up later");
+    assert_eq!(appended.chat.items.len(), 2);
+
+    let persisted = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-queue-durable", 100).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(persisted.message_queue, appended.message_queue);
+
+    let removed = api
+        .queue_remove_for_test(TaskQueueRemoveParams {
+            task_id: "task-queue-durable".into(),
+            queued_message_id: appended.message_queue.items[0].queued_message_id.clone(),
+            queue_revision: appended.message_queue.revision,
+            client_mutation_id: "mutation-remove-1".into(),
+        })
+        .unwrap();
+    assert!(removed.message_queue.items.is_empty());
+    assert_eq!(removed.chat.items.len(), 2);
+    assert!(store
+        .read_task("task-queue-durable")
+        .unwrap()
+        .message_queue
+        .items
+        .is_empty());
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+}
+
+#[test]
+fn queued_message_is_available_through_task_composer_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record(
+            "task-queue-history",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.send(send_params("task-queue-history", "start work"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-history").unwrap().status == TaskStatus::Active);
+
+    api.queue_append_for_test(TaskQueueAppendParams {
+        task_id: "task-queue-history".into(),
+        message: ComposerMessage {
+            text: Some("  follow up later  ".to_string()),
+            ..ComposerMessage::default()
+        },
+    })
+    .unwrap();
+    let history = api
+        .composer_history_for_client(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            ComposerHistoryParams {
+                scope: ComposerHistoryScope::Task {
+                    task_id: TaskId::from("task-queue-history"),
+                },
+            },
+        )
+        .unwrap();
+
+    assert_eq!(history.entries[0].text, "follow up later");
+    agent.release_prompt.store(true, Ordering::SeqCst);
+}
+
+#[test]
+fn queue_take_atomically_returns_composer_content_and_rejects_stale_revisions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let attachment_path = workspace.join("notes.md");
+    std::fs::write(&attachment_path, "queued attachment").unwrap();
+    store
+        .write_task(&task_record(
+            "task-queue-take",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let task_id = TaskId::from("task-queue-take");
+    let attachment = api.attachment_runtime().register_file_reference_for_test(
+        &task_id,
+        "notes.md",
+        &attachment_path,
+    );
+    api.send(send_params("task-queue-take", "start work"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-take").unwrap().status == TaskStatus::Active);
+
+    let appended = api
+        .queue_append_for_test(TaskQueueAppendParams {
+            task_id: "task-queue-take".into(),
+            message: ComposerMessage {
+                text: Some("revise this".into()),
+                images: vec![inline_image()],
+                attachments: vec![attachment.handle_id],
+            },
+        })
+        .unwrap();
+    let queued_message_id = appended.message_queue.items[0].queued_message_id.clone();
+
+    let stale = api.queue_take_for_test(TaskQueueTakeParams {
+        task_id: "task-queue-take".into(),
+        queued_message_id: queued_message_id.clone(),
+        queue_revision: appended.message_queue.revision.saturating_sub(1),
+        client_mutation_id: "take-stale".into(),
+    });
+    assert!(stale.is_err());
+    assert_eq!(
+        store
+            .read_task("task-queue-take")
+            .unwrap()
+            .message_queue
+            .items
+            .len(),
+        1
+    );
+
+    let taken = api
+        .queue_take_for_test(TaskQueueTakeParams {
+            task_id: "task-queue-take".into(),
+            queued_message_id,
+            queue_revision: appended.message_queue.revision,
+            client_mutation_id: "take-current".into(),
+        })
+        .unwrap();
+    assert!(taken.task.message_queue.items.is_empty());
+    assert_eq!(taken.message.text, "revise this");
+    assert_eq!(taken.message.images, vec![inline_image()]);
+    assert_eq!(taken.message.attachments.len(), 1);
+    assert_eq!(taken.message.attachments[0].label, "notes.md");
+    let restored = api
+        .attachment_runtime()
+        .resolve_for_send(&task_id, &[taken.message.attachments[0].handle_id.clone()])
+        .unwrap();
+    assert_eq!(
+        restored.agent_attachments()[0].path.as_deref(),
+        Some(attachment_path.to_string_lossy().as_ref())
+    );
+    assert!(store
+        .read_task("task-queue-take")
+        .unwrap()
+        .message_queue
+        .items
+        .is_empty());
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+}
+
+#[test]
+fn queued_message_move_rebases_by_stable_id_while_agent_turn_is_active() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record(
+            "task-queue-mutate",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.send(send_params("task-queue-mutate", "start work"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-mutate").unwrap().status == TaskStatus::Active);
+    let _first = api
+        .queue_append_for_test(TaskQueueAppendParams {
+            task_id: "task-queue-mutate".into(),
+            message: ComposerMessage {
+                text: Some("first".into()),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+    let second = api
+        .queue_append_for_test(TaskQueueAppendParams {
+            task_id: "task-queue-mutate".into(),
+            message: ComposerMessage {
+                text: Some("second".into()),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+    let moved = api
+        .queue_move_for_test(TaskQueueMoveParams {
+            task_id: "task-queue-mutate".into(),
+            queued_message_id: second.message_queue.items[1].queued_message_id.clone(),
+            target_index: 0,
+            // Agent updates can advance the observed queue revision between drag start
+            // and drop. Reordering remains safe because the row identity is durable.
+            queue_revision: second.message_queue.revision.saturating_sub(1),
+            client_mutation_id: "move-1".into(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        moved
+            .message_queue
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["second", "first"]
+    );
+    agent.release_prompt.store(true, Ordering::SeqCst);
+}
+
+#[test]
+fn send_now_accepts_and_removes_the_exact_queued_message_atomically() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record(
+            "task-queue-send",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.send(send_params("task-queue-send", "start work"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-send").unwrap().status == TaskStatus::Active);
+    let queued = api
+        .queue_append_for_test(TaskQueueAppendParams {
+            task_id: "task-queue-send".into(),
+            message: ComposerMessage {
+                text: Some("send this now".into()),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+    let item = queued.message_queue.items[0].clone();
+
+    let accepted = api
+        .send(TaskSendParams {
+            task_id: "task-queue-send".into(),
+            message: ComposerMessage {
+                text: Some(item.text.clone()),
+                ..Default::default()
+            },
+            queue_selection: Some(TaskQueueSendSelection {
+                queued_message_id: item.queued_message_id,
+                queue_revision: queued.message_queue.revision,
+            }),
+        })
+        .unwrap();
+
+    assert!(accepted.task.message_queue.items.is_empty());
+    assert!(accepted
+        .task
+        .chat
+        .items
+        .iter()
+        .any(|item| item.parts.iter().any(|part| {
+            matches!(part, MessagePart::Text { text } if text == "send this now")
+        })));
+    agent.release_prompt.store(true, Ordering::SeqCst);
+}
+
+#[test]
+fn restart_pauses_an_idle_nonempty_queue() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    let mut task = task_record("task-queue-restart", &workspace.to_string_lossy());
+    task.message_queue.items.push(QueuedMessageRecord {
+        queued_message_id: "queued-1".into(),
+        text: "wait for resume".into(),
+        created_at: "now".into(),
+        chat_attachments: Vec::new(),
+        agent_attachments: Vec::new(),
+    });
+    task.message_queue.revision = 1;
+    store.write_task(&task).unwrap();
+
+    let _api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(RecordingAgent::default()),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let recovered = store.read_task("task-queue-restart").unwrap();
+    assert_eq!(
+        recovered.message_queue.pause,
+        Some(TaskMessageQueuePauseRecord::Restarted)
+    );
+    assert_eq!(recovered.message_queue.revision, 2);
+}
+
+#[test]
+fn normal_turn_completion_accepts_the_queue_head_as_the_next_turn() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record(
+            "task-queue-advance",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        notifier,
+    )
+    .unwrap();
+
+    api.send(send_params("task-queue-advance", "first turn"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-advance").unwrap().status == TaskStatus::Active);
+    api.queue_append_for_test(TaskQueueAppendParams {
+        task_id: "task-queue-advance".into(),
+        message: ComposerMessage {
+            text: Some("queued second turn".to_string()),
+            ..ComposerMessage::default()
+        },
+    })
+    .unwrap();
+    while updates.try_recv().is_ok() {}
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) >= 2);
+    wait_until(|| store.read_task("task-queue-advance").unwrap().status == TaskStatus::Inactive);
+    let task = store.read_task("task-queue-advance").unwrap();
+    assert!(task.message_queue.items.is_empty());
+    assert!(
+        updates.try_iter().any(|update| matches!(
+            update.kind,
+            TaskUpdateKind::Changed(change)
+                if change.changes.message_queue.as_ref().is_some_and(|queue| queue.items.is_empty())
+        )),
+        "automatic delivery must publish the updated Queue projection"
+    );
+    let user_texts = store
+        .read_messages("task-queue-advance")
+        .unwrap()
+        .into_iter()
+        .filter_map(|message| match message.chat.message {
+            NormalizedMessage::User { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        user_texts,
+        vec!["first turn", "queued second turn"],
+        "stored messages: {:#?}",
+        store.read_messages("task-queue-advance").unwrap()
+    );
+}
+
+#[test]
+fn automatic_queue_delivery_preserves_inline_image_attachments() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record(
+            "task-queue-image",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.send(send_params("task-queue-image", "start work"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-image").unwrap().status == TaskStatus::Active);
+    api.queue_append_for_test(TaskQueueAppendParams {
+        task_id: "task-queue-image".into(),
+        message: ComposerMessage {
+            text: Some("inspect image".into()),
+            images: vec![inline_image()],
+            attachments: Vec::new(),
+        },
+    })
+    .unwrap();
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) >= 2);
+    let prompt_attachments = agent.prompt_attachments.lock().unwrap();
+    assert_eq!(prompt_attachments[1][0].kind, "image");
+    assert!(prompt_attachments[1][0].payload.is_some());
+}
+
+#[test]
+fn unsuccessful_turn_completion_keeps_the_queue_intact() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record(
+            "task-queue-paused",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        prompt_outcome: Mutex::new(Some(crate::agent::AgentPromptOutcome::MaxTokens)),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.send(send_params("task-queue-paused", "first turn"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-paused").unwrap().status == TaskStatus::Active);
+    api.queue_append_for_test(TaskQueueAppendParams {
+        task_id: "task-queue-paused".into(),
+        message: ComposerMessage {
+            text: Some("keep this queued".to_string()),
+            ..ComposerMessage::default()
+        },
+    })
+    .unwrap();
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+
+    wait_until(|| store.read_task("task-queue-paused").unwrap().status == TaskStatus::Inactive);
+    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store
+            .read_task("task-queue-paused")
+            .unwrap()
+            .message_queue
+            .items[0]
+            .text,
+        "keep this queued"
+    );
+}
+
+#[test]
 fn send_starts_agent_session_and_prompts_after_commit() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -4858,6 +5401,7 @@ fn send_post_commit_start_failure_allows_client_to_resend_inline_image() {
     .unwrap();
     let params = TaskSendParams {
         task_id: "task-existing".into(),
+        queue_selection: None,
         message: ComposerMessage {
             text: Some("hello".to_string()),
             images: vec![inline_image()],
@@ -4876,6 +5420,7 @@ fn send_post_commit_start_failure_allows_client_to_resend_inline_image() {
     let retry = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
+            queue_selection: None,
             message: ComposerMessage {
                 text: Some("reuse".to_string()),
                 images: vec![inline_image()],
@@ -4947,6 +5492,7 @@ fn send_accepts_a_file_only_message_and_forwards_the_original_path() {
 
     api.send(TaskSendParams {
         task_id,
+        queue_selection: None,
         message: ComposerMessage {
             text: None,
             images: Vec::new(),
@@ -5247,6 +5793,7 @@ fn send_rejects_invalid_inline_image_without_committing() {
     let error = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
+            queue_selection: None,
             message: ComposerMessage {
                 text: Some("hello".to_string()),
                 images: vec![image],
@@ -5285,6 +5832,7 @@ fn send_commits_inline_image_as_image_chat_content() {
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
+            queue_selection: None,
             message: ComposerMessage {
                 text: Some("hello".to_string()),
                 images: vec![inline_image()],
@@ -5352,6 +5900,7 @@ fn send_commits_inline_image_without_an_empty_text_part() {
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
+            queue_selection: None,
             message: ComposerMessage {
                 text: None,
                 images: vec![inline_image()],
@@ -5406,6 +5955,7 @@ fn rejected_send_keeps_inline_image_available_for_retry() {
     let error = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
+            queue_selection: None,
             message: message.clone(),
         })
         .unwrap_err();
@@ -5415,6 +5965,7 @@ fn rejected_send_keeps_inline_image_available_for_retry() {
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
+            queue_selection: None,
             message,
         })
         .unwrap();
@@ -7229,6 +7780,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
         composer_history: Default::default(),
+        message_queue: Default::default(),
         agent_id: "codex".to_string(),
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
@@ -7282,6 +7834,7 @@ fn test_new_task_lifecycle() -> TaskLifecycle {
 fn send_params(task_id: &str, text: &str) -> TaskSendParams {
     TaskSendParams {
         task_id: task_id.into(),
+        queue_selection: None,
         message: ComposerMessage {
             text: Some(text.to_string()),
             images: Vec::new(),
@@ -7406,6 +7959,7 @@ struct RecordingAgent {
     release_cancelled_prompt: AtomicBool,
     release_prompt: AtomicBool,
     prompt_calls: Mutex<Vec<(String, String)>>,
+    prompt_outcome: Mutex<Option<crate::agent::AgentPromptOutcome>>,
     steer_calls: Mutex<Vec<(String, String)>>,
     prompt_attachments: Mutex<Vec<Vec<Attachment>>>,
     session_config_updates: Mutex<Vec<(String, String, String)>>,
@@ -7738,7 +8292,11 @@ impl AgentRuntime for RecordingAgent {
         let outcome = if cancelled {
             crate::agent::AgentPromptOutcome::Cancelled
         } else {
-            crate::agent::AgentPromptOutcome::EndTurn
+            self.prompt_outcome
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or(crate::agent::AgentPromptOutcome::EndTurn)
         };
         self.prompt_completions.fetch_add(1, Ordering::SeqCst);
         Ok(outcome)

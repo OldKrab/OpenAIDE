@@ -628,6 +628,7 @@ fn task_chat_fixture(
 fn send_params(task_id: &TaskId, text: &str) -> TaskSendParams {
     TaskSendParams {
         task_id: task_id.clone(),
+        queue_selection: None,
         message: ComposerMessage {
             text: Some(text.to_string()),
             images: Vec::new(),

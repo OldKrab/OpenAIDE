@@ -51,6 +51,7 @@ mod list_sessions;
 mod native_session_archive;
 mod open;
 mod prepare;
+mod queue;
 mod reset_task_history;
 pub(crate) mod secret_resolver;
 pub(crate) mod send;
@@ -366,6 +367,38 @@ impl TaskSendWorkflow for TaskProductApi {
     ) -> Result<TaskSendAccepted, ProtocolError> {
         self.send_message(client_instance_id, params)
     }
+
+    fn queue_append_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskQueueAppendParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.queue_append_message(client_instance_id, params)
+    }
+
+    fn queue_remove_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskQueueRemoveParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.queue_remove_message(client_instance_id, params)
+    }
+
+    fn queue_take_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskQueueTakeParams,
+    ) -> Result<openaide_app_server_protocol::task::TaskQueueTakeResult, ProtocolError> {
+        self.queue_take_message(client_instance_id, params)
+    }
+
+    fn queue_move_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskQueueMoveParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.queue_move_message(client_instance_id, params)
+    }
 }
 
 #[cfg(test)]
@@ -449,6 +482,46 @@ impl TaskProductApi {
 
     pub(crate) fn send(&self, params: TaskSendParams) -> Result<TaskSendAccepted, ProtocolError> {
         self.send_message(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn queue_append_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskQueueAppendParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.queue_append_message(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn queue_remove_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskQueueRemoveParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.queue_remove_message(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn queue_take_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskQueueTakeParams,
+    ) -> Result<openaide_app_server_protocol::task::TaskQueueTakeResult, ProtocolError> {
+        self.queue_take_message(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn queue_move_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskQueueMoveParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.queue_move_message(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
         )

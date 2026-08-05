@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStop, LoaderCircle } from "lucide-react";
+import { ArrowUp, CircleStop, ListPlus, LoaderCircle } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
@@ -16,7 +16,7 @@ import {
 import { composerCanSubmit, type ComposerAvailability } from "./composerAvailability";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { IconButton } from "./ComposerPrimitives";
-import { shouldInsertComposerNewline, shouldSubmitComposerKey } from "./composerKeymap";
+import { shouldInsertComposerNewline, shouldQueueComposerKey, shouldSubmitComposerKey } from "./composerKeymap";
 import {
   commandCatalogKey,
   SlashCommandPicker,
@@ -36,7 +36,7 @@ import {
   type FileMentionToken,
 } from "./ComposerFileMentions";
 
-export { shouldInsertComposerNewline, shouldSubmitComposerKey } from "./composerKeymap";
+export { shouldInsertComposerNewline, shouldQueueComposerKey, shouldSubmitComposerKey } from "./composerKeymap";
 
 type ComposerProps = {
   agentLocked?: boolean;
@@ -54,6 +54,7 @@ type ComposerProps = {
   loadComposerHistory?: () => Promise<string[]>;
   agents?: AgentOption[];
   onCancel?: () => void;
+  onAddToQueue?: () => void;
   onChange: (prompt: string) => void;
   onUnsupportedImageAttachment?: (message?: string) => void;
   onRevealAttachment?: (attachmentId: string) => Promise<void> | void;
@@ -86,6 +87,7 @@ export function Composer({
   loadComposerHistory,
   agents = agentOptions,
   onCancel,
+  onAddToQueue,
   onChange,
   onUnsupportedImageAttachment,
   onRevealAttachment,
@@ -135,6 +137,10 @@ export function Composer({
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
   const uploadPending = fileUploads.some((upload) => upload.state !== "error");
   const canSubmit = composerCanSubmit(availability, editorText, attachments.length) && !uploadPending;
+  const canAddToQueue = availability.canEdit
+    && hasDraftContent
+    && !uploadPending
+    && !availability.submitting;
   const composerHistory = useComposerHistory({
     load: loadComposerHistory,
     refreshKey: submissionSettlementKey,
@@ -479,6 +485,16 @@ export function Composer({
             }
           }
           const mobileComposerBehavior = usesMobileComposerBehavior();
+          if (
+            !mobileComposerBehavior
+            && onAddToQueue
+            && canAddToQueue
+            && shouldQueueComposerKey(event)
+          ) {
+            event.preventDefault();
+            onAddToQueue();
+            return;
+          }
           if (!mobileComposerBehavior && shouldSubmitComposerKey(event, submitShortcut) && canSubmit) {
             event.preventDefault();
             submitDraft();
@@ -552,6 +568,17 @@ export function Composer({
           ) : null}
           {showStopAction && onCancel ? (
             <IconButton ariaLabel="Stop task" className="composer-stop-button" icon={<CircleStop size={14} />} onClick={onCancel} />
+          ) : null}
+          {onAddToQueue && !availability.submitting ? (
+            <IconButton
+              ariaLabel="Add to queue"
+              className="composer-queue-button"
+              disabled={!canAddToQueue}
+              icon={<ListPlus size={15} />}
+              keyShortcuts="Control+Shift+Enter Meta+Shift+Enter"
+              onClick={onAddToQueue}
+              title="Add to queue (Ctrl/Cmd+Shift+Enter)"
+            />
           ) : null}
           {!availability.submitting && showSendAction ? (
             <IconButton

@@ -8,8 +8,8 @@ use crate::snapshot::{
     AgentCollectionSnapshot, AgentPlanSnapshot, ChatItem, ChatSnapshot, ClientSnapshot,
     PendingRequestSnapshot, ProjectCollectionSnapshot, TaskAgentCommandsSnapshot,
     TaskAgentConfigSnapshot, TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities,
-    TaskLifecycle, TaskNavigationSnapshot, TaskPreparationSnapshot, TaskSendCapabilitySnapshot,
-    TaskSummary,
+    TaskLifecycle, TaskMessageQueueSnapshot, TaskNavigationSnapshot, TaskPreparationSnapshot,
+    TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
@@ -157,6 +157,8 @@ pub struct TaskChanges {
     /// Outer option controls delta presence; inner option clears the current Agent Plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_plan: Option<Option<AgentPlanSnapshot>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_queue: Option<TaskMessageQueueSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chat: Vec<TaskChatChange>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -175,6 +177,7 @@ impl TaskChanges {
             && self.input_capabilities.is_none()
             && self.context_usage.is_none()
             && self.current_plan.is_none()
+            && self.message_queue.is_none()
             && self.chat.is_empty()
             && !self.removed
     }

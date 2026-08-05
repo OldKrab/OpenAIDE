@@ -83,9 +83,17 @@ function responseHeaders(response) {
   const out = {};
   for (const [key, value] of response.headers.entries()) {
     const lower = key.toLowerCase();
-    if (lower === "connection" || lower === "etag" || lower === "last-modified" || lower === "transfer-encoding") continue;
+    if (
+      lower === "connection"
+      || lower === "content-encoding"
+      || lower === "etag"
+      || lower === "last-modified"
+      || lower === "transfer-encoding"
+    ) continue;
     out[key] = value;
   }
+  // Node fetch decodes upstream compression before arrayBuffer(); forwarding the
+  // original encoding would make browsers decode the buffered body a second time.
   out["cache-control"] = "no-store, max-age=0, must-revalidate";
   out.pragma = "no-cache";
   out.expires = "0";

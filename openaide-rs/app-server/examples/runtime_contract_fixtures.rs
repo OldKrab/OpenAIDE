@@ -99,6 +99,7 @@ fn main() {
         active_turn_started_at: None,
         lifecycle: openaide_app_server::storage::records::TaskLifecycle::Open,
         chat: chat.clone(),
+        message_queue: Default::default(),
         settings_summary: SettingsSummary {
             agent_id: "codex".to_string(),
             isolation: IsolationKind::Local,

@@ -5,11 +5,13 @@ use openaide_app_server_protocol::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
     TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
     TaskClosePlanParams, TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
-    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
+    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
+    TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
+    TaskReleaseResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
+    TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use serde_json::Value;
 
@@ -195,6 +197,129 @@ impl RpcGateway {
                 user_message_id: accepted.user_message_id,
             },
         )
+    }
+
+    pub(super) fn handle_task_queue_append(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        _now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskQueueAppendParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for queue append");
+        match self
+            .task_send
+            .queue_append_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => self.result::<TaskQueueAppendResult>(
+                connection_id,
+                id,
+                meta,
+                TaskQueueAppendResult { task },
+            ),
+            Err(error) => self.error(connection_id, id, meta, error),
+        }
+    }
+
+    pub(super) fn handle_task_queue_remove(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        _now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskQueueRemoveParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for queue remove");
+        match self
+            .task_send
+            .queue_remove_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => self.result::<TaskQueueRemoveResult>(
+                connection_id,
+                id,
+                meta,
+                TaskQueueRemoveResult { task },
+            ),
+            Err(error) => self.error(connection_id, id, meta, error),
+        }
+    }
+
+    pub(super) fn handle_task_queue_take(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        _now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskQueueTakeParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for queue take");
+        match self
+            .task_send
+            .queue_take_for_client(&client.client_instance_id, params)
+        {
+            Ok(result) => self.result::<TaskQueueTakeResult>(connection_id, id, meta, result),
+            Err(error) => self.error(connection_id, id, meta, error),
+        }
+    }
+
+    pub(super) fn handle_task_queue_move(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        _now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskQueueMoveParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for queue move");
+        match self
+            .task_send
+            .queue_move_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => self.result::<TaskQueueMoveResult>(
+                connection_id,
+                id,
+                meta,
+                TaskQueueMoveResult { task },
+            ),
+            Err(error) => self.error(connection_id, id, meta, error),
+        }
     }
 
     pub(super) fn handle_task_cancel(

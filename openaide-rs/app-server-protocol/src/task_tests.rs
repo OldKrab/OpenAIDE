@@ -33,6 +33,7 @@ fn task_file_search_is_scoped_and_uses_relative_paths() {
 fn task_send_message_is_text_plus_inline_ordered_images() {
     let params = TaskSendParams {
         task_id: "task-1".into(),
+        queue_selection: None,
         message: ComposerMessage {
             text: Some("/plan implement this".to_string()),
             images: vec![ComposerImage {

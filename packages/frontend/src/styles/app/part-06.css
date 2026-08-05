@@ -19,6 +19,7 @@
 }
 
 .task-surface:not(.new-task-surface) .composer {
+  min-height: 94px;
   max-height: 50dvh;
 }
 
@@ -64,6 +65,16 @@
   position: absolute;
   top: 3px;
   pointer-events: none;
+}
+
+/* Keep the Task Composer stable for an empty or one-line draft; longer content still grows naturally. */
+.task-surface:not(.new-task-surface) .composer-editor {
+  min-height: 22px;
+}
+
+.task-surface:not(.new-task-surface) .composer {
+  gap: 4px;
+  padding-block: 8px;
 }
 
 .composer-reference-token {
@@ -458,7 +469,7 @@
   justify-content: center;
 }
 
-.composer-actions .composer-icon-button:not(.composer-send-button) {
+.composer-actions .composer-icon-button:not(.composer-send-button):not(.composer-queue-button) {
   min-width: 30px;
   min-height: 30px;
   width: 30px;
@@ -470,7 +481,7 @@
   line-height: 0;
 }
 
-.composer-actions .composer-icon-button:not(.composer-send-button) svg {
+.composer-actions .composer-icon-button:not(.composer-send-button):not(.composer-queue-button) svg {
   display: block;
 }
 

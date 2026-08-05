@@ -208,6 +208,7 @@ impl TaskProductApi {
             updated_at: now.to_string(),
             last_activity: last_activity.to_string(),
             composer_history: Default::default(),
+            message_queue: Default::default(),
             agent_name: self
                 .agent_registry
                 .display_name(params.agent_id.as_str(), None)?,

@@ -46,10 +46,26 @@ After approval, harden only the selected direction with production tests, lifecy
 4. Import real production components into `packages/frontend/prototypes/<prototype-name>/prototype.tsx`. Keep only candidate-specific composition and fixture adapters local to the prototype.
 5. Use the standard harness `?variant=<key>` control. Variant changes must update the URL and React state in place; do not navigate or reload the page.
 6. Keep reviewer-shareable scenario state in query parameters when reload or sharing must reproduce it.
-7. Run `npm run prototype:target -- <prototype-name>` and verify the printed Target route in a browser. Check keyboard switching, desktop and narrow layouts, HMR, overflow, and console errors.
-8. Hand over a verified clickable Target link, including the relevant `?variant=` value.
+7. Run `npm run prototype:target -- <prototype-name>` and keep that process alive for the full review. Record the Vite port it actually binds; another session may already own the default port.
+8. Before using the public Target route, follow the multi-session checks below. Then verify the exact prototype in a browser, including keyboard switching, desktop and narrow layouts, HMR, overflow, and console errors.
+9. Hand over a clickable Target link only after the public route renders the requested prototype and variant.
 
 Do not replace an existing production component with a lookalike. If the candidate needs a change to that component, make the smallest production-compatible extension and ensure every affected surface remains coherent.
+
+## Share safely across sessions
+
+Prototype files are ignored and worktree-local. Prototype Vite servers may run concurrently, but the current Target web service proxies all `/prototype/*` traffic to one configured Vite port. Starting another prototype server does not update that proxy, and a later Target restart can point it at a different session.
+
+Before sharing or re-sharing a prototype:
+
+1. Inspect listeners and prototype processes to identify the requested prototype's Vite port. Do not assume the default port or kill another session's server.
+2. Inspect Target's configured `OPENAIDE_WEB_PROTOTYPE_PORT`. If it differs, report which prototype currently owns the public route.
+3. Do not restart or reconfigure Target just to take ownership. Read and follow the `openaide-self-development` skill; Target runtime changes require the user's explicit request in the current conversation.
+4. If the user authorizes switching Target, use the documented Target role command. Never use bare `bash deploy/local-web.sh restart`, and never touch Driver.
+5. Verify through Target, not only through the loopback Vite URL. Assert prototype-specific rendered content or the exact page title; HTTP 200, the generic harness shell, or a prototype index is not proof that the requested prototype loaded.
+6. If another session later changes the Target route, describe it as a routing conflict rather than a missing prototype. Keep the local prototype intact and ask before switching the public route again.
+
+Do not claim that multiple worktree prototypes are simultaneously public. That requires slug-to-port routing, which the current single-upstream Target proxy does not provide.
 
 ## Build a logic prototype
 
@@ -79,3 +95,5 @@ The terminal shell is exploratory. Approval locks the demonstrated semantics; im
 - Connecting a visual experiment to real destructive mutations.
 - Treating approval as permission to alter the chosen UX during hardening.
 - Shipping ignored fixtures, switchers, or alternate candidates as production features.
+- Assuming a running prototype server is the prototype currently exposed through Target.
+- Repointing Target or stopping another session's prototype without explicit user authorization.

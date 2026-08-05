@@ -51,6 +51,7 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
         }),
         agent_commands_catalog: task.agent_commands_catalog.clone(),
         lifecycle: task.lifecycle.clone(),
+        message_queue: task.message_queue.clone(),
         preparation: task.preparation.clone(),
         supports_image_input: task.supports_image_input,
         context_usage,

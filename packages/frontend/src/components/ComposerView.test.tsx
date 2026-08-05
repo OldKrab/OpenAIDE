@@ -1221,6 +1221,37 @@ describe("Composer view behavior", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
+  it("adds the draft to the queue with Ctrl or Cmd Shift Enter", () => {
+    const onAddToQueue = vi.fn();
+    const onSubmit = vi.fn();
+    const preventDefault = vi.fn();
+    const renderer = renderComposer({ onAddToQueue, onSubmit, prompt: "queue this" });
+    const queueButton = buttonByLabel(renderer.root, "Add to queue");
+
+    expect(queueButton.props.title).toBe("Add to queue (Ctrl/Cmd+Shift+Enter)");
+    expect(queueButton.props["aria-keyshortcuts"]).toBe("Control+Shift+Enter Meta+Shift+Enter");
+
+    keyDown(textarea(renderer.root), {
+      ctrlKey: true,
+      preventDefault,
+      shiftKey: true,
+    });
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onAddToQueue).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    keyDown(textarea(renderer.root), {
+      metaKey: true,
+      preventDefault,
+      shiftKey: true,
+    });
+
+    expect(preventDefault).toHaveBeenCalledTimes(2);
+    expect(onAddToQueue).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("allows attachment-only messages when submission is available", () => {
     const onSubmit = vi.fn();
     const renderer = renderComposer({
@@ -1898,6 +1929,7 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       historyScopeKey={overrides.historyScopeKey}
       loadComposerHistory={overrides.loadComposerHistory}
       onCancel={overrides.onCancel}
+      onAddToQueue={overrides.onAddToQueue}
       onChange={overrides.onChange ?? vi.fn()}
       onUnsupportedImageAttachment={overrides.onUnsupportedImagePaste ?? vi.fn()}
       onRevealAttachment={overrides.onRevealAttachment ?? vi.fn()}
@@ -1931,6 +1963,7 @@ type ComposerTestProps = {
   historyScopeKey: string;
   loadComposerHistory: () => Promise<string[]>;
   onCancel: () => void;
+  onAddToQueue: () => void;
   onChange: (prompt: string) => void;
   onUnsupportedImagePaste: (message?: string) => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;

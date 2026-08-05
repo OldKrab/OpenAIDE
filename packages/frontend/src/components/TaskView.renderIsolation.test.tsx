@@ -8,7 +8,7 @@ const chatRowRender = vi.hoisted(() => vi.fn());
 vi.mock("./ChatMessageView", () => ({
   ChatRow: ({ message }: { message: ChatMessage }) => {
     chatRowRender(message.message_id);
-    return <p>{message.message_id}</p>;
+    return <p data-chat-row-id={message.message_id}>{message.message_id}</p>;
   },
 }));
 
@@ -60,6 +60,27 @@ describe("TaskView render isolation", () => {
     });
 
     expect(chatRowRender).toHaveBeenCalledOnce();
+  });
+
+  it("mounts only a viewport-sized subset of a long Chat history", () => {
+    const snapshot = taskSnapshot();
+    snapshot.chat.items = Array.from({ length: 200 }, (_, index) => chatMessage(index));
+    snapshot.chat.total_count = snapshot.chat.items.length;
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot)} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list"
+            ? scrollViewport(600)
+            : null
+        ),
+      });
+    });
+
+    const mountedRows = tree.root.findAll((node) => node.props["data-chat-row-id"] !== undefined);
+    expect(mountedRows.length).toBeGreaterThan(0);
+    expect(mountedRows.length).toBeLessThan(40);
   });
 
   it("keeps live text animation frames below the Chat timeline seam", async () => {
@@ -136,6 +157,35 @@ describe("TaskView render isolation", () => {
 
     expect(tree.root.findByProps({ className: "working-status-duration" }).children).toContain("0:05");
   });
+
+  it("renders Plan beside Chat and anchors Queue above Composer", () => {
+    const snapshot = taskSnapshot();
+    snapshot.current_plan = {
+      entries: [{ content: "Verify layout", priority: "medium", status: "in_progress" }],
+    };
+    snapshot.message_queue = {
+      revision: 2,
+      items: [
+        { queued_message_id: "queued-1", text: "Next", created_at: "now" },
+        { queued_message_id: "queued-2", text: "Later", created_at: "now" },
+      ],
+    };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView
+        {...taskViewProps(snapshot)}
+        onMoveQueueMessage={vi.fn()}
+        onRemoveQueueMessage={vi.fn()}
+        onTakeQueueMessage={vi.fn()}
+      />);
+    });
+
+    expect(tree.root.findAllByProps({ className: "task-plan-column" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ className: "task-plan-drawer" })).toHaveLength(1);
+    expect(tree.root.findByProps({ className: "task-queue-anchor" })
+      .findByProps({ className: "task-message-queue" }).props["data-single"]).toBeUndefined();
+  });
 });
 
 function taskViewProps(snapshot: TaskSnapshot) {
@@ -167,19 +217,7 @@ function taskViewProps(snapshot: TaskSnapshot) {
 }
 
 function taskSnapshot(): TaskSnapshot {
-  const message: ChatMessage = {
-    cursor: "agent-1",
-    identity: "agent-1",
-    message_id: "agent-1",
-    message_type: "agent_message",
-    message: {
-      kind: "agent_message",
-      id: "agent-1",
-      role: "agent",
-      parts: [{ kind: "text", text: "Stable answer" }],
-      created_at: "2026-07-13T00:00:00Z",
-    },
-  };
+  const message = chatMessage(1);
   return {
     lifecycle: "open",
     task: {
@@ -212,5 +250,35 @@ function taskSnapshot(): TaskSnapshot {
     send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision: 1,
+  };
+}
+
+function chatMessage(index: number): ChatMessage {
+  const messageId = `agent-${index}`;
+  return {
+    cursor: messageId,
+    identity: messageId,
+    message_id: messageId,
+    message_type: "agent_message",
+    message: {
+      kind: "agent_message",
+      id: messageId,
+      role: "agent",
+      parts: [{ kind: "text", text: "Stable answer" }],
+      created_at: "2026-07-13T00:00:00Z",
+    },
+  };
+}
+
+function scrollViewport(clientHeight: number) {
+  return {
+    addEventListener: vi.fn(),
+    clientHeight,
+    clientWidth: 800,
+    getBoundingClientRect: () => ({ height: clientHeight, width: 800 }),
+    removeEventListener: vi.fn(),
+    scrollHeight: 20_000,
+    scrollTo: vi.fn(),
+    scrollTop: 0,
   };
 }

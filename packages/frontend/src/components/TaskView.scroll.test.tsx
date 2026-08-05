@@ -3,10 +3,62 @@ import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 
+const virtualizerCalls = vi.hoisted(() => ({ scrollToEnd: vi.fn() }));
+
+vi.mock("@tanstack/react-virtual", async () => {
+  const React = await import("react");
+  type Options = {
+    count: number;
+    getItemKey: (index: number) => string;
+    getScrollElement: () => HTMLDivElement | null;
+  };
+  return {
+    useVirtualizer: (options: Options) => {
+      const optionsRef = React.useRef(options);
+      optionsRef.current = options;
+      const virtualizerRef = React.useRef<ReturnType<typeof createVirtualizer> | undefined>(undefined);
+      virtualizerRef.current ??= createVirtualizer(optionsRef);
+      return virtualizerRef.current;
+    },
+  };
+
+  function createVirtualizer(optionsRef: { current: Options }) {
+    const element = () => optionsRef.current.getScrollElement();
+    const distanceFromEnd = () => {
+      const viewport = element();
+      return viewport ? Math.max(0, viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) : 0;
+    };
+    return {
+      getDistanceFromEnd: distanceFromEnd,
+      getTotalSize: () => element()?.scrollHeight ?? optionsRef.current.count * 72,
+      getVirtualItems: () => Array.from({ length: optionsRef.current.count }, (_, index) => ({
+        end: (index + 1) * 72,
+        index,
+        key: optionsRef.current.getItemKey(index),
+        lane: 0,
+        size: 72,
+        start: index * 72,
+      })),
+      isAtEnd: (threshold = 2) => distanceFromEnd() <= threshold,
+      measureElement: () => undefined,
+      scrollToEnd: (options?: { behavior?: ScrollBehavior }) => {
+        virtualizerCalls.scrollToEnd(options);
+        const viewport = element();
+        if (viewport) viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      },
+      scrollToOffset: (offset: number) => {
+        const viewport = element();
+        if (viewport) viewport.scrollTop = offset;
+      },
+    };
+  }
+});
+
 describe("TaskView follow scroll", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("window", { acquireVsCodeApi: undefined });
+    virtualizerCalls.scrollToEnd.mockClear();
   });
 
   afterEach(() => vi.unstubAllGlobals());
@@ -239,13 +291,6 @@ describe("TaskView follow scroll", () => {
   it("smoothly returns to the latest message when the user clicks the jump control", async () => {
     const { TaskView } = await import("./TaskView");
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    const animationFrames: FrameRequestCallback[] = [];
-    let now = 0;
-    vi.stubGlobal("performance", { now: () => now });
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      animationFrames.push(callback);
-      return animationFrames.length;
-    });
     let tree!: ReactTestRenderer;
 
     act(() => {
@@ -261,16 +306,9 @@ describe("TaskView follow scroll", () => {
       messageListView(tree).props.onScroll({ currentTarget: messageList });
     });
 
+    virtualizerCalls.scrollToEnd.mockClear();
     act(() => jumpButtons(tree)[0].props.onClick());
-    expect(messageList.scrollTop).toBe(800);
-
-    now = 90;
-    act(() => animationFrames.shift()?.(now));
-    expect(messageList.scrollTop).toBeGreaterThan(800);
-    expect(messageList.scrollTop).toBeLessThan(1000);
-
-    now = 180;
-    act(() => animationFrames.shift()?.(now));
+    expect(virtualizerCalls.scrollToEnd).toHaveBeenCalledWith({ behavior: "smooth" });
     expect(messageList.scrollTop).toBe(1000);
   });
 

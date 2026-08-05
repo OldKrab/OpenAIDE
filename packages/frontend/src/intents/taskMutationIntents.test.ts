@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import {
   TASK_CLOSE_PLAN,
+  TASK_QUEUE_APPEND,
+  TASK_QUEUE_REMOVE,
+  TASK_QUEUE_TAKE,
   TASK_SEND,
   type AttachmentHandleId,
 } from "@openaide/app-server-client";
@@ -32,6 +35,117 @@ describe("task mutation intents", () => {
       type: "taskInput:error",
       taskId: "task-a",
       message: "connection closed",
+    }));
+  });
+
+  it("adds the exact composer draft to the durable queue", async () => {
+    const { appendTaskQueueIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("connection closed"));
+    const dispatch = vi.fn();
+
+    appendTaskQueueIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch,
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot(), { prompt: "Do this next", context: [] });
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(TASK_QUEUE_APPEND, {
+      taskId: "task-a",
+      message: { text: "Do this next" },
+    }));
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:sendError",
+      taskId: "task-a",
+      message: "connection closed",
+    }));
+  });
+
+  it("removes a queued message once with its observed queue revision", async () => {
+    const { removeTaskQueueMessageIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("conflict"));
+
+    removeTaskQueueMessageIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch: vi.fn(),
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot(), "queued-1");
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request).toHaveBeenCalledWith(TASK_QUEUE_REMOVE, expect.objectContaining({
+      taskId: "task-a",
+      queuedMessageId: "queued-1",
+      queueRevision: 0,
+      clientMutationId: expect.stringMatching(/^frontend-queue-remove-/),
+    }));
+  });
+
+  it("keeps a queued row pending while atomically taking it for Composer", async () => {
+    const { takeTaskQueueMessageIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("stale queue"));
+    const dispatch = vi.fn();
+    const snapshot = taskSnapshot();
+    snapshot.message_queue = {
+      revision: 7,
+      items: [{ queued_message_id: "queued-1", text: "Edit this", created_at: "now" }],
+    };
+
+    takeTaskQueueMessageIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch,
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, snapshot, { prompt: "", context: [] }, "queued-1");
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskQueue:take:start",
+      taskId: "task-a",
+      item: snapshot.message_queue.items[0],
+      index: 0,
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(TASK_QUEUE_TAKE, {
+      taskId: "task-a",
+      queuedMessageId: "queued-1",
+      queueRevision: 7,
+      clientMutationId: expect.stringMatching(/^frontend-queue-take-/),
+    }));
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({
+      type: "taskQueue:take:error",
+      taskId: "task-a",
+      queuedMessageId: "queued-1",
+      message: "stale queue",
+    }));
+  });
+
+  it("sends now with the exact durable queue selection", async () => {
+    const { sendTaskQueueMessageNowIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("conflict"));
+    const snapshot = taskSnapshot();
+    snapshot.message_queue = {
+      revision: 7,
+      items: [{ queued_message_id: "queued-1", text: "Send this", created_at: "now" }],
+    };
+
+    sendTaskQueueMessageNowIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch: vi.fn(),
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, snapshot, "queued-1");
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(TASK_SEND, {
+      taskId: "task-a",
+      message: { text: "Send this" },
+      queueSelection: { queuedMessageId: "queued-1", queueRevision: 7 },
     }));
   });
 
@@ -237,6 +351,7 @@ function taskSnapshot(): TaskSnapshot {
       version: 1,
     },
     active_requests: [],
+    message_queue: { revision: 0, items: [] },
     settings_summary: { agent_id: "codex", isolation: "local" },
     send_capability: { state: "ready" },
     revision: 1,

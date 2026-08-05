@@ -48,8 +48,8 @@ use crate::events::{
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
-    FileBrowserRootId, MessageId, ProjectId, RequestId, ServerId, StateRootId, TaskId,
-    TaskListCursor, TurnId, WorktreeId, WorktreeOperationId, WorktreeRepositoryId,
+    FileBrowserRootId, MessageId, ProjectId, QueuedMessageId, RequestId, ServerId, StateRootId,
+    TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId, WorktreeRepositoryId,
 };
 use crate::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
@@ -85,18 +85,18 @@ use crate::snapshot::{
     LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
     NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
     PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
-    QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
-    ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    SubagentActivitySnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskAttentionEvent, TaskAttentionReason, TaskContextUsage, TaskHistorySyncSnapshot,
-    TaskInputCapabilities, TaskLifecycle, TaskNavigationEntry, TaskNavigationGroup,
-    TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPreparationAction,
-    TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
-    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost,
-    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
-    ToolPresentationSnapshot, ToolSearchTargetSnapshot,
+    QuestionMessageAction, QuestionMessageState, QueuedMessageAttachmentSnapshot,
+    QueuedMessageSnapshot, RecoveryAction, RecoverySnapshot, ServerCapabilities, ServerSnapshot,
+    SettingsSnapshot, StateRootSnapshot, SubagentActivitySnapshot, TaskAgentCommandsSnapshot,
+    TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason, TaskContextUsage,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueuePauseSnapshot,
+    TaskMessageQueueSnapshot, TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState,
+    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
+    TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
+    TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
+    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage,
+    TaskUsageCost, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
+    ToolPresentationActionSnapshot, ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -108,19 +108,22 @@ use crate::task::{
     ActivityToolOutput, ActivityToolValue, ComposerHistoryEntry, ComposerHistoryParams,
     ComposerHistoryResult, ComposerHistoryScope, ComposerImage, ComposerMessage,
     NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
-    NativeSessionRestoreResult, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
-    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
-    TaskAdoptNativeSessionResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
-    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
-    TaskClosePlanResult, TaskLifecycleChanged, TaskListLifecycle, TaskListParams, TaskListResult,
-    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
-    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
-    TaskNavigationSection, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
-    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
-    TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
+    NativeSessionRestoreResult, TakenQueuedMessage, TaskAcquireInWorktreeParams,
+    TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
+    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
+    TaskClosePlanParams, TaskClosePlanResult, TaskLifecycleChanged, TaskListLifecycle,
+    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
+    TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
+    TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueSendSelection, TaskQueueTakeParams,
+    TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams,
+    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams,
+    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskTitleSelection,
+    TaskToolImagePreviewParams, TaskToolImagePreviewResult, TerminalOutputSnapshot,
+    ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -152,6 +155,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<FileBrowserRootId>(output, config);
     push_decl::<MessageId>(output, config);
     push_decl::<ProjectId>(output, config);
+    push_decl::<QueuedMessageId>(output, config);
     push_decl::<RequestId>(output, config);
     push_decl::<ServerId>(output, config);
     push_decl::<StateRootId>(output, config);
@@ -385,9 +389,19 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskAdoptNativeSessionParams>(output, config);
     push_decl::<TaskAdoptNativeSessionResult>(output, config);
     push_decl::<TaskSendParams>(output, config);
+    push_decl::<TaskQueueSendSelection>(output, config);
     push_decl::<ComposerMessage>(output, config);
     push_decl::<ComposerImage>(output, config);
     push_decl::<TaskSendResult>(output, config);
+    push_decl::<TaskQueueAppendParams>(output, config);
+    push_decl::<TaskQueueAppendResult>(output, config);
+    push_decl::<TaskQueueRemoveParams>(output, config);
+    push_decl::<TaskQueueRemoveResult>(output, config);
+    push_decl::<TaskQueueTakeParams>(output, config);
+    push_decl::<TaskQueueTakeResult>(output, config);
+    push_decl::<TakenQueuedMessage>(output, config);
+    push_decl::<TaskQueueMoveParams>(output, config);
+    push_decl::<TaskQueueMoveResult>(output, config);
     push_decl::<TaskSetConfigOptionParams>(output, config);
     push_decl::<TaskSetConfigOptionResult>(output, config);
     push_decl::<TaskSetTitleParams>(output, config);
@@ -477,6 +491,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskStatus>(output, config);
     push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);
+    push_decl::<TaskMessageQueueSnapshot>(output, config);
+    push_decl::<TaskMessageQueuePauseSnapshot>(output, config);
+    push_decl::<QueuedMessageSnapshot>(output, config);
+    push_decl::<QueuedMessageAttachmentSnapshot>(output, config);
     push_decl::<AgentPlanSnapshot>(output, config);
     push_decl::<AgentPlanEntrySnapshot>(output, config);
     push_decl::<AgentPlanPrioritySnapshot>(output, config);

@@ -1,0 +1,209 @@
+.task-work-stack {
+  position: relative;
+  container-name: task-work-stack;
+  container-type: inline-size;
+}
+
+.task-work-stack-header {
+  min-width: 0;
+  position: relative;
+}
+
+.task-workbench {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.task-conversation {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  justify-self: stretch;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+}
+
+.task-plan-column {
+  display: none;
+}
+
+.task-plan-drawer-trigger {
+  min-height: 28px;
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 126px;
+  border: 1px solid color-mix(in oklch, var(--oa-focus) 18%, var(--oa-border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--oa-focus) 4%, var(--oa-bg));
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.task-plan-drawer-trigger:hover,
+.task-plan-drawer-trigger:focus-visible {
+  background: color-mix(in oklch, var(--oa-focus) 7%, var(--oa-raised));
+  color: var(--oa-text);
+}
+
+.task-plan-drawer-trigger small {
+  color: color-mix(in oklch, var(--oa-focus) 72%, var(--oa-text));
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.task-plan-drawer-backdrop {
+  position: absolute;
+  z-index: 19;
+  inset: 44px 0 0;
+  border: 0;
+  background: color-mix(in oklch, var(--oa-text) 10%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease-out;
+}
+
+.task-plan-drawer-backdrop:not([aria-hidden="true"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.task-plan-drawer {
+  width: min(360px, calc(100% - 24px));
+  max-height: min(420px, calc(100% - 60px));
+  position: absolute;
+  z-index: 20;
+  top: 52px;
+  right: 12px;
+  border: 0;
+  border-radius: var(--oa-radius-md);
+  background: transparent;
+  padding: 0;
+  box-shadow: 0 14px 36px color-mix(in oklch, var(--oa-text) 12%, transparent);
+  overflow-y: auto;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(24px);
+  visibility: hidden;
+  transition:
+    opacity 160ms cubic-bezier(.16, 1, .3, 1),
+    transform 160ms cubic-bezier(.16, 1, .3, 1),
+    visibility 0s linear 160ms;
+}
+
+.task-plan-drawer[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.task-plan-column > .agent-plan,
+.task-plan-drawer > .agent-plan {
+  width: 100%;
+  margin: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.task-plan-column .agent-plan-heading,
+.task-plan-column .agent-plan-close,
+.task-plan-drawer .agent-plan-heading,
+.task-plan-drawer .agent-plan-close {
+  grid-row: 1;
+}
+
+.task-plan-column .agent-plan-disclosure,
+.task-plan-drawer .agent-plan-disclosure {
+  grid-row: 2;
+}
+
+.task-plan-column .agent-plan-disclosure[data-open="false"] .agent-plan-entries,
+.task-plan-drawer .agent-plan-disclosure[data-open="false"] .agent-plan-entries {
+  transform: translateY(-100%);
+}
+
+.task-plan-column .agent-plan[data-open="true"] .agent-plan-chevron,
+.task-plan-drawer .agent-plan[data-open="true"] .agent-plan-chevron {
+  transform: rotate(0);
+}
+
+.task-plan-column .agent-plan[data-open="false"] .agent-plan-chevron,
+.task-plan-drawer .agent-plan[data-open="false"] .agent-plan-chevron {
+  transform: rotate(-90deg);
+}
+
+@container task-work-stack (max-width: 1359px) {
+  .task-work-stack-header .task-header {
+    padding-right: 112px;
+  }
+
+  .task-work-stack-header .task-header-agent,
+  .task-work-stack-header .task-header-workspace {
+    display: none;
+  }
+
+  .task-plan-drawer-trigger {
+    right: 12px;
+  }
+}
+
+@container task-work-stack (min-width: 1360px) {
+  .task-plan-column {
+    width: min(400px, calc(50% - 408px));
+    min-width: 0;
+    position: absolute;
+    z-index: 10;
+    top: 0;
+    bottom: 0;
+    right: max(0px, calc(50% - 808px));
+    display: flex;
+    align-items: flex-start;
+    padding: 14px 12px;
+    pointer-events: none;
+  }
+
+  .task-plan-column > .agent-plan {
+    pointer-events: auto;
+  }
+
+  .task-plan-drawer-trigger,
+  .task-plan-drawer-backdrop,
+  .task-plan-drawer {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .task-plan-drawer-trigger {
+    display: none;
+  }
+
+  .task-plan-drawer-backdrop {
+    inset-block-start: 0;
+  }
+
+  .task-plan-drawer {
+    top: 8px;
+    right: 8px;
+    width: min(340px, calc(100% - 16px));
+    max-height: calc(100% - 16px);
+  }
+
+  .task-plan-drawer .agent-plan-close {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-plan-drawer,
+  .task-plan-drawer-backdrop {
+    transition-duration: .01ms;
+  }
+}

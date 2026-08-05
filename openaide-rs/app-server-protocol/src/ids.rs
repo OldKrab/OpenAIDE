@@ -104,6 +104,10 @@ id_type!(
 );
 id_type!(TaskId, "string & { readonly __openaideBrand: \"TaskId\" }");
 id_type!(
+    QueuedMessageId,
+    "string & { readonly __openaideBrand: \"QueuedMessageId\" }"
+);
+id_type!(
     TaskListCursor,
     "string & { readonly __openaideBrand: \"TaskListCursor\" }"
 );

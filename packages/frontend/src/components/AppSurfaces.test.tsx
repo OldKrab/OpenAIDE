@@ -455,6 +455,21 @@ describe("AppSurfaces callback wiring", () => {
     expect(header.findByType("small").children.join("")).toBe("Ready · OpenAIDE");
   });
 
+  it("opens the Task Plan from the narrow workbench header", () => {
+    stubMobileWindow();
+    const controller = webControllerFor("task");
+    controller.state.snapshot = snapshot("task_1");
+    controller.state.snapshot.current_plan = {
+      entries: [{ content: "Verify layout", priority: "medium", status: "in_progress" }],
+    };
+
+    const tree = render(controller);
+    act(() => tree.root.findByProps({ "aria-label": "Open Plan" }).props.onClick());
+
+    expect(tree.root.findByProps({ "aria-label": "Close Plan" }).props["aria-expanded"]).toBe(true);
+    expect(latestMockProps<{ planDrawerOpen?: boolean }>(surfaceMocks.task)?.planDrawerOpen).toBe(true);
+  });
+
   it("ignores mobile web navigation swipes that do not start at the left edge", () => {
     stubMobileWindow();
     const controller = webControllerFor("task");
@@ -1239,12 +1254,17 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         unlockDeveloperSettings: vi.fn(),
       },
       task: {
+        addToQueue: vi.fn(),
         cancel: vi.fn(),
         loadChatPage: vi.fn(),
         loadToolImagePreview: vi.fn(async () => undefined),
         subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
         removeAttachment: vi.fn(),
+        removeQueueMessage: vi.fn(),
+        takeQueueMessage: vi.fn(),
+        moveQueueMessage: vi.fn(),
+        sendQueueMessageNow: vi.fn(),
         respondToPermission: vi.fn(),
         respondToQuestion: vi.fn(),
         selectConfigOption: vi.fn(),

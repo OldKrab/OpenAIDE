@@ -92,7 +92,15 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
 
   const chat = page.getByLabel("Task chat");
   await expect(page).toHaveURL(/\/task\/task_/);
-  await expect(chat.locator("p.chat-user").filter({ hasText: "smoke:basic" })).toHaveText("smoke:basic");
+  const userMessage = chat.locator("p.chat-user").filter({ hasText: "smoke:basic" });
+  await expect(userMessage).toHaveText("smoke:basic");
+  const userMessageAlignment = await userMessage.evaluate((element) => {
+    const block = element.closest(".chat-user-block");
+    const virtualRow = element.closest(".message-list-virtual-row");
+    if (!block || !virtualRow) throw new Error("Virtualized User message structure is incomplete.");
+    return virtualRow.getBoundingClientRect().right - block.getBoundingClientRect().right;
+  });
+  expect(userMessageAlignment).toBeCloseTo(0, 0);
   await expect(chat.getByText("Smoke answer", { exact: true })).toBeVisible();
   await expect(chat.locator(".task-header-title > strong")).toHaveText("Smoke task");
   await page.getByRole("button", { name: "Read file, thought" }).click();
@@ -201,7 +209,11 @@ test("keeps collapsed tool rows equally spaced with and without details", async 
   const activity = chat.locator(".activity-group").filter({
     hasText: "Wait for subagents",
   });
-  await activity.locator(":scope > .activity-disclosure-trigger").click();
+  const activityTrigger = activity.locator(":scope > .activity-disclosure-trigger");
+  const openingOverlap = await maximumVirtualRowOverlapDuring(page, async () => {
+    await activityTrigger.click();
+  });
+  expect(openingOverlap).toBeLessThanOrEqual(0.5);
   const rows = activity.locator(".activity-step");
   await expect(rows).toHaveCount(2);
 
@@ -222,6 +234,11 @@ test("keeps collapsed tool rows equally spaced with and without details", async 
 
   await rows.first().getByRole("button").click();
   await expect(rows.first().getByText("fixture output", { exact: true })).toBeVisible();
+
+  const closingOverlap = await maximumVirtualRowOverlapDuring(page, async () => {
+    await activityTrigger.click();
+  });
+  expect(closingOverlap).toBeLessThanOrEqual(0.5);
 });
 
 test("copies fenced Markdown code independently at desktop and constrained widths", async ({ context, page }) => {
@@ -644,6 +661,37 @@ async function measureContextEdge(meterEdge, radius) {
       cornerThicknesses: [0.25, 0.5, 0.75, 0.95].map(radialThickness),
     };
   }, radius);
+}
+
+/** Samples every animation frame so transient virtual-row collisions cannot self-heal unnoticed. */
+async function maximumVirtualRowOverlapDuring(page, action) {
+  await page.evaluate(() => {
+    const state = { active: true, maximum: 0 };
+    window.__openaideVirtualRowOverlap = state;
+    const sample = () => {
+      const rows = [...document.querySelectorAll(".message-list-virtual-row")]
+        .map((element) => ({
+          index: Number(element.getAttribute("data-index")),
+          bounds: element.getBoundingClientRect(),
+        }))
+        .sort((left, right) => left.index - right.index);
+      for (let index = 0; index < rows.length - 1; index += 1) {
+        state.maximum = Math.max(
+          state.maximum,
+          rows[index].bounds.bottom - rows[index + 1].bounds.top,
+        );
+      }
+      if (state.active) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+
+  await action();
+  await page.waitForTimeout(300);
+  return page.evaluate(() => {
+    window.__openaideVirtualRowOverlap.active = false;
+    return window.__openaideVirtualRowOverlap.maximum;
+  });
 }
 
 async function openPreparedNewTask(page) {

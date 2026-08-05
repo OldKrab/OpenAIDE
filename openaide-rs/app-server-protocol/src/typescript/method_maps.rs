@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
+        " | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -70,6 +70,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_SEARCH_FILES]: TaskSearchFilesParams;\n");
     output.push_str("  [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionParams;\n");
     output.push_str("  [TASK_SEND]: TaskSendParams;\n");
+    output.push_str("  [TASK_QUEUE_APPEND]: TaskQueueAppendParams;\n");
+    output.push_str("  [TASK_QUEUE_REMOVE]: TaskQueueRemoveParams;\n");
+    output.push_str("  [TASK_QUEUE_TAKE]: TaskQueueTakeParams;\n");
+    output.push_str("  [TASK_QUEUE_MOVE]: TaskQueueMoveParams;\n");
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleParams;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedParams;\n");
@@ -152,6 +156,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_SEARCH_FILES]: TaskSearchFilesResult;\n");
     output.push_str("  [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionResult;\n");
     output.push_str("  [TASK_SEND]: TaskSendResult;\n");
+    output.push_str("  [TASK_QUEUE_APPEND]: TaskQueueAppendResult;\n");
+    output.push_str("  [TASK_QUEUE_REMOVE]: TaskQueueRemoveResult;\n");
+    output.push_str("  [TASK_QUEUE_TAKE]: TaskQueueTakeResult;\n");
+    output.push_str("  [TASK_QUEUE_MOVE]: TaskQueueMoveResult;\n");
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleResult;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedResult;\n");
@@ -311,6 +319,14 @@ pub(super) fn push_method_maps(output: &mut String) {
         "export type TaskAdoptNativeSessionResponse = ResponseEnvelope<TaskAdoptNativeSessionResult>;\n",
     );
     output.push_str("export type TaskSendResponse = ResponseEnvelope<TaskSendResult>;\n");
+    output.push_str(
+        "export type TaskQueueAppendResponse = ResponseEnvelope<TaskQueueAppendResult>;\n",
+    );
+    output.push_str(
+        "export type TaskQueueRemoveResponse = ResponseEnvelope<TaskQueueRemoveResult>;\n",
+    );
+    output.push_str("export type TaskQueueTakeResponse = ResponseEnvelope<TaskQueueTakeResult>;\n");
+    output.push_str("export type TaskQueueMoveResponse = ResponseEnvelope<TaskQueueMoveResult>;\n");
     output.push_str(
         "export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionResult>;\n",
     );

@@ -3365,6 +3365,7 @@ function protocolTaskSnapshot(
             blockers: [{ kind: "taskRunning" as const, message: "Task is already running" }],
           }
         : { state: "loading" as const },
+    messageQueue: { revision: 0, items: [] },
     historySync: { state: "idle", generation: 0 },
     chat: {
       items: userText

@@ -97,6 +97,7 @@ export type NewTaskDraftInput = {
 };
 
 export type TaskCallbacks = {
+  addToQueue: () => void;
   cancel: () => void;
   closePlan?: () => Promise<void>;
   fileBrowser?: TaskFileBrowserCallbacks;
@@ -109,6 +110,10 @@ export type TaskCallbacks = {
   loadToolImagePreview: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   revealAttachment: (attachmentId: string) => Promise<void>;
   removeAttachment: (attachmentId: string) => void;
+  removeQueueMessage: (queuedMessageId: string) => void;
+  takeQueueMessage: (queuedMessageId: string) => void;
+  moveQueueMessage: (queuedMessageId: string, targetIndex: number) => Promise<void>;
+  sendQueueMessageNow: (queuedMessageId: string) => void;
   respondToPermission: (
     requestId: string,
     optionId: string,

@@ -60,6 +60,58 @@ describe("Agent Plan", () => {
     expect(tree.root.findByProps({ "aria-label": "Collapse Agent Plan" }).props["aria-expanded"]).toBe(true);
   });
 
+  it("uses an expanded default only when the user has no retained preference", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentPlanView
+          defaultOpen
+          plan={plan}
+          taskId="task-default-expanded"
+          taskStatus="active"
+        />,
+      );
+    });
+    expect(tree.root.findByProps({ "aria-label": "Collapse Agent Plan" }).props["aria-expanded"]).toBe(true);
+    act(() => tree.unmount());
+
+    sessionStorage.setItem("openaide.agentPlanDisclosure:task-retained-collapse", "collapsed");
+    act(() => {
+      tree = create(
+        <AgentPlanView
+          defaultOpen
+          plan={plan}
+          taskId="task-retained-collapse"
+          taskStatus="active"
+        />,
+      );
+    });
+    expect(tree.root.findByProps({ "aria-label": "Expand Agent Plan" }).props["aria-expanded"]).toBe(false);
+  });
+
+  it("shows a Plan panel without a redundant disclosure control", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentPlanView
+          collapsible={false}
+          plan={plan}
+          taskId="task-panel"
+          taskStatus="active"
+        />,
+      );
+    });
+
+    expect(tree.root.findAllByProps({ "aria-label": "Expand Agent Plan" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ "aria-label": "Collapse Agent Plan" })).toHaveLength(0);
+    expect(tree.root.findByProps({ className: "agent-plan-heading" }).type).toBe("div");
+    expect(tree.root.findByProps({ className: "agent-plan-disclosure" }).props).toMatchObject({
+      "aria-hidden": false,
+      "data-open": true,
+      inert: undefined,
+    });
+  });
+
   it("clears retained disclosure when the current plan ends", () => {
     sessionStorage.setItem("openaide.agentPlanDisclosure:task-ended", "expanded");
 

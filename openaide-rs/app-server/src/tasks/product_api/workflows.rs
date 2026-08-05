@@ -8,9 +8,10 @@ use openaide_app_server_protocol::support::{
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
     TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskClosePlanParams,
-    TaskLifecycleChanged, TaskReleaseParams, TaskRestoreParams, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSetConfigOptionParams, TaskSetPinnedParams,
-    TaskSetTitleParams,
+    TaskLifecycleChanged, TaskQueueAppendParams, TaskQueueMoveParams, TaskQueueRemoveParams,
+    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskRestoreParams,
+    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSetConfigOptionParams,
+    TaskSetPinnedParams, TaskSetTitleParams,
 };
 
 pub(crate) trait TaskAcquireWorkflow: Send + Sync {
@@ -72,6 +73,47 @@ pub(crate) trait TaskSendWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskSendParams,
     ) -> Result<TaskSendAccepted, ProtocolError>;
+
+    fn queue_append_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: TaskQueueAppendParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        Err(queue_unavailable())
+    }
+
+    fn queue_remove_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: TaskQueueRemoveParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        Err(queue_unavailable())
+    }
+
+    fn queue_take_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: TaskQueueTakeParams,
+    ) -> Result<TaskQueueTakeResult, ProtocolError> {
+        Err(queue_unavailable())
+    }
+
+    fn queue_move_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: TaskQueueMoveParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        Err(queue_unavailable())
+    }
+}
+
+fn queue_unavailable() -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::CapabilityUnavailable,
+        message: "Task Message Queue is unavailable".to_string(),
+        recoverable: false,
+        target: None,
+    }
 }
 
 pub(crate) trait TaskFileSearchWorkflow: Send + Sync {

@@ -116,6 +116,11 @@ type AppActionPayload =
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:sendError"; taskId: string; message?: string }
   | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
+  | { type: "taskQueue:accepted"; taskId: string; queueRevision: number }
+  | { type: "taskQueue:take:start"; taskId: string; item: import("@openaide/app-shell-contracts").QueuedMessage; index: number }
+  | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string }
+  | { type: "taskQueue:take:accepted"; taskId: string; queuedMessageId: string; prompt: string; context: ComposerAttachment[] }
+  | { type: "taskQueue:take:error"; taskId: string; queuedMessageId: string; message: string }
   | { type: "taskInput:error"; taskId: string; message?: string }
   | { type: "taskConfig:result"; taskId: string; catalog: ConfigOptionsCatalog }
   | {

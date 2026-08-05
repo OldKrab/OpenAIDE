@@ -102,6 +102,30 @@ describe("scope-local state ingestion", () => {
     expect(cleared.state.snapshot.task.currentPlan).toBeNull();
   });
 
+  it("removes a delivered Queue head from an ordered Task delta", () => {
+    const state = taskState("task-1", 4);
+    if (state.snapshot.kind !== "task") return;
+    state.snapshot.task.messageQueue = {
+      revision: 2,
+      items: [{
+        queuedMessageId: "queued-1" as never,
+        text: "Send after this turn",
+        createdAt: "2026-08-05T00:00:00Z",
+      }],
+    };
+
+    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+      kind: "taskChanged",
+      taskId: taskId("task-1"),
+      revision: 5,
+      changes: { messageQueue: { revision: 3, items: [] } },
+    }));
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") return;
+    expect(result.state.snapshot.task.messageQueue).toEqual({ revision: 3, items: [] });
+  });
+
   it("requires a fresh baseline for a missing Task revision", () => {
     const result = applySubscriptionEvent(
       taskState("task-1", 4),
@@ -581,6 +605,7 @@ function taskSnapshot(id: string, revision: number): TaskSnapshot {
     agentConfig: { state: "ready", options: [] },
     agentCommands: { state: "ready", commands: [] },
     sendCapability: { state: "ready", blockers: [] },
+    messageQueue: { revision: 0, items: [] },
     chat: { items: [], hasMoreBefore: false, hasMessages: false },
     historySync: { state: "idle", generation: 0 },
     pendingRequests: [],

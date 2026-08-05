@@ -31,6 +31,11 @@ pub(crate) enum AttachmentTarget {
         data: String,
         size_bytes: u64,
     },
+    /// Exact embedded content retained by Queue ownership and returned to Composer.
+    QueuedSnapshot {
+        chat_attachment: Box<Attachment>,
+        agent_attachment: Box<Attachment>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +61,12 @@ pub(crate) struct FileBrowserEntryHandle {
 
 impl PreSendAttachmentHandle {
     pub(super) fn chat_attachment(&self) -> Attachment {
+        if let AttachmentTarget::QueuedSnapshot {
+            chat_attachment, ..
+        } = &self.target
+        {
+            return chat_attachment.as_ref().clone();
+        }
         if let AttachmentTarget::PastedImage {
             mime_type,
             data,
@@ -79,7 +90,7 @@ impl PreSendAttachmentHandle {
             | AttachmentTarget::EmbeddedSnapshot { path, .. } => {
                 Some(path.to_string_lossy().to_string())
             }
-            AttachmentTarget::PastedImage { .. } => None,
+            AttachmentTarget::PastedImage { .. } | AttachmentTarget::QueuedSnapshot { .. } => None,
         };
         Attachment {
             kind: self.kind_name().to_string(),
@@ -91,6 +102,9 @@ impl PreSendAttachmentHandle {
 
     pub(super) fn agent_attachment(&self) -> Result<Attachment, AttachmentRuntimeError> {
         match &self.target {
+            AttachmentTarget::QueuedSnapshot {
+                agent_attachment, ..
+            } => Ok(agent_attachment.as_ref().clone()),
             AttachmentTarget::FileReference { path, allowed_root } => {
                 allowed_root.validate_file(path)?;
                 Ok(Attachment {
@@ -142,6 +156,7 @@ impl PreSendAttachmentHandle {
             AttachmentTarget::FileReference { .. } => "file_reference",
             AttachmentTarget::EmbeddedSnapshot { .. } => "embedded_snapshot",
             AttachmentTarget::PastedImage { .. } => "image",
+            AttachmentTarget::QueuedSnapshot { .. } => "embedded_snapshot",
         }
     }
 }

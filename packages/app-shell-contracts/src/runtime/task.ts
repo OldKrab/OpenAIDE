@@ -42,6 +42,8 @@ export type TaskSnapshot = {
   chat: MessagePage;
   /** Active App Server requests render after durable Chat and never enter history. */
   active_requests: ChatMessage[];
+  /** Durable follow-ups that have not entered Chat yet. */
+  message_queue?: TaskMessageQueue;
   settings_summary: {
     agent_id: string;
     isolation: IsolationKind;
@@ -81,6 +83,19 @@ export type TaskSnapshot = {
   current_plan?: AgentPlan;
   revision: number;
   history_sync: HistorySyncState;
+};
+
+export type TaskMessageQueue = {
+  revision: number;
+  pause?: "restarted" | "unsuccessfulTurn" | "attachmentUnavailable";
+  items: QueuedMessage[];
+};
+
+export type QueuedMessage = {
+  queued_message_id: string;
+  text: string;
+  created_at: string;
+  attachments?: Array<{ kind: string; label: string }>;
 };
 
 export type AgentPlan = {

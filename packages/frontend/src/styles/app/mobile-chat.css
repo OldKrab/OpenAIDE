@@ -1,7 +1,6 @@
 @media (max-width: 760px) {
   .message-list {
     padding-inline: 0;
-    padding-bottom: 36px;
     scrollbar-gutter: auto;
   }
 
@@ -151,6 +150,37 @@
     grid-template-columns: fit-content(36%) minmax(0, 1fr) max-content;
     justify-content: stretch;
     align-items: center;
+  }
+
+  .new-task-context-controls[data-layout="sentence"] {
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-content: stretch;
+    gap: 2px 5px;
+  }
+
+  .new-task-context-controls[data-layout="sentence"] .new-task-context-word {
+    align-self: center;
+  }
+
+  .new-task-context-controls[data-layout="sentence"] .new-task-context-anchor {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .new-task-context-controls[data-layout="sentence"] .composer-pill {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .project-unavailable-notice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .project-unavailable-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 
   .new-task-context-anchor-workspace {

@@ -56,6 +56,22 @@ _Avoid_: Upload when the App Shell references an original local path, treating `
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
 _Avoid_: Log-style names
 
+**Queued Message**:
+A user-authored instruction accepted for later automatic or manual delivery. It remains distinct from Chat until delivery begins.
+_Avoid_: Draft, delayed steering message, pending Chat message
+
+**Task Message Queue**:
+The ordered durable collection of Queued Messages awaiting delivery for one Task. Its head advances automatically after normal Agent-turn completion.
+_Avoid_: Draft list, Chat backlog, steering queue
+
+**Queue Pause**:
+The idle recovery state in which automatic Task Message Queue advancement is suspended after interrupted or unsuccessful work. Explicit Send or Resume Queue clears it before Agent work begins.
+_Avoid_: Stopped Task, failed Task, clearing the queue
+
+**Edit in Composer**:
+The Queue action that atomically removes one Queued Message and restores its text and attachments as the ordinary Composer draft.
+_Avoid_: In-place queue edit, Queue Edit Guard, delivered-message edit
+
 **Composer History**:
 A bounded recall history of previously accepted User message text available through the Composer. It is distinct from Chat and contains no reusable attachments.
 _Avoid_: Chat history, Prompt History, command history

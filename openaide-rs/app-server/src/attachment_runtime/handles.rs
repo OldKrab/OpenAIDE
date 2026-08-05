@@ -274,9 +274,9 @@ impl AttachmentRuntime {
                     label: handle.label.clone(),
                 })
             }
-            AttachmentTarget::EmbeddedSnapshot { .. } | AttachmentTarget::PastedImage { .. } => {
-                Err(AttachmentRuntimeError::NotFile)
-            }
+            AttachmentTarget::EmbeddedSnapshot { .. }
+            | AttachmentTarget::PastedImage { .. }
+            | AttachmentTarget::QueuedSnapshot { .. } => Err(AttachmentRuntimeError::NotFile),
         }
     }
 }

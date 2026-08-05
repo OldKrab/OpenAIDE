@@ -167,6 +167,7 @@ function taskSubscription(cursor: string, revision: number): StateSubscribeResul
         agentConfig: { state: "ready", options: [] },
         agentCommands: { state: "ready", commands: [] },
         sendCapability: { state: "ready" },
+        messageQueue: { revision: 0, items: [] },
         historySync: { state: "idle", generation: 0 },
         chat: { items: [], hasMessages: false },
         pendingRequests: [],

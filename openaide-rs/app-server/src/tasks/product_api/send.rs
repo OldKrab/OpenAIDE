@@ -1,11 +1,12 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, MessageId, TurnId};
 use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
-use openaide_app_server_protocol::task::TaskSendParams;
+use openaide_app_server_protocol::task::{TaskQueueSendSelection, TaskSendParams};
 use uuid::Uuid;
 
 use crate::attachment_runtime::{AttachmentSendReservation, ResolvedSendAttachments};
 use crate::projects::ProjectIdentity;
+use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
@@ -18,7 +19,7 @@ use super::{
     TaskSendAccepted,
 };
 pub(crate) mod committed;
-mod support;
+pub(super) mod support;
 
 use committed::CommittedSend;
 use support::{normalized_message_text, prompt_title, protocol_error_from_attachment_runtime};
@@ -83,17 +84,36 @@ impl TaskProductApi {
             .attachments
             .reserve_for_send(&owner, &params.message.attachments)
             .map_err(protocol_error_from_attachment_runtime)?;
-        let attachments = attachment_reservation
+        let mut attachments = attachment_reservation
             .resolved_with_inline_images(&params.message.images)
             .map_err(protocol_error_from_attachment_runtime)?;
         let prompt_text = normalized_message_text(&params.message);
-        if prompt_text.is_empty()
-            && params.message.images.is_empty()
-            && params.message.attachments.is_empty()
-        {
+        let queue_selection = params.queue_selection.clone();
+        if let Some(selection) = queue_selection.as_ref() {
+            if !params.message.images.is_empty() || !params.message.attachments.is_empty() {
+                return Err(validation_error(
+                    "message.attachments",
+                    "Send now uses the queued message's attachments",
+                ));
+            }
+            if existing_task.message_queue.revision != selection.queue_revision {
+                return Err(conflict_error("Task Message Queue changed"));
+            }
+            let queued = existing_task
+                .message_queue
+                .items
+                .iter()
+                .find(|item| item.queued_message_id == selection.queued_message_id.as_str())
+                .ok_or_else(|| conflict_error("Queued Message no longer exists"))?;
+            if queued.text != prompt_text {
+                return Err(conflict_error("Queued Message changed"));
+            }
+            attachments = self.resolved_queued_attachments(&existing_task, queued)?;
+        }
+        if prompt_text.is_empty() && attachments.is_empty() {
             return Err(validation_error("message.text", "Message text is required"));
         }
-        if !params.message.images.is_empty() && !existing_task.supports_image_input {
+        if attachments.contains_images() && !existing_task.supports_image_input {
             return Err(ProtocolError {
                 code:
                     openaide_app_server_protocol::errors::ProtocolErrorCode::CapabilityUnavailable,
@@ -117,6 +137,7 @@ impl TaskProductApi {
                 attachments,
                 attachment_reservation,
                 now,
+                queue_selection,
             );
         }
 
@@ -148,6 +169,13 @@ impl TaskProductApi {
                     }
                     promoted_new_task =
                         matches!(ctx.task().lifecycle, TaskLifecycle::Prepared { .. });
+                    let queue_revision_before = ctx.task().message_queue.revision;
+                    consume_selected_queue_message(
+                        ctx.task_mut(),
+                        queue_selection.as_ref(),
+                        &prompt_text,
+                    )?;
+                    clear_queue_pause(ctx.task_mut(), queue_revision_before);
                     self.append_user_message(
                         ctx,
                         &format!("user:{}", user_message_id.as_str()),
@@ -241,6 +269,7 @@ impl TaskProductApi {
         attachments: ResolvedSendAttachments,
         attachment_reservation: AttachmentSendReservation,
         now: String,
+        queue_selection: Option<TaskQueueSendSelection>,
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = existing_task.task_id.clone();
         let sending_client = client_instance_id.clone();
@@ -257,6 +286,13 @@ impl TaskProductApi {
                 {
                     return Ok(TaskMutationResult::Rejected);
                 }
+                let queue_revision_before = ctx.task().message_queue.revision;
+                consume_selected_queue_message(
+                    ctx.task_mut(),
+                    queue_selection.as_ref(),
+                    &prompt_text,
+                )?;
+                clear_queue_pause(ctx.task_mut(), queue_revision_before);
                 self.append_user_message(
                     ctx,
                     &format!("user:{}", user_message_id.as_str()),
@@ -341,7 +377,45 @@ impl TaskProductApi {
     }
 }
 
-fn record_composer_history(task: &mut TaskRecord, entry_id: &str, text: &str, accepted_at: &str) {
+fn consume_selected_queue_message(
+    task: &mut TaskRecord,
+    selection: Option<&TaskQueueSendSelection>,
+    prompt_text: &str,
+) -> Result<(), RuntimeError> {
+    let Some(selection) = selection else {
+        return Ok(());
+    };
+    if task.message_queue.revision != selection.queue_revision {
+        return Err(RuntimeError::Conflict(
+            "Task Message Queue changed".to_string(),
+        ));
+    }
+    let index = task
+        .message_queue
+        .items
+        .iter()
+        .position(|item| item.queued_message_id == selection.queued_message_id.as_str())
+        .ok_or_else(|| RuntimeError::Conflict("Queued Message no longer exists".to_string()))?;
+    if task.message_queue.items[index].text != prompt_text {
+        return Err(RuntimeError::Conflict("Queued Message changed".to_string()));
+    }
+    task.message_queue.items.remove(index);
+    task.message_queue.revision = task.message_queue.revision.saturating_add(1);
+    Ok(())
+}
+
+fn clear_queue_pause(task: &mut TaskRecord, revision_before: u64) {
+    if task.message_queue.pause.take().is_some() && task.message_queue.revision == revision_before {
+        task.message_queue.revision = task.message_queue.revision.saturating_add(1);
+    }
+}
+
+pub(super) fn record_composer_history(
+    task: &mut TaskRecord,
+    entry_id: &str,
+    text: &str,
+    accepted_at: &str,
+) {
     if text.is_empty() {
         return;
     }
