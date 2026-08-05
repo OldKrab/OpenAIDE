@@ -68,6 +68,8 @@ type AppPrimaryTaskSurfaceProps = {
   controller: AppController;
   focusRequestKey: number;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
+  onPlanDrawerOpenChange?: (open: boolean) => void;
+  planDrawerOpen?: boolean;
   workspaceRecovery?: {
     manageWorktrees: (projectId: string) => void;
     openProjectSettings: () => void;
@@ -75,7 +77,14 @@ type AppPrimaryTaskSurfaceProps = {
   };
 };
 
-export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, workspaceRecovery }: AppPrimaryTaskSurfaceProps) {
+export function AppPrimaryTaskSurface({
+  controller,
+  focusRequestKey,
+  model,
+  onPlanDrawerOpenChange,
+  planDrawerOpen,
+  workspaceRecovery,
+}: AppPrimaryTaskSurfaceProps) {
   const { activeTask, agents, backendReady, bootstrap, callbacks, intents, preferences, view } = controller;
   const { primaryTask } = view;
   const {
@@ -111,6 +120,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onClosePlan={callbacks.task.closePlan}
+        onAddToQueue={callbacks.task.addToQueue}
         onLoadChatPage={callbacks.task.loadChatPage}
         onLoadComposerHistory={callbacks.task.loadComposerHistory}
         onLoadToolImagePreview={callbacks.task.loadToolImagePreview}
@@ -123,10 +133,16 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
         onRetryConnection={retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
+        onRemoveQueueMessage={callbacks.task.removeQueueMessage}
+        onTakeQueueMessage={callbacks.task.takeQueueMessage}
+        onMoveQueueMessage={callbacks.task.moveQueueMessage}
+        onPlanDrawerOpenChange={onPlanDrawerOpenChange}
+        onSendQueueMessageNow={callbacks.task.sendQueueMessageNow}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSelectConfigOption={callbacks.task.selectConfigOption}
         onSendPrompt={callbacks.task.sendPrompt}
         permissionResponses={primaryTask.permissionResponses}
+        planDrawerOpen={planDrawerOpen}
         liveTextPresentation={primaryTask.liveTextPresentation}
         questionResponses={primaryTask.questionResponses}
         savedScrollState={primaryTask.savedScrollState}
@@ -169,7 +185,6 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
       projectContextMode={canSelectNewTaskProject ? "selectable" : "fixed"}
       state={primaryTask.newTask}
       submitShortcut={preferences.composer_submit_shortcut}
-      workspaceBrowser={callbacks.newTask.workspaceBrowser}
     />
   );
 }

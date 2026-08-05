@@ -2,7 +2,7 @@ use openaide_app_server_protocol::ids::TaskId;
 
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ActivityStatus, InterruptionReason, TaskStatus};
-use crate::storage::records::TaskAttentionReason;
+use crate::storage::records::{TaskAttentionReason, TaskMessageQueuePauseRecord};
 use crate::tasks::attention::fresh_attention;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationContext, TaskMutationResult};
 use crate::time::now_string;
@@ -70,6 +70,13 @@ pub(super) fn apply_active_work_end(
     ctx.finish_running_activities(ActivityStatus::Interrupted)?;
     append_interruption(ctx, cause.reason(), &cause.message(), now.clone(), true)?;
     let task = ctx.task_mut();
+    if !task.message_queue.items.is_empty() {
+        task.message_queue.pause = Some(match cause {
+            ActiveWorkEnd::Restarted => TaskMessageQueuePauseRecord::Restarted,
+            _ => TaskMessageQueuePauseRecord::UnsuccessfulTurn,
+        });
+        task.message_queue.revision = task.message_queue.revision.saturating_add(1);
+    }
     task.status = TaskStatus::Inactive;
     task.active_turn_id = None;
     task.active_turn_started_at = None;

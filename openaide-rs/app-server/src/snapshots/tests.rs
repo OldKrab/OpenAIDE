@@ -380,6 +380,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
             input_capabilities: None,
             context_usage: None,
             current_plan: None,
+            message_queue: Default::default(),
             chat: ChatSnapshot {
                 items: Vec::new(),
                 has_more_before: false,

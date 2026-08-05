@@ -1147,6 +1147,7 @@ fn task_projection(task_id: &str) -> TaskProjection {
             updated_at: "2026-07-20T00:00:00Z".to_string(),
             last_activity: "2026-07-20T00:00:00Z".to_string(),
             composer_history: Default::default(),
+            message_queue: Default::default(),
             agent_id: "agent_1".to_string(),
             agent_name: "Agent".to_string(),
             isolation: IsolationKind::Local,

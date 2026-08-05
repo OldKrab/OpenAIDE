@@ -16,6 +16,11 @@ type TaskInteractionAction =
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:sendError"; taskId: string; message?: string }
   | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
+  | { type: "taskQueue:accepted"; taskId: string; queueRevision: number }
+  | { type: "taskQueue:take:start"; taskId: string; item: import("@openaide/app-shell-contracts").QueuedMessage; index: number }
+  | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string }
+  | { type: "taskQueue:take:accepted"; taskId: string; queuedMessageId: string; prompt: string; context: ComposerAttachment[] }
+  | { type: "taskQueue:take:error"; taskId: string; queuedMessageId: string; message: string }
   | { type: "taskInput:error"; taskId: string; message?: string }
   | {
       type: "taskInput:configError";
@@ -67,7 +72,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     }
     case "taskInput:prompt":
       const input = state.taskInputs[action.taskId];
-      if (input?.pending) return state;
+      if (input?.pending || input?.queueTake) return state;
       return {
         ...state,
         taskInputs: {
@@ -82,7 +87,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
       };
     case "taskInput:attachment:add": {
       const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
-      if (input.pending) return state;
+      if (input.pending || input.queueTake) return state;
       return {
         ...state,
         taskInputs: {
@@ -97,7 +102,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     }
     case "taskInput:attachment:addAppServer": {
       const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
-      if (input.pending) return state;
+      if (input.pending || input.queueTake) return state;
       return {
         ...state,
         taskInputs: {
@@ -112,7 +117,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     }
     case "taskInput:attachment:remove": {
       const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
-      if (input.pending) return state;
+      if (input.pending || input.queueTake) return state;
       return {
         ...state,
         taskInputs: {
@@ -131,6 +136,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     }
     case "taskInput:submit": {
       const previousInput = state.taskInputs[action.taskId];
+      if (previousInput?.queueTake) return state;
       const input = action.input ?? previousInput ?? { prompt: "", context: [] };
       return {
         ...state,
@@ -147,6 +153,62 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
               state: "sending",
             },
           },
+        },
+      };
+    }
+    case "taskQueue:take:start": {
+      const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
+      if (input.pending || input.queueTake || input.prompt.length > 0 || input.context.length > 0) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: {
+            ...input,
+            error: undefined,
+            queueTake: { item: action.item, index: action.index, stage: "pending" },
+          },
+        },
+      };
+    }
+    case "taskQueue:take:collapse": {
+      const input = state.taskInputs[action.taskId];
+      if (input?.queueTake?.item.queued_message_id !== action.queuedMessageId) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: {
+            ...input,
+            queueTake: { ...input.queueTake, stage: "collapsing" },
+          },
+        },
+      };
+    }
+    case "taskQueue:take:accepted": {
+      const input = state.taskInputs[action.taskId];
+      if (input?.queueTake?.item.queued_message_id !== action.queuedMessageId) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: {
+            prompt: action.prompt,
+            context: action.context,
+            acceptedQueueTakeId: action.queuedMessageId,
+          },
+        },
+      };
+    }
+    case "taskQueue:take:error": {
+      const input = state.taskInputs[action.taskId];
+      if (input?.queueTake?.item.queued_message_id !== action.queuedMessageId) return state;
+      const { queueTake: _queueTake, ...rest } = input;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: { ...rest, error: action.message },
         },
       };
     }
@@ -208,6 +270,21 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
                 : state.newTask.selection,
             }
           : state.newTask,
+      };
+    }
+    case "taskQueue:accepted": {
+      const input = state.taskInputs[action.taskId];
+      if (!input?.pending) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: {
+            prompt: "",
+            context: [],
+            acceptedQueueRevision: action.queueRevision,
+          },
+        },
       };
     }
     case "taskInput:error": {
@@ -398,15 +475,22 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
 }
 
 function acceptedInputIdentity(input: AppState["taskInputs"][string] | undefined) {
-  return input?.acceptedUserMessageId
-    ? { acceptedUserMessageId: input.acceptedUserMessageId }
-    : {};
+  return {
+    ...(input?.acceptedUserMessageId
+      ? { acceptedUserMessageId: input.acceptedUserMessageId }
+      : {}),
+    ...(input?.acceptedQueueRevision !== undefined
+      ? { acceptedQueueRevision: input.acceptedQueueRevision }
+      : {}),
+  };
 }
 
 function isTaskInteractionAction(action: AppAction): action is TaskInteractionAction {
   return action.type === "taskConfig:result"
     || action.type.startsWith("taskInput:")
     || action.type === "taskSend:accepted"
+    || action.type === "taskQueue:accepted"
+    || action.type.startsWith("taskQueue:take:")
     || action.type === "taskOpen:start"
     || action.type === "taskOpen:error"
     || action.type.startsWith("chatPage:")

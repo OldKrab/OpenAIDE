@@ -24,6 +24,18 @@ describe("interactive control styles", () => {
   });
 });
 
+describe("expanded Task Queue boundary", () => {
+  it("keeps the Chat scroll end above the floating Queue only while it is expanded", () => {
+    expect(appCss).toMatch(/\.task-conversation \.message-list\s*{[^}]*padding-block-end:\s*var\(--task-queue-overlay-clearance,\s*0px\);/);
+    expect(appCss).toMatch(/\.task-queue-floating:has\(\.task-message-queue\[data-open="true"\]:not\(\[data-single="true"\]\)\)::before\s*{[^}]*linear-gradient/);
+    expect(appCss).not.toMatch(/\.task-queue-floating::before\s*{/);
+  });
+
+  it("keeps the first-row actions and next marker on one grid line", () => {
+    expect(appCss).toMatch(/\.task-message-queue-items > li:first-child \.task-message-queue-actions\s*{[^}]*grid-column:\s*3;[^}]*grid-row:\s*1;/);
+  });
+});
+
 describe("task list row styles", () => {
   it("renders Questions as one soft surface with quiet field separation and low-border controls", () => {
     expect(appCss).toMatch(/\.question-card\s*{[^}]*border:\s*0;[^}]*border-radius:\s*12px;[^}]*background:\s*color-mix\(in oklch, var\(--oa-panel\) 78%, var\(--oa-bg\)\);/);
@@ -154,7 +166,7 @@ describe("task list row styles", () => {
     expect(appCss).not.toMatch(/\.chat-message-actions\s*{[^}]*position:\s*absolute;/);
     expect(appCss).toMatch(/\.chat-agent-block:hover \.chat-message-actions,\s*\.chat-agent-block:focus-within \.chat-message-actions,\s*\.chat-user-block:hover \.chat-message-actions,\s*\.chat-user-block:focus-within \.chat-message-actions\s*{\s*opacity:\s*1;/);
     expect(appCss).toMatch(/\.chat-message-action\s*{[^}]*width:\s*20px;[^}]*min-height:\s*16px;[^}]*border:\s*0;[^}]*background:\s*transparent;/);
-    expect(appCss).toMatch(/\.message-list > \.activity-group\s*{[^}]*margin-block-end:\s*4px;/);
+    expect(appCss).toMatch(/\.message-list-virtual-row > \.activity-group\s*{[^}]*margin-block-end:\s*4px;/);
   });
 
   it("keeps narrow transcript controls touchable", () => {
@@ -172,15 +184,14 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.web-main-surface\s*{[^}]*grid-column:\s*2;[^}]*grid-row:\s*1;/);
     expect(appCss).toMatch(/\.chat-column\s*{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
-    expect(appCss).toMatch(/\.message-list\s*{[^}]*gap:\s*8px;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*padding-inline:\s*max\(0px,\s*calc\(\(100% - 760px\) \/ 2\)\);/);
-    expect(appCss).toMatch(/\.message-list\s*{[^}]*padding-bottom:\s*64px;/);
-    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[^}]*\.message-list\s*{[^}]*padding-bottom:\s*36px;/);
+    expect(appCss).toMatch(/\.message-list-virtualizer\s*{[^}]*width:\s*100%;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*gap:\s*8px;/);
+    expect(appCss).toMatch(/\.message-list-virtual-row\s*{[^}]*width:\s*100%;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/);
   });
 
   it("shows working status as a quiet animated row in the message stream", () => {
     expect(appCss).toMatch(/\.working-status\s*{[^}]*margin-top:\s*32px;/);
-    expect(appCss).toMatch(/\.message-list > \.activity-group \+ \.working-status\s*{[^}]*margin-top:\s*28px;/);
+    expect(appCss).toMatch(/\.message-list-virtual-row\[data-row-kind="status"\]\[data-after-activity="true"\] \.working-status\s*{[^}]*margin-top:\s*28px;/);
     expect(appCss).toMatch(/\.working-status\s*{[^}]*color:\s*var\(--oa-muted\);[^}]*display:\s*inline-flex;/);
     expect(appCss).toMatch(/\.working-status-dots span\s*{[^}]*animation:\s*working-dot-pulse 1\.2s ease-in-out infinite;/);
     expect(appCss).toMatch(/\.working-status-duration-separator\s*{[^}]*width:\s*1px;[^}]*height:\s*12px;[^}]*background:\s*var\(--oa-border\);/);
@@ -359,8 +370,12 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer-send-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.composer\s*{[^}]*width:\s*min\(760px, 100%\)/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.new-task-context-controls\s*{[^}]*width:\s*fit-content/);
-    expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer\s*{\s*max-height:\s*50dvh;/);
+    expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer\s*{[^}]*min-height:\s*94px;[^}]*max-height:\s*50dvh;/);
     expect(appCss).toMatch(/\.composer textarea,\s*\.composer-editor\s*{[^}]*min-height:\s*40px;[^}]*max-height:\s*calc\(50dvh - 72px\);/);
+    expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer-editor\s*{\s*min-height:\s*22px;/);
+    expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer\s*{[^}]*gap:\s*4px;[^}]*padding-block:\s*8px;/);
+    expect(appCss).not.toMatch(/\.composer-editor\[data-empty\]\s*{[^}]*min-height:/);
+    expect(appCss).not.toMatch(/\.composer:has\([^}]*data-empty[^}]*\)\s*{[^}]*(?:gap|padding(?:-block)?):/);
     expect(appCss).toMatch(/\.new-task-surface \.composer textarea,\s*\.new-task-surface \.composer-editor\s*{\s*max-height:\s*min\(480px,\s*65dvh\);/);
   });
 
@@ -372,8 +387,8 @@ describe("task list row styles", () => {
   });
 
   it("centers composer action button icons in a stable square hit target", () => {
-    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button:not\(\.composer-send-button\)\s*{[^}]*min-width:\s*30px;[^}]*min-height:\s*30px;[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*display:\s*grid;[^}]*place-items:\s*center;[^}]*line-height:\s*0;/);
-    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button:not\(\.composer-send-button\) svg\s*{\s*display:\s*block;/);
+    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button:not\(\.composer-send-button\):not\(\.composer-queue-button\)\s*{[^}]*min-width:\s*30px;[^}]*min-height:\s*30px;[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*display:\s*grid;[^}]*place-items:\s*center;[^}]*line-height:\s*0;/);
+    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button:not\(\.composer-send-button\):not\(\.composer-queue-button\) svg\s*{\s*display:\s*block;/);
   });
 
   it("gives the shared new-task screen a restrained but clear visual hierarchy", () => {

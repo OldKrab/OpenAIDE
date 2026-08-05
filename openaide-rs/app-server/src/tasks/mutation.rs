@@ -144,11 +144,17 @@ impl TaskMutationContext<'_> {
             .map(|stored| stored.sequence + 1)
             .unwrap_or(1);
         message.cursor = cursor::from_sequence(sequence);
-        self.projection.messages.push(StoredMessage {
+        let stored = StoredMessage {
             sequence,
             chat: message,
-        });
+        };
+        self.projection.messages.push(stored.clone());
         crate::storage::message_store::advance_message_meta(self.projection, 0);
+        // Pre-identified rows still need an explicit journal/publication delta;
+        // mutating the in-memory projection alone would persist only Task metadata.
+        self.chat_changes.push(CommittedChatChange::Append {
+            item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
+        });
     }
 
     pub(crate) fn append_terminal(

@@ -65,17 +65,21 @@ export const IconButton = forwardRef<HTMLButtonElement, {
   className?: string;
   disabled?: boolean;
   icon: ReactNode;
+  keyShortcuts?: string;
   onClick?: () => void;
   popupTrigger?: PopupTriggerProps;
   pressed?: boolean;
+  title?: string;
 }>(function IconButton({
   ariaLabel,
   className,
   disabled,
   icon,
+  keyShortcuts,
   onClick,
   popupTrigger,
   pressed,
+  title,
 }, ref) {
   const classes = ["composer-icon-button", className].filter(Boolean).join(" ");
   const { ref: popupRef, ...popupProps } = popupTrigger ?? {};
@@ -84,10 +88,12 @@ export const IconButton = forwardRef<HTMLButtonElement, {
       {...popupProps}
       ref={(node) => assignButtonRef(node, ref, popupRef)}
       aria-label={ariaLabel}
+      aria-keyshortcuts={keyShortcuts}
       aria-pressed={pressed}
       className={classes}
       disabled={disabled}
       onClick={popupTrigger?.onClick ?? onClick}
+      title={title}
       type="button"
     >
       {icon}

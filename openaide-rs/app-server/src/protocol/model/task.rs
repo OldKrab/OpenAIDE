@@ -84,6 +84,7 @@ pub struct TaskSnapshot {
     pub active_turn_started_at: Option<String>,
     pub lifecycle: TaskLifecycle,
     pub chat: MessagePage,
+    pub message_queue: crate::storage::records::TaskMessageQueueRecord,
     pub settings_summary: SettingsSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,

@@ -185,12 +185,49 @@ pub struct TaskSnapshot {
     pub context_usage: Option<TaskContextUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_plan: Option<AgentPlanSnapshot>,
+    #[serde(default)]
+    pub message_queue: TaskMessageQueueSnapshot,
     pub chat: ChatSnapshot,
     pub history_sync: TaskHistorySyncSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_requests: Vec<PendingRequestSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<RecoverySnapshot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMessageQueueSnapshot {
+    pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause: Option<TaskMessageQueuePauseSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<QueuedMessageSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskMessageQueuePauseSnapshot {
+    Restarted,
+    UnsuccessfulTurn,
+    AttachmentUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedMessageSnapshot {
+    pub queued_message_id: crate::ids::QueuedMessageId,
+    pub text: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<QueuedMessageAttachmentSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedMessageAttachmentSnapshot {
+    pub kind: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

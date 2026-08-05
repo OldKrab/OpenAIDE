@@ -57,6 +57,7 @@ function applyTaskChanges(
     agentConfig: changes.agentConfig ?? snapshot.task.agentConfig,
     agentCommands: changes.agentCommands ?? snapshot.task.agentCommands,
     sendCapability: changes.sendCapability ?? snapshot.task.sendCapability,
+    messageQueue: changes.messageQueue ?? snapshot.task.messageQueue,
     inputCapabilities: changes.inputCapabilities ?? snapshot.task.inputCapabilities,
     contextUsage: changes.contextUsage === undefined
       ? snapshot.task.contextUsage

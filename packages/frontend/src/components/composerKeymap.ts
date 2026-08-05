@@ -16,6 +16,22 @@ export function shouldSubmitComposerKey(
   return submitShortcut === "enter" ? !hasCommandModifier : hasCommandModifier;
 }
 
+/** Queue is a stable modifier variant of Send, independent of the configured Send shortcut. */
+export function shouldQueueComposerKey(event: {
+  altKey: boolean;
+  ctrlKey: boolean;
+  key: string;
+  metaKey: boolean;
+  nativeEvent?: { isComposing?: boolean };
+  shiftKey: boolean;
+}) {
+  return event.key === "Enter"
+    && !event.nativeEvent?.isComposing
+    && !event.altKey
+    && event.shiftKey
+    && (event.ctrlKey || event.metaKey);
+}
+
 export function shouldInsertComposerNewline(
   event: {
     altKey: boolean;

@@ -52,6 +52,8 @@ use crate::task::{
     TaskClosePlanParams, TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams,
     TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
     TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult,
+    TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
+    TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult,
     TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
     TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
     TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult,
@@ -477,6 +479,30 @@ protocol_method!(
     TaskAdoptNativeSessionResult
 );
 protocol_method!(TaskSend, TASK_SEND, TaskSendParams, TaskSendResult);
+protocol_method!(
+    TaskQueueAppend,
+    TASK_QUEUE_APPEND,
+    TaskQueueAppendParams,
+    TaskQueueAppendResult
+);
+protocol_method!(
+    TaskQueueRemove,
+    TASK_QUEUE_REMOVE,
+    TaskQueueRemoveParams,
+    TaskQueueRemoveResult
+);
+protocol_method!(
+    TaskQueueTake,
+    TASK_QUEUE_TAKE,
+    TaskQueueTakeParams,
+    TaskQueueTakeResult
+);
+protocol_method!(
+    TaskQueueMove,
+    TASK_QUEUE_MOVE,
+    TaskQueueMoveParams,
+    TaskQueueMoveResult
+);
 protocol_method!(
     TaskSetConfigOption,
     TASK_SET_CONFIG_OPTION,

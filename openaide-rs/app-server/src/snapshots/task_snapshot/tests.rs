@@ -841,6 +841,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
         composer_history: Default::default(),
+        message_queue: Default::default(),
         agent_id: "agent-a".to_string(),
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,

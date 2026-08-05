@@ -15,7 +15,8 @@ use openaide_app_server_protocol::methods::{
     SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE, TASK_ACQUIRE_IN_WORKTREE,
     TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_CHAT_PAGE, TASK_CLOSE_PLAN,
     TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE,
-    TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_RELEASE, TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND,
+    TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND, TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE,
+    TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND,
     TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW,
     WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
     WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
@@ -213,6 +214,14 @@ impl RpcGateway {
                 self.handle_task_adopt_native_session(connection_id, id, params, meta, now)
             }
             TASK_SEND => self.handle_task_send(connection_id, id, params, meta, now),
+            TASK_QUEUE_APPEND => {
+                self.handle_task_queue_append(connection_id, id, params, meta, now)
+            }
+            TASK_QUEUE_REMOVE => {
+                self.handle_task_queue_remove(connection_id, id, params, meta, now)
+            }
+            TASK_QUEUE_TAKE => self.handle_task_queue_take(connection_id, id, params, meta, now),
+            TASK_QUEUE_MOVE => self.handle_task_queue_move(connection_id, id, params, meta, now),
             TASK_CANCEL => self.handle_task_cancel(connection_id, id, params, meta, now),
             TASK_CHAT_PAGE => self.handle_task_chat_page(connection_id, id, params, meta),
             TASK_COMPOSER_HISTORY => {

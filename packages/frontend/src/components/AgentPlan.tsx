@@ -6,45 +6,65 @@ const currentPlanDisclosure = new Map<string, boolean>();
 const PLAN_DISCLOSURE_STORAGE_PREFIX = "openaide.agentPlanDisclosure:";
 
 export function AgentPlanView({
+  collapsible = true,
+  defaultOpen = false,
   onClose,
   plan,
   taskId,
   taskStatus,
 }: {
+  /** Separate Plan panels can stay expanded when their container already owns visibility. */
+  collapsible?: boolean;
+  /** Used only until the user establishes a retained disclosure preference for this Task. */
+  defaultOpen?: boolean;
   onClose?: () => Promise<void> | void;
   plan: AgentPlan;
   taskId: string;
   taskStatus: TaskStatus;
 }) {
-  const [open, setOpen] = useState(() => readAgentPlanDisclosure(taskId));
+  const [disclosureOpen, setDisclosureOpen] = useState(
+    () => readAgentPlanDisclosure(taskId) ?? defaultOpen,
+  );
   const [closing, setClosing] = useState(false);
+  const open = collapsible ? disclosureOpen : true;
   const completed = plan.entries.filter((entry) => entry.status === "completed").length;
   const current = plan.entries.find((entry) => entry.status === "in_progress")
     ?? plan.entries.find((entry) => entry.status === "pending");
 
   return (
     <section className="agent-plan" data-open={open}>
-      <button
-        aria-expanded={open}
-        aria-label={`${open ? "Collapse" : "Expand"} Agent Plan`}
-        className="agent-plan-heading"
-        onClick={() => setOpen((value) => {
-          const next = !value;
-          retainAgentPlanDisclosure(taskId, next);
-          return next;
-        })}
-        type="button"
-      >
-        <ChevronDown aria-hidden="true" className="agent-plan-chevron" size={15} />
-        <strong>Plan</strong>
-        {!open && current ? (
-          <span className="agent-plan-current">
-            <PlanStatusMark entry={current} taskRunning={taskStatus === "active"} />
-            <span>{current.content}</span>
-          </span>
-        ) : null}
-        <small>{completed} of {plan.entries.length} complete</small>
-      </button>
+      {collapsible ? (
+        <button
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} Agent Plan`}
+          className="agent-plan-heading"
+          onClick={() => setDisclosureOpen((value) => {
+            const next = !value;
+            retainAgentPlanDisclosure(taskId, next);
+            return next;
+          })}
+          type="button"
+        >
+          <ChevronDown aria-hidden="true" className="agent-plan-chevron" size={15} />
+          <PlanHeadingContent
+            completed={completed}
+            current={current}
+            open={open}
+            plan={plan}
+            taskStatus={taskStatus}
+          />
+        </button>
+      ) : (
+        <div className="agent-plan-heading">
+          <PlanHeadingContent
+            completed={completed}
+            current={current}
+            open={open}
+            plan={plan}
+            taskStatus={taskStatus}
+          />
+        </div>
+      )}
       {onClose ? (
         <button
           aria-label="Close Plan"
@@ -65,6 +85,31 @@ export function AgentPlanView({
       </PlanDisclosure>
     </section>
   );
+}
+
+function PlanHeadingContent({
+  completed,
+  current,
+  open,
+  plan,
+  taskStatus,
+}: {
+  completed: number;
+  current?: AgentPlanEntry;
+  open: boolean;
+  plan: AgentPlan;
+  taskStatus: TaskStatus;
+}) {
+  return <>
+    <strong>Plan</strong>
+    {!open && current ? (
+      <span className="agent-plan-current">
+        <PlanStatusMark entry={current} taskRunning={taskStatus === "active"} />
+        <span>{current.content}</span>
+      </span>
+    ) : null}
+    <small>{completed} of {plan.entries.length} complete</small>
+  </>;
 }
 
 /** A completed or cleared Plan makes the next Plan a new, initially collapsed disclosure. */
@@ -200,7 +245,7 @@ function readAgentPlanDisclosure(taskId: string) {
   } catch {
     // Live memory remains available when browser storage is blocked.
   }
-  return currentPlanDisclosure.get(taskId) ?? false;
+  return currentPlanDisclosure.get(taskId);
 }
 
 function retainAgentPlanDisclosure(taskId: string, open: boolean) {

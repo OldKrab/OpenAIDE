@@ -181,11 +181,20 @@ export function reconcileTaskSnapshot(
     );
   const historySync = keepCurrent ? currentSync : incomingSync;
   const durableSnapshot = shouldIgnoreStaleTaskSnapshot(current, incoming) ? current : incoming;
-  // Request responses and state events are independent transports. Preserve the
-  // newer sync clock while still accepting unrelated durable snapshot growth.
+  // Request responses and state events are independent transports. The queue has
+  // its own durable revision because Agent traffic can advance the Task revision
+  // before a queue mutation response arrives.
+  const currentQueueRevision = current.message_queue?.revision ?? -1;
+  const incomingQueueRevision = incoming.message_queue?.revision ?? -1;
+  const messageQueue = incomingQueueRevision > currentQueueRevision
+    ? incoming.message_queue
+    : currentQueueRevision > incomingQueueRevision
+      ? current.message_queue
+      : durableSnapshot.message_queue;
   return durableSnapshot.history_sync === historySync
+    && durableSnapshot.message_queue === messageQueue
     ? durableSnapshot
-    : { ...durableSnapshot, history_sync: historySync };
+    : { ...durableSnapshot, history_sync: historySync, message_queue: messageQueue };
 }
 
 function historySyncIsTerminal(sync: TaskSnapshot["history_sync"]) {

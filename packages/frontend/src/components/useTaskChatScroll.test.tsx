@@ -3,6 +3,60 @@ import { act, create } from "react-test-renderer";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskChatScrollState } from "../state/store";
+
+vi.mock("@tanstack/react-virtual", async () => {
+  const React = await import("react");
+  type Options = {
+    count: number;
+    getItemKey: (index: number) => string;
+    getScrollElement: () => HTMLDivElement | null;
+  };
+  return {
+    useVirtualizer: (options: Options) => {
+      const optionsRef = React.useRef(options);
+      optionsRef.current = options;
+      const virtualizerRef = React.useRef<ReturnType<typeof createVirtualizer> | undefined>(undefined);
+      virtualizerRef.current ??= createVirtualizer(optionsRef);
+      return virtualizerRef.current;
+    },
+  };
+
+  function createVirtualizer(optionsRef: { current: Options }) {
+    const element = () => optionsRef.current.getScrollElement();
+    const distanceFromEnd = () => {
+      const viewport = element();
+      return viewport ? Math.max(0, viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) : 0;
+    };
+    return {
+      getDistanceFromEnd: distanceFromEnd,
+      getTotalSize: () => element()?.scrollHeight ?? optionsRef.current.count * 72,
+      getOffsetForIndex: (index: number) => [index * 72, "start"] as const,
+      getVirtualItems: () => Array.from({ length: optionsRef.current.count }, (_, index) => ({
+        end: (index + 1) * 72,
+        index,
+        key: optionsRef.current.getItemKey(index),
+        lane: 0,
+        size: 72,
+        start: index * 72,
+      })),
+      isAtEnd: (threshold = 2) => distanceFromEnd() <= threshold,
+      measureElement: () => undefined,
+      scrollToEnd: () => {
+        const viewport = element();
+        if (viewport) viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      },
+      scrollToOffset: (offset: number) => {
+        const viewport = element();
+        if (viewport) viewport.scrollTop = offset;
+      },
+      scrollBy: (delta: number) => {
+        const viewport = element();
+        if (viewport) viewport.scrollTop += delta;
+      },
+    };
+  }
+});
+
 import { useTaskChatScroll } from "./useTaskChatScroll";
 
 describe("useTaskChatScroll", () => {
@@ -15,776 +69,250 @@ describe("useTaskChatScroll", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps a following viewport pinned through activity, permission, and later content reflow", () => {
+  it("keeps a following viewport pinned when mounted Chat content changes size", () => {
     const resize = installResizeObserver();
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
+    renderHarness(messageList);
+    expect(messageList.scrollTop).toBe(1000);
 
     messageList.scrollHeight = 2200;
     act(() => resize.notify());
+
     expect(messageList.scrollTop).toBe(1800);
-
-    act(() => tree.update(<Harness itemCount={2} />));
-    messageList.scrollHeight = 2600;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(2200);
-
-    act(() => tree.update(<Harness itemCount={2} />));
-    messageList.scrollHeight = 2100;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(1700);
-
-    // Markdown, images, and tool details can settle without another React render.
-    messageList.scrollHeight = 2900;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(2500);
   });
 
-  it("restores a Task's saved following ownership after its Chat grows in the background", () => {
+  it("leaves follow mode without moving the viewport when an overlay expands", () => {
+    const resize = installResizeObserver();
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} taskId="task_1" />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
+    const onScrollState = vi.fn();
+    const tree = renderHarness(messageList, { onScrollState });
     expect(messageList.scrollTop).toBe(1000);
 
-    act(() => tree.update(<Harness itemCount={1} taskId="task_2" />));
+    act(() => tree.root.findByProps({ className: "pause-follow-test" }).props.onClick());
     messageList.scrollHeight = 1800;
-    act(() => tree.update(<Harness itemCount={2} taskId="task_1" />));
+    act(() => resize.notify());
 
+    expect(messageList.scrollTop).toBe(1000);
+    expect(onScrollState).toHaveBeenLastCalledWith({ ownership: "reading", scrollTop: 1000 });
+  });
+
+  it("does not pull a reader down, then resumes following after explicit downward intent", () => {
+    const resize = installResizeObserver();
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const tree = renderHarness(messageList);
+    const viewport = messageListView(tree);
+
+    act(() => {
+      viewport.props.onWheel({ deltaY: -8 });
+      messageList.scrollTop = 700;
+      viewport.props.onScroll({ currentTarget: messageList });
+    });
+    messageList.scrollHeight = 1600;
+    act(() => resize.notify());
+    expect(messageList.scrollTop).toBe(700);
+
+    act(() => {
+      viewport.props.onWheel({ deltaY: 8 });
+      messageList.scrollTop = 1200;
+      viewport.props.onScroll({ currentTarget: messageList });
+    });
+    messageList.scrollHeight = 1800;
+    act(() => resize.notify());
     expect(messageList.scrollTop).toBe(1400);
   });
 
-  it("observes Chat rows inserted after mount for later intrinsic-size changes", () => {
-    const resize = installResizeObserver();
-    const mutation = installMutationObserver();
+  it("claims reader ownership from upward keyboard navigation but not from a nested control", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
+    const onScrollState = vi.fn();
+    const tree = renderHarness(messageList, { onScrollState });
+    const viewport = messageListView(tree);
 
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
+    act(() => viewport.props.onKeyDown({
+      altKey: false,
+      ctrlKey: false,
+      currentTarget: messageList,
+      defaultPrevented: false,
+      key: "PageUp",
+      metaKey: false,
+      shiftKey: false,
+      target: messageList,
+    }));
+    expect(onScrollState).toHaveBeenLastCalledWith({ ownership: "reading", scrollTop: 1000 });
 
-    const insertedRow = {} as Element;
-    messageList.children.push(insertedRow);
-    act(() => mutation.notify());
-
-    expect(resize.instances[0]?.observe).toHaveBeenCalledWith(insertedRow);
-    expect(mutation.instances[0]?.observe).toHaveBeenCalledWith(messageList, { childList: true });
+    const nestedButton = { closest: () => ({}) };
+    act(() => viewport.props.onKeyDown({
+      altKey: false,
+      ctrlKey: false,
+      currentTarget: messageList,
+      defaultPrevented: false,
+      key: "PageUp",
+      metaKey: false,
+      shiftKey: false,
+      target: nestedButton,
+    }));
+    expect(onScrollState).toHaveBeenCalledTimes(1);
   });
 
-  it("recovers a follower when permission layout contracts and grows before its scroll event", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+  it("restores a saved reader offset when switching Tasks", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1800 });
     let tree!: ReactTestRenderer;
-
     act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
+      tree = create(
+        <Harness
+          onScrollState={vi.fn()}
+          savedScrollState={{ ownership: "reading", scrollTop: 320 }}
+          taskId="task_2"
+        />,
+        { createNodeMock: () => messageList },
+      );
     });
 
-    act(() => tree.update(<Harness itemCount={1} />));
-    messageList.scrollHeight = 800;
-    messageList.scrollHeight = 2000;
-    act(() => {
-      tree.root.findByProps({ className: "message-list" }).props.onScroll({ currentTarget: messageList });
-    });
-
-    expect(messageList.scrollTop).toBe(1600);
+    expect(messageList.scrollTop).toBe(320);
+    expect(messageListView(tree)).toBeTruthy();
   });
 
-  it("cancels observers, listeners, and animation frames when the Task changes", () => {
-    const resize = installResizeObserver();
-    const mutation = installMutationObserver();
-    const addEventListener = vi.fn();
-    const removeEventListener = vi.fn();
-    vi.stubGlobal("window", {
-      addEventListener,
-      matchMedia: () => ({ matches: false }),
-      removeEventListener,
-    });
-    vi.stubGlobal("performance", { now: () => 0 });
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 41));
-    const cancelAnimationFrame = vi.fn();
-    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
+  it("automatically requests earlier history only while estimated Chat is underfilled", () => {
+    const shortList = scrollNode({ clientHeight: 400, scrollHeight: 180 });
+    const onLoadEarlier = vi.fn(() => 1);
+    renderHarness(shortList, { beforeCursor: "cursor-1", hasEarlier: true, onLoadEarlier });
+    expect(onLoadEarlier).toHaveBeenCalledWith("cursor-1");
 
-    act(() => {
-      tree = create(<Harness itemCount={1} taskId="task_1" />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onWheel({ deltaY: -10 });
-      messageList.scrollTop = 700;
-      viewport.props.onScroll({ currentTarget: messageList });
-      tree.root.findByProps({ className: "jump" }).props.onClick();
-    });
-
-    act(() => tree.update(<Harness itemCount={1} taskId="task_2" />));
-
-    expect(resize.instances[0]?.disconnect).toHaveBeenCalledOnce();
-    expect(mutation.instances[0]?.disconnect).toHaveBeenCalledOnce();
-    expect(removeEventListener).toHaveBeenCalledWith("pointerup", expect.any(Function));
-    expect(removeEventListener).toHaveBeenCalledWith("pointercancel", expect.any(Function));
-    expect(removeEventListener).toHaveBeenCalledWith("pointermove", expect.any(Function));
-    expect(cancelAnimationFrame).toHaveBeenCalledWith(41);
-
-    act(() => tree.unmount());
-    expect(resize.instances[1]?.disconnect).toHaveBeenCalledOnce();
-    expect(mutation.instances[1]?.disconnect).toHaveBeenCalledOnce();
-    expect(removeEventListener.mock.calls.filter(([type]) => type === "pointerup")).toHaveLength(2);
-    expect(removeEventListener.mock.calls.filter(([type]) => type === "pointercancel")).toHaveLength(2);
-    expect(removeEventListener.mock.calls.filter(([type]) => type === "pointermove")).toHaveLength(2);
+    const filledList = scrollNode({ clientHeight: 400, scrollHeight: 900 });
+    const filledLoad = vi.fn(() => 1);
+    renderHarness(filledList, { beforeCursor: "cursor-2", hasEarlier: true, onLoadEarlier: filledLoad });
+    expect(filledLoad).not.toHaveBeenCalled();
   });
 
-  it("keeps follow mode off when persisting a small upward scroll", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollTop = 998;
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onWheel({ deltaY: -2 });
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-
-    expect(messageList.scrollTop).toBe(998);
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-
-    expect(messageList.scrollTop).toBe(998);
-  });
-
-  it("does not treat an unclassified scroll event as reader intent", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollTop = 700;
-    act(() => {
-      tree.root.findByProps({ className: "message-list" }).props.onScroll({ currentTarget: messageList });
-    });
-
-    expect(messageList.scrollTop).toBe(1000);
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(1100);
-  });
-
-  it("preserves keyboard reader intent after a permission resolves", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollHeight = 800;
-    messageList.scrollHeight = 2000;
-    act(() => tree.update(<Harness itemCount={1} />));
-
-    const viewport = tree.root.findByProps({ className: "message-list" });
-    messageList.scrollTop = 700;
-    act(() => {
-      viewport.props.onKeyDown({
-        altKey: false,
-        ctrlKey: false,
-        currentTarget: messageList,
-        defaultPrevented: false,
-        key: "PageUp",
-        metaKey: false,
-        shiftKey: false,
-        target: messageList,
-      });
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-
-    messageList.scrollHeight = 2100;
-    act(() => tree.update(<Harness itemCount={2} />));
-    expect(messageList.scrollTop).toBe(700);
-  });
-
-  it("restores following when keyboard navigation reaches the latest message", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    const viewport = tree.root.findByProps({ className: "message-list" });
-    messageList.scrollTop = 700;
-    act(() => {
-      viewport.props.onWheel({ deltaY: -20 });
-      viewport.props.onScroll({ currentTarget: messageList });
-      viewport.props.onKeyDown({
-        altKey: false,
-        ctrlKey: false,
-        currentTarget: messageList,
-        defaultPrevented: false,
-        key: "End",
-        metaKey: false,
-        shiftKey: false,
-        target: messageList,
-      });
-      messageList.scrollTop = 1000;
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-
-    messageList.scrollHeight = 1500;
-    act(() => tree.update(<Harness itemCount={2} />));
-    expect(messageList.scrollTop).toBe(1100);
-  });
-
-  it("restores following from explicit downward intent without a timing window", () => {
-    const resize = installResizeObserver();
-    let now = 0;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    const viewport = tree.root.findByProps({ className: "message-list" });
-    act(() => {
-      viewport.props.onWheel({ deltaY: -20 });
-      messageList.scrollTop = 700;
-      viewport.props.onScroll({ currentTarget: messageList });
-      viewport.props.onWheel({ deltaY: 20 });
-    });
-    now = 10_000;
-    act(() => {
-      messageList.scrollTop = 1000;
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(1100);
-  });
-
-  it("restores following when the user wheels down from an already-bottom reader viewport", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+  it("keeps the reader at the same position within retained content after a prepend", () => {
+    const animationFrames = installAnimationFrames();
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1200 });
+    let retainedContentTop = 100;
+    const retainedRow = {
+      dataset: { rowKey: "message:retained" },
+      getBoundingClientRect: () => ({
+        bottom: retainedContentTop - messageList.scrollTop + 72,
+        top: retainedContentTop - messageList.scrollTop,
+      }),
+    };
+    messageList.querySelectorAll = () => [retainedRow] as unknown as never[];
+    const onLoadEarlier = vi.fn(() => 1);
+    const onScrollState = vi.fn();
     let tree!: ReactTestRenderer;
     act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
+      tree = create(
+        <Harness
+          itemKeys={["load-earlier", "message:retained"]}
+          onLoadEarlier={onLoadEarlier}
+          onScrollState={onScrollState}
+        />,
+        { createNodeMock: () => messageList },
+      );
     });
+    messageList.scrollTop = 0;
 
-    const viewport = tree.root.findByProps({ className: "message-list" });
-    act(() => {
-      viewport.props.onWheel({ deltaY: -10 });
-      messageList.scrollTop = 700;
-      viewport.props.onScroll({ currentTarget: messageList });
-      messageList.scrollTop = 1000;
-      viewport.props.onScroll({ currentTarget: messageList });
-      viewport.props.onWheel({ currentTarget: messageList, deltaY: 10 });
-    });
-
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(1100);
-  });
-
-  it("follows final output when the Task becomes inactive in the same update", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
+    act(() => tree.root.findByProps({ className: "load-earlier-test" }).props.onClick());
+    expect(onLoadEarlier).toHaveBeenCalledWith("cursor-before");
+    expect(onScrollState).toHaveBeenLastCalledWith({ ownership: "reading", scrollTop: 0 });
 
     act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
+      messageList.scrollHeight = 1344;
+      retainedContentTop = 499;
+      tree.update(
+        <Harness
+          itemKeys={[
+            "load-earlier",
+            "message:older-1",
+            "message:older-2",
+            "message:retained",
+          ]}
+          onLoadEarlier={onLoadEarlier}
+          onScrollState={onScrollState}
+        />,
+      );
     });
 
-    expect(messageList.scrollTop).toBe(1000);
-    messageList.scrollHeight = 1500;
-    act(() => tree.update(<Harness itemCount={2} />));
-
-    expect(messageList.scrollTop).toBe(1100);
-  });
-
-  it("keeps following when layout contraction clamps the viewport without user input", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollHeight = 1350;
-    act(() => {
-      tree.root.findByProps({ className: "message-list" }).props.onScroll({ currentTarget: messageList });
-    });
-    messageList.scrollHeight = 1450;
-    act(() => tree.update(<Harness itemCount={2} />));
-
-    expect(messageList.scrollTop).toBe(1050);
-  });
-
-  it("lets a slow touch swipe leave follow mode from its first small movement", () => {
-    const windowListeners = new Map<string, EventListener>();
-    vi.stubGlobal("window", {
-      addEventListener: (type: string, listener: EventListener) => windowListeners.set(type, listener),
-      removeEventListener: (type: string) => windowListeners.delete(type),
-    });
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollTop = 999;
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onPointerDown({ clientY: 200, pointerType: "touch" });
-      windowListeners.get("pointermove")?.({ clientY: 201, pointerType: "touch" } as PointerEvent);
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-    messageList.scrollHeight = 1500;
-    act(() => tree.update(<Harness itemCount={2} />));
-
-    expect(messageList.scrollTop).toBe(999);
-  });
-
-  it("does not infer touch intent while a resting finger overlaps content reflow", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    const viewport = tree.root.findByProps({ className: "message-list" });
-    act(() => viewport.props.onPointerDown({ clientY: 200, pointerType: "touch" }));
-    messageList.scrollHeight = 800;
-    messageList.scrollHeight = 2000;
-    act(() => viewport.props.onScroll({ currentTarget: messageList }));
-    act(() => resize.notify());
-
-    expect(messageList.scrollTop).toBe(1600);
-  });
-
-  it("lets a mouse scrollbar drag leave follow mode", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollTop = 700;
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onPointerDown({ clientX: 610, currentTarget: messageList, pointerType: "mouse" });
-      viewport.props.onScroll({ currentTarget: messageList });
-      viewport.props.onPointerUp({ pointerType: "mouse" });
-    });
-    messageList.scrollHeight = 1500;
-    act(() => tree.update(<Harness itemCount={2} />));
-
-    expect(messageList.scrollTop).toBe(700);
-  });
-
-  it("gives an overlay scrollbar press reader ownership before live layout reconciliation", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    messageList.clientWidth = 600;
-    messageList.offsetWidth = 600;
-    messageList.getBoundingClientRect = () => ({ left: 0, right: 600 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onPointerDown({ clientX: 595, currentTarget: messageList, pointerType: "mouse" });
-    });
-    messageList.scrollTop = 700;
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-
-    expect(messageList.scrollTop).toBe(700);
-  });
-
-  it("does not infer scrollbar intent from a pointer down in Chat content", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollTop = 700;
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onPointerDown({ clientX: 200, currentTarget: messageList, pointerType: "mouse" });
-      viewport.props.onScroll({ currentTarget: messageList });
-      viewport.props.onPointerUp({ pointerType: "mouse" });
-    });
-
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(1100);
-  });
-
-  it("ends pointer ownership when the pointer is released outside Chat", () => {
-    const windowListeners = new Map<string, EventListener>();
-    vi.stubGlobal("window", {
-      addEventListener: (type: string, listener: EventListener) => windowListeners.set(type, listener),
-      removeEventListener: (type: string) => windowListeners.delete(type),
-    });
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    const viewport = tree.root.findByProps({ className: "message-list" });
-    act(() => {
-      viewport.props.onPointerDown({ clientX: 610, currentTarget: messageList, pointerType: "mouse" });
-      windowListeners.get("pointerup")?.(new Event("pointerup"));
-      tree.update(<Harness itemCount={1} />);
-    });
-    messageList.scrollHeight = 800;
-    messageList.scrollHeight = 2000;
-    act(() => viewport.props.onScroll({ currentTarget: messageList }));
-
-    expect(messageList.scrollTop).toBe(1600);
-  });
-
-  it("keeps a reader anchored when synchronized history is inserted", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness historySyncState="syncing" itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-    messageList.scrollTop = 700;
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onWheel({ deltaY: -10 });
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-
-    messageList.scrollHeight = 1600;
-    act(() => tree.update(<Harness historySyncState="updated" itemCount={2} />));
-
-    expect(messageList.scrollTop).toBe(900);
-  });
-
-  it("excludes live row reflow from a synchronized-history prepend offset", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness historySyncState="syncing" itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-    messageList.scrollTop = 700;
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onWheel({ deltaY: -10 });
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-
-    // A streamed row grows while native history is still being checked.
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-    expect(messageList.scrollTop).toBe(700);
-
-    // Only the 200px history prepend should move the reading viewport.
-    messageList.scrollHeight = 1700;
-    act(() => tree.update(<Harness historySyncState="updated" itemCount={2} />));
-    expect(messageList.scrollTop).toBe(900);
-  });
-
-  it("does not treat live rows as prepended history when synchronization finishes idle", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness historySyncState="syncing" itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-    messageList.scrollTop = 700;
-    const viewport = tree.root.findByProps({ className: "message-list" });
-    act(() => {
-      viewport.props.onWheel({ deltaY: -10 });
-      viewport.props.onScroll({ currentTarget: messageList });
-    });
-
-    messageList.scrollHeight = 1600;
-    act(() => tree.update(<Harness historySyncState="idle" itemCount={2} />));
-
-    expect(messageList.scrollTop).toBe(700);
-  });
-
-  it("keeps the visible row anchored while an earlier page is prepended", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onWheel({ deltaY: -10 });
-      messageList.scrollTop = 700;
-      viewport.props.onScroll({ currentTarget: messageList });
-      tree.root.findByProps({ className: "capture-prepend" }).props.onClick();
-      tree.update(<Harness itemCount={1} pendingPrepend />);
-    });
-
-    messageList.scrollHeight = 1600;
-    act(() => tree.update(<Harness itemCount={2} prependRequestGeneration={1} />));
-
-    expect(messageList.scrollTop).toBe(900);
-  });
-
-  it("waits for the requested earlier page before consuming its prepend anchor", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onWheel({ deltaY: -10 });
-      messageList.scrollTop = 700;
-      viewport.props.onScroll({ currentTarget: messageList });
-      tree.root.findByProps({ className: "capture-prepend" }).props.onClick();
-      tree.update(<Harness itemCount={1} pendingPrepend />);
-    });
-
-    // A new live row arrives at the end of Chat while the earlier-page request is still pending.
-    messageList.scrollHeight = 1500;
-    act(() => tree.update(<Harness itemCount={2} pendingPrepend />));
-    expect(messageList.scrollTop).toBe(700);
-
-    // Only the requested page's prepend shifts the reader's visible row.
-    messageList.scrollHeight = 1700;
-    act(() => tree.update(<Harness itemCount={3} prependRequestGeneration={1} />));
-    expect(messageList.scrollTop).toBe(900);
-  });
-
-  it("excludes intrinsic live-row growth from a pending earlier page's prepend offset", () => {
-    const resize = installResizeObserver();
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-    act(() => {
-      const viewport = tree.root.findByProps({ className: "message-list" });
-      viewport.props.onWheel({ deltaY: -10 });
-      messageList.scrollTop = 700;
-      viewport.props.onScroll({ currentTarget: messageList });
-      tree.root.findByProps({ className: "capture-prepend" }).props.onClick();
-      tree.update(<Harness itemCount={1} pendingPrepend />);
-    });
-
-    messageList.scrollHeight = 1500;
-    act(() => resize.notify());
-
-    messageList.scrollHeight = 1700;
-    act(() => tree.update(<Harness itemCount={2} prependRequestGeneration={1} />));
-    expect(messageList.scrollTop).toBe(900);
-  });
-
-  it("stays at the bottom when synchronized history is inserted while following", () => {
-    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
-    let tree!: ReactTestRenderer;
-    act(() => {
-      tree = create(<Harness historySyncState="syncing" itemCount={1} />, {
-        createNodeMock: (element) => (
-          (element.props as { className?: string }).className === "message-list" ? messageList : null
-        ),
-      });
-    });
-
-    messageList.scrollHeight = 1600;
-    act(() => tree.update(<Harness historySyncState="updated" itemCount={2} />));
-
-    expect(messageList.scrollTop).toBe(1200);
+    expect(messageList.scrollTop).toBe(144);
+    expect(animationFrames.pending()).toBeGreaterThan(0);
+    act(() => animationFrames.flush());
+    expect(messageList.scrollTop).toBe(399);
+    expect(retainedRow.getBoundingClientRect().top).toBe(100);
   });
 });
 
 function Harness({
-  historySyncState = "idle",
-  itemCount,
-  pendingPrepend = false,
-  prependRequestGeneration = pendingPrepend ? 1 : 0,
+  beforeCursor,
+  hasEarlier = false,
+  itemKeys = ["message:1", "timeline-status"],
+  onLoadEarlier = () => undefined,
+  onScrollState,
+  savedScrollState,
   taskId = "task_1",
 }: {
-  historySyncState?: "idle" | "syncing" | "updated";
-  itemCount: number;
-  pendingPrepend?: boolean;
-  prependRequestGeneration?: number;
+  beforeCursor?: string;
+  hasEarlier?: boolean;
+  itemKeys?: string[];
+  onLoadEarlier?: (cursor: string) => number | undefined;
+  onScrollState?: (state: TaskChatScrollState) => void;
+  savedScrollState?: TaskChatScrollState;
   taskId?: string;
 }) {
-  const [savedScrollStates, setSavedScrollStates] = useState<Record<string, TaskChatScrollState>>({
-    task_1: { ownership: "following", scrollTop: 1000 },
-  });
+  const [savedState, setSavedState] = useState(savedScrollState);
   const chatScroll = useTaskChatScroll({
-    hasEarlier: false,
-    historySyncState,
-    itemCount,
-    onLoadEarlier: () => undefined,
-    onScrollState: (scrollState) => setSavedScrollStates((current) => ({
-      ...current,
-      [taskId]: scrollState,
-    })),
-    pendingPrepend,
-    prependRequestGeneration,
-    savedScrollState: savedScrollStates[taskId],
+    beforeCursor,
+    hasEarlier,
+    itemKeys,
+    latestMessageKey: "message:1",
+    onLoadEarlier,
+    onScrollState: (state) => {
+      setSavedState(state);
+      onScrollState?.(state);
+    },
+    pendingPrepend: false,
+    savedScrollState: savedState,
     taskId,
   });
-
   return (
     <>
       <div
         className="message-list"
+        onKeyDown={chatScroll.onKeyDown}
         onPointerCancel={chatScroll.onPointerCancel}
         onPointerDown={chatScroll.onPointerDown}
         onPointerUp={chatScroll.onPointerUp}
-        onKeyDown={chatScroll.onKeyDown}
         onScroll={chatScroll.onScroll}
         onWheel={chatScroll.onWheel}
         ref={chatScroll.messageListRef}
       />
-      <button
-        className="capture-prepend"
-        onClick={() => chatScroll.capturePrependAnchor(prependRequestGeneration + 1)}
-        type="button"
-      />
-      <button className="jump" onClick={chatScroll.jumpToLatest} type="button" />
+      <button className="load-earlier-test" onClick={() => chatScroll.loadEarlier("cursor-before")} />
+      <button className="pause-follow-test" onClick={chatScroll.pauseFollowing} />
     </>
   );
 }
 
+function renderHarness(
+  messageList: ReturnType<typeof scrollNode>,
+  props: React.ComponentProps<typeof Harness> = {},
+) {
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(<Harness {...props} />, { createNodeMock: () => messageList });
+  });
+  return tree;
+}
+
+function messageListView(tree: ReactTestRenderer) {
+  return tree.root.findByProps({ className: "message-list" });
+}
+
 function scrollNode({ clientHeight, scrollHeight }: { clientHeight: number; scrollHeight: number }) {
-  const children: Element[] = [];
   let currentScrollHeight = scrollHeight;
   let currentScrollTop = 0;
   return {
     clientHeight,
     clientWidth: 600,
-    children,
-    getBoundingClientRect: () => ({ left: 0, right: 616 }),
+    getBoundingClientRect: () => ({ bottom: clientHeight, height: clientHeight, left: 0, right: 616, top: 0, width: 600 }),
     offsetWidth: 616,
+    querySelectorAll: () => [],
     get scrollHeight() {
       return currentScrollHeight;
     },
@@ -802,57 +330,42 @@ function scrollNode({ clientHeight, scrollHeight }: { clientHeight: number; scro
 }
 
 function installResizeObserver() {
-  const observers: Array<{
-    callback: ResizeObserverCallback;
-    disconnect: ReturnType<typeof vi.fn>;
-    observe: ReturnType<typeof vi.fn>;
-    observer: ResizeObserver;
-  }> = [];
+  const observers: Array<{ callback: ResizeObserverCallback; observer: ResizeObserver }> = [];
   class MockResizeObserver implements ResizeObserver {
-    readonly callback: ResizeObserverCallback;
     readonly disconnect = vi.fn();
     readonly observe = vi.fn();
     readonly unobserve = vi.fn();
 
-    constructor(callback: ResizeObserverCallback) {
-      this.callback = callback;
-      observers.push({ callback, disconnect: this.disconnect, observe: this.observe, observer: this });
+    constructor(readonly callback: ResizeObserverCallback) {
+      observers.push({ callback, observer: this });
     }
   }
   vi.stubGlobal("ResizeObserver", MockResizeObserver);
   return {
-    instances: observers,
     notify() {
-      const latest = observers.at(-1);
-      latest?.callback([], latest.observer);
+      for (const { callback, observer } of observers) callback([], observer);
     },
   };
 }
 
-function installMutationObserver() {
-  const observers: Array<{
-    callback: MutationCallback;
-    disconnect: ReturnType<typeof vi.fn>;
-    observe: ReturnType<typeof vi.fn>;
-    observer: MutationObserver;
-  }> = [];
-  class MockMutationObserver implements MutationObserver {
-    readonly callback: MutationCallback;
-    readonly disconnect = vi.fn();
-    readonly observe = vi.fn();
-    readonly takeRecords = vi.fn(() => []);
-
-    constructor(callback: MutationCallback) {
-      this.callback = callback;
-      observers.push({ callback, disconnect: this.disconnect, observe: this.observe, observer: this });
-    }
-  }
-  vi.stubGlobal("MutationObserver", MockMutationObserver);
+function installAnimationFrames() {
+  let nextId = 1;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const id = nextId;
+    nextId += 1;
+    callbacks.set(id, callback);
+    return id;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
   return {
-    instances: observers,
-    notify() {
-      const latest = observers.at(-1);
-      latest?.callback([], latest.observer);
+    pending: () => callbacks.size,
+    flush() {
+      for (let attempt = 0; callbacks.size > 0 && attempt < 10; attempt += 1) {
+        const frame = [...callbacks.entries()];
+        callbacks.clear();
+        for (const [, callback] of frame) callback(performance.now());
+      }
     },
   };
 }

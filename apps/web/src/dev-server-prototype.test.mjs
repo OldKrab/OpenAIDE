@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { gzipSync } from "node:zlib";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -17,6 +18,16 @@ test("Target proxies authenticated prototype HTTP and HMR traffic before the mai
   chmodSync(fakeAppServerPath, 0o755);
 
   const prototypeServer = http.createServer((request, response) => {
+    if (request.url === "/prototype/compressed.js") {
+      const compressed = gzipSync("globalThis.prototypeLoaded = true;");
+      response.writeHead(200, {
+        "content-encoding": "gzip",
+        "content-length": String(compressed.byteLength),
+        "content-type": "text/javascript",
+      });
+      response.end(compressed);
+      return;
+    }
     response.writeHead(200, { "content-type": "text/plain", etag: "prototype-etag" });
     response.end(`prototype:${request.url}`);
   });
@@ -57,6 +68,11 @@ test("Target proxies authenticated prototype HTTP and HMR traffic before the mai
   assert.equal(await response.text(), "prototype:/prototype/example/?variant=B");
   assert.equal(response.headers.get("cache-control"), "no-store, max-age=0, must-revalidate");
   assert.equal(response.headers.get("etag"), null);
+
+  const compressedResponse = await fetch(`http://127.0.0.1:${webPort}/prototype/compressed.js`);
+  assert.equal(compressedResponse.status, 200);
+  assert.equal(compressedResponse.headers.get("content-encoding"), null);
+  assert.equal(await compressedResponse.text(), "globalThis.prototypeLoaded = true;");
 
   const upgrade = await upgradeRequest(webPort, "/prototype/hmr?token=test");
   assert.match(upgrade, /101 Switching Protocols/);

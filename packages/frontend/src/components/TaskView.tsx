@@ -1,8 +1,7 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Check, CircleAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CircleAlert, ListTodo } from "lucide-react";
 import type {
   AppPreferencesRecord,
-  ChatMessage,
   ConfigOptionCurrentValue,
   ConfigOptionsCatalog,
   ElicitationResponse,
@@ -18,12 +17,11 @@ import type {
   TaskLiveTextPresentation,
   TaskOpenError,
 } from "../state/store";
-import { ChatRow } from "./ChatMessageView";
 import { Composer } from "./Composer";
 import { composerAvailability, composerCanSubmit } from "./composerAvailability";
 import { TaskHeader } from "./TaskHeader";
 import { scrollTopAfterPrependedContent } from "./TaskViewModel";
-import { taskWorkingStatusLabel, timestampMillis, workspaceLabel } from "./taskSurfaceHelpers";
+import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
   permissionResponseForMessage,
@@ -37,6 +35,9 @@ import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
+import { TaskMessageQueueView } from "./TaskMessageQueue";
+import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
+import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
 
 export {
   scrollTopAfterPrependedContent,
@@ -45,6 +46,7 @@ export {
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
+export { chatRowKey, formatElapsedDuration } from "./TaskChatTimeline";
 
 const RECONNECT_NOTICE_DELAY_MS = 1_000;
 
@@ -112,6 +114,7 @@ export function TaskView({
   intents,
   onCancel,
   onClosePlan,
+  onAddToQueue,
   fileBrowser,
   onLoadChatPage,
   onLoadComposerHistory,
@@ -125,10 +128,16 @@ export function TaskView({
   onRetryConnection,
   onRevealAttachment,
   onRemoveAttachment,
+  onRemoveQueueMessage,
+  onTakeQueueMessage,
+  onMoveQueueMessage,
+  onPlanDrawerOpenChange,
+  onSendQueueMessageNow,
   onRestoreTask,
   onSendPrompt,
   onSelectConfigOption,
   permissionResponses,
+  planDrawerOpen = false,
   liveTextPresentation,
   questionResponses = {},
   startupConfigOptions,
@@ -149,6 +158,7 @@ export function TaskView({
   intents: TaskViewIntents;
   onCancel: () => void;
   onClosePlan?: () => Promise<void>;
+  onAddToQueue?: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadComposerHistory?: () => Promise<string[]>;
@@ -165,10 +175,16 @@ export function TaskView({
   onRetryConnection?: () => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
+  onRemoveQueueMessage?: (queuedMessageId: string) => void;
+  onTakeQueueMessage?: (queuedMessageId: string) => void;
+  onMoveQueueMessage?: (queuedMessageId: string, targetIndex: number) => void | Promise<void>;
+  onPlanDrawerOpenChange?: (open: boolean) => void;
+  onSendQueueMessageNow?: (queuedMessageId: string) => void;
   onRestoreTask?: (taskId: string) => void;
   onSendPrompt: (prompt?: string) => void;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   permissionResponses: AppState["permissionResponses"];
+  planDrawerOpen?: boolean;
   liveTextPresentation?: TaskLiveTextPresentation;
   questionResponses?: AppState["questionResponses"];
   startupConfigOptions?: ConfigOptionsCatalog;
@@ -179,6 +195,9 @@ export function TaskView({
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
   showWorkspaceContext?: boolean;
 }) {
+  const queueOverlayRef = useCallback((node: HTMLDivElement | null) => (
+    node ? installTaskQueueOverlayClearance(node) : undefined
+  ), []);
   const inputPending = taskInput.pending?.state === "sending";
   const recovery = taskAgentRecovery(
     snapshot.task.agent_id,
@@ -192,6 +211,9 @@ export function TaskView({
     ...snapshot.active_requests,
   ], [chat.items, snapshot.active_requests]);
   const turnBusy = snapshot.task.status === "active";
+  const queueAvailable = snapshot.task.status === "active"
+    || snapshot.task.status === "waiting"
+    || snapshot.task.status === "stopping";
   const workspaceAvailable = snapshot.task.workspace_available !== false;
   const imageAttachmentsAllowed = snapshot.input_capabilities?.image === true;
   const imageAttachments = taskInput.context.filter((attachment) => attachment.kind === "image");
@@ -199,7 +221,7 @@ export function TaskView({
   const attachmentsSendable = appServerComposerImages(imageAttachments) !== undefined
     && appServerAttachmentHandles(resourceAttachments) !== undefined
     && (imageAttachments.length === 0 || imageAttachmentsAllowed);
-  const availability = composerAvailability({
+  const baseAvailability = composerAvailability({
     allowEditingWhileSendBlocked: true,
     archived,
     attachmentsReady: attachmentsSendable,
@@ -217,7 +239,28 @@ export function TaskView({
     submitPendingLabel: "Sending message",
     submitting: inputPending,
   });
+  const availability = taskInput.queueTake
+    ? {
+        ...baseAvailability,
+        canEdit: false,
+        submissionAllowed: false,
+        submissionBlockedMessage: "Moving queued message to Composer.",
+        placeholder: "Moving queued message to Composer.",
+      }
+    : baseAvailability;
   const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
+  const queue = useMemo(() => {
+    const current = snapshot.message_queue ?? { revision: 0, items: [] };
+    const take = taskInput.queueTake;
+    if (!take || current.items.some((item) => item.queued_message_id === take.item.queued_message_id)) {
+      return current;
+    }
+    const items = [...current.items];
+    items.splice(Math.min(take.index, items.length), 0, take.item);
+    return { ...current, items };
+  }, [snapshot.message_queue, taskInput.queueTake]);
+  const composerEmpty = taskInput.prompt.length === 0 && taskInput.context.length === 0;
+  const completedPlanSteps = snapshot.current_plan?.entries.filter((entry) => entry.status === "completed").length ?? 0;
   const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
   const [showReconnectNotice, setShowReconnectNotice] = useState(false);
@@ -249,7 +292,11 @@ export function TaskView({
     return () => window.clearTimeout(timer);
   }, [snapshot.history_sync.generation, snapshot.history_sync.state, snapshot.task.task_id]);
   useEffect(() => {
-    if (!snapshot.current_plan) resetAgentPlanDisclosure(snapshot.task.task_id);
+    if (!snapshot.current_plan) {
+      resetAgentPlanDisclosure(snapshot.task.task_id);
+      resetAgentPlanDisclosure(`${snapshot.task.task_id}:column`);
+      resetAgentPlanDisclosure(`${snapshot.task.task_id}:drawer`);
+    }
   }, [snapshot.current_plan, snapshot.task.task_id]);
   const timelineStatusLabel = taskWorkingStatusLabel(
     chatItems,
@@ -265,6 +312,11 @@ export function TaskView({
       ? "blocked"
     : "progress";
   const workingStartedAt = snapshot.active_turn_started_at;
+  const timelineRows = useMemo(
+    () => buildTaskChatTimelineRows({ archived, chat, items: chatItems, timelineStatusLabel }),
+    [archived, chat, chatItems, timelineStatusLabel],
+  );
+  const timelineRowKeys = useMemo(() => timelineRows.map((row) => row.key), [timelineRows]);
   const taskSelection = {
     agentId: snapshot.task.agent_id,
     agentLabel: activeTask?.agent_name ?? snapshot.task.agent_name,
@@ -277,11 +329,11 @@ export function TaskView({
     beforeCursor: chat.beforeCursor,
     hasEarlier: chat.hasBefore,
     historySyncState: snapshot.history_sync.state,
-    itemCount: chatItems.length,
+    itemKeys: timelineRowKeys,
+    latestMessageKey: chatItems.at(-1)?.message_id,
     onLoadEarlier: loadChatPage,
     onScrollState: intents.recordScroll,
     pendingPrepend: chat.pending,
-    prependRequestGeneration: chatPageState?.requestGeneration ?? 0,
     savedScrollState,
     taskId: snapshot.task.task_id,
   });
@@ -302,18 +354,46 @@ export function TaskView({
   };
 
   return (
-    <section className="task-surface" aria-label="Task chat">
-      <TaskHeader
-        agentId={snapshot.task.agent_id}
-        agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
-        status={snapshot.task.status}
-        title={activeTask?.title ?? snapshot.task.title}
-        workspaceRoot={snapshot.task.workspace_root}
-        worktreeName={snapshot.task.worktree_name}
-        gitRef={snapshot.task.git_ref}
-        showWorkspaceContext={showWorkspaceContext}
-      />
-      <div className="chat-column">
+    <section className="task-surface task-work-stack" aria-label="Task chat">
+      <div className="task-work-stack-header">
+        <TaskHeader
+          agentId={snapshot.task.agent_id}
+          agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
+          status={snapshot.task.status}
+          title={activeTask?.title ?? snapshot.task.title}
+          workspaceRoot={snapshot.task.workspace_root}
+          worktreeName={snapshot.task.worktree_name}
+          gitRef={snapshot.task.git_ref}
+          showWorkspaceContext={showWorkspaceContext}
+        />
+        {snapshot.current_plan ? (
+          <button
+            aria-expanded={planDrawerOpen}
+            aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
+            className="task-plan-drawer-trigger"
+            onClick={() => onPlanDrawerOpenChange?.(!planDrawerOpen)}
+            type="button"
+          >
+            <ListTodo aria-hidden="true" size={14} />
+            <span>Plan</span>
+            <small>{completedPlanSteps}/{snapshot.current_plan.entries.length}</small>
+          </button>
+        ) : null}
+      </div>
+      <div className="task-workbench">
+        {snapshot.current_plan ? (
+          <aside aria-label="Current plan" className="task-plan-column">
+            <AgentPlanView
+              defaultOpen
+              key={`column:${snapshot.task.task_id}`}
+              onClose={onClosePlan}
+              plan={snapshot.current_plan}
+              taskId={`${snapshot.task.task_id}:column`}
+              taskStatus={snapshot.task.status}
+            />
+          </aside>
+        ) : null}
+        <div className="chat-column task-conversation">
         <TaskChatTimeline
           archived={archived}
           canRestoreTask={onRestoreTask !== undefined}
@@ -330,6 +410,7 @@ export function TaskView({
           onSubscribeToolDetail={subscribeToolDetail}
           permissionResponses={permissionResponses}
           questionResponses={questionResponses}
+          rows={timelineRows}
           taskId={snapshot.task.task_id}
           taskStatus={snapshot.task.status}
           toolDetails={toolDetails}
@@ -363,14 +444,22 @@ export function TaskView({
             </>}
           </div>
         </div> : null}
-        {snapshot.current_plan ? (
-          <AgentPlanView
-            key={snapshot.task.task_id}
-            onClose={onClosePlan}
-            plan={snapshot.current_plan}
-            taskId={snapshot.task.task_id}
-            taskStatus={snapshot.task.status}
-          />
+        {onRemoveQueueMessage && queue.items.length > 0 ? (
+          <section aria-label="Queued messages" className="task-queue-anchor">
+            <div className="task-queue-floating" ref={queueOverlayRef}>
+              <TaskMessageQueueView
+                editDisabled={!composerEmpty || Boolean(taskInput.queueTake)}
+                extractingQueuedMessageId={taskInput.queueTake?.item.queued_message_id}
+                extractionStage={taskInput.queueTake?.stage}
+                queue={queue}
+                onExpanded={chatScroll.pauseFollowing}
+                onRemove={onRemoveQueueMessage}
+                onTake={onTakeQueueMessage}
+                onMove={onMoveQueueMessage}
+                onSendNow={onSendQueueMessageNow}
+              />
+            </div>
+          </section>
         ) : null}
         {recovery && agentRecoveryActions ? <AgentRecoveryPanel
           actions={agentRecoveryActions}
@@ -394,12 +483,13 @@ export function TaskView({
               imageAttachmentsAllowed={imageAttachmentsAllowed}
               historyScopeKey={`task:${snapshot.task.task_id}`}
               loadComposerHistory={onLoadComposerHistory}
-              focusRequestKey={snapshot.task.task_id}
+              focusRequestKey={`${snapshot.task.task_id}:${taskInput.acceptedQueueTakeId ?? ""}`}
               onCancel={
                 backendReady && (turnBusy || inputPending)
                   ? onCancel
                   : undefined
               }
+              onAddToQueue={!archived && queueAvailable ? onAddToQueue : undefined}
               onChange={intents.changePrompt}
               onUnsupportedImageAttachment={intents.reportAttachmentError}
               onRevealAttachment={onRevealAttachment}
@@ -409,166 +499,48 @@ export function TaskView({
               prompt={taskInput.prompt}
               selection={taskSelection}
               submitShortcut={submitShortcut}
-              submissionSettlementKey={taskInput.acceptedUserMessageId}
+              submissionSettlementKey={taskInput.acceptedUserMessageId ?? taskInput.acceptedQueueRevision}
               showAgentSelector={false}
               showIsolationSelector={false}
             />
           </ComposerWithContextUsage>
         )}
+        </div>
       </div>
+      {snapshot.current_plan ? (
+        <>
+          <div
+            aria-hidden="true"
+            className="task-plan-drawer-backdrop"
+            onClick={() => onPlanDrawerOpenChange?.(false)}
+          />
+          <aside
+            aria-hidden={!planDrawerOpen}
+            aria-label="Current plan"
+            className="task-plan-drawer"
+            data-open={planDrawerOpen}
+            inert={planDrawerOpen ? undefined : true}
+          >
+            <AgentPlanView
+              collapsible={false}
+              key={`drawer:${snapshot.task.task_id}`}
+              onClose={() => {
+                onPlanDrawerOpenChange?.(false);
+                return onClosePlan?.();
+              }}
+              plan={snapshot.current_plan}
+              taskId={`${snapshot.task.task_id}:drawer`}
+              taskStatus={snapshot.task.status}
+            />
+          </aside>
+        </>
+      ) : null}
     </section>
   );
 }
 
-type TaskChatTimelineProps = {
-  archived: boolean;
-  canRestoreTask: boolean;
-  chat: ReturnType<typeof renderedChat>;
-  chatScroll: ReturnType<typeof useTaskChatScroll>;
-  commandCatalog: TaskSnapshot["agent_commands"];
-  items: ChatMessage[];
-  liveTextPresentation?: TaskLiveTextPresentation;
-  onLoadChatPage: (beforeCursor: string) => number | undefined;
-  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
-  onPermissionRespond: (requestId: string, optionId: string) => void;
-  onQuestionRespond: (requestId: string, response: ElicitationResponse) => void;
-  onRestoreTask: (taskId: string) => void;
-  onSubscribeToolDetail: (artifactId: string) => () => void;
-  permissionResponses: AppState["permissionResponses"];
-  questionResponses: AppState["questionResponses"];
-  taskId: string;
-  taskStatus: TaskSnapshot["task"]["status"];
-  toolDetails: AppState["toolDetails"];
-  timelineStatusKind: "blocked" | "notice" | "progress";
-  timelineStatusLabel?: string;
-  workingStartedAt?: string;
-};
-
-// Composer drafts update independently from authoritative Chat and must not invalidate its rows.
-const TaskChatTimeline = memo(function TaskChatTimeline({
-  archived,
-  canRestoreTask,
-  chat,
-  chatScroll,
-  commandCatalog,
-  items,
-  liveTextPresentation,
-  onLoadChatPage,
-  onLoadToolImagePreview,
-  onPermissionRespond,
-  onQuestionRespond,
-  onRestoreTask,
-  onSubscribeToolDetail,
-  permissionResponses,
-  questionResponses,
-  taskId,
-  taskStatus,
-  toolDetails,
-  timelineStatusKind,
-  timelineStatusLabel,
-  workingStartedAt,
-}: TaskChatTimelineProps) {
-  const latestTextMessageIds = latestTextMessageIdsByChannel(items);
-  return (
-    <div className="message-list-shell" data-more-below={String(chatScroll.moreBelow)}>
-      <div
-        className="message-list"
-        onKeyDown={chatScroll.onKeyDown}
-        onPointerCancel={chatScroll.onPointerCancel}
-        onPointerDown={chatScroll.onPointerDown}
-        onPointerUp={chatScroll.onPointerUp}
-        onScroll={chatScroll.onScroll}
-        onWheel={chatScroll.onWheel}
-        ref={chatScroll.messageListRef}
-      >
-        {archived ? (
-          <div className="archived-task-notice" role="status">
-            <span>Archived task. Restore it to send a follow-up.</span>
-            {canRestoreTask ? (
-              <button type="button" onClick={() => onRestoreTask(taskId)}>
-                Restore
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {chat.hasBefore ? (
-          <div className="load-earlier-row">
-            <button
-              disabled={chat.pending || !chat.beforeCursor}
-              onClick={() => {
-                if (!chat.beforeCursor || chat.pending) return;
-                const requestGeneration = onLoadChatPage(chat.beforeCursor);
-                if (requestGeneration !== undefined) {
-                  chatScroll.capturePrependAnchor(requestGeneration);
-                }
-              }}
-              type="button"
-            >
-              {chat.pending ? "Loading earlier" : "Load earlier"}
-            </button>
-          </div>
-        ) : null}
-        {chat.error ? <p className="chat-system">{chat.error}</p> : null}
-        {items.map((message) => (
-          <ChatRow
-            key={chatRowKey(message)}
-            message={message}
-            onLoadToolImagePreview={onLoadToolImagePreview}
-            liveTextEventCursor={liveTextCursorForMessage(liveTextPresentation, latestTextMessageIds, message)}
-            presentLiveText={taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping"}
-            taskId={taskId}
-            toolDetails={toolDetails}
-            onSubscribeToolDetail={onSubscribeToolDetail}
-            permissionResponse={permissionResponseForMessage(message.message, permissionResponses)}
-            onPermissionRespond={onPermissionRespond}
-            onQuestionRespond={onQuestionRespond}
-            questionResponse={questionResponseForMessage(message.message, questionResponses)}
-            commandCatalog={commandCatalog}
-          />
-        ))}
-        {timelineStatusLabel ? (
-          <TimelineStatus kind={timelineStatusKind} label={timelineStatusLabel} startedAt={workingStartedAt} />
-        ) : null}
-      </div>
-      {chatScroll.showJumpToLatest ? (
-        <button
-          aria-label="Jump to latest message"
-          className="jump-to-latest"
-          onClick={chatScroll.jumpToLatest}
-          title="Jump to latest"
-          type="button"
-        >
-          <ArrowDown aria-hidden="true" size={14} />
-        </button>
-      ) : null}
-    </div>
-  );
-});
-
 async function unavailableToolImagePreview() {
   return undefined;
-}
-
-function liveTextCursorForMessage(
-  presentation: TaskLiveTextPresentation | undefined,
-  latestMessageIds: Partial<Record<"agent" | "thought", string>>,
-  message: ChatMessage,
-) {
-  if (message.message.kind !== "agent_message") return undefined;
-  if (latestMessageIds[message.message.role] !== message.message_id) return undefined;
-  const signal = presentation?.[message.message.role];
-  return signal?.messageId === message.message_id ? signal.eventCursor : undefined;
-}
-
-function latestTextMessageIdsByChannel(items: ChatMessage[]) {
-  const latest: Partial<Record<"agent" | "thought", string>> = {};
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (item?.message.kind !== "agent_message") continue;
-    latest[item.message.role] ??= item.message_id;
-    if (latest.agent && latest.thought) break;
-  }
-  return latest;
 }
 
 /** Keeps a callback interface stable while routing calls to the latest controller closure. */
@@ -578,85 +550,4 @@ function useCurrentCallback<Arguments extends unknown[], Result>(
   const callbackRef = useRef(callback);
   callbackRef.current = callback;
   return useCallback((...args: Arguments) => callbackRef.current(...args), []);
-}
-
-export function chatRowKey(message: ChatMessage) {
-  return message.message_id;
-}
-
-function TimelineStatus({
-  kind,
-  label,
-  onRetry,
-  startedAt,
-}: {
-  kind: "blocked" | "notice" | "progress";
-  label: string;
-  onRetry?: () => void;
-  startedAt?: string;
-}) {
-  const elapsedSeconds = useElapsedSeconds(kind === "progress" ? startedAt : undefined);
-  const visibleElapsed = elapsedSeconds !== undefined && elapsedSeconds >= 5
-    ? formatElapsedDuration(elapsedSeconds)
-    : undefined;
-  return (
-    <div className={`working-status working-status-${kind}`}>
-      {kind === "progress" ? (
-        <span className="working-status-dots" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
-      ) : kind === "notice" ? (
-        <Check aria-hidden="true" className="working-status-notice-icon" size={14} />
-      ) : <CircleAlert aria-hidden="true" className="working-status-blocked-icon" size={14} />}
-      <span className="working-status-label" role="status" aria-live="polite">{label}</span>
-      {visibleElapsed && elapsedSeconds !== undefined ? (
-        <>
-          <span className="working-status-duration-separator" aria-hidden="true" />
-          <time
-            aria-label={`Elapsed time ${elapsedDurationLabel(elapsedSeconds)}`}
-            className="working-status-duration"
-            dateTime={`PT${elapsedSeconds}S`}
-          >
-            {visibleElapsed}
-          </time>
-        </>
-      ) : null}
-      {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
-    </div>
-  );
-}
-
-/** Keeps clock ticks inside the live footer so the surrounding Chat timeline stays stable. */
-function useElapsedSeconds(startedAt?: string) {
-  const startedAtMs = startedAt ? timestampMillis(startedAt) : Number.NaN;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    setNow(Date.now());
-    if (Number.isNaN(startedAtMs)) return undefined;
-    const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000);
-    return () => globalThis.clearInterval(timer);
-  }, [startedAtMs]);
-  if (Number.isNaN(startedAtMs)) return undefined;
-  return Math.max(0, Math.floor((now - startedAtMs) / 1_000));
-}
-
-export function formatElapsedDuration(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function elapsedDurationLabel(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  return [
-    hours ? `${hours} hour${hours === 1 ? "" : "s"}` : undefined,
-    minutes ? `${minutes} minute${minutes === 1 ? "" : "s"}` : undefined,
-    `${seconds} second${seconds === 1 ? "" : "s"}`,
-  ].filter(Boolean).join(" ");
 }

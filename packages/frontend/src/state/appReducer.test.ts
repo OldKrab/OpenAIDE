@@ -803,6 +803,63 @@ describe("app reducer composer state", () => {
     });
   });
 
+  it("clears only the pending composer draft accepted into the queue", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "taskInput:submit",
+      taskId: "task_1",
+      input: { prompt: "Do this after the turn", context: [] },
+    });
+
+    state = appReducer(state, {
+      type: "taskQueue:accepted",
+      taskId: "task_1",
+      queueRevision: 4,
+    });
+
+    expect(state.taskInputs.task_1).toEqual({
+      prompt: "",
+      context: [],
+      acceptedQueueRevision: 4,
+    });
+  });
+
+  it("locks an empty composer while taking a queued message, then restores its draft", () => {
+    let state = createInitialState();
+    const item = {
+      queued_message_id: "queued-1",
+      text: "Edit this",
+      created_at: "now",
+    };
+
+    state = appReducer(state, { type: "taskQueue:take:start", taskId: "task_1", item, index: 1 });
+    state = appReducer(state, { type: "taskInput:prompt", taskId: "task_1", prompt: "Race" });
+    expect(state.taskInputs.task_1).toMatchObject({
+      prompt: "",
+      queueTake: { item, index: 1, stage: "pending" },
+    });
+
+    state = appReducer(state, {
+      type: "taskQueue:take:collapse",
+      taskId: "task_1",
+      queuedMessageId: "queued-1",
+    });
+    expect(state.taskInputs.task_1.queueTake?.stage).toBe("collapsing");
+
+    state = appReducer(state, {
+      type: "taskQueue:take:accepted",
+      taskId: "task_1",
+      queuedMessageId: "queued-1",
+      prompt: "Edit this",
+      context: [],
+    });
+    expect(state.taskInputs.task_1).toEqual({
+      prompt: "Edit this",
+      context: [],
+      acceptedQueueTakeId: "queued-1",
+    });
+  });
+
   it("does not settle a pending follow-up from matching snapshot content", () => {
     let state = createInitialState();
     state = { ...state, activeTaskId: "task_1" };
@@ -888,6 +945,50 @@ describe("app reducer composer state", () => {
     expect(state.snapshot?.revision).toBe(2);
     expect(state.snapshot?.chat.items.map((item) => item.message_id)).toEqual(["user_1"]);
     expect(state.taskInputs.task_1.pending).toBeUndefined();
+  });
+
+  it("accepts a newer queue revision from a globally older mutation response", () => {
+    let state = createInitialState();
+    state = { ...state, activeTaskId: "task_1" };
+    const liveAgentSnapshot = {
+      ...snapshot("task_1", [userMessage("user_1", "Running")], 5),
+      message_queue: { revision: 1, items: [] },
+    };
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: liveAgentSnapshot });
+    const queueResponse = {
+      ...snapshot("task_1", [userMessage("user_1", "Running")], 4),
+      message_queue: {
+        revision: 2,
+        items: [{ queued_message_id: "queued-1", text: "Next", created_at: "now" }],
+      },
+    };
+
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: queueResponse });
+
+    expect(state.snapshot?.revision).toBe(5);
+    expect(state.snapshot?.message_queue).toEqual(queueResponse.message_queue);
+  });
+
+  it("keeps the queue when a newer partial snapshot omits its projection", () => {
+    let state = createInitialState();
+    state = { ...state, activeTaskId: "task_1" };
+    const queuedSnapshot = {
+      ...snapshot("task_1", [userMessage("user_1", "Running")], 5),
+      message_queue: {
+        revision: 2,
+        items: [{ queued_message_id: "queued-1", text: "Keep this", created_at: "now" }],
+      },
+    };
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: queuedSnapshot });
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: snapshot("task_1", [userMessage("user_1", "Running")], 6),
+    });
+
+    expect(state.snapshot?.revision).toBe(6);
+    expect(state.snapshot?.message_queue).toEqual(queuedSnapshot.message_queue);
   });
 
   it("does not replace visible chat with a same-revision incomplete refresh", () => {

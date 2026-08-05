@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::attachment::PreSendAttachment;
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,
-    TaskId, TaskListCursor, TurnId, WorktreeId,
+    QueuedMessageId, TaskId, TaskListCursor, TurnId, WorktreeId,
 };
 use crate::snapshot::AgentConfigOptionCurrentValue;
 use crate::snapshot::{
@@ -84,6 +85,16 @@ pub struct TaskAdoptNativeSessionResult {
 pub struct TaskSendParams {
     pub task_id: TaskId,
     pub message: ComposerMessage,
+    /// Removes this exact durable queue item in the same commit that accepts Send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_selection: Option<TaskQueueSendSelection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueSendSelection {
+    pub queued_message_id: QueuedMessageId,
+    pub queue_revision: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -113,6 +124,76 @@ pub struct TaskSendResult {
     pub task: TaskSnapshot,
     pub turn_id: TurnId,
     pub user_message_id: MessageId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueAppendParams {
+    pub task_id: TaskId,
+    pub message: ComposerMessage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueAppendResult {
+    pub task: TaskSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueRemoveParams {
+    pub task_id: TaskId,
+    pub queued_message_id: QueuedMessageId,
+    pub queue_revision: u64,
+    pub client_mutation_id: ClientMutationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueRemoveResult {
+    pub task: TaskSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueTakeParams {
+    pub task_id: TaskId,
+    pub queued_message_id: QueuedMessageId,
+    pub queue_revision: u64,
+    pub client_mutation_id: ClientMutationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueTakeResult {
+    pub task: TaskSnapshot,
+    pub message: TakenQueuedMessage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TakenQueuedMessage {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<PreSendAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ComposerImage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueMoveParams {
+    pub task_id: TaskId,
+    pub queued_message_id: QueuedMessageId,
+    pub target_index: u64,
+    pub queue_revision: u64,
+    pub client_mutation_id: ClientMutationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueMoveResult {
+    pub task: TaskSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

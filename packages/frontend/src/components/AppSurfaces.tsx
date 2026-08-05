@@ -1,4 +1,4 @@
-import { Menu, X } from "lucide-react";
+import { ListTodo, Menu, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
@@ -30,6 +30,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       });
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
+  const [planDrawerOpen, setPlanDrawerOpen] = useState(false);
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
@@ -86,6 +87,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       }
     : undefined;
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
+  useEffect(() => setPlanDrawerOpen(false), [renderableTaskSnapshot?.task.task_id]);
   useEffect(() => {
     if (
       bootstrap.surface !== "task"
@@ -122,6 +124,14 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNavigationOpen]);
+  useEffect(() => {
+    if (!planDrawerOpen) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setPlanDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [planDrawerOpen]);
   useEffect(() => {
     if (!isWebWorkbench || typeof window === "undefined") return;
     const mediaQuery = typeof window.matchMedia === "function"
@@ -333,7 +343,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           ? undefined
           : { "--mobile-navigation-progress": mobileNavigation.dragProgress } as CSSProperties}
       >
-        <header className="mobile-workbench-bar">
+        <header className="mobile-workbench-bar" data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}>
           <button
             aria-expanded={mobileNavigationOpen}
             aria-label={mobileNavigationOpen ? "Close task navigation" : "Open task navigation"}
@@ -342,6 +352,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
                 closeMobileNavigation();
                 return;
               }
+              setPlanDrawerOpen(false);
               mobileNavigation.setOpen(true);
             }}
             ref={mobileNavigationButtonRef}
@@ -353,6 +364,19 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             <strong>{mobileTitle}</strong>
             <small>{mobileSubtitle}</small>
           </span>
+          {renderableTaskSnapshot?.current_plan ? (
+            <button
+              aria-expanded={planDrawerOpen}
+              aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
+              onClick={() => {
+                closeMobileNavigation({ restoreFocus: false });
+                setPlanDrawerOpen((open) => !open);
+              }}
+              type="button"
+            >
+              {planDrawerOpen ? <X size={17} /> : <ListTodo size={17} />}
+            </button>
+          ) : null}
         </header>
         <div
           aria-hidden="true"
@@ -372,6 +396,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               controller={controller}
               focusRequestKey={newTaskFocusRequestKey}
               model={taskSurfaceModel}
+              onPlanDrawerOpenChange={setPlanDrawerOpen}
+              planDrawerOpen={planDrawerOpen}
               workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
             />
           )}
@@ -386,6 +412,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
         model={taskSurfaceModel}
+        onPlanDrawerOpenChange={setPlanDrawerOpen}
+        planDrawerOpen={planDrawerOpen}
         workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
       />
     </main>

@@ -1,199 +1,301 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, UIEvent, WheelEvent } from "react";
-import {
-  scrollTopAfterPrependedContent,
-  scrollTopForFollowingViewport,
-} from "./TaskViewModel";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { TaskChatScrollState } from "../state/store";
 
 type ScrollIntent = "towardEarlier" | "towardLatest";
 type PointerScrollGesture =
   | { kind: "scrollbar" }
   | { kind: "touch"; lastClientY: number };
-type ScrollAnchor = { scrollHeight: number; scrollTop: number };
-type HistoryAnchor = ScrollAnchor & { ownership: TaskChatScrollState["ownership"] };
-type PrependAnchor = ScrollAnchor & { requestGeneration: number; requestStarted: boolean };
+type PrependAnchor = {
+  itemKeys: readonly string[];
+  key?: string;
+  scrollOffset: number;
+  totalSize: number;
+  viewportOffset?: number;
+};
 
 const SHOW_JUMP_TO_LATEST_DISTANCE_PX = 96;
 const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
-const JUMP_TO_LATEST_DURATION_MS = 180;
 const OVERLAY_SCROLLBAR_HIT_WIDTH_PX = 10;
 const AUTO_FILL_HISTORY_BUFFER_PX = 120;
 const MAX_AUTO_FILL_PAGES = 4;
+const CHAT_ROW_ESTIMATE_PX = 72;
+const CHAT_ROW_GAP_PX = 8;
+const CHAT_END_PADDING_PX = 64;
+const CHAT_INITIAL_RECT = { width: 760, height: 600 };
 
 type UseTaskChatScrollOptions = {
   beforeCursor?: string;
   hasEarlier: boolean;
   historySyncState?: "idle" | "syncing" | "updated";
-  itemCount: number;
+  itemKeys: readonly string[];
+  latestMessageKey?: string;
   onLoadEarlier: (beforeCursor: string) => number | undefined;
   onScrollState: (scrollState: TaskChatScrollState) => void;
   pendingPrepend: boolean;
-  prependRequestGeneration: number;
   savedScrollState?: TaskChatScrollState;
   taskId: string;
 };
 
-/** Owns the Chat viewport: content follows only until explicit reader input takes control. */
+/** Owns Chat reading intent while TanStack Virtual owns row geometry and anchoring. */
 export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   const {
     beforeCursor,
     hasEarlier,
     historySyncState,
-    itemCount,
+    itemKeys,
+    latestMessageKey,
     onLoadEarlier,
     onScrollState,
     pendingPrepend,
-    prependRequestGeneration,
     savedScrollState,
     taskId,
   } = options;
   const autoFillPageCountRef = useRef(0);
   const autoFillCursorRef = useRef<string | undefined>(undefined);
-  const messageListRef = useRef<HTMLDivElement | null>(null);
-  const historyAnchorRef = useRef<HistoryAnchor | undefined>(undefined);
-  const jumpAnimationFrameRef = useRef<number | undefined>(undefined);
+  const lastMessageKeyRef = useRef<string | undefined>(latestMessageKey);
   const lastScrollTopRef = useRef<number | undefined>(undefined);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
   const onScrollStateRef = useRef(onScrollState);
   const pointerGestureRef = useRef<PointerScrollGesture | undefined>(undefined);
   const prependAnchorRef = useRef<PrependAnchor | undefined>(undefined);
+  const prependCorrectionFrameRef = useRef<number | undefined>(undefined);
   const scrollIntentRef = useRef<ScrollIntent | undefined>(undefined);
-  const scrollOwnershipRef = useRef<TaskChatScrollState["ownership"]>("following");
+  const scrollOwnershipRef = useRef<TaskChatScrollState["ownership"]>(
+    savedScrollState?.ownership ?? "following",
+  );
+  const [scrollOwnership, setScrollOwnershipState] = useState<TaskChatScrollState["ownership"]>(
+    savedScrollState?.ownership ?? "following",
+  );
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [moreBelow, setMoreBelow] = useState(false);
   onScrollStateRef.current = onScrollState;
 
+  const getItemKey = useCallback(
+    (index: number) => itemKeys[index] ?? `missing-chat-row:${index}`,
+    [itemKeys],
+  );
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    anchorTo: "end",
+    count: itemKeys.length,
+    estimateSize: () => CHAT_ROW_ESTIMATE_PX,
+    followOnAppend: scrollOwnership === "following",
+    gap: CHAT_ROW_GAP_PX,
+    getItemKey,
+    getScrollElement: () => messageListRef.current,
+    // Avoid a blank first render before the App Shell viewport is measured.
+    initialRect: CHAT_INITIAL_RECT,
+    overscan: 6,
+    paddingEnd: CHAT_END_PADDING_PX,
+    scrollEndThreshold: 2,
+    // React 19 can schedule these updates without forcing synchronous commits.
+    useFlushSync: false,
+  });
+
+  const persistScrollState = useCallback((ownership = scrollOwnershipRef.current) => {
+    const messageList = messageListRef.current;
+    if (!messageList) return;
+    onScrollStateRef.current({ ownership, scrollTop: messageList.scrollTop });
+  }, []);
+
+  // The persistent Load earlier control is the virtualizer's first row, so
+  // its generic prepend anchor preserves that control. Product reading
+  // continuity instead preserves the reader's position within the old range.
+  useLayoutEffect(() => {
+    const anchor = prependAnchorRef.current;
+    if (!anchor) return;
+    if (sameKeys(anchor.itemKeys, itemKeys)) return;
+    const previousKeys = new Set(anchor.itemKeys);
+    const insertedMessage = itemKeys.some(
+      (key) => key.startsWith("message:") && !previousKeys.has(key),
+    );
+    if (!insertedMessage) {
+      if (!pendingPrepend) prependAnchorRef.current = undefined;
+      return;
+    }
+    prependAnchorRef.current = undefined;
+    const prependedSize = virtualizer.getTotalSize() - anchor.totalSize;
+    virtualizer.scrollToOffset(Math.max(0, anchor.scrollOffset + prependedSize));
+    persistScrollState("reading");
+    if (anchor.key && anchor.viewportOffset !== undefined && typeof requestAnimationFrame === "function") {
+      const correctRetainedRow = (attempt: number) => {
+        const messageList = messageListRef.current;
+        if (!messageList) return;
+        const row = [...messageList.querySelectorAll<HTMLElement>("[data-row-key]")]
+          .find((candidate) => candidate.dataset.rowKey === anchor.key);
+        if (row) {
+          const viewportTop = messageList.getBoundingClientRect().top;
+          const delta = row.getBoundingClientRect().top - viewportTop - anchor.viewportOffset!;
+          if (Math.abs(delta) > 0.5) virtualizer.scrollBy(delta);
+          if (Math.abs(delta) <= 0.5 || attempt >= 5) {
+            persistScrollState("reading");
+            prependCorrectionFrameRef.current = undefined;
+            return;
+          }
+        }
+        if (attempt >= 5) {
+          prependCorrectionFrameRef.current = undefined;
+          return;
+        }
+        prependCorrectionFrameRef.current = requestAnimationFrame(() => correctRetainedRow(attempt + 1));
+      };
+      prependCorrectionFrameRef.current = requestAnimationFrame(() => correctRetainedRow(0));
+    }
+  }, [itemKeys, pendingPrepend, persistScrollState, virtualizer]);
+
   const setScrollOwnership = useCallback((ownership: TaskChatScrollState["ownership"]) => {
     if (scrollOwnershipRef.current === ownership) return;
     scrollOwnershipRef.current = ownership;
+    setScrollOwnershipState(ownership);
+    persistScrollState(ownership);
+  }, [persistScrollState]);
+
+  const loadEarlier = useCallback((cursor: string) => {
     const messageList = messageListRef.current;
-    if (messageList) onScrollStateRef.current({ ownership, scrollTop: messageList.scrollTop });
-  }, []);
+    const visibleAnchor = messageList ? firstVisibleMessageAnchor(messageList) : undefined;
+    if (prependCorrectionFrameRef.current !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(prependCorrectionFrameRef.current);
+      prependCorrectionFrameRef.current = undefined;
+    }
+    prependAnchorRef.current = messageList
+      ? {
+          itemKeys: [...itemKeys],
+          ...visibleAnchor,
+          scrollOffset: messageList.scrollTop,
+          totalSize: virtualizer.getTotalSize(),
+        }
+      : undefined;
+    // Paging backward is explicit reading intent even when a restored offset
+    // reached the control without first producing a wheel/pointer gesture.
+    setScrollOwnership("reading");
+    const requestId = onLoadEarlier(cursor);
+    if (requestId === undefined) prependAnchorRef.current = undefined;
+    return requestId;
+  }, [itemKeys, onLoadEarlier, setScrollOwnership, virtualizer]);
+
+  useEffect(() => () => {
+    if (prependCorrectionFrameRef.current !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(prependCorrectionFrameRef.current);
+    }
+  }, [taskId]);
 
   const setScrollIntent = useCallback((intent: ScrollIntent) => {
     if (scrollIntentRef.current === intent) return;
     scrollIntentRef.current = intent;
   }, []);
 
-  const updateJumpToLatestVisibility = useCallback((messageList: HTMLDivElement) => {
-    const distanceFromBottom = distanceFromLatest(messageList);
+  const updateJumpToLatestVisibility = useCallback(() => {
+    const distanceFromBottom = virtualizer.getDistanceFromEnd();
     setMoreBelow(distanceFromBottom > 2);
     setShowJumpToLatest((visible) => (
       visible
         ? distanceFromBottom > HIDE_JUMP_TO_LATEST_DISTANCE_PX
         : distanceFromBottom > SHOW_JUMP_TO_LATEST_DISTANCE_PX
     ));
-  }, []);
+  }, [virtualizer]);
 
-  const cancelJumpAnimation = useCallback(() => {
-    const frame = jumpAnimationFrameRef.current;
-    if (frame === undefined) return;
-    globalThis.cancelAnimationFrame?.(frame);
-    jumpAnimationFrameRef.current = undefined;
-  }, []);
-
-  const reconcileViewport = useCallback((messageList: HTMLDivElement) => {
-    const followingScrollTop = scrollTopForFollowingViewport({
-      clientHeight: messageList.clientHeight,
-      ownership: scrollOwnershipRef.current,
-      scrollHeight: messageList.scrollHeight,
-    });
-    if (followingScrollTop !== undefined) messageList.scrollTop = followingScrollTop;
-    lastScrollTopRef.current = messageList.scrollTop;
-    updateJumpToLatestVisibility(messageList);
-  }, [updateJumpToLatestVisibility]);
-
-  const capturePrependAnchor = useCallback((requestGeneration: number) => {
+  const autoLoadEarlierIfUnderfilled = useCallback(() => {
     const messageList = messageListRef.current;
-    if (!messageList) return;
-    prependAnchorRef.current = {
-      requestGeneration,
-      requestStarted: false,
-      scrollHeight: messageList.scrollHeight,
-      scrollTop: messageList.scrollTop,
-    };
-  }, []);
-
-  const autoLoadEarlierIfUnderfilled = useCallback((messageList: HTMLDivElement) => {
     if (
-      !hasEarlier
+      !messageList
+      || !hasEarlier
       || !beforeCursor
       || pendingPrepend
       || messageList.clientHeight <= 0
-      || messageList.scrollHeight >= messageList.clientHeight + AUTO_FILL_HISTORY_BUFFER_PX
+      || virtualizer.getTotalSize() >= messageList.clientHeight + AUTO_FILL_HISTORY_BUFFER_PX
       || autoFillPageCountRef.current >= MAX_AUTO_FILL_PAGES
       || autoFillCursorRef.current === beforeCursor
     ) return;
 
-    // One cursor gets one automatic attempt. A failed request remains explicitly retryable
-    // through Load earlier instead of silently looping against the same page.
+    // One cursor gets one automatic attempt. Failure remains explicitly retryable.
     autoFillCursorRef.current = beforeCursor;
     autoFillPageCountRef.current += 1;
-    const requestGeneration = onLoadEarlier(beforeCursor);
-    if (requestGeneration !== undefined) capturePrependAnchor(requestGeneration);
-  }, [beforeCursor, capturePrependAnchor, hasEarlier, onLoadEarlier, pendingPrepend]);
+    onLoadEarlier(beforeCursor);
+  }, [beforeCursor, hasEarlier, onLoadEarlier, pendingPrepend, virtualizer]);
 
-  const refreshPendingPrependBaseline = useCallback((messageList: HTMLDivElement) => {
-    const anchor = prependAnchorRef.current;
-    if (
-      !anchor
-      || !pendingPrepend
-      || prependRequestGeneration !== anchor.requestGeneration
-    ) return false;
-    anchor.requestStarted = true;
-    anchor.scrollHeight = messageList.scrollHeight;
-    anchor.scrollTop = messageList.scrollTop;
-    return true;
-  }, [pendingPrepend, prependRequestGeneration]);
-
-  const refreshHistorySyncBaseline = useCallback((messageList: HTMLDivElement) => {
-    const anchor = historyAnchorRef.current;
-    if (!anchor) return false;
-    // Intrinsic growth while history is syncing belongs to the live
-    // timeline, not the later native-history prepend.
-    anchor.scrollHeight = messageList.scrollHeight;
-    anchor.scrollTop = messageList.scrollTop;
-    anchor.ownership = scrollOwnershipRef.current;
-    return true;
-  }, []);
-
-  // Scroll persistence feeds this hook's props. Restore only when Task identity changes.
+  // Restore only when Task identity changes. The virtualizer keeps subsequent
+  // prepends and size changes stable by keyed row identity.
   useLayoutEffect(() => {
-    const messageList = messageListRef.current;
-    if (!messageList) return undefined;
-    cancelJumpAnimation();
-    historyAnchorRef.current = undefined;
+    const ownership = savedScrollState?.ownership ?? "following";
+    scrollOwnershipRef.current = ownership;
+    setScrollOwnershipState(ownership);
     pointerGestureRef.current = undefined;
-    prependAnchorRef.current = undefined;
     scrollIntentRef.current = undefined;
     autoFillCursorRef.current = undefined;
     autoFillPageCountRef.current = 0;
+    lastMessageKeyRef.current = latestMessageKey;
 
-    scrollOwnershipRef.current = savedScrollState?.ownership ?? "following";
-    messageList.scrollTop = savedScrollState?.scrollTop ?? messageList.scrollHeight;
-    reconcileViewport(messageList);
+    if (ownership === "following") {
+      virtualizer.scrollToEnd();
+    } else {
+      virtualizer.scrollToOffset(savedScrollState?.scrollTop ?? 0);
+    }
+    const messageList = messageListRef.current;
+    lastScrollTopRef.current = messageList?.scrollTop;
+    updateJumpToLatestVisibility();
+  }, [taskId]);
 
-    return () => {
-      cancelJumpAnimation();
-      historyAnchorRef.current = undefined;
-      pointerGestureRef.current = undefined;
-      prependAnchorRef.current = undefined;
-      scrollIntentRef.current = undefined;
-      autoFillCursorRef.current = undefined;
-      autoFillPageCountRef.current = 0;
-    };
-  }, [cancelJumpAnimation, reconcileViewport, taskId]);
+  // A status/footer row can remain the final virtual row while a new Chat
+  // message is inserted before it, so explicitly express the product's follow
+  // intent through the virtualizer for that append shape.
+  useLayoutEffect(() => {
+    const previousMessageKey = lastMessageKeyRef.current;
+    lastMessageKeyRef.current = latestMessageKey;
+    if (
+      previousMessageKey !== undefined
+      && latestMessageKey !== undefined
+      && latestMessageKey !== previousMessageKey
+      && scrollOwnershipRef.current === "following"
+    ) {
+      virtualizer.scrollToEnd();
+    }
+  }, [latestMessageKey, virtualizer]);
+
+  // A history replacement may not retain any keyed visible row. Followers
+  // still land at latest; readers keep their current offset as the fallback.
+  useLayoutEffect(() => {
+    if (historySyncState === "updated" && scrollOwnershipRef.current === "following") {
+      virtualizer.scrollToEnd();
+    }
+  }, [historySyncState, virtualizer]);
+
+  // Panels above the composer change the Chat viewport height. Preserve the
+  // current product ownership while delegating the actual move to TanStack.
+  useLayoutEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList || typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(() => {
+      if (scrollOwnershipRef.current === "following") virtualizer.scrollToEnd();
+      updateJumpToLatestVisibility();
+      autoLoadEarlierIfUnderfilled();
+    });
+    observer.observe(messageList);
+    return () => observer.disconnect();
+  }, [autoLoadEarlierIfUnderfilled, taskId, updateJumpToLatestVisibility, virtualizer]);
+
+  // ResizeObserver is present in every supported App Shell. Keep a render
+  // fallback for tests and constrained embedded environments.
+  useLayoutEffect(() => {
+    if (typeof ResizeObserver === "function") return;
+    if (scrollOwnershipRef.current === "following") virtualizer.scrollToEnd();
+    updateJumpToLatestVisibility();
+    autoLoadEarlierIfUnderfilled();
+  });
+
+  useLayoutEffect(() => {
+    autoLoadEarlierIfUnderfilled();
+  }, [autoLoadEarlierIfUnderfilled, itemKeys.length]);
 
   const finishPointerGesture = useCallback(() => {
     const gesture = pointerGestureRef.current;
     if (!gesture) return;
     pointerGestureRef.current = undefined;
     scrollIntentRef.current = undefined;
-    const messageList = messageListRef.current;
-    if (gesture.kind === "scrollbar" && messageList && isAtLatest(messageList)) {
+    if (gesture.kind === "scrollbar" && virtualizer.isAtEnd(2)) {
       setScrollOwnership("following");
     }
-  }, [setScrollOwnership]);
+  }, [setScrollOwnership, virtualizer]);
 
   const trackTouchGesture = useCallback((event: globalThis.PointerEvent) => {
     const gesture = pointerGestureRef.current;
@@ -201,14 +303,13 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     const movement = event.clientY - gesture.lastClientY;
     if (movement === 0) return;
     gesture.lastClientY = event.clientY;
-    cancelJumpAnimation();
     if (movement > 0) {
       setScrollIntent("towardEarlier");
       setScrollOwnership("reading");
     } else {
       setScrollIntent("towardLatest");
     }
-  }, [cancelJumpAnimation, setScrollIntent, setScrollOwnership]);
+  }, [setScrollIntent, setScrollOwnership]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return undefined;
@@ -221,125 +322,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       window.removeEventListener("pointercancel", finishPointerGesture);
     };
   }, [finishPointerGesture, taskId, trackTouchGesture]);
-
-  // Rows are observed directly because an overflow container's own box does not change when
-  // markdown, images, permissions, or tool details change its scroll height.
-  useLayoutEffect(() => {
-    const messageList = messageListRef.current;
-    if (!messageList || typeof ResizeObserver !== "function") return undefined;
-    let active = true;
-    const onResize = () => {
-      if (!active || messageListRef.current !== messageList) return;
-      reconcileViewport(messageList);
-      refreshHistorySyncBaseline(messageList);
-      refreshPendingPrependBaseline(messageList);
-      autoLoadEarlierIfUnderfilled(messageList);
-    };
-    const resizeObserver = new ResizeObserver(onResize);
-    const observedChildren = new Set<Element>();
-    const observeCurrentChildren = () => {
-      const currentChildren = new Set(Array.from(messageList.children));
-      for (const child of observedChildren) {
-        if (currentChildren.has(child)) continue;
-        resizeObserver.unobserve(child);
-        observedChildren.delete(child);
-      }
-      for (const child of currentChildren) {
-        if (observedChildren.has(child)) continue;
-        resizeObserver.observe(child);
-        observedChildren.add(child);
-      }
-    };
-    resizeObserver.observe(messageList);
-    observeCurrentChildren();
-    const mutationObserver = typeof MutationObserver === "function"
-      ? new MutationObserver(() => {
-          observeCurrentChildren();
-          onResize();
-        })
-      : undefined;
-    // Direct row changes are enough to refresh observation. Intrinsic changes
-    // inside a row are reported by that row's ResizeObserver without walking
-    // every Markdown mutation in the full Chat subtree.
-    mutationObserver?.observe(messageList, { childList: true });
-
-    return () => {
-      active = false;
-      mutationObserver?.disconnect();
-      resizeObserver.disconnect();
-    };
-  }, [
-    autoLoadEarlierIfUnderfilled,
-    reconcileViewport,
-    refreshHistorySyncBaseline,
-    refreshPendingPrependBaseline,
-    taskId,
-  ]);
-
-  useLayoutEffect(() => {
-    const messageList = messageListRef.current;
-    if (!messageList) return;
-    if (historySyncState === "syncing") {
-      historyAnchorRef.current ??= {
-        scrollHeight: messageList.scrollHeight,
-        scrollTop: messageList.scrollTop,
-        ownership: scrollOwnershipRef.current,
-      };
-      return;
-    }
-    const anchor = historyAnchorRef.current;
-    if (!anchor) return;
-    if (historySyncState === "updated") {
-      messageList.scrollTop = anchor.ownership === "following"
-        ? latestScrollTop(messageList)
-        : scrollTopAfterPrependedContent({
-            previousScrollHeight: anchor.scrollHeight,
-            previousScrollTop: anchor.scrollTop,
-            nextScrollHeight: messageList.scrollHeight,
-          });
-    }
-    historyAnchorRef.current = undefined;
-    reconcileViewport(messageList);
-  }, [historySyncState, reconcileViewport]);
-
-  useLayoutEffect(() => {
-    const messageList = messageListRef.current;
-    const anchor = prependAnchorRef.current;
-    if (!messageList || !anchor) return;
-    if (prependRequestGeneration < anchor.requestGeneration) return;
-    if (prependRequestGeneration > anchor.requestGeneration) {
-      prependAnchorRef.current = undefined;
-      return;
-    }
-    if (refreshPendingPrependBaseline(messageList)) {
-      // While the request is in flight, new live rows and intrinsic layout changes are
-      // unrelated to the future prepend. Advance the baseline without moving the reader.
-      return;
-    }
-    if (!anchor.requestStarted) return;
-    messageList.scrollTop = scrollTopAfterPrependedContent({
-      previousScrollHeight: anchor.scrollHeight,
-      previousScrollTop: anchor.scrollTop,
-      nextScrollHeight: messageList.scrollHeight,
-    });
-    prependAnchorRef.current = undefined;
-    reconcileViewport(messageList);
-  }, [itemCount, pendingPrepend, prependRequestGeneration, reconcileViewport, refreshPendingPrependBaseline]);
-
-  // ResizeObserver owns browser layout reconciliation. The render fallback is
-  // retained only for test/legacy environments that do not provide it.
-  useLayoutEffect(() => {
-    if (typeof ResizeObserver === "function") return;
-    const messageList = messageListRef.current;
-    if (messageList) reconcileViewport(messageList);
-  });
-
-  // Visible height, rather than raw stored-row count, decides whether the initial
-  // folded Chat contains enough history to orient the reader.
-  useLayoutEffect(() => {
-    const messageList = messageListRef.current;
-    if (messageList) autoLoadEarlierIfUnderfilled(messageList);
-  }, [autoLoadEarlierIfUnderfilled, itemCount]);
 
   const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const messageList = event.currentTarget;
@@ -356,40 +338,29 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     if (
       scrollOwnershipRef.current === "reading"
       && scrollIntentRef.current === "towardLatest"
-      && isAtLatest(messageList)
+      && virtualizer.isAtEnd(2)
     ) {
-      scrollIntentRef.current = undefined;
       setScrollOwnership("following");
     }
-    // Wheel/keyboard intent belongs to this scroll transaction; pointer gestures set it again
-    // for each movement while they remain active.
     scrollIntentRef.current = undefined;
-    reconcileViewport(messageList);
-    if (historyAnchorRef.current) {
-      historyAnchorRef.current = {
-        scrollHeight: messageList.scrollHeight,
-        scrollTop: messageList.scrollTop,
-        ownership: scrollOwnershipRef.current,
-      };
-    }
-    onScrollStateRef.current({ ownership: scrollOwnershipRef.current, scrollTop: messageList.scrollTop });
-  }, [reconcileViewport, setScrollIntent, setScrollOwnership]);
+    lastScrollTopRef.current = messageList.scrollTop;
+    updateJumpToLatestVisibility();
+    persistScrollState();
+  }, [persistScrollState, setScrollIntent, setScrollOwnership, updateJumpToLatestVisibility, virtualizer]);
 
   const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     if (event.deltaY === 0) return;
-    cancelJumpAnimation();
     if (event.deltaY < 0) {
       setScrollIntent("towardEarlier");
       setScrollOwnership("reading");
     } else {
       setScrollIntent("towardLatest");
-      const messageList = event.currentTarget ?? messageListRef.current;
-      if (messageList && isAtLatest(messageList)) {
+      if (virtualizer.isAtEnd(2)) {
         scrollIntentRef.current = undefined;
         setScrollOwnership("following");
       }
     }
-  }, [cancelJumpAnimation, setScrollIntent, setScrollOwnership]);
+  }, [setScrollIntent, setScrollOwnership, virtualizer]);
 
   const onKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (
@@ -401,65 +372,38 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     ) return;
     const direction = keyboardScrollDirection(event.key, event.shiftKey);
     if (!direction) return;
-    cancelJumpAnimation();
     setScrollIntent(direction);
     if (direction === "towardEarlier") {
       setScrollOwnership("reading");
-    } else if (isAtLatest(event.currentTarget)) {
+    } else if (virtualizer.isAtEnd(2)) {
       scrollIntentRef.current = undefined;
       setScrollOwnership("following");
     }
-  }, [cancelJumpAnimation, setScrollIntent, setScrollOwnership]);
+  }, [setScrollIntent, setScrollOwnership, virtualizer]);
 
   const onPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const gesture = event.pointerType === "touch"
       ? { kind: "touch" as const, lastClientY: event.clientY }
       : (isVerticalScrollbarPointer(event) ? { kind: "scrollbar" as const } : undefined);
     pointerGestureRef.current = gesture;
-    if (gesture?.kind !== "scrollbar") return;
-    // Claim reader ownership before the browser's first drag scroll event so live
-    // content reflow cannot reconcile the viewport back to Follow mode.
-    cancelJumpAnimation();
-    setScrollOwnership("reading");
-  }, [cancelJumpAnimation, setScrollOwnership]);
+    if (gesture?.kind === "scrollbar") setScrollOwnership("reading");
+  }, [setScrollOwnership]);
 
   const jumpToLatest = useCallback(() => {
-    const messageList = messageListRef.current;
-    if (!messageList) return;
-    cancelJumpAnimation();
     scrollIntentRef.current = undefined;
     setShowJumpToLatest(false);
-    const finish = () => {
-      messageList.scrollTop = latestScrollTop(messageList);
-      lastScrollTopRef.current = messageList.scrollTop;
-      scrollOwnershipRef.current = "following";
-      onScrollStateRef.current({ ownership: "following", scrollTop: messageList.scrollTop });
-    };
-    if (prefersReducedMotion() || typeof requestAnimationFrame !== "function") {
-      finish();
-      return;
-    }
-    const startScrollTop = messageList.scrollTop;
-    const startedAt = performance.now();
-    const animate = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / JUMP_TO_LATEST_DURATION_MS);
-      const easedProgress = 1 - ((1 - progress) ** 4);
-      const targetScrollTop = latestScrollTop(messageList);
-      messageList.scrollTop = startScrollTop + ((targetScrollTop - startScrollTop) * easedProgress);
-      lastScrollTopRef.current = messageList.scrollTop;
-      if (progress < 1) {
-        jumpAnimationFrameRef.current = requestAnimationFrame(animate);
-      } else {
-        jumpAnimationFrameRef.current = undefined;
-        finish();
-      }
-    };
-    jumpAnimationFrameRef.current = requestAnimationFrame(animate);
-  }, [cancelJumpAnimation]);
+    setScrollOwnership("following");
+    virtualizer.scrollToEnd({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  }, [setScrollOwnership, virtualizer]);
+
+  // Overlay expansion is reading intent: preserve the viewport before its scroll range changes.
+  const pauseFollowing = useCallback(() => {
+    setScrollOwnership("reading");
+  }, [setScrollOwnership]);
 
   return useMemo(() => ({
-    capturePrependAnchor,
     jumpToLatest,
+    loadEarlier,
     messageListRef,
     moreBelow,
     onKeyDown,
@@ -468,17 +412,21 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     onPointerUp: finishPointerGesture,
     onScroll,
     onWheel,
+    pauseFollowing,
     showJumpToLatest,
+    virtualizer,
   }), [
-    capturePrependAnchor,
     finishPointerGesture,
     jumpToLatest,
+    loadEarlier,
     moreBelow,
     onKeyDown,
     onPointerDown,
     onScroll,
     onWheel,
+    pauseFollowing,
     showJumpToLatest,
+    virtualizer,
   ]);
 }
 
@@ -490,6 +438,21 @@ function keyboardScrollDirection(key: string, shiftKey: boolean): ScrollIntent |
     return "towardLatest";
   }
   return undefined;
+}
+
+function firstVisibleMessageAnchor(messageList: HTMLDivElement) {
+  const viewportTop = messageList.getBoundingClientRect().top;
+  const row = [...messageList.querySelectorAll<HTMLElement>(
+    '.message-list-virtual-row[data-row-kind="message"][data-row-key]',
+  )].find((candidate) => candidate.getBoundingClientRect().bottom > viewportTop);
+  const key = row?.dataset.rowKey;
+  return row && key
+    ? { key, viewportOffset: row.getBoundingClientRect().top - viewportTop }
+    : undefined;
+}
+
+function sameKeys(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((key, index) => key === right[index]);
 }
 
 function nestedControlOwnsScrollKey(target: EventTarget, viewport: HTMLDivElement) {
@@ -505,26 +468,12 @@ function nestedControlOwnsScrollKey(target: EventTarget, viewport: HTMLDivElemen
 function isVerticalScrollbarPointer(event: PointerEvent<HTMLDivElement>) {
   if (event.pointerType !== "mouse") return false;
   if (event.currentTarget.scrollHeight <= event.currentTarget.clientHeight) return false;
-  // Firefox overlay scrollbars occupy no layout width, so use the styled
-  // scrollbar width as a right-edge hit target when geometry reports zero.
   const scrollbarWidth = Math.max(
     event.currentTarget.offsetWidth - event.currentTarget.clientWidth,
     OVERLAY_SCROLLBAR_HIT_WIDTH_PX,
   );
   const bounds = event.currentTarget.getBoundingClientRect();
   return event.clientX >= bounds.right - scrollbarWidth && event.clientX <= bounds.right;
-}
-
-function isAtLatest(messageList: HTMLDivElement) {
-  return distanceFromLatest(messageList) <= 2;
-}
-
-function distanceFromLatest(messageList: HTMLDivElement) {
-  return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
-}
-
-function latestScrollTop(messageList: HTMLDivElement) {
-  return Math.max(0, messageList.scrollHeight - messageList.clientHeight);
 }
 
 function prefersReducedMotion() {

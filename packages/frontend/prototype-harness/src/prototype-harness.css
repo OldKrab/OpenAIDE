@@ -21,9 +21,9 @@
 .prototype-switcher {
   position: fixed;
   left: 50%;
-  bottom: 18px;
+  bottom: 6px;
   z-index: 10000;
-  min-height: 40px;
+  min-height: 30px;
   transform: translateX(-50%);
   border: 1px solid color-mix(in oklch, var(--oa-text) 70%, var(--oa-border));
   border-radius: 999px;
@@ -32,13 +32,20 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 4px;
+  padding: 1px;
+  opacity: 0.28;
+  transition: opacity 120ms ease-out;
   box-shadow: 0 8px 24px color-mix(in oklch, var(--oa-text) 22%, transparent);
 }
 
+.prototype-switcher:hover,
+.prototype-switcher:focus-within {
+  opacity: 1;
+}
+
 .prototype-switcher button {
-  width: 31px;
-  height: 31px;
+  width: 27px;
+  height: 27px;
   border: 0;
   border-radius: 50%;
   background: transparent;
@@ -51,10 +58,17 @@
 }
 
 .prototype-switcher span {
-  min-width: 150px;
+  min-width: 122px;
   padding-inline: 7px;
   text-align: center;
   font-size: 12px;
+}
+
+@media (min-width: 641px) {
+  .prototype-switcher {
+    inset: 50px 94px auto auto;
+    transform: none;
+  }
 }
 
 .prototype-index {

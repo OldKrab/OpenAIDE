@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use openaide_app_server_protocol::attachment::{
-    AttachmentCreatePastedImageResult, PreSendAttachment,
+    AttachmentCreatePastedImageResult, AttachmentResourceId, PreSendAttachment,
 };
 use openaide_app_server_protocol::ids::{AttachmentHandleId, ClientInstanceId};
 use openaide_app_server_protocol::task::ComposerImage;
@@ -296,6 +296,113 @@ impl AttachmentRuntime {
         })
     }
 
+    /// Recreates client-owned Composer resources from one durable queued message.
+    pub(crate) fn restore_queued_for_composer(
+        &self,
+        owner: impl Into<AttachmentOwner>,
+        chat_attachments: &[Attachment],
+        agent_attachments: &[Attachment],
+    ) -> Result<(Vec<PreSendAttachment>, Vec<ComposerImage>), AttachmentRuntimeError> {
+        let owner = owner.into();
+        if chat_attachments.len() != agent_attachments.len() {
+            return Err(AttachmentRuntimeError::ReadFailed(
+                "Queued attachment projections do not match".to_string(),
+            ));
+        }
+        let mut restored = Vec::new();
+        let mut images = Vec::new();
+        let restore = (|| {
+            for (chat, agent) in chat_attachments.iter().zip(agent_attachments) {
+                let result = match agent.kind.as_str() {
+                    "image" => {
+                        let payload = agent
+                            .payload
+                            .as_ref()
+                            .ok_or(AttachmentRuntimeError::InvalidImage)?;
+                        let data = payload
+                            .get("data")
+                            .and_then(serde_json::Value::as_str)
+                            .ok_or(AttachmentRuntimeError::InvalidImage)?;
+                        let mime_type = payload
+                            .get("mimeType")
+                            .and_then(serde_json::Value::as_str)
+                            .ok_or(AttachmentRuntimeError::InvalidImage)?;
+                        images.push(ComposerImage {
+                            label: agent.label.clone(),
+                            mime_type: mime_type.to_string(),
+                            data: data.to_string(),
+                        });
+                        continue;
+                    }
+                    "file_reference" => {
+                        let path = agent.path.as_ref().map(PathBuf::from).ok_or_else(|| {
+                            AttachmentRuntimeError::ReadFailed(
+                                "Queued file reference has no path".to_string(),
+                            )
+                        })?;
+                        let allowed_root = path_validation::AllowedRoot::new(
+                            path.parent().ok_or(AttachmentRuntimeError::InvalidRoot)?,
+                        )?;
+                        allowed_root.validate_file(&path)?;
+                        self.register_file_reference(
+                            &owner,
+                            agent.label.clone(),
+                            path,
+                            allowed_root,
+                        )
+                    }
+                    _ => self.register_queued_snapshot(&owner, chat.clone(), agent.clone()),
+                };
+                restored.push(PreSendAttachment {
+                    handle_id: result.handle_id,
+                    label: result.label,
+                });
+            }
+            Ok::<(), AttachmentRuntimeError>(())
+        })();
+        if let Err(error) = restore {
+            let resources = restored
+                .iter()
+                .map(|attachment| AttachmentResourceId::Handle {
+                    id: attachment.handle_id.clone(),
+                })
+                .collect::<Vec<_>>();
+            self.release_resources(&owner, &resources);
+            return Err(error);
+        }
+        Ok((restored, images))
+    }
+
+    fn register_queued_snapshot(
+        &self,
+        owner: impl Into<AttachmentOwner>,
+        chat_attachment: Attachment,
+        agent_attachment: Attachment,
+    ) -> RegisteredAttachmentHandle {
+        let owner = owner.into();
+        let mut state = self
+            .state
+            .lock()
+            .expect("attachment runtime mutex poisoned");
+        state.prune_expired(Instant::now());
+        state.next_id += 1;
+        let handle_id = AttachmentHandleId::from(format!("attachment-handle-{}", state.next_id));
+        let label = agent_attachment.label.clone();
+        state.handles.insert(
+            handle_id.as_str().to_string(),
+            PreSendAttachmentHandle {
+                owner,
+                label: label.clone(),
+                target: AttachmentTarget::QueuedSnapshot {
+                    chat_attachment: Box::new(chat_attachment),
+                    agent_attachment: Box::new(agent_attachment),
+                },
+                expires_at: self.expires_at(),
+            },
+        );
+        RegisteredAttachmentHandle { handle_id, label }
+    }
+
     fn register_pasted_image(
         &self,
         owner: impl Into<AttachmentOwner>,
@@ -402,6 +509,29 @@ impl Default for AttachmentRuntime {
 }
 
 impl ResolvedSendAttachments {
+    /// Rehydrates App Server-owned queue content after its pre-send handles were consumed.
+    pub(crate) fn from_persisted(
+        chat_attachments: Vec<Attachment>,
+        agent_attachments: Vec<Attachment>,
+    ) -> Self {
+        Self {
+            chat_attachments,
+            agent_attachments,
+            #[cfg(test)]
+            fingerprint_handles: Vec::new(),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.chat_attachments.is_empty() && self.agent_attachments.is_empty()
+    }
+
+    pub(crate) fn contains_images(&self) -> bool {
+        self.agent_attachments
+            .iter()
+            .any(|attachment| attachment.kind == "image")
+    }
+
     /// Validates and materializes client-owned Images at the Send boundary.
     pub(crate) fn from_inline_images(
         images: &[ComposerImage],

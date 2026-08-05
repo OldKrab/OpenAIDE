@@ -322,6 +322,35 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
             }
         }),
         current_plan: snapshot.current_plan.map(project_agent_plan),
+        message_queue: openaide_app_server_protocol::snapshot::TaskMessageQueueSnapshot {
+            revision: snapshot.message_queue.revision,
+            pause: snapshot.message_queue.pause.map(|pause| match pause {
+                crate::storage::records::TaskMessageQueuePauseRecord::Restarted =>
+                    openaide_app_server_protocol::snapshot::TaskMessageQueuePauseSnapshot::Restarted,
+                crate::storage::records::TaskMessageQueuePauseRecord::UnsuccessfulTurn =>
+                    openaide_app_server_protocol::snapshot::TaskMessageQueuePauseSnapshot::UnsuccessfulTurn,
+                crate::storage::records::TaskMessageQueuePauseRecord::AttachmentUnavailable =>
+                    openaide_app_server_protocol::snapshot::TaskMessageQueuePauseSnapshot::AttachmentUnavailable,
+            }),
+            items: snapshot
+                .message_queue
+                .items
+                .into_iter()
+                .map(
+                    |item| openaide_app_server_protocol::snapshot::QueuedMessageSnapshot {
+                        queued_message_id: item.queued_message_id.into(),
+                        text: item.text,
+                        created_at: item.created_at,
+                        attachments: item.chat_attachments.into_iter().map(|attachment| {
+                            openaide_app_server_protocol::snapshot::QueuedMessageAttachmentSnapshot {
+                                kind: attachment.kind,
+                                label: attachment.label,
+                            }
+                        }).collect(),
+                    },
+                )
+                .collect(),
+        },
         chat: project_chat_page(snapshot.chat),
         history_sync,
         pending_requests: Vec::new(),

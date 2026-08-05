@@ -52,6 +52,7 @@ impl TaskTurnLifecycle {
                 updated_at: now.clone(),
                 last_activity: now.clone(),
                 composer_history: Default::default(),
+                message_queue: Default::default(),
                 agent_name: self.agent_registry.display_name(
                     &params.selected_agent_id,
                     params.selected_agent_label.as_deref(),

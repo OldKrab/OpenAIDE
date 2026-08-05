@@ -709,6 +709,7 @@ struct ChangedFields {
     input_capabilities: bool,
     context_usage: bool,
     current_plan: bool,
+    message_queue: bool,
     removed: bool,
 }
 
@@ -739,6 +740,7 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
         context_usage: original.context_usage != task.context_usage
             || original.last_turn_usage != task.last_turn_usage,
         current_plan: original.current_plan != task.current_plan,
+        message_queue: original.message_queue != task.message_queue,
         removed: !original.tombstoned && task.tombstoned,
     }
 }
@@ -790,6 +792,7 @@ fn project_committed_changes(
             .flatten(),
         context_usage: fields.context_usage.then(|| task.context_usage.clone()),
         current_plan: fields.current_plan.then(|| task.current_plan.clone()),
+        message_queue: fields.message_queue.then(|| task.message_queue.clone()),
         chat: projected_chat,
         removed: fields.removed,
     })

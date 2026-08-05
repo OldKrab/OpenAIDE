@@ -431,6 +431,6 @@
   gap: 3px;
 }
 
-.message-list > .activity-group {
+.message-list-virtual-row > .activity-group {
   margin-block-end: 4px;
 }

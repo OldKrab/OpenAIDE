@@ -18,6 +18,8 @@
 @import "./app/composer-options.css";
 @import "./app/context-usage.css";
 @import "./app/agent-plan.css";
+@import "./app/task-work-stack.css";
+@import "./app/task-message-queue.css";
 @import "./app/settings-shell.css";
 @import "./app/agent-settings-catalog.css";
 @import "./app/mcp-settings.css";

@@ -13,7 +13,7 @@ impl TaskTransitions {
         for task in self.recoverable_records()? {
             // Catalog metadata is sufficient to reject stable Tasks. Hydrate Chat only for
             // Tasks whose process-local state may actually need restart recovery.
-            if volatile_recovery_plan(&task).is_none() {
+            if volatile_recovery_plan(&task).is_none() && task.message_queue.items.is_empty() {
                 continue;
             }
             let task_id = task.task_id;
@@ -21,21 +21,36 @@ impl TaskTransitions {
             self.mutations
                 .commit_existing_task(&task_id, chat_commit_options(), |ctx| {
                     let now = now_string();
-                    let Some(plan) = volatile_recovery_plan(ctx.task()) else {
-                        return Ok(TaskMutationResult::Unchanged);
-                    };
-                    if plan.interrupt_active_turn {
+                    let plan = volatile_recovery_plan(ctx.task());
+                    if plan.as_ref().is_some_and(|plan| plan.interrupt_active_turn) {
                         apply_active_work_end(ctx, &ActiveWorkEnd::Restarted, now.clone())?;
                         active_work_ended = true;
                     }
-                    if plan.invalidate_live_session_data {
+                    if !ctx.task().message_queue.items.is_empty() {
+                        let queue = &mut ctx.task_mut().message_queue;
+                        if queue.pause
+                            != Some(crate::storage::records::TaskMessageQueuePauseRecord::Restarted)
+                        {
+                            queue.pause = Some(
+                                crate::storage::records::TaskMessageQueuePauseRecord::Restarted,
+                            );
+                            queue.revision = queue.revision.saturating_add(1);
+                        }
+                    }
+                    if plan
+                        .as_ref()
+                        .is_some_and(|plan| plan.invalidate_live_session_data)
+                    {
                         let task = ctx.task_mut();
                         task.config_options_catalog = None;
                         task.agent_commands_catalog = None;
                         task.context_usage = None;
                         task.last_turn_usage = None;
                     }
-                    if plan.clear_pending_config_change {
+                    if plan
+                        .as_ref()
+                        .is_some_and(|plan| plan.clear_pending_config_change)
+                    {
                         // Agent I/O cannot be resumed after process restart. Preserve the
                         // monotonic sequence, but retire the volatile client mutation so
                         // App Shells can issue a fresh, explicitly ordered request.

@@ -162,6 +162,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
       agentConfig: { state: "ready", options: [] },
       agentCommands: { state: "ready", commands: [] },
       sendCapability: { state: "ready" },
+      messageQueue: { revision: 0, items: [] },
       historySync: { state: "idle", generation: 0 },
       chat: { items: [], hasMoreBefore: false, hasMessages: true },
     },

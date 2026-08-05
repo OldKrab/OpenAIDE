@@ -25,7 +25,16 @@ import {
   releaseAttachmentResources,
 } from "../services/attachmentResources";
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
-import { cancelTaskIntent, closeTaskPlanIntent, sendTaskPromptIntent } from "../intents/taskMutationIntents";
+import {
+  appendTaskQueueIntent,
+  cancelTaskIntent,
+  closeTaskPlanIntent,
+  removeTaskQueueMessageIntent,
+  moveTaskQueueMessageIntent,
+  takeTaskQueueMessageIntent,
+  sendTaskQueueMessageNowIntent,
+  sendTaskPromptIntent,
+} from "../intents/taskMutationIntents";
 import { requestComposerHistory } from "../intents/taskReadIntents";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
 import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
@@ -62,6 +71,20 @@ export function createTaskCallbacks({
   state,
 }: TaskDependencies): TaskCallbacks {
   return {
+    addToQueue: () => {
+      if (!state.snapshot) return;
+      const taskId = state.snapshot.task.task_id;
+      const input = state.taskInputs[taskId] ?? { prompt: "", context: [] };
+      appendTaskQueueIntent({
+        attachmentResources,
+        backendConnection,
+        clientInstanceId,
+        createSnapshotRequestId,
+        dispatch,
+        postHostMessage,
+        stateRootId: state.appServerStateRootId,
+      }, state.snapshot, input);
+    },
     cancel: () => {
       const cancel = () => cancelTaskIntent(
         {
@@ -191,6 +214,37 @@ export function createTaskCallbacks({
           ? [attachmentHandleResource(attachment.app_server_handle_id)]
           : [],
       );
+    },
+    removeQueueMessage: (queuedMessageId) => {
+      removeTaskQueueMessageIntent({
+        attachmentResources,
+        backendConnection,
+        clientInstanceId,
+        createSnapshotRequestId,
+        dispatch,
+        postHostMessage,
+        stateRootId: state.appServerStateRootId,
+      }, state.snapshot, queuedMessageId);
+    },
+    takeQueueMessage: (queuedMessageId) => {
+      const taskId = state.snapshot?.task.task_id;
+      if (!taskId) return;
+      takeTaskQueueMessageIntent({
+        attachmentResources, backendConnection, clientInstanceId, createSnapshotRequestId,
+        dispatch, postHostMessage, stateRootId: state.appServerStateRootId,
+      }, state.snapshot, state.taskInputs[taskId] ?? { prompt: "", context: [] }, queuedMessageId);
+    },
+    moveQueueMessage: (queuedMessageId, targetIndex) => {
+      return moveTaskQueueMessageIntent({
+        attachmentResources, backendConnection, clientInstanceId, createSnapshotRequestId,
+        dispatch, postHostMessage, stateRootId: state.appServerStateRootId,
+      }, state.snapshot, queuedMessageId, targetIndex);
+    },
+    sendQueueMessageNow: (queuedMessageId) => {
+      sendTaskQueueMessageNowIntent({
+        attachmentResources, backendConnection, clientInstanceId, createSnapshotRequestId,
+        dispatch, postHostMessage, stateRootId: state.appServerStateRootId,
+      }, state.snapshot, queuedMessageId);
     },
     revealAttachment: (attachmentId) => {
       if (!state.snapshot || !backendConnection?.request) return Promise.reject(new Error(appServerRequiredMessage()));

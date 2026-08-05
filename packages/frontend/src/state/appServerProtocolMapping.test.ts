@@ -1199,6 +1199,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
       ],
     },
     ...overrides,
+    messageQueue: overrides.messageQueue ?? { revision: 0, items: [] },
   };
 }
 

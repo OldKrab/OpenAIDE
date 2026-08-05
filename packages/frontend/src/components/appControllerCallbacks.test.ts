@@ -3790,6 +3790,7 @@ function protocolTaskSnapshot(
     agentConfig: { state: "ready" as const, options: [] },
     agentCommands: { state: "ready" as const, commands: [] },
     sendCapability: { state: "ready" as const },
+    messageQueue: { revision: 0, items: [] },
     historySync: { state: "idle", generation: 0 },
     chat: { items: [], hasMoreBefore: false, hasMessages: true },
   };

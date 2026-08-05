@@ -391,6 +391,42 @@ impl TaskAttentionEvent {
     }
 }
 
+/// Durable user-authored work waiting outside Chat until delivery begins.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct QueuedMessageRecord {
+    pub queued_message_id: String,
+    pub text: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chat_attachments: Vec<crate::protocol::model::Attachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_attachments: Vec<crate::protocol::model::Attachment>,
+}
+
+/// One revisioned ordering boundary for every mutation of a Task's queue.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskMessageQueueRecord {
+    pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause: Option<TaskMessageQueuePauseRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<QueuedMessageRecord>,
+}
+
+impl TaskMessageQueueRecord {
+    fn is_initial(&self) -> bool {
+        self.revision == 0 && self.pause.is_none() && self.items.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskMessageQueuePauseRecord {
+    Restarted,
+    UnsuccessfulTurn,
+    AttachmentUnavailable,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskRecord {
     pub task_id: String,
@@ -409,6 +445,9 @@ pub struct TaskRecord {
     /// Bounded accepted text recall kept separate from replaceable Native Session Chat.
     #[serde(default, skip_serializing_if = "ComposerHistory::is_empty")]
     pub composer_history: ComposerHistory,
+    /// Durable queued work remains separate from accepted Chat.
+    #[serde(default, skip_serializing_if = "TaskMessageQueueRecord::is_initial")]
+    pub message_queue: TaskMessageQueueRecord,
     pub agent_id: String,
     pub agent_name: String,
     pub isolation: IsolationKind,
@@ -482,6 +521,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             last_activity: String,
             #[serde(default)]
             composer_history: ComposerHistory,
+            #[serde(default)]
+            message_queue: TaskMessageQueueRecord,
             agent_id: String,
             agent_name: String,
             isolation: IsolationKind,
@@ -543,6 +584,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             updated_at: stored.updated_at,
             last_activity: stored.last_activity,
             composer_history: stored.composer_history,
+            message_queue: stored.message_queue,
             agent_id: stored.agent_id,
             agent_name: stored.agent_name,
             isolation: stored.isolation,

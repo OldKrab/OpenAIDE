@@ -243,7 +243,7 @@ pub enum QuestionAction {
     Cancel,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Attachment {
     pub kind: String,
     pub label: String,

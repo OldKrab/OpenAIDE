@@ -72,6 +72,8 @@ export type TaskComposerInput = {
   context: ComposerAttachment[];
   /** Changes only when task/send accepts this Task's exact pending attempt. */
   acceptedUserMessageId?: MessageId;
+  /** Changes only when task/queueAppend accepts this Task's exact pending attempt. */
+  acceptedQueueRevision?: number;
   error?: string;
   configError?: {
     mutationId: string;
@@ -79,6 +81,13 @@ export type TaskComposerInput = {
     catalogKey?: string;
   };
   pending?: PendingComposerSend;
+  queueTake?: {
+    item: import("@openaide/app-shell-contracts").QueuedMessage;
+    index: number;
+    stage: "pending" | "collapsing";
+  };
+  /** Refocuses Composer after one queued item becomes the ordinary draft. */
+  acceptedQueueTakeId?: string;
 };
 
 export type TaskChatScrollState = {

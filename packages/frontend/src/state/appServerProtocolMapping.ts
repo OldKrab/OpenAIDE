@@ -171,6 +171,16 @@ function mapProtocolTaskSnapshotWithCache(
       },
       active_turn_started_at: snapshot.activeTurnStartedAt ?? undefined,
       active_requests: pendingRequestItems(snapshot.pendingRequests ?? [], task.updated_at),
+      message_queue: {
+        revision: snapshot.messageQueue?.revision ?? 0,
+        pause: snapshot.messageQueue?.pause ?? undefined,
+        items: (snapshot.messageQueue?.items ?? []).map((item) => ({
+          queued_message_id: item.queuedMessageId,
+          text: item.text,
+          created_at: item.createdAt,
+          attachments: item.attachments,
+        })),
+      },
       settings_summary: {
         agent_id: task.agent_id,
         isolation: DEFAULT_LOCAL_ISOLATION,

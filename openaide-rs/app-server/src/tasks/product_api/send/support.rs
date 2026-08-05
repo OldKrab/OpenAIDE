@@ -79,7 +79,7 @@ pub(super) fn prompt_title(prompt: &str) -> Option<TaskTitle> {
     TaskTitle::new(value, TaskTitleSource::Prompt)
 }
 
-pub(super) fn protocol_error_from_attachment_runtime(
+pub(in crate::tasks::product_api) fn protocol_error_from_attachment_runtime(
     error: AttachmentRuntimeError,
 ) -> ProtocolError {
     match error {

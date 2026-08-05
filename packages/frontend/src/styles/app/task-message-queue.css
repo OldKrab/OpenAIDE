@@ -1,0 +1,539 @@
+.task-queue-anchor,
+.task-composer-shell {
+  width: min(760px, 100%);
+  min-width: 0;
+  margin-inline: auto;
+}
+
+/* Reserve only the title height. Expanded messages grow upward without moving Chat. */
+.task-queue-anchor {
+  height: 34px;
+  position: relative;
+  z-index: 8;
+  margin-bottom: 10px;
+}
+
+.task-queue-floating {
+  width: 100%;
+  min-width: 0;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  background: var(--oa-bg);
+}
+
+/* Expanded rows float over Chat; this soft edge marks that boundary without adding a separator. */
+.task-queue-floating:has(.task-message-queue[data-open="true"]:not([data-single="true"]))::before {
+  content: "";
+  height: 22px;
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklch, var(--oa-bg) 88%, transparent)
+  );
+  pointer-events: none;
+}
+
+/* Padding extends only the scroll range; expanding Queue does not resize or move the Chat viewport. */
+.task-conversation .message-list {
+  padding-block-end: var(--task-queue-overlay-clearance, 0px);
+}
+
+.task-message-queue {
+  width: 100%;
+  min-width: 0;
+  max-height: min(42vh, 348px);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--oa-bg);
+}
+
+.task-message-queue[data-single="true"] {
+  max-height: none;
+  overflow: visible;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+}
+
+.task-message-queue-heading {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  box-sizing: border-box;
+  overflow: hidden;
+  grid-row: 1;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 5px;
+  text-align: left;
+}
+
+.task-message-queue[data-open="true"] .task-message-queue-heading {
+  border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 76%, transparent);
+}
+
+.task-message-queue-heading:hover,
+.task-message-queue-heading:focus-visible {
+  background: color-mix(in oklch, var(--oa-focus) 5%, var(--oa-raised));
+}
+
+.task-message-queue-heading:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+
+.task-message-queue-heading > svg {
+  flex: none;
+  color: var(--oa-muted);
+  transition: transform 160ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.task-message-queue[data-open="false"] .task-message-queue-heading > svg {
+  transform: rotate(-90deg);
+}
+
+.task-message-queue-heading > strong {
+  flex: none;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.task-message-queue-heading > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oa-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-message-queue-heading > small {
+  min-width: 30px;
+  margin-inline-start: auto;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--oa-focus) 8%, var(--oa-raised));
+  color: color-mix(in oklch, var(--oa-focus) 74%, var(--oa-text));
+  padding: 2px 6px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.task-message-queue-disclosure {
+  min-height: 0;
+  overflow: hidden;
+  grid-row: 2;
+  display: grid;
+  grid-template-rows: 1fr;
+  visibility: visible;
+}
+
+.task-message-queue-disclosure[data-open="false"] {
+  grid-template-rows: 0fr;
+  visibility: hidden;
+}
+
+.task-message-queue[data-single="true"] .task-message-queue-disclosure {
+  grid-row: 1;
+  overflow: visible;
+}
+
+.task-message-queue-content {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.task-message-queue[data-single="true"] .task-message-queue-content {
+  overflow: visible;
+}
+
+.task-message-queue-items {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  scrollbar-gutter: stable;
+  animation: task-queue-stack-reveal 150ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.task-message-queue[data-single="true"] .task-message-queue-items {
+  overflow: visible;
+}
+
+.task-message-queue-items > li {
+  position: relative;
+  min-width: 0;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid color-mix(in oklch, var(--oa-focus) 28%, var(--oa-border));
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--oa-focus) 8%, var(--oa-bg));
+  padding: 6px 7px;
+  color: var(--oa-text);
+  font-size: 14px;
+  line-height: 1.35;
+  list-style: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-drag: none;
+  translate: 0 var(--queue-shift-y, 0px);
+  will-change: transform;
+  transition:
+    opacity 150ms ease-out,
+    box-shadow 150ms ease-out,
+    translate 110ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.task-message-queue-items > li + li {
+  border-top-color: color-mix(in oklch, var(--oa-focus) 28%, var(--oa-border));
+}
+
+.task-message-queue[data-single="true"] .task-message-queue-items > li {
+  cursor: default;
+  user-select: text;
+  will-change: auto;
+}
+
+.task-message-queue-copy {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+.task-message-queue-copy > span {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.task-message-queue-copy > small {
+  min-width: 0;
+  overflow: hidden;
+  grid-column: 1;
+  color: var(--oa-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-message-queue-grip {
+  width: 18px;
+  height: 24px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: color-mix(in oklch, var(--oa-muted) 58%, transparent);
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+
+.task-message-queue-grip:active { cursor: grabbing; }
+
+.task-message-queue-single-icon {
+  width: 18px;
+  color: color-mix(in oklch, var(--oa-focus) 68%, var(--oa-muted));
+  justify-self: center;
+}
+
+.task-message-queue-items[data-reorderable="true"] > li {
+  cursor: grab;
+}
+
+.task-message-queue-items[data-dragging="true"],
+.task-message-queue-items[data-dragging="true"] > li,
+.task-message-queue-items[data-dragging="true"] > li * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.task-message-queue-items > li[data-dragging="true"] {
+  z-index: 12;
+  background: color-mix(in oklch, var(--oa-focus) 12%, var(--oa-bg));
+  box-shadow: 0 14px 30px color-mix(in oklch, var(--oa-text) 16%, transparent);
+  opacity: .96;
+  transform: translate3d(0, var(--queue-drag-y, 0), 0) scale(1.01);
+  translate: 0 0;
+}
+
+.task-message-queue-drop-marker {
+  height: 2px;
+  position: absolute;
+  right: 7px;
+  left: 7px;
+  border-radius: 1px;
+  background: color-mix(in oklch, var(--oa-focus) 72%, transparent);
+  pointer-events: none;
+}
+
+.task-message-queue-drop-marker[data-position="before"] { top: -5px; }
+.task-message-queue-drop-marker[data-position="after"] { bottom: -5px; }
+
+.task-message-queue-items > li[data-extracting] {
+  border-color: color-mix(in oklch, var(--oa-focus) 46%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-focus) 9%, var(--oa-bg));
+  cursor: default;
+}
+
+.task-message-queue-items > li[data-extracting] .task-message-queue-single-icon,
+.task-message-queue-items > li[data-extracting] .task-message-queue-grip {
+  color: var(--oa-focus);
+}
+
+.task-message-queue-items > li[data-extracting="collapsing"] {
+  pointer-events: none;
+  transform-origin: center bottom;
+  animation: task-queue-dequeue-collapse 180ms cubic-bezier(.5, 0, 1, 1) both;
+}
+
+.task-message-queue-pending {
+  animation: oa-spin .9s linear infinite;
+}
+
+.task-message-queue-items > li:first-child .task-message-queue-actions {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.task-message-queue-items > li:first-child::after {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  align-self: center;
+  color: color-mix(in oklch, var(--oa-focus) 24%, var(--oa-muted));
+  content: "Sends next  →";
+  font-size: 11px;
+  font-weight: 620;
+  opacity: 1;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.task-message-queue-items > li:first-child:hover::after,
+.task-message-queue-items > li:first-child:focus-within::after,
+.task-message-queue-items[data-dragging="true"] > li:first-child::after {
+  opacity: 0;
+}
+
+.task-message-queue-items > li:first-child[data-extracting]::after {
+  content: "Moving…";
+  color: var(--oa-muted);
+  opacity: 1;
+}
+
+.task-message-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--oa-muted);
+}
+
+.task-message-queue-actions button {
+  min-width: 32px;
+  min-height: 32px;
+  width: 32px;
+  height: 32px;
+  position: relative;
+  padding: 0;
+}
+
+.task-message-queue-actions button[aria-label="Send queued message now"] {
+  background: color-mix(in oklch, var(--oa-focus) 10%, transparent);
+  color: color-mix(in oklch, var(--oa-focus) 78%, var(--oa-text));
+}
+
+.task-message-queue-actions button[aria-label="Send queued message now"]:hover {
+  background: color-mix(in oklch, var(--oa-focus) 17%, transparent);
+  color: var(--oa-focus);
+}
+
+.task-message-queue-actions button[aria-label="Delete queued message"] {
+  color: color-mix(in oklch, var(--oa-danger) 76%, var(--oa-muted));
+}
+
+.task-message-queue-actions button[aria-label="Delete queued message"]:hover {
+  background: color-mix(in oklch, var(--oa-danger) 10%, transparent);
+  color: var(--oa-danger);
+}
+
+.task-message-queue-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.task-message-queue-actions button::after {
+  width: max-content;
+  position: absolute;
+  z-index: 30;
+  top: 50%;
+  right: calc(100% + 6px);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  content: attr(aria-label);
+  padding: 4px 6px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(2px, -50%);
+  transition: opacity 100ms ease-out, transform 100ms ease-out;
+  font-size: 11px;
+}
+
+.task-message-queue-actions button:hover::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+  transition-delay: 450ms;
+}
+
+.task-message-queue-actions button:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+  transition-delay: 0s;
+}
+
+.task-message-queue-pause {
+  min-height: 30px;
+  padding: 4px 9px;
+  color: var(--oa-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.task-message-queue-pause button {
+  margin-inline-start: auto;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  padding: 3px 7px;
+  background: color-mix(in oklch, var(--oa-raised) 78%, transparent);
+  color: var(--oa-text);
+  font: inherit;
+}
+
+.composer-actions .composer-queue-button {
+  min-width: 32px;
+  min-height: 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.composer-queue-button:not(:disabled) {
+  color: color-mix(in oklch, var(--oa-text) 82%, var(--oa-muted));
+}
+
+@media (hover: hover) {
+  .task-message-queue-actions {
+    opacity: 0;
+    transition: none;
+  }
+
+  .task-message-queue-items > li:hover .task-message-queue-actions,
+  .task-message-queue-actions:focus-within,
+  .task-message-queue-items > li[data-extracting] .task-message-queue-actions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .task-message-queue {
+    max-height: min(46vh, 310px);
+  }
+
+  .task-message-queue-items > li {
+    min-height: 52px;
+    padding-block: 7px;
+  }
+
+  .task-message-queue-items > li:first-child {
+    grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  }
+
+  .task-message-queue-items > li:first-child::after {
+    width: auto;
+    height: auto;
+    position: static;
+    grid-column: 4;
+    grid-row: 1;
+    justify-self: end;
+    align-self: center;
+    content: "Next →";
+    display: block;
+    transform: none;
+  }
+
+  .task-message-queue-actions,
+  .task-message-queue-items > li[data-extracting] .task-message-queue-actions {
+    opacity: 1;
+  }
+
+  .task-message-queue-actions button {
+    width: 34px;
+    height: 34px;
+  }
+
+  .task-message-queue-actions button::after {
+    display: none;
+  }
+}
+
+@media (max-height: 500px) {
+  .task-message-queue {
+    max-height: 116px;
+  }
+}
+
+@keyframes task-queue-stack-reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes task-queue-dequeue-collapse {
+  to { opacity: 0; transform: translate3d(0, 6px, 0) scaleY(.82); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-message-queue-heading > svg,
+  .task-message-queue-actions,
+  .task-message-queue-actions button::after {
+    transition-duration: .01ms;
+  }
+
+  .task-message-queue-items,
+  .task-message-queue-items > li[data-extracting="collapsing"] {
+    animation-duration: .01ms;
+  }
+
+  .task-message-queue-pending {
+    animation: none;
+  }
+}

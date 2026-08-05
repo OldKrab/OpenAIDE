@@ -1,4 +1,4 @@
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import "@fontsource-variable/inter";
 import "../../src/styles/tokens.css";
 import "../../src/styles/app.css";
@@ -20,7 +20,12 @@ const slug = requestedPrototypeSlug(window.location.pathname);
 const selected = slug ? prototypes.find((entry) => entry.slug === slug) : undefined;
 document.title = selected ? `${selected.definition.title} · Prototype` : "OpenAIDE Prototypes";
 
-createRoot(document.getElementById("root")!).render(
+// Vite can re-evaluate this entry during HMR; retain one root so variants do not
+// leave competing React trees mutating the same prototype canvas.
+const prototypeWindow = window as Window & { __openaidePrototypeRoot?: Root };
+const root = prototypeWindow.__openaidePrototypeRoot
+  ??= createRoot(document.getElementById("root")!);
+root.render(
   selected
     ? <PrototypeView definition={selected.definition} />
     : <PrototypeIndex missingSlug={slug} />,
