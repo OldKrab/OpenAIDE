@@ -1,87 +1,103 @@
 # Release policy
 
-OpenAIDE uses Semantic Versioning. Until version 1.0, minor releases may contain
-documented breaking changes and patch releases remain backward-compatible bug and
-security fixes. Alpha, beta, and release-candidate builds use SemVer prerelease
-identifiers such as `0.0.1-alpha.1`, `0.0.1-beta.1`, and `0.0.1-rc.1`.
+OpenAIDE release versions are deliberately narrower than general Semantic
+Versioning. A version must be either `X.Y.Z` or
+`X.Y.Z-(alpha|beta|rc).N`, where `N` starts at 1. Every new version must be
+greater than the current package version and every existing release tag.
 
-Prereleases are testing builds. They may contain incomplete behavior, change APIs
-or storage without migration support, and must not be presented as stable or
-promoted to production.
+Until version 1.0, minor releases may contain documented breaking changes and
+patch releases remain backward-compatible bug and security fixes. Prereleases
+are testing builds. They may contain incomplete behavior, change APIs or storage
+without migration support, and must not be presented as stable.
 
-## Merge requirements
+## Repository requirements
 
 - Product changes reach `main` through reviewed pull requests. The automated
   release-version commit is the only direct-push exception.
-- The `TypeScript and protocol checks`, `Rust format, lint, and tests`,
-  `JavaScript and TypeScript tests`, and `Production build` checks are required.
+- Require `TypeScript and protocol checks`, `Rust format, lint, and tests`,
+  `JavaScript and TypeScript tests`, `Task Chat smoke tests`, and
+  `Production build` on pull requests.
+- Allow the release GitHub App to push the automated version commit and tag.
+- Enable **immutable releases** in repository settings. The release workflow
+  stops before registry publication if GitHub does not report the canonical
+  release as immutable.
+- Configure `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_PRIVATE_KEY`. Stable
+  registry publication also requires `VSCE_PAT` and `OVSX_PAT` as repository or
+  organization secrets. `RELEASE_APP_ID` is obsolete and should be removed.
 - Generated App Server Protocol bindings must be committed and current.
-- Prefer squash merging so each merged pull request is one releasable change.
-- Do not put credentials in repository or workflow files. Use GitHub environments
-  and repository or organization secrets.
 
-The `main` ruleset must require the repository's CI checks for pull requests and
-allow the release GitHub App to push the automated version commit and tag. The
-`Version Bump` workflow requires `RELEASE_APP_CLIENT_ID` and
-`RELEASE_APP_PRIVATE_KEY`. Stable registry releases also require `VSCE_PAT` for
-the VS Code Marketplace and `OVSX_PAT` for Open VSX.
+The workflows pin Node, Rust, publishing tools, and third-party actions. Cargo
+release builds use the committed lockfile. Dependency/toolchain pin updates are
+normal reviewed changes, not release-time downloads of an unspecified latest
+version.
 
-Before the first Open VSX release:
+## Open VSX setup
+
+OpenAIDE will begin Open VSX publication with the next stable release; do not
+backfill `0.0.1`.
+
+Before that release:
 
 1. Create an [Eclipse account](https://accounts.eclipse.org/user/register), sign
    in to [Open VSX](https://open-vsx.org/), connect the same GitHub and Eclipse
    accounts, and accept the Publisher Agreement from the Open VSX profile page.
 2. Generate a dedicated CI token from the
-   [Open VSX token settings](https://open-vsx.org/user-settings/tokens). Open VSX
-   account and publishing setup does not require payment details.
+   [Open VSX token settings](https://open-vsx.org/user-settings/tokens).
 3. With that token available locally as `OVSX_PAT`, run
-   `npx --yes ovsx@1.0.2 create-namespace openaide`, then
+   `npm exec -- ovsx create-namespace openaide`, then
    [claim namespace ownership](https://github.com/EclipseFdn/open-vsx.org/wiki/Managing-Namespaces).
-4. Run `gh secret set OVSX_PAT` in this repository and enter the token at the
-   hidden prompt. Do not pass it in command arguments or commit it to a file.
+4. Run `gh secret set OVSX_PAT` and enter the token at the hidden prompt. Never
+   pass it in command arguments or commit it to a file.
 
 ## Creating a release
 
-1. Confirm that `main` contains exactly the changes to release and that its CI is
-   green. Choose a new exact SemVer without a `v` prefix, such as
-   `0.0.1-alpha.10` or `0.0.1`.
-2. Write concise user-facing Markdown in a local file such as
-   `release-notes.md`. The file is release input and does not need to be
-   committed. Prefer sections such as `## Features`, `## Bug Fixes`, and
-   `## Chores`; describe user impact rather than copying commit messages. Do
-   not add a changelog section because the workflow appends the comparison
-   link.
-3. In GitHub Actions, run the `Version Bump` workflow on `main` and enter the
-   version and release notes. Do not edit package manifests or create the
-   release tag manually. The same workflow can be dispatched with GitHub CLI:
+1. Confirm that `main` contains exactly the changes to release. Choose a new
+   OpenAIDE version without a `v` prefix, such as `0.0.2-beta.1` or `0.0.2`.
+2. Write concise user-facing Markdown in `release-notes.md`. Prefer sections
+   such as `## Features`, `## Bug Fixes`, and `## Chores`; describe user impact.
+   Do not add a changelog section because the workflow appends it.
+3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh
    gh workflow run version-bump.yml --ref main \
-     -f version=0.0.1-alpha.10 \
+     -f version=0.0.2-beta.1 \
      -F release_notes=@release-notes.md
    ```
 
-   GitHub's web workflow form has only a single-line string field, so use the
-   CLI file input for normal multi-section release notes.
+4. `Version Bump` is serialized and cannot be cancelled in progress. It checks
+   that the exact checked-out `main` commit has a completed successful CI push
+   run, validates the monotonic version, updates the root package and lockfile,
+   commits the release notes, creates the explicit tag, and atomically pushes
+   the `main` update and tag.
+5. The tag starts `Release`. It rejects tags not reachable from `main`, repeats
+   release checks, then builds Linux x64, Windows x64, and macOS Apple Silicon
+   VSIX packages. Each runner inspects the packaged files and exercises its
+   bundled App Server through startup and graceful JSON-RPC shutdown before the
+   VSIX can be uploaded.
+6. The workflow creates a draft GitHub Release, attaches the complete verified
+   asset set, publishes the draft, and verifies immutability. This GitHub
+   Release is the canonical release. Stable releases then reconcile the same
+   downloaded bytes with the VS Code Marketplace and Open VSX. Prereleases stay
+   on GitHub only.
+7. Confirm that the Release workflow completed successfully. No manual rebuild
+   or replacement of its assets is permitted.
 
-4. The workflow validates both inputs, runs `npm version` to update the canonical
-   root version and lockfile, appends the full changelog link to the notes, uses
-   those notes as the version commit message, creates the `vVERSION` tag, and
-   pushes both to `main`.
-5. The tag starts the `Release` workflow. It repeats the release checks, stamps
-   the exact version into packaged manifests, builds Linux x64, Windows x64, and
-   macOS Apple Silicon VSIX packages, and creates the GitHub Release from the
-   version commit message. Prerelease versions create GitHub prereleases; stable
-   versions also publish all platform packages to the VS Code Marketplace and
-   Open VSX.
-6. Confirm that the Release workflow completed successfully, then install and
-   smoke-test each published VSIX before promoting the release.
+The root `package.json` is the release-version source of truth. Package and
+Cargo manifests stamped only during artifact creation stay at `0.0.0` in source
+and must not be updated by hand.
 
-The root `package.json` is the release-version source of truth. Package manifests
-that are stamped only during artifact creation stay at their neutral source
-version and must not be updated by hand.
+## Recovery and registry reconciliation
 
-Releases are never rebuilt in place. Correct a bad release with a new patch
-or prerelease version. For example, replace a bad `0.0.1-alpha.1` build with
-`0.0.1-alpha.2`. Registry releases are immutable; correct them with a new version
-rather than rebuilding an existing tag.
+GitHub assets and registry packages are immutable release facts. A bad artifact
+requires a new patch or prerelease version; for example, replace a bad
+`0.0.2-beta.1` with `0.0.2-beta.2`.
+
+If registry publication was merely interrupted, run **Reconcile Release
+Registries** with the existing stable version. It downloads the immutable GitHub
+assets and handles each target independently:
+
+- missing package: publish it;
+- same version, target, and SHA-256: skip successfully;
+- same version and target with a different SHA-256: fail without publishing.
+
+This recovery path resumes incomplete publication; it never rebuilds a release.

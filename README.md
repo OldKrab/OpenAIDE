@@ -77,8 +77,8 @@ Web App archive, and container artifacts are not currently published.
 The local Web App launcher currently targets Linux and requires Bash and standard
 Linux process utilities. To build the workspace, install:
 
-- Node.js 24 with npm
-- the stable Rust toolchain
+- Node.js 24.18.0 with npm
+- Rust 1.97.1
 - VS Code 1.100 or newer when testing the extension
 
 Install dependencies and verify the workspace:
@@ -128,11 +128,12 @@ checks.
 
 ## Releases
 
-Pull requests are checked by GitHub Actions. A versioned tag builds Linux x64,
-Windows x64, and macOS Apple Silicon VSIX packages and creates a GitHub Release
-according to the [release policy](docs/release-policy.md). Stable tags also
-publish those packages to the VS Code Marketplace and Open VSX; prerelease tags
-such as `v0.0.1-alpha.1` remain GitHub prereleases.
+Pull requests are checked by GitHub Actions. A versioned tag reachable from
+`main` builds and smoke-tests Linux x64, Windows x64, and macOS Apple Silicon
+VSIX packages, then creates the canonical immutable GitHub Release according to
+the [release policy](docs/release-policy.md). Stable releases are reconciled to
+the VS Code Marketplace; Open VSX publication starts with the next stable
+release. Prerelease tags such as `v0.0.2-beta.1` remain GitHub prereleases.
 
 ## Contributing and security
 

@@ -4,15 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Exact SemVer to release, without the v prefix (for example 0.0.1-alpha.9)"
+        description: "Exact OpenAIDE version without v (for example 0.0.2-beta.1)"
         type: string
         required: true
       release_notes:
-        description: "User-facing Markdown (for example, ## Features and ## Bug Fixes); the changelog link is added automatically"
+        description: "User-facing Markdown; the changelog link is added automatically"
         type: string
         required: true
 
-permissions: {}
+permissions:
+  actions: read
+  contents: read
+
+# A version commit and its tag are one serialized transaction. Never cancel a push midway.
+concurrency:
+  group: release-version-bump
+  cancel-in-progress: false
 
 jobs:
   bump:
@@ -21,28 +28,35 @@ jobs:
     steps:
       - name: Generate release token
         id: release-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       # The App token lets the pushed tag trigger the separate Release workflow.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           ref: main
           token: ${{ steps.release-token.outputs.token }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
 
-      - name: Validate version
+      - name: Require successful CI for the checked-out main commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-release-main-ci.mjs
+
+      - name: Validate release inputs
         env:
           RELEASE_NOTES: ${{ inputs.release_notes }}
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
-          if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
-            echo "Version must be SemVer without a v prefix, such as 0.0.1 or 0.0.1-alpha.9" >&2
-            exit 1
-          fi
+          node scripts/release-version.mjs next "$RELEASE_VERSION"
           if [[ -z "${RELEASE_NOTES//[[:space:]]/}" ]]; then
             echo "Release notes must contain user-facing Markdown" >&2
             exit 1
@@ -53,7 +67,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # The version commit doubles as the GitHub Release body, matching the Codex release flow.
+      # The version commit doubles as the GitHub Release body.
       - name: Commit version and tag
         shell: bash
         env:
@@ -74,5 +88,7 @@ jobs:
           git commit --file "$notes_path"
           git tag --annotate "v$RELEASE_VERSION" --message "Release v$RELEASE_VERSION"
 
-      - name: Push commit and tag
-        run: git push --follow-tags origin main
+      - name: Atomically push the version commit and explicit tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: git push --atomic origin "HEAD:refs/heads/main" "refs/tags/v$RELEASE_VERSION"

@@ -7,25 +7,34 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   validate:
-    name: Validate release tag
+    name: Validate canonical release tag
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
       - id: version
+        name: Validate version and main ancestry
         shell: bash
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
-            echo "Release tag must be a SemVer release such as v0.0.1 or v0.0.1-alpha.1" >&2
-            exit 1
-          fi
-          version="${GITHUB_REF_NAME#v}"
-          package_version="$(node -p "require('./package.json').version")"
-          if [[ "$version" != "$package_version" ]]; then
-            echo "Tag version $version does not match package.json version $package_version" >&2
+          version="$(node scripts/release-version.mjs tag "$GITHUB_REF_NAME")"
+          git fetch origin main
+          commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "Release tag $GITHUB_REF_NAME is not reachable from main" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -35,16 +44,18 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: npm ci
       - run: npm run check
-      - run: cargo test --workspace
+      - run: cargo test --locked --workspace
       - run: npm run test:gate
       - run: npm run test --workspaces --if-present
 
@@ -54,58 +65,14 @@ jobs:
     with:
       version: ${{ needs.validate.outputs.version }}
 
-  marketplace:
-    name: Publish VS Code Marketplace packages
-    if: ${{ !contains(github.ref_name, '-') }}
-    needs: [validate, artifacts]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: vsix-*
-          path: release
-          merge-multiple: true
-      - name: Publish platform packages
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          for package in release/*.vsix; do
-            npx --yes @vscode/vsce@3.6.0 publish --packagePath "$package"
-          done
-
-  open-vsx:
-    name: Publish Open VSX packages
-    if: ${{ !contains(github.ref_name, '-') }}
-    needs: [validate, artifacts]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: vsix-*
-          path: release
-          merge-multiple: true
-      - name: Publish platform packages
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: |
-          for package in release/*.vsix; do
-            npx --yes ovsx@1.0.2 publish "$package"
-          done
-
   github-release:
-    name: Publish GitHub release
+    name: Publish canonical immutable GitHub release
     needs: [validate, artifacts]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read release notes from version commit
         id: release-notes
         shell: bash
@@ -115,14 +82,81 @@ jobs:
           git log -1 --format=%B "$commit" > "$notes_path"
           printf '\n' >> "$notes_path"
           echo "path=$notes_path" >> "$GITHUB_OUTPUT"
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: vsix-*
           path: release
           merge-multiple: true
-      - uses: softprops/action-gh-release@v3
+      - name: Require the complete canonical asset set
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          for target in linux-x64 win32-x64 darwin-arm64; do
+            test -f "release/openaide-vscode-$target-$RELEASE_VERSION.vsix"
+          done
+          test "$(find release -maxdepth 1 -type f -name '*.vsix' | wc -l)" -eq 3
+      - name: Create draft and attach verified assets
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           body_path: ${{ steps.release-notes.outputs.path }}
+          draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
-          files: release/*
+          files: release/*.vsix
+      - name: Publish the completed draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+      - name: Require repository immutable releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          immutable="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .immutable)"
+          if [[ "$immutable" != "true" ]]; then
+            echo "GitHub release is not immutable; enable immutable releases in repository settings" >&2
+            exit 1
+          fi
+
+  marketplace:
+    name: Reconcile VS Code Marketplace packages
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs: [validate, github-release]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Download canonical GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$GITHUB_REF_NAME" --pattern '*.vsix' --dir release
+      - name: Publish missing packages or verify identical ones
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: node scripts/reconcile-release-registry.mjs marketplace "${{ needs.validate.outputs.version }}" release
+
+  open-vsx:
+    name: Reconcile Open VSX packages
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs: [validate, github-release]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Download canonical GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$GITHUB_REF_NAME" --pattern '*.vsix' --dir release
+      - name: Publish missing packages or verify identical ones
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: node scripts/reconcile-release-registry.mjs open-vsx "${{ needs.validate.outputs.version }}" release

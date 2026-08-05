@@ -1,0 +1,87 @@
+name: Reconcile Release Registries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing stable OpenAIDE version to reconcile, without v"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reconcile-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate canonical GitHub release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: v${{ inputs.version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Require a stable version and immutable canonical release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          node scripts/release-version.mjs tag "v$RELEASE_VERSION"
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            echo "Registries only receive stable OpenAIDE releases" >&2
+            exit 1
+          fi
+          immutable="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$RELEASE_VERSION" --jq .immutable)"
+          if [[ "$immutable" != "true" ]]; then
+            echo "Canonical GitHub release v$RELEASE_VERSION is not immutable" >&2
+            exit 1
+          fi
+
+  marketplace:
+    name: Reconcile VS Code Marketplace
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: v${{ inputs.version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "v${{ inputs.version }}" --pattern '*.vsix' --dir release
+      - env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: node scripts/reconcile-release-registry.mjs marketplace "${{ inputs.version }}" release
+
+  open-vsx:
+    name: Reconcile Open VSX
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: v${{ inputs.version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "v${{ inputs.version }}" --pattern '*.vsix' --dir release
+      - env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: node scripts/reconcile-release-registry.mjs open-vsx "${{ inputs.version }}" release
