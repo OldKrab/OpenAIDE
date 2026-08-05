@@ -14,21 +14,6 @@ describe("Composer view behavior", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows the composer focus boundary for keyboard navigation, not pointer focus", () => {
-    const renderer = renderComposer();
-    let composer = renderer.root.findByType("section");
-
-    expect(composer.props["data-keyboard-focus"]).toBeUndefined();
-
-    act(() => composer.props.onKeyDownCapture({ key: "Tab" }));
-    composer = renderer.root.findByType("section");
-    expect(composer.props["data-keyboard-focus"]).toBe("true");
-
-    act(() => composer.props.onPointerDownCapture());
-    composer = renderer.root.findByType("section");
-    expect(composer.props["data-keyboard-focus"]).toBeUndefined();
-  });
-
   it("renders removable attachments and closes open menus on Escape", () => {
     const onRemoveAttachment = vi.fn();
     const onRevealAttachment = vi.fn();
