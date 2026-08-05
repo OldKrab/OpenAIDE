@@ -26,7 +26,6 @@ import {
 } from "./ComposerSlashCommands";
 import { attachEveryImage } from "./imageAttachmentBatch";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
-import { useComposerKeyboardFocus } from "./useComposerKeyboardFocus";
 import { useComposerHistory } from "./useComposerHistory";
 import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
 import {
@@ -110,7 +109,6 @@ export function Composer({
   const [editorText, setEditorText] = useState(prompt);
   const [editorRenderRevision, setEditorRenderRevision] = useState(0);
   const [fileUploads, setFileUploads] = useState<ComposerFileUpload[]>([]);
-  const { keyboardFocus, onKeyboardNavigation, onPointerInteraction } = useComposerKeyboardFocus();
   const editorRef = useRef<ComposerEditorHandle | null>(null);
   const configMutationSequenceRef = useRef(0);
   const fileDropHandlerRef = useRef<((files: File[]) => void) | undefined>(undefined);
@@ -325,9 +323,6 @@ export function Composer({
     <section
       className="composer"
       aria-label="Message composer"
-      data-keyboard-focus={keyboardFocus ? "true" : undefined}
-      onKeyDownCapture={onKeyboardNavigation}
-      onPointerDownCapture={onPointerInteraction}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           setOpenMenu(undefined);

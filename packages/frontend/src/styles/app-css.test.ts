@@ -351,7 +351,7 @@ describe("task list row styles", () => {
   });
 
   it("shares new-task and composer geometry across app shells", () => {
-    expect(appCss).toMatch(/\.composer\[data-keyboard-focus="true"\]:focus-within\s*{\s*border-color:\s*color-mix\(in oklch, var\(--oa-focus\) 42%, var\(--oa-border\)\);/);
+    expect(appCss).not.toMatch(/\.composer\[data-keyboard-focus="true"\]:focus-within/);
     expect(appCss).not.toMatch(/\.composer:focus-within\s*{/);
     expect(appCss).toMatch(/\.composer textarea:focus-visible,\s*\.composer-editor:focus-visible\s*{\s*outline:\s*0;/);
     expect(appCss).toMatch(/\.composer\s*{[^}]*width:\s*min\(760px, 100%\);[^}]*border-radius:\s*20px;[^}]*box-shadow:\s*none;/);

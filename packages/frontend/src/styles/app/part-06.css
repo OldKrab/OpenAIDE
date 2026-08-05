@@ -22,11 +22,6 @@
   max-height: 50dvh;
 }
 
-.composer[data-keyboard-focus="true"]:focus-within {
-  border-color: color-mix(in oklch, var(--oa-focus) 42%, var(--oa-border));
-  box-shadow: none;
-}
-
 .composer textarea,
 .composer-editor {
   width: 100%;
