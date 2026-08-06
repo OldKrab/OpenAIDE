@@ -30,9 +30,11 @@
   }
 
   .new-task-center {
-    align-content: start;
+    /* Match the desktop start surface: keep the complete setup group balanced
+       in the available task area instead of pinning it near the header. */
+    align-content: safe center;
     gap: 6px;
-    padding: clamp(28px, 16dvh, 112px) 12px 12px;
+    padding: 24px 12px;
   }
 
   .new-task-center h1 {
@@ -153,24 +155,22 @@
   }
 
   .new-task-context-controls[data-layout="sentence"] {
-    width: 100%;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    justify-content: stretch;
-    gap: 2px 5px;
-  }
-
-  .new-task-context-controls[data-layout="sentence"] .new-task-context-word {
-    align-self: center;
+    width: fit-content;
+    max-width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 3px 5px;
   }
 
   .new-task-context-controls[data-layout="sentence"] .new-task-context-anchor {
-    width: 100%;
-    justify-items: stretch;
+    width: auto;
+    justify-items: center;
   }
 
   .new-task-context-controls[data-layout="sentence"] .composer-pill {
-    width: 100%;
+    width: fit-content;
     max-width: 100%;
   }
 

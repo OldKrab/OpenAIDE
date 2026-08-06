@@ -392,7 +392,20 @@
   outline-offset: 1px;
 }
 
-@media (hover: none), (pointer: coarse) {
+@media (max-width: 760px), (hover: none), (pointer: coarse) {
+  /* A trailing action narrows the reading column and is hard to reach on touch.
+     Keep the message action in normal flow beneath the response instead. */
+  .chat-agent-block {
+    padding-inline-end: 0;
+  }
+
+  .chat-agent-block > .chat-message-actions {
+    position: static;
+    justify-self: start;
+    margin-block-start: 4px;
+    opacity: 1;
+  }
+
   .agent-markdown-code-copy {
     min-width: 36px;
     min-height: 36px;
