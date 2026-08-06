@@ -4,15 +4,21 @@ import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskChatScrollState } from "../state/store";
 
+const virtualizerOptions = vi.hoisted(() => ({
+  latest: undefined as { anchorTo?: "end" | "start" } | undefined,
+}));
+
 vi.mock("@tanstack/react-virtual", async () => {
   const React = await import("react");
   type Options = {
+    anchorTo?: "end" | "start";
     count: number;
     getItemKey: (index: number) => string;
     getScrollElement: () => HTMLDivElement | null;
   };
   return {
     useVirtualizer: (options: Options) => {
+      virtualizerOptions.latest = options;
       const optionsRef = React.useRef(options);
       optionsRef.current = options;
       const virtualizerRef = React.useRef<ReturnType<typeof createVirtualizer> | undefined>(undefined);
@@ -62,6 +68,7 @@ import { useTaskChatScroll } from "./useTaskChatScroll";
 describe("useTaskChatScroll", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    virtualizerOptions.latest = undefined;
   });
 
   afterEach(() => {
@@ -79,6 +86,14 @@ describe("useTaskChatScroll", () => {
     act(() => resize.notify());
 
     expect(messageList.scrollTop).toBe(1800);
+  });
+
+  it("starts Chat from its first row instead of an end anchor", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 72 });
+
+    renderHarness(messageList, { itemKeys: ["message:first"] });
+
+    expect(virtualizerOptions.latest?.anchorTo).toBe("start");
   });
 
   it("leaves follow mode without moving the viewport when an overlay expands", () => {
