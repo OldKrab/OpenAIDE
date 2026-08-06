@@ -21,7 +21,8 @@ This file is the short operating guide for agents working in this repo. Keep det
 - Treat simplicity as a primary constraint for every code and design change, including features, fixes, and refactors. Do not preserve existing complexity merely because it exists. Prefer one owner, one state representation, one ordering mechanism, one validation pass, and visible failure with explicit recovery. If implementation would expand an agreed design, stop and discuss it first.
 ## Bugs And TDD
 
-- When the user reports a bug, use TDD: reproduce or add a failing regression test first, then fix, then rerun the test.
+- For bugs affecting production behavior or application logic, use TDD: reproduce or add a failing regression test first, then fix, then rerun the test.
+- Do not invoke TDD or ask the user to confirm a test seam for visual-only UI/CSS fixes unless the change affects production logic or the user explicitly requests test-first development. Use proportionate browser verification instead; add automated coverage only when it provides durable regression value.
 - Regression tests should catch the bug at the closest real user, protocol, or storage boundary. Do not duplicate existing coverage.
 - Do not accept mocks that hide protocol semantics. If ACP sends chunks, updates, or replayed history, tests must model chunks, updates, and replayed history.
 

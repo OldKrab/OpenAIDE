@@ -158,15 +158,16 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.chat-attachment-list \+ \.chat-user\s*{\s*margin-top:\s*6px;/);
   });
 
-  it("keeps copy actions in a compact row below their messages", () => {
-    expect(appCss).toMatch(/\.chat-agent-block\s*{[^}]*width:\s*100%;[^}]*display:\s*grid;[^}]*gap:\s*0;/);
+  it("keeps copy actions available without changing transcript spacing", () => {
+    expect(appCss).toMatch(/\.chat-agent-block\s*{[^}]*width:\s*100%;[^}]*position:\s*relative;[^}]*display:\s*grid;[^}]*gap:\s*0;[^}]*padding-inline-end:\s*24px;/);
     expect(appCss).not.toMatch(/\.message-list > \.chat-thought-block,[^{]+\.message-list > \.activity-group\s*{[^}]*margin-inline-start:/);
     expect(appCss).toMatch(/\.chat-user-block\s*{[^}]*display:\s*grid;[^}]*gap:\s*0;/);
     expect(appCss).toMatch(/\.chat-message-actions\s*{[^}]*min-height:\s*16px;[^}]*opacity:\s*0;/);
-    expect(appCss).not.toMatch(/\.chat-message-actions\s*{[^}]*position:\s*absolute;/);
+    expect(appCss).toMatch(/\.chat-agent-block > \.chat-message-actions\s*{[^}]*position:\s*absolute;[^}]*inset-inline-end:\s*0;[^}]*inset-block-end:\s*0;[^}]*min-height:\s*0;/);
     expect(appCss).toMatch(/\.chat-agent-block:hover \.chat-message-actions,\s*\.chat-agent-block:focus-within \.chat-message-actions,\s*\.chat-user-block:hover \.chat-message-actions,\s*\.chat-user-block:focus-within \.chat-message-actions\s*{\s*opacity:\s*1;/);
     expect(appCss).toMatch(/\.chat-message-action\s*{[^}]*width:\s*20px;[^}]*min-height:\s*16px;[^}]*border:\s*0;[^}]*background:\s*transparent;/);
-    expect(appCss).toMatch(/\.message-list-virtual-row > \.activity-group\s*{[^}]*margin-block-end:\s*4px;/);
+    expect(appCss).not.toMatch(/\.message-list-virtual-row > \.activity-group\s*{[^}]*margin-block-end:/);
+    expect(appCss).toMatch(/\.activity-group:not\(\.open\)\s*{[^}]*gap:\s*0;/);
   });
 
   it("keeps narrow transcript controls touchable", () => {

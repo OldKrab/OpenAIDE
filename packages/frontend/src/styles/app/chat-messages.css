@@ -19,8 +19,11 @@
 
 .chat-agent-block {
   width: 100%;
+  position: relative;
   display: grid;
   gap: 0;
+  /* Copy actions share the final text line without adding a hidden layout row. */
+  padding-inline-end: 24px;
 }
 
 .chat-agent-content-image {
@@ -352,6 +355,13 @@
   justify-self: end;
 }
 
+.chat-agent-block > .chat-message-actions {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  min-height: 0;
+}
+
 .chat-agent-block:hover .chat-message-actions,
 .chat-agent-block:focus-within .chat-message-actions,
 .chat-user-block:hover .chat-message-actions,
@@ -431,8 +441,4 @@
   color: var(--oa-muted);
   display: grid;
   gap: 3px;
-}
-
-.message-list-virtual-row > .activity-group {
-  margin-block-end: 4px;
 }

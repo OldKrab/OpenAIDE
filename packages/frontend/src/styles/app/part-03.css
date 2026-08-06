@@ -76,6 +76,11 @@
   gap: 2px;
 }
 
+/* A collapsed disclosure must not add spacing beyond the transcript row gap. */
+.activity-group:not(.open) {
+  gap: 0;
+}
+
 .activity-disclosure-body {
   min-width: 0;
   display: grid;
