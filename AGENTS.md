@@ -1,50 +1,38 @@
-# AGENTS.md
+# OpenAIDE Agent Guide
 
-This file is the short operating guide for agents working in this repo. Keep detailed product and architecture policy in docs, not here.
+## Orient
 
-## Useful files
+Read the narrow source of truth before changing its area:
 
-- Product language: `CONTEXT.md`.
-- Product purpose and UX principles: `PRODUCT.md`.
-- Visual system: `DESIGN.md`.
-- Task Lifecycle and Chat specification: `docs/task-chat-flow.md`; update it when this behavior changes in code, but do not change the accepted specification without first discussing the proposal with the user and receiving explicit agreement.
-- Other ADRs under `docs/adr/` when touching their area.
+- Product terms: `CONTEXT.md`.
+- Product intent and UX principles: `PRODUCT.md`.
+- Visual work: `DESIGN.md`.
+- Task lifecycle, Chat, task navigation, or replica behavior: `docs/task-chat-flow.md` and the relevant linked ADRs. This is an accepted specification; discuss and obtain explicit user agreement before changing its behavior or requirements.
+- Frontend work: `packages/frontend/AGENTS.md`.
+- Disposable prototypes: `docs/prototyping.md`.
+- A decision governed by an ADR: the relevant file in `docs/adr/`.
 
-## Working Rules
+## Shape
 
-- Document code. Leave comments on improtant funcitons, classes, not obvious code pieces.
-- Use logging in code. It is essential for future debugging.
-- Before committing, inspect the complete staged diff for secrets, credentials, personal domains, email addresses, usernames, home-directory paths, machine-specific configuration, and other sensitive or personal data. Keep local machine configuration in ignored files. Report any findings and unresolved failing checks before committing.
-- Keep Backend and Frontend concerns separate. App Server owns product state and workflow decisions; Frontend owns rendering and ephemeral presentation state.
-- When Rust App Server Protocol change, regenerate TypeScript bindings with `npm run protocol:generate` and verify with `npm run protocol:check`.
-- For non-trivial architecture or API design, discuss the approach first and state the next planned step.
-- Treat simplicity as a primary constraint for every code and design change, including features, fixes, and refactors. Do not preserve existing complexity merely because it exists. Prefer one owner, one state representation, one ordering mechanism, one validation pass, and visible failure with explicit recovery. If implementation would expand an agreed design, stop and discuss it first.
-## Bugs And TDD
+- Establish the owning layer and contract before implementation. App Server owns durable product state, workflow decisions, persistence, and ordering; Frontend renders authoritative state and owns only ephemeral presentation.
+- Keep the design tight: one owner, state representation, ordering mechanism, and validation pass. Prefer an explicit failure and recovery path to hidden coordination or retries.
+- Discuss the approach before a non-trivial architecture or API change. Stop for agreement when implementation would expand an accepted design.
+- Keep user-facing product behavior shared across app shells; put shell chrome, routing, and capabilities behind narrow composition points.
+- When changing the Rust App Server Protocol, regenerate and check the TypeScript bindings with the repository scripts.
 
-- For bugs affecting production behavior or application logic, use TDD: reproduce or add a failing regression test first, then fix, then rerun the test.
-- Do not invoke TDD or ask the user to confirm a test seam for visual-only UI/CSS fixes unless the change affects production logic or the user explicitly requests test-first development. Use proportionate browser verification instead; add automated coverage only when it provides durable regression value.
-- Regression tests should catch the bug at the closest real user, protocol, or storage boundary. Do not duplicate existing coverage.
-- Do not accept mocks that hide protocol semantics. If ACP sends chunks, updates, or replayed history, tests must model chunks, updates, and replayed history.
+## Write
 
-## Prototyping
+- Leave concise comments on public and non-obvious code: explain ownership, invariants, lifecycle boundaries, and tradeoffs. Add logging where it makes failures diagnosable.
+- Keep hand-written production files below 800 logical lines; extract a cohesive module before extending a file that exceeds it.
+- Put Rust test bodies in dedicated test files. Use integration tests by default; private unit tests use the adjacent `<module>_tests.rs` convention. Shared integration helpers live in `tests/common/mod.rs`.
 
-- Follow `docs/prototyping.md` for disposable UI and logic prototypes.
+## Prove
 
-## Source Size And Tests
+- For a production behavior bug, make the closest real boundary test red, implement the fix, and rerun it. Model ACP chunks, updates, and replayed history rather than mocking away protocol semantics.
+- For visual-only work, verify the affected interaction in the browser at relevant wide and narrow viewports. Shared UI changes require both; shell composition requires the default and override paths.
+- Run the narrowest relevant repository check first, then broaden when a shared contract changes. Read the available scripts and tool configuration rather than copying commands into this guide.
 
-- Hand-written production source files must stay at or below 800 logical lines. Start splitting before 600 lines when a file is still growing.
-- Test files, generated files, lockfiles, snapshots, fixtures, vendored files, and machine-generated bindings are exempt from the production source size limit.
-- Do not add new production logic to a file that already exceeds the limit; first extract cohesive modules until the production file is back under the limit.
-- Rust test bodies must live in separate test files, not inline `#[cfg(test)] mod tests` blocks in production modules. Prefer crate-level integration tests under each crate's `tests/` directory; when private access is required, put only a tiny `#[cfg(test)] mod tests;` declaration in the production file and put the test body in a sibling test file.
-- Name a private Rust unit-test file `<module>_tests.rs` and load it with `#[cfg(test)] #[path = "<module>_tests.rs"] mod tests;`. Use a test directory only when it contains multiple behavior-focused files; do not create a directory solely for one `tests.rs`.
-- Shared Rust integration-test helpers belong under a subdirectory module such as `tests/common/mod.rs`, not directly in `tests/common.rs`, so Cargo does not treat helpers as a standalone integration test crate.
+## Hand off
 
-## Verification
-
-Run the narrowest relevant checks first, then broaden when contracts or shared behavior change.
-- Rust format: `cargo fmt --all --check`
-- Rust tests: `cargo test -p openaide-app-server`
-- Rust lint: `cargo clippy -p openaide-app-server --all-targets -- -D warnings`
-- TypeScript/build checks: `npm run check`
-- Full build: `npm run build`
-- Workspace tests: `npm run test --workspaces --if-present`
+- Before a commit, inspect the complete staged diff for credentials, personal or machine-specific data, and local paths. Keep local configuration ignored.
+- Report unresolved checks and any security-sensitive findings with the change.
