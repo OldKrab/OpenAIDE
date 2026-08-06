@@ -62,6 +62,14 @@ pub(super) async fn run_prompt(
         return Ok(AgentPromptOutcome::Cancelled);
     }
     let active_session_id = active_session.session_id().to_string();
+    crate::logging::info(
+        "acp_prompt_dispatch_started",
+        json!({
+            "agent_id": context.agent_id,
+            "task_id": prompt.task_id.as_str(),
+            "session_id": active_session_id.as_str(),
+        }),
+    );
     while cancel_rx.try_recv().is_ok() {}
     let mut active_prompt = ActivePrompt::start(
         active_session,

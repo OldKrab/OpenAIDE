@@ -190,6 +190,13 @@ pub(super) async fn run_native_session_worker(
                         done_tx,
                         request_guard,
                     } => {
+                        crate::logging::info(
+                            "acp_prompt_command_received",
+                            serde_json::json!({
+                                "task_id": prompt.task_id.as_str(),
+                                "session_id": prompt.session_id.as_str(),
+                            }),
+                        );
                         let result = run_prompt(
                             &mut active_session,
                             &mut cancel_rx,

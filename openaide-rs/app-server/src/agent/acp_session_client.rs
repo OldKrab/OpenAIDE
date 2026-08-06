@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -92,6 +93,8 @@ impl AcpSessionClient {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<AgentPromptOutcome, RuntimeError> {
         let cancellation = prompt.cancellation.clone();
+        let task_id = prompt.task_id.clone();
+        let session_id = prompt.session_id.clone();
         if cancellation.is_cancelled() {
             return Ok(AgentPromptOutcome::Cancelled);
         }
@@ -100,9 +103,23 @@ impl AcpSessionClient {
         }
         // A cancelled prompt still owns the Native Session until its worker observes
         // the Agent's response. Session updates use the independent permanent listener.
+        crate::logging::info(
+            "acp_prompt_lifecycle_admission_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+            }),
+        );
         let Some(admission) = self.prompt_lifecycle.admit(&cancellation)? else {
             return Ok(AgentPromptOutcome::Cancelled);
         };
+        crate::logging::info(
+            "acp_prompt_lifecycle_admitted",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+            }),
+        );
         if cancellation.is_cancelled() {
             return Ok(AgentPromptOutcome::Cancelled);
         }
@@ -123,6 +140,13 @@ impl AcpSessionClient {
                 request_guard: admission.request,
             })
             .map_err(|_| self.worker_stopped_error())?;
+        crate::logging::info(
+            "acp_prompt_command_queued",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+            }),
+        );
         loop {
             match done_rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(result) => return result,
@@ -236,9 +260,11 @@ impl AcpSessionClient {
 struct PromptLifecycle {
     active: Mutex<Option<PromptGeneration>>,
     settled: Condvar,
+    next_generation_id: AtomicU64,
 }
 
 struct PromptGeneration {
+    id: u64,
     cancellation: TurnCancellation,
     accepting_steering: bool,
     outstanding_requests: usize,
@@ -253,7 +279,9 @@ impl PromptLifecycle {
         loop {
             match active.as_ref() {
                 None => {
+                    let generation_id = self.next_generation_id.fetch_add(1, Ordering::Relaxed) + 1;
                     *active = Some(PromptGeneration {
+                        id: generation_id,
                         cancellation: cancellation.clone(),
                         accepting_steering: true,
                         outstanding_requests: 1,
@@ -261,9 +289,11 @@ impl PromptLifecycle {
                     return Ok(Some(PromptAdmission {
                         _settlement: PromptSettlementGuard {
                             lifecycle: self.clone(),
+                            generation_id,
                         },
                         request: PromptRequestGuard {
                             lifecycle: self.clone(),
+                            generation_id,
                         },
                     }));
                 }
@@ -301,22 +331,22 @@ impl PromptLifecycle {
         generation.outstanding_requests += 1;
         Ok(PromptRequestGuard {
             lifecycle: self.clone(),
+            generation_id: generation.id,
         })
     }
 
-    fn finish_request(&self) {
+    fn finish_request(&self, generation_id: u64) {
         let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
-        let Some(generation) = active.as_mut() else {
+        let Some(generation) = active
+            .as_mut()
+            .filter(|generation| generation.id == generation_id)
+        else {
             return;
         };
         generation.outstanding_requests = generation
             .outstanding_requests
             .checked_sub(1)
             .expect("ACP prompt request count underflow");
-        if !generation.accepting_steering && generation.outstanding_requests == 0 {
-            active.take();
-            self.settled.notify_all();
-        }
     }
 }
 
@@ -327,6 +357,7 @@ struct PromptAdmission {
 
 struct PromptSettlementGuard {
     lifecycle: Arc<PromptLifecycle>,
+    generation_id: u64,
 }
 
 impl Drop for PromptSettlementGuard {
@@ -336,25 +367,35 @@ impl Drop for PromptSettlementGuard {
             .active
             .lock()
             .expect("ACP prompt lifecycle poisoned");
-        let Some(generation) = active.as_mut() else {
+        let Some(generation) = active
+            .as_mut()
+            .filter(|generation| generation.id == self.generation_id)
+        else {
             return;
         };
         generation.accepting_steering = false;
-        if generation.outstanding_requests == 0 {
-            active.take();
-            self.lifecycle.settled.notify_all();
-        }
+        let outstanding_requests = generation.outstanding_requests;
+        active.take();
+        self.lifecycle.settled.notify_all();
+        crate::logging::info(
+            "acp_prompt_generation_retired",
+            serde_json::json!({
+                "generation_id": self.generation_id,
+                "outstanding_requests": outstanding_requests,
+            }),
+        );
     }
 }
 
-/// Keeps one ACP request in its originating prompt generation until its response arrives.
+/// Tags an ACP response waiter so a late response cannot mutate a newer prompt generation.
 pub(super) struct PromptRequestGuard {
     lifecycle: Arc<PromptLifecycle>,
+    generation_id: u64,
 }
 
 impl Drop for PromptRequestGuard {
     fn drop(&mut self) {
-        self.lifecycle.finish_request();
+        self.lifecycle.finish_request(self.generation_id);
     }
 }
 

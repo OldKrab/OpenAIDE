@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use openaide_app_server_protocol::ids::TurnId;
 
@@ -235,7 +236,40 @@ impl NativeSessionService {
             attachments,
         } = request;
         let task_id = task.task_id.clone();
-        let opened = self.acquire_for_prompt(&task)?;
+        let acquire_started = Instant::now();
+        crate::logging::info(
+            "task_primary_prompt_session_acquire_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+                "has_bound_session": task.agent_session_id.is_some(),
+            }),
+        );
+        let opened = match self.acquire_for_prompt(&task) {
+            Ok(opened) => {
+                crate::logging::info(
+                    "task_primary_prompt_session_acquire_completed",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "turn_id": turn_id.as_str(),
+                        "elapsed_ms": acquire_started.elapsed().as_millis(),
+                    }),
+                );
+                opened
+            }
+            Err(error) => {
+                crate::logging::error(
+                    "task_primary_prompt_session_acquire_failed",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "turn_id": turn_id.as_str(),
+                        "elapsed_ms": acquire_started.elapsed().as_millis(),
+                        "error": error.to_string(),
+                    }),
+                );
+                return Err(error);
+            }
+        };
         let session_state = opened.task_state();
         let missing_session_id = opened.replaced_session_id().map(str::to_string);
         let replacement_session_id = opened.session().session_id.clone();
@@ -263,10 +297,24 @@ impl NativeSessionService {
             )?,
         };
         if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
+            crate::logging::warn(
+                "task_primary_prompt_session_binding_rejected",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "turn_id": turn_id.as_str(),
+                }),
+            );
             return Err(RuntimeError::NotReady(
                 "Native Session changed before prompt start".to_string(),
             ));
         }
+        crate::logging::info(
+            "task_primary_prompt_session_binding_completed",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+            }),
+        );
         if missing_session_id.is_some() {
             log_missing_session_replaced(
                 &task_id,
@@ -276,8 +324,38 @@ impl NativeSessionService {
             );
         }
 
-        let session_sink = self.ensure_update_subscription(&task_id, &opened.session().key())?;
+        let session_sink = match self.ensure_update_subscription(&task_id, &opened.session().key())
+        {
+            Ok(session_sink) => {
+                crate::logging::info(
+                    "task_primary_prompt_session_events_attached",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "turn_id": turn_id.as_str(),
+                    }),
+                );
+                session_sink
+            }
+            Err(error) => {
+                crate::logging::error(
+                    "task_primary_prompt_session_events_attach_failed",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "turn_id": turn_id.as_str(),
+                        "error": error.to_string(),
+                    }),
+                );
+                return Err(error);
+            }
+        };
         let session = opened.commit();
+        crate::logging::info(
+            "task_primary_prompt_turn_spawning",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+            }),
+        );
         self.turn_runner.spawn_agent_turn(
             task_id,
             text,

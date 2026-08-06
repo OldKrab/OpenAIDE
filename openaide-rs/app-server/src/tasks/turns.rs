@@ -211,6 +211,15 @@ impl TurnRunner {
     ) {
         let runner = self.clone();
         let cancellation = TurnCancellation::new();
+        crate::logging::info(
+            "task_primary_prompt_runner_spawned",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+                "agent_id": session.agent_id.as_str(),
+                "session_id": session.session_id.as_str(),
+            }),
+        );
         let active = ActiveTurn {
             task_id: task_id.clone(),
             cancellation: cancellation.clone(),
@@ -222,6 +231,14 @@ impl TurnRunner {
             .expect("active turn registry poisoned")
             .insert(turn_id.clone(), active.clone());
         thread::spawn(move || {
+            let runner_started = Instant::now();
+            crate::logging::info(
+                "task_primary_prompt_runner_started",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "turn_id": turn_id.as_str(),
+                }),
+            );
             let _registration = TurnRegistration {
                 turn_id: turn_id.clone(),
                 active_turns: runner.active_turns.clone(),
@@ -240,8 +257,23 @@ impl TurnRunner {
                 return;
             }
             match runner.transitions().mark_turn_running(&task_id, &turn_id) {
-                Ok(true) => {}
+                Ok(true) => crate::logging::info(
+                    "task_primary_prompt_runner_marked_running",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "turn_id": turn_id.as_str(),
+                        "elapsed_ms": runner_started.elapsed().as_millis(),
+                    }),
+                ),
                 Ok(false) => {
+                    crate::logging::info(
+                        "task_primary_prompt_runner_mark_running_rejected",
+                        serde_json::json!({
+                            "task_id": task_id.as_str(),
+                            "turn_id": turn_id.as_str(),
+                            "elapsed_ms": runner_started.elapsed().as_millis(),
+                        }),
+                    );
                     // Stop is persisted before its in-memory cancellation token is
                     // signalled. If startup observes that durable Stopping window,
                     // it still owns finalization even when the token is not set yet.
@@ -255,6 +287,15 @@ impl TurnRunner {
                     return;
                 }
                 Err(error) => {
+                    crate::logging::error(
+                        "task_primary_prompt_runner_mark_running_failed",
+                        serde_json::json!({
+                            "task_id": task_id.as_str(),
+                            "turn_id": turn_id.as_str(),
+                            "elapsed_ms": runner_started.elapsed().as_millis(),
+                            "error": error.to_string(),
+                        }),
+                    );
                     let _ = runner
                         .transitions()
                         .finish_turn(&task_id, &turn_id, Err(error));
@@ -272,6 +313,15 @@ impl TurnRunner {
                 runner.server_requests.clone(),
                 cancellation.clone(),
             ));
+            crate::logging::info(
+                "task_primary_prompt_agent_invoke_started",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "turn_id": turn_id.as_str(),
+                    "agent_id": session.agent_id.as_str(),
+                    "session_id": session.session_id.as_str(),
+                }),
+            );
             let result = runner.agent.prompt(
                 AgentPrompt {
                     agent_id: session.agent_id,
