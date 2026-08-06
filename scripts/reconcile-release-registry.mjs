@@ -5,9 +5,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const EXTENSION_ID = "openaide.openaide-vscode-extension";
-const PUBLISHER = "openaide";
-const EXTENSION_NAME = "openaide-vscode-extension";
+const COMPANION_EXTENSION_ID = "openaide.openaide-vscode-notification-companion";
 const TARGETS = ["linux-x64", "win32-x64", "darwin-arm64"];
+const RELEASE_EXTENSIONS = [
+  {
+    extensionId: COMPANION_EXTENSION_ID,
+    targets: ["universal"],
+    fileName: (version) => `openaide-vscode-notification-companion-${version}.vsix`,
+  },
+  {
+    extensionId: EXTENSION_ID,
+    targets: TARGETS,
+    fileName: (version, target) => `openaide-vscode-${target}-${version}.vsix`,
+  },
+];
 
 /** Publishes missing registry packages and treats an identical existing package as success. */
 export async function reconcileRegistry({
@@ -24,7 +35,12 @@ export async function reconcileRegistry({
 
   for (const releasePackage of packages) {
     const expected = await sha256(releasePackage.path);
-    const facts = { fetchImpl, version, target: releasePackage.target };
+    const facts = {
+      fetchImpl,
+      version,
+      target: releasePackage.target,
+      extensionId: releasePackage.extensionId,
+    };
     const existing = await lookup(facts);
     if (existing === expected) {
       console.log(`${registry} ${version} ${releasePackage.target} already matches ${expected}; skipping.`);
@@ -52,14 +68,14 @@ export async function reconcileRegistry({
   }
 }
 
-export async function lookupMarketplaceDigest({ fetchImpl, version, target }) {
+export async function lookupMarketplaceDigest({ fetchImpl, version, target, extensionId = EXTENSION_ID }) {
   const response = await fetchImpl(
     "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery?api-version=7.2-preview.1",
     {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({
-        filters: [{ criteria: [{ filterType: 7, value: EXTENSION_ID }] }],
+        filters: [{ criteria: [{ filterType: 7, value: extensionId }] }],
         // Include every version and its properties; latest-only would break recovery of older releases.
         flags: 17,
       }),
@@ -68,19 +84,23 @@ export async function lookupMarketplaceDigest({ fetchImpl, version, target }) {
   if (!response.ok) throw new Error(`Marketplace lookup failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
   const body = await response.json();
   const extension = body.results?.[0]?.extensions?.find(
-    (candidate) => `${candidate.publisher?.publisherName}.${candidate.extensionName}` === EXTENSION_ID,
+    (candidate) => `${candidate.publisher?.publisherName}.${candidate.extensionName}` === extensionId,
   );
-  const release = extension?.versions?.find(
-    (candidate) => candidate.version === version && candidate.targetPlatform === target,
-  );
+  const release = extension?.versions?.find((candidate) => candidate.version === version && (
+    target === "universal"
+      ? !candidate.targetPlatform || candidate.targetPlatform === "universal"
+      : candidate.targetPlatform === target
+  ));
   const digest = release?.properties?.find(
     (property) => property.key === "Microsoft.VisualStudio.Services.VsixSha256",
   )?.value;
   return normalizeDigest(digest);
 }
 
-export async function lookupOpenVsxDigest({ fetchImpl, version, target }) {
-  const response = await fetchImpl(`https://open-vsx.org/api/${PUBLISHER}/${EXTENSION_NAME}/${target}/${version}`);
+export async function lookupOpenVsxDigest({ fetchImpl, version, target, extensionId = EXTENSION_ID }) {
+  const [publisher, extensionName] = extensionId.split(".", 2);
+  const targetPath = target === "universal" ? version : `${target}/${version}`;
+  const response = await fetchImpl(`https://open-vsx.org/api/${publisher}/${extensionName}/${targetPath}`);
   if (response.status === 404) return undefined;
   if (!response.ok) throw new Error(`Open VSX lookup failed (${response.status}): ${(await response.text()).slice(0, 500)}`);
   const metadata = await response.json();
@@ -94,11 +114,11 @@ export async function lookupOpenVsxDigest({ fetchImpl, version, target }) {
 
 export async function collectReleasePackages(directory, version) {
   const entries = await readdir(directory);
-  return TARGETS.map((target) => {
-    const name = `openaide-vscode-${target}-${version}.vsix`;
+  return RELEASE_EXTENSIONS.flatMap((extension) => extension.targets.map((target) => {
+    const name = extension.fileName(version, target);
     if (!entries.includes(name)) throw new Error(`Canonical GitHub release is missing ${name}`);
-    return { target, path: path.join(directory, name) };
-  });
+    return { extensionId: extension.extensionId, target, path: path.join(directory, name) };
+  }));
 }
 
 async function sha256(filePath) {

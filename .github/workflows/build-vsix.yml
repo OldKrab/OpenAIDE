@@ -94,3 +94,62 @@ jobs:
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
+
+  notification-companion:
+    name: Build and smoke-test notification companion VSIX
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Set artifact version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            version="$REQUESTED_VERSION"
+            artifact_name="vsix-notification-companion"
+          else
+            base_version="$(node -p "require('./package.json').version")"
+            short_sha="${GITHUB_SHA:0:7}"
+            if [[ "$base_version" == *-* ]]; then
+              version="${base_version}.g${short_sha}"
+            else
+              version="${base_version}-g${short_sha}"
+            fi
+            artifact_name="vsix-notification-companion-g${short_sha}"
+          fi
+          node scripts/set-release-artifact-version.mjs "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+      - run: npm run build --workspace openaide-vscode-notification-companion
+      - name: Add extension license
+        shell: bash
+        run: cp LICENSE apps/vscode-notification-companion/LICENSE
+      - name: Package universal VSIX
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cd apps/vscode-notification-companion
+          npm exec -- vsce package \
+            --no-dependencies \
+            --out "../../artifacts/openaide-vscode-notification-companion-${{ steps.version.outputs.version }}.vsix"
+      - name: Verify packaged content
+        shell: bash
+        run: |
+          extraction_root="$RUNNER_TEMP/openaide-vscode-notification-companion"
+          unzip -q "artifacts/openaide-vscode-notification-companion-${{ steps.version.outputs.version }}.vsix" -d "$extraction_root"
+          node scripts/smoke-notification-companion-vsix.mjs \
+            "$extraction_root/extension" \
+            "${{ steps.version.outputs.version }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.version.outputs.artifact_name }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

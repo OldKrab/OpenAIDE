@@ -18,6 +18,12 @@ leaving your editor.
 2. Open the OpenAIDE view from the Activity Bar.
 3. Check Agent Settings, then create a Task and send your first message.
 
+When a Task needs attention while the VS Code window is unfocused, OpenAIDE
+uses its local System Notifications companion to present an operating-system
+notification. The companion is installed automatically with OpenAIDE and runs
+on the UI machine, including when the workspace is remote. Use **OpenAIDE:
+Test System Notification** from the Command Palette to verify desktop delivery.
+
 ## Requirements
 
 - VS Code 1.100 or newer

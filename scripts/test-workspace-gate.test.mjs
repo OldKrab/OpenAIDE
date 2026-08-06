@@ -10,6 +10,7 @@ const maintainedWorkspaceNames = [
   "@openaide/app-server-client",
   "@openaide/app-shell-contracts",
   "openaide-frontend",
+  "openaide-vscode-notification-companion",
   "openaide-vscode-extension",
   "openaide-web",
 ];
@@ -41,6 +42,7 @@ test("default gate runs maintained repository integration tests", () => {
     "scripts/redeploy-web-dev.test.mjs",
     "scripts/release-version.test.mjs",
     "scripts/smoke-release-vsix.test.mjs",
+    "scripts/smoke-notification-companion-vsix.test.mjs",
   ]) {
     assert.match(gate, new RegExp(testFile.replaceAll(".", "\\.")));
   }
@@ -61,6 +63,7 @@ test("default npm check includes every workspace that exposes a check script", (
     "@openaide/app-shell-contracts",
     "openaide-frontend",
     "openaide-vscode-extension",
+    "openaide-vscode-notification-companion",
   ]);
 });
 
@@ -141,6 +144,7 @@ test("release publishing produces every supported platform VSIX package", () => 
   const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
   const artifactBuild = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
   const extensionPackage = packageJson("apps/vscode-extension/package.json");
+  const companionPackage = packageJson("apps/vscode-notification-companion/package.json");
 
   assert.match(release, /uses: \.\/\.github\/workflows\/build-vsix\.yml/);
   assert.match(release, /version: \$\{\{ needs\.validate\.outputs\.version \}\}/);
@@ -157,6 +161,14 @@ test("release publishing produces every supported platform VSIX package", () => 
   assert.doesNotMatch(artifactBuild, /extension_version=|--cwd/);
   assert.match(extensionPackage.scripts.build, /esbuild/);
   assert.match(extensionPackage.scripts.build, /--external:vscode/);
+  assert.deepEqual(extensionPackage.extensionKind, ["workspace"]);
+  assert.deepEqual(extensionPackage.extensionDependencies, [
+    "openaide.openaide-vscode-notification-companion",
+  ]);
+  assert.deepEqual(companionPackage.extensionKind, ["ui"]);
+  assert.equal(companionPackage.api, "none");
+  assert.match(artifactBuild, /apps\/vscode-notification-companion/);
+  assert.match(release, /openaide-vscode-notification-companion/);
   assert.match(release, /Read release notes from version commit/);
   assert.match(release, /body_path: \$\{\{ steps\.release-notes\.outputs\.path \}\}/);
   assert.match(release, /draft: true/);
