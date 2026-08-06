@@ -153,15 +153,12 @@ export function sendTaskPromptIntent(
     message,
   })
     .then((result) => {
-      dependencies.dispatch({
-        type: "snapshot",
-        snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
-        intent: "refresh",
-      });
+      const acceptedSnapshot = mapProtocolTaskSnapshot(result.task).snapshot;
       dependencies.dispatch({
         type: "taskSend:accepted",
         taskId,
         userMessageId: result.userMessageId,
+        snapshot: acceptedSnapshot,
       });
     })
     .catch((error) => {
@@ -379,12 +376,13 @@ export function sendTaskQueueMessageNowIntent(
       queueRevision: snapshot.message_queue?.revision ?? 0,
     },
   }).then((result) => {
+    const acceptedSnapshot = mapProtocolTaskSnapshot(result.task).snapshot;
     dependencies.dispatch({
-      type: "snapshot",
-      snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
-      intent: "refresh",
+      type: "taskSend:accepted",
+      taskId,
+      userMessageId: result.userMessageId,
+      snapshot: acceptedSnapshot,
     });
-    dependencies.dispatch({ type: "taskSend:accepted", taskId, userMessageId: result.userMessageId });
   }).catch((error) => {
     dependencies.dispatch({
       type: "taskInput:error",

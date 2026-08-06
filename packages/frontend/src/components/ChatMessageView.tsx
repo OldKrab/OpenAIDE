@@ -14,6 +14,7 @@ import { UserMessageAttachments } from "./UserMessageAttachments";
 import { useLiveMessagePresentation } from "./useLiveMessagePresentation";
 import { currentFrontendShell } from "../services/frontendShell";
 import { ClosedPlanView, CompletedPlanView } from "./AgentPlan";
+import { presentThoughtMarkdown } from "./thoughtPresentation";
 
 export { firstToolPath } from "../state/toolDetailsViewModel";
 
@@ -226,7 +227,7 @@ function AgentMessageParts({
       className={contentProps.muted ? "chat-thought" : "chat-agent"}
       key={index}
       streaming={streaming && index === parts.length - 1}
-      text={part.text}
+      text={contentProps.muted ? presentThoughtMarkdown(part.text) : part.text}
     />
   ) : (
     <AgentContentMessage content={part} key={index} {...contentProps} />

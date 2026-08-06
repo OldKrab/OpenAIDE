@@ -1061,6 +1061,29 @@ fn replayed_text_without_source_ids_has_restart_stable_identity() {
 }
 
 #[test]
+fn codex_replay_discards_anonymous_copies_of_sourced_thought_chunks() {
+    let thought = |text: &str, source_id: Option<&str>| {
+        let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text)));
+        SessionUpdate::AgentThoughtChunk(match source_id {
+            Some(source_id) => chunk.message_id(source_id),
+            None => chunk,
+        })
+    };
+    let messages = ReplayProjection::for_agent("codex", "session-duplicate-thought").project(vec![
+        thought("**Assessing signing**", Some("item-90")),
+        thought("**Deferring signing**", Some("item-90")),
+        thought("**Assessing signing**", None),
+        thought("**Deferring signing**", None),
+    ]);
+
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        agent_message_text(&messages[0], AgentMessageRole::Thought),
+        Some("**Assessing signing****Deferring signing**")
+    );
+}
+
+#[test]
 fn replay_continues_a_sourced_message_across_tool_activity() {
     let messages = ReplayProjection::new("session-source-tool-source").project(vec![
         SessionUpdate::AgentMessageChunk(

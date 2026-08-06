@@ -2107,7 +2107,11 @@ describe("app controller callbacks", () => {
 
   it("sends text-only task prompts through BackendConnection when available", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task_1", "Sent") }));
+    const request = vi.fn(async () => ({
+      task: protocolTaskSnapshot("task_1", "Sent"),
+      turnId: "turn-1",
+      userMessageId: "message-1",
+    }));
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
     state.taskInputs.task_1 = { prompt: "Continue", context: [] };
@@ -2128,7 +2132,12 @@ describe("app controller callbacks", () => {
       taskId: "task_1",
       input: { prompt: "Continue", context: [] },
     });
-    expect(dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+    expect(dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      type: "taskSend:accepted",
+      taskId: "task_1",
+      userMessageId: "message-1",
+      snapshot: expect.any(Object),
+    }));
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
