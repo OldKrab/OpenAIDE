@@ -843,6 +843,42 @@ describe("app reducer composer state", () => {
     });
   });
 
+  it("moves an accepted message into Chat while clearing its Composer atomically", () => {
+    let state = createInitialState();
+    state = { ...state, activeTaskId: "task_1" };
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [userMessage("older-message", "Earlier")]),
+    });
+    state = appReducer(state, {
+      type: "taskInput:submit",
+      taskId: "task_1",
+      input: { prompt: "Accepted follow-up", context: [] },
+    });
+
+    const accepted = snapshot("task_1", [
+      userMessage("older-message", "Earlier"),
+      userMessage("accepted-message", "Accepted follow-up"),
+    ], 2);
+    state = appReducer(state, {
+      type: "taskSend:accepted",
+      taskId: "task_1",
+      userMessageId: "accepted-message" as never,
+      snapshot: accepted,
+    });
+
+    expect(state.taskInputs.task_1).toEqual({
+      prompt: "",
+      context: [],
+      acceptedUserMessageId: "accepted-message",
+    });
+    expect(state.snapshot?.chat.items.map((item) => item.message_id)).toEqual([
+      "older-message",
+      "accepted-message",
+    ]);
+  });
+
   it("clears only the pending composer draft accepted into the queue", () => {
     let state = createInitialState();
     state = appReducer(state, {

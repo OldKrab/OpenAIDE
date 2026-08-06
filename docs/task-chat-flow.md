@@ -237,6 +237,8 @@ App Server materializes the acceptance response from durable state before ACP pr
 
 Frontend remains on the New Task surface in submitting state until it reconciles acceptance. Because the UI permits only one in-flight Send per Task, success clears that Task's Composer directly and asks the App Shell to route to the now-visible Task id. It does not compare message text, message id, idempotency key, or a settlement key to clear the acknowledged Composer. Rejection leaves the Composer unchanged and does not route to the Task page.
 
+For an existing Task, the acceptance response's canonical Task snapshot and Composer settlement are applied in one Frontend state transition. The accepted User message therefore appears in Chat in the same rendered transition in which Composer clears; a later subscription snapshot may reconcile the same Task revision but must not create a second User message.
+
 First Send performs no history synchronization because the New Task has no Agent conversation history. Acceptance or scheduling alone never publishes `historySync: syncing`.
 
 If Native Session acquisition for that accepted first prompt proves that the empty session no longer exists, `NativeSessionService` creates a fresh session, reapplies remembered Configuration Options, atomically replaces the missing binding while the Task still contains only the accepted User message and running marker, and starts the prompt once. Chat receives no interruption for the recovered missing-session condition. Missing sessions on Tasks that already have Agent history are not replaced because doing so would silently discard conversation context.

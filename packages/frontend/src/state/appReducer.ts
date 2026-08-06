@@ -116,7 +116,13 @@ type AppActionPayload =
   | { type: "taskInput:clear"; taskId: string }
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:sendError"; taskId: string; message?: string }
-  | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
+  | {
+      type: "taskSend:accepted";
+      taskId: string;
+      userMessageId: import("@openaide/app-server-client").MessageId;
+      /** Canonical Task state returned with an existing-Task Send acceptance. */
+      snapshot?: TaskSnapshot;
+    }
   | { type: "taskQueue:accepted"; taskId: string; queueRevision: number }
   | { type: "taskQueue:take:start"; taskId: string; item: import("@openaide/app-shell-contracts").QueuedMessage; index: number }
   | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string }
@@ -210,6 +216,18 @@ type GlobalAction = Extract<
 export function appReducer(state: AppState, action: AppAction): AppState {
   if (action.replicaEpoch !== undefined && action.replicaEpoch < state.appServerReplicaEpoch) {
     return state;
+  }
+  if (action.type === "taskSend:accepted" && action.snapshot) {
+    // Apply the canonical Chat projection and Composer settlement as one
+    // Frontend transition. This prevents an accepted User message from
+    // disappearing from Composer before it is visible in Chat.
+    const interactionState = reduceTaskInteractionState(state, action) ?? state;
+    return reduceGlobalState(interactionState, {
+      type: "snapshot",
+      snapshot: action.snapshot,
+      intent: "refresh",
+      replicaEpoch: action.replicaEpoch,
+    });
   }
   const domainState =
     reduceNewTaskState(state, action)

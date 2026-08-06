@@ -15,7 +15,12 @@ type TaskInteractionAction =
   | { type: "taskInput:clear"; taskId: string }
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:sendError"; taskId: string; message?: string }
-  | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
+  | {
+      type: "taskSend:accepted";
+      taskId: string;
+      userMessageId: import("@openaide/app-server-client").MessageId;
+      snapshot?: import("@openaide/app-shell-contracts").TaskSnapshot;
+    }
   | { type: "taskQueue:accepted"; taskId: string; queueRevision: number }
   | { type: "taskQueue:take:start"; taskId: string; item: import("@openaide/app-shell-contracts").QueuedMessage; index: number }
   | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string }
