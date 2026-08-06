@@ -347,6 +347,13 @@ impl TaskProductApi {
     ) -> Result<(), ProtocolError> {
         let task_id = existing_task.task_id.clone();
         let turn_id = committed_send.turn_id().clone();
+        crate::logging::info(
+            "task_primary_prompt_start_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+            }),
+        );
         let result = match self
             .native_sessions
             .start_primary_prompt(PrimaryPromptRequest {
@@ -358,6 +365,14 @@ impl TaskProductApi {
             Ok(()) => Ok(()),
             Err(error) => committed_send.fail(self, error).map(|_| ()),
         };
+        crate::logging::info(
+            "task_primary_prompt_start_completed",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+                "outcome": if result.is_ok() { "started" } else { "failed" },
+            }),
+        );
         // Ownership must retire even when recovery itself reports a storage error;
         // otherwise every later Send is rejected by stale in-memory admission state.
         self.turn_acceptance
