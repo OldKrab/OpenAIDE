@@ -17,7 +17,7 @@ The preview is not justified as a second presentation of runtime state already v
 - The production implementation follows `packages/frontend/prototypes/sidebar-worktree-context`, variant A.
 - Every Task remains a single compact row on desktop and mobile. Titles truncate rather than wrap.
 - Only Tasks backed by linked worktrees receive a quiet Git worktree icon in the trailing status area. Project-root Tasks receive no additional marker. The icon has an accessible label and tooltip and does not replace runtime status.
-- On pointer devices, dwelling on a Task for 550 ms opens a passive rich preview. While any preview is open, moving directly to another Task updates it immediately.
+- On pointer devices, the first dwell on a Task or Project for 750 ms opens a passive rich preview. While any sidebar preview is open, moving directly between Task and Project rows updates it immediately, including cross-type movement.
 - The Task row and preview form one hover region. Moving from the row into the preview keeps it open; leaving both closes it after a short grace period. Keyboard focus opens immediately, Escape and outside click dismiss, and opening the Task clears pending timers.
 - The preview shows Task identity, Project, Task Workspace, branch or detached revision, runtime state, and useful actions supported by authoritative summary data. Hover never opens the Task, restores a Native Session, fetches Chat, or acknowledges attention.
 - Mobile does not use hover preview. The existing Task `…` action opens a compact action sheet. **Task details** reveals Project, Task Workspace or Project root, branch when present, and status; Back returns to actions, and backdrop, close, or Escape dismisses it.
@@ -27,7 +27,7 @@ The preview is not justified as a second presentation of runtime state already v
 - The production implementation follows `packages/frontend/prototypes/unavailable-task-context` for worktree-unavailable and Project-unavailable states.
 - Workspace availability is independent of Task runtime status. A missing worktree or Project never marks an otherwise idle Task as failed in Task Navigation or the Task header.
 - Saved Task history remains readable. The composer is visible but cannot edit or Send while its Task Workspace is unavailable.
-- A missing worktree presents Refresh and **Manage worktrees** recovery. A missing Project presents **Project settings** and **Reconnect folder** recovery.
+- A missing worktree presents Refresh and **Manage worktrees** recovery. An unavailable Project folder presents **Check again** and **Remove project…** recovery. OpenAIDE does not reconnect the Project to a different path or migrate its Tasks.
 - Desktop uses one quiet inline notice below the Task header. Mobile keeps the Task header to one line and places the same notice and actions below it without horizontal overflow.
 
 ## Evidence and constraints

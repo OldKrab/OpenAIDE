@@ -4,6 +4,7 @@ import type { ProjectOption } from "../state/composerOptions";
 export type SidebarProjectGroup = {
   key: string;
   label: string;
+  workspaceRoot?: string;
   tasks: TaskSummary[];
   nativeSessions: AgentListedSession[];
 };
@@ -23,12 +24,10 @@ export function groupedTasks(
   const projectLabels = new Map(projects.map((project) => [project.projectId, project.label]));
   const groups = new Map<string, SidebarProjectGroup>();
   for (const project of projects) {
-    groups.set(project.projectId, { key: project.projectId, label: project.label, tasks: [], nativeSessions: [] });
-  }
-  if (options.includeProjectId && !groups.has(options.includeProjectId)) {
-    groups.set(options.includeProjectId, {
-      key: options.includeProjectId,
-      label: projectLabels.get(options.includeProjectId) ?? "Current workspace",
+    groups.set(project.projectId, {
+      key: project.projectId,
+      label: project.label,
+      workspaceRoot: project.workspaceRoot,
       tasks: [],
       nativeSessions: [],
     });

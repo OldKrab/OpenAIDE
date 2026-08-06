@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
+        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -57,6 +57,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;\n");
+    output.push_str("  [PROJECT_ADD]: ProjectAddParams;\n");
+    output.push_str("  [PROJECT_RENAME]: ProjectRenameParams;\n");
+    output.push_str("  [PROJECT_REMOVE]: ProjectRemoveParams;\n");
+    output.push_str("  [PROJECT_REFRESH]: ProjectRefreshParams;\n");
     output.push_str("  [WORKTREE_REFRESH]: WorktreeRefreshParams;\n");
     output.push_str("  [WORKTREE_CREATE]: WorktreeCreateParams;\n");
     output.push_str("  [WORKTREE_RECREATE]: WorktreeRecreateParams;\n");
@@ -143,6 +147,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;\n");
+    output.push_str("  [PROJECT_ADD]: ProjectAddResult;\n");
+    output.push_str("  [PROJECT_RENAME]: ProjectRenameResult;\n");
+    output.push_str("  [PROJECT_REMOVE]: ProjectRemoveResult;\n");
+    output.push_str("  [PROJECT_REFRESH]: ProjectRefreshResult;\n");
     output.push_str("  [WORKTREE_REFRESH]: WorktreeRefreshResult;\n");
     output.push_str("  [WORKTREE_CREATE]: WorktreeCreateResult;\n");
     output.push_str("  [WORKTREE_RECREATE]: WorktreeRecreateResult;\n");
@@ -308,6 +316,21 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str(
         "export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;\n",
     );
+    output.push_str("export type ProjectAddRequest = TypedClientRequest<typeof PROJECT_ADD>;\n");
+    output.push_str("export type ProjectAddResponse = ResponseEnvelope<ProjectAddResult>;\n");
+    output.push_str(
+        "export type ProjectRenameRequest = TypedClientRequest<typeof PROJECT_RENAME>;\n",
+    );
+    output.push_str("export type ProjectRenameResponse = ResponseEnvelope<ProjectRenameResult>;\n");
+    output.push_str(
+        "export type ProjectRemoveRequest = TypedClientRequest<typeof PROJECT_REMOVE>;\n",
+    );
+    output.push_str("export type ProjectRemoveResponse = ResponseEnvelope<ProjectRemoveResult>;\n");
+    output.push_str(
+        "export type ProjectRefreshRequest = TypedClientRequest<typeof PROJECT_REFRESH>;\n",
+    );
+    output
+        .push_str("export type ProjectRefreshResponse = ResponseEnvelope<ProjectRefreshResult>;\n");
     output.push_str(
         "export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;\n",
     );

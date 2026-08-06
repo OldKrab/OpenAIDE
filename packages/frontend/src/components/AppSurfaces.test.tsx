@@ -1,4 +1,5 @@
 import { act, create } from "react-test-renderer";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppController } from "./appController";
@@ -117,6 +118,23 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("opens the Web Project folder dialog from the sidebar footer", async () => {
+    const controller = controllerFor("navigation");
+    controller.bootstrap = { surface: "navigation", shell: WEB_SHELL };
+    controller.callbacks.newTask.workspaceBrowser = {
+      ownerKey: "project-browser",
+      listDirectory: vi.fn(),
+      listRoots: vi.fn(async () => [{ label: "Computer", path: "/" }]),
+    };
+    const tree = render(controller);
+    const sidebar = latestMockProps<ComponentProps<typeof import("./Sidebar").Sidebar>>(surfaceMocks.sidebar);
+
+    await act(async () => sidebar?.onAddProject?.());
+
+    expect(tree.root.findByProps({ "aria-label": "Add Project" })).toBeDefined();
+    expect(controller.callbacks.newTask.workspaceBrowser.listRoots).toHaveBeenCalledOnce();
+  });
+
   it("opens Project Worktree Management in the Worktrees Settings tab", () => {
     surfaceMocks.renderRealSidebar = true;
     const controller = controllerFor("navigation");
@@ -130,6 +148,78 @@ describe("AppSurfaces callback wiring", () => {
     expect(controller.callbacks.navigation.openSettings)
       .toHaveBeenCalledWith(undefined, undefined, "project_1", "worktrees");
     expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
+  });
+
+  it("uses the sidebar Project count in removal confirmation", async () => {
+    surfaceMocks.renderRealSidebar = true;
+    const controller = controllerFor("navigation");
+    controller.state.projects = [{
+      projectId: "project_1",
+      label: "OpenAIDE",
+      workspaceRoot: "/workspace/OpenAIDE",
+    }];
+    controller.state.newTask.nativeSessions.items = Array.from({ length: 6 }, (_, index) => ({
+      agent_id: "codex",
+      agent_name: "Codex",
+      cwd: "/workspace/OpenAIDE",
+      project_id: "project_1",
+      session_id: `session_${index}`,
+      title: `Session ${index}`,
+    }));
+    controller.intents.newTask.loadProjectTasks = vi.fn(async () => []);
+    const tree = render(controller);
+
+    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
+    await act(async () => {
+      tree.root.findAllByType("button")
+        .find((button) => button.children.includes("Remove Project"))?.props.onClick();
+      await Promise.resolve();
+    });
+
+    const dialog = tree.root.findByProps({ "aria-label": "Remove OpenAIDE" });
+    expect(dialog.findByType("p").children.join(""))
+      .toBe("6 Tasks will be removed from OpenAIDE. They will remain in their original Agents.");
+  });
+
+  it("opens New Task in the adjacent Project after removing the routed Task's Project", async () => {
+    surfaceMocks.renderRealSidebar = true;
+    const controller = webControllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_1",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    controller.state.projects = [
+      { projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE" },
+      { projectId: "project_2", label: "Next", workspaceRoot: "/workspace/Next" },
+    ];
+    const routedTask = snapshot("task_1").task;
+    routedTask.project_id = "project_1";
+    routedTask.project_label = "OpenAIDE";
+    controller.visibleTasks = [routedTask];
+    controller.intents.newTask.loadProjectTasks = vi.fn(async () => [routedTask]);
+    controller.intents.projects.remove = vi.fn(async () => 1);
+    const tree = render(controller);
+
+    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
+    await act(async () => {
+      tree.root.findAllByType("button")
+        .find((button) => button.children.includes("Remove Project"))?.props.onClick();
+      await Promise.resolve();
+    });
+    const dialog = tree.root.findByProps({ "aria-label": "Remove OpenAIDE" });
+    await act(async () => {
+      await dialog.findAllByType("button")
+        .find((button) => button.children.includes("Remove Project"))?.props.onClick();
+    });
+
+    expect(controller.intents.projects.remove).toHaveBeenCalledWith("project_1");
+    expect(controller.intents.newTask.selectProject).toHaveBeenCalledWith(controller.state.projects[1]);
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project_2");
   });
 
   it("groups VS Code Task Navigation even for one Project", () => {
@@ -1288,6 +1378,12 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         renameWorktree: vi.fn(),
         openFolder: vi.fn(),
         openTask: vi.fn(),
+      },
+      projects: {
+        add: vi.fn(),
+        remove: vi.fn(),
+        refresh: vi.fn(),
+        rename: vi.fn(),
       },
       task: {
         changePrompt: vi.fn(),

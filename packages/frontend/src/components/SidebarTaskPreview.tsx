@@ -22,6 +22,9 @@ export type SidebarPreviewContent = PreviewContentBase & (
       agentName: string;
       kind: "agent_history";
     }
+  | {
+      kind: "project";
+    }
 );
 
 type Preview = { anchor: HTMLElement; content: SidebarPreviewContent };
@@ -31,23 +34,62 @@ type PreviewContext = {
   leave: () => void;
 };
 
-const INITIAL_PREVIEW_DELAY_MS = 1_000;
+/** Coordinates hover-preview ownership across different sidebar row types. */
+export type SidebarPreviewCoordinator = {
+  closed: (owner: symbol) => void;
+  enter: (owner: symbol) => boolean;
+  opened: (owner: symbol, dismiss: () => void) => void;
+};
+
+export function createSidebarPreviewCoordinator(): SidebarPreviewCoordinator {
+  let active: { dismiss: () => void; owner: symbol } | undefined;
+  return {
+    closed(owner) {
+      if (active?.owner === owner) active = undefined;
+    },
+    enter(owner) {
+      if (!active) return false;
+      if (active.owner !== owner) {
+        const previous = active;
+        active = undefined;
+        previous.dismiss();
+      }
+      return true;
+    },
+    opened(owner, dismiss) {
+      active = { dismiss, owner };
+    },
+  };
+}
+
+export const SIDEBAR_PREVIEW_DELAY_MS = 750;
 
 const Context = createContext<PreviewContext | undefined>(undefined);
 
-export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }) {
+export function SidebarTaskPreviewProvider({
+  children,
+  coordinator,
+}: {
+  children: ReactNode;
+  coordinator?: SidebarPreviewCoordinator;
+}) {
   const [preview, setPreview] = useState<Preview>();
   const previewRef = useRef<HTMLDivElement>(null);
   const pendingRowRef = useRef<HTMLElement | undefined>(undefined);
   const showTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previewOpen = useRef(false);
+  const localCoordinator = useRef<SidebarPreviewCoordinator | undefined>(undefined);
+  const owner = useRef(Symbol("task-preview")).current;
+  if (!localCoordinator.current) localCoordinator.current = createSidebarPreviewCoordinator();
+  const previewCoordinator = coordinator ?? localCoordinator.current;
   previewOpen.current = preview !== undefined;
 
   useEffect(() => () => {
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
-  }, []);
+    previewCoordinator.closed(owner);
+  }, [owner, previewCoordinator]);
 
   const enter = (content: SidebarPreviewContent, row: HTMLElement, immediate = false) => {
     // VS Code navigation cannot place a rich preview beside its webview, so
@@ -56,6 +98,7 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
       && document.body?.dataset.shell === "vscodeExtension") return;
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) return;
     if (!immediate && pendingRowRef.current === row) return;
+    const coordinatedImmediate = previewCoordinator.enter(owner);
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
     pendingRowRef.current = row;
@@ -65,21 +108,26 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
         anchor: row,
         content,
       });
+      previewCoordinator.opened(owner, dismiss);
     };
-    if (immediate || previewOpen.current) open();
-    else showTimer.current = setTimeout(open, INITIAL_PREVIEW_DELAY_MS);
+    if (immediate || previewOpen.current || coordinatedImmediate) open();
+    else showTimer.current = setTimeout(open, SIDEBAR_PREVIEW_DELAY_MS);
   };
   const leave = () => {
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
     pendingRowRef.current = undefined;
-    hideTimer.current = setTimeout(() => setPreview(undefined), 140);
+    hideTimer.current = setTimeout(() => {
+      setPreview(undefined);
+      previewCoordinator.closed(owner);
+    }, 140);
   };
   const dismiss = () => {
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
     pendingRowRef.current = undefined;
     setPreview(undefined);
+    previewCoordinator.closed(owner);
   };
 
   useEffect(() => {
@@ -87,21 +135,27 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
     const dismiss = (event: PointerEvent) => {
       if (previewRef.current?.contains(event.target as Node)) return;
       setPreview(undefined);
+      previewCoordinator.closed(owner);
     };
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPreview(undefined);
+      if (event.key === "Escape") {
+        setPreview(undefined);
+        previewCoordinator.closed(owner);
+      }
     };
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
-  }, [preview]);
+  }, [owner, preview, previewCoordinator]);
 
   return <Context.Provider value={{ dismiss, enter, leave }}>
     {children}
     {preview ? <PopupHoverSurface anchor={preview.anchor} className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} containerRef={previewRef} semanticRole="dialog">
       {preview.content.kind === "task"
         ? <TaskPreviewDetails content={preview.content} />
-        : <AgentHistoryPreviewDetails content={preview.content} />}
+        : preview.content.kind === "project"
+          ? <ProjectPreviewDetails content={preview.content} />
+          : <AgentHistoryPreviewDetails content={preview.content} />}
     </PopupHoverSurface> : null}
   </Context.Provider>;
 }
@@ -161,6 +215,17 @@ export function TaskPreviewDetails({
       {content.workspaceKind === "worktree" ? <GitBranch size={15} /> : <FolderRoot size={15} />}
       <span><small>{content.workspaceKind === "worktree" ? "Worktree" : "Location"}</small><strong>{content.workspaceLabel}</strong>{content.gitRef ? <em>{content.gitRef}</em> : null}</span>
     </div>
+  </>;
+}
+
+function ProjectPreviewDetails({
+  content,
+}: {
+  content: Extract<SidebarPreviewContent, { kind: "project" }>;
+}) {
+  return <>
+    <header><ScrollablePreviewTitle title={content.title} /><span className="task-preview-state">{content.state}</span></header>
+    <div><FolderRoot size={15} /><span><small>Original path</small><strong>{content.workspaceLabel}</strong></span></div>
   </>;
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
 import {
   TASK_ACQUIRE,
   TASK_ACQUIRE_IN_WORKTREE,
+  TASK_RELEASE,
   type TaskId,
 } from "@openaide/app-server-client";
 import type { AppAction } from "../state/appReducer";
@@ -19,6 +20,10 @@ import {
 } from "../state/newTaskPreparationContext";
 import type { NewTaskController } from "./newTaskController";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
+import {
+  readRetainedPreparedTaskLease,
+  retainPreparedTaskLease,
+} from "../state/newTaskSelectionDefaults";
 
 export type PendingNewTaskPreparation = {
   key: string;
@@ -29,6 +34,7 @@ type NewTaskPreparationOptions = {
   backendConnection?: AppControllerBackendConnection;
   backendReady: boolean;
   bootstrap: WebviewBootstrap;
+  clientInstanceId: string;
   attachmentResources?: ComposerAttachmentResourceOwner;
   asyncOperations: AsyncOperationOwner;
   dispatch: Dispatch<AppAction>;
@@ -46,6 +52,7 @@ export function useNewTaskPreparation({
   backendConnection,
   backendReady,
   bootstrap,
+  clientInstanceId,
   dispatch,
   pendingPreparation,
   newTaskController,
@@ -120,6 +127,9 @@ export function useNewTaskPreparation({
 
     const request = backendConnection.request;
     const previousPreparation = pendingPreparation.current?.promise;
+    const retainedLease = state.appServerStateRootId
+      ? readRetainedPreparedTaskLease(state.appServerStateRootId, clientInstanceId)
+      : undefined;
     const staleTaskId = retainedSnapshot && !preparedTaskMatches
       ? retainedSnapshot.task.task_id as TaskId
       : undefined;
@@ -138,6 +148,11 @@ export function useNewTaskPreparation({
         throw new SupersededPreparation();
       }
       if (staleTaskId && staleTaskId !== replacementTaskId) await discard(staleTaskId);
+      if (!staleTaskId && retainedLease && retainedLease.preparationKey !== preparationKey) {
+        // Reload can preserve the stable client and selected context while losing the
+        // in-memory snapshot. Release the retained lease before acquiring another key.
+        await request(TASK_RELEASE, { taskId: retainedLease.taskId as TaskId });
+      }
       if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
@@ -151,6 +166,12 @@ export function useNewTaskPreparation({
         throw new SupersededPreparation();
       }
       const taskId = task.task.taskId as TaskId;
+      if (state.appServerStateRootId) {
+        retainPreparedTaskLease(state.appServerStateRootId, clientInstanceId, {
+          preparationKey,
+          taskId,
+        });
+      }
       const cancelledAttempt = startAttempt.current?.cancelled ? startAttempt.current : undefined;
       if (cancelledAttempt) {
         cancelledAttempt.taskId = taskId;
@@ -209,6 +230,7 @@ export function useNewTaskPreparation({
     asyncOperations,
     bootstrap.surface,
     bootstrap.taskId,
+    clientInstanceId,
     dispatch,
     pendingPreparation,
     preparationKey,

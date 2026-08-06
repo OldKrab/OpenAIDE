@@ -8,6 +8,7 @@ mod legacy_task_cleanup;
 pub mod mcp_servers;
 pub mod message_store;
 pub mod new_task_defaults;
+pub(crate) mod projects;
 pub mod records;
 pub mod root;
 pub mod task_journal;
@@ -37,6 +38,7 @@ struct StoreInner {
     recovery: RecoveryClassification,
     open_guard: StorageOpenGuard,
     settings_write_lock: Mutex<()>,
+    project_write_lock: Mutex<()>,
     worktree_write_lock: Mutex<()>,
     /// Sole durable owner for Task, Chat, and Tool-detail state.
     task_journal: task_journal::TaskJournalStore,
@@ -122,6 +124,7 @@ impl Store {
                 recovery: open.recovery,
                 open_guard: open.guard,
                 settings_write_lock: Mutex::new(()),
+                project_write_lock: Mutex::new(()),
                 worktree_write_lock: Mutex::new(()),
                 task_journal,
                 task_commit_handler,
@@ -212,6 +215,13 @@ impl Store {
             .worktree_write_lock
             .lock()
             .expect("worktree catalog lock poisoned")
+    }
+
+    pub(crate) fn lock_project_write(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .project_write_lock
+            .lock()
+            .expect("project catalog lock poisoned")
     }
 
     pub fn task_dir(&self, task_id: &str) -> Result<PathBuf, RuntimeError> {

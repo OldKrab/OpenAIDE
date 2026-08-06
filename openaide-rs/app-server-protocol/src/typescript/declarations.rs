@@ -51,6 +51,10 @@ use crate::ids::{
     FileBrowserRootId, MessageId, ProjectId, QueuedMessageId, RequestId, ServerId, StateRootId,
     TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId, WorktreeRepositoryId,
 };
+use crate::project::{
+    ProjectAddParams, ProjectAddResult, ProjectRefreshParams, ProjectRefreshResult,
+    ProjectRemoveParams, ProjectRemoveResult, ProjectRenameParams, ProjectRenameResult,
+};
 use crate::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
@@ -288,6 +292,14 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<WorkspaceBrowserRoot>(output, config);
     push_decl::<WorkspaceListDirectoryParams>(output, config);
     push_decl::<WorkspaceListDirectoryResult>(output, config);
+    push_decl::<ProjectAddParams>(output, config);
+    push_decl::<ProjectAddResult>(output, config);
+    push_decl::<ProjectRenameParams>(output, config);
+    push_decl::<ProjectRenameResult>(output, config);
+    push_decl::<ProjectRemoveParams>(output, config);
+    push_decl::<ProjectRemoveResult>(output, config);
+    push_decl::<ProjectRefreshParams>(output, config);
+    push_decl::<ProjectRefreshResult>(output, config);
     push_decl::<WorkspaceBrowserDirectory>(output, config);
     push_decl::<WorkspaceBrowserEntry>(output, config);
     push_decl::<WorktreeRepositorySnapshot>(output, config);

@@ -149,6 +149,7 @@ describe("startAppServerStateSubscription", () => {
       type: "taskNavigation",
       archived: false,
       hasMoreProjectIds: [],
+      loadingProjectIds: [],
       refreshError: undefined,
       refreshing: false,
       sessions: [],
@@ -201,6 +202,7 @@ describe("startAppServerStateSubscription", () => {
       type: "taskNavigation",
       archived: false,
       hasMoreProjectIds: [],
+      loadingProjectIds: [],
       refreshError: undefined,
       refreshing: true,
       sessions: [{
@@ -256,6 +258,7 @@ describe("startAppServerStateSubscription", () => {
       type: "taskNavigation",
       archived: true,
       hasMoreProjectIds: [],
+      loadingProjectIds: [],
       refreshError: undefined,
       refreshing: false,
       sessions: [expect.objectContaining({

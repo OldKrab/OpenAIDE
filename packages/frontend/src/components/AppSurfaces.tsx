@@ -10,6 +10,9 @@ import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
+import { ProjectFolderDialog } from "./ProjectFolderDialog";
+import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
+import { currentFrontendShell } from "../services/frontendShell";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -31,6 +34,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
   const [planDrawerOpen, setPlanDrawerOpen] = useState(false);
+  const [projectFolderDialogOpen, setProjectFolderDialogOpen] = useState(false);
+  const [projectToRemove, setProjectToRemove] = useState<{
+    projectId: string;
+    label: string;
+    nativeSessionCount: number;
+    taskCount: number;
+  }>();
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
@@ -87,6 +97,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       }
     : undefined;
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
+  const routedTaskProjectId = bootstrap.surface === "task"
+    ? (renderableTaskSnapshot && renderableTaskSnapshot.task.task_id === bootstrap.taskId
+        ? renderableTaskSnapshot.task.project_id
+        : activeTask && activeTask.task_id === bootstrap.taskId
+          ? activeTask.project_id
+          : visibleTasks.find((task) => task.task_id === bootstrap.taskId)?.project_id)
+    : undefined;
   useEffect(() => setPlanDrawerOpen(false), [renderableTaskSnapshot?.task.task_id]);
   useEffect(() => {
     if (
@@ -116,6 +133,81 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
+  const workspaceBrowser = callbacks.newTask.workspaceBrowser;
+  const projectFolderPicker = currentFrontendShell()?.projects;
+  const finishAddingProject = async (folder: { path: string }) => {
+    const project = await controller.intents.projects.add(folder.path);
+    setProjectFolderDialogOpen(false);
+    controller.intents.newTask.selectProject({
+      projectId: project.projectId,
+      label: project.label,
+      workspaceRoot: project.workspaceRoot,
+      available: project.available,
+      worktreeRepositoryId: project.worktreeRepositoryId ?? undefined,
+      projectWorktreeId: project.projectWorktreeId ?? undefined,
+      worktreeError: project.worktreeError ?? undefined,
+    });
+    callbacks.navigation.openNewTask(project.projectId);
+  };
+  const addProject = workspaceBrowser
+    ? () => setProjectFolderDialogOpen(true)
+    : projectFolderPicker
+      ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
+      : undefined;
+  const projectFolderDialog = projectFolderDialogOpen && workspaceBrowser ? (
+    <ProjectFolderDialog
+      browser={workspaceBrowser}
+      onClose={() => setProjectFolderDialogOpen(false)}
+      onSelect={finishAddingProject}
+    />
+  ) : null;
+  const projectRemoveDialog = projectToRemove ? (
+    <ProjectRemoveDialog
+      onCancel={() => setProjectToRemove(undefined)}
+      onConfirm={async () => {
+        const removedProjectIndex = navigationProjects.findIndex(
+          (project) => project.projectId === projectToRemove.projectId,
+        );
+        const adjacentProject = removedProjectIndex < 0
+          ? undefined
+          : navigationProjects[removedProjectIndex + 1] ?? navigationProjects[removedProjectIndex - 1];
+        const removesRoutedTask = routedTaskProjectId === projectToRemove.projectId;
+        await controller.intents.projects.remove(projectToRemove.projectId);
+        setProjectToRemove(undefined);
+        if (removesRoutedTask) {
+          // The removed Task route is no longer valid. Select its adjacent Project before
+          // routing so New Task never briefly reacquires the removed Project context.
+          if (adjacentProject) controller.intents.newTask.selectProject(adjacentProject);
+          callbacks.navigation.openNewTask(adjacentProject?.projectId);
+        }
+      }}
+      project={projectToRemove}
+    />
+  ) : null;
+  const prepareProjectRemoval = (project: {
+    projectId: string;
+    label: string;
+    nativeSessionCount: number;
+    taskCount: number;
+  }) => {
+    setProjectToRemove(project);
+    void controller.intents.newTask.loadProjectTasks?.(project.projectId).then((tasks) => {
+      setProjectToRemove((current) => current?.projectId === project.projectId
+        ? { ...current, taskCount: tasks.length + current.nativeSessionCount }
+        : current);
+    }).catch(() => {
+      // The confirmation remains usable with the navigation count; removal returns the authoritative count.
+    });
+  };
+  const projectRemovalCounts = (projectId: string) => {
+    const nativeSessionCount = navigation.nativeSessions.items
+      .filter((session) => session.project_id === projectId).length;
+    return {
+      nativeSessionCount,
+      taskCount: visibleTasks.filter((task) => task.project_id === projectId).length
+        + nativeSessionCount,
+    };
+  };
   useEffect(() => {
     if (!mobileNavigationOpen) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -200,9 +292,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
           onArchiveTask={callbacks.navigation.archiveTask}
+          onAddProject={addProject}
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
           onManageWorktrees={manageWorktrees}
+          onRemoveProject={prepareProjectRemoval}
+          onRenameProject={async (projectId, label) => { await controller.intents.projects.rename(projectId, label); }}
           onNewTask={callbacks.navigation.openNewTask}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
           onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
@@ -223,6 +318,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
         />
+        {projectFolderDialog}
+        {projectRemoveDialog}
       </main>
     );
   }
@@ -303,9 +400,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
         nativeSessionProjectId={navigation.newTaskSelection.projectId}
         onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
+        onAddProject={addProject}
         onArchiveTask={callbacks.navigation.archiveTask}
         onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
         onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
+        onRemoveProject={(project) => { closeMobileNavigation({ restoreFocus: false }); prepareProjectRemoval(project); }}
+        onRenameProject={async (projectId, label) => { await controller.intents.projects.rename(projectId, label); }}
         onNewTask={openNewTaskFromNavigation}
         onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
         onOpenTask={closeAfter(callbacks.navigation.openTask)}
@@ -343,6 +443,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           ? undefined
           : { "--mobile-navigation-progress": mobileNavigation.dragProgress } as CSSProperties}
       >
+         {projectFolderDialog}
+         {projectRemoveDialog}
         <header className="mobile-workbench-bar" data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}>
           <button
             aria-expanded={mobileNavigationOpen}
@@ -396,6 +498,16 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               controller={controller}
               focusRequestKey={newTaskFocusRequestKey}
               model={taskSurfaceModel}
+               onAddProject={addProject}
+              onCheckProject={async (projectId) => { await controller.intents.projects.refresh(projectId); }}
+              onRemoveProject={(projectId) => {
+                const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
+                if (project) prepareProjectRemoval({
+                  projectId,
+                  label: project.label,
+                  ...projectRemovalCounts(projectId),
+                });
+               }}
               onPlanDrawerOpenChange={setPlanDrawerOpen}
               planDrawerOpen={planDrawerOpen}
               workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
@@ -412,6 +524,16 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
         model={taskSurfaceModel}
+         onAddProject={addProject}
+        onCheckProject={async (projectId) => { await controller.intents.projects.refresh(projectId); }}
+        onRemoveProject={(projectId) => {
+          const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
+          if (project) prepareProjectRemoval({
+            projectId,
+            label: project.label,
+            ...projectRemovalCounts(projectId),
+          });
+         }}
         onPlanDrawerOpenChange={setPlanDrawerOpen}
         planDrawerOpen={planDrawerOpen}
         workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}

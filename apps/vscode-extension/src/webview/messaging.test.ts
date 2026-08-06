@@ -608,6 +608,30 @@ describe("webview messaging composer routes", () => {
     expect(posted).toEqual([]);
   });
 
+  it("returns a selected Project folder without opening a new VS Code workspace", async () => {
+    const posted: unknown[] = [];
+    vi.mocked(vscode.window.showOpenDialog).mockResolvedValue([
+      { fsPath: "/workspace/project" } as vscode.Uri,
+    ]);
+
+    await handleWebviewMessage(
+      { type: "project.pickFolder", payload: { requestId: "project-pick-1" } } as never,
+      context({}, posted),
+    );
+
+    expect(vscode.window.showOpenDialog).toHaveBeenCalledWith({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "Add Project",
+    });
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+    expect(posted).toEqual([{
+      type: "project.pickFolder.result",
+      payload: { requestId: "project-pick-1", folder: { path: "/workspace/project", label: "project" } },
+    }]);
+  });
+
   it("persists developer settings unlock and returns refreshed runtime settings", async () => {
     const runtime = {
       appServerRequest: vi.fn().mockResolvedValue({

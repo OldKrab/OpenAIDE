@@ -1352,7 +1352,7 @@ fn session_list_result_is_workspace_scoped_and_normalized() {
     let result = agent_list_sessions_result_from_response(
         "codex".to_string(),
         response,
-        &requested_cwd,
+        Some(&requested_cwd),
         Some("prepared-session"),
     );
 
@@ -1370,6 +1370,22 @@ fn session_list_result_is_workspace_scoped_and_normalized() {
         result.sessions[0].updated_at.as_deref(),
         Some("2026-05-18T10:00:00Z")
     );
+}
+
+#[test]
+fn session_list_result_without_a_cwd_keeps_sessions_from_nested_workspaces() {
+    let parent = PathBuf::from("/workspace/projects");
+    let child = parent.join("app");
+    let response = ListSessionsResponse::new(vec![
+        SessionInfo::new("parent-session", parent),
+        SessionInfo::new("child-session", child.clone()),
+    ]);
+
+    let result =
+        agent_list_sessions_result_from_response("codex".to_string(), response, None, None);
+
+    assert_eq!(result.sessions.len(), 2);
+    assert_eq!(result.sessions[1].cwd, child.to_string_lossy());
 }
 
 #[test]
@@ -1438,7 +1454,7 @@ fn session_list_does_not_implicitly_authenticate_or_retry() {
                     .await?;
                 let result = request_session_list(
                     &connection,
-                    requested_cwd.clone(),
+                    Some(requested_cwd.clone()),
                     None,
                     &initialize,
                     Some("codex-login"),

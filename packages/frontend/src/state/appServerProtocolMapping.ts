@@ -41,6 +41,7 @@ export type ProtocolTaskNavigationMapping = {
   tasks: TaskSummary[];
   sessions: AgentListedSession[];
   hasMoreProjectIds: string[];
+  loadingProjectIds: string[];
   refreshing: boolean;
   refreshError?: string;
   activeTaskId?: string;
@@ -109,6 +110,9 @@ export function mapProtocolTaskNavigation(
     sessions,
     hasMoreProjectIds: snapshot.groups
       .filter((group) => group.hasMore)
+      .map((group) => group.projectId),
+    loadingProjectIds: snapshot.groups
+      .filter((group) => group.loading === true)
       .map((group) => group.projectId),
     refreshing: snapshot.refresh.state === "refreshing",
     refreshError: snapshot.refresh.state === "failed" ? snapshot.refresh.message : undefined,

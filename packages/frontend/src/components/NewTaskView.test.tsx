@@ -186,6 +186,32 @@ describe("NewTaskView", () => {
     expect(menuLabels(tree)).toEqual(expect.arrayContaining(["Codex", "OpenCode"]));
   });
 
+  it("omits Isolation when the selected Project does not support worktrees", () => {
+    const state = createInitialState();
+    const project = {
+      projectId: "project_docs",
+      label: "docs",
+      workspaceRoot: "/workspace/docs",
+    };
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+
+    const tree = render(
+      <NewTaskView
+        agents={[{ id: "codex", label: "Codex", description: "Code agent", enabled: true, icon: "openai" }]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Work on docs using Codex");
+    expect(textContent(tree)).not.toContain("No isolation");
+    expect(textContent(tree)).not.toContain("with");
+  });
+
   it("shows the selected Project worktrees after changing New Task Project context", () => {
     let state = createInitialState();
     const webProject = { projectId: "project_web", label: "Web", workspaceRoot: "/workspace/web" };
@@ -246,7 +272,7 @@ describe("NewTaskView", () => {
     act(() => buttonWithText(tree, "Web").props.onClick());
     act(() => buttonWithText(tree, "API").props.onClick());
     act(() => tree.update(view()));
-    act(() => buttonWithText(tree, "Project root").props.onClick());
+    act(() => buttonWithText(tree, "No isolation").props.onClick());
 
     expect(buttonWithText(tree, "API feature")).toBeDefined();
   });
@@ -313,74 +339,6 @@ describe("NewTaskView", () => {
     expect(textContent(tree)).toContain("Loading workspaces.");
   });
 
-  it("accepts a workspace path when no project has been seen before", () => {
-    const state = createInitialState();
-    state.workspaceRootsLoaded = true;
-    const dispatch = vi.fn();
-    const tree = render(
-      <NewTaskView
-        agents={[]}
-        dispatch={dispatch}
-        onSelectConfigOption={vi.fn()}
-        onSubmitTask={vi.fn()}
-        state={state}
-        submitShortcut="mod_enter"
-      />,
-    );
-
-    act(() => buttonWithText(tree, "Choose workspace").props.onClick());
-    act(() => tree.root.findByProps({ id: "new-task-workspace-root" }).props.onChange({ target: { value: "/workspace/new-app" } }));
-    act(() => tree.root.findByProps({ "aria-label": "Use workspace path" }).props.onClick());
-
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:workspace",
-      workspace: {
-        path: "/workspace/new-app",
-        label: "new-app",
-        projectId: "project-fe42cc83da346a18",
-      },
-    });
-  });
-
-  it("accepts a workspace selected from the App Server folder picker", async () => {
-    const state = createInitialState();
-    state.workspaceRootsLoaded = true;
-    const dispatch = vi.fn();
-    const tree = render(
-      <NewTaskView
-        agents={[]}
-        dispatch={dispatch}
-        onSelectConfigOption={vi.fn()}
-        onSubmitTask={vi.fn()}
-        state={state}
-        submitShortcut="mod_enter"
-        workspaceBrowser={workspaceBrowserCallbacks()}
-      />,
-    );
-
-    act(() => buttonWithText(tree, "Choose workspace").props.onClick());
-    await act(async () => {
-      await Promise.resolve();
-    });
-    act(() => buttonWithText(tree, "Workspace").props.onClick());
-    await act(async () => {
-      await Promise.resolve();
-    });
-    act(() => buttonWithText(tree, "new-app").props.onClick());
-    await act(async () => {
-      await Promise.resolve();
-    });
-    act(() => buttonWithText(tree, "Use this folder").props.onClick());
-
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:workspace",
-      workspace: {
-        path: "/workspace/new-app",
-        label: "new-app",
-        projectId: "project-fe42cc83da346a18",
-      },
-    });
-  });
 
   it("allows sending after a new workspace path is selected", () => {
     const state = createInitialState();
@@ -456,6 +414,7 @@ describe("NewTaskView", () => {
     );
 
     const send = tree.root.findByProps({ "aria-label": "Send message" });
+    expect(buttonWithText(tree, "OpenAIDE").props.disabled).toBe(false);
     expect(send.props.disabled).toBe(true);
 
     act(() => send.props.onClick());
@@ -1312,25 +1271,6 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
     searchFiles: vi.fn(async () => ({ taskId: "task-1" as never, state: "ready" as const, paths: [] })),
     listDirectory: vi.fn(async () => ({ directory: { label: "Workspace", rootId: "root-1" as never }, entries: [] })),
     listRoots: vi.fn(async () => [{ label: "Workspace", rootId: "root-1" as never }]),
-  };
-}
-
-function workspaceBrowserCallbacks() {
-  return {
-    ownerKey: "new-task-workspace:test",
-    listRoots: vi.fn(async () => [{ label: "Workspace", path: "/workspace" }]),
-    listDirectory: vi.fn(async (path: string) => {
-      if (path === "/workspace") {
-        return {
-          directory: { label: "Workspace", path: "/workspace", parentPath: "/" },
-          entries: [{ label: "new-app", path: "/workspace/new-app" }],
-        };
-      }
-      return {
-        directory: { label: "new-app", path: "/workspace/new-app", parentPath: "/workspace" },
-        entries: [],
-      };
-    }),
   };
 }
 

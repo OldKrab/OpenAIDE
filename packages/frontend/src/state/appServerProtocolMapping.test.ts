@@ -65,6 +65,23 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.refreshing).toBe(false);
   });
 
+  it("maps Project-scoped discovery independently from the global refresh", () => {
+    const mapping = mapProtocolTaskNavigation({
+      section: "tasks",
+      refresh: { state: "idle" },
+      groups: [{
+        projectId: "project-loading" as ProjectId,
+        projectLabel: "Loading Project",
+        taskCount: 0,
+        entries: [],
+        loading: true,
+      }],
+    }, mappingContext());
+
+    expect(mapping.loadingProjectIds).toEqual(["project-loading"]);
+    expect(mapping.refreshing).toBe(false);
+  });
+
   it("keeps stopping distinct from running", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ status: "stopping" }))).toMatchObject({
       status: "stopping",

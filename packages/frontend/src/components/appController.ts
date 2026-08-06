@@ -25,6 +25,11 @@ import {
   WORKTREE_RENAME,
   WORKTREE_REMOVE,
   WORKTREE_REMOVAL_PREFLIGHT,
+  PROJECT_ADD,
+  PROJECT_REFRESH,
+  PROJECT_REMOVE,
+  PROJECT_RENAME,
+  TASK_NAVIGATION_LOAD_MORE,
   TASK_LIST,
   type ProjectId,
   type AgentId,
@@ -51,6 +56,7 @@ import type { NewTaskViewIntents, NewTaskViewState } from "./NewTaskView";
 import type { TaskViewIntents } from "./TaskView";
 import { mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
 import { useNativeSessionRouteLifecycle } from "./useNativeSessionRouteLifecycle";
+import { initialTaskNavigationRowsPerProject } from "../state/taskNavigationPolicy";
 
 /** Internal workflow assembly exposed only to the controller lifecycle tests. */
 export type AppControllerTestHarness = {
@@ -107,6 +113,12 @@ export type AppController = {
   callbacks: AppControllerCallbacks;
   intents: {
     newTask: NewTaskViewIntents;
+    projects: {
+      add: (workspaceRoot: string) => Promise<import("@openaide/app-server-client").ProjectSummary>;
+      remove: (projectId: string) => Promise<number>;
+      refresh: (projectId: string) => Promise<import("@openaide/app-server-client").ProjectSummary>;
+      rename: (projectId: string, label: string) => Promise<import("@openaide/app-server-client").ProjectSummary>;
+    };
     task: TaskViewIntents;
   };
   preferences: AppPreferencesRecord;
@@ -480,6 +492,39 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
             mapProtocolTaskSummary(task, Math.max(active.revision, archived.revision), context));
         },
         openTask: (taskId) => renderState.callbacks.navigation.openTask(taskId),
+      },
+      projects: {
+        add: async (workspaceRoot) => {
+          if (!request) throw new Error("App Server connection unavailable.");
+          const project = (await request(PROJECT_ADD, { workspaceRoot })).project;
+          const nextProjectCount = state.projects.some((candidate) => candidate.projectId === project.projectId)
+            ? state.projects.length
+            : state.projects.length + 1;
+          // Project creation should finish as soon as the Project exists. Discovery continues
+          // in the background so the sidebar can render the Project-level loading state.
+          void request(TASK_NAVIGATION_LOAD_MORE, {
+            projectId: project.projectId,
+            targetRowCount: initialTaskNavigationRowsPerProject(nextProjectCount),
+          }).catch((error: unknown) => {
+            console.warn("[OpenAIDE] Initial Project task discovery failed", {
+              error,
+              projectId: project.projectId,
+            });
+          });
+          return project;
+        },
+        rename: async (projectId, label) => {
+          if (!request) throw new Error("App Server connection unavailable.");
+          return (await request(PROJECT_RENAME, { projectId: projectId as ProjectId, label })).project;
+        },
+        remove: async (projectId) => {
+          if (!request) throw new Error("App Server connection unavailable.");
+          return (await request(PROJECT_REMOVE, { projectId: projectId as ProjectId })).removedTaskCount;
+        },
+        refresh: async (projectId) => {
+          if (!request) throw new Error("App Server connection unavailable.");
+          return (await request(PROJECT_REFRESH, { projectId: projectId as ProjectId })).project;
+        },
       },
       task: {
         refreshWorkspace: async () => {

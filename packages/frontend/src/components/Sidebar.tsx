@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import { Archive, ArrowLeft, Plus, RefreshCcw, Search, Settings } from "lucide-react";
+import { Archive, ArrowLeft, FolderPlus, Plus, RefreshCcw, Search, Settings } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
 import type { AppState } from "../state/store";
@@ -24,8 +24,16 @@ type SidebarProps = {
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
+  onAddProject?: () => void;
   onLoadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   onManageWorktrees?: (projectId: string) => void;
+  onRemoveProject?: (project: {
+    projectId: string;
+    label: string;
+    nativeSessionCount: number;
+    taskCount: number;
+  }) => void;
+  onRenameProject?: (projectId: string, label: string) => Promise<void>;
   onNewTask: (projectId?: string) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenWorkspaceFolder?: () => void;
@@ -65,8 +73,11 @@ export const Sidebar = memo(function Sidebar({
   nativeSessionAgentName,
   nativeSessionProjectId,
   onArchiveNativeSession,
+  onAddProject,
   onLoadNativeSessions,
   onManageWorktrees,
+  onRemoveProject,
+  onRenameProject,
   onNewTask,
   onOpenNativeSession,
   onOpenWorkspaceFolder,
@@ -144,6 +155,7 @@ export const Sidebar = memo(function Sidebar({
   const showEmptyState = !taskListError && (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
+  const noProjects = groupByProject && projects.length === 0;
 
   return (
     <aside
@@ -162,7 +174,7 @@ export const Sidebar = memo(function Sidebar({
         </div>
       ) : null}
       <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
-        {!showArchived ? <button type="button" onClick={() => onNewTask()}>
+        {!showArchived ? <button disabled={noProjects} type="button" onClick={() => onNewTask()}>
           <Plus size={15} />
           New task
         </button> : null}
@@ -170,6 +182,7 @@ export const Sidebar = memo(function Sidebar({
           <Search size={15} />
           <input
             aria-label={showArchived ? "Search archive" : "Search tasks"}
+            disabled={noProjects}
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={showArchived ? "Search archive" : "Search"}
             value={searchQuery}
@@ -240,6 +253,9 @@ export const Sidebar = memo(function Sidebar({
                 nativeSessionsHaveMore={
                   !showArchived && nativeSessions.hasMoreProjectIds?.includes(group.key) === true
                 }
+                loading={
+                  !showArchived && nativeSessions.loadingProjectIds?.includes(group.key) === true
+                }
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
                 onArchiveNativeSession={onArchiveNativeSession}
                 onArchiveTask={onArchiveTask}
@@ -256,6 +272,13 @@ export const Sidebar = memo(function Sidebar({
                 }
                 onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(group.key) : undefined}
                 onNewTask={() => onNewTask(group.key)}
+                onRemoveProject={onRemoveProject ? () => onRemoveProject({
+                  projectId: group.key,
+                  label: group.label,
+                  nativeSessionCount: group.nativeSessions.length,
+                  taskCount: group.tasks.length + group.nativeSessions.length,
+                }) : undefined}
+                onRenameProject={onRenameProject ? (label) => onRenameProject(group.key, label) : undefined}
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}
                 onRestoreNativeSession={onRestoreNativeSession}
@@ -338,6 +361,12 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
       </div></div></SidebarTaskPreviewProvider>
       <div className="sidebar-footer">
+        {!showArchived && onAddProject ? (
+          <button className="add-project-button" onClick={onAddProject} type="button">
+            <FolderPlus size={15} />
+            Add project
+          </button>
+        ) : null}
         <button
           aria-current={settingsActive ? "page" : undefined}
           className={`settings-button ${settingsActive ? "selected" : ""}`}

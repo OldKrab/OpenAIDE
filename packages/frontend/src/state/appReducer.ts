@@ -47,6 +47,7 @@ type AppActionPayload =
       tasks: TaskSummary[];
       sessions: AgentListedSession[];
       hasMoreProjectIds: string[];
+      loadingProjectIds?: string[];
       refreshing: boolean;
       refreshError?: string;
     }
@@ -279,6 +280,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         ...(action.archived ? state.archivedNativeSessions : state.newTask.nativeSessions),
         items: action.sessions,
         hasMoreProjectIds: action.hasMoreProjectIds,
+        loadingProjectIds: action.loadingProjectIds ?? [],
         loaded: true,
         loading: action.refreshing,
         nextCursor: undefined,
@@ -420,16 +422,23 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
     case "taskChat:liveText":
       return applyTaskLiveTextPresentation(state, action.taskId, action);
     case "projects": {
-      const selected = state.newTask.selection.projectId
+      const currentProject = state.newTask.selection.projectId
         ? action.projects.find((project) => project.projectId === state.newTask.selection.projectId)
-        : selectedProject(action.projects, action.initialProjectId);
+        : undefined;
+      const selected = currentProject ?? selectedProject(action.projects, action.initialProjectId);
       const selection = selected
         ? selectionWithProject(state.newTask.selection, selected)
-        : state.newTask.selection;
+        : {
+            ...state.newTask.selection,
+            projectId: undefined,
+            workspaceRoot: "",
+            workspaceLabel: "Workspace",
+            worktreeId: undefined,
+          };
       return {
         ...state,
         projects: action.projects,
-        newTask: { ...state.newTask, selection },
+        newTask: { ...state.newTask, error: undefined, selection },
       };
     }
     case "worktreeRepository":

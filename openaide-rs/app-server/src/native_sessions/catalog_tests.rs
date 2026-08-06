@@ -36,6 +36,33 @@ fn listed_native_sessions_survive_app_server_restart() {
 }
 
 #[test]
+fn a_new_project_observation_reassigns_an_existing_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let catalog =
+        NativeSessionCatalog::open(Store::open(temp.path().to_path_buf()).unwrap()).unwrap();
+    let reference = NativeSessionRef::new("codex", "session-1");
+    let observation = NativeSessionObservation {
+        reference: reference.clone(),
+        title: Some("Nested session".to_string()),
+        last_activity: None,
+    };
+    catalog
+        .record_page(
+            "removed-child",
+            "/workspace/projects/app",
+            vec![observation.clone()],
+        )
+        .unwrap();
+
+    catalog
+        .record_page("parent", "/workspace/projects/app", vec![observation])
+        .unwrap();
+
+    assert!(catalog.project("removed-child").is_empty());
+    assert_eq!(catalog.project("parent")[0].reference, reference);
+}
+
+#[test]
 fn definitive_load_failure_removal_survives_restart() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

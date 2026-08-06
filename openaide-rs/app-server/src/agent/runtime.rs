@@ -235,7 +235,8 @@ pub struct AgentAuthenticateRequest {
 #[derive(Clone)]
 pub struct AgentListSessionsRequest {
     pub agent_id: String,
-    pub cwd: String,
+    /// Optional ACP cwd filter. `None` requests the Agent's global session catalog.
+    pub cwd: Option<String>,
     pub cursor: Option<String>,
 }
 
@@ -314,7 +315,8 @@ pub trait AgentRuntime: Send + Sync {
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         Err(RuntimeError::CapabilityMissing(format!(
             "agent_list_sessions:{}:{}",
-            request.agent_id, request.cwd
+            request.agent_id,
+            request.cwd.as_deref().unwrap_or("*")
         )))
     }
 

@@ -46,7 +46,7 @@ pub(super) async fn request_resume_session(
 
 pub(super) async fn request_session_list(
     connection: &ConnectionTo<Agent>,
-    cwd: PathBuf,
+    cwd: Option<PathBuf>,
     cursor: Option<String>,
     _initialize: &InitializeResponse,
     _preferred_auth_method_id: Option<&str>,
@@ -109,11 +109,13 @@ async fn send_resume_session_request(
 
 async fn send_session_list_request(
     connection: &ConnectionTo<Agent>,
-    cwd: PathBuf,
+    cwd: Option<PathBuf>,
     cursor: Option<String>,
 ) -> Result<ListSessionsResponse, agent_client_protocol::Error> {
-    connection
-        .send_request(ListSessionsRequest::new().cwd(cwd).cursor(cursor))
-        .block_task()
-        .await
+    let request = ListSessionsRequest::new().cursor(cursor);
+    let request = match cwd {
+        Some(cwd) => request.cwd(cwd),
+        None => request,
+    };
+    connection.send_request(request).block_task().await
 }

@@ -49,6 +49,7 @@ mod discard;
 mod file_search;
 mod list_sessions;
 mod native_session_archive;
+mod native_session_discovery;
 mod open;
 mod prepare;
 mod queue;

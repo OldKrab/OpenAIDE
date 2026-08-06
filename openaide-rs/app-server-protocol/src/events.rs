@@ -82,6 +82,7 @@ pub enum AppServerEventPayload {
         task_count: u64,
         entries: Vec<crate::snapshot::TaskNavigationEntry>,
         has_more: bool,
+        loading: bool,
     },
     RefreshStateChanged {
         refresh: crate::snapshot::TaskNavigationRefreshState,

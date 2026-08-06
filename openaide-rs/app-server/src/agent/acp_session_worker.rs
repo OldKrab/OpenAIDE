@@ -349,7 +349,7 @@ async fn list_sessions_on_shared_process(
     request: AgentListSessionsRequest,
     preferred_auth_method_id: Option<&str>,
 ) -> Result<AgentListSessionsResult, RuntimeError> {
-    let cwd = std::path::PathBuf::from(&request.cwd);
+    let cwd = request.cwd.as_deref().map(std::path::PathBuf::from);
     let response = request_session_list(
         connection,
         cwd.clone(),
@@ -362,7 +362,7 @@ async fn list_sessions_on_shared_process(
     Ok(agent_list_sessions_result_from_response(
         request.agent_id,
         response,
-        &cwd,
+        cwd.as_deref(),
         None,
     ))
 }

@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Folder, HardDrive, RotateCw } from "lucide-react";
+import { ArrowLeft, ArrowUp, Check, Folder, HardDrive, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceBrowserEntry, WorkspaceBrowserRoot, WorkspaceListDirectoryResult } from "@openaide/app-server-client";
 import type { WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
@@ -109,6 +109,12 @@ export function NewWorkspacePicker({
         <ArrowLeft size={13} />
         <span>Back</span>
       </button>
+      {state.directory.parentPath ? (
+        <button className="new-workspace-picker-row" onClick={() => openDirectory(state.directory.parentPath!)} type="button">
+          <ArrowUp size={13} />
+          <span>Up</span>
+        </button>
+      ) : null}
       <button
         className="new-workspace-picker-row choose"
         onClick={() => onSelect({ path: state.directory.path, label: state.directory.label })}

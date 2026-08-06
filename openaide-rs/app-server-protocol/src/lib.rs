@@ -9,6 +9,7 @@ pub mod errors;
 pub mod events;
 pub mod ids;
 pub mod methods;
+pub mod project;
 pub mod server_requests;
 pub mod settings;
 pub mod snapshot;

@@ -37,6 +37,9 @@ pub struct TaskNavigationGroup {
     pub entries: Vec<TaskNavigationEntry>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_more: bool,
+    /// True while App Server discovers the bounded initial row window for this Project.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub loading: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]

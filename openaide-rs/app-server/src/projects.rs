@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use crate::protocol::model::IsolationKind;
@@ -20,12 +20,15 @@ pub struct ProjectTaskContext {
 #[derive(Clone, Default)]
 pub struct ConfiguredProjectRoots {
     state: Arc<RwLock<ProjectRootsState>>,
+    store: Arc<RwLock<Option<Store>>>,
 }
 
 #[derive(Default)]
 struct ProjectRootsState {
     configured_projects: Vec<ProjectTaskContext>,
+    managed_projects: Vec<ProjectTaskContext>,
     client_projects: HashMap<ClientInstanceId, Vec<ProjectTaskContext>>,
+    removed_project_ids: HashSet<ProjectId>,
 }
 
 impl ConfiguredProjectRoots {
@@ -34,9 +37,46 @@ impl ConfiguredProjectRoots {
         Self {
             state: Arc::new(RwLock::new(ProjectRootsState {
                 configured_projects,
+                managed_projects: Vec::new(),
                 client_projects: HashMap::new(),
+                removed_project_ids: HashSet::new(),
             })),
+            store: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Loads and enables durable user-managed Project state for this registry.
+    pub fn enable_persistence(
+        &self,
+        store: Store,
+    ) -> Result<(), crate::protocol::errors::RuntimeError> {
+        let catalog = store.read_project_catalog()?;
+        let mut managed_projects = catalog
+            .projects
+            .into_iter()
+            .map(|stored| {
+                let identity = ProjectIdentity::from_workspace_root(&stored.workspace_root);
+                ProjectTaskContext {
+                    project_id: identity.project_id,
+                    workspace_root: identity.workspace_root,
+                    label: stored.label,
+                    isolation: IsolationKind::Local,
+                }
+            })
+            .collect::<Vec<_>>();
+        sort_and_deduplicate_projects(&mut managed_projects);
+        let mut state = self
+            .state
+            .write()
+            .expect("Project Context registry lock poisoned");
+        state.managed_projects = managed_projects;
+        state.removed_project_ids = catalog.removed_project_ids.into_iter().collect();
+        drop(state);
+        *self
+            .store
+            .write()
+            .expect("Project persistence lock poisoned") = Some(store);
+        Ok(())
     }
 
     pub fn projects(&self) -> Vec<ProjectTaskContext> {
@@ -45,6 +85,113 @@ impl ConfiguredProjectRoots {
             .read()
             .expect("Project Context registry lock poisoned");
         visible_projects(&state)
+    }
+
+    /// Adds a user-managed Project without requiring Task history to exist first.
+    pub fn add_project(&self, workspace_root: &str) -> Result<ProjectTaskContext, ProtocolError> {
+        let workspace_root = workspace_root.trim();
+        if workspace_root.is_empty() {
+            return Err(invalid_project_root("Project folder is required"));
+        }
+        if !std::path::Path::new(workspace_root).is_dir() {
+            return Err(invalid_project_root("Project folder does not exist"));
+        }
+        let identity = ProjectIdentity::from_workspace_root(workspace_root);
+        let project = ProjectTaskContext {
+            project_id: identity.project_id,
+            workspace_root: identity.workspace_root,
+            label: identity.label,
+            isolation: IsolationKind::Local,
+        };
+        let mut state = self
+            .state
+            .write()
+            .expect("Project Context registry lock poisoned");
+        let mut managed_projects = state.managed_projects.clone();
+        managed_projects.push(project.clone());
+        sort_and_deduplicate_projects(&mut managed_projects);
+        let mut removed = state.removed_project_ids.clone();
+        removed.remove(&project.project_id);
+        persist_project_catalog(&self.store, &managed_projects, &removed)?;
+        state.managed_projects = managed_projects;
+        state.removed_project_ids = removed;
+        Ok(project)
+    }
+
+    pub fn rename_project(
+        &self,
+        project: &ProjectTaskContext,
+        label: &str,
+    ) -> Result<ProjectTaskContext, ProtocolError> {
+        let label = label.trim();
+        if label.is_empty() {
+            return Err(invalid_project_root("Project name is required"));
+        }
+        let mut renamed = project.clone();
+        renamed.label = label.to_string();
+        let mut state = self
+            .state
+            .write()
+            .expect("Project Context registry lock poisoned");
+        let mut managed = state.managed_projects.clone();
+        managed.retain(|candidate| candidate.project_id != project.project_id);
+        managed.push(renamed.clone());
+        sort_and_deduplicate_projects(&mut managed);
+        persist_project_catalog(&self.store, &managed, &state.removed_project_ids)?;
+        state.managed_projects = managed;
+        Ok(renamed)
+    }
+
+    pub fn remove_project(&self, project_id: &ProjectId) -> Result<u64, ProtocolError> {
+        let removed_task_count = self.tombstone_project_tasks(project_id)?;
+        let mut state = self
+            .state
+            .write()
+            .expect("Project Context registry lock poisoned");
+        let mut managed = state.managed_projects.clone();
+        managed.retain(|project| project.project_id != *project_id);
+        let mut removed = state.removed_project_ids.clone();
+        removed.insert(project_id.clone());
+        persist_project_catalog(&self.store, &managed, &removed)?;
+        state.managed_projects = managed;
+        state.removed_project_ids = removed;
+        Ok(removed_task_count)
+    }
+
+    pub(crate) fn is_removed(&self, project_id: &ProjectId) -> bool {
+        self.state
+            .read()
+            .expect("Project Context registry lock poisoned")
+            .removed_project_ids
+            .contains(project_id)
+    }
+
+    fn tombstone_project_tasks(&self, project_id: &ProjectId) -> Result<u64, ProtocolError> {
+        let binding = self
+            .store
+            .read()
+            .expect("Project persistence lock poisoned");
+        let Some(store) = binding.as_ref() else {
+            return Ok(0);
+        };
+        let mut removed = 0_u64;
+        for mut task in store
+            .list_all_task_records_strict()
+            .map_err(project_storage_error)?
+        {
+            let root = task.project_root.as_deref().unwrap_or(&task.workspace_root);
+            if task.tombstoned
+                || ProjectIdentity::from_workspace_root(root).project_id != *project_id
+            {
+                continue;
+            }
+            // Project removal is local-only: retain the native Agent session id.
+            task.tombstoned = true;
+            task.revision = task.revision.saturating_add(1);
+            store.write_task(&task).map_err(project_storage_error)?;
+            removed = removed.saturating_add(1);
+        }
+        Ok(removed)
     }
 
     /// Replaces one initialized client's workspace facts as a single generation.
@@ -114,9 +261,52 @@ fn project_contexts_from_workspace_roots(
 
 fn visible_projects(state: &ProjectRootsState) -> Vec<ProjectTaskContext> {
     let mut projects = state.configured_projects.clone();
+    projects.extend(state.managed_projects.clone());
     projects.extend(state.client_projects.values().flatten().cloned());
+    projects.retain(|project| !state.removed_project_ids.contains(&project.project_id));
     sort_and_deduplicate_projects(&mut projects);
     projects
+}
+
+fn persist_project_catalog(
+    store: &Arc<RwLock<Option<Store>>>,
+    managed: &[ProjectTaskContext],
+    removed: &HashSet<ProjectId>,
+) -> Result<(), ProtocolError> {
+    let binding = store.read().expect("Project persistence lock poisoned");
+    let Some(store) = binding.as_ref() else {
+        return Ok(());
+    };
+    store
+        .write_project_catalog(&crate::storage::projects::StoredProjectCatalog {
+            projects: managed
+                .iter()
+                .map(|project| crate::storage::projects::StoredProject {
+                    workspace_root: project.workspace_root.clone(),
+                    label: project.label.clone(),
+                })
+                .collect(),
+            removed_project_ids: removed.iter().cloned().collect(),
+        })
+        .map_err(project_storage_error)
+}
+
+fn invalid_project_root(message: &str) -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::InvalidRequest,
+        message: message.to_string(),
+        recoverable: true,
+        target: None,
+    }
+}
+
+fn project_storage_error(error: impl std::fmt::Display) -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::Internal,
+        message: format!("Failed to save Project: {error}"),
+        recoverable: true,
+        target: None,
+    }
 }
 
 fn sort_and_deduplicate_projects(projects: &mut Vec<ProjectTaskContext>) {

@@ -812,7 +812,7 @@ fn listing_sessions_does_not_create_a_native_session() {
     runtime
         .list_sessions(AgentListSessionsRequest {
             agent_id: "codex".to_string(),
-            cwd: cwd_string(),
+            cwd: Some(cwd_string()),
             cursor: None,
         })
         .expect("list sessions");
@@ -1035,7 +1035,7 @@ fn listing_then_starting_reuses_one_agent_process() {
     runtime
         .list_sessions(AgentListSessionsRequest {
             agent_id: "codex".to_string(),
-            cwd: cwd_string(),
+            cwd: Some(cwd_string()),
             cursor: None,
         })
         .expect("list sessions");
@@ -1065,7 +1065,7 @@ fn task_trace_preserves_initialize_capabilities_after_process_warmup() {
     runtime
         .list_sessions(AgentListSessionsRequest {
             agent_id: "codex".to_string(),
-            cwd: cwd_string(),
+            cwd: Some(cwd_string()),
             cursor: None,
         })
         .expect("warm shared Agent process");
@@ -1103,7 +1103,7 @@ fn listing_sessions_reuses_the_active_agent_process() {
     runtime
         .list_sessions(AgentListSessionsRequest {
             agent_id: "codex".to_string(),
-            cwd: cwd_string(),
+            cwd: Some(cwd_string()),
             cursor: None,
         })
         .expect("list sessions");

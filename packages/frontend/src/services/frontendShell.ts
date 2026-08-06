@@ -63,6 +63,10 @@ export type FrontendShell = {
   workspace?: {
     openFolder(): void;
   };
+  /** Native folder acquisition for adding a Project; Web renders its own explorer. */
+  projects?: {
+    pickFolder(): Promise<{ path: string; label: string } | undefined>;
+  };
   /** Shell-specific acquisition; shared Frontend receives only opaque handles. */
   files?: FrontendFileAcquisition;
   /** Opens a durable sent file using the host-native interaction. */

@@ -325,10 +325,12 @@ describe("scope-local state ingestion", () => {
       taskCount: 1,
       entries: [{ kind: "task", task: taskSummary("task-1") }],
       hasMore: false,
+      loading: true,
     }));
     expect(replacement.kind).toBe("applied");
     if (replacement.kind !== "applied" || replacement.state.snapshot.kind !== "taskNavigation") return;
     expect(replacement.state.snapshot.navigation.groups[0]?.entries).toHaveLength(1);
+    expect(replacement.state.snapshot.navigation.groups[0]?.loading).toBe(true);
     expect(replacement.state.snapshot.navigation.groups[1]?.entries).toEqual(
       state.snapshot.kind === "taskNavigation"
         ? state.snapshot.navigation.groups[1]?.entries
