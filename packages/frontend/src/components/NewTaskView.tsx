@@ -321,34 +321,37 @@ export function NewTaskView({
                 ))}
             </PopupPanel>
           </div> : null}
-          {selectedProject && isolationAvailable ? <div className={`new-task-context-anchor new-task-context-anchor-workspace ${openContextMenu === "workspace" ? "context-menu-open" : ""}`}>
-            <PopupPanel
-              className="task-workspace-popup"
-              label="Task workspace"
-              onOpenChange={(nextOpen) => setOpenContextMenu(nextOpen ? "workspace" : undefined)}
-              open={openContextMenu === "workspace"}
-              placement="bottom"
-              trigger={(popupTrigger) => (
-                <Selector
-                  disabled={state.newTask.submitting}
-                  icon={state.newTask.selection.worktreeId ? <GitBranch size={12} /> : <FolderRoot size={12} />}
-                  label={taskWorkspaceLabel}
-                  locked={false}
-                  menuOpen={openContextMenu === "workspace"}
-                  popupTrigger={popupTrigger}
+          {selectedProject && isolationAvailable ? <div className="new-task-context-phrase">
+            {!fixedProjectContext ? <span className="new-task-context-word word-with">with</span> : null}
+            <div className={`new-task-context-anchor new-task-context-anchor-workspace ${openContextMenu === "workspace" ? "context-menu-open" : ""}`}>
+              <PopupPanel
+                className="task-workspace-popup"
+                label="Task workspace"
+                onOpenChange={(nextOpen) => setOpenContextMenu(nextOpen ? "workspace" : undefined)}
+                open={openContextMenu === "workspace"}
+                placement="bottom"
+                trigger={(popupTrigger) => (
+                  <Selector
+                    disabled={state.newTask.submitting}
+                    icon={state.newTask.selection.worktreeId ? <GitBranch size={12} /> : <FolderRoot size={12} />}
+                    label={taskWorkspaceLabel}
+                    locked={false}
+                    menuOpen={openContextMenu === "workspace"}
+                    popupTrigger={popupTrigger}
+                  />
+                )}
+              >
+                <TaskWorkspacePicker
+                  intents={intents}
+                  onClose={() => setOpenContextMenu(undefined)}
+                  onManageWorktrees={onManageWorktrees}
+                  project={selectedProject}
+                  repository={selectedRepository}
+                  selectedWorktreeId={state.newTask.selection.worktreeId}
+                  tasks={state.tasks}
                 />
-              )}
-            >
-              <TaskWorkspacePicker
-                intents={intents}
-                onClose={() => setOpenContextMenu(undefined)}
-                onManageWorktrees={onManageWorktrees}
-                project={selectedProject}
-                repository={selectedRepository}
-                selectedWorktreeId={state.newTask.selection.worktreeId}
-                tasks={state.tasks}
-              />
-            </PopupPanel>
+              </PopupPanel>
+            </div>
           </div> : null}
           {!fixedProjectContext ? <span className="new-task-context-word word-using">using</span> : null}
           <div className={`new-task-context-anchor new-task-context-anchor-agent ${openContextMenu === "agent" ? "context-menu-open" : ""}`}>
@@ -392,7 +395,6 @@ export function NewTaskView({
                 ))}
             </PopupMenu>
           </div>
-          {!fixedProjectContext && selectedProject && isolationAvailable ? <span className="new-task-context-word word-with">with</span> : null}
         </div>
         {projectUnavailable && selectedProject ? <div className="project-unavailable-notice" role="status">
           <FolderX size={17} />
