@@ -77,7 +77,9 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     [itemKeys],
   );
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
-    anchorTo: "end",
+    // Initial Chat must begin at its first row. Following later messages is
+    // handled explicitly below, after the reader's intent is known.
+    anchorTo: "start",
     count: itemKeys.length,
     estimateSize: () => CHAT_ROW_ESTIMATE_PX,
     followOnAppend: scrollOwnership === "following",
