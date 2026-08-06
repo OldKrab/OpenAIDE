@@ -6,6 +6,27 @@ import { ChatActivityView } from "./ChatActivityView";
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
 describe("ChatActivityView", () => {
+  it("renders adjacent bold Thought chunks as separate Markdown blocks", async () => {
+    const activity = mixedActivity();
+    activity.steps = [{
+      kind: "thought",
+      message_id: "thought-adjacent-markdown",
+      text: "**Assessing signing****Deferring signing****Clarifying trade-offs**",
+    }];
+
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+    act(() => tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0].props.onClick());
+    const paragraphs = tree.root.findAllByType("p");
+
+    expect(paragraphs.map((paragraph) => paragraph.findByType("strong").children.join(""))).toEqual([
+      "Assessing signing",
+      "Deferring signing",
+      "Clarifying trade-offs",
+    ]);
+  });
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });

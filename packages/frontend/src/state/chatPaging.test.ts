@@ -72,6 +72,22 @@ describe("chatPaging", () => {
     });
   });
 
+  it("hides legacy anonymous replay copies already contained in a sourced Thought", () => {
+    const session = "019fcc2e-6a55-7832-8abd-e5392d24406c";
+    const sourcedId = `acp:${session}:thought:item-90`;
+    const replayId = `acp:${session}:replay:thought:duplicate:0`;
+    const chat = renderedChat(snapshot([
+      thoughtMessage(sourcedId, "**Assessing signing****Deferring signing****Clarifying trade-offs**"),
+      thoughtMessage(replayId, "**Deferring signing****Clarifying trade-offs**"),
+    ]), undefined);
+
+    expect(chat.items).toHaveLength(1);
+    expect(chat.items[0]).toMatchObject({
+      message_id: sourcedId,
+      message: { kind: "agent_message", role: "thought" },
+    });
+  });
+
   it("keeps one Thought as a standalone Thinking disclosure", () => {
     const chat = renderedChat(snapshot([thoughtMessage("m1", "Inspect the request")]), undefined);
 

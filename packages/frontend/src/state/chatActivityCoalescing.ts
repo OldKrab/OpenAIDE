@@ -23,11 +23,12 @@ export function coalesceAdjacentActivities(items: ChatMessage[]) {
       continue;
     }
 
-    const run: ActivityRunMessage[] = [];
+    const collectedRun: ActivityRunMessage[] = [];
     while (items[index] && isActivityRunItem(items[index])) {
-      run.push(items[index] as ActivityRunMessage);
+      collectedRun.push(items[index] as ActivityRunMessage);
       index += 1;
     }
+    const run = withoutContainedReplayThoughtCopies(collectedRun);
 
     // A single Thought keeps its lightweight Thinking disclosure. Every larger
     // run becomes one activity group; a single Tool is already an activity row.
@@ -38,6 +39,36 @@ export function coalesceAdjacentActivities(items: ChatMessage[]) {
     }
   }
   return merged;
+}
+
+/** Hides malformed Codex load replays persisted before duplicate-stream normalization. */
+function withoutContainedReplayThoughtCopies(run: ActivityRunMessage[]) {
+  const sourcedThoughts = run.flatMap((item) => {
+    if (item.message.kind !== "agent_message" || item.message.role !== "thought") return [];
+    const sessionPrefix = sourcedThoughtSessionPrefix(item.message.id);
+    return sessionPrefix ? [{ sessionPrefix, text: thoughtText(item.message) }] : [];
+  });
+  if (sourcedThoughts.length === 0) return run;
+  return run.filter((item) => {
+    if (item.message.kind !== "agent_message" || item.message.role !== "thought") return true;
+    const sessionPrefix = replayThoughtSessionPrefix(item.message.id);
+    if (!sessionPrefix) return true;
+    const replayText = thoughtText(item.message);
+    return !sourcedThoughts.some(
+      (source) => source.sessionPrefix === sessionPrefix && source.text.includes(replayText),
+    );
+  });
+}
+
+function sourcedThoughtSessionPrefix(messageId: string) {
+  const marker = messageId.indexOf(":thought:");
+  if (marker < 0 || messageId.includes(":replay:thought:")) return undefined;
+  return messageId.slice(0, marker);
+}
+
+function replayThoughtSessionPrefix(messageId: string) {
+  const marker = messageId.indexOf(":replay:thought:");
+  return marker < 0 ? undefined : messageId.slice(0, marker);
 }
 
 function stableActivityRun(run: ActivityRunMessage[]) {

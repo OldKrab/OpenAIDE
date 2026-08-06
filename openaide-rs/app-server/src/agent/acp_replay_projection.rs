@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_schema::{ContentBlock, SessionUpdate};
@@ -58,7 +58,8 @@ impl ReplayProjection {
         let tool_calls = Arc::new(Mutex::new(Default::default()));
         let codex_subagents =
             (self.agent_id.as_deref() == Some("codex")).then(CodexSubagentState::default);
-        let mut replay = ReplayBuffer::new(&self.session_id);
+        let mut replay =
+            ReplayBuffer::new(&self.session_id, self.agent_id.as_deref() == Some("codex"));
         for update in updates {
             replay.project(update, &created_at, &tool_calls, codex_subagents.as_ref());
         }
@@ -80,6 +81,8 @@ struct ReplayBuffer {
     sourced_user_indices: HashMap<String, usize>,
     // ACP message ids keep each Agent or Thought channel open across interleaved updates.
     sourced_agent_indices: HashMap<(AgentMessageRole, String), usize>,
+    sourced_agent_text_chunks: HashSet<(AgentMessageRole, String)>,
+    dedupe_anonymous_copies: bool,
     session_id: String,
     next_text_ordinal: usize,
     current_plan: Option<AgentPlan>,
@@ -88,12 +91,14 @@ struct ReplayBuffer {
 }
 
 impl ReplayBuffer {
-    fn new(session_id: &str) -> Self {
+    fn new(session_id: &str, dedupe_anonymous_copies: bool) -> Self {
         Self {
             messages: Vec::new(),
             active_anonymous_text: None,
             sourced_user_indices: HashMap::new(),
             sourced_agent_indices: HashMap::new(),
+            sourced_agent_text_chunks: HashSet::new(),
+            dedupe_anonymous_copies,
             session_id: session_id.to_string(),
             next_text_ordinal: 0,
             current_plan: None,
@@ -242,6 +247,14 @@ impl ReplayBuffer {
     ) {
         let Some(source_message_id) = source_message_id else {
             if let AgentMessagePart::Text { text } = part {
+                if self.dedupe_anonymous_copies
+                    && self
+                        .sourced_agent_text_chunks
+                        .contains(&(role, text.clone()))
+                {
+                    self.end_anonymous_text_run();
+                    return;
+                }
                 let kind = match role {
                     AgentMessageRole::Agent => ReplayTextKind::Agent,
                     AgentMessageRole::Thought => ReplayTextKind::Thought,
@@ -267,6 +280,11 @@ impl ReplayBuffer {
         };
 
         self.end_anonymous_text_run();
+        if self.dedupe_anonymous_copies {
+            if let AgentMessagePart::Text { text } = &part {
+                self.sourced_agent_text_chunks.insert((role, text.clone()));
+            }
+        }
         let source_key = (role, source_message_id.clone());
         if let Some(message_index) = self.sourced_agent_indices.get(&source_key).copied() {
             append_agent_part(&mut self.messages[message_index], role, part);

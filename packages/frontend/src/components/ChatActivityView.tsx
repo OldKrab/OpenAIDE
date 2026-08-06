@@ -21,6 +21,7 @@ import { toolPresentationName } from "../state/toolDetailsShared";
 import { ChatToolDetails } from "./ChatToolDetailsView";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { toolKindIcon } from "./chatToolIcons";
+import { presentThoughtMarkdown } from "./thoughtPresentation";
 
 export function ChatActivityView({
   activity,
@@ -145,7 +146,7 @@ export function ActivityStepRow({
         stepId={step.message_id}
         trigger={<ActivityStepContent disclosure icon={activityStepIcon(step, legacyToolName)} label="Thought" />}
       >
-        <AgentMarkdown className="chat-thought" text={step.text} />
+        <AgentMarkdown className="chat-thought" text={presentThoughtMarkdown(step.text)} />
         <MessageCopyAction text={step.text} />
       </AnimatedDisclosure>
     );
