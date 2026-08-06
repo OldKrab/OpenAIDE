@@ -8,7 +8,9 @@ use crate::agent::{
 };
 use crate::attachment_runtime::AttachmentRuntimeError;
 use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery};
-use crate::projects::{project_id_for_workspace, ProjectTaskContext, StorageProjectResolver};
+use crate::projects::{
+    project_id_for_workspace, ConfiguredProjectRoots, ProjectTaskContext, StorageProjectResolver,
+};
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentCommand,
     AgentCommandsCatalog, AgentListSessionsResult, AgentListedSession, AgentMessagePart,
@@ -760,7 +762,7 @@ fn create_replaces_a_persisted_draft_catalog_with_fresh_agent_defaults() {
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
-        agent,
+        agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
@@ -2828,6 +2830,165 @@ fn background_native_catalog_refresh_stops_when_a_page_adds_no_session_identity(
 }
 
 #[test]
+fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace_root = temp.path().join("project-with-agent-history");
+    let session_workspace = workspace_root.join("nested-workspace");
+    std::fs::create_dir_all(&session_workspace).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "native-existing".to_string(),
+            cwd: session_workspace.to_string_lossy().to_string(),
+            title: Some("Existing Agent session".to_string()),
+            last_activity: Some("2026-08-01T00:00:00Z".to_string()),
+            updated_at: Some("2026-08-01T00:00:00Z".to_string()),
+        }]),
+        filter_listed_sessions_by_cwd: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects.clone(),
+    )
+    .unwrap();
+    let project = configured_projects
+        .add_project(&workspace_root.to_string_lossy())
+        .unwrap();
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 20);
+
+    wait_until(|| {
+        api.native_session_catalog().entries().iter().any(|entry| {
+            entry.project_id == project.project_id.as_str()
+                && entry.observation.reference.agent_id == "codex"
+                && entry.observation.reference.session_id == "native-existing"
+        })
+    });
+}
+
+#[test]
+fn full_native_catalog_refresh_discovers_sessions_in_nested_project_folders() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let project_root = temp.path().join("project");
+    let session_root = project_root.join("nested");
+    std::fs::create_dir_all(&session_root).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let project = configured_projects
+        .add_project(&project_root.to_string_lossy())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "nested-session".to_string(),
+            cwd: session_root.to_string_lossy().to_string(),
+            title: Some("Nested session".to_string()),
+            last_activity: None,
+            updated_at: None,
+        }]),
+        filter_listed_sessions_by_cwd: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects,
+    )
+    .unwrap();
+
+    api.refresh_native_session_catalogs().unwrap();
+
+    assert!(api
+        .native_session_catalog()
+        .project(project.project_id.as_str())
+        .iter()
+        .any(|entry| entry.reference.session_id == "nested-session"));
+}
+
+#[test]
+fn targeted_native_catalog_refresh_assigns_sessions_to_the_most_specific_project() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let parent_root = temp.path().join("projects");
+    let child_root = parent_root.join("app");
+    std::fs::create_dir_all(&child_root).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "child-session".to_string(),
+            cwd: child_root.to_string_lossy().to_string(),
+            title: Some("Child session".to_string()),
+            last_activity: None,
+            updated_at: None,
+        }]),
+        filter_listed_sessions_by_cwd: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects.clone(),
+    )
+    .unwrap();
+    let parent = configured_projects
+        .add_project(&parent_root.to_string_lossy())
+        .unwrap();
+    let child = configured_projects
+        .add_project(&child_root.to_string_lossy())
+        .unwrap();
+
+    api.request_native_session_catalog_load_more(parent.project_id.as_str(), 20);
+    wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= 1);
+    assert!(api
+        .native_session_catalog()
+        .project(parent.project_id.as_str())
+        .is_empty());
+
+    api.request_native_session_catalog_load_more(child.project_id.as_str(), 20);
+    wait_until(|| {
+        api.native_session_catalog()
+            .project(child.project_id.as_str())
+            .iter()
+            .any(|entry| entry.reference.session_id == "child-session")
+    });
+}
+
+#[test]
 fn load_more_continues_past_a_page_containing_only_archived_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -2873,6 +3034,59 @@ fn load_more_continues_past_a_page_containing_only_archived_sessions() {
         .requested_cursors()
         .iter()
         .any(|cursor| cursor.as_deref() == Some("page-2")));
+}
+
+#[test]
+fn project_load_stops_after_the_requested_navigation_window() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace_root = temp.path().join("bounded-project");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let project = configured_projects
+        .add_project(&workspace_root.to_string_lossy())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(BoundedGlobalSessionAgent {
+        requested_cursors: Mutex::new(Vec::new()),
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects,
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 7);
+
+    wait_until(|| {
+        !api.native_session_catalog()
+            .project_refreshing(project.project_id.as_str())
+    });
+    assert_eq!(
+        agent.requested_cursors(),
+        vec![None, Some("page-2".to_string())]
+    );
+    assert_eq!(
+        api.native_session_catalog()
+            .project(project.project_id.as_str())
+            .len(),
+        10
+    );
+    assert!(api
+        .native_session_catalog()
+        .project_has_more(project.project_id.as_str()));
 }
 
 #[test]
@@ -3297,12 +3511,12 @@ fn failed_native_session_listing_is_not_cached() {
     )
     .unwrap();
 
-    for expected in [2, 4] {
+    for expected in [1, 2] {
         assert!(api.refresh_native_session_catalogs().is_err());
         assert_eq!(agent.list_calls.load(Ordering::SeqCst), expected);
     }
 
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 2);
 }
 
 #[test]
@@ -7942,6 +8156,7 @@ struct RecordingAgent {
     resume_config_catalog: Option<ConfigOptionsCatalog>,
     resume_commands_catalog: Option<AgentCommandsCatalog>,
     suppress_commands_on_attach: bool,
+    filter_listed_sessions_by_cwd: bool,
     listed_sessions: Mutex<Vec<AgentListedSession>>,
     replayed_messages: Mutex<Vec<NormalizedMessage>>,
     fail_start: bool,
@@ -8168,9 +8383,14 @@ impl AgentRuntime for RecordingAgent {
             return Err(RuntimeError::NotReady("session listing failed".to_string()));
         }
         let mut sessions = self.listed_sessions.lock().unwrap().clone();
+        if self.filter_listed_sessions_by_cwd {
+            if let Some(cwd) = request.cwd.as_deref() {
+                sessions.retain(|session| session.cwd == cwd);
+            }
+        }
         for session in &mut sessions {
-            if session.cwd.is_empty() {
-                session.cwd = request.cwd.clone();
+            if session.cwd.is_empty() && request.cwd.is_some() {
+                session.cwd = request.cwd.clone().unwrap();
             }
         }
         Ok(AgentListSessionsResult {
@@ -8426,6 +8646,67 @@ struct ArchivedFirstPageAgent {
     requested_cursors: Mutex<Vec<Option<String>>>,
 }
 
+struct BoundedGlobalSessionAgent {
+    requested_cursors: Mutex<Vec<Option<String>>>,
+    workspace_root: String,
+}
+
+impl BoundedGlobalSessionAgent {
+    fn requested_cursors(&self) -> Vec<Option<String>> {
+        self.requested_cursors.lock().unwrap().clone()
+    }
+}
+
+impl AgentRuntime for BoundedGlobalSessionAgent {
+    fn list_sessions(
+        &self,
+        request: AgentListSessionsRequest,
+    ) -> Result<AgentListSessionsResult, RuntimeError> {
+        self.requested_cursors
+            .lock()
+            .unwrap()
+            .push(request.cursor.clone());
+        let page = match request.cursor.as_deref() {
+            None => 0,
+            Some("page-2") => 1,
+            Some("page-3") => 2,
+            _ => 3,
+        };
+        let sessions = (0..5)
+            .map(|index| AgentListedSession {
+                session_id: format!("session-{}", page * 5 + index),
+                cwd: self.workspace_root.clone(),
+                title: Some(format!("Session {}", page * 5 + index)),
+                last_activity: Some(format!("2026-08-{:02}T00:00:00Z", 6 - page)),
+                updated_at: None,
+            })
+            .collect();
+        let next_cursor = match page {
+            0 => Some("page-2".to_string()),
+            1 => Some("page-3".to_string()),
+            2 => Some("page-4".to_string()),
+            _ => None,
+        };
+        Ok(AgentListSessionsResult {
+            agent_id: request.agent_id,
+            sessions,
+            next_cursor,
+        })
+    }
+
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "bounded-session"))
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
+    }
+}
+
 impl ArchivedFirstPageAgent {
     fn requested_cursors(&self) -> Vec<Option<String>> {
         self.requested_cursors.lock().unwrap().clone()
@@ -8445,7 +8726,10 @@ impl AgentRuntime for ArchivedFirstPageAgent {
             None => (
                 vec![AgentListedSession {
                     session_id: "archived-page".to_string(),
-                    cwd: request.cwd,
+                    cwd: request
+                        .cwd
+                        .clone()
+                        .unwrap_or_else(|| "/tmp/openaide-unit-workspace/app".to_string()),
                     title: Some("Archived".to_string()),
                     last_activity: None,
                     updated_at: None,
@@ -8455,7 +8739,10 @@ impl AgentRuntime for ArchivedFirstPageAgent {
             Some("page-2") => (
                 vec![AgentListedSession {
                     session_id: "active-page".to_string(),
-                    cwd: request.cwd,
+                    cwd: request
+                        .cwd
+                        .clone()
+                        .unwrap_or_else(|| "/tmp/openaide-unit-workspace/app".to_string()),
                     title: Some("Active".to_string()),
                     last_activity: None,
                     updated_at: None,
@@ -8561,7 +8848,7 @@ impl AgentRuntime for PagedSessionAgent {
             None => Vec::new(),
             Some("page-2") => vec![crate::protocol::model::AgentListedSession {
                 session_id: "matching-session".to_string(),
-                cwd: request.cwd,
+                cwd: request.cwd.expect("test listing is workspace-scoped"),
                 title: Some("Matching project".to_string()),
                 last_activity: None,
                 updated_at: None,

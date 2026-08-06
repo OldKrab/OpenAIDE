@@ -69,6 +69,9 @@ type AppPrimaryTaskSurfaceProps = {
   focusRequestKey: number;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
   onPlanDrawerOpenChange?: (open: boolean) => void;
+  onAddProject?: () => void;
+  onCheckProject?: (projectId: string) => Promise<void>;
+  onRemoveProject?: (projectId: string) => void;
   planDrawerOpen?: boolean;
   workspaceRecovery?: {
     manageWorktrees: (projectId: string) => void;
@@ -82,6 +85,9 @@ export function AppPrimaryTaskSurface({
   focusRequestKey,
   model,
   onPlanDrawerOpenChange,
+  onAddProject,
+  onCheckProject,
+  onRemoveProject,
   planDrawerOpen,
   workspaceRecovery,
 }: AppPrimaryTaskSurfaceProps) {
@@ -176,10 +182,13 @@ export function AppPrimaryTaskSurface({
       intents={intents.newTask}
       loadingProjects={!backendReady}
       onCancelTask={callbacks.newTask.cancel}
+      onAddProject={onAddProject}
+      onCheckProject={onCheckProject}
       onLoadComposerHistory={callbacks.newTask.loadComposerHistory}
       onManageWorktrees={workspaceRecovery?.manageWorktrees}
       onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
       onRemoveAttachment={callbacks.newTask.removeAttachment}
+      onRemoveProject={onRemoveProject}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={canSelectNewTaskProject ? "selectable" : "fixed"}

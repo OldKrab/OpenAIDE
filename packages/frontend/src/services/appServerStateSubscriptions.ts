@@ -214,6 +214,7 @@ function remappedTaskNavigationActions(context: StateSubscriptionMappingContext)
       tasks: mapped.tasks,
       sessions: mapped.sessions,
       hasMoreProjectIds: mapped.hasMoreProjectIds,
+      loadingProjectIds: mapped.loadingProjectIds,
       refreshing: mapped.refreshing,
       refreshError: mapped.refreshError,
     });

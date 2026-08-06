@@ -36,7 +36,7 @@ describe("TaskWorkspacePicker", () => {
     const tree = render(intents);
     const options = tree.root.findAllByProps({ role: "option" });
 
-    expect(options.map(text)).toEqual(expect.arrayContaining([expect.stringContaining("Project root"), expect.stringContaining("Sidebar scrolling")]));
+    expect(options.map(text)).toEqual(expect.arrayContaining([expect.stringContaining("No isolation"), expect.stringContaining("Sidebar scrolling")]));
     act(() => options.find((option) => text(option).includes("Sidebar scrolling"))?.props.onClick());
 
     expect(intents.selectWorktree).toHaveBeenCalledWith({
@@ -110,7 +110,7 @@ describe("TaskWorkspacePicker", () => {
     });
 
     const options = tree.root.findAllByProps({ role: "option" });
-    const projectRoot = options.find((option) => text(option).includes("Project root"));
+    const projectRoot = options.find((option) => text(option).includes("No isolation"));
     const primary = options.find((option) => text(option).includes("Primary checkout"));
     expect(projectRoot?.props["aria-selected"]).toBe(true);
     expect(primary).toBeDefined();

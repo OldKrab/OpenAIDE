@@ -15,6 +15,11 @@ export type NewTaskContextIds = {
 
 type SelectionStorage = Pick<Storage, "getItem" | "setItem">;
 
+export type RetainedPreparedTaskLease = {
+  preparationKey: string;
+  taskId: string;
+};
+
 export function selectInitialNewTaskContext({
   retained,
   shellProjectId,
@@ -91,6 +96,37 @@ export function retainNewTaskContext(
   }
 }
 
+/** Reads the leased Prepared Task identity needed to recover context changes across reload. */
+export function readRetainedPreparedTaskLease(
+  stateRootId: StateRootId | string,
+  clientInstanceId: ClientInstanceId | string,
+  storage: SelectionStorage | undefined = availableSessionStorage(),
+): RetainedPreparedTaskLease | undefined {
+  try {
+    const value = storage?.getItem(preparedTaskLeaseStorageKey(stateRootId, clientInstanceId));
+    return value ? JSON.parse(value) as RetainedPreparedTaskLease : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Retains only opaque lease identity; App Server remains authoritative for Prepared Task state. */
+export function retainPreparedTaskLease(
+  stateRootId: StateRootId | string,
+  clientInstanceId: ClientInstanceId | string,
+  lease: RetainedPreparedTaskLease,
+  storage: SelectionStorage | undefined = availableSessionStorage(),
+) {
+  try {
+    storage?.setItem(
+      preparedTaskLeaseStorageKey(stateRootId, clientInstanceId),
+      JSON.stringify(lease),
+    );
+  } catch {
+    // A blocked session store removes reload recovery but never live lease ownership.
+  }
+}
+
 function firstValid(available: string[], ...preferred: Array<string | undefined>) {
   return preferred.find((candidate) => candidate !== undefined && available.includes(candidate))
     ?? available[0];
@@ -98,6 +134,10 @@ function firstValid(available: string[], ...preferred: Array<string | undefined>
 
 function storageKey(stateRootId: string, clientInstanceId: string) {
   return `openaide.newTaskSelection:${stateRootId}:${clientInstanceId}`;
+}
+
+function preparedTaskLeaseStorageKey(stateRootId: string, clientInstanceId: string) {
+  return `openaide.preparedTaskLease:${stateRootId}:${clientInstanceId}`;
 }
 
 function availableSessionStorage(): Storage | undefined {

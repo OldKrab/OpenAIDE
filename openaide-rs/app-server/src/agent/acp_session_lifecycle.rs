@@ -215,13 +215,13 @@ fn command_catalog(update: &SessionUpdate) -> Option<AgentCommandsCatalog> {
 pub(super) fn agent_list_sessions_result_from_response(
     agent_id: String,
     response: ListSessionsResponse,
-    requested_cwd: &Path,
+    requested_cwd: Option<&Path>,
     excluded_session_id: Option<&str>,
 ) -> AgentListSessionsResult {
     let sessions = response
         .sessions
         .into_iter()
-        .filter(|session| session.cwd == requested_cwd)
+        .filter(|session| requested_cwd.is_none_or(|cwd| session.cwd == cwd))
         .filter(|session| {
             excluded_session_id
                 .map(|excluded| session.session_id.to_string() != excluded)

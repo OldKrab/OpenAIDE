@@ -247,9 +247,16 @@ impl RpcGateway {
                 continue;
             };
             let group = snapshot.groups.into_iter().next();
-            let (task_count, entries, has_more) = group
-                .map(|group| (group.task_count, group.entries, group.has_more))
-                .unwrap_or((0, Vec::new(), false));
+            let (task_count, entries, has_more, loading) = group
+                .map(|group| {
+                    (
+                        group.task_count,
+                        group.entries,
+                        group.has_more,
+                        group.loading,
+                    )
+                })
+                .unwrap_or((0, Vec::new(), false, false));
             let client_hub = self.client_hub.clone();
             events.extend(event_deliveries(self.state_stream.publish_committed(
                 EventScope::StateRoot {
@@ -261,6 +268,7 @@ impl RpcGateway {
                     task_count,
                     entries,
                     has_more,
+                    loading,
                 },
                 |client_id| client_hub.delivery_for(client_id),
                 now,

@@ -58,6 +58,7 @@ export type WebviewToHostMessage =
   | { type: "shell.openExternal"; payload: { url: string } }
   | { type: "shell.reload" }
   | { type: "attachment.pickFiles"; payload: { requestId: string; taskId: string } }
+  | { type: "project.pickFolder"; payload: { requestId: string } }
   | { type: "worktree.openFolder"; payload: { repository_id: string; worktree_id: string } }
   | { type: "tool.openPath"; payload: { path: string; line?: number } };
 
@@ -67,6 +68,7 @@ export type HostToWebviewMessage =
   | { type: "appServer.connectionChanged"; payload: { connection: WebviewAppServerConnection } }
   | { type: "surface.focusChanged"; payload: { task_id?: string } }
   | { type: "attachment.pickFiles.result"; payload: { requestId: string; attachments?: Array<{ handleId: string; label: string }>; error?: string } }
+  | { type: "project.pickFolder.result"; payload: { requestId: string; folder?: { path: string; label: string }; error?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }
   | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId } }
   | { type: "diagnostics.snapshot.result"; payload: DiagnosticsSnapshot }

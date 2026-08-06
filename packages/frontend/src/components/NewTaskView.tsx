@@ -1,5 +1,5 @@
-import { Check, FolderOpen, FolderRoot, GitBranch } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FolderOpen, FolderPlus, FolderRoot, FolderX, GitBranch } from "lucide-react";
+import { useState } from "react";
 import type { AppPreferencesRecord, ConfigOptionCurrentValue } from "@openaide/app-shell-contracts";
 import {
   agentOptions,
@@ -9,15 +9,13 @@ import {
   type ComposerSelection,
   type ProjectOption,
 } from "../state/composerOptions";
-import { projectIdForWorkspaceRoot, workspaceLabel } from "../state/projectIdentity";
 import { configOptionsMutable, configOptionsSettled } from "../state/configOptionState";
 import type { AppState, NewTaskState, TaskComposerInput } from "../state/store";
 import { AgentIcon } from "./AgentIcon";
 import { Composer } from "./Composer";
 import { composerAvailability, composerCanSubmit } from "./composerAvailability";
 import { MenuButton, Selector } from "./ComposerPrimitives";
-import type { TaskFileBrowserCallbacks, WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
-import { NewWorkspacePicker } from "./NewWorkspacePicker";
+import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { NewTaskStartingView } from "./NewTaskStartingView";
 import { newTaskStatusLabel } from "./taskSurfaceHelpers";
 import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
@@ -68,24 +66,28 @@ export function NewTaskView({
   agentRecoveryActions,
   loadingProjects = false,
   onOpenWorkspaceFolder,
+  onAddProject,
+  onCheckProject,
   onLoadComposerHistory,
   onManageWorktrees,
+  onRemoveProject,
   submitShortcut,
   fileBrowser,
   focusRequestKey,
-  workspaceBrowser,
   projectContextMode = "selectable",
 }: {
   state: NewTaskViewState;
   intents: NewTaskViewIntents;
   fileBrowser?: TaskFileBrowserCallbacks;
-  workspaceBrowser?: WorkspaceBrowserCallbacks;
   projectContextMode?: ProjectContextMode;
   focusRequestKey?: number;
   loadingProjects?: boolean;
   onOpenWorkspaceFolder?: () => void;
+  onAddProject?: () => void;
+  onCheckProject?: (projectId: string) => Promise<void>;
   onLoadComposerHistory?: () => Promise<string[]>;
   onManageWorktrees?: (projectId: string) => void;
+  onRemoveProject?: (projectId: string) => void;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -95,7 +97,7 @@ export function NewTaskView({
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
 }) {
   const [openContextMenu, setOpenContextMenu] = useState<NewTaskContextMenu | undefined>();
-  const [workspacePath, setWorkspacePath] = useState(state.newTask.selection.workspaceRoot);
+  const [checkingProject, setCheckingProject] = useState(false);
   if (onOpenWorkspaceFolder) {
     return (
       <section className="task-surface new-task-surface" aria-label="New task">
@@ -110,6 +112,7 @@ export function NewTaskView({
   const recoveryKind = agentRecoveryKind(selectedAgent, state.snapshot?.preparation);
   const projectChoices = state.projects;
   const selectedProject = projectChoices.find((project) => project.projectId === state.newTask.selection.projectId);
+  const isolationAvailable = selectedProject?.worktreeRepositoryId !== undefined;
   const selectedRepository = selectedProject?.worktreeRepositoryId
     ? state.worktreeRepositories[selectedProject.worktreeRepositoryId]
     : undefined;
@@ -120,8 +123,7 @@ export function NewTaskView({
     && (!selectedWorktree || selectedWorktree.availability === "unavailable"));
   const taskWorkspaceLabel = worktreeSelected
     ? selectedWorktree?.name ?? state.newTask.selection.workspaceLabel ?? "Workspace unavailable"
-    : "Project root";
-  const enteredWorkspacePath = workspacePath.trim();
+    : "No isolation";
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
   // Liveness recovery can publish the replacement Task's loading snapshot
@@ -201,6 +203,19 @@ export function NewTaskView({
   const composerFileBrowser = needsProject || needsWorkspace || projectUnavailable
     || worktreeUnavailable || worktreeLoading || loadingProjects ? undefined : fileBrowser;
 
+  if (!fixedProjectContext && !loadingProjects && projectChoices.length === 0 && onAddProject) {
+    return (
+      <section className="task-surface new-task-surface" aria-label="New task">
+        <div className="no-project-state">
+          <span className="no-project-state-icon"><FolderPlus size={20} /></span>
+          <h1>No Projects</h1>
+          <p>Add a Project folder to start a Task.</p>
+          <button onClick={onAddProject} type="button"><FolderPlus size={14} />Add project</button>
+        </div>
+      </section>
+    );
+  }
+
   const submit = (prompt: string) => {
     if (!canSubmit) return;
     onSubmitTask({ prompt, context: composerAttachments });
@@ -209,17 +224,6 @@ export function NewTaskView({
     select();
     setOpenContextMenu(undefined);
   };
-  const selectWorkspacePath = (path: string, label = workspaceLabel(path)) => {
-    const trimmedPath = path.trim();
-    if (!trimmedPath) return;
-    intents.selectWorkspace({
-      path: trimmedPath,
-      label,
-      projectId: projectIdForWorkspaceRoot(trimmedPath),
-    });
-    setOpenContextMenu(undefined);
-  };
-  const useWorkspacePath = () => selectWorkspacePath(enteredWorkspacePath);
   const composer = (
     <Composer
       attachments={composerAttachments}
@@ -277,7 +281,8 @@ export function NewTaskView({
     >
       <div className="new-task-center">
         <h1>What are we working on?</h1>
-        <div className="new-task-context-controls" aria-label="Task start context">
+        <div className="new-task-context-controls" data-layout={fixedProjectContext ? "fixed" : "sentence"} aria-label="Task start context">
+          {!fixedProjectContext ? <span className="new-task-context-word word-work-on">Work on</span> : null}
           {!fixedProjectContext ? <div className={`new-task-context-anchor new-task-context-anchor-project ${openContextMenu === "project" ? "context-menu-open" : ""}`}>
             <PopupPanel
               className="composer-popover new-task-context-menu new-task-project-menu"
@@ -287,8 +292,8 @@ export function NewTaskView({
               placement="bottom"
               trigger={(popupTrigger) => (
                 <Selector
-                  disabled={loadingProjects || state.newTask.submitting}
-                  icon={<FolderOpen size={12} />}
+                  disabled={state.newTask.submitting || (loadingProjects && !selectedProject)}
+                  icon={selectedProject?.available === false ? <FolderX size={12} /> : <FolderOpen size={12} />}
                   label={projectSelectorLabel}
                   locked={false}
                   menuOpen={openContextMenu === "project"}
@@ -296,11 +301,17 @@ export function NewTaskView({
                 />
               )}
             >
-                {projectChoices.length ? <div className="new-task-context-menu-heading" role="none">Workspaces</div> : null}
+                <div className="new-task-project-menu-toolbar" role="none">
+                  <strong>Projects</strong>
+                  {onAddProject ? <button onClick={() => { setOpenContextMenu(undefined); onAddProject(); }} type="button"><FolderPlus size={13} />Add</button> : null}
+                </div>
                 {projectChoices.map((project) => (
                   <MenuButton
                     active={state.newTask.selection.projectId === project.projectId}
-                    icon={<FolderOpen size={13} />}
+                    description={project.available === false
+                      ? `Folder unavailable · ${project.workspaceRoot ?? "Path unavailable"}`
+                      : project.workspaceRoot}
+                    icon={project.available === false ? <FolderX size={13} /> : <FolderOpen size={13} />}
                     key={project.projectId}
                     label={project.label}
                     onClick={() => selectContextAndClose(() => {
@@ -308,43 +319,9 @@ export function NewTaskView({
                     })}
                   />
                 ))}
-                {workspaceBrowser ? (
-                  <NewWorkspacePicker
-                    browser={workspaceBrowser}
-                    key={workspaceBrowser.ownerKey}
-                    onSelect={(workspace) => selectWorkspacePath(workspace.path, workspace.label)}
-                  />
-                ) : null}
-                <div className="new-workspace-entry" role="none">
-                  <label htmlFor="new-task-workspace-root">Open folder path</label>
-                  <div className="new-workspace-entry-row">
-                    <input
-                      id="new-task-workspace-root"
-                      onChange={(event) => setWorkspacePath(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          useWorkspacePath();
-                        }
-                      }}
-                      placeholder="/path/to/workspace"
-                      type="text"
-                      value={workspacePath}
-                    />
-                    <button
-                      aria-label="Use workspace path"
-                      disabled={!enteredWorkspacePath}
-                      onClick={useWorkspacePath}
-                      type="button"
-                    >
-                      <Check size={14} />
-                      <span>Open</span>
-                    </button>
-                  </div>
-                </div>
             </PopupPanel>
           </div> : null}
-          {selectedProject?.worktreeRepositoryId ? <div className={`new-task-context-anchor new-task-context-anchor-workspace ${openContextMenu === "workspace" ? "context-menu-open" : ""}`}>
+          {selectedProject && isolationAvailable ? <div className={`new-task-context-anchor new-task-context-anchor-workspace ${openContextMenu === "workspace" ? "context-menu-open" : ""}`}>
             <PopupPanel
               className="task-workspace-popup"
               label="Task workspace"
@@ -373,6 +350,7 @@ export function NewTaskView({
               />
             </PopupPanel>
           </div> : null}
+          {!fixedProjectContext ? <span className="new-task-context-word word-using">using</span> : null}
           <div className={`new-task-context-anchor new-task-context-anchor-agent ${openContextMenu === "agent" ? "context-menu-open" : ""}`}>
             <PopupMenu
               className="composer-popover new-task-context-menu"
@@ -414,7 +392,20 @@ export function NewTaskView({
                 ))}
             </PopupMenu>
           </div>
+          {!fixedProjectContext && selectedProject && isolationAvailable ? <span className="new-task-context-word word-with">with</span> : null}
         </div>
+        {projectUnavailable && selectedProject ? <div className="project-unavailable-notice" role="status">
+          <FolderX size={17} />
+          <span><strong>Project folder unavailable</strong><small>{selectedProject.workspaceRoot}</small></span>
+          <span className="project-unavailable-actions">
+            {onCheckProject ? <button disabled={checkingProject} onClick={async () => {
+              setCheckingProject(true);
+              try { await onCheckProject(selectedProject.projectId); }
+              finally { setCheckingProject(false); }
+            }} type="button">{checkingProject ? "Checking…" : "Check again"}</button> : null}
+            {onRemoveProject ? <button onClick={() => onRemoveProject(selectedProject.projectId)} type="button">Remove Project…</button> : null}
+          </span>
+        </div> : null}
         {recoveryKind && selectedAgent && agentRecoveryActions ? (
           <AgentRecoveryPanel
             actions={agentRecoveryActions}

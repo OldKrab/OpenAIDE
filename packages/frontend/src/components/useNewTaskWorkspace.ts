@@ -92,6 +92,7 @@ export function useNewTaskWorkspace({
     backendConnection,
     backendReady,
     bootstrap,
+    clientInstanceId,
     dispatch: newTaskDispatch,
     pendingPreparation,
     newTaskController,

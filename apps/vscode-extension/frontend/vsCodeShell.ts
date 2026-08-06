@@ -25,8 +25,13 @@ export function createVsCodeShell(): FrontendShell {
   const vscode = window.acquireVsCodeApi?.();
   const bootstrap = datasetBootstrap;
   let nextFileRequest = 1;
+  let nextProjectRequest = 1;
   const pendingFileRequests = new Map<string, {
     resolve: (attachments: PreSendAttachment[]) => void;
+    reject: (error: Error) => void;
+  }>();
+  const pendingProjectRequests = new Map<string, {
+    resolve: (folder: { path: string; label: string } | undefined) => void;
     reject: (error: Error) => void;
   }>();
   if (typeof window.addEventListener === "function") {
@@ -37,6 +42,14 @@ export function createVsCodeShell(): FrontendShell {
       pendingFileRequests.delete(event.data.payload.requestId);
       if (event.data.payload.error) pending.reject(new Error(event.data.payload.error));
       else pending.resolve((event.data.payload.attachments ?? []) as PreSendAttachment[]);
+    });
+    window.addEventListener("message", (event: MessageEvent<HostToWebviewMessage>) => {
+      if (event.data?.type !== "project.pickFolder.result") return;
+      const pending = pendingProjectRequests.get(event.data.payload.requestId);
+      if (!pending) return;
+      pendingProjectRequests.delete(event.data.payload.requestId);
+      if (event.data.payload.error) pending.reject(new Error(event.data.payload.error));
+      else pending.resolve(event.data.payload.folder);
     });
   }
   const backendConnection = vscode && typeof window.addEventListener === "function"
@@ -124,6 +137,16 @@ export function createVsCodeShell(): FrontendShell {
     },
     workspace: {
       openFolder: () => vscode?.postMessage({ type: "workspace.openFolder" }),
+    },
+    projects: {
+      pickFolder() {
+        if (!vscode) return Promise.reject(new Error("VS Code folder picker unavailable."));
+        const requestId = `project-pick-${nextProjectRequest++}`;
+        return new Promise((resolve, reject) => {
+          pendingProjectRequests.set(requestId, { resolve, reject });
+          vscode.postMessage({ type: "project.pickFolder", payload: { requestId } });
+        });
+      },
     },
   };
 }

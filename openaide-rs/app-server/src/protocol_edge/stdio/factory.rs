@@ -48,6 +48,7 @@ pub(super) fn gateway(
     configured_projects: ConfiguredProjectRoots,
 ) -> Result<GatewayFactoryOutput, ProtocolEdgeStdioStartError> {
     let storage_fatal_events = store.take_task_storage_fatal_events();
+    configured_projects.enable_persistence(store.clone())?;
     let (task_notifier, task_updates) = TaskUpdateNotifier::channel();
     let projects = ProjectCollectionStore::new_with_configured_roots(
         store.clone(),

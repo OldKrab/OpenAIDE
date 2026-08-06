@@ -177,6 +177,7 @@ body[data-shell="web"] .sidebar {
 
 .sidebar-actions button,
 .sidebar-search,
+.add-project-button,
 .settings-button {
   min-height: 28px;
   border: 0;
@@ -199,6 +200,7 @@ body[data-shell="web"] .sidebar {
 
 .sidebar-actions button:hover,
 .sidebar-search:focus-within,
+.add-project-button:hover,
 .settings-button:hover,
 .task-row:hover,
 .task-row:has(:focus-visible) {
@@ -239,6 +241,157 @@ body[data-shell="web"] .sidebar {
 
 .settings-button {
   width: 100%;
+}
+
+.add-project-button {
+  width: 100%;
+  color: var(--oa-text);
+}
+
+.project-folder-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in oklch, var(--oa-text) 22%, transparent);
+}
+
+.project-folder-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 32px));
+  overflow: auto;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-panel);
+  box-shadow: 0 20px 54px color-mix(in oklch, var(--oa-text) 22%, transparent);
+  padding: 12px;
+}
+
+.project-folder-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 10px;
+}
+
+.project-folder-dialog > header > span {
+  display: grid;
+  gap: 2px;
+}
+
+.project-folder-dialog > header strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.project-folder-dialog > header small,
+.project-folder-error {
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.project-folder-dialog > header button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.project-folder-dialog > header button:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.project-folder-error {
+  margin: 0 2px 8px;
+  color: var(--oa-danger);
+}
+
+.project-folder-submitting {
+  pointer-events: none;
+  opacity: .56;
+}
+
+.project-remove-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in oklch, var(--oa-text) 22%, transparent);
+}
+
+.project-remove-dialog {
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-panel);
+  box-shadow: 0 20px 54px color-mix(in oklch, var(--oa-text) 22%, transparent);
+  padding: 18px;
+}
+
+.project-remove-dialog > header,
+.project-remove-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-remove-dialog > header > button {
+  margin-left: auto;
+}
+
+.project-remove-dialog h2 {
+  margin: 10px 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.project-remove-dialog p,
+.project-remove-dialog small {
+  color: var(--oa-muted);
+  line-height: 1.45;
+}
+
+.project-remove-dialog > footer {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.project-remove-dialog button {
+  min-height: 30px;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-text);
+  padding: 4px 10px;
+}
+
+.project-remove-dialog button.danger {
+  border-color: color-mix(in oklch, var(--oa-danger) 72%, var(--oa-border));
+  background: var(--oa-danger);
+  color: white;
+}
+
+.project-rename-form {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 3px;
+}
+
+.project-rename-form input {
+  min-width: 0;
 }
 
 .settings-button.selected {

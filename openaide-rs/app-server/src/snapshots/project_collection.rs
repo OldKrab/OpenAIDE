@@ -74,19 +74,26 @@ fn project_identities(
         }
     }
 
-    let mut projects = configured_roots
-        .projects()
-        .into_iter()
-        .map(|project| ProjectIdentity::from_workspace_root(&project.workspace_root))
+    let mut projects = latest_by_workspace
+        .into_values()
+        .map(|record| {
+            ProjectIdentity::from_workspace_root(
+                record
+                    .project_root
+                    .as_deref()
+                    .unwrap_or(&record.workspace_root),
+            )
+        })
+        .filter(|identity| !configured_roots.is_removed(&identity.project_id))
         .collect::<Vec<_>>();
-    projects.extend(latest_by_workspace.into_values().map(|record| {
-        ProjectIdentity::from_workspace_root(
-            record
-                .project_root
-                .as_deref()
-                .unwrap_or(&record.workspace_root),
-        )
-    }));
+    for project in configured_roots.projects() {
+        projects.retain(|identity| identity.project_id != project.project_id);
+        projects.push(ProjectIdentity {
+            project_id: project.project_id,
+            workspace_root: project.workspace_root,
+            label: project.label,
+        });
+    }
     projects.sort_by(|left, right| {
         left.label
             .cmp(&right.label)

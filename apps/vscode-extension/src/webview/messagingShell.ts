@@ -132,6 +132,23 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     }
     return true;
   }
+  if (message.type === "project.pickFolder") {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "Add Project",
+    });
+    const path = selected?.[0]?.fsPath;
+    await context.post({
+      type: "project.pickFolder.result",
+      payload: {
+        requestId: message.payload.requestId,
+        ...(path ? { folder: { path, label: nodePath.basename(path) || "Project" } } : {}),
+      },
+    });
+    return true;
+  }
   if (message.type === "worktree.openFolder" && isObject(message.payload)) {
     const repositoryId = requiredString(message.payload, "repository_id") as WorktreeRepositoryId;
     const worktreeId = requiredString(message.payload, "worktree_id") as WorktreeId;

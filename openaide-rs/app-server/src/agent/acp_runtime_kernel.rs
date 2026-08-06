@@ -68,8 +68,11 @@ impl AcpRuntimeKernel {
         let _operation = self.lock_agent_process_operations()?;
         self.registry.require(&request.agent_id)?;
 
-        let cwd = std::path::PathBuf::from(request.cwd.clone());
-        if !cwd.is_absolute() {
+        if request
+            .cwd
+            .as_deref()
+            .is_some_and(|cwd| !std::path::Path::new(cwd).is_absolute())
+        {
             return Err(RuntimeError::InvalidParams("workspace_root".to_string()));
         }
 

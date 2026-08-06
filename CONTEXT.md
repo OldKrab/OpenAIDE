@@ -108,6 +108,10 @@ _Avoid_: Treating every Task worktree as a separate Project
 The selected Project's configured filesystem root when used directly as a Task Workspace. It is a stable product choice, not the browser, shell process, or editor's ambient current directory.
 _Avoid_: Current folder
 
+**Unavailable Project**:
+A Project whose original configured folder cannot currently be used. The Project and its Tasks remain visible because the condition may be temporary; v1 can check the same path again or remove the Project, but cannot reconnect it to another path or migrate its Tasks.
+_Avoid_: Failed Project, moved Project, reconnecting to a replacement folder
+
 **Worktree Repository**:
 The Git repository that owns a shared inventory of registered worktrees. Worktree support applies only when the Project folder itself is a Git top-level checkout or linked-worktree root.
 _Avoid_: Walking up from a Project subdirectory to infer worktree support
@@ -291,6 +295,9 @@ _Avoid_: Treating every unread update or status change as an alert
 - The leased **Prepared Task** becomes a visible **Task** when its first user message is durably accepted.
 - A **Task** belongs to the OpenAIDE task list and has **Project Context**.
 - **Project Context** is always a **Project**.
+- Project identity follows its canonical folder path; renaming a Project changes only its OpenAIDE display name.
+- An **Unavailable Project** preserves its original path and Task history but cannot start new work until the same path becomes available again.
+- Removing a Project removes its OpenAIDE Tasks and local OpenAIDE data while preserving its folder, files, worktrees, and Agent-owned Native Sessions.
 - A **Task** has one **Task Workspace**.
 - Project folders that are top-level checkouts of the same **Worktree Repository** share its worktree inventory and management surface.
 - An **Unavailable Worktree** remains visible while Git continues to register it, but it cannot be selected as a **Task Workspace**.

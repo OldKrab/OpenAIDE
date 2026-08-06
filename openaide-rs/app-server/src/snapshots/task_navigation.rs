@@ -116,6 +116,7 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                     .is_none_or(|agents| agents.contains(task.agent_id.as_str()))
             })
             .filter(|(task, _)| project_selected(project_ids, &task.project_id))
+            .filter(|(task, _)| !self.configured_projects.is_removed(&task.project_id))
             .collect();
         // An archived or prepared Task still owns its Agent Native Session. Otherwise
         // archiving could incorrectly resurrect that session as an unadopted row.
@@ -159,6 +160,11 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                         .is_none_or(|agents| agents.contains(&entry.observation.reference.agent_id))
                 })
                 .filter(|entry| project_selected_str(project_ids, &entry.project_id))
+                .filter(|entry| {
+                    !self
+                        .configured_projects
+                        .is_removed(&ProjectId::from(entry.project_id.clone()))
+                })
                 .filter(|entry| {
                     !owned.contains(&(
                         entry.observation.reference.agent_id.clone(),
@@ -207,6 +213,10 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                     .then_with(|| navigation_activity(right).cmp(&navigation_activity(left)))
                     .then_with(|| navigation_identity(left).cmp(&navigation_identity(right)))
             });
+            group.loading = self
+                .native_sessions
+                .as_ref()
+                .is_some_and(|catalog| catalog.project_refreshing(group.project_id.as_str()));
         }
         if let Some(project_ids) = project_ids {
             groups.sort_by_key(|group| {
@@ -244,6 +254,7 @@ fn empty_group(project_id: ProjectId, project_label: String) -> TaskNavigationGr
         task_count: 0,
         entries: Vec::new(),
         has_more: false,
+        loading: false,
     }
 }
 

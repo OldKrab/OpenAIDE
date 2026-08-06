@@ -53,7 +53,7 @@ impl AgentRuntime for MockAgent {
             agent_id: request.agent_id,
             sessions: vec![AgentListedSession {
                 session_id: "mock-session".to_string(),
-                cwd: request.cwd,
+                cwd: request.cwd.unwrap_or_else(|| "/workspace".to_string()),
                 title: Some("Mock session".to_string()),
                 last_activity: Some("2026-05-18T00:00:00Z".to_string()),
                 updated_at: Some("2026-05-18T00:00:00Z".to_string()),

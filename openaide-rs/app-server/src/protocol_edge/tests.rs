@@ -27,7 +27,7 @@ use openaide_app_server_protocol::state::{
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::agent::product_api::{
     AgentAuthenticateWorkflow, AgentCatalogMutationWorkflow, AgentProbeWorkflow,
@@ -195,6 +195,276 @@ fn client_capabilities_changed_replaces_reported_workspace_roots() {
         .expect("Project collection");
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0]["label"], json!("beta"));
+}
+
+#[test]
+fn project_add_publishes_project_without_task_history() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let workspace_root = store.root().join("workspace/app");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+
+    let added = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "2",
+            "project/add",
+            json!({ "workspaceRoot": workspace_root }),
+        ),
+        AppServerTime(2),
+    ));
+
+    assert_eq!(added["result"]["project"]["label"], json!("app"));
+    assert_eq!(
+        added["result"]["project"]["workspaceRoot"],
+        json!(workspace_root.to_string_lossy())
+    );
+    assert_eq!(added["result"]["project"]["available"], json!(true));
+
+    let subscribed = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(3),
+    ));
+    assert_eq!(
+        subscribed["result"]["snapshot"]["projects"]["projects"][0]["label"],
+        json!("app")
+    );
+}
+
+#[test]
+fn task_navigation_load_more_requests_bounded_discovery_for_one_project() {
+    let root = tempfile::tempdir().unwrap().keep();
+    let store = Store::open(root).unwrap();
+    let listing = Arc::new(RecordingCatalogRefresh::default());
+    let mut gateway = gateway_with_project_store_and_listing(store.clone(), listing.clone());
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            "taskNavigation/loadMore",
+            json!({ "projectId": "project-added", "targetRowCount": 7 }),
+        ),
+        AppServerTime(2),
+    ));
+
+    assert_eq!(
+        listing.project_requests.lock().unwrap().as_slice(),
+        [("project-added".to_string(), 7)]
+    );
+}
+
+#[test]
+fn project_add_survives_gateway_restart() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let workspace_root = store.root().join("workspace/persistent-app");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            "project/add",
+            json!({ "workspaceRoot": workspace_root }),
+        ),
+        AppServerTime(2),
+    ));
+    drop(gateway);
+
+    let mut restarted = gateway_with_project_store(store);
+    let restarted_connection = ConnectionId::new("conn-2");
+    initialize(&mut restarted, restarted_connection.clone());
+    let subscribed = response_value(restarted.handle_inbound(
+        restarted_connection,
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(3),
+    ));
+
+    assert_eq!(
+        subscribed["result"]["snapshot"]["projects"]["projects"][0]["label"],
+        json!("persistent-app")
+    );
+}
+
+#[test]
+fn project_rename_updates_the_durable_display_name() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let workspace_root = store.root().join("workspace/original-name");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let added = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "2",
+            "project/add",
+            json!({ "workspaceRoot": workspace_root }),
+        ),
+        AppServerTime(2),
+    ));
+    let project_id = added["result"]["project"]["projectId"].clone();
+
+    let renamed = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "3",
+            "project/rename",
+            json!({ "projectId": project_id, "label": "Product" }),
+        ),
+        AppServerTime(3),
+    ));
+    assert_eq!(renamed["result"]["project"]["label"], json!("Product"));
+
+    drop(gateway);
+    let project_roots = crate::projects::ConfiguredProjectRoots::default();
+    project_roots.enable_persistence(store).unwrap();
+    assert_eq!(project_roots.projects()[0].label, "Product");
+}
+
+#[test]
+fn project_remove_hides_a_project_without_deleting_its_folder() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let workspace_root = store.root().join("workspace/remove-me");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let added = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "2",
+            "project/add",
+            json!({ "workspaceRoot": workspace_root }),
+        ),
+        AppServerTime(2),
+    ));
+
+    let removed = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "3",
+            "project/remove",
+            json!({ "projectId": added["result"]["project"]["projectId"] }),
+        ),
+        AppServerTime(3),
+    ));
+    assert_eq!(removed["result"]["removedTaskCount"], json!(0));
+    assert!(workspace_root.is_dir());
+
+    let subscribed = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "4",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(4),
+    ));
+    assert_eq!(
+        subscribed["result"]["snapshot"]["projects"]["projects"],
+        json!([])
+    );
+}
+
+#[test]
+fn project_remove_tombstones_local_tasks_but_keeps_agent_sessions() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let workspace_root = store.root().join("workspace/with-task");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let added = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "2",
+            "project/add",
+            json!({ "workspaceRoot": workspace_root }),
+        ),
+        AppServerTime(2),
+    ));
+    let mut task = client_new_task_record("task-in-project", "client-1");
+    task.workspace_root = workspace_root.to_string_lossy().to_string();
+    task.project_root = Some(task.workspace_root.clone());
+    task.lifecycle = crate::storage::records::TaskLifecycle::Open;
+    task.agent_session_id = Some("agent-session-kept".to_string());
+    store.write_task(&task).unwrap();
+
+    let removed = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "3",
+            "project/remove",
+            json!({ "projectId": added["result"]["project"]["projectId"] }),
+        ),
+        AppServerTime(3),
+    ));
+
+    assert_eq!(removed["result"]["removedTaskCount"], json!(1));
+    let stored = store.read_task("task-in-project").unwrap();
+    assert!(stored.tombstoned);
+    assert_eq!(
+        stored.agent_session_id.as_deref(),
+        Some("agent-session-kept")
+    );
+}
+
+#[test]
+fn project_refresh_rechecks_folder_availability() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let workspace_root = store.root().join("workspace/availability");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let added = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "2",
+            "project/add",
+            json!({ "workspaceRoot": workspace_root }),
+        ),
+        AppServerTime(2),
+    ));
+    std::fs::remove_dir(&workspace_root).unwrap();
+
+    let unavailable = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "3",
+            "project/refresh",
+            json!({ "projectId": added["result"]["project"]["projectId"] }),
+        ),
+        AppServerTime(3),
+    ));
+    assert_eq!(unavailable["result"]["project"]["available"], json!(false));
+
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let restored = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "4",
+            "project/refresh",
+            json!({ "projectId": added["result"]["project"]["projectId"] }),
+        ),
+        AppServerTime(4),
+    ));
+    assert_eq!(restored["result"]["project"]["available"], json!(true));
 }
 
 #[test]
@@ -2069,7 +2339,20 @@ fn gateway_with_project_context() -> RpcGateway {
 fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
     let root = tempfile::tempdir().unwrap().keep();
     let store = Store::open(root).unwrap();
+    let gateway = gateway_with_project_store(store.clone());
+    (gateway, store)
+}
+
+fn gateway_with_project_store(store: Store) -> RpcGateway {
+    gateway_with_project_store_and_listing(store, Arc::new(RejectingAgentListSessions))
+}
+
+fn gateway_with_project_store_and_listing(
+    store: Store,
+    agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
+) -> RpcGateway {
     let project_roots = crate::projects::ConfiguredProjectRoots::default();
+    project_roots.enable_persistence(store.clone()).unwrap();
     let task_snapshots = Arc::new(TaskSnapshotStore::new(store.clone()));
     let snapshots = SnapshotBuilder::with_sources(
         "server-1".into(),
@@ -2089,7 +2372,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
             task_snapshots.clone(),
         ),
     );
-    let gateway = RpcGateway::new(
+    RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
         StateStream::new(StateRootId::from("root-1")),
@@ -2108,7 +2391,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
-        Arc::new(RejectingAgentListSessions),
+        agent_list_sessions,
         Arc::new(RejectingAttachments),
         Arc::new(RejectingTaskAcquire),
         Arc::new(RejectingTaskFileSearch),
@@ -2124,8 +2407,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingTaskArchive),
         Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
         Arc::new(FixedShutdown),
-    );
-    (gateway, store)
+    )
 }
 
 fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>) -> RpcGateway {
@@ -2417,6 +2699,7 @@ impl AgentListSessionsWorkflow for ListingAgentSessions {
 #[derive(Default)]
 struct RecordingCatalogRefresh {
     requests: AtomicUsize,
+    project_requests: Mutex<Vec<(String, usize)>>,
 }
 
 impl AgentListSessionsWorkflow for RecordingCatalogRefresh {
@@ -2432,6 +2715,13 @@ impl AgentListSessionsWorkflow for RecordingCatalogRefresh {
 
     fn request_native_session_catalog_refresh(&self) {
         self.requests.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn request_native_session_catalog_load_more(&self, project_id: &str, target_row_count: usize) {
+        self.project_requests
+            .lock()
+            .unwrap()
+            .push((project_id.to_string(), target_row_count));
     }
 }
 

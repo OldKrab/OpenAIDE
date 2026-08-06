@@ -7,6 +7,7 @@ import {
   AppServerProtocolError,
   createAppServerSession,
   PERMISSION_REQUEST,
+  PROJECT_ADD,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILLS,
@@ -16,6 +17,7 @@ import {
   TASK_ADOPT_NATIVE_SESSION,
   TASK_RELEASE,
   TASK_LIST,
+  TASK_NAVIGATION_LOAD_MORE,
   TASK_MARK_READ,
   TASK_OPEN,
   TASK_SEND,
@@ -736,6 +738,60 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_2");
+  });
+
+  it("loads only the initial visible rows after adding a Project", async () => {
+    const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
+    initializedSnapshot.projects = {
+      projects: [{
+        projectId: "project_1" as never,
+        label: "Existing",
+        workspaceRoot: "/workspace/existing",
+        available: true,
+      }],
+    };
+    const discovery = deferredValue<{ accepted: true }>();
+    const request = vi.fn(async (method: string) => {
+      if (method === PROJECT_ADD) {
+        return {
+          project: {
+            projectId: "project_2",
+            label: "Added",
+            workspaceRoot: "/workspace/added",
+            available: true,
+          },
+        };
+      }
+      if (method === TASK_NAVIGATION_LOAD_MORE) return discovery.promise;
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    let addedProject: Awaited<ReturnType<NonNullable<typeof latestPublicController>["intents"]["projects"]["add"]>> | undefined;
+    await act(async () => {
+      void latestPublicController?.intents.projects.add("/workspace/added").then((project) => {
+        addedProject = project;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(addedProject?.projectId).toBe("project_2");
+    expect(request).toHaveBeenCalledWith(PROJECT_ADD, { workspaceRoot: "/workspace/added" });
+    expect(request).toHaveBeenCalledWith(TASK_NAVIGATION_LOAD_MORE, {
+      projectId: "project_2",
+      targetRowCount: 10,
+    });
+    discovery.resolve({ accepted: true });
   });
 
   it("does not overwrite a user-selected Agent when initialize resolves late", async () => {
@@ -2030,6 +2086,161 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([]);
+  });
+
+  it("releases the reload-retained Prepared Task before acquiring a different retained context", async () => {
+    let leasedTaskId: string | undefined;
+    const request = vi.fn(async (
+      method: string,
+      params?: { projectId?: string; taskId?: string },
+    ) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "Project", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_RELEASE) {
+        if (params?.taskId === leasedTaskId) leasedTaskId = undefined;
+        return { discardedTaskId: params?.taskId };
+      }
+      if (method === TASK_ACQUIRE) {
+        if (leasedTaskId) {
+          throw new Error("Release the current Prepared Task before acquiring another context");
+        }
+        const projectId = params?.projectId ?? "project_1";
+        leasedTaskId = projectId === "project_1" ? "task_project_1" : "task_project_2";
+        const task = protocolTaskSnapshot(leasedTaskId, "New task", { hasMessages: false });
+        task.task.projectId = projectId as never;
+        return { task };
+      }
+      throw new Error(method);
+    });
+    const snapshot = clientSnapshot({ includeActiveTask: false });
+    snapshot.projects = {
+      projects: [
+        { projectId: "project_1" as never, label: "One", workspaceRoot: "/workspace/project_1", available: true },
+        { projectId: "project_2" as never, label: "Two", workspaceRoot: "/workspace/project_2", available: true },
+      ],
+    };
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+    let renderer: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      renderer = create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_project_1");
+
+    await act(async () => {
+      renderer?.unmount();
+      await Promise.resolve();
+    });
+    globalThis.sessionStorage.setItem(
+      "openaide.newTaskSelection:state_root_1:client_1",
+      JSON.stringify({ projectId: "project_2", agentId: "codex" }),
+    );
+    bootstrap = webTaskBootstrap();
+    request.mockClear();
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([
+      [TASK_RELEASE, { taskId: "task_project_1" }],
+    ]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toEqual([
+      [TASK_ACQUIRE, { projectId: "project_2", agentId: "codex" }],
+    ]);
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_project_2");
+    expect(latestController?.state.newTask.error).toBeUndefined();
+  });
+
+  it("releases a pooled Prepared Task again when its Task id is reacquired", async () => {
+    let leasedTaskId: string | undefined;
+    const request = vi.fn(async (
+      method: string,
+      params?: { projectId?: string; taskId?: string },
+    ) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "Project", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_RELEASE) {
+        if (params?.taskId === leasedTaskId) leasedTaskId = undefined;
+        return { discardedTaskId: params?.taskId };
+      }
+      if (method === TASK_ACQUIRE) {
+        if (leasedTaskId) {
+          throw new Error("Release the current Prepared Task before acquiring another context");
+        }
+        const projectId = params?.projectId ?? "project_1";
+        leasedTaskId = projectId === "project_1" ? "task_project_1" : "task_project_2";
+        const task = protocolTaskSnapshot(leasedTaskId, "New task", { hasMessages: false });
+        task.task.projectId = projectId as never;
+        return { task };
+      }
+      throw new Error(method);
+    });
+    const snapshot = clientSnapshot({ includeActiveTask: false });
+    const projects = [
+      { projectId: "project_1", label: "One", workspaceRoot: "/workspace/project_1", available: true },
+      { projectId: "project_2", label: "Two", workspaceRoot: "/workspace/project_2", available: true },
+    ];
+    snapshot.projects = { projects: projects.map((project) => ({ ...project, projectId: project.projectId as never })) };
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_project_1");
+
+    await act(async () => {
+      latestController?.dispatch({ type: "newTask:project", project: projects[1] });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      latestController?.dispatch({ type: "newTask:project", project: projects[0] });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    request.mockClear();
+
+    await act(async () => {
+      latestController?.dispatch({ type: "newTask:project", project: projects[1] });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toContainEqual([
+      TASK_RELEASE,
+      { taskId: "task_project_1" },
+    ]);
+    expect(latestController?.newTaskSnapshot?.task).toMatchObject({
+      task_id: "task_project_2",
+      project_id: "project_2",
+    });
+    expect(latestController?.state.newTask.error).toBeUndefined();
   });
 
   it("replaces the prepared empty Task when the selected Agent changes", async () => {
@@ -3408,7 +3619,14 @@ function nonTaskSubscriptionSnapshot(
       scope,
       snapshot: {
         kind: "projects" as const,
-        projects: { projects: [] },
+        projects: {
+          projects: [{
+            projectId: "project_1" as never,
+            label: "Project",
+            workspaceRoot: "/workspace/project",
+            available: true,
+          }],
+        },
       },
     };
   }

@@ -74,7 +74,7 @@ impl AgentService {
         }
         self.gateway.list_sessions(AgentListSessionsRequest {
             agent_id: params.agent_id,
-            cwd: workspace_root.to_string_lossy().to_string(),
+            cwd: Some(workspace_root.to_string_lossy().to_string()),
             cursor: params.cursor,
         })
     }

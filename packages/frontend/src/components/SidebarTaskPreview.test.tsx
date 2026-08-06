@@ -1,7 +1,12 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
-import { SidebarTaskPreviewProvider, taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
+import {
+  createSidebarPreviewCoordinator,
+  SidebarTaskPreviewProvider,
+  taskPreviewContent,
+  useSidebarTaskPreview,
+} from "./SidebarTaskPreview";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -11,6 +16,19 @@ afterEach(() => {
 });
 
 describe("SidebarTaskPreview", () => {
+  it("transfers an open preview immediately between different row kinds", () => {
+    const coordinator = createSidebarPreviewCoordinator();
+    const taskOwner = Symbol("task");
+    const projectOwner = Symbol("project");
+    const dismissTask = vi.fn(() => coordinator.closed(taskOwner));
+
+    expect(coordinator.enter(taskOwner)).toBe(false);
+    coordinator.opened(taskOwner, dismissTask);
+
+    expect(coordinator.enter(projectOwner)).toBe(true);
+    expect(dismissTask).toHaveBeenCalledOnce();
+  });
+
   it("does not open rich hover previews inside VS Code navigation", () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", {
@@ -39,7 +57,7 @@ describe("SidebarTaskPreview", () => {
     expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
   });
 
-  it("opens after one second of pointer dwell", () => {
+  it("opens after 750 milliseconds of pointer dwell", () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", {
       innerHeight: 800,
@@ -60,7 +78,7 @@ describe("SidebarTaskPreview", () => {
 
     act(() => tree.root.findByType("button").props.onPointerEnter());
     act(() => {
-      vi.advanceTimersByTime(999);
+      vi.advanceTimersByTime(749);
     });
     expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
 

@@ -155,6 +155,53 @@
   padding: clamp(12px, 3vh, 24px) clamp(18px, 8vw, 84px) clamp(16px, 6vh, 42px);
 }
 
+.no-project-state {
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.no-project-state-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.no-project-state h1,
+.no-project-state p {
+  margin: 0;
+}
+
+.no-project-state h1 {
+  font-size: 18px;
+  font-weight: 550;
+}
+
+.no-project-state p {
+  color: var(--oa-muted);
+}
+
+.no-project-state > button {
+  min-height: 32px;
+  margin-top: 4px;
+  border: 1px solid color-mix(in oklch, var(--oa-focus) 55%, var(--oa-border));
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-focus);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+}
+
 .new-task-context-controls {
   min-width: 0;
   width: fit-content;
@@ -170,6 +217,32 @@
   padding: 2px;
 }
 
+.new-task-context-controls[data-layout="sentence"] {
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 5px;
+  padding: 0;
+}
+
+.new-task-context-word {
+  color: color-mix(in oklch, var(--oa-muted) 90%, var(--oa-text));
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 32px;
+  white-space: nowrap;
+}
+
+.new-task-context-controls[data-layout="sentence"] .word-work-on { order: 0; }
+.new-task-context-controls[data-layout="sentence"] .new-task-context-anchor-project { order: 1; }
+.new-task-context-controls[data-layout="sentence"] .word-using { order: 2; }
+.new-task-context-controls[data-layout="sentence"] .new-task-context-anchor-agent { order: 3; }
+.new-task-context-controls[data-layout="sentence"] .word-with { order: 4; }
+.new-task-context-controls[data-layout="sentence"] .new-task-context-anchor-workspace { order: 5; }
+
 .new-task-context-anchor {
   min-width: 0;
   position: static;
@@ -181,6 +254,93 @@
   position: absolute;
   top: calc(100% + 6px);
   z-index: 20;
+}
+
+.new-task-project-menu-toolbar {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 7px;
+}
+
+.new-task-project-menu-toolbar strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.new-task-project-menu-toolbar button {
+  min-height: 25px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+}
+
+.new-task-project-menu-toolbar button:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.project-unavailable-notice {
+  width: min(620px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid color-mix(in oklch, var(--oa-warning) 38%, var(--oa-border));
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-warning) 5%, var(--oa-panel));
+  padding: 8px 10px;
+}
+
+.project-unavailable-notice > svg {
+  color: var(--oa-warning);
+}
+
+.project-unavailable-notice > span:not(.project-unavailable-actions) {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.project-unavailable-notice strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-unavailable-notice small {
+  overflow: hidden;
+  color: var(--oa-muted);
+  font-family: var(--vscode-editor-font-family), ui-monospace, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-unavailable-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-unavailable-actions button {
+  min-height: 27px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  padding: 3px 7px;
+}
+
+.project-unavailable-actions button:hover:not(:disabled) {
+  background: var(--oa-raised);
+  color: var(--oa-text);
 }
 
 .new-workspace-entry {
@@ -304,6 +464,33 @@
   padding-inline: 9px;
   font-size: 12px;
   font-weight: 500;
+}
+
+.new-task-context-controls[data-layout="sentence"] .composer-pill {
+  min-height: 32px;
+  max-width: min(320px, 46vw);
+  color: color-mix(in oklch, var(--oa-text) 88%, var(--oa-muted));
+  gap: 5px;
+  padding-inline: 7px;
+  font-size: 13.5px;
+  font-weight: 450;
+}
+
+.new-task-context-controls[data-layout="sentence"] .composer-pill > svg:last-child {
+  display: none;
+}
+
+.new-task-context-controls[data-layout="sentence"] .composer-pill > svg:first-child {
+  color: var(--oa-muted);
+  opacity: .78;
+}
+
+.new-task-context-controls[data-layout="sentence"] .composer-pill:hover:not(:disabled):not([aria-expanded="true"]) {
+  background: transparent;
+}
+
+.new-task-context-controls[data-layout="sentence"] .composer-pill[aria-expanded="true"] {
+  background: color-mix(in oklch, var(--oa-text) 5%, transparent);
 }
 
 .new-task-context-controls .composer-pill:hover:not(:disabled) {

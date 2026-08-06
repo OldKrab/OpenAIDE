@@ -44,6 +44,10 @@ pub const ATTACHMENT_REVEAL_SENT: &str = "attachment/revealSent";
 pub const SHELL_RESOLVE_FILE_REVEAL: &str = "shell/resolveFileReveal";
 pub const WORKSPACE_LIST_ROOTS: &str = "workspace/listRoots";
 pub const WORKSPACE_LIST_DIRECTORY: &str = "workspace/listDirectory";
+pub const PROJECT_ADD: &str = "project/add";
+pub const PROJECT_RENAME: &str = "project/rename";
+pub const PROJECT_REMOVE: &str = "project/remove";
+pub const PROJECT_REFRESH: &str = "project/refresh";
 pub const WORKTREE_REFRESH: &str = "worktree/refresh";
 pub const WORKTREE_CREATE: &str = "worktree/create";
 pub const WORKTREE_RECREATE: &str = "worktree/recreate";
@@ -127,6 +131,10 @@ pub const CLIENT_METHODS: &[&str] = &[
     SHELL_RESOLVE_FILE_REVEAL,
     WORKSPACE_LIST_ROOTS,
     WORKSPACE_LIST_DIRECTORY,
+    PROJECT_ADD,
+    PROJECT_RENAME,
+    PROJECT_REMOVE,
+    PROJECT_REFRESH,
     WORKTREE_REFRESH,
     WORKTREE_CREATE,
     WORKTREE_RECREATE,

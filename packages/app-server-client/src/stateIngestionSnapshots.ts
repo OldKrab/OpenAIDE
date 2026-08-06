@@ -141,6 +141,7 @@ function updateTaskNavigationSnapshot(
       payload.taskCount,
       payload.entries,
       payload.hasMore,
+      payload.loading,
     );
     return navigation ? changed({ ...snapshot, navigation }) : unchanged(snapshot);
   }

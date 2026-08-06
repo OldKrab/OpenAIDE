@@ -735,6 +735,27 @@ describe("SidebarNativeSessionRow", () => {
 });
 
 describe("Sidebar", () => {
+  it("does not render a phantom project group from a removed project selection", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject
+        nativeSessionProjectId="project_removed"
+        nativeSessions={nativeSessions()}
+        projects={[{ projectId: "project_openaide", label: "OpenAIDE" }]}
+        showArchived={false}
+        tasks={[task({
+          project_id: "project_openaide",
+          project_label: "OpenAIDE",
+          workspace_root: "/workspace/OpenAIDE",
+        })]}
+      />,
+    );
+
+    expect(tree.root.findAllByType(SidebarProjectTaskGroup)).toHaveLength(1);
+    expect(textContent(tree)).not.toContain("Current workspace");
+  });
+
   it("replaces the ordinary empty state with an actionable folder setup state", () => {
     const onOpenWorkspaceFolder = vi.fn();
     const tree = render(
@@ -1827,6 +1848,28 @@ describe("Sidebar", () => {
       .toBe("Load more");
     expect(taskRows(tree)).toHaveLength(17);
     expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 17);
+  });
+
+  it("shows a loading status only on the Project being discovered", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessions={nativeSessions({ loadingProjectIds: ["project_2"] })}
+        projects={[
+          { projectId: "project_1", label: "Ready" },
+          { projectId: "project_2", label: "Added" },
+        ]}
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    const ready = tree.root.findByProps({ "aria-label": "Ready" });
+    const added = tree.root.findByProps({ "aria-label": "Added" });
+    expect(ready.findAllByProps({ className: "project-task-group-counts" })).toHaveLength(0);
+    expect(added.findByProps({ className: "project-task-group-counts" }).children.join(""))
+      .toBe("Loading…");
   });
 
   it("reveals exactly the numeric task count when a prefetched page arrives", () => {

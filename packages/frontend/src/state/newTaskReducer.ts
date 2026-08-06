@@ -382,6 +382,9 @@ function replacePreparedDraftOnContextChange(
   if (newTaskPreparationKey({ newTask: state.newTask }) === newTaskPreparationKey({ newTask: nextNewTask })) {
     return { ...state, newTask: nextNewTask };
   }
+  // Preparation errors belong to the Project/Agent/worktree combination that
+  // produced them; carrying one into a new context makes valid choices look broken.
+  nextNewTask = { ...nextNewTask, error: undefined };
   const preparedTaskId = newTaskId;
   if (!preparedTaskId) return { ...state, newTask: nextNewTask };
   const preparedInput = state.taskInputs[preparedTaskId];

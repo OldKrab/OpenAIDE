@@ -32,8 +32,8 @@ export class NewTaskController {
   private generation = 0;
   private preparationReset = 0;
   private readonly listeners = new Set<() => void>();
-  // Settled IDs stay for this controller's lifetime: late creation/browser
-  // promises can otherwise issue a second discard after the first one completes.
+  // Settled IDs deduplicate late disposal work until the App Server explicitly
+  // leases that pooled Task identity to this client again.
   private readonly disposals = new Map<TaskId, Promise<void>>();
   // Send protection is independent of the current controller lease. A newer New Task
   // must not make an older in-flight Send disposable before its one request settles.
@@ -148,6 +148,9 @@ export class NewTaskController {
       attachmentResources?.claimNewTaskController(taskId);
       return this.current;
     }
+    // Prepared Tasks return to a server pool, so a later acquire may legitimately
+    // reuse the same Task id. Disposal ownership is per lease, not per identity.
+    this.disposals.delete(taskId);
     const lease = { generation: ++this.generation, preparationKey, taskId };
     this.current = lease;
     if (this.expiredLeaseTaskId === taskId) this.expiredLeaseTaskId = undefined;

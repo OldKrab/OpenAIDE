@@ -51,6 +51,7 @@ pub(crate) struct NativeSessionCatalog {
     state: Arc<Mutex<StoredNativeSessionCatalog>>,
     refresh_state: Arc<Mutex<openaide_app_server_protocol::snapshot::TaskNavigationRefreshState>>,
     projects_with_more: Arc<Mutex<std::collections::HashSet<String>>>,
+    projects_refreshing: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl NativeSessionCatalog {
@@ -69,6 +70,7 @@ impl NativeSessionCatalog {
                 openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle,
             )),
             projects_with_more: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            projects_refreshing: Arc::new(Mutex::new(std::collections::HashSet::new())),
         })
     }
 
@@ -96,6 +98,9 @@ impl NativeSessionCatalog {
                     );
                     continue;
                 }
+                // Project ownership can become more specific when a parent or
+                // child Project is added after this session was first observed.
+                existing.project_id = project_id.to_string();
                 let advances_activity = observation
                     .last_activity
                     .as_deref()
@@ -334,6 +339,26 @@ impl NativeSessionCatalog {
         self.projects_with_more
             .lock()
             .expect("native session pagination state poisoned")
+            .contains(project_id)
+    }
+
+    /// Tracks transient discovery independently for each Project navigation group.
+    pub(crate) fn set_project_refreshing(&self, project_id: &str, refreshing: bool) -> bool {
+        let mut projects = self
+            .projects_refreshing
+            .lock()
+            .expect("native session Project refresh state poisoned");
+        if refreshing {
+            projects.insert(project_id.to_string())
+        } else {
+            projects.remove(project_id)
+        }
+    }
+
+    pub(crate) fn project_refreshing(&self, project_id: &str) -> bool {
+        self.projects_refreshing
+            .lock()
+            .expect("native session Project refresh state poisoned")
             .contains(project_id)
     }
 }

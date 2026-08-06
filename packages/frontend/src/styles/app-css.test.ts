@@ -421,6 +421,11 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.new-task-context-controls \.composer-pill\[aria-expanded="true"\]\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-text\) 9%, transparent\);[^}]*color:\s*var\(--oa-text\);/);
   });
 
+  it("aligns connective and selected text on the same sentence metrics", () => {
+    expect(appCss).toMatch(/\.new-task-context-word\s*{[^}]*font-size:\s*13\.5px;[^}]*line-height:\s*32px;/);
+    expect(appCss).toMatch(/\.new-task-context-controls\[data-layout="sentence"\] \.composer-pill\s*{[^}]*font-size:\s*13\.5px;/);
+  });
+
   it("keeps all mobile task context labels on one row while workspace absorbs overflow", () => {
     expect(appCss).toMatch(/@media \(max-width:\s*430px\)[\s\S]*?\.new-task-context-controls\s*{[^}]*grid-template-columns:\s*fit-content\(36%\) minmax\(0,\s*1fr\) max-content;[^}]*align-items:\s*center;/);
     expect(appCss).toMatch(/\.new-task-context-anchor-workspace \.composer-pill\s*{[^}]*width:\s*100%;/);
@@ -472,7 +477,8 @@ describe("task list row styles", () => {
   });
 
   it("shows project task counts in grouped sidebar headers", () => {
-    expect(appCss).toMatch(/\.project-task-group-header\s*{[^}]*margin-bottom:\s*4px;/);
+    expect(appCss).toMatch(/\.project-task-group-header\s*{[^}]*height:\s*32px;[^}]*margin-bottom:\s*4px;/);
+    expect(appCss).toMatch(/\.project-task-group-toggle\s*{[^}]*height:\s*32px;/);
     expect(appCss).toMatch(/\.project-task-group-toggle\s*{[^}]*color:\s*var\(--oa-text\);/);
     expect(appCss).toMatch(/\.project-task-group-toggle strong\s*{[^}]*color:\s*var\(--oa-text\);[^}]*font-size:\s*13px;[^}]*font-weight:\s*600;/);
     expect(appCss).toMatch(/\.project-task-group-counts\s*{[^}]*font-size:\s*11px;[^}]*color:\s*var\(--oa-muted\);/);

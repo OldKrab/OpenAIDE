@@ -10,6 +10,7 @@ mod client_handlers;
 mod diagnostics_handlers;
 pub mod local_http;
 mod messages;
+mod project_handlers;
 mod responses;
 mod routing;
 mod server_request_handlers;

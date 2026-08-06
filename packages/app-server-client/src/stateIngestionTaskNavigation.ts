@@ -51,6 +51,7 @@ export function replaceNavigationProjectEntries(
   taskCount: number,
   entries: TaskNavigationEntry[],
   hasMore: boolean,
+  loading: boolean,
 ): TaskNavigationSnapshot | undefined {
   const groupIndex = navigation.groups.findIndex((group) => group.projectId === projectId);
   if (groupIndex < 0) return undefined;
@@ -60,6 +61,7 @@ export function replaceNavigationProjectEntries(
     taskCount,
     entries,
     hasMore,
+    loading,
   };
   return { ...navigation, groups };
 }

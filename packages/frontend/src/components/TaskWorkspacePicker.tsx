@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ShieldOff,
   Trash2,
   X,
 } from "lucide-react";
@@ -73,7 +74,7 @@ export function TaskWorkspacePicker({
   return (
     <div className="task-workspace-popover">
       <header className="task-workspace-popover-header">
-        <span><strong>Task workspace</strong><small>Choose the folder where this task will run.</small></span>
+        <span><strong>Isolation</strong><small>Use the Project directly or isolate this Task in a worktree.</small></span>
         <button aria-label="Close task workspace" onClick={onClose} type="button"><X size={15} /></button>
       </header>
       {worktrees.length > 7 ? (
@@ -84,8 +85,22 @@ export function TaskWorkspacePicker({
       ) : null}
       <div className="task-workspace-list-wrap">
         <div className="task-workspace-list" role="listbox">
+          <button
+            aria-selected={!selectedWorktreeId}
+            className={!selectedWorktreeId ? "selected" : undefined}
+            onClick={() => {
+              intents.selectWorktree({ label: "Project root", path: project.workspaceRoot ?? "" });
+              onClose();
+            }}
+            role="option"
+            type="button"
+          >
+            <ShieldOff size={14} />
+            <span><strong>No isolation</strong><small>{project.workspaceRoot}</small></span>
+          </button>
           {filtered.map((worktree) => {
             const root = isProjectRoot(worktree, project);
+            if (root) return null;
             const selected = root ? !selectedWorktreeId : selectedWorktreeId === worktree.worktreeId;
             const available = worktree.availability === "available";
             const reasonOpen = !available && explainedUnavailableId === worktree.worktreeId;
@@ -123,8 +138,9 @@ export function TaskWorkspacePicker({
         </div>
       </div>
       <footer className="task-workspace-actions">
-        <button onClick={() => setMode("create")} type="button"><Plus size={14} />New worktree</button>
+        {repository ? <button onClick={() => setMode("create")} type="button"><Plus size={14} />New worktree</button> : null}
         <button
+          disabled={!repository}
           onClick={() => onManageWorktrees?.(project.projectId)}
           type="button"
         >

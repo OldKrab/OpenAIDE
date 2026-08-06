@@ -205,6 +205,46 @@ describe("app reducer composer state", () => {
     expect(state.newTask.selection.workspaceLabel).toBe("Renamed App");
   });
 
+  it("moves the New Task composer away from a removed Project", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "projects",
+      projects: [
+        { projectId: "project-removed", label: "Removed", workspaceRoot: "/workspace/removed" },
+        { projectId: "project-next", label: "Next", workspaceRoot: "/workspace/next" },
+      ],
+    });
+    state = appReducer(state, { type: "newTask:projectId", projectId: "project-removed" });
+
+    state = appReducer(state, {
+      type: "projects",
+      projects: [{ projectId: "project-next", label: "Next", workspaceRoot: "/workspace/next" }],
+    });
+
+    expect(state.newTask.selection).toMatchObject({
+      projectId: "project-next",
+      workspaceLabel: "Next",
+      workspaceRoot: "/workspace/next",
+    });
+  });
+
+  it("clears a preparation error when the user selects another Project", () => {
+    let state = createInitialState();
+    state = appReducer(state, { type: "submit:error", message: "Project not found: project-removed" });
+
+    state = appReducer(state, {
+      type: "newTask:project",
+      project: {
+        projectId: "project-docs",
+        label: "docs",
+        workspaceRoot: "/workspace/docs",
+      },
+    });
+
+    expect(state.newTask.selection.projectId).toBe("project-docs");
+    expect(state.newTask.error).toBeUndefined();
+  });
+
   it("keeps loaded new-task Agent options when the same project id is selected again", () => {
     let state = createInitialState();
     state = appReducer(state, {

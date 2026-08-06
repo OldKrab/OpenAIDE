@@ -1,5 +1,5 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
-import { Folder, FolderOpen, GitBranch, MoreHorizontal, Plus } from "lucide-react";
+import { Check, Folder, FolderOpen, GitBranch, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
@@ -9,6 +9,8 @@ import {
   recentVisibleRows,
   type SidebarProjectGroup,
 } from "./sidebarProjectModel";
+import { useSidebarTaskPreview } from "./SidebarTaskPreview";
+import { useRef } from "react";
 
 type SidebarProjectTaskGroupProps = {
   activeTaskId?: string;
@@ -22,12 +24,15 @@ type SidebarProjectTaskGroupProps = {
   nativeSessionMutations: import("../state/store").AppState["nativeSessionMutations"];
   nativeSessionsAdoptingSessionId?: string;
   nativeSessionsHaveMore: boolean;
+  loading: boolean;
   canManageWorktrees: boolean;
   onArchiveNativeSession: (session: AgentListedSession) => void;
   onArchiveTask: (taskId: string) => void;
   onLoadMore: (visibleIncrement: number) => void;
   onManageWorktrees?: () => void;
   onNewTask: () => void;
+  onRemoveProject?: () => void;
+  onRenameProject?: (label: string) => Promise<void>;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreNativeSession: (session: AgentListedSession) => void;
@@ -53,12 +58,15 @@ export function SidebarProjectTaskGroup({
   nativeSessionMutations,
   nativeSessionsAdoptingSessionId,
   nativeSessionsHaveMore,
+  loading,
   canManageWorktrees,
   onArchiveNativeSession,
   onArchiveTask,
   onLoadMore,
   onManageWorktrees,
   onNewTask,
+  onRemoveProject,
+  onRenameProject,
   onOpenNativeSession,
   onOpenTask,
   onRestoreNativeSession,
@@ -69,6 +77,12 @@ export function SidebarProjectTaskGroup({
   showArchived,
 }: SidebarProjectTaskGroupProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(group.label);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string>();
+  const headerRef = useRef<HTMLDivElement>(null);
+  const preview = useSidebarTaskPreview();
   const activeTask = group.tasks.find((task) => task.task_id === activeTaskId);
   const taskRows = projectGroupRows(group.tasks, []);
   const allRows = projectGroupRows(group.tasks, nativeSessions);
@@ -77,14 +91,46 @@ export function SidebarProjectTaskGroup({
     : undefined;
   const visibleRows = recentVisibleRows(allRows, maxTasks, activeRow);
   const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
-  const countSummary = projectGroupCountSummary(taskRows.length, nativeSessions.length);
+  const countSummary = loading
+    ? "Loading…"
+    : projectGroupCountSummary(taskRows.length, nativeSessions.length);
+  const projectPreview = {
+    kind: "project" as const,
+    state: countSummary || "No tasks",
+    title: group.label,
+    workspaceLabel: group.workspaceRoot ?? "Path unavailable",
+  };
+  const saveRename = async () => {
+    if (!onRenameProject || renameSaving || !renameDraft.trim()) return;
+    setRenameSaving(true);
+    setRenameError(undefined);
+    try {
+      await onRenameProject(renameDraft.trim());
+      setRenaming(false);
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : "Unable to rename Project.");
+    } finally {
+      setRenameSaving(false);
+    }
+  };
 
   return (
     <section className="project-task-group" aria-label={group.label}>
-      <div className="project-task-group-header">
-        <button
+      <div
+        className="project-task-group-header"
+        onPointerLeave={() => preview?.leave()}
+        onPointerMove={() => !menuOpen && !renaming && headerRef.current && preview?.enter(projectPreview, headerRef.current)}
+        ref={headerRef}
+      >
+        {renaming ? <form className="project-rename-form" onSubmit={(event) => { event.preventDefault(); void saveRename(); }}>
+          <input aria-label={`Rename ${group.label}`} autoFocus disabled={renameSaving} maxLength={120} onChange={(event) => setRenameDraft(event.target.value)} value={renameDraft} />
+          <button aria-label="Save Project name" disabled={renameSaving || !renameDraft.trim()} type="submit"><Check size={13} /></button>
+          <button aria-label="Cancel Project rename" disabled={renameSaving} onClick={() => { setRenaming(false); setRenameError(undefined); }} type="button"><X size={13} /></button>
+          {renameError ? <small role="alert">{renameError}</small> : null}
+        </form> : <button
           aria-expanded={!collapsed}
           className="project-task-group-toggle"
+          onFocus={() => !menuOpen && headerRef.current && preview?.enter(projectPreview, headerRef.current, true)}
           onClick={onToggleCollapse}
           type="button"
         >
@@ -93,12 +139,12 @@ export function SidebarProjectTaskGroup({
             <strong>{group.label}</strong>
             {countSummary ? <small className="project-task-group-counts">{countSummary}</small> : null}
           </span>
-        </button>
+        </button>}
         <div className="project-task-group-actions">
           <PopupMenu
             className="project-task-group-menu"
             label={`${group.label} actions`}
-            onOpenChange={setMenuOpen}
+            onOpenChange={(open) => { if (open) preview?.dismiss(); setMenuOpen(open); }}
             open={menuOpen}
             trigger={(triggerProps) => (
               <button {...triggerProps} aria-label={`${group.label} actions`} type="button">
@@ -108,6 +154,8 @@ export function SidebarProjectTaskGroup({
           >
             <button onClick={() => { setMenuOpen(false); onNewTask(); }} role="menuitem" type="button"><Plus size={13} />New task</button>
             {canManageWorktrees && onManageWorktrees ? <button onClick={() => { setMenuOpen(false); onManageWorktrees(); }} role="menuitem" type="button"><GitBranch size={13} />Manage worktrees</button> : null}
+            {onRenameProject ? <button onClick={() => { setMenuOpen(false); setRenameDraft(group.label); setRenameError(undefined); setRenaming(true); }} role="menuitem" type="button"><Pencil size={13} />Rename Project</button> : null}
+            {onRemoveProject ? <button className="danger" onClick={() => { setMenuOpen(false); onRemoveProject(); }} role="menuitem" type="button"><Trash2 size={13} />Remove Project</button> : null}
           </PopupMenu>
         </div>
       </div>
