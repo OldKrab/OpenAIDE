@@ -222,9 +222,11 @@
 .chat-agent pre {
   max-width: 100%;
   overflow: auto;
+  overflow-wrap: anywhere;
   border-radius: var(--oa-radius-sm);
   background: color-mix(in oklch, var(--oa-panel) 82%, var(--oa-bg));
   padding: 8px 9px;
+  white-space: pre-wrap;
 }
 
 .chat-agent pre code {
