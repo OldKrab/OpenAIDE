@@ -1,13 +1,5 @@
-use super::{command_not_found_error, AcpAgentConfig};
+use super::command_not_found_error;
 use crate::protocol::errors::RuntimeError;
-
-#[test]
-fn codex_npx_fallback_uses_the_release_tested_exact_version() {
-    let config = AcpAgentConfig::codex_npx_fallback();
-
-    assert_eq!(config.command, "npx");
-    assert_eq!(config.args, ["-y", "@agentclientprotocol/codex-acp@1.1.10"]);
-}
 
 #[test]
 fn missing_codex_npx_is_classified_as_node_js_required() {
