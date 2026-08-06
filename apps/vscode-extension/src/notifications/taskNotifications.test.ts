@@ -6,7 +6,7 @@ const vscodeMocks = vi.hoisted(() => ({
   showInformationMessage: vi.fn(async () => "Open Task"),
   windowState: { focused: true },
   windowStateListeners: new Set<(state: { focused: boolean }) => void>(),
-  showSystemNotification: vi.fn(async () => undefined),
+  executeCommand: vi.fn(async () => undefined),
 }));
 
 vi.mock("vscode", () => ({
@@ -18,10 +18,9 @@ vi.mock("vscode", () => ({
     }),
     showInformationMessage: vscodeMocks.showInformationMessage,
   },
-}));
-
-vi.mock("./systemNotifications", () => ({
-  createSystemNotificationSender: () => vscodeMocks.showSystemNotification,
+  commands: {
+    executeCommand: vscodeMocks.executeCommand,
+  },
 }));
 
 vi.mock("../workspace/roots", () => ({
@@ -33,7 +32,7 @@ describe("VS Code Task notification registration", () => {
     vscodeMocks.windowState.focused = true;
     vscodeMocks.windowStateListeners.clear();
     vscodeMocks.showInformationMessage.mockClear();
-    vscodeMocks.showSystemNotification.mockClear();
+    vscodeMocks.executeCommand.mockClear();
   });
 
   it("subscribes once at extension-host scope and routes the notification action", async () => {
@@ -134,15 +133,16 @@ describe("VS Code Task notification registration", () => {
 
     observer?.onSnapshot(navigationSnapshot([]));
     observer?.onSnapshot(navigationSnapshot([attentionTask()]));
-    await vi.waitFor(() => expect(vscodeMocks.showSystemNotification).toHaveBeenCalledWith(
-      "Task finished: Ship notifications",
+    await vi.waitFor(() => expect(vscodeMocks.executeCommand).toHaveBeenCalledWith(
+      "_openaide.notifications.show",
+      { message: "Task finished: Ship notifications" },
     ));
     expect(vscodeMocks.showInformationMessage).not.toHaveBeenCalled();
   });
 
   it("falls back to the workbench notification when OS delivery is unavailable", async () => {
     vscodeMocks.windowState.focused = false;
-    vscodeMocks.showSystemNotification.mockRejectedValueOnce(new Error("notify-send missing"));
+    vscodeMocks.executeCommand.mockRejectedValueOnce(new Error("local presenter unavailable"));
     let observer: AppServerStateObserver | undefined;
     const runtime = {
       subscribeAppServerState: vi.fn(async (

@@ -11,6 +11,7 @@ test("stamps the exact release version into every packaged artifact manifest", (
   setReleaseArtifactVersion(repoRoot, "0.0.1-alpha.9");
 
   assert.equal(packageJson(repoRoot, "apps/vscode-extension/package.json").version, "0.0.1-alpha.9");
+  assert.equal(packageJson(repoRoot, "apps/vscode-notification-companion/package.json").version, "0.0.1-alpha.9");
   for (const relativePath of [
     "openaide-rs/app-server/Cargo.toml",
     "openaide-rs/app-server-protocol/Cargo.toml",
@@ -43,6 +44,11 @@ function fixtureRepo(lineEnding = "\n") {
   const repoRoot = mkdtempSync(path.join(os.tmpdir(), "openaide-release-version-"));
   writeFixture(repoRoot, "apps/vscode-extension/package.json", {
     name: "test-extension",
+    private: true,
+    version: "0.0.0",
+  });
+  writeFixture(repoRoot, "apps/vscode-notification-companion/package.json", {
+    name: "test-notification-companion",
     private: true,
     version: "0.0.0",
   });

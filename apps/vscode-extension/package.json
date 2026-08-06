@@ -30,6 +30,12 @@
   "engines": {
     "vscode": "^1.100.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
+  "extensionDependencies": [
+    "openaide.openaide-vscode-notification-companion"
+  ],
   "activationEvents": [
     "onView:openaide.tasks",
     "onCommand:openaide.newTask",

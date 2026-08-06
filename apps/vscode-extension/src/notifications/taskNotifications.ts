@@ -6,10 +6,10 @@ import type {
   SubscriptionScope,
 } from "@openaide/app-server-client";
 import { createTaskNotificationManager } from "./taskNotificationManager";
-import { createSystemNotificationSender } from "./systemNotifications";
 import { workspaceRoots } from "../workspace/roots";
 
 const HANDLED_EVENTS_KEY = "openaide.taskNotifications.handled";
+const SHOW_SYSTEM_NOTIFICATION_COMMAND = "_openaide.notifications.show";
 
 type TaskNotificationRuntime = {
   subscribeAppServerState(
@@ -38,7 +38,6 @@ export async function registerTaskNotifications(
   surfaces: TaskSurface,
   logger: TaskNotificationLogger,
 ): Promise<vscode.Disposable> {
-  const showSystemNotification = createSystemNotificationSender(process.platform);
   const manager = createTaskNotificationManager({
     now: () => Date.now(),
     focusedTaskId: () => surfaces.currentFocusedTaskId(),
@@ -58,7 +57,9 @@ export async function registerTaskNotifications(
     showNativeNotification: async (message, action) => {
       logger.info("showing OS Task notification");
       try {
-        await showSystemNotification(message);
+        // VS Code routes commands across extension hosts, so the UI-side companion
+        // receives this even when OpenAIDE runs in WSL, SSH, or a container.
+        await vscode.commands.executeCommand(SHOW_SYSTEM_NOTIFICATION_COMMAND, { message });
         return undefined;
       } catch (error) {
         logger.warn("OS Task notification unavailable; falling back to VS Code", {

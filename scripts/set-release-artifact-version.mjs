@@ -14,7 +14,12 @@ export function setReleaseArtifactVersion(repoRoot, version) {
     throw new Error(`Release version must be SemVer without a v prefix: ${version}`);
   }
 
-  setJsonVersion(path.join(repoRoot, "apps/vscode-extension/package.json"), version);
+  for (const relativePath of [
+    "apps/vscode-extension/package.json",
+    "apps/vscode-notification-companion/package.json",
+  ]) {
+    setJsonVersion(path.join(repoRoot, relativePath), version);
+  }
   for (const relativePath of [
     "openaide-rs/app-server/Cargo.toml",
     "openaide-rs/app-server-protocol/Cargo.toml",
