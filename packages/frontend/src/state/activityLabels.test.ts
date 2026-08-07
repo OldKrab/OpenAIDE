@@ -62,6 +62,18 @@ describe("activity labels", () => {
     );
   });
 
+  it.each([
+    "List files in 'tasks'",
+    "View Image /tmp/preview.png",
+  ])("preserves the complete ACP read-kind title %s", (title) => {
+    expect(activityStepLabel({
+      kind: "tool",
+      name: "read",
+      status: "completed",
+      input_summary: title,
+    })).toBe(title);
+  });
+
   it("uses command details when saved summaries only contain cwd", () => {
     const message = activity("Search index.md in .", "completed", [
       {
