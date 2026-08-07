@@ -95,11 +95,38 @@ impl AcpSessionClient {
         let cancellation = prompt.cancellation.clone();
         let task_id = prompt.task_id.clone();
         let session_id = prompt.session_id.clone();
+        let prompt_started_at = Instant::now();
+        crate::logging::info(
+            "acp_prompt_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+            }),
+        );
         if cancellation.is_cancelled() {
+            crate::logging::info(
+                "acp_prompt_cancelled_before_admission",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "session_id": session_id.as_str(),
+                    "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                }),
+            );
             return Ok(AgentPromptOutcome::Cancelled);
         }
         if self.has_terminal_error() {
-            return Err(self.worker_stopped_error());
+            let error = self.worker_stopped_error();
+            crate::logging::error(
+                "acp_prompt_terminal_error_before_admission",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "session_id": session_id.as_str(),
+                    "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                    "error_code": error.code(),
+                    "error_reason": error.reason(),
+                }),
+            );
+            return Err(error);
         }
         // A cancelled prompt still owns the Native Session until its worker observes
         // the Agent's response. Session updates use the independent permanent listener.
@@ -110,14 +137,39 @@ impl AcpSessionClient {
                 "session_id": session_id.as_str(),
             }),
         );
-        let Some(admission) = self.prompt_lifecycle.admit(&cancellation)? else {
-            return Ok(AgentPromptOutcome::Cancelled);
+        let admission = match self.prompt_lifecycle.admit(&cancellation) {
+            Ok(Some(admission)) => admission,
+            Ok(None) => {
+                crate::logging::info(
+                    "acp_prompt_lifecycle_admission_cancelled",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "session_id": session_id.as_str(),
+                        "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                    }),
+                );
+                return Ok(AgentPromptOutcome::Cancelled);
+            }
+            Err(error) => {
+                crate::logging::error(
+                    "acp_prompt_lifecycle_admission_failed",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "session_id": session_id.as_str(),
+                        "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                        "error_code": error.code(),
+                        "error_reason": error.reason(),
+                    }),
+                );
+                return Err(error);
+            }
         };
         crate::logging::info(
             "acp_prompt_lifecycle_admitted",
             serde_json::json!({
                 "task_id": task_id.as_str(),
                 "session_id": session_id.as_str(),
+                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
             }),
         );
         if cancellation.is_cancelled() {
@@ -126,36 +178,146 @@ impl AcpSessionClient {
         if self.has_terminal_error() {
             return Err(self.worker_stopped_error());
         }
-        self.terminal_owner.activate()?;
+        let terminal_activation_started_at = Instant::now();
+        crate::logging::info(
+            "acp_prompt_terminal_owner_activation_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+            }),
+        );
+        if let Err(error) = self.terminal_owner.activate() {
+            crate::logging::error(
+                "acp_prompt_terminal_owner_activation_failed",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "session_id": session_id.as_str(),
+                    "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                    "activation_elapsed_ms": terminal_activation_started_at.elapsed().as_millis(),
+                    "error_code": error.code(),
+                    "error_reason": error.reason(),
+                }),
+            );
+            return Err(error);
+        }
+        crate::logging::info(
+            "acp_prompt_terminal_owner_activation_completed",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                "activation_elapsed_ms": terminal_activation_started_at.elapsed().as_millis(),
+            }),
+        );
         if cancellation.is_cancelled() {
             let _ = self.terminal_owner.cancel();
             return Ok(AgentPromptOutcome::Cancelled);
         }
         let (done_tx, done_rx) = mpsc::channel();
-        self.command_tx
+        crate::logging::info(
+            "acp_prompt_command_dispatch_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+            }),
+        );
+        if self
+            .command_tx
             .send(AcpSessionCommand::Prompt {
                 prompt,
                 sink,
                 done_tx,
                 request_guard: admission.request,
             })
-            .map_err(|_| self.worker_stopped_error())?;
+            .is_err()
+        {
+            let error = self.worker_stopped_error();
+            crate::logging::error(
+                "acp_prompt_command_dispatch_failed",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "session_id": session_id.as_str(),
+                    "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                    "error_code": error.code(),
+                    "error_reason": error.reason(),
+                }),
+            );
+            return Err(error);
+        }
+        crate::logging::info(
+            "acp_prompt_command_dispatch_completed",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+            }),
+        );
         crate::logging::info(
             "acp_prompt_command_queued",
             serde_json::json!({
                 "task_id": task_id.as_str(),
                 "session_id": session_id.as_str(),
+                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+            }),
+        );
+        let wait_started_at = Instant::now();
+        crate::logging::info(
+            "acp_prompt_wait_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "session_id": session_id.as_str(),
+                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
             }),
         );
         loop {
             match done_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(result) => return result,
+                Ok(result) => {
+                    crate::logging::info(
+                        "acp_prompt_wait_finished",
+                        serde_json::json!({
+                            "task_id": task_id.as_str(),
+                            "session_id": session_id.as_str(),
+                            "wait_elapsed_ms": wait_started_at.elapsed().as_millis(),
+                            "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                            "outcome": prompt_outcome_label(&result),
+                            "error_code": result.as_ref().err().map(RuntimeError::code),
+                            "error_reason": result.as_ref().err().map(RuntimeError::reason),
+                        }),
+                    );
+                    return result;
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(self.worker_stopped_error());
+                    let error = self.worker_stopped_error();
+                    crate::logging::error(
+                        "acp_prompt_wait_disconnected",
+                        serde_json::json!({
+                            "task_id": task_id.as_str(),
+                            "session_id": session_id.as_str(),
+                            "wait_elapsed_ms": wait_started_at.elapsed().as_millis(),
+                            "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                            "error_code": error.code(),
+                            "error_reason": error.reason(),
+                        }),
+                    );
+                    return Err(error);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if self.has_terminal_error() {
-                        return Err(self.worker_stopped_error());
+                        let error = self.worker_stopped_error();
+                        crate::logging::error(
+                            "acp_prompt_wait_terminal_error",
+                            serde_json::json!({
+                                "task_id": task_id.as_str(),
+                                "session_id": session_id.as_str(),
+                                "wait_elapsed_ms": wait_started_at.elapsed().as_millis(),
+                                "elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                                "error_code": error.code(),
+                                "error_reason": error.reason(),
+                            }),
+                        );
+                        return Err(error);
                     }
                 }
             }
@@ -487,6 +649,18 @@ fn worker_stopped_error(terminal_error: &Arc<Mutex<Option<String>>>) -> RuntimeE
         .clone()
         .unwrap_or_else(|| "Native Session worker stopped".to_string());
     RuntimeError::NotReady(message)
+}
+
+fn prompt_outcome_label(result: &Result<AgentPromptOutcome, RuntimeError>) -> &'static str {
+    match result {
+        Ok(AgentPromptOutcome::EndTurn) => "end_turn",
+        Ok(AgentPromptOutcome::MaxTokens) => "max_tokens",
+        Ok(AgentPromptOutcome::MaxTurnRequests) => "max_turn_requests",
+        Ok(AgentPromptOutcome::Refusal) => "refusal",
+        Ok(AgentPromptOutcome::Cancelled) => "cancelled",
+        Ok(AgentPromptOutcome::Other(_)) => "other",
+        Err(_) => "error",
+    }
 }
 
 fn readable_worker_stopped_message(raw: &str) -> String {

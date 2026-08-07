@@ -2,6 +2,7 @@ use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, MessageId, TurnId};
 use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
 use openaide_app_server_protocol::task::{TaskQueueSendSelection, TaskSendParams};
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::attachment_runtime::{AttachmentSendReservation, ResolvedSendAttachments};
@@ -243,18 +244,58 @@ impl TaskProductApi {
         // so the background start is launched regardless of snapshot success.
         let accepted = committed_send.accepted(self);
 
+        let background_started_at = Instant::now();
+        let background_task_id = committed_task.task_id.clone();
+        let background_turn_id = turn_id.clone();
+        crate::logging::info(
+            "task_primary_prompt_background_start_scheduled",
+            serde_json::json!({
+                "task_id": background_task_id.as_str(),
+                "turn_id": background_turn_id.as_str(),
+            }),
+        );
         let api = self.clone();
         let background_send = committed_send.clone();
         std::thread::spawn(move || {
-            if let Err(error) =
-                api.start_committed_send(committed_task, prompt_text, attachments, background_send)
-            {
+            let worker_started_at = Instant::now();
+            crate::logging::info(
+                "task_primary_prompt_background_start_entered",
+                serde_json::json!({
+                    "task_id": background_task_id.as_str(),
+                    "turn_id": background_turn_id.as_str(),
+                    "scheduled_to_entry_ms": background_started_at.elapsed().as_millis(),
+                }),
+            );
+            let result =
+                api.start_committed_send(committed_task, prompt_text, attachments, background_send);
+            crate::logging::info(
+                "task_primary_prompt_background_start_returned",
+                serde_json::json!({
+                    "task_id": background_task_id.as_str(),
+                    "turn_id": background_turn_id.as_str(),
+                    "outcome": if result.is_ok() { "ok" } else { "error" },
+                    "worker_elapsed_ms": worker_started_at.elapsed().as_millis(),
+                }),
+            );
+            if let Err(error) = result {
                 crate::logging::error(
                     "task_committed_send_start_failed",
-                    serde_json::json!({ "error": error.message }),
+                    serde_json::json!({
+                        "task_id": background_task_id.as_str(),
+                        "turn_id": background_turn_id.as_str(),
+                        "error": error.message,
+                    }),
                 );
             }
         });
+        crate::logging::info(
+            "task_primary_prompt_background_start_spawned",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+                "scheduled_to_spawned_ms": background_started_at.elapsed().as_millis(),
+            }),
+        );
         accepted
     }
 
