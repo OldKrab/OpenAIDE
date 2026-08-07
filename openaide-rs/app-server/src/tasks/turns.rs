@@ -14,6 +14,7 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::transitions::TaskTransitions;
 use crate::tasks::turn_acceptance::TurnAcceptanceCoordinator;
+use crate::tasks::turn_diagnostics;
 use crate::tasks::turn_events::{TaskEventSink, TaskSessionEventSink};
 use openaide_app_server_protocol::ids::TaskId;
 
@@ -225,11 +226,20 @@ impl TurnRunner {
             cancellation: cancellation.clone(),
             session: session.key(),
         };
+        let registration_started_at = Instant::now();
         self.active_turns
             .turns
             .lock()
             .expect("active turn registry poisoned")
             .insert(turn_id.clone(), active.clone());
+        turn_diagnostics::runner_registered(
+            task_id.as_str(),
+            turn_id.as_str(),
+            registration_started_at.elapsed().as_millis(),
+        );
+        let thread_scheduled_at = Instant::now();
+        let thread_task_id = task_id.clone();
+        let thread_turn_id = turn_id.clone();
         thread::spawn(move || {
             let runner_started = Instant::now();
             crate::logging::info(
@@ -244,6 +254,11 @@ impl TurnRunner {
                 active_turns: runner.active_turns.clone(),
             };
             if cancellation.is_cancelled() {
+                turn_diagnostics::runner_cancelled_before_running(
+                    task_id.as_str(),
+                    turn_id.as_str(),
+                    runner_started.elapsed().as_millis(),
+                );
                 if runner.turn_is_active(&task_id, &turn_id) {
                     let _ = runner.transitions().finish_turn(
                         &task_id,
@@ -254,8 +269,18 @@ impl TurnRunner {
                 return;
             }
             if !runner.turn_is_active(&task_id, &turn_id) {
+                turn_diagnostics::runner_not_active_before_running(
+                    task_id.as_str(),
+                    turn_id.as_str(),
+                    runner_started.elapsed().as_millis(),
+                );
                 return;
             }
+            turn_diagnostics::runner_mark_running_started(
+                task_id.as_str(),
+                turn_id.as_str(),
+                runner_started.elapsed().as_millis(),
+            );
             match runner.transitions().mark_turn_running(&task_id, &turn_id) {
                 Ok(true) => crate::logging::info(
                     "task_primary_prompt_runner_marked_running",
@@ -333,7 +358,19 @@ impl TurnRunner {
                 },
                 sink.clone(),
             );
-            let _ = runner.turn_acceptance.serialize(&task_id, || {
+            turn_diagnostics::agent_invoke_returned(
+                task_id.as_str(),
+                turn_id.as_str(),
+                &result,
+                runner_started.elapsed().as_millis(),
+            );
+            let settlement_started_at = Instant::now();
+            turn_diagnostics::settlement_started(
+                task_id.as_str(),
+                turn_id.as_str(),
+                runner_started.elapsed().as_millis(),
+            );
+            let settlement_result = runner.turn_acceptance.serialize(&task_id, || {
                 #[cfg(test)]
                 runner.pause_before_settlement_for_test();
                 let next_turn_id = format!("turn_{}", uuid::Uuid::new_v4());
@@ -380,7 +417,19 @@ impl TurnRunner {
                     }
                 }
             });
+            turn_diagnostics::settlement_returned(
+                task_id.as_str(),
+                turn_id.as_str(),
+                &settlement_result,
+                settlement_started_at.elapsed().as_millis(),
+                runner_started.elapsed().as_millis(),
+            );
         });
+        turn_diagnostics::runner_thread_spawned(
+            thread_task_id.as_str(),
+            thread_turn_id.as_str(),
+            thread_scheduled_at.elapsed().as_millis(),
+        );
     }
 
     /// Forwards a steering prompt without registering another Task work lifecycle.

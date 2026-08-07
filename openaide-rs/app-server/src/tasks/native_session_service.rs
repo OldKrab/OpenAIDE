@@ -236,6 +236,7 @@ impl NativeSessionService {
             attachments,
         } = request;
         let task_id = task.task_id.clone();
+        let prompt_started_at = Instant::now();
         let acquire_started = Instant::now();
         crate::logging::info(
             "task_primary_prompt_session_acquire_started",
@@ -253,6 +254,7 @@ impl NativeSessionService {
                         "task_id": task_id.as_str(),
                         "turn_id": turn_id.as_str(),
                         "elapsed_ms": acquire_started.elapsed().as_millis(),
+                        "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
                     }),
                 );
                 opened
@@ -264,6 +266,7 @@ impl NativeSessionService {
                         "task_id": task_id.as_str(),
                         "turn_id": turn_id.as_str(),
                         "elapsed_ms": acquire_started.elapsed().as_millis(),
+                        "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
                         "error": error.to_string(),
                     }),
                 );
@@ -283,7 +286,7 @@ impl NativeSessionService {
                     session_state.apply_to(ctx.task_mut());
                     Ok(TaskMutationResult::Changed)
                 },
-            )?,
+            ),
             None => self.mutations.commit_existing_task(
                 &task_id,
                 TaskCommitOptions::metadata(),
@@ -294,7 +297,22 @@ impl NativeSessionService {
                     session_state.apply_to(ctx.task_mut());
                     Ok(TaskMutationResult::Changed)
                 },
-            )?,
+            ),
+        };
+        let binding = match binding {
+            Ok(binding) => binding,
+            Err(error) => {
+                crate::logging::error(
+                    "task_primary_prompt_session_binding_failed",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "turn_id": turn_id.as_str(),
+                        "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                        "error": error.to_string(),
+                    }),
+                );
+                return Err(error);
+            }
         };
         if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
             crate::logging::warn(
@@ -302,6 +320,7 @@ impl NativeSessionService {
                 serde_json::json!({
                     "task_id": task_id.as_str(),
                     "turn_id": turn_id.as_str(),
+                    "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
                 }),
             );
             return Err(RuntimeError::NotReady(
@@ -313,6 +332,7 @@ impl NativeSessionService {
             serde_json::json!({
                 "task_id": task_id.as_str(),
                 "turn_id": turn_id.as_str(),
+                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
             }),
         );
         if missing_session_id.is_some() {
@@ -324,6 +344,14 @@ impl NativeSessionService {
             );
         }
 
+        crate::logging::info(
+            "task_primary_prompt_session_events_attach_started",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+            }),
+        );
         let session_sink = match self.ensure_update_subscription(&task_id, &opened.session().key())
         {
             Ok(session_sink) => {
@@ -332,6 +360,7 @@ impl NativeSessionService {
                     serde_json::json!({
                         "task_id": task_id.as_str(),
                         "turn_id": turn_id.as_str(),
+                        "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
                     }),
                 );
                 session_sink
@@ -342,6 +371,7 @@ impl NativeSessionService {
                     serde_json::json!({
                         "task_id": task_id.as_str(),
                         "turn_id": turn_id.as_str(),
+                        "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
                         "error": error.to_string(),
                     }),
                 );
@@ -354,15 +384,24 @@ impl NativeSessionService {
             serde_json::json!({
                 "task_id": task_id.as_str(),
                 "turn_id": turn_id.as_str(),
+                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
             }),
         );
         self.turn_runner.spawn_agent_turn(
-            task_id,
+            task_id.clone(),
             text,
             attachments,
             turn_id.as_str().to_string(),
             session,
             session_sink,
+        );
+        crate::logging::info(
+            "task_primary_prompt_turn_spawned",
+            serde_json::json!({
+                "task_id": task_id.as_str(),
+                "turn_id": turn_id.as_str(),
+                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+            }),
         );
         Ok(())
     }
