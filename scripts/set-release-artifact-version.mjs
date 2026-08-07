@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/;
 const NEUTRAL_VERSION = "0.0.0";
+const CARGO_PACKAGE_NAMES = ["openaide-app-server", "openaide-app-server-protocol"];
 
 /**
  * Stamps the canonical release version into manifests consumed by packaged artifacts.
@@ -26,6 +27,8 @@ export function setReleaseArtifactVersion(repoRoot, version) {
   ]) {
     setCargoVersion(path.join(repoRoot, relativePath), version);
   }
+  // Keep the lockfile in sync so release builds can retain Cargo's --locked guarantee.
+  setCargoLockVersions(path.join(repoRoot, "Cargo.lock"), version);
 }
 
 function setJsonVersion(filePath, version) {
@@ -54,6 +57,33 @@ function setCargoVersion(filePath, version) {
 
   // Git may check manifests out as CRLF on Windows, so preserve the checkout's line endings.
   lines[versionLineIndex] = `version = "${version}"`;
+  writeFileSync(filePath, lines.join(lineEnding));
+}
+
+function setCargoLockVersions(filePath, version) {
+  const lockfile = readFileSync(filePath, "utf8");
+  const lineEnding = lockfile.includes("\r\n") ? "\r\n" : "\n";
+  const lines = lockfile.split(/\r?\n/);
+
+  for (const packageName of CARGO_PACKAGE_NAMES) {
+    const packageHeaderIndex = lines.findIndex(
+      (line, index) => line === "[[package]]" && lines[index + 1] === `name = "${packageName}"`,
+    );
+    const nextPackageIndex = lines.findIndex(
+      (line, index) => index > packageHeaderIndex && line === "[[package]]",
+    );
+    const packageEnd = nextPackageIndex === -1 ? lines.length : nextPackageIndex;
+    const versionLineIndex = lines.findIndex(
+      (line, index) => index > packageHeaderIndex && index < packageEnd && line === `version = "${NEUTRAL_VERSION}"`,
+    );
+
+    if (packageHeaderIndex === -1 || versionLineIndex === -1) {
+      throw new Error(`${filePath} must contain a neutral package version for ${packageName}`);
+    }
+
+    lines[versionLineIndex] = `version = "${version}"`;
+  }
+
   writeFileSync(filePath, lines.join(lineEnding));
 }
 
