@@ -54,6 +54,7 @@ mod open;
 mod prepare;
 mod queue;
 mod reset_task_history;
+mod retention;
 pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;
@@ -86,6 +87,7 @@ pub(crate) struct TaskProductApi {
     history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
     native_catalog: crate::native_sessions::catalog::NativeSessionCatalog,
     native_catalog_refresh: list_sessions::NativeCatalogRefreshCoordinator,
+    storage_maintenance: retention::TaskStorageMaintenanceCoordinator,
     task_subscription_presence: TaskSubscriptionPresence,
     native_adoption: Arc<Mutex<()>>,
     #[allow(dead_code)]
@@ -230,6 +232,7 @@ impl TaskProductApi {
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
             native_catalog,
             native_catalog_refresh: Default::default(),
+            storage_maintenance: Default::default(),
             task_subscription_presence: Default::default(),
             native_adoption: Arc::new(Mutex::new(())),
             server_requests,

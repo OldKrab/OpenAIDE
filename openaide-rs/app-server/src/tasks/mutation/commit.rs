@@ -16,10 +16,13 @@ use super::{
     TaskMutationContext, TaskMutationResult, TaskMutations,
 };
 
+mod changed_fields;
 mod journal_operations;
 mod native_session_binding;
 mod navigation_change;
 mod persist_new;
+mod retention;
+use changed_fields::{changed_fields, ChangedFields};
 use journal_operations::journal_operations;
 pub(super) use native_session_binding::{
     replace_missing_session_for_initial_prompt, replace_missing_session_for_prepared_task,
@@ -42,6 +45,8 @@ pub(super) fn commit_existing_task(
         mutation,
     )
 }
+
+pub(super) use retention::purge_task_if_retention_expired;
 
 fn commit_existing_task_with_session_policy(
     target: &TaskMutations,
@@ -679,6 +684,10 @@ fn persist_changed_projection(
         {
             detail.details.revision = change.artifact_sequence;
             detail.terminal_appends = change.terminal_appends.clone();
+        } else if let Some(committed_head) = projection.artifact_heads.get(&detail.artifact_id) {
+            // A byte-identical replacement is not rewritten, but the focused
+            // publication must still point at the existing durable artifact.
+            detail.details.revision = *committed_head;
         }
     }
     target
@@ -696,53 +705,6 @@ fn persist_changed_projection(
             navigation,
         },
     })
-}
-
-#[derive(Clone, Copy)]
-struct ChangedFields {
-    summary: bool,
-    lifecycle: bool,
-    preparation: bool,
-    agent_config: bool,
-    agent_commands: bool,
-    send_capability: bool,
-    input_capabilities: bool,
-    context_usage: bool,
-    current_plan: bool,
-    message_queue: bool,
-    removed: bool,
-}
-
-fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
-    let preparation = original.preparation != task.preparation;
-    let summary = original.title.effective() != task.title.effective()
-        || original.status != task.status
-        || original.unread != task.unread
-        || original.attention != task.attention
-        || original.updated_at != task.updated_at
-        || original.last_activity != task.last_activity
-        || original.agent_id != task.agent_id
-        || original.workspace_root != task.workspace_root
-        || original.message_history_version != task.message_history_version
-        || preparation;
-    ChangedFields {
-        summary,
-        lifecycle: original.lifecycle != task.lifecycle,
-        preparation,
-        agent_config: preparation
-            || original.config_options_catalog != task.config_options_catalog
-            || original.config_mutation != task.config_mutation
-            || original.model_id != task.model_id,
-        agent_commands: preparation
-            || original.agent_commands_catalog != task.agent_commands_catalog,
-        send_capability: preparation || original.status != task.status,
-        input_capabilities: original.supports_image_input != task.supports_image_input,
-        context_usage: original.context_usage != task.context_usage
-            || original.last_turn_usage != task.last_turn_usage,
-        current_plan: original.current_plan != task.current_plan,
-        message_queue: original.message_queue != task.message_queue,
-        removed: !original.tombstoned && task.tombstoned,
-    }
 }
 
 fn project_committed_changes(

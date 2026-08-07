@@ -1155,7 +1155,7 @@ fn compacted_agent_text_accepts_later_durable_chunks() {
             .unwrap();
     }
 
-    store.compact_message_journal(task_id).unwrap();
+    store.maintain_task_storage(task_id).unwrap();
     assert!(!store
         .task_dir(task_id)
         .unwrap()

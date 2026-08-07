@@ -295,7 +295,7 @@ pub(super) fn compaction_is_worthwhile(task_dir: &Path) -> Result<bool, RuntimeE
     }
     let journal_bytes = fs::metadata(journal)?.len();
     let snapshot_bytes = fs::metadata(task_dir.join(metadata.chat_snapshot))?.len();
-    Ok(journal_bytes >= snapshot_bytes && journal_bytes >= 64 * 1024)
+    Ok(journal_bytes >= snapshot_bytes && journal_bytes >= 1024 * 1024)
 }
 
 pub(super) fn migrate(

@@ -53,7 +53,7 @@ use crate::state_sync::StateStream;
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskFileSearchWorkflow,
     TaskMetadataWorkflow, TaskOpenWorkflow, TaskPlanWorkflow, TaskReleaseWorkflow,
-    TaskSetConfigOptionWorkflow,
+    TaskSetConfigOptionWorkflow, TaskStorageMaintenanceWorkflow,
 };
 use crate::tasks::product_api::{
     TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
@@ -94,6 +94,7 @@ pub struct RpcGateway {
     task_plan: Arc<dyn TaskPlanWorkflow>,
     task_release: Arc<dyn TaskReleaseWorkflow>,
     task_archive: Arc<dyn TaskArchiveWorkflow>,
+    task_storage_maintenance: Arc<dyn TaskStorageMaintenanceWorkflow>,
     worktrees: Arc<crate::worktrees::WorktreeManager>,
     shutdown: Arc<dyn AppServerShutdownWorkflow>,
 }
@@ -208,9 +209,18 @@ impl RpcGateway {
             task_plan,
             task_release,
             task_archive,
+            task_storage_maintenance: Arc::new(NoopTaskStorageMaintenance),
             worktrees,
             shutdown,
         }
+    }
+
+    pub(crate) fn with_task_storage_maintenance(
+        mut self,
+        workflow: Arc<dyn TaskStorageMaintenanceWorkflow>,
+    ) -> Self {
+        self.task_storage_maintenance = workflow;
+        self
     }
 
     fn handle_client_probe(
@@ -430,6 +440,12 @@ impl RpcGateway {
     ) -> GatewayOutcome {
         responses::error(connection_id, id, meta, error)
     }
+}
+
+struct NoopTaskStorageMaintenance;
+
+impl TaskStorageMaintenanceWorkflow for NoopTaskStorageMaintenance {
+    fn request_task_storage_maintenance(&self) {}
 }
 
 fn probe_lifecycle(state: LifecycleState) -> ClientProbeLifecycle {

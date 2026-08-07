@@ -74,6 +74,12 @@ Navigation uses four event kinds. `taskUpdated` replaces row-visible fields only
 
 Archived Tasks are saved, read-only history. `task/open` returns their stored state without Agent session load, resume, or history synchronization. Send, cancel, configuration mutation, and other Agent-interactive operations reject Archived Tasks until Restore. Late Agent events cannot reclassify an Archived Task or restore live controls. The sidebar presents Archive as a secondary destination from Tasks, visually identifies the read-only context, and provides Restore as the only lifecycle action.
 
+### Local Task storage retention
+
+App Server physically removes an unpinned Open or Archived Task after seven consecutive days without a user open, an accepted prompt, or Agent activity. A Prepared Task, pinned Task, active/starting/stopping/waiting Task, Task with queued work, Task with a pending App Server request, or Task with an active client subscription is never eligible. Opening a Task advances a small App Server-owned usage marker without creating a semantic Task revision or reordering Task Navigation.
+
+The sweep runs once when the reusable App Server starts and every six hours afterward. A Task migrated from a version without usage markers receives one measured seven-day grace period because prior client opens cannot be reconstructed safely. Expiration removes only that state root's local Task metadata, Chat, and Tool artifacts. It does not call Agent session deletion and does not remove or modify a Managed or External Worktree; a preserved Agent-owned Native Session may therefore reappear through Native Session Discovery. App Server publishes Task removal before reclaiming its directory, and interrupted physical cleanup remains hidden and retryable on startup.
+
 An unknown Task route is a route-local failure, not an App Server connection failure. When `client/initialize` requests a missing Task, initialization still returns the global client baseline with no active Task; the explicit `task/open` request then reports `notFound`. Frontend keeps Task Navigation and App Server health intact, renders **Task not found**, and allows immediate recovery through another Task or New Task. Only transport, logical-session, initialization, or subscription failure may change global connection health.
 
 ## Client Identity
@@ -424,6 +430,8 @@ App Server owns Task Attention meaning, identity, persistence, ordering, and cle
 Opening an existing Task triggers Native Session recovery and a history-freshness check. App Server returns stored Task state immediately, then uses `session/resume` when Chat is not proven stale, falls back to `session/load` when resume is unsupported, and calls `session/load` directly when the cached Agent timestamp proves Chat is stale. Opening does not issue `session/list`, and Send never initiates history synchronization. After a complete catalog observation, App Server also runs the same freshness check for an idle Task with an active Task-scope subscriber and starts `session/load` when Native history is stale. Exact catalog, tolerance, replacement, failure, and publication behavior is defined by [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md), while timestamp persistence is defined by [ADR-0024](adr/0024-task-chat-persistence.md).
 
 When synchronization is required, Frontend keeps the stored Chat visible, shows `historySync: syncing` as ongoing progress, and disables Send. A successful `session/load` atomically replaces Chat with exactly the rendered replay, then briefly shows `History updated` as a static completion notice without animation or elapsed time. The completion notice is presentation state, not durable Chat history. Failure keeps existing Chat, appends `History update failed` Live Activity, ends syncing, and enables Send.
+
+After a successful replay replacement, App Server checks measured Chat and Tool-artifact reclaim just as it does after a completed turn. Periodic storage maintenance provides the same check for idle Tasks, so repeated passive Native Session refreshes cannot leave lifetime-sized replacement journals.
 
 ## Task Titles
 

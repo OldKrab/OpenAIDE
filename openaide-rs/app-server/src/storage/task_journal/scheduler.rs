@@ -45,6 +45,8 @@ struct SchedulerState {
     peak_task_stream_bytes: usize,
     reset_reply: Option<mpsc::Sender<Result<(), RuntimeError>>>,
     resetting: bool,
+    purge_reply: Option<(String, mpsc::Sender<Result<(), RuntimeError>>)>,
+    purging: bool,
     shutdown_reply: Option<mpsc::Sender<()>>,
     closed: bool,
 }
@@ -68,6 +70,10 @@ pub(super) enum NextWork {
         writes: Vec<QueuedWrite>,
     },
     Reset(mpsc::Sender<Result<(), RuntimeError>>),
+    Purge {
+        task_id: String,
+        reply: mpsc::Sender<Result<(), RuntimeError>>,
+    },
     Shutdown(mpsc::Sender<()>),
     Closed,
 }
@@ -89,7 +95,7 @@ impl Scheduler {
         let mut state = self.state.lock().expect("Task scheduler poisoned");
         while !state.closed
             && state.shutdown_reply.is_none()
-            && (state.reset_reply.is_some() || state.resetting || !has_capacity(&state, &write))
+            && (has_pending_exclusive_control(&state) || !has_capacity(&state, &write))
         {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
         }
@@ -117,7 +123,7 @@ impl Scheduler {
                 "Task journal worker is unavailable".to_string(),
             ));
         }
-        if state.reset_reply.is_some() || state.resetting || !has_capacity(&state, &write) {
+        if has_pending_exclusive_control(&state) || !has_capacity(&state, &write) {
             return Ok(Some(write));
         }
         enqueue(&mut state, write, reply);
@@ -131,7 +137,7 @@ impl Scheduler {
         let mut state = self.state.lock().expect("Task scheduler poisoned");
         while !state.closed
             && state.shutdown_reply.is_none()
-            && (state.reset_reply.is_some() || state.resetting || !has_capacity(&state, write))
+            && (has_pending_exclusive_control(&state) || !has_capacity(&state, write))
         {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
         }
@@ -164,6 +170,8 @@ impl Scheduler {
             || state.shutdown_reply.is_some()
             || state.reset_reply.is_some()
             || state.resetting
+            || state.purge_reply.is_some()
+            || state.purging
         {
             return Err(RuntimeError::Storage(
                 "Task journal worker is unavailable".to_string(),
@@ -177,6 +185,34 @@ impl Scheduler {
     pub fn finish_reset(&self) {
         let mut state = self.state.lock().expect("Task scheduler poisoned");
         state.resetting = false;
+        self.changed.notify_all();
+    }
+
+    pub fn request_purge(
+        &self,
+        task_id: String,
+        reply: mpsc::Sender<Result<(), RuntimeError>>,
+    ) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().expect("Task scheduler poisoned");
+        if state.closed
+            || state.shutdown_reply.is_some()
+            || state.reset_reply.is_some()
+            || state.resetting
+            || state.purge_reply.is_some()
+            || state.purging
+        {
+            return Err(RuntimeError::Storage(
+                "Task journal worker is unavailable".to_string(),
+            ));
+        }
+        state.purge_reply = Some((task_id, reply));
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    pub fn finish_purge(&self) {
+        let mut state = self.state.lock().expect("Task scheduler poisoned");
+        state.purging = false;
         self.changed.notify_all();
     }
 
@@ -214,6 +250,9 @@ impl Scheduler {
             let _ = reply.send(());
         }
         if let Some(reply) = state.reset_reply.take() {
+            let _ = reply.send(Err(RuntimeError::Storage(message.to_string())));
+        }
+        if let Some((_, reply)) = state.purge_reply.take() {
             let _ = reply.send(Err(RuntimeError::Storage(message.to_string())));
         }
         self.changed.notify_all();
@@ -260,7 +299,11 @@ impl Scheduler {
                 state.resetting = true;
                 return NextWork::Reset(reply);
             }
-            if !state.resetting {
+            if let Some((task_id, reply)) = state.purge_reply.take() {
+                state.purging = true;
+                return NextWork::Purge { task_id, reply };
+            }
+            if !state.resetting && !state.purging {
                 if let Some(reply) = state.shutdown_reply.take() {
                     state.closed = true;
                     self.changed.notify_all();
@@ -273,6 +316,10 @@ impl Scheduler {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
         }
     }
+}
+
+fn has_pending_exclusive_control(state: &SchedulerState) -> bool {
+    state.reset_reply.is_some() || state.resetting || state.purge_reply.is_some() || state.purging
 }
 
 fn validate_write_size(write: &TaskWrite) -> Result<(), RuntimeError> {

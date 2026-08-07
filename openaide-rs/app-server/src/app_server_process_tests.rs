@@ -14,7 +14,7 @@ use crate::storage_runtime::{EndpointRecordStore, StateRoot};
 
 use super::{
     expire_local_http_clients, native_session_catalog_refresh_due,
-    publish_local_http_probe_endpoint,
+    publish_local_http_probe_endpoint, task_storage_maintenance_due,
 };
 
 #[test]
@@ -23,6 +23,12 @@ fn native_session_catalog_periodic_refresh_is_due_after_five_minutes() {
         299
     )));
     assert!(native_session_catalog_refresh_due(Duration::from_secs(300)));
+}
+
+#[test]
+fn task_storage_maintenance_is_due_every_six_hours() {
+    assert!(!task_storage_maintenance_due(Duration::from_secs(21_599)));
+    assert!(task_storage_maintenance_due(Duration::from_secs(21_600)));
 }
 
 #[test]

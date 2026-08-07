@@ -67,6 +67,8 @@ impl TaskProductApi {
     ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         let task = self.read_task_for_client(&task_id, client_instance_id)?;
+        self.mark_task_used_now(&task_id)
+            .map_err(protocol_error_from_runtime)?;
 
         if matches!(task.lifecycle, TaskLifecycle::Archived) {
             let snapshot = crate::tasks::snapshot::build_snapshot(

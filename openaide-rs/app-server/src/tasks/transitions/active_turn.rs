@@ -242,9 +242,9 @@ impl TaskTransitions {
             );
         }
         if committed {
-            if let Err(error) = self.mutations.compact_message_journal(task_id) {
+            if let Err(error) = self.mutations.maintain_task_storage(task_id) {
                 crate::logging::warn(
-                    "message_journal_compaction_failed",
+                    "task_storage_maintenance_failed",
                     serde_json::json!({
                         "task_id": task_id,
                         "error": error.to_string(),

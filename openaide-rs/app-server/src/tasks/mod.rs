@@ -14,6 +14,9 @@ pub(crate) mod native_session_service;
 pub(crate) mod product_api;
 pub(crate) mod query;
 pub(crate) mod query_store;
+pub(crate) mod retention;
+#[cfg(test)]
+mod retention_tests;
 pub(crate) mod revision_source;
 pub mod runtime_state;
 pub mod service;

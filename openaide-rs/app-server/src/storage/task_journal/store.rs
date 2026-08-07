@@ -22,8 +22,11 @@ mod admission;
 mod compaction;
 pub(super) mod failure;
 mod maintenance;
+mod purge;
 mod recovery;
 mod reset;
+mod semantic_noops;
+mod usage;
 mod worker;
 pub use admission::CommitReceipt;
 pub(crate) use admission::TrySubmit;
@@ -102,6 +105,7 @@ impl TaskJournalStore {
         let store_root = state_root.join(TASK_STORE_DIR);
         frame::create_directory_durably(&store_root, frame::JournalKind::Root, faults.as_ref())?;
         reset::cleanup_tombstones(&store_root);
+        purge::cleanup_tombstones(&store_root);
         let tasks_root = store_root.join(TASKS_DIR);
         frame::create_directory_durably(&tasks_root, frame::JournalKind::Root, faults.as_ref())?;
         let (mut catalog_records, mut initially_recovered) = recovery::open_catalog(&tasks_root)?;
@@ -390,7 +394,7 @@ fn commit_batch(
         .expect("Task journal projections poisoned")
         .get(task_id)
         .cloned();
-    remove_semantic_noops(current_task.as_ref(), &mut reduced.task_operations)?;
+    semantic_noops::remove(current_task.as_ref(), &mut reduced.task_operations)?;
     if reduced.task_operations.is_empty()
         && reduced.artifacts.is_empty()
         && compaction == CompactionMode::None
@@ -449,6 +453,16 @@ fn commit_batch(
                 .copied()
                 .unwrap_or_default();
             artifact::validate_artifact_id(&artifact_id)?;
+            let operations = artifact::remove_semantic_noops(
+                tasks_root,
+                task_id,
+                &artifact_id,
+                committed_head,
+                operations,
+            )?;
+            if operations.is_empty() {
+                continue;
+            }
             let artifact_sequence = committed_head.checked_add(1).ok_or_else(|| {
                 RuntimeError::Storage("Tool artifact sequence overflow".to_string())
             })?;
@@ -458,6 +472,25 @@ fn commit_batch(
             });
             planned_artifacts.push((artifact_id, committed_head, operations));
         }
+    }
+    if reduced.task_operations.is_empty() && planned_artifacts.is_empty() {
+        let next_task = current_task
+            .clone()
+            .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+        if compaction != CompactionMode::None {
+            maintenance::compact_loaded_task(
+                tasks_root,
+                catalog_records,
+                projections,
+                task_id,
+                next_task,
+                compaction,
+                faults,
+            )?;
+        } else {
+            require_available(Some(&next_task), task_id)?;
+        }
+        return Ok(None);
     }
     validate_operations(current_task.as_ref(), task_id, &reduced.task_operations)?;
     let has_artifact_reference = !planned_artifacts.is_empty();
@@ -570,41 +603,6 @@ fn quarantine_or_abort(tasks_root: &Path, task_id: &str) {
         );
         panic!("cannot quarantine Task after uncertain durability failure: {error}");
     }
-}
-
-fn remove_semantic_noops(
-    task: Option<&RecoveredTask>,
-    operations: &mut Vec<TaskOperation>,
-) -> Result<(), RuntimeError> {
-    let current = match task {
-        Some(RecoveredTask::Available { projection, .. }) => Some(projection.as_ref()),
-        Some(RecoveredTask::Unavailable { error }) => {
-            return Err(RuntimeError::Storage(error.clone()))
-        }
-        None => None,
-    };
-    operations.retain(|operation| match operation {
-        TaskOperation::AppendText { text, .. } => !text.is_empty(),
-        TaskOperation::ReplaceTask { task } => current
-            .map(|projection| !serialized_equal(&projection.task, task.as_ref()))
-            .unwrap_or(true),
-        TaskOperation::ReplaceProjection { projection } => current
-            .map(|current| !serialized_equal(current, projection.as_ref()))
-            .unwrap_or(true),
-        TaskOperation::ReplaceMessageMeta { message_meta } => current
-            .map(|projection| !serialized_equal(&projection.message_meta, message_meta.as_ref()))
-            .unwrap_or(true),
-        TaskOperation::AppendMessage { .. }
-        | TaskOperation::UpsertMessage { .. }
-        | TaskOperation::ReplaceMessages { .. }
-        | TaskOperation::Create { .. }
-        | TaskOperation::CommitArtifact { .. } => true,
-    });
-    Ok(())
-}
-
-fn serialized_equal<T: serde::Serialize>(left: &T, right: &T) -> bool {
-    serde_json::to_vec(left).ok() == serde_json::to_vec(right).ok()
 }
 
 fn freeze_task(

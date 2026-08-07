@@ -667,6 +667,42 @@ fn corrupt_split_metadata_does_not_prevent_other_tasks_from_opening() {
 }
 
 #[test]
+fn purging_a_tombstoned_task_reclaims_its_directory_and_catalog_entry() {
+    let root = TempDir::new().expect("create state root");
+    let task_id = "task_retention_purge";
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let mut projection = task_projection(task_id);
+    projection.task.tombstoned = true;
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let task_dir = root.path().join("task-store-v1/tasks").join(task_id);
+    assert!(task_dir.is_dir());
+
+    store.purge_tombstoned_task(task_id).unwrap();
+
+    assert!(!task_dir.exists());
+    assert!(matches!(
+        store.load(task_id),
+        Err(crate::protocol::errors::RuntimeError::TaskNotFound(_))
+    ));
+    assert!(store
+        .list_task_records()
+        .iter()
+        .all(|task| task.task_id != task_id));
+    store.shutdown().unwrap();
+
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert!(matches!(
+        reopened.load(task_id),
+        Err(crate::protocol::errors::RuntimeError::TaskNotFound(_))
+    ));
+    reopened.shutdown().unwrap();
+}
+
+#[test]
 fn tool_artifact_tail_is_reconciled_only_when_the_detail_is_loaded() {
     let root = TempDir::new().expect("create state root");
     let tasks_root = root.path().join("task-store-v1/tasks");

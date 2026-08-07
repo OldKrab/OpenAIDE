@@ -13,6 +13,10 @@ use super::model::{
     ToolArtifactProjection,
 };
 
+mod compaction;
+
+pub(super) use compaction::compact_all;
+
 const ARTIFACTS_DIR: &str = "artifacts";
 pub(super) type ReconciledArtifactHeads = HashMap<(String, String), u64>;
 
@@ -146,6 +150,73 @@ pub(super) fn load(
         terminal_order,
         terminal_outputs,
     })
+}
+
+/// Removes full structured replacements that do not change the currently
+/// committed Tool detail. Terminal appends remain cumulative and are never
+/// treated as semantic no-ops here.
+pub(super) fn remove_semantic_noops(
+    tasks_root: &Path,
+    task_id: &str,
+    artifact_id: &str,
+    committed_head: u64,
+    operations: Vec<ArtifactOperation>,
+) -> Result<Vec<ArtifactOperation>, RuntimeError> {
+    if !operations
+        .iter()
+        .any(|operation| matches!(operation, ArtifactOperation::ReplaceDetails { .. }))
+    {
+        return Ok(operations);
+    }
+    let mut current = latest_details(tasks_root, task_id, artifact_id, committed_head)?
+        .map(|details| serde_json::to_vec(&details))
+        .transpose()?;
+    let mut retained = Vec::with_capacity(operations.len());
+    for operation in operations {
+        match &operation {
+            ArtifactOperation::ReplaceDetails { details } => {
+                let replacement = serde_json::to_vec(details.as_ref())?;
+                if current.as_ref() == Some(&replacement) {
+                    continue;
+                }
+                current = Some(replacement);
+                retained.push(operation);
+            }
+            ArtifactOperation::AppendTerminal { .. } => retained.push(operation),
+        }
+    }
+    Ok(retained)
+}
+
+fn latest_details(
+    tasks_root: &Path,
+    task_id: &str,
+    artifact_id: &str,
+    committed_head: u64,
+) -> Result<Option<crate::protocol::model::ActivityToolDetails>, RuntimeError> {
+    if committed_head == 0 {
+        return Ok(None);
+    }
+    let path = artifact_path(tasks_root, task_id, artifact_id)?;
+    let replayed: ReplayedFrames<ArtifactFrame> = frame::replay(&path)
+        .map_err(|error| artifact_frame_error("noop_replay", task_id, artifact_id, error))?;
+    let committed_frames = usize::try_from(committed_head)
+        .map_err(|_| RuntimeError::Storage("Tool artifact head exceeds memory".to_string()))?;
+    if replayed.frames.len() < committed_frames {
+        return Err(RuntimeError::Storage(format!(
+            "Tool artifact {artifact_id} ends before committed sequence {committed_head}"
+        )));
+    }
+    Ok(replayed
+        .frames
+        .into_iter()
+        .take(committed_frames)
+        .rev()
+        .flat_map(|frame| frame.operations.into_iter().rev())
+        .find_map(|operation| match operation {
+            ArtifactOperation::ReplaceDetails { details } => Some(*details),
+            ArtifactOperation::AppendTerminal { .. } => None,
+        }))
 }
 
 /// Restores the crash-consistent physical head for one Tool detail at the

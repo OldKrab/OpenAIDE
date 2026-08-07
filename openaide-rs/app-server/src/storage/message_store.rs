@@ -116,8 +116,8 @@ impl Store {
         Ok(self.task_journal().load(task_id)?.messages)
     }
 
-    /// Checks the journal's measured reclaim threshold at an idle prompt boundary.
-    pub(crate) fn compact_message_journal(&self, task_id: &str) -> Result<(), RuntimeError> {
+    /// Checks measured Chat and Tool-artifact reclaim thresholds at an idle boundary.
+    pub(crate) fn maintain_task_storage(&self, task_id: &str) -> Result<(), RuntimeError> {
         self.task_journal()
             .submit(TaskWrite::compaction_if_worthwhile_barrier(
                 task_id.to_string(),

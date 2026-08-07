@@ -1,13 +1,15 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+mod rotating_file;
+
+use rotating_file::{RotatingLogFile, RotationPolicy};
+
 struct LoggerState {
-    file: Option<File>,
+    file: Option<RotatingLogFile>,
     write_failure_reported: bool,
 }
 
@@ -44,8 +46,7 @@ pub fn init_file_logger(storage_root: &Path) {
         .join("diagnostics")
         .join("logs")
         .join("openaide-app-server.jsonl");
-    let file = fs::create_dir_all(path.parent().unwrap_or(storage_root))
-        .and_then(|_| OpenOptions::new().create(true).append(true).open(path));
+    let file = RotatingLogFile::open(path, RotationPolicy::default());
     if file.is_err() {
         write_fallback("app_server_log_open_failed");
     }
@@ -96,7 +97,7 @@ fn write(level: &str, event: &str, fields: Value) {
     };
     let mut guard = logger.lock().expect("runtime logger lock poisoned");
     if let Some(file) = guard.file.as_mut() {
-        let result = writeln!(file, "{text}").and_then(|_| file.flush());
+        let result = file.append_line(&text);
         if result.is_err() && !guard.write_failure_reported {
             guard.write_failure_reported = true;
             write_fallback("app_server_log_write_failed");
