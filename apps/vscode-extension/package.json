@@ -33,9 +33,6 @@
   "extensionKind": [
     "workspace"
   ],
-  "extensionDependencies": [
-    "openaide.openaide-vscode-notification-companion"
-  ],
   "activationEvents": [
     "onView:openaide.tasks",
     "onCommand:openaide.newTask",

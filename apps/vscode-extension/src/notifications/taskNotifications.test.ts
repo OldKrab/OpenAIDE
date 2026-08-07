@@ -4,22 +4,11 @@ import { registerTaskNotifications } from "./taskNotifications";
 
 const vscodeMocks = vi.hoisted(() => ({
   showInformationMessage: vi.fn(async () => "Open Task"),
-  windowState: { focused: true },
-  windowStateListeners: new Set<(state: { focused: boolean }) => void>(),
-  executeCommand: vi.fn(async () => undefined),
 }));
 
 vi.mock("vscode", () => ({
   window: {
-    state: vscodeMocks.windowState,
-    onDidChangeWindowState: vi.fn((listener) => {
-      vscodeMocks.windowStateListeners.add(listener);
-      return { dispose: () => vscodeMocks.windowStateListeners.delete(listener) };
-    }),
     showInformationMessage: vscodeMocks.showInformationMessage,
-  },
-  commands: {
-    executeCommand: vscodeMocks.executeCommand,
   },
 }));
 
@@ -29,10 +18,7 @@ vi.mock("../workspace/roots", () => ({
 
 describe("VS Code Task notification registration", () => {
   beforeEach(() => {
-    vscodeMocks.windowState.focused = true;
-    vscodeMocks.windowStateListeners.clear();
     vscodeMocks.showInformationMessage.mockClear();
-    vscodeMocks.executeCommand.mockClear();
   });
 
   it("subscribes once at extension-host scope and routes the notification action", async () => {
@@ -99,11 +85,13 @@ describe("VS Code Task notification registration", () => {
     registration.dispose();
     expect(stop).toHaveBeenCalledOnce();
     expect(disposeTaskFocus).toHaveBeenCalledOnce();
-    expect(vscodeMocks.windowStateListeners).toHaveLength(0);
+    expect(vscodeMocks.showInformationMessage).toHaveBeenCalledWith(
+      "Task finished: Ship notifications",
+      "Open Task",
+    );
   });
 
-  it("uses an OS notification while the VS Code window is unfocused", async () => {
-    vscodeMocks.windowState.focused = false;
+  it("uses a workbench notification for an eligible Task", async () => {
     let observer: AppServerStateObserver | undefined;
     const runtime = {
       subscribeAppServerState: vi.fn(async (
@@ -125,7 +113,7 @@ describe("VS Code Task notification registration", () => {
       globalState,
       {
         openTask,
-        currentFocusedTaskId: () => "task-1",
+        currentFocusedTaskId: () => "task-2",
         onDidChangeFocusedTask: vi.fn(() => ({ dispose: vi.fn() })),
       },
       { warn: vi.fn(), info: vi.fn() },
@@ -133,46 +121,6 @@ describe("VS Code Task notification registration", () => {
 
     observer?.onSnapshot(navigationSnapshot([]));
     observer?.onSnapshot(navigationSnapshot([attentionTask()]));
-    await vi.waitFor(() => expect(vscodeMocks.executeCommand).toHaveBeenCalledWith(
-      "_openaide.notifications.show",
-      { message: "Task finished: Ship notifications" },
-    ));
-    expect(vscodeMocks.showInformationMessage).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the workbench notification when OS delivery is unavailable", async () => {
-    vscodeMocks.windowState.focused = false;
-    vscodeMocks.executeCommand.mockRejectedValueOnce(new Error("local presenter unavailable"));
-    let observer: AppServerStateObserver | undefined;
-    const runtime = {
-      subscribeAppServerState: vi.fn(async (
-        _scope: SubscriptionScope,
-        nextObserver: AppServerStateObserver,
-      ) => {
-        observer = nextObserver;
-        return vi.fn();
-      }),
-    };
-    const globalState = {
-      get: vi.fn((_key: string, fallback: unknown) => fallback),
-      update: vi.fn(async () => undefined),
-    };
-
-    const openTask = vi.fn();
-    await registerTaskNotifications(
-      runtime,
-      globalState,
-      {
-        openTask,
-        currentFocusedTaskId: () => "task-1",
-        onDidChangeFocusedTask: vi.fn(() => ({ dispose: vi.fn() })),
-      },
-      { warn: vi.fn(), info: vi.fn() },
-    );
-
-    observer?.onSnapshot(navigationSnapshot([]));
-    observer?.onSnapshot(navigationSnapshot([attentionTask()]));
-
     await vi.waitFor(() => expect(vscodeMocks.showInformationMessage).toHaveBeenCalledWith(
       "Task finished: Ship notifications",
       "Open Task",

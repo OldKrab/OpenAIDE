@@ -5,14 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const EXTENSION_ID = "openaide.openaide-vscode-extension";
-const COMPANION_EXTENSION_ID = "openaide.openaide-vscode-notification-companion";
 const TARGETS = ["linux-x64", "win32-x64", "darwin-arm64"];
 const RELEASE_EXTENSIONS = [
-  {
-    extensionId: COMPANION_EXTENSION_ID,
-    targets: ["universal"],
-    fileName: (version) => `openaide-vscode-notification-companion-${version}.vsix`,
-  },
   {
     extensionId: EXTENSION_ID,
     targets: TARGETS,

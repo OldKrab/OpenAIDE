@@ -52,24 +52,6 @@ test("treats Open VSX 404 as missing and reads its published checksum", async ()
   assert.equal(digest, "d".repeat(64));
 });
 
-test("looks up the universal companion without a target-platform path", async () => {
-  const urls = [];
-  await lookupOpenVsxDigest({
-    extensionId: "openaide.openaide-vscode-notification-companion",
-    version: "0.0.2",
-    target: "universal",
-    async fetchImpl(url) {
-      urls.push(url);
-      if (url.endsWith("sha256")) return new Response(`${"e".repeat(64)}\n`);
-      return Response.json({ files: { sha256: "https://open-vsx.test/companion.sha256" } });
-    },
-  });
-  assert.deepEqual(urls, [
-    "https://open-vsx.org/api/openaide/openaide-vscode-notification-companion/0.0.2",
-    "https://open-vsx.test/companion.sha256",
-  ]);
-});
-
 test("skips identical packages, publishes missing packages, and rejects conflicts", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-registry-fixture-"));
   const packagePath = path.join(root, "package.vsix");
@@ -116,23 +98,20 @@ test("requires all canonical platform filenames", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-release-assets-"));
   try {
     await writeFile(path.join(root, "openaide-vscode-linux-x64-0.0.2.vsix"), "linux");
-    await writeFile(path.join(root, "openaide-vscode-notification-companion-0.0.2.vsix"), "companion");
     await assert.rejects(collectReleasePackages(root, "0.0.2"), /win32-x64/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("collects the universal notification companion before platform packages", async () => {
+test("collects all platform packages", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-release-assets-"));
   try {
-    await writeFile(path.join(root, "openaide-vscode-notification-companion-0.0.2.vsix"), "companion");
     for (const target of ["linux-x64", "win32-x64", "darwin-arm64"]) {
       await writeFile(path.join(root, `openaide-vscode-${target}-0.0.2.vsix`), target);
     }
     const packages = await collectReleasePackages(root, "0.0.2");
     assert.deepEqual(packages.map(({ extensionId, target }) => ({ extensionId, target })), [
-      { extensionId: "openaide.openaide-vscode-notification-companion", target: "universal" },
       { extensionId: "openaide.openaide-vscode-extension", target: "linux-x64" },
       { extensionId: "openaide.openaide-vscode-extension", target: "win32-x64" },
       { extensionId: "openaide.openaide-vscode-extension", target: "darwin-arm64" },
