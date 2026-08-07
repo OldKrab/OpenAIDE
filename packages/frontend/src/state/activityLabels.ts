@@ -101,8 +101,17 @@ export function activityStepSemanticTitle(
   const presentation = step.presentation;
   if (presentation) return presentationSemanticTitle(presentation);
   if (step.name === "read") {
-    const subject = (pathSubjectLabel(step) ?? step.input_summary)?.replace(/^Read\s+/i, "").trim();
-    return subject ? semanticTitle([{ action: "Read", subjects: [subject] }]) : undefined;
+    const providedTitle = step.input_summary?.trim();
+    if (providedTitle) {
+      const suppliedAction = /^(Read|View|List)\s+(.+)$/i.exec(providedTitle);
+      if (suppliedAction) {
+        const action = capitalize(suppliedAction[1]) as "Read" | "View" | "List";
+        return semanticTitle([{ action, subjects: [suppliedAction[2]] }]);
+      }
+      return semanticTitle([{ action: "Read", subjects: [providedTitle] }]);
+    }
+    const path = pathSubjectLabel(step);
+    return path ? semanticTitle([{ action: "Read", subjects: [path] }]) : undefined;
   }
   if (step.name !== "search") return undefined;
   const scope = searchScopeLabel(step);

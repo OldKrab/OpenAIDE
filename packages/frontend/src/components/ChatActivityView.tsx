@@ -427,7 +427,7 @@ function semanticSubjectListClassName(
 ) {
   const tone = action.action === "Activated"
     ? "identity"
-    : action.action === "Read" || action.action === "View"
+    : action.action === "List" || action.action === "Read" || action.action === "View"
       ? "resource"
       : "technical";
   // Preserve short patterns at natural width; only long Search subjects need a local text window.

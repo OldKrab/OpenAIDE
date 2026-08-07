@@ -10,7 +10,7 @@ export type ActivityStepSemanticTitle = {
 };
 
 export type ActivityStepSemanticAction = {
-  action: "Activated" | "Read" | "Search" | "Search file names for" | "View";
+  action: "Activated" | "List" | "Read" | "Search" | "Search file names for" | "View";
   scope?: string;
   subjects: string[];
 };
