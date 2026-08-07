@@ -555,11 +555,52 @@ impl TaskMutations {
             .expect("store update lock poisoned")
     }
 
-    /// Compacts streamed Chat deltas only at an explicit workflow boundary.
-    pub(crate) fn compact_message_journal(&self, task_id: &str) -> Result<(), RuntimeError> {
+    /// Compacts superseded Chat and Tool details at an explicit idle boundary.
+    pub(crate) fn maintain_task_storage(&self, task_id: &str) -> Result<(), RuntimeError> {
         let _guard = self.lock();
-        self.store.compact_message_journal(task_id)?;
+        self.store.maintain_task_storage(task_id)?;
         Ok(())
+    }
+
+    /// Persists client use outside semantic Task history so opening a Task does
+    /// not append another full metadata revision.
+    pub(crate) fn mark_task_used(
+        &self,
+        task_id: &str,
+        used_at_millis: i128,
+    ) -> Result<(), RuntimeError> {
+        let _guard = self.lock();
+        self.store
+            .task_journal()
+            .mark_task_used(task_id, used_at_millis)
+    }
+
+    pub(crate) fn purge_task_if_retention_expired(
+        &self,
+        task_id: &str,
+        now_millis: i128,
+        cutoff_millis: i128,
+        process_protected: bool,
+    ) -> Result<bool, RuntimeError> {
+        commit::purge_task_if_retention_expired(
+            self,
+            task_id,
+            now_millis,
+            cutoff_millis,
+            process_protected,
+        )
+    }
+
+    pub(crate) fn purge_existing_tombstone(&self, task_id: &str) -> Result<(), RuntimeError> {
+        let guard = self.lock();
+        let task = self.store.read_task(task_id)?;
+        if !task.tombstoned {
+            return Err(RuntimeError::Conflict(
+                "Only a tombstoned Task can be physically purged".to_string(),
+            ));
+        }
+        drop(guard);
+        self.store.task_journal().purge_tombstoned_task(task_id)
     }
 
     /// Durably appends terminal output without advancing Task revision.

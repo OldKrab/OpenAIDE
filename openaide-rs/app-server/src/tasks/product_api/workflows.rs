@@ -60,6 +60,11 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
     }
 }
 
+pub(crate) trait TaskStorageMaintenanceWorkflow: Send + Sync {
+    /// Coalesces a best-effort local compaction and retention pass.
+    fn request_task_storage_maintenance(&self);
+}
+
 #[derive(Debug)]
 pub(crate) struct TaskSendAccepted {
     pub task: TaskSnapshot,

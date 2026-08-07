@@ -117,6 +117,16 @@ impl NativeSessionService {
                 "attach_ms": attach_ms,
             }),
         );
+        if let Err(error) = self.mutations.maintain_task_storage(&task.task_id) {
+            crate::logging::warn(
+                "task_storage_maintenance_failed",
+                serde_json::json!({
+                    "task_id": task.task_id,
+                    "boundary": "native_session_history_refresh",
+                    "error": error.to_string(),
+                }),
+            );
+        }
         Ok(Some(snapshot))
     }
 

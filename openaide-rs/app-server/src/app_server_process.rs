@@ -16,6 +16,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const NATIVE_SESSION_CATALOG_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const TASK_STORAGE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 const LOCAL_HTTP_ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(25);
 
@@ -175,8 +176,10 @@ fn local_http_error_fields(
 
 /// Expires abandoned product clients while explicit detach owns process shutdown.
 fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
+    gateway.request_task_storage_maintenance();
     thread::spawn(move || {
         let mut last_native_catalog_refresh = Instant::now();
+        let mut last_task_storage_maintenance = Instant::now();
         loop {
             thread::sleep(Duration::from_secs(1));
             if gateway.has_task_navigation_subscribers()
@@ -185,6 +188,10 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
                 gateway.request_native_session_catalog_refresh();
                 last_native_catalog_refresh = Instant::now();
             }
+            if task_storage_maintenance_due(last_task_storage_maintenance.elapsed()) {
+                gateway.request_task_storage_maintenance();
+                last_task_storage_maintenance = Instant::now();
+            }
             expire_local_http_clients(&gateway, AppServerTime::now());
         }
     });
@@ -192,6 +199,10 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
 
 fn native_session_catalog_refresh_due(elapsed: Duration) -> bool {
     elapsed >= NATIVE_SESSION_CATALOG_REFRESH_INTERVAL
+}
+
+fn task_storage_maintenance_due(elapsed: Duration) -> bool {
+    elapsed >= TASK_STORAGE_MAINTENANCE_INTERVAL
 }
 
 /// Expires abandoned client-scoped state without coupling silence to process lifetime.

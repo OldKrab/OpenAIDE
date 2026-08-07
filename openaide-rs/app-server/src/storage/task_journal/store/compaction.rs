@@ -13,7 +13,7 @@ use crate::storage::task_journal::scheduler::QueuedWrite;
 // a smaller journal can reclaim at least one meaningful write batch.
 const OBSOLETE_FRAME_THRESHOLD: usize = 128;
 const BYTE_RATIO: u64 = 2;
-const MIN_RECLAIM_BYTES: u64 = 64 * 1024;
+const MIN_RECLAIM_BYTES: u64 = 1024 * 1024;
 
 pub(super) fn compact_task(
     tasks_root: &Path,

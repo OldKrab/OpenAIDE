@@ -139,12 +139,25 @@ pub(super) struct ReplayedFrames<T> {
 /// Returns the exact bytes occupied by a new one-frame journal. Compaction
 /// policy stays outside framing without duplicating the physical format.
 pub(super) fn one_frame_file_len<T: Serialize>(frame: &T) -> Result<u64, RuntimeError> {
-    let payload = serde_json::to_vec(frame).map_err(|error| json_error("encode", error))?;
-    let length = FILE_HEADER_LEN
-        .checked_add(FRAME_LENGTH_LEN)
-        .and_then(|length| length.checked_add(payload.len()))
-        .and_then(|length| length.checked_add(FRAME_CHECKSUM_LEN))
-        .ok_or_else(|| RuntimeError::Storage("Task journal frame size overflow".to_string()))?;
+    framed_file_len(std::slice::from_ref(frame))
+}
+
+/// Returns exact bytes for a complete multi-frame replacement journal.
+pub(super) fn framed_file_len<T: Serialize>(frames: &[T]) -> Result<u64, RuntimeError> {
+    let mut length = FILE_HEADER_LEN;
+    for frame in frames {
+        let payload = serde_json::to_vec(frame).map_err(|error| json_error("encode", error))?;
+        if payload.len() > MAX_FRAME_BYTES {
+            return Err(RuntimeError::Storage(format!(
+                "Task journal frame exceeds {MAX_FRAME_BYTES} bytes"
+            )));
+        }
+        length = length
+            .checked_add(FRAME_LENGTH_LEN)
+            .and_then(|length| length.checked_add(payload.len()))
+            .and_then(|length| length.checked_add(FRAME_CHECKSUM_LEN))
+            .ok_or_else(|| RuntimeError::Storage("Task journal frame size overflow".to_string()))?;
+    }
     u64::try_from(length)
         .map_err(|_| RuntimeError::Storage("Task journal frame size overflow".to_string()))
 }
@@ -257,6 +270,20 @@ pub(super) fn replace_with_faults<T: FramedRecord>(
     frame: &T,
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
+    replace_frames_with_faults(path, std::slice::from_ref(frame), faults)
+}
+
+/// Atomically publishes a verified sequence-preserving compacted journal.
+pub(super) fn replace_frames_with_faults<T: FramedRecord>(
+    path: &Path,
+    frames: &[T],
+    faults: &FaultInjector,
+) -> Result<(), RuntimeError> {
+    if frames.is_empty() {
+        return Err(RuntimeError::Storage(
+            "Task journal compaction requires at least one frame".to_string(),
+        ));
+    }
     let parent = path
         .parent()
         .ok_or_else(|| RuntimeError::Storage("Task journal path has no parent".to_string()))?;
@@ -266,10 +293,10 @@ pub(super) fn replace_with_faults<T: FramedRecord>(
         .unwrap_or("journal");
     let temporary = parent.join(format!(".{file_name}.compact-{}", uuid::Uuid::new_v4()));
     let result = (|| {
-        create_with_faults(&temporary, frame, JournalKind::Compaction, faults)?;
+        create_compacted_file(&temporary, frames, faults)?;
         faults.check(JournalKind::Compaction, FaultPoint::CompactionValidate)?;
         let verified: ReplayedFrames<T> = replay(&temporary)?;
-        if verified.frames.len() != 1 {
+        if verified.frames.len() != frames.len() {
             return Err(RuntimeError::Storage(
                 "Task journal compaction validation failed".to_string(),
             ));
@@ -288,6 +315,40 @@ pub(super) fn replace_with_faults<T: FramedRecord>(
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn create_compacted_file<T: FramedRecord>(
+    path: &Path,
+    frames: &[T],
+    faults: &FaultInjector,
+) -> Result<(), RuntimeError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| RuntimeError::Storage("Task journal path has no parent".to_string()))?;
+    create_directory_durably(parent, JournalKind::Compaction, faults)?;
+    faults.check(JournalKind::Compaction, FaultPoint::CreateOpen)?;
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| io_error("create_open", error))?;
+    faults.check(JournalKind::Compaction, FaultPoint::CreateHeaderWrite)?;
+    file.write_all(MAGIC)
+        .and_then(|_| file.write_all(&FORMAT_VERSION.to_le_bytes()))
+        .map_err(|error| io_error("create_header_write", error))?;
+    for frame in frames {
+        write_frame(&mut file, frame, JournalKind::Compaction, faults)?;
+    }
+    faults.check(JournalKind::Compaction, FaultPoint::FileSync)?;
+    faults.record_sync();
+    file.sync_all()
+        .map_err(|error| io_error("create_sync", error))?;
+    sync_directory(
+        parent,
+        JournalKind::Compaction,
+        FaultPoint::ParentSync,
+        faults,
+    )
 }
 
 /// Replays complete verified frames. Only an incomplete final frame is removed;

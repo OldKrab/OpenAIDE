@@ -4,14 +4,17 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Barrier};
 
 use openaide_app_server::protocol::model::{
-    AgentCommand, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole, ChatMessage,
-    ConfigOptionsCatalog, IsolationKind, NormalizedMessage, TaskStatus,
+    ActivityToolContent, ActivityToolDetails, AgentCommand, AgentCommandsCatalog, AgentMessagePart,
+    AgentMessageRole, ChatMessage, ConfigOptionsCatalog, IsolationKind, NormalizedMessage,
+    TaskStatus,
 };
 use openaide_app_server::storage::records::{
     MessageMeta, StoredMessage, TaskConfigMutationState, TaskLifecycle, TaskPreparationRecord,
     TaskRecord, TaskTitle, TaskTitleSource,
 };
-use openaide_app_server::storage::task_journal::{TaskJournalStore, TaskProjection, TaskWrite};
+use openaide_app_server::storage::task_journal::{
+    TaskJournalStore, TaskProjection, TaskWrite, ToolArtifactReplacement,
+};
 use tempfile::TempDir;
 
 #[test]
@@ -229,6 +232,193 @@ fn stale_pre_compaction_chat_tail_is_ignored_after_snapshot_publication() {
         "once"
     );
     reopened.shutdown().unwrap();
+}
+
+#[test]
+fn forced_maintenance_compacts_artifacts_without_changing_replay_or_next_append() {
+    let root = TempDir::new().expect("create state root");
+    let task_id = "task_artifact_compaction";
+    let artifact_id = "artifact_execute_1";
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(task_projection(task_id)))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let mut expected_text = String::new();
+    for revision in 0..32 {
+        expected_text = format!("revision-{revision}:{}", "x".repeat(64 * 1_024));
+        store
+            .submit(TaskWrite::barrier_replace_projection(
+                store.load(task_id).unwrap(),
+                vec![ToolArtifactReplacement {
+                    artifact_id: artifact_id.to_string(),
+                    details: text_tool_details(expected_text.clone()),
+                }],
+            ))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    store
+        .submit(TaskWrite::stream_append_terminal(
+            task_id,
+            artifact_id,
+            "terminal_1",
+            "before",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let artifact_path = artifact_journal_path(root.path(), task_id);
+    let before = std::fs::metadata(&artifact_path).unwrap().len();
+    store
+        .submit(TaskWrite::compaction_barrier(task_id))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let after = std::fs::metadata(&artifact_path).unwrap().len();
+    assert!(
+        after * 4 < before,
+        "artifact journal was not materially compacted"
+    );
+    assert_tool_artifact(&store, task_id, artifact_id, &expected_text, "before");
+    store.shutdown().unwrap();
+
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert_tool_artifact(&reopened, task_id, artifact_id, &expected_text, "before");
+    reopened
+        .submit(TaskWrite::stream_append_terminal(
+            task_id,
+            artifact_id,
+            "terminal_1",
+            "-after",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert_tool_artifact(
+        &reopened,
+        task_id,
+        artifact_id,
+        &expected_text,
+        "before-after",
+    );
+    reopened.shutdown().unwrap();
+}
+
+#[test]
+fn identical_artifact_replacement_does_not_create_another_durable_revision() {
+    let root = TempDir::new().expect("create state root");
+    let task_id = "task_artifact_noop";
+    let artifact_id = "artifact_execute_1";
+    let details = text_tool_details("stable detail".repeat(1_024));
+    let (store, commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(task_projection(task_id)))
+        .unwrap()
+        .wait()
+        .unwrap();
+    commits.recv().unwrap();
+    let first = store
+        .submit(TaskWrite::barrier_replace_projection(
+            store.load(task_id).unwrap(),
+            vec![ToolArtifactReplacement {
+                artifact_id: artifact_id.to_string(),
+                details: details.clone(),
+            }],
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    commits.recv().unwrap();
+    let artifact_path = artifact_journal_path(root.path(), task_id);
+    let before = std::fs::metadata(&artifact_path).unwrap().len();
+
+    let duplicate = store
+        .submit(TaskWrite::barrier_replace_projection(
+            store.load(task_id).unwrap(),
+            vec![ToolArtifactReplacement {
+                artifact_id: artifact_id.to_string(),
+                details,
+            }],
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    assert_eq!(duplicate.journal_sequence, first.journal_sequence);
+    assert_eq!(std::fs::metadata(artifact_path).unwrap().len(), before);
+    assert!(commits.try_recv().is_err());
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn idle_artifact_compaction_waits_for_measured_reclaim() {
+    let root = TempDir::new().expect("create state root");
+    let task_id = "task_artifact_threshold";
+    let artifact_id = "artifact_execute_1";
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(task_projection(task_id)))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    for revision in 0..2 {
+        store
+            .submit(TaskWrite::barrier_replace_projection(
+                store.load(task_id).unwrap(),
+                vec![ToolArtifactReplacement {
+                    artifact_id: artifact_id.to_string(),
+                    details: text_tool_details(format!(
+                        "revision-{revision}:{}",
+                        "x".repeat(512 * 1_024)
+                    )),
+                }],
+            ))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    let artifact_path = artifact_journal_path(root.path(), task_id);
+    let before_small_check = std::fs::metadata(&artifact_path).unwrap().len();
+    store
+        .submit(TaskWrite::compaction_if_worthwhile_barrier(task_id))
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert_eq!(
+        std::fs::metadata(&artifact_path).unwrap().len(),
+        before_small_check
+    );
+
+    for revision in 2..4 {
+        store
+            .submit(TaskWrite::barrier_replace_projection(
+                store.load(task_id).unwrap(),
+                vec![ToolArtifactReplacement {
+                    artifact_id: artifact_id.to_string(),
+                    details: text_tool_details(format!(
+                        "revision-{revision}:{}",
+                        "x".repeat(512 * 1_024)
+                    )),
+                }],
+            ))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    let before_large_check = std::fs::metadata(&artifact_path).unwrap().len();
+    store
+        .submit(TaskWrite::compaction_if_worthwhile_barrier(task_id))
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert!(std::fs::metadata(artifact_path).unwrap().len() * 2 < before_large_check);
+    store.shutdown().unwrap();
 }
 
 #[test]
@@ -1038,6 +1228,33 @@ fn agent_text(message: &StoredMessage) -> &str {
         panic!("expected one text part");
     };
     text
+}
+
+fn text_tool_details(text: String) -> ActivityToolDetails {
+    ActivityToolDetails {
+        locations: Vec::new(),
+        content: vec![ActivityToolContent::Text { text }],
+        input: None,
+        output: None,
+    }
+}
+
+fn assert_tool_artifact(
+    store: &TaskJournalStore,
+    task_id: &str,
+    artifact_id: &str,
+    expected_text: &str,
+    expected_terminal: &str,
+) {
+    let artifact = store
+        .load_tool_artifact(task_id, artifact_id)
+        .expect("load compacted artifact");
+    let details = artifact.details.expect("artifact has structured details");
+    let [ActivityToolContent::Text { text }] = details.content.as_slice() else {
+        panic!("expected one text Tool detail")
+    };
+    assert_eq!(text, expected_text);
+    assert_eq!(artifact.terminal_outputs["terminal_1"], expected_terminal);
 }
 
 fn task_projection(task_id: &str) -> TaskProjection {

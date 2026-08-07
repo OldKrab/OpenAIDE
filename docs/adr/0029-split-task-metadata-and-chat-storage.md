@@ -59,3 +59,21 @@ At safe prompt or idle boundaries, committed Chat deltas are merged into a new
 validated snapshot and the delta journal is reset. Cold Task opening therefore
 loads one materialized snapshot plus a bounded delta tail rather than replaying
 the lifetime history of Task and runtime-control changes.
+
+Compaction is lossless and threshold-based. App Server checks it after completed
+turns, after authoritative Native Session history replacement, and during startup
+and six-hour idle maintenance. A journal is rewritten after 128 superseded frames
+or when the physical rewrite can reclaim at least 1 MiB at a material ratio.
+Repeated byte-identical Tool-detail replacements do not create another artifact
+revision. Artifact compaction keeps the committed frame sequence and every
+terminal append while retaining only the latest structured replacement, so
+existing artifact heads and later appends remain valid.
+
+Client-open recency is a small Task-local `last-used` marker rather than Durable
+Task Metadata. It can therefore protect seven-day local retention without
+appending a full Task snapshot on every open. Invalid usage markers fail closed.
+Tasks carried forward from a store version without usage markers receive one
+tracked seven-day grace period because their historical client opens are unknown.
+Retention first publishes a local Task tombstone, then the single journal worker
+renames and removes only that Task directory behind an exclusive durability
+barrier. Agent-owned Native Sessions and Worktrees are outside this operation.

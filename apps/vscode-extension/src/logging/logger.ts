@@ -1,16 +1,17 @@
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import { RotatingLogFile } from "./rotatingFile";
 
 export class ExtensionLogger {
-  private fileWrite: Promise<unknown> = Promise.resolve();
+  private file: RotatingLogFile | undefined;
 
   constructor(
     private readonly scope: string,
-    private logFile?: string,
-  ) {}
+    logFile?: string,
+  ) {
+    if (logFile) this.file = new RotatingLogFile(logFile);
+  }
 
   setLogFile(logFile: string) {
-    this.logFile = logFile;
+    this.file = new RotatingLogFile(logFile);
   }
 
   info(event: string, fields: Record<string, unknown> = {}) {
@@ -30,15 +31,9 @@ export class ExtensionLogger {
     if (level === "error") console.error(line);
     else if (level === "warn") console.warn(line);
     else console.info(line);
-    if (!this.logFile) return;
-    this.fileWrite = this.fileWrite
-      .then(async () => {
-        await fs.mkdir(path.dirname(this.logFile!), { recursive: true });
-        await fs.appendFile(this.logFile!, `${line}\n`, "utf8");
-      })
-      .catch((error) => {
-        console.warn(this.format("warn", "failed to write extension log file", { error: String(error) }));
-      });
+    this.file?.append(line).catch((error) => {
+      console.warn(this.format("warn", "failed to write extension log file", { error: String(error) }));
+    });
   }
 
   private format(level: string, event: string, fields: Record<string, unknown>) {

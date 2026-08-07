@@ -41,6 +41,17 @@ impl SharedRpcGateway {
         workflow.request_native_session_catalog_refresh();
     }
 
+    /// Delegates periodic storage work without retaining the protocol lock.
+    pub fn request_task_storage_maintenance(&self) {
+        let workflow = self
+            .gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .task_storage_maintenance
+            .clone();
+        workflow.request_task_storage_maintenance();
+    }
+
     pub fn has_task_navigation_subscribers(&self) -> bool {
         self.gateway
             .lock()

@@ -10,10 +10,10 @@ use crate::storage::task_journal::model::TaskOperation;
 use super::{
     compaction, freeze_shared_task, quarantine_or_abort, recovery, CompactionMode, RecoveredTask,
 };
-use crate::storage::task_journal::split;
+use crate::storage::task_journal::{artifact, split};
 
-/// Runs an explicit idle/forced compaction without mixing the physical storage
-/// generation switch into the main semantic commit path.
+/// Runs idle/forced storage maintenance without mixing physical rewrites into
+/// the semantic commit path.
 pub(super) fn compact_loaded_task(
     tasks_root: &Path,
     catalog_records: &RwLock<HashMap<String, TaskRecord>>,
@@ -57,6 +57,27 @@ pub(super) fn compact_loaded_task(
         if compacted {
             recovery::publish_catalog(tasks_root, catalog_records, task_id, &next_task)?;
         }
+    }
+    let RecoveredTask::Available { projection, .. } = &next_task else {
+        return Err(RuntimeError::Storage("Task is unavailable".to_string()));
+    };
+    let artifact_outcome = artifact::compact_all(
+        tasks_root,
+        task_id,
+        &projection.artifact_heads,
+        mode,
+        faults,
+    )?;
+    if artifact_outcome.compacted_files > 0 {
+        crate::logging::info(
+            "tool_artifact_compacted",
+            serde_json::json!({
+                "task_id": task_id,
+                "artifact_count": artifact_outcome.compacted_files,
+                "removed_replacements": artifact_outcome.removed_replacements,
+                "reclaimed_bytes": artifact_outcome.reclaimed_bytes,
+            }),
+        );
     }
     projections
         .write()

@@ -1104,7 +1104,7 @@ fn terminal_only_tool_updates_are_durable_without_task_revision() {
         published.kind,
         TaskUpdateKind::ToolDetailChanged { ref deltas, .. } if !deltas.is_empty()
     ));
-    store.compact_message_journal("task_terminal").unwrap();
+    store.maintain_task_storage("task_terminal").unwrap();
 
     let artifact_id =
         crate::storage::tool_artifacts::tool_artifact_id("acp_tool:session_1:tool_1", 0);
@@ -1710,6 +1710,62 @@ fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
             .and_then(|detail| detail.stdout),
         Some("latest".to_string())
     );
+}
+
+#[test]
+fn identical_tool_detail_update_reuses_the_committed_artifact_revision() {
+    let (_dir, store, _mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store,
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    let mut revisions = Vec::new();
+    for _ in 0..2 {
+        sink.session_update(AgentEvent::ToolCall(AgentToolCall {
+            tool_call_id: "tool_1".to_string(),
+            scope_id: None,
+            title: "Run checks".to_string(),
+            kind: "execute".to_string(),
+            status: AgentToolCallStatus::InProgress,
+            presentation: None,
+            input_summary: Some("cargo test".to_string()),
+            output_preview: Some("same".to_string()),
+            details: Some(Box::new(ActivityToolDetails {
+                locations: Vec::new(),
+                content: Vec::new(),
+                input: None,
+                output: Some(ActivityToolOutput {
+                    stdout: Some("same".to_string()),
+                    stderr: None,
+                    formatted_output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    success: None,
+                    fields: Vec::new(),
+                }),
+            })),
+        }))
+        .unwrap();
+        let update = notifications.recv().unwrap();
+        let TaskUpdateKind::Changed(change) = update.kind else {
+            panic!("expected Task change");
+        };
+        revisions.push(change.tool_details[0].details.revision);
+    }
+
+    assert!(revisions[0] > 0);
+    assert_eq!(revisions[1], revisions[0]);
 }
 
 #[test]

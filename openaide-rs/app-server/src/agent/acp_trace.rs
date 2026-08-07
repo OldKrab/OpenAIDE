@@ -2,6 +2,7 @@ use serde::Serialize;
 
 mod file;
 mod naming;
+mod retention;
 mod session;
 mod state;
 

@@ -38,6 +38,11 @@ pub(super) fn run(
                 scheduler.finish_reset();
                 let _ = reply.send(result);
             }
+            NextWork::Purge { task_id, reply } => {
+                let result = super::purge::tombstoned_task(&context, &task_id);
+                scheduler.finish_purge();
+                let _ = reply.send(result);
+            }
             NextWork::Shutdown(reply) => {
                 let _ = reply.send(());
                 return;
