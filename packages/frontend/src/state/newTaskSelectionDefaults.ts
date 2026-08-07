@@ -36,8 +36,8 @@ export function selectInitialNewTaskContext({
   return {
     projectId: firstValid(
       projects.map((project) => project.projectId),
-      retained?.projectId,
       shellProjectId,
+      retained?.projectId,
       defaults.projectId ?? undefined,
     ),
     agentId: firstValid(

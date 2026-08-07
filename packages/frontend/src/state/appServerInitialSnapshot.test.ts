@@ -52,12 +52,12 @@ describe("App Server initial snapshot ingestion", () => {
     ]);
   });
 
-  it("uses retained choices before shell and App Server defaults", () => {
+  it("uses a project-scoped New Task route before retained and App Server defaults", () => {
     const ingestion = actionsFromInitialSnapshot(clientSnapshot({
       client: {
         clientInstanceId: "client-1" as ClientInstanceId,
         shellKind: "web",
-        surface: { kind: "newTask", projectId: "project-2" as ProjectId },
+        surface: { kind: "newTask", projectId: "project-1" as ProjectId },
       },
       projects: {
         projects: [
@@ -83,7 +83,7 @@ describe("App Server initial snapshot ingestion", () => {
 
     expect(ingestion.actions[0]).toEqual({
       type: "projects",
-      initialProjectId: "project-2",
+      initialProjectId: "project-1",
       projects: [
         {
           projectId: "project-1",

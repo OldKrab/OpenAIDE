@@ -16,14 +16,14 @@ const agents = [
 ];
 
 describe("New Task initial selection", () => {
-  it("keeps valid client choices before shell and App Server defaults", () => {
+  it("uses a valid shell Project before client and App Server defaults", () => {
     expect(selectInitialNewTaskContext({
       retained: { projectId: "project-b", agentId: "opencode" },
       shellProjectId: "project-a",
       defaults: { projectId: "project-a" as never, agentId: "codex" as never },
       projects,
       agents,
-    })).toEqual({ projectId: "project-b", agentId: "opencode" });
+    })).toEqual({ projectId: "project-a", agentId: "opencode" });
   });
 
   it("uses the shell Project and App Server Agent default without retained choices", () => {
