@@ -14,6 +14,7 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::transitions::TaskTransitions;
 use crate::tasks::turn_acceptance::TurnAcceptanceCoordinator;
+use crate::tasks::turn_diagnostics;
 use crate::tasks::turn_events::{TaskEventSink, TaskSessionEventSink};
 use openaide_app_server_protocol::ids::TaskId;
 
@@ -231,13 +232,10 @@ impl TurnRunner {
             .lock()
             .expect("active turn registry poisoned")
             .insert(turn_id.clone(), active.clone());
-        crate::logging::info(
-            "task_primary_prompt_runner_registered",
-            serde_json::json!({
-                "task_id": task_id.as_str(),
-                "turn_id": turn_id.as_str(),
-                "registration_elapsed_ms": registration_started_at.elapsed().as_millis(),
-            }),
+        turn_diagnostics::runner_registered(
+            task_id.as_str(),
+            turn_id.as_str(),
+            registration_started_at.elapsed().as_millis(),
         );
         let thread_scheduled_at = Instant::now();
         let thread_task_id = task_id.clone();
@@ -256,13 +254,10 @@ impl TurnRunner {
                 active_turns: runner.active_turns.clone(),
             };
             if cancellation.is_cancelled() {
-                crate::logging::info(
-                    "task_primary_prompt_runner_cancelled_before_running",
-                    serde_json::json!({
-                        "task_id": task_id.as_str(),
-                        "turn_id": turn_id.as_str(),
-                        "elapsed_ms": runner_started.elapsed().as_millis(),
-                    }),
+                turn_diagnostics::runner_cancelled_before_running(
+                    task_id.as_str(),
+                    turn_id.as_str(),
+                    runner_started.elapsed().as_millis(),
                 );
                 if runner.turn_is_active(&task_id, &turn_id) {
                     let _ = runner.transitions().finish_turn(
@@ -274,23 +269,17 @@ impl TurnRunner {
                 return;
             }
             if !runner.turn_is_active(&task_id, &turn_id) {
-                crate::logging::warn(
-                    "task_primary_prompt_runner_not_active_before_running",
-                    serde_json::json!({
-                        "task_id": task_id.as_str(),
-                        "turn_id": turn_id.as_str(),
-                        "elapsed_ms": runner_started.elapsed().as_millis(),
-                    }),
+                turn_diagnostics::runner_not_active_before_running(
+                    task_id.as_str(),
+                    turn_id.as_str(),
+                    runner_started.elapsed().as_millis(),
                 );
                 return;
             }
-            crate::logging::info(
-                "task_primary_prompt_runner_mark_running_started",
-                serde_json::json!({
-                    "task_id": task_id.as_str(),
-                    "turn_id": turn_id.as_str(),
-                    "elapsed_ms": runner_started.elapsed().as_millis(),
-                }),
+            turn_diagnostics::runner_mark_running_started(
+                task_id.as_str(),
+                turn_id.as_str(),
+                runner_started.elapsed().as_millis(),
             );
             match runner.transitions().mark_turn_running(&task_id, &turn_id) {
                 Ok(true) => crate::logging::info(
@@ -369,34 +358,17 @@ impl TurnRunner {
                 },
                 sink.clone(),
             );
-            let outcome = match &result {
-                Ok(crate::agent::AgentPromptOutcome::EndTurn) => "end_turn",
-                Ok(crate::agent::AgentPromptOutcome::MaxTokens) => "max_tokens",
-                Ok(crate::agent::AgentPromptOutcome::MaxTurnRequests) => "max_turn_requests",
-                Ok(crate::agent::AgentPromptOutcome::Refusal) => "refusal",
-                Ok(crate::agent::AgentPromptOutcome::Cancelled) => "cancelled",
-                Ok(crate::agent::AgentPromptOutcome::Other(_)) => "other",
-                Err(_) => "error",
-            };
-            crate::logging::info(
-                "task_primary_prompt_agent_invoke_returned",
-                serde_json::json!({
-                    "task_id": task_id.as_str(),
-                    "turn_id": turn_id.as_str(),
-                    "outcome": outcome,
-                    "elapsed_ms": runner_started.elapsed().as_millis(),
-                    "error_code": result.as_ref().err().map(RuntimeError::code),
-                    "error_reason": result.as_ref().err().map(RuntimeError::reason),
-                }),
+            turn_diagnostics::agent_invoke_returned(
+                task_id.as_str(),
+                turn_id.as_str(),
+                &result,
+                runner_started.elapsed().as_millis(),
             );
             let settlement_started_at = Instant::now();
-            crate::logging::info(
-                "task_primary_prompt_settlement_started",
-                serde_json::json!({
-                    "task_id": task_id.as_str(),
-                    "turn_id": turn_id.as_str(),
-                    "elapsed_ms": runner_started.elapsed().as_millis(),
-                }),
+            turn_diagnostics::settlement_started(
+                task_id.as_str(),
+                turn_id.as_str(),
+                runner_started.elapsed().as_millis(),
             );
             let settlement_result = runner.turn_acceptance.serialize(&task_id, || {
                 #[cfg(test)]
@@ -445,26 +417,18 @@ impl TurnRunner {
                     }
                 }
             });
-            crate::logging::info(
-                "task_primary_prompt_settlement_returned",
-                serde_json::json!({
-                    "task_id": task_id.as_str(),
-                    "turn_id": turn_id.as_str(),
-                    "outcome": if settlement_result.is_ok() { "ok" } else { "error" },
-                    "settlement_elapsed_ms": settlement_started_at.elapsed().as_millis(),
-                    "elapsed_ms": runner_started.elapsed().as_millis(),
-                    "error_code": settlement_result.as_ref().err().map(RuntimeError::code),
-                    "error_reason": settlement_result.as_ref().err().map(RuntimeError::reason),
-                }),
+            turn_diagnostics::settlement_returned(
+                task_id.as_str(),
+                turn_id.as_str(),
+                &settlement_result,
+                settlement_started_at.elapsed().as_millis(),
+                runner_started.elapsed().as_millis(),
             );
         });
-        crate::logging::info(
-            "task_primary_prompt_runner_thread_spawned",
-            serde_json::json!({
-                "task_id": thread_task_id.as_str(),
-                "turn_id": thread_turn_id.as_str(),
-                "registration_to_thread_spawned_ms": thread_scheduled_at.elapsed().as_millis(),
-            }),
+        turn_diagnostics::runner_thread_spawned(
+            thread_task_id.as_str(),
+            thread_turn_id.as_str(),
+            thread_scheduled_at.elapsed().as_millis(),
         );
     }
 

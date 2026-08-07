@@ -24,6 +24,7 @@ pub(crate) mod task_operation;
 pub(crate) mod task_start_transaction;
 pub(crate) mod transitions;
 pub(crate) mod turn_acceptance;
+pub(crate) mod turn_diagnostics;
 pub(crate) mod turn_events;
 pub(crate) mod turn_lifecycle;
 pub mod turns;
