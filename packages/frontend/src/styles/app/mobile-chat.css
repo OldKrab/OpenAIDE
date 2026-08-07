@@ -30,11 +30,10 @@
   }
 
   .new-task-center {
-    /* Match the desktop start surface: keep the complete setup group balanced
-       in the available task area instead of pinning it near the header. */
-    align-content: safe center;
+    /* Keep the setup group reachable above the software keyboard on short viewports. */
+    align-content: start;
     gap: 6px;
-    padding: 24px 12px;
+    padding: clamp(28px, 16dvh, 112px) 12px 12px;
   }
 
   .new-task-center h1 {
