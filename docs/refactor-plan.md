@@ -2217,7 +2217,7 @@ concrete current gap.
 - App Shell request/result messages are explicit shell contracts, separate from
   normal App Server transport request/response messages.
 - VS Code answers `secret/read` from `SecretStorage` by key and
-  `shell/showNotification` through native notification UI.
+  `shell/showNotification` through the workbench notification UI.
 - VS Code answers `shell/revealFile` with `{ revealed: false }` until Backend
   owns a real opaque file-handle resolver; it does not fall back to raw paths.
 - Legacy webview BackendConnection bridge exposes the same `serverRequests`

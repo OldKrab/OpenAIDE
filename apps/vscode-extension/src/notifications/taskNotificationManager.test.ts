@@ -26,20 +26,16 @@ describe("VS Code Task notifications", () => {
     expect(test.openTask).toHaveBeenCalledWith("task-1", "Review the implementation");
   });
 
-  it("uses a native notification for the active Task after VS Code loses focus", () => {
+  it("does not notify the active Task", () => {
     const test = environment(
       Date.parse("2026-07-20T12:00:00.000Z"),
       "task-1",
-      false,
     );
     const manager = createTaskNotificationManager(test.environment);
 
     manager.reconcile([]);
     manager.reconcile([task("active-task-event", "finished", "2026-07-20T12:00:02.000Z")]);
 
-    expect(test.nativeNotifications).toEqual([
-      "Task finished: Review the implementation",
-    ]);
     expect(test.notifications).toEqual([]);
   });
 
@@ -69,7 +65,7 @@ describe("VS Code Task notifications", () => {
     expect(test.notifications[0]?.message).toBe("Task finished: Review the implementation");
   });
 
-  it("uses the window focus state from when the attention event occurred", () => {
+  it("uses a workbench notification for another Task regardless of window focus", () => {
     const test = environment(
       Date.parse("2026-07-20T12:00:00.000Z"),
       "task-2",
@@ -77,16 +73,12 @@ describe("VS Code Task notifications", () => {
     const manager = createTaskNotificationManager(test.environment);
 
     manager.reconcile([]);
-    test.setNow(Date.parse("2026-07-20T12:00:01.000Z"));
-    test.setWindowFocused(false);
-    test.setNow(Date.parse("2026-07-20T12:00:03.000Z"));
-    test.setWindowFocused(true);
     manager.reconcile([task("background-event", "finished", "2026-07-20T12:00:02.000Z")]);
 
-    expect(test.nativeNotifications).toEqual([
-      "Task finished: Review the implementation",
-    ]);
-    expect(test.notifications).toEqual([]);
+    expect(test.notifications).toEqual([{
+      message: "Task finished: Review the implementation",
+      action: "Open Task",
+    }]);
   });
 
   it("keeps Agent output from expanding a Task notification", async () => {
@@ -168,22 +160,17 @@ function task(
 function environment(
   initialNow: number,
   initialFocusedTaskId: string | undefined = "task-1",
-  initialWindowFocused = true,
 ) {
   let focusedTaskId = initialFocusedTaskId;
-  let windowFocused = initialWindowFocused;
   let now = initialNow;
   let resolveNotification: (selection: string | undefined) => void = () => undefined;
   const focusedTaskListeners = new Set<(taskId: string | undefined) => void>();
-  const windowFocusListeners = new Set<() => void>();
   const handled = new Set<string>();
   const notifications: Array<{ message: string; action: string }> = [];
-  const nativeNotifications: string[] = [];
   const openTask = vi.fn();
   const environment: TaskNotificationEnvironment = {
     now: () => now,
     focusedTaskId: () => focusedTaskId,
-    windowFocused: () => windowFocused,
     readHandledEventIds: () => [...handled],
     rememberHandledEventIds: (eventIds) => {
       handled.clear();
@@ -195,24 +182,15 @@ function environment(
         resolveNotification = resolve;
       });
     },
-    async showNativeNotification(message) {
-      nativeNotifications.push(message);
-      return undefined;
-    },
     openTask,
     subscribeFocusedTask(listener) {
       focusedTaskListeners.add(listener);
       return () => focusedTaskListeners.delete(listener);
     },
-    subscribeWindowFocus(listener) {
-      windowFocusListeners.add(listener);
-      return () => windowFocusListeners.delete(listener);
-    },
   };
   return {
     environment,
     notifications,
-    nativeNotifications,
     openTask,
     resolveNotification: (selection: string | undefined) => resolveNotification(selection),
     setNow(next: number) {
@@ -221,10 +199,6 @@ function environment(
     setFocusedTask(taskId: string | undefined) {
       focusedTaskId = taskId;
       for (const listener of focusedTaskListeners) listener(focusedTaskId);
-    },
-    setWindowFocused(focused: boolean) {
-      windowFocused = focused;
-      for (const listener of windowFocusListeners) listener();
     },
   };
 }

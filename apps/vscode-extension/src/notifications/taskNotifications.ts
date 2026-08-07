@@ -9,7 +9,6 @@ import { createTaskNotificationManager } from "./taskNotificationManager";
 import { workspaceRoots } from "../workspace/roots";
 
 const HANDLED_EVENTS_KEY = "openaide.taskNotifications.handled";
-const SHOW_SYSTEM_NOTIFICATION_COMMAND = "_openaide.notifications.show";
 
 type TaskNotificationRuntime = {
   subscribeAppServerState(
@@ -41,7 +40,6 @@ export async function registerTaskNotifications(
   const manager = createTaskNotificationManager({
     now: () => Date.now(),
     focusedTaskId: () => surfaces.currentFocusedTaskId(),
-    windowFocused: () => vscode.window.state.focused,
     readHandledEventIds: () => globalState.get<string[]>(HANDLED_EVENTS_KEY, []),
     rememberHandledEventIds: (eventIds) => {
       void globalState.update(HANDLED_EVENTS_KEY, eventIds).then(undefined, (error) => {
@@ -54,27 +52,9 @@ export async function registerTaskNotifications(
       logger.info("showing VS Code Task notification");
       return vscode.window.showInformationMessage(message, action);
     },
-    showNativeNotification: async (message, action) => {
-      logger.info("showing OS Task notification");
-      try {
-        // VS Code routes commands across extension hosts, so the UI-side companion
-        // receives this even when OpenAIDE runs in WSL, SSH, or a container.
-        await vscode.commands.executeCommand(SHOW_SYSTEM_NOTIFICATION_COMMAND, { message });
-        return undefined;
-      } catch (error) {
-        logger.warn("OS Task notification unavailable; falling back to VS Code", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return vscode.window.showInformationMessage(message, action);
-      }
-    },
     openTask: (taskId, title) => surfaces.openTask(taskId, title),
     subscribeFocusedTask(listener) {
       const subscription = surfaces.onDidChangeFocusedTask(listener);
-      return () => subscription.dispose();
-    },
-    subscribeWindowFocus(listener) {
-      const subscription = vscode.window.onDidChangeWindowState(listener);
       return () => subscription.dispose();
     },
     reportError: (error) => {
