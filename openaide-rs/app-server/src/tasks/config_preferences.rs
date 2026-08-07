@@ -89,6 +89,7 @@ fn apply_pass(
             session_id: session.session_id.clone(),
             config_id: option_id.clone(),
             value: preference.value.clone(),
+            diagnostic_operation_id: None,
         };
         match agent_gateway.set_session_config_option(request) {
             Ok(catalog) => *session = session.clone().with_config_options(&catalog),

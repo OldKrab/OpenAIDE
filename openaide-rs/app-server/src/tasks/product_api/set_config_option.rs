@@ -1,6 +1,7 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::TaskSetConfigOptionParams;
+use std::time::Instant;
 
 use crate::agent::AgentSessionSetConfigOptionRequest;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionKind};
@@ -24,9 +25,30 @@ impl TaskProductApi {
         params: TaskSetConfigOptionParams,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
+        let config_id = params.config_id.as_str().to_string();
+        let operation_id = format!("config-option-{}", uuid::Uuid::new_v4());
+        let started_at = Instant::now();
+        crate::logging::info(
+            "task_config_option_request_started",
+            serde_json::json!({
+                "task_id": task_id,
+                "config_id": config_id,
+                "operation_id": operation_id,
+            }),
+        );
         self.read_interactive_task_for_client(&task_id, client_instance_id)?;
+        let queued_at = Instant::now();
         self.config_operations.serialize(&task_id, || {
-            self.set_config_option_on_task_serialized(&task_id, params)
+            crate::logging::info(
+                "task_config_option_serialization_acquired",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "config_id": config_id,
+                    "operation_id": operation_id,
+                    "queue_wait_ms": queued_at.elapsed().as_millis(),
+                }),
+            );
+            self.set_config_option_on_task_serialized(&task_id, params, &operation_id, started_at)
         })
     }
 
@@ -34,6 +56,8 @@ impl TaskProductApi {
         &self,
         task_id: &str,
         params: TaskSetConfigOptionParams,
+        operation_id: &str,
+        started_at: Instant,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
         if params.config_id.as_str().trim().is_empty() {
             return Err(validation_error("configId", "Config option id is required"));
@@ -64,7 +88,17 @@ impl TaskProductApi {
         {
             let snapshot =
                 build_snapshot(&self.store, task_id, 100).map_err(super::storage_error)?;
-            return self.project_task_snapshot(snapshot);
+            let snapshot = self.project_task_snapshot(snapshot)?;
+            crate::logging::info(
+                "task_config_option_request_completed",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "operation_id": operation_id,
+                    "total_elapsed_ms": started_at.elapsed().as_millis(),
+                    "outcome": "already_current",
+                }),
+            );
+            return Ok(snapshot);
         }
 
         let now = now_string();
@@ -89,17 +123,39 @@ impl TaskProductApi {
         else {
             let snapshot =
                 build_snapshot(&self.store, task_id, 100).map_err(super::storage_error)?;
-            return self.project_task_snapshot(snapshot);
+            let snapshot = self.project_task_snapshot(snapshot)?;
+            crate::logging::info(
+                "task_config_option_request_completed",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "operation_id": operation_id,
+                    "total_elapsed_ms": started_at.elapsed().as_millis(),
+                    "outcome": "not_applied",
+                }),
+            );
+            return Ok(snapshot);
         };
         let request = AgentSessionSetConfigOptionRequest {
             agent_id: task.agent_id.clone(),
             session_id,
             config_id: config_id.clone(),
             value: value.clone(),
+            diagnostic_operation_id: Some(operation_id.to_string()),
         };
+        crate::logging::info(
+            "task_config_option_agent_dispatch_started",
+            serde_json::json!({
+                "task_id": task_id,
+                "config_id": config_id,
+                "operation_id": operation_id,
+            }),
+        );
+        let agent_started_at = Instant::now();
         let first_attempt = self.agent_gateway.set_session_config_option(request);
+        let mut recovery_attempted = false;
         let live_result = match first_attempt {
             Err(error) if inactive_session_can_recover(&error) => {
+                recovery_attempted = true;
                 let session = self.native_sessions.ensure_active_for_interaction(&task);
                 session.and_then(|session| {
                     let recovered_task = self.store.read_task(task_id)?;
@@ -116,12 +172,23 @@ impl TaskProductApi {
                             session_id: session.session_id().to_string(),
                             config_id,
                             value,
+                            diagnostic_operation_id: Some(operation_id.to_string()),
                         },
                     )
                 })
             }
             result => result,
         };
+        crate::logging::info(
+            "task_config_option_agent_dispatch_completed",
+            serde_json::json!({
+                "task_id": task_id,
+                "operation_id": operation_id,
+                "agent_elapsed_ms": agent_started_at.elapsed().as_millis(),
+                "recovery_attempted": recovery_attempted,
+                "result_status": if live_result.is_ok() { "ok" } else { "error" },
+            }),
+        );
         let live_catalog = match live_result {
             Ok(catalog) => catalog,
             Err(error) => {
@@ -137,6 +204,14 @@ impl TaskProductApi {
             live_catalog,
             &now_string(),
         )?;
+        crate::logging::info(
+            "task_config_option_catalog_published",
+            serde_json::json!({
+                "task_id": task_id,
+                "operation_id": operation_id,
+                "total_elapsed_ms": started_at.elapsed().as_millis(),
+            }),
+        );
         match self
             .store
             .write_agent_config_preferences(&confirmed_catalog)
@@ -152,6 +227,14 @@ impl TaskProductApi {
                 }),
             ),
         }
+        crate::logging::info(
+            "task_config_option_request_completed",
+            serde_json::json!({
+                "task_id": task_id,
+                "operation_id": operation_id,
+                "total_elapsed_ms": started_at.elapsed().as_millis(),
+            }),
+        );
         Ok(snapshot)
     }
 

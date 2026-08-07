@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -182,25 +182,61 @@ impl AcpSessionClient {
     pub(super) fn set_config_option(
         &self,
         agent_id: String,
+        session_id: String,
         config_id: String,
         value: ConfigOptionCurrentValue,
+        operation_id: String,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
+        let started_at = Instant::now();
         let (reply_tx, reply_rx) = mpsc::channel();
+        let queued_at = Instant::now();
+        crate::logging::info(
+            "acp_config_option_command_queued",
+            serde_json::json!({
+                "session_id": session_id,
+                "operation_id": operation_id,
+            }),
+        );
         self.config_tx
             .send(AcpSessionConfigCommand::SetConfigOption {
                 agent_id,
+                session_id: session_id.clone(),
                 config_id,
                 value,
+                operation_id: operation_id.clone(),
+                queued_at,
                 reply_tx,
             })
             .map_err(|_| self.worker_stopped_error())?;
         // Some Agents serialize configuration behind an active tool call. Keep
         // the request alive while the Frontend presents that pending state.
-        reply_rx
-            .recv_timeout(Duration::from_secs(60))
-            .map_err(|error| {
-                RuntimeError::NotReady(format!("ACP config update timed out: {error}"))
-            })?
+        let result = match reply_rx.recv_timeout(Duration::from_secs(60)) {
+            Ok(result) => result,
+            Err(error) => {
+                crate::logging::warn(
+                    "acp_config_option_command_completed",
+                    serde_json::json!({
+                        "session_id": session_id,
+                        "operation_id": operation_id,
+                        "total_elapsed_ms": started_at.elapsed().as_millis(),
+                        "result_status": "timeout",
+                    }),
+                );
+                return Err(RuntimeError::NotReady(format!(
+                    "ACP config update timed out: {error}"
+                )));
+            }
+        };
+        crate::logging::info(
+            "acp_config_option_command_completed",
+            serde_json::json!({
+                "session_id": session_id,
+                "operation_id": operation_id,
+                "total_elapsed_ms": started_at.elapsed().as_millis(),
+                "result_status": if result.is_ok() { "ok" } else { "error" },
+            }),
+        );
+        result
     }
 
     pub(super) fn cancel(&self) -> Result<(), RuntimeError> {
@@ -425,8 +461,11 @@ pub(super) enum AcpSessionCommand {
 pub(super) enum AcpSessionConfigCommand {
     SetConfigOption {
         agent_id: String,
+        session_id: String,
         config_id: String,
         value: ConfigOptionCurrentValue,
+        operation_id: String,
+        queued_at: Instant,
         reply_tx: mpsc::Sender<Result<ConfigOptionsCatalog, RuntimeError>>,
     },
 }

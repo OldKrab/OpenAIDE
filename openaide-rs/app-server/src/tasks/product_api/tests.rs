@@ -7140,9 +7140,13 @@ fn set_config_option_without_native_session_does_not_project_unsupported_fallbac
 
 #[test]
 fn set_config_option_applies_to_running_task_live_session() {
+    let diagnostic_logs = crate::logging::capture_test_logs();
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    let mut record = task_record(
+        "task-config-diagnostics",
+        "/tmp/openaide-unit-workspace/app",
+    );
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(RecordingAgent::default());
@@ -7154,7 +7158,7 @@ fn set_config_option_applies_to_running_task_live_session() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let mut record = store.read_task("task-existing").unwrap();
+    let mut record = store.read_task("task-config-diagnostics").unwrap();
     record.status = TaskStatus::Active;
     record.active_turn_id = Some("turn-active".to_string());
     record.agent_session_id = Some("session-active".to_string());
@@ -7163,7 +7167,7 @@ fn set_config_option_applies_to_running_task_live_session() {
 
     let snapshot = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
-            task_id: "task-existing".into(),
+            task_id: "task-config-diagnostics".into(),
             config_id: "model".into(),
             value: protocol_config_id("gpt-5.5"),
             client_mutation_id: "mutation-1".into(),
@@ -7178,7 +7182,7 @@ fn set_config_option_applies_to_running_task_live_session() {
             "gpt-5.5".to_string()
         )]
     );
-    let stored = store.read_task("task-existing").unwrap();
+    let stored = store.read_task("task-config-diagnostics").unwrap();
     assert_eq!(task_config_id(&stored, "model"), Some("gpt-5.5"));
     assert_eq!(stored.model_id.as_deref(), Some("gpt-5.5"));
     assert_ne!(stored.updated_at, "2026-01-01T00:00:00.000Z");
@@ -7187,6 +7191,36 @@ fn set_config_option_applies_to_running_task_live_session() {
         protocol_value_id(&snapshot.agent_config.options[0].current_value),
         Some("gpt-5.5")
     );
+
+    let config_events = diagnostic_logs
+        .snapshot()
+        .into_iter()
+        .filter(|entry| entry["fields"]["task_id"] == "task-config-diagnostics")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        config_events
+            .iter()
+            .map(|entry| entry["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "task_config_option_request_started",
+            "task_config_option_serialization_acquired",
+            "task_config_option_agent_dispatch_started",
+            "task_config_option_agent_dispatch_completed",
+            "task_config_option_catalog_published",
+            "task_config_option_request_completed",
+        ]
+    );
+    let operation_id = config_events[0]["fields"]["operation_id"].as_str().unwrap();
+    assert!(operation_id.starts_with("config-option-"));
+    assert!(config_events.iter().all(|entry| {
+        entry["fields"]["operation_id"].as_str() == Some(operation_id)
+            && entry["fields"].get("client_mutation_id").is_none()
+            && entry["fields"].get("value").is_none()
+    }));
+    assert!(config_events[1]["fields"]["queue_wait_ms"].is_number());
+    assert!(config_events[3]["fields"]["agent_elapsed_ms"].is_number());
+    assert!(config_events[5]["fields"]["total_elapsed_ms"].is_number());
 }
 
 #[test]
