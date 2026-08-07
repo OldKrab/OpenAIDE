@@ -154,8 +154,11 @@ impl AcpActiveSessionManager {
         request: AgentSessionSetConfigOptionRequest,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
         let session = request.session_key();
+        let operation_id = request
+            .diagnostic_operation_id
+            .unwrap_or_else(|| format!("config-option-{}", uuid::Uuid::new_v4()));
         self.sessions
-            .set_config_option(&session, request.config_id, request.value)
+            .set_config_option(&session, request.config_id, request.value, operation_id)
     }
 
     pub(super) fn prompt(

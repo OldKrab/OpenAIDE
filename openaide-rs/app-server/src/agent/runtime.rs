@@ -209,6 +209,8 @@ pub struct AgentSessionSetConfigOptionRequest {
     pub session_id: String,
     pub config_id: String,
     pub value: ConfigOptionCurrentValue,
+    /// Correlates timing diagnostics across product and ACP runtime boundaries.
+    pub diagnostic_operation_id: Option<String>,
 }
 
 impl AgentSessionSetConfigOptionRequest {

@@ -89,11 +89,14 @@ impl AcpActiveSessionRegistry {
         session: &AgentSessionKey,
         config_id: String,
         value: ConfigOptionCurrentValue,
+        operation_id: String,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
         self.require_session(session)?.set_config_option(
             session.agent_id().to_string(),
+            session.session_id().to_string(),
             config_id,
             value,
+            operation_id,
         )
     }
 

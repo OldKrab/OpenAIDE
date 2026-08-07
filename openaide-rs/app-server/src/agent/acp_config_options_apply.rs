@@ -1,5 +1,6 @@
 use crate::agent::acp_schema::{SessionConfigOptionValue, SetSessionConfigOptionRequest};
 use agent_client_protocol::{Agent, ConnectionTo, SessionMessage};
+use std::time::Instant;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_response_boundary::take_preceding_session_updates;
@@ -18,6 +19,7 @@ pub(super) async fn set_task_config_option_after_prior_updates(
     config_id: String,
     value: ConfigOptionCurrentValue,
     agent_id: &str,
+    operation_id: &str,
 ) -> Result<OrderedConfigOptionResponse, RuntimeError> {
     let request = SetSessionConfigOptionRequest::new(
         active_session.session_id().clone(),
@@ -27,9 +29,26 @@ pub(super) async fn set_task_config_option_after_prior_updates(
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     let (release_tx, release_rx) = tokio::sync::oneshot::channel();
     let agent_id = agent_id.to_string();
+    let operation_id_for_response = operation_id.to_string();
+    let request_started_at = Instant::now();
+    crate::logging::info(
+        "acp_config_option_request_dispatched",
+        serde_json::json!({
+            "session_id": active_session.session_id().to_string(),
+            "operation_id": operation_id,
+        }),
+    );
     connection
         .send_request_to(Agent, request)
         .on_receiving_result(move |result| async move {
+            crate::logging::info(
+                "acp_config_option_response_received",
+                serde_json::json!({
+                    "operation_id": operation_id_for_response,
+                    "agent_response_ms": request_started_at.elapsed().as_millis(),
+                    "result_status": if result.is_ok() { "ok" } else { "error" },
+                }),
+            );
             let result = result
                 .map(|response| normalize_config_options(&agent_id, response.config_options))
                 .map_err(acp_error);

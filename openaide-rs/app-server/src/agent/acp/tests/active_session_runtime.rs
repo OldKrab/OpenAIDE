@@ -1581,6 +1581,7 @@ fn config_response_and_prior_updates_reach_the_bound_task_before_the_caller() {
                 session_id,
                 config_id: "model".to_string(),
                 value: config_id("gpt-final"),
+                diagnostic_operation_id: None,
             });
         result_tx.send(result).expect("report config result");
     });
@@ -1774,6 +1775,7 @@ fn different_agents_may_own_the_same_native_session_id() {
             session_id: agent_a.session_id.clone(),
             config_id: "model".to_string(),
             value: config_id("gpt-5.5"),
+            diagnostic_operation_id: None,
         })
         .expect("set Agent A config");
     let agent_b_catalog = runtime
@@ -1782,6 +1784,7 @@ fn different_agents_may_own_the_same_native_session_id() {
             session_id: agent_b.session_id.clone(),
             config_id: "model".to_string(),
             value: config_id("gpt-5.6-sol"),
+            diagnostic_operation_id: None,
         })
         .expect("set Agent B config");
     assert_eq!(catalog_id(&agent_a_catalog, "model"), Some("gpt-5.5"));
@@ -2676,6 +2679,7 @@ fn set_config_option_dispatches_while_prompt_is_running() {
             session_id: session.session_id.clone(),
             config_id: "model".to_string(),
             value: config_id("gpt-5.5"),
+            diagnostic_operation_id: None,
         })
         .expect("set config option");
     assert_eq!(catalog_id(&catalog, "model"), Some("gpt-5.5"));
@@ -2698,6 +2702,7 @@ fn set_config_option_dispatches_while_prompt_is_running() {
 
 #[test]
 fn set_config_option_allows_an_agent_response_after_five_seconds() {
+    let diagnostic_logs = crate::logging::capture_test_logs();
     let temp = tempfile::TempDir::new().expect("temp dir");
     if !python3_available() {
         eprintln!("skipping ACP active-session runtime fixture: python3 not found");
@@ -2736,10 +2741,33 @@ fn set_config_option_allows_an_agent_response_after_five_seconds() {
             session_id: session.session_id.clone(),
             config_id: "model".to_string(),
             value: config_id("gpt-5.5"),
+            diagnostic_operation_id: Some("config-option-test".to_string()),
         })
         .expect("slow config response should remain within the user-visible deadline");
 
     assert_eq!(catalog_id(&catalog, "model"), Some("gpt-5.5"));
+    let config_events = diagnostic_logs
+        .snapshot()
+        .into_iter()
+        .filter(|entry| entry["fields"]["operation_id"] == "config-option-test")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        config_events
+            .iter()
+            .map(|entry| entry["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "acp_config_option_command_queued",
+            "acp_config_option_command_received",
+            "acp_config_option_request_dispatched",
+            "acp_config_option_response_received",
+            "acp_config_option_catalog_published",
+            "acp_config_option_command_completed",
+        ]
+    );
+    assert!(config_events[1]["fields"]["queue_wait_ms"].is_number());
+    assert!(config_events[3]["fields"]["agent_response_ms"].is_number());
+    assert!(config_events[5]["fields"]["total_elapsed_ms"].is_number());
     runtime
         .close_session(&session.key())
         .expect("close session");

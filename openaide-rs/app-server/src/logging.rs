@@ -13,6 +13,32 @@ struct LoggerState {
 
 static LOGGER: OnceLock<Mutex<LoggerState>> = OnceLock::new();
 
+#[cfg(test)]
+static TEST_LOG_SINKS: OnceLock<Mutex<Vec<std::sync::mpsc::Sender<Value>>>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) struct TestLogCapture {
+    receiver: std::sync::mpsc::Receiver<Value>,
+}
+
+#[cfg(test)]
+impl TestLogCapture {
+    pub(crate) fn snapshot(&self) -> Vec<Value> {
+        self.receiver.try_iter().collect()
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn capture_test_logs() -> TestLogCapture {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    TEST_LOG_SINKS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("test log sink registry poisoned")
+        .push(sender);
+    TestLogCapture { receiver }
+}
+
 pub fn init_file_logger(storage_root: &Path) {
     let path = storage_root
         .join("diagnostics")
@@ -55,6 +81,13 @@ fn write(level: &str, event: &str, fields: Value) {
         "event": event,
         "fields": sanitize_value(fields),
     });
+    #[cfg(test)]
+    if let Some(sinks) = TEST_LOG_SINKS.get() {
+        sinks
+            .lock()
+            .expect("test log sink registry poisoned")
+            .retain(|sink| sink.send(line.clone()).is_ok());
+    }
     let Ok(text) = serde_json::to_string(&line) else {
         return;
     };

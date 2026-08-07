@@ -432,10 +432,21 @@ async fn handle_prompt_config_command(
     match command {
         AcpSessionConfigCommand::SetConfigOption {
             agent_id,
+            session_id,
             config_id,
             value,
+            operation_id,
+            queued_at,
             reply_tx,
         } => {
+            logging::info(
+                "acp_config_option_command_received",
+                json!({
+                    "session_id": session_id,
+                    "operation_id": operation_id,
+                    "queue_wait_ms": queued_at.elapsed().as_millis(),
+                }),
+            );
             let connection = active_session.connection();
             let mut response = match set_task_config_option_after_prior_updates(
                 &connection,
@@ -443,6 +454,7 @@ async fn handle_prompt_config_command(
                 config_id,
                 value,
                 &agent_id,
+                &operation_id,
             )
             .await
             {
@@ -470,6 +482,14 @@ async fn handle_prompt_config_command(
                 }
             }
             let result = response.finish_with_session_sink(session_event_sink.as_deref());
+            logging::info(
+                "acp_config_option_catalog_published",
+                json!({
+                    "session_id": session_id,
+                    "operation_id": operation_id,
+                    "result_status": if result.is_ok() { "ok" } else { "error" },
+                }),
+            );
             if let Ok(next_catalog) = &result {
                 *catalog = next_catalog.clone();
             }
