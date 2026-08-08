@@ -76,6 +76,50 @@ describe("ReliableBackendConnection", () => {
     connection.close();
   });
 
+  it("keeps at most one heartbeat request in flight", async () => {
+    vi.useFakeTimers();
+    try {
+      const sent: RpcMessage[] = [];
+      const listeners = new Set<(message: RpcMessage) => void>();
+      const channel: RpcMessageChannel = {
+        send: (message) => sent.push(message),
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      };
+      const connection = createReliableBackendConnection({
+        channel,
+        heartbeatIntervalMs: 5,
+      });
+      const initializing = connection.initialize({
+        clientInstanceId: "client-1" as ClientInstanceId,
+        shell: { kind: "web" },
+        requestedSurface: { kind: "home" },
+        capabilities: { protocol: [], shell: [] },
+      });
+      const initializeRequest = sent[0];
+      if (!initializeRequest || !("id" in initializeRequest)) {
+        throw new Error("Expected initialize request");
+      }
+      for (const receive of listeners) receive({
+        jsonrpc: "2.0",
+        id: initializeRequest.id,
+        result: { result: initializeResult() },
+      });
+      await initializing;
+
+      await vi.advanceTimersByTimeAsync(25);
+
+      expect(sent.filter((message) => (
+        "method" in message && message.method === CLIENT_HEARTBEAT
+      ))).toHaveLength(1);
+      connection.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     {
       expiry: "transport" as const,
@@ -281,6 +325,36 @@ describe("ReliableBackendConnection", () => {
       "session-2",
     ]));
     expect(invalidations).toEqual(["serverReplayExpired"]);
+    connection.close();
+  });
+
+  it("replaces a transport generation after consecutive receive deadlines", async () => {
+    const transport = createStalledReceiveTransport();
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      receiveTimeoutMs: 5,
+      maxConsecutiveReceiveTimeouts: 2,
+      heartbeatIntervalMs: 60_000,
+    });
+    const invalidations: string[] = [];
+    connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
+
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    await vi.waitFor(() => expect(transport.openedSessions()).toBe(2));
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-2",
+    ]));
+    expect(invalidations).toEqual(["receiveStalled"]);
     connection.close();
   });
 
@@ -736,6 +810,70 @@ function createExpiringSessionTransport(
       },
     });
   }
+}
+
+function createStalledReceiveTransport() {
+  const frames = new Map<string, Array<{ sequence: number; message: RpcMessage }>>();
+  const initialized: string[] = [];
+  let opened = 0;
+  let firstSessionDelivered = false;
+
+  return {
+    fetch: vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "GET") {
+        const sessionId = init.headers["X-OpenAIDE-Session-Id"] ?? "";
+        if (sessionId === "session-1" && firstSessionDelivered) {
+          // Models the affected embedded HTTP implementation: neither fetch nor
+          // its AbortSignal ever settles after the initial response.
+          return new Promise(() => undefined);
+        }
+        const after = Number(init.headers["X-OpenAIDE-After"] ?? "0");
+        const available = (frames.get(sessionId) ?? []).filter((frame) => frame.sequence > after);
+        if (sessionId === "session-1" && available.length > 0) firstSessionDelivered = true;
+        if (available.length > 0) return response(200, { frames: available });
+        if (sessionId !== "session-1") return response(204, "");
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+        });
+      }
+
+      const body = JSON.parse(init.body ?? "{}") as {
+        transport?: string;
+        sessionId?: string;
+        message?: RpcMessage;
+      };
+      if (body.transport === "open") {
+        opened += 1;
+        return response(200, {
+          transportVersion: 1,
+          sessionId: `session-${opened}`,
+          serverId: "server-1",
+        });
+      }
+      const sessionId = body.sessionId ?? "";
+      const message = body.message;
+      if (!message || !("id" in message) || !("method" in message)) {
+        throw new Error("Test transport expected a request");
+      }
+      if (message.method !== CLIENT_INITIALIZE) {
+        throw new Error(`Unexpected test request: ${message.method}`);
+      }
+      initialized.push(sessionId);
+      const sessionFrames = frames.get(sessionId) ?? [];
+      sessionFrames.push({
+        sequence: sessionFrames.length + 1,
+        message: {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { result: initializeResult(`cursor-${opened}`) },
+        },
+      });
+      frames.set(sessionId, sessionFrames);
+      return response(204, "");
+    }),
+    openedSessions: () => opened,
+    initializedSessions: () => initialized,
+  };
 }
 
 function response(status: number, body: unknown) {

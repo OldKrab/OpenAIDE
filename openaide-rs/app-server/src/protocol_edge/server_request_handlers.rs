@@ -9,7 +9,7 @@ use openaide_app_server_protocol::server_requests::{
 use openaide_app_server_protocol::snapshot::{PendingRequestScope, TaskSnapshot};
 use openaide_app_server_protocol::state::SubscriptionScope;
 
-use crate::app_lifecycle::{ShutdownCompletion, ShutdownRequestOutcome};
+use crate::app_lifecycle::{LifecycleState, ShutdownCompletion, ShutdownRequestOutcome};
 #[cfg(test)]
 use crate::client_lifecycle::Delivery;
 use crate::client_lifecycle::{AppServerTime, ClientContext, ClientExpiryOutcome, ConnectionId};
@@ -81,12 +81,21 @@ impl RpcGateway {
     }
 
     pub fn shutdown(&mut self) -> Result<ShutdownCompletion, RuntimeError> {
+        let previous = self.lifecycle.state();
         if matches!(
             self.lifecycle.request_shutdown(),
             ShutdownRequestOutcome::AlreadyStopping
         ) {
             return Ok(ShutdownCompletion::CleanRelease);
         }
+        crate::logging::info(
+            "app_server_lifecycle_transition",
+            serde_json::json!({
+                "from_status": format!("{previous:?}"),
+                "to_status": "Stopping",
+                "reason_code": "shutdown_requested",
+            }),
+        );
         match self.shutdown.shutdown() {
             Ok(()) => Ok(self.lifecycle.complete_shutdown(true)),
             Err(error) => {
@@ -129,12 +138,11 @@ impl RpcGateway {
             "client_detach_started",
             serde_json::json!({ "client_instance_id": client_instance_id }),
         );
-        if !matches!(
-            self.client_hub.detach(client_instance_id),
-            crate::client_lifecycle::DetachOutcome::Detached { .. }
-        ) {
+        let crate::client_lifecycle::DetachOutcome::Detached { last_client, .. } =
+            self.client_hub.detach(client_instance_id)
+        else {
             return;
-        }
+        };
         self.server_requests
             .observe_client_expired(client_instance_id, now);
         self.state_stream
@@ -150,6 +158,9 @@ impl RpcGateway {
             "client_detach_completed",
             serde_json::json!({ "client_instance_id": client_instance_id }),
         );
+        if last_client {
+            self.begin_draining_after_last_client("explicit_detach");
+        }
     }
 
     pub fn expire_client_after_reconnect_grace(
@@ -177,6 +188,15 @@ impl RpcGateway {
                 );
             }
             self.remove_expired_client_workspace_roots(client_instance_id, now);
+        }
+        if matches!(
+            &outcome,
+            ClientExpiryOutcome::Expired {
+                last_client: true,
+                ..
+            }
+        ) {
+            self.begin_draining_after_last_client("reconnect_grace_expired");
         }
         outcome
     }
@@ -211,6 +231,9 @@ impl RpcGateway {
         if projects_changed {
             self.queue_project_collection_update(now);
         }
+        if batch.last_client_expired {
+            self.begin_draining_after_last_client("client_liveness_expired");
+        }
         let last_expired_index = batch
             .last_client_expired
             .then(|| batch.expired.len().saturating_sub(1));
@@ -223,6 +246,24 @@ impl RpcGateway {
                 last_client: Some(index) == last_expired_index,
             })
             .collect()
+    }
+
+    /// App lifecycle owns the transition after client lifecycle reports the fact.
+    fn begin_draining_after_last_client(&mut self, reason: &'static str) {
+        let previous = self.lifecycle.state();
+        self.lifecycle.begin_draining();
+        if previous != LifecycleState::Draining
+            && self.lifecycle.state() == LifecycleState::Draining
+        {
+            crate::logging::info(
+                "app_server_lifecycle_transition",
+                serde_json::json!({
+                    "from_status": format!("{previous:?}"),
+                    "to_status": "Draining",
+                    "reason_code": reason,
+                }),
+            );
+        }
     }
 
     fn remove_expired_client_workspace_roots(

@@ -5,7 +5,7 @@ use openaide_app_server_protocol::attachment::PreSendAttachment;
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 
-use crate::app_lifecycle::ShutdownCompletion;
+use crate::app_lifecycle::{LifecycleState, ShutdownCompletion};
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome, ConnectionId};
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestDelivery;
@@ -263,6 +263,14 @@ impl SharedRpcGateway {
             .expect("protocol gateway lock poisoned")
             .client_hub
             .has_ever_initialized_clients()
+    }
+
+    /// Reports the lifecycle-owned terminal condition without exposing client records.
+    pub(crate) fn should_shutdown_after_last_client(&self) -> bool {
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        gateway.lifecycle.state() == LifecycleState::Draining
+            && gateway.client_hub.has_ever_initialized_clients()
+            && !gateway.client_hub.has_initialized_clients()
     }
 
     pub fn shutdown(&self) -> Result<ShutdownCompletion, RuntimeError> {

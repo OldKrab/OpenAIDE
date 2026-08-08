@@ -3,7 +3,7 @@ use openaide_app_server_protocol::client::{
 };
 use openaide_app_server_protocol::envelopes::{ResponseEnvelope, ResponseMeta};
 use serde_json::{json, Value};
-use std::sync::mpsc::{self, TryRecvError};
+use std::sync::mpsc;
 
 use super::*;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
@@ -117,7 +117,7 @@ fn rejects_non_probe_methods() {
 }
 
 #[test]
-fn expired_client_wake_does_not_request_app_server_shutdown() {
+fn expired_last_client_requests_app_server_shutdown() {
     let state_dir = tempfile::TempDir::new().expect("state dir");
     let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
     let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
@@ -174,5 +174,5 @@ fn expired_client_wake_does_not_request_app_server_shutdown() {
     );
 
     assert_eq!(heartbeat.status, 200);
-    assert_eq!(shutdown_receiver.try_recv(), Err(TryRecvError::Empty));
+    assert!(shutdown_receiver.try_recv().is_ok());
 }

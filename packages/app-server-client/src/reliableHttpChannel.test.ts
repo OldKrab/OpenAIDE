@@ -336,6 +336,90 @@ describe("ReliableHttpMessageChannel", () => {
     ]));
     channel.close();
   });
+
+  it("restarts a receive poll when the HTTP implementation ignores abort", async () => {
+    let pollAttempt = 0;
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST") {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      pollAttempt += 1;
+      if (pollAttempt === 1) return new Promise(() => undefined);
+      if (pollAttempt === 2) {
+        return response(200, JSON.stringify({
+          frames: [{
+            sequence: 1,
+            message: { jsonrpc: "2.0", id: "rpc-1", result: 42 },
+          }],
+        }));
+      }
+      return new Promise(() => undefined);
+    });
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://127.0.0.1:4321",
+      connectionId: "client-1",
+      fetch,
+      retryDelayMs: 0,
+      receiveTimeoutMs: 5,
+    });
+    const received: RpcMessage[] = [];
+    channel.subscribe((message) => received.push(message));
+
+    await vi.waitFor(() => expect(received).toEqual([
+      { jsonrpc: "2.0", id: "rpc-1", result: 42 },
+    ]));
+    expect(pollAttempt).toBeGreaterThanOrEqual(2);
+    channel.close();
+  });
+
+  it("restarts a receive poll when reading the response body ignores abort", async () => {
+    let pollAttempt = 0;
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST") {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      pollAttempt += 1;
+      if (pollAttempt === 1) {
+        return {
+          ok: true,
+          status: 200,
+          text: () => new Promise<string>(() => undefined),
+        };
+      }
+      if (pollAttempt === 2) {
+        return response(200, JSON.stringify({
+          frames: [{
+            sequence: 1,
+            message: { jsonrpc: "2.0", id: "rpc-1", result: 42 },
+          }],
+        }));
+      }
+      return new Promise(() => undefined);
+    });
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://127.0.0.1:4321",
+      connectionId: "client-1",
+      fetch,
+      retryDelayMs: 0,
+      receiveTimeoutMs: 5,
+    });
+    const received: RpcMessage[] = [];
+    channel.subscribe((message) => received.push(message));
+
+    await vi.waitFor(() => expect(received).toEqual([
+      { jsonrpc: "2.0", id: "rpc-1", result: 42 },
+    ]));
+    expect(pollAttempt).toBeGreaterThanOrEqual(2);
+    channel.close();
+  });
 });
 
 function decodeBase64(data: string) {

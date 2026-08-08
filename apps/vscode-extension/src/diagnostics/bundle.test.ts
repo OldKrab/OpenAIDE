@@ -150,16 +150,29 @@ describe("support diagnostics bundle", () => {
         response_code: "missing_after",
       },
     })}\n`);
-    await writeFile(path.join(logDirectory, "openaide-app-server.jsonl"), `${JSON.stringify({
-      timestamp_ms: Date.parse("2026-07-18T09:55:00.000Z"),
-      scope: "openaide-app-server",
-      level: "warn",
-      event: "reliable_session_poll_rejected",
-      fields: {
-        reason_code: "missing_after",
-        after_header_present: false,
-      },
-    })}\n`);
+    await writeFile(path.join(logDirectory, "openaide-app-server.jsonl"), [
+      JSON.stringify({
+        timestamp_ms: Date.parse("2026-07-18T09:55:00.000Z"),
+        scope: "openaide-app-server",
+        level: "warn",
+        event: "reliable_session_poll_rejected",
+        fields: {
+          reason_code: "missing_after",
+          after_header_present: false,
+        },
+      }),
+      JSON.stringify({
+        timestamp_ms: Date.parse("2026-07-18T09:56:00.000Z"),
+        scope: "openaide-app-server",
+        level: "info",
+        event: "app_server_lifecycle_transition",
+        fields: {
+          from_status: "Running",
+          to_status: "Draining",
+          reason_code: "inactive_last_client_expired",
+        },
+      }),
+    ].join("\n"));
 
     const result = await buildSupportBundle({
       snapshot: snapshot(),
@@ -183,6 +196,9 @@ describe("support diagnostics bundle", () => {
     expect(exported).toContain('"http_status":400');
     expect(exported).toContain('"response_code":"missing_after"');
     expect(exported).toContain('"reason_code":"missing_after"');
+    expect(exported).toContain('"from_status":"Running"');
+    expect(exported).toContain('"to_status":"Draining"');
+    expect(exported).toContain('"reason_code":"inactive_last_client_expired"');
     expect(exported).not.toContain("private response body");
     expect(exported).not.toContain("after_header_present");
   });

@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -14,7 +15,8 @@ use crate::storage_runtime::{EndpointRecordStore, StateRoot};
 
 use super::{
     expire_local_http_clients, native_session_catalog_refresh_due,
-    publish_local_http_probe_endpoint, task_storage_maintenance_due,
+    publish_local_http_probe_endpoint, request_shutdown_after_last_client,
+    task_storage_maintenance_due,
 };
 
 #[test]
@@ -255,7 +257,7 @@ fn explicit_last_vscode_detach_gracefully_stops_published_endpoint() {
 }
 
 #[test]
-fn inactive_last_client_expiry_keeps_published_endpoint_running() {
+fn inactive_last_client_expiry_enters_draining_until_a_client_reconnects() {
     let state_dir = tempfile::TempDir::new().expect("state dir");
     let runtime_dir = tempfile::TempDir::new().expect("runtime dir");
     let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
@@ -280,10 +282,33 @@ fn inactive_last_client_expiry_keeps_published_endpoint_running() {
 
     let now = AppServerTime::now();
     assert!(expire_local_http_clients(&gateway, AppServerTime(now.0 + 30_001)).is_empty());
-    assert_eq!(
-        expire_local_http_clients(&gateway, AppServerTime(now.0 + 40_002)).len(),
-        1
+    let expired = expire_local_http_clients(&gateway, AppServerTime(now.0 + 40_002));
+    assert_eq!(expired.len(), 1);
+
+    let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+    assert!(request_shutdown_after_last_client(
+        &gateway,
+        &expired,
+        &shutdown_sender,
+        Duration::ZERO,
+    ));
+    assert!(shutdown_receiver.try_recv().is_ok());
+
+    let draining_probe = post_json(
+        &record.endpoints[0].address,
+        &record.auth_token,
+        None,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "probe-draining",
+            "method": "client/probe",
+            "params": {}
+        })
+        .to_string(),
     );
+    let body = draining_probe.split("\r\n\r\n").nth(1).expect("body");
+    let messages: Value = serde_json::from_str(body).unwrap();
+    assert_eq!(messages["result"]["result"]["lifecycle"], "draining");
 
     let reinitialized = post_json(
         &record.endpoints[0].address,
@@ -295,6 +320,31 @@ fn inactive_last_client_expiry_keeps_published_endpoint_running() {
     let body = reinitialized.split("\r\n\r\n").nth(1).expect("body");
     let messages: Value = serde_json::from_str(body).unwrap();
     assert!(messages[0]["result"]["result"]["snapshot"].is_object());
+
+    let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+    assert!(!request_shutdown_after_last_client(
+        &gateway,
+        &expired,
+        &shutdown_sender,
+        Duration::ZERO,
+    ));
+    assert!(shutdown_receiver.try_recv().is_err());
+
+    let running_probe = post_json(
+        &record.endpoints[0].address,
+        &record.auth_token,
+        None,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "probe-running",
+            "method": "client/probe",
+            "params": {}
+        })
+        .to_string(),
+    );
+    let body = running_probe.split("\r\n\r\n").nth(1).expect("body");
+    let messages: Value = serde_json::from_str(body).unwrap();
+    assert_eq!(messages["result"]["result"]["lifecycle"], "running");
 }
 
 fn initialize_request(id: &str, client_instance_id: &str) -> String {

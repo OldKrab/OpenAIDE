@@ -16,9 +16,11 @@ export function executeDetailInfo(
   const exitCode = details.output?.exit_code;
   const running = step.status === "running";
   const failed = step.status === "error" || details.output?.success === false || (exitCode !== undefined && exitCode !== 0);
+  // Older saved tasks used this semantic label for a terminal reference. It is not captured output.
+  const displayableFallback = fallbackPreview === "Terminal output" ? undefined : fallbackPreview;
   const outputText = failed
-    ? stderr || terminal || aggregated || formatted || stdout || fallbackPreview
-    : terminal || stdout || formatted || aggregated || fallbackPreview;
+    ? stderr || terminal || aggregated || formatted || stdout || displayableFallback
+    : terminal || stdout || formatted || aggregated || displayableFallback;
   return {
     command,
     duration: firstFieldValue(details.output?.fields, "duration"),

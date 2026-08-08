@@ -56,6 +56,16 @@ describe("toolDetailsViewModel", () => {
     expect(info.outputText).toBe("permission denied");
   });
 
+  it("does not present a terminal reference label as command output", () => {
+    const info = executeDetailInfo(
+      details({}),
+      toolStep({ name: "execute", status: "completed" }),
+      "Terminal output",
+    );
+
+    expect(info.outputText).toBeUndefined();
+  });
+
   it("preserves edit result text for created, updated, and failed edits", () => {
     const created = details({ content: [{ kind: "diff", path: "/workspace/new.md", new_text: "new" }] });
     const updated = details({

@@ -675,7 +675,7 @@ describe("ChatRow", () => {
     expect(html).toContain("activity-tool-execute-detail completed");
     expect(html).toContain("execute-command-chip");
     expect(html).toContain("printf &#x27;openaide-permission-test-allow-once");
-    expect(html).not.toContain("<code>Terminal output</code>");
+    expect(html).not.toContain("Terminal output");
   });
 
   it("changes execute title and icon from presentation while retaining execute details", async () => {
@@ -1461,6 +1461,48 @@ describe("ChatRow", () => {
     expect(loaded).toContain("loaded details");
     expect(loaded).not.toContain("activity-tool-skeleton");
     vi.useRealTimers();
+  });
+
+  it("keeps execute details in loading and terminal error states", async () => {
+    vi.useFakeTimers();
+    const { ChatToolDetails } = await import("./ChatToolDetailsView");
+    const step = {
+      kind: "tool" as const,
+      name: "execute",
+      status: "completed" as const,
+      input_summary: "cargo test",
+    };
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatToolDetails loading step={step} />);
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(JSON.stringify(tree!.toJSON())).toContain("activity-tool-skeleton");
+    expect(JSON.stringify(tree!.toJSON())).not.toContain("Completed");
+
+    act(() => {
+      tree!.update(<ChatToolDetails error="connection closed" step={step} />);
+    });
+    const failed = JSON.stringify(tree!.toJSON());
+    expect(failed).toContain("Tool details unavailable.");
+    expect(failed).not.toContain("connection closed");
+    expect(failed).not.toContain("activity-tool-skeleton");
+    vi.useRealTimers();
+  });
+
+  it("labels a successfully loaded empty execute result", async () => {
+    const { ChatToolDetails } = await import("./ChatToolDetailsView");
+    const html = renderToStaticMarkup(
+      <ChatToolDetails
+        details={{ locations: [], content: [] }}
+        step={{ kind: "tool", name: "execute", status: "completed", input_summary: "true" }}
+      />,
+    );
+
+    expect(html).toContain("No output returned.");
+    expect(html).toContain("Completed");
   });
 
   it("opens tool paths through the rendered tool path button", async () => {

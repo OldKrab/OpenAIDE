@@ -34,6 +34,7 @@ import {
 } from "./rpcPeer.js";
 import {
   createReliableHttpMessageChannel,
+  isReliableHttpReceiveStalled,
   isReliableHttpReplayExpired,
   isReliableHttpSessionExpired,
   reliableHttpErrorDiagnosticFields,
@@ -77,6 +78,8 @@ export type ReliableLocalHttpBackendConnectionOptions = {
   fetch?: ReliableHttpFetch;
   heartbeatIntervalMs?: number;
   retryDelayMs?: number;
+  receiveTimeoutMs?: number;
+  maxConsecutiveReceiveTimeouts?: number;
   logger?: DiagnosticsLogger;
   subscribeToWake?: (wake: () => void) => () => void;
   /** Supplies a replacement endpoint when the App Shell starts a new App Server process. */
@@ -277,6 +280,12 @@ function createReliableHttpBackendConnection(
       ...(endpoint.authToken ? { authToken: endpoint.authToken } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
+      ...(options.receiveTimeoutMs === undefined
+        ? {}
+        : { receiveTimeoutMs: options.receiveTimeoutMs }),
+      ...(options.maxConsecutiveReceiveTimeouts === undefined
+        ? {}
+        : { maxConsecutiveReceiveTimeouts: options.maxConsecutiveReceiveTimeouts }),
       logger,
       ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
     });
@@ -362,17 +371,23 @@ function createReliableHttpBackendConnection(
 
   function handleGenerationError(generation: HttpConnectionGeneration, error: unknown) {
     if (closed || generation !== active) return;
-    const invalidation = isReliableHttpSessionExpired(error)
-      ? {
-          reason: "httpSessionExpired" as const,
-          message: "HTTP RPC session expired",
-        }
-      : isReliableHttpReplayExpired(error)
-        ? {
-            reason: "serverReplayExpired" as const,
-            message: "HTTP RPC server replay history expired",
-          }
-        : undefined;
+    let invalidation: (BackendGenerationInvalidation & { message: string }) | undefined;
+    if (isReliableHttpSessionExpired(error)) {
+      invalidation = {
+        reason: "httpSessionExpired",
+        message: "HTTP RPC session expired",
+      };
+    } else if (isReliableHttpReplayExpired(error)) {
+      invalidation = {
+        reason: "serverReplayExpired",
+        message: "HTTP RPC server replay history expired",
+      };
+    } else if (isReliableHttpReceiveStalled(error)) {
+      invalidation = {
+        reason: "receiveStalled",
+        message: "HTTP RPC receive remained stalled",
+      };
+    }
     if (!invalidation || !initializeParams) {
       terminalError = error;
       logger.error("backend_transport_failed_terminal", {
@@ -560,6 +575,7 @@ function createInternalReliableBackendConnection(
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let heartbeatFailureCount = 0;
   let heartbeatFailureActive = false;
+  let heartbeatPending = false;
   let requestSequence = 0;
 
   // RpcPeer owns the single protocol handler. Backend consumers are independent
@@ -674,7 +690,8 @@ function createInternalReliableBackendConnection(
   function startHeartbeat() {
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = setInterval(() => {
-      if (!initialized) return;
+      if (!initialized || heartbeatPending) return;
+      heartbeatPending = true;
       void sendRequest(CLIENT_HEARTBEAT, {})
         .then(() => {
           if (!heartbeatFailureActive) return;
@@ -696,6 +713,9 @@ function createInternalReliableBackendConnection(
               ...diagnosticErrorFields(error),
             });
           }
+        })
+        .finally(() => {
+          heartbeatPending = false;
         });
     }, options.heartbeatIntervalMs ?? 5_000);
   }
