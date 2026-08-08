@@ -85,7 +85,8 @@
   content: "";
   position: absolute;
   z-index: 1;
-  right: 0;
+  /* Fade Chat content behind the composer without washing out the scrollbar thumb. */
+  right: 10px;
   bottom: 0;
   left: 0;
   height: 48px;
