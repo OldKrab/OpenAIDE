@@ -44,6 +44,7 @@
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "@vscode/vsce": "3.6.0",
+    "jsdom": "^30.0.1",
     "ovsx": "1.0.2",
     "semver": "7.7.2",
     "typescript": "^7.0.2",
