@@ -4,7 +4,7 @@
     "jsx": "react-jsx",
     "outDir": "dist",
     "rootDir": "../..",
-    "types": ["vite/client"]
+    "types": ["node", "vite/client"]
   },
   "include": ["src", "../../apps/browser/frontend", "vite.config.ts"]
 }
