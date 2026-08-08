@@ -17,6 +17,7 @@ import {
   type WorktreeRepositoryId,
 } from "@openaide/app-server-client";
 import type { WebviewToHostMessage } from "@openaide/app-shell-contracts";
+import { sanitizeDiagnosticText } from "../logging/logger";
 import { workspaceRoots } from "../workspace/roots";
 import type { MessageContext } from "./messagingContext";
 import { isObject } from "./messagingFields";
@@ -121,32 +122,34 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     return true;
   }
   if (message.type === "workspace.openFolder") {
-    const selected = await vscode.window.showOpenDialog({
-      canSelectFiles: false,
-      canSelectFolders: true,
-      canSelectMany: false,
-      openLabel: "Open Folder",
-    });
-    if (selected?.[0]) {
-      await vscode.commands.executeCommand("vscode.openFolder", selected[0], false);
-    }
+    await vscode.commands.executeCommand("workbench.action.addRootFolder");
     return true;
   }
   if (message.type === "project.pickFolder") {
-    const selected = await vscode.window.showOpenDialog({
-      canSelectFiles: false,
-      canSelectFolders: true,
-      canSelectMany: false,
-      openLabel: "Add Project",
-    });
-    const path = selected?.[0]?.fsPath;
-    await context.post({
-      type: "project.pickFolder.result",
-      payload: {
-        requestId: message.payload.requestId,
-        ...(path ? { folder: { path, label: nodePath.basename(path) || "Project" } } : {}),
-      },
-    });
+    try {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: "Add Project",
+      });
+      const path = selected?.[0]?.fsPath;
+      await context.post({
+        type: "project.pickFolder.result",
+        payload: {
+          requestId: message.payload.requestId,
+          ...(path ? { folder: { path, label: nodePath.basename(path) || "Project" } } : {}),
+        },
+      });
+    } catch (error) {
+      await context.post({
+        type: "project.pickFolder.result",
+        payload: {
+          requestId: message.payload.requestId,
+          error: sanitizeDiagnosticText(error),
+        },
+      });
+    }
     return true;
   }
   if (message.type === "worktree.openFolder" && isObject(message.payload)) {

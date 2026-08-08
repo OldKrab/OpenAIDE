@@ -149,6 +149,14 @@ impl NativeSessionService {
         }
 
         let resume_started = std::time::Instant::now();
+        crate::logging::info(
+            "native_session_open_resume_started",
+            serde_json::json!({
+                "task_id": task.task_id,
+                "agent_id": task.agent_id,
+                "stored_session_id": stored_session_id,
+            }),
+        );
         let session = match self.agent_gateway.resume_session(AgentSessionResume {
             agent_id: task.agent_id.clone(),
             task_id: task.task_id.clone(),
@@ -160,9 +168,28 @@ impl NativeSessionService {
         }) {
             Ok(session) => session,
             Err(RuntimeError::CapabilityMissing(_)) => {
-                return Ok(OpenSessionResumeOutcome::Unsupported)
+                crate::logging::info(
+                    "native_session_open_resume_unsupported",
+                    serde_json::json!({
+                        "task_id": task.task_id,
+                        "agent_id": task.agent_id,
+                        "duration_ms": resume_started.elapsed().as_millis(),
+                    }),
+                );
+                return Ok(OpenSessionResumeOutcome::Unsupported);
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                crate::logging::warn(
+                    "native_session_open_resume_failed",
+                    serde_json::json!({
+                        "task_id": task.task_id,
+                        "agent_id": task.agent_id,
+                        "duration_ms": resume_started.elapsed().as_millis(),
+                        "error_kind": "runtime_error",
+                    }),
+                );
+                return Err(error);
+            }
         };
         let resume_ms = resume_started.elapsed().as_millis();
         let returned_config_catalog = session.config_catalog.is_some();
@@ -196,6 +223,7 @@ impl NativeSessionService {
                 "task_id": task.task_id,
                 "agent_id": task.agent_id,
                 "resume_ms": resume_ms,
+                "total_ms": resume_started.elapsed().as_millis(),
                 "returned_config_catalog": returned_config_catalog,
                 "returned_commands_catalog": returned_commands_catalog,
             }),

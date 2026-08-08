@@ -1,6 +1,7 @@
 import {
   createReliableLocalHttpBackendConnection,
   createReliableWebProxyBackendConnection,
+  type DiagnosticsLogger,
 } from "@openaide/app-server-client";
 import type {
   HostToWebviewMessage,
@@ -8,6 +9,7 @@ import type {
 } from "@openaide/app-shell-contracts";
 import { frontendShell } from "./frontendShell";
 import type { PostHostMessage } from "../state/postHostMessage";
+import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 
 /** Shared Frontend facade over the App Shell selected at the composition root. */
 export function getBootstrap() {
@@ -79,6 +81,7 @@ export function getBackendConnection() {
     return createReliableLocalHttpBackendConnection({
       ...bootstrap.appServerConnection,
       connectionId: createTransportConnectionId(),
+      logger: createFrontendDiagnosticsLogger(),
       subscribeToWake: subscribeToBrowserWake,
     });
   }
@@ -86,10 +89,31 @@ export function getBackendConnection() {
     return createReliableWebProxyBackendConnection({
       endpointUrl: bootstrap.appServerConnection.endpointUrl,
       connectionId: createTransportConnectionId(),
+      logger: createFrontendDiagnosticsLogger(),
       subscribeToWake: subscribeToBrowserWake,
     });
   }
   return undefined;
+}
+
+function createFrontendDiagnosticsLogger(): DiagnosticsLogger {
+  return {
+    info: (event, fields = {}) => sendWebviewTelemetry(
+      postHostMessage,
+      `app_server_client_${event}`,
+      fields,
+    ),
+    warn: (event, fields = {}) => sendWebviewTelemetry(
+      postHostMessage,
+      `app_server_client_${event}`,
+      fields,
+    ),
+    error: (event, fields = {}) => sendWebviewTelemetry(
+      postHostMessage,
+      `app_server_client_${event}`,
+      fields,
+    ),
+  };
 }
 
 /** Transport identity is disposable and must never double as the logical App Shell client. */

@@ -22,9 +22,16 @@ Read the narrow source of truth before changing its area:
 
 ## Write
 
-- Leave concise comments on public and non-obvious code: explain ownership, invariants, lifecycle boundaries, and tradeoffs. Add logging where it makes failures diagnosable.
+- Leave concise comments on public and non-obvious code: explain ownership, invariants, lifecycle boundaries, and tradeoffs. Follow the Observe rules for runtime diagnostics.
 - Keep hand-written production files below 800 logical lines; extract a cohesive module before extending a file that exceeds it.
 - Put Rust test bodies in dedicated test files. Use integration tests by default; private unit tests use the adjacent `<module>_tests.rs` convention. Shared integration helpers live in `tests/common/mod.rs`.
+
+## Observe
+
+- Treat lifecycle and boundary logging as part of implementation. For every asynchronous operation crossing the Web Shell, Frontend, App Server, transport, persistence, or Agent boundary, emit structured start and terminal events with a stable operation name, safe correlation identifiers, outcome, duration, retry or attempt count, and classified error.
+- Record state transitions and waits that can explain user-visible latency. Keep healthy polling loops quiet; log the poll wake, timeout, retry, terminal failure, and meaningful batch instead of every iteration.
+- Keep diagnostics metadata-only and production-safe: redact prompts, content, secrets, tokens, credentials, environment values, paths, URLs, and free-form error messages. Make loggers injectable where tests need to assert success, failure, and retry paths.
+- When diagnosing a delay, follow one correlation identifier across every layer and verify the first and last event for each lifecycle stage before proposing a cause.
 
 ## Prove
 

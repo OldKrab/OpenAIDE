@@ -198,6 +198,10 @@ export function useAppControllerBackendLifecycle({
       : undefined;
     const stopRecoveryBaselines = backendConnection?.handleRecoveryBaseline((baseline) => {
       if (!active) return;
+      sendWebviewTelemetry(postHostMessage, "app_server_recovery_baseline_received", {
+        surface: initialBootstrap.surface,
+        reason: baseline.reason,
+      });
       const recoveredSnapshot = baseline.result.snapshot;
       const recoveredReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(recoveredSnapshot));
       const recoveredDispatch = bindAppServerReplicaEpoch(dispatch, recoveredReplicaEpoch);
@@ -232,9 +236,20 @@ export function useAppControllerBackendLifecycle({
       }
       if (recoveredSnapshot.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.agents));
       setBackendStateGeneration((current) => current + 1);
+      sendWebviewTelemetry(postHostMessage, "app_server_recovery_baseline_applied", {
+        surface: initialBootstrap.surface,
+        reason: baseline.reason,
+      });
     });
     const stopSessionStatus = backendConnection?.handleSessionStatus((next) => {
       if (!active) return;
+      sendWebviewTelemetry(postHostMessage, "app_server_session_status_changed", {
+        surface: initialBootstrap.surface,
+        status: next.status,
+        generation: next.generation,
+        ...(next.status === "recovering" ? { reason: next.reason } : {}),
+        ...(next.status === "unavailable" ? { error_name: errorName(next.error) } : {}),
+      });
       if (next.status === "recovering") {
         setBackendReady(false);
         setBackendConnectionState({
@@ -285,6 +300,11 @@ export function useAppControllerBackendLifecycle({
       });
     }, () => {
       if (backendConnection) {
+        const initializeStartedAt = Date.now();
+        sendWebviewTelemetry(postHostMessage, "app_server_initialize_started", {
+          surface: initialBootstrap.surface,
+          task_id: initialBootstrap.taskId,
+        });
         void backendConnection
           .initialize(initializeParamsForBootstrap(initialBootstrap))
           .then((result) => {
@@ -334,17 +354,6 @@ export function useAppControllerBackendLifecycle({
                 scope: { kind: "agents" },
                 setAgents,
               }));
-              if (shouldLoadTaskNavigation(initialBootstrap)) {
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
-                  context: subscriptionContext,
-                  dispatch: dispatchForCurrentReplica,
-                  onBaselineLost: () => markGlobalSubscriptionLost("task-navigation"),
-                  onBaselineError: (error) => markSubscriptionError("task-navigation", error),
-                  onBaselineReady: () => markSubscriptionReady("task-navigation"),
-                  scope: taskNavigationScopeForBootstrap(initialBootstrap),
-                }));
-              }
               for (const project of result.snapshot.projects?.projects ?? []) {
                 if (!project.worktreeRepositoryId) continue;
                 stopSubscriptions.push(startAppServerStateSubscription({
@@ -384,6 +393,8 @@ export function useAppControllerBackendLifecycle({
             setBackendInitializationReady(true);
             sendWebviewTelemetry(postHostMessage, "app_server_initialize_completed", {
               surface: initialBootstrap.surface,
+              task_id: initialBootstrap.taskId,
+              duration_ms: Date.now() - initializeStartedAt,
             });
             const globalBaselinesReady = pendingGlobalSubscriptionBaselines.current.size === 0;
             setBackendReady(globalBaselinesReady);
@@ -395,6 +406,8 @@ export function useAppControllerBackendLifecycle({
             if (!active) return;
             sendWebviewTelemetry(postHostMessage, "app_server_initialize_failed", {
               surface: initialBootstrap.surface,
+              task_id: initialBootstrap.taskId,
+              duration_ms: Date.now() - initializeStartedAt,
               error_name: errorName(error),
             });
             backendInitialized.current = false;
@@ -452,33 +465,34 @@ export function useAppControllerBackendLifecycle({
   }, [backendConnection, initialBootstrap.surface, initialBootstrap.taskId]);
 
   useEffect(() => {
-    if (
-      !backendConnection
-      || !backendInitializationReady
-      || !state.showArchived
-      || !shouldLoadTaskNavigation(initialBootstrap)
-    ) {
-      return;
-    }
+    if (!backendConnection || !backendInitializationReady || !shouldLoadTaskNavigation(bootstrap)) return;
     const context = stateSubscriptionContext.current;
     if (!context) return;
+    const section = state.showArchived ? "archive" : "tasks";
+    const taskNavigationKey = "task-navigation";
     return startAppServerStateSubscription({
       backendConnection: { subscribeState: backendConnection.subscribeState },
       context,
       dispatch: dispatchForCurrentReplica,
+      onBaselineLost: () => markGlobalSubscriptionLost(taskNavigationKey),
       onBaselineError: (error) => {
-        dispatchForCurrentReplica({
-          type: "tasks:error",
-          message: error instanceof Error ? error.message : "Unable to load archived tasks.",
-        });
+        if (section === "archive") {
+          dispatchForCurrentReplica({
+            type: "tasks:error",
+            message: error instanceof Error ? error.message : "Unable to load archived tasks.",
+          });
+          return;
+        }
+        markSubscriptionError(taskNavigationKey, error);
       },
-      scope: taskNavigationScopeForBootstrap(initialBootstrap, "archive"),
+      onBaselineReady: () => markSubscriptionReady(taskNavigationKey),
+      scope: taskNavigationScopeForBootstrap(bootstrap, section),
     });
   }, [
     backendConnection,
     backendInitializationReady,
+    bootstrap,
     dispatchForCurrentReplica,
-    initialBootstrap,
     state.showArchived,
   ]);
 

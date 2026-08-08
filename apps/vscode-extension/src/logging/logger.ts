@@ -75,5 +75,5 @@ function redactFields(fields: Record<string, unknown>) {
 function isSensitiveField(key: string) {
   if (/^error_name$/i.test(key)) return false;
   if (/_kind$|_code$|_count$|_bytes$|_status$/i.test(key)) return false;
-  return /prompt|secret|token|password|env|content|output|path|message|error|command|cwd/i.test(key);
+  return /prompt|secret|token|password|credential|authorization|env|content|output|path|message|error|command|cwd|url/i.test(key);
 }

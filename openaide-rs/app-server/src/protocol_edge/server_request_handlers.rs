@@ -102,6 +102,13 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> crate::client_lifecycle::TransportClosedOutcome {
         let outcome = self.client_hub.observe_transport_closed(connection_id, now);
+        crate::logging::info(
+            "client_transport_closed",
+            serde_json::json!({
+                "connection_id": connection_id.as_str(),
+                "outcome": format!("{:?}", outcome),
+            }),
+        );
         if let crate::client_lifecycle::TransportClosedOutcome::EnteredReconnectGrace {
             client_instance_id,
             ..
@@ -118,6 +125,10 @@ impl RpcGateway {
         client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
         now: AppServerTime,
     ) {
+        crate::logging::info(
+            "client_detach_started",
+            serde_json::json!({ "client_instance_id": client_instance_id }),
+        );
         if !matches!(
             self.client_hub.detach(client_instance_id),
             crate::client_lifecycle::DetachOutcome::Detached { .. }
@@ -135,6 +146,10 @@ impl RpcGateway {
             );
         }
         self.remove_expired_client_workspace_roots(client_instance_id, now);
+        crate::logging::info(
+            "client_detach_completed",
+            serde_json::json!({ "client_instance_id": client_instance_id }),
+        );
     }
 
     pub fn expire_client_after_reconnect_grace(
@@ -143,6 +158,13 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> ClientExpiryOutcome {
         let outcome = self.client_hub.expire_after_grace(client_instance_id, now);
+        crate::logging::info(
+            "client_reconnect_grace_evaluated",
+            serde_json::json!({
+                "client_instance_id": client_instance_id,
+                "outcome": format!("{:?}", outcome),
+            }),
+        );
         if let ClientExpiryOutcome::Expired { .. } = &outcome {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
@@ -161,6 +183,15 @@ impl RpcGateway {
 
     pub fn expire_inactive_clients(&mut self, now: AppServerTime) -> Vec<ClientExpiryOutcome> {
         let batch = self.client_hub.expire_inactive_clients(now);
+        if !batch.expired.is_empty() {
+            crate::logging::info(
+                "client_liveness_expired",
+                serde_json::json!({
+                    "client_count": batch.expired.len(),
+                    "last_client_expired": batch.last_client_expired,
+                }),
+            );
+        }
         let mut projects_changed = false;
         for client_instance_id in &batch.expired {
             self.server_requests

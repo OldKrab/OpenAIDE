@@ -186,8 +186,12 @@ test("heartbeat diagnostics report one failure transition and one recovery", asy
   assert.deepEqual(
     events.filter(({ event }) => event.startsWith("app_server_heartbeat_")),
     [
-      { level: "warn", event: "app_server_heartbeat_failed", fields: { error_kind: "TypeError" } },
-      { level: "info", event: "app_server_heartbeat_recovered", fields: {} },
+      {
+        level: "warn",
+        event: "app_server_heartbeat_failed",
+        fields: { error_kind: "TypeError", failure_count: 1 },
+      },
+      { level: "info", event: "app_server_heartbeat_recovered", fields: { failure_count: 2 } },
     ],
   );
   assert.doesNotMatch(JSON.stringify(events), /private transport detail/);

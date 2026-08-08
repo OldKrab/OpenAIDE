@@ -41,3 +41,12 @@ fn absolute_parent_segments_do_not_escape_above_root() {
     assert_eq!(child.project_id, child_with_parent_above_root.project_id);
     assert_eq!(child_with_parent_above_root.workspace_root, "/workspace");
 }
+
+#[test]
+fn windows_workspace_roots_use_the_shared_forward_slash_identity() {
+    let backslash = ProjectIdentity::from_workspace_root(r"C:\Users\developer\Repo");
+    let slash = ProjectIdentity::from_workspace_root("C:/Users/developer/Repo");
+
+    assert_eq!(backslash.project_id, slash.project_id);
+    assert_eq!(backslash.project_id.as_str(), "project-3a48cc7bbcebeec3");
+}

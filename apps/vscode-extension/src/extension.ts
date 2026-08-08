@@ -20,11 +20,15 @@ export async function activate(context: vscode.ExtensionContext) {
   const runtime = new RuntimeClient(runtimeProcess, logger);
   activeRuntime = runtime;
   const taskEditors = new TaskEditorManager(context, runtime, runtimeProcess, logger);
+  const taskViewProvider = new TaskViewProvider(context, runtime, runtimeProcess, logger, taskEditors);
   const fileSystemHostHandlers = registerFileSystemHostHandlers(runtime);
   const agentSecretHandlers = registerAgentSecretHandlers(runtime, context.secrets);
   const agentAuthTerminalHandler = registerAgentAuthTerminalHandler(runtime);
   const terminalHostHandlers = registerTerminalHostHandlers(runtime);
-  const workspaceProjectSync = registerWorkspaceProjectSync(runtime, logger);
+  const workspaceProjectSync = registerWorkspaceProjectSync(runtime, logger, (roots) => {
+    taskEditors.updateWorkspaceRoots(roots);
+    taskViewProvider.updateWorkspaceRoots(roots);
+  });
   await workspaceProjectSync.ready;
   const taskNotifications = await registerTaskNotifications(
     runtime,
@@ -32,8 +36,6 @@ export async function activate(context: vscode.ExtensionContext) {
     taskEditors,
     logger,
   );
-  const taskViewProvider = new TaskViewProvider(context, runtime, runtimeProcess, logger, taskEditors);
-
   context.subscriptions.push(runtime);
   context.subscriptions.push(runtimeProcess);
   context.subscriptions.push(fileSystemHostHandlers);

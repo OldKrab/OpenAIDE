@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { workspaceRoots } from "./roots";
+import { workspaceRoots, type WorkspaceRoot } from "./roots";
 
 type WorkspaceProjectRuntime = {
   syncWorkspaceRoots(roots: Array<{ path: string }>): Promise<void>;
@@ -14,14 +14,19 @@ export type WorkspaceProjectSync = vscode.Disposable & {
   ready: Promise<void>;
 };
 
+export type WorkspaceRootsChanged = (roots: WorkspaceRoot[]) => void;
+
 /** Keeps the App Server's Project registry aligned with VS Code's live folders. */
 export function registerWorkspaceProjectSync(
   runtime: WorkspaceProjectRuntime,
   logger: WorkspaceProjectLogger,
+  onWorkspaceRootsChanged?: WorkspaceRootsChanged,
 ): WorkspaceProjectSync {
   const sync = async () => {
     try {
-      await runtime.syncWorkspaceRoots(workspaceRoots().map(({ path }) => ({ path })));
+      const roots = workspaceRoots();
+      await runtime.syncWorkspaceRoots(roots.map(({ path }) => ({ path })));
+      onWorkspaceRootsChanged?.(roots);
     } catch (error) {
       // A later folder change retries the full replacement set; webviews remain usable meanwhile.
       logger.warn("failed to synchronize VS Code workspace Projects", { error: String(error) });

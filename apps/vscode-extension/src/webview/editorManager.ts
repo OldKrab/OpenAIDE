@@ -12,7 +12,7 @@ import {
   type WebviewBootstrap,
   type WebviewHost,
 } from "./types";
-import { currentWorkspaceRoot, workspaceRoots } from "../workspace/roots";
+import { currentWorkspaceRoot, workspaceRoots, type WorkspaceRoot } from "../workspace/roots";
 import { agentTabIcon, newTaskTabIcon, settingsTabIcon } from "./tabIcons";
 
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
@@ -40,6 +40,16 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     if (this.newTaskPanel) {
       this.newTaskPanel.reveal(vscode.ViewColumn.Active);
       this.focusPanel(this.newTaskPanel);
+      if (projectId !== undefined) {
+        const current = this.panelBootstraps.get(this.newTaskPanel);
+        if (current && current.surface === "task" && !current.taskId) {
+          this.panelBootstraps.set(this.newTaskPanel, { ...current, projectId });
+          void this.newTaskPanel.webview.postMessage({
+            type: "surface.newTaskChanged",
+            payload: { project_id: projectId },
+          });
+        }
+      }
       return;
     }
     const panel = this.createPanel("openaide.task", "New task", {
@@ -163,6 +173,18 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     return { dispose: () => this.focusedTaskListeners.delete(listener) };
   }
 
+  updateWorkspaceRoots(roots: WorkspaceRoot[]) {
+    const projectIds = roots.map(({ projectId }) => projectId);
+    for (const panel of this.panels()) {
+      const current = this.panelBootstraps.get(panel);
+      if (current) this.panelBootstraps.set(panel, { ...current, projectIds });
+      void panel.webview.postMessage({
+        type: "surface.workspaceChanged",
+        payload: { project_ids: projectIds },
+      });
+    }
+  }
+
   private createPanel(viewType: string, title: string, bootstrap: PanelBootstrap) {
     const panel = vscode.window.createWebviewPanel(viewType, title, vscode.ViewColumn.Active, {
       enableScripts: true,
@@ -268,6 +290,15 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     if (this.focusedTaskId === taskId) return;
     this.focusedTaskId = taskId;
     for (const listener of this.focusedTaskListeners) listener(taskId);
+  }
+
+  private panels() {
+    return new Set([
+      ...this.taskPanels.values(),
+      ...this.nativeSessionPanels.values(),
+      ...(this.newTaskPanel ? [this.newTaskPanel] : []),
+      ...(this.settingsPanel ? [this.settingsPanel] : []),
+    ]);
   }
 
   private bootstrap(bootstrap: PanelBootstrap): WebviewBootstrap {

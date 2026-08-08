@@ -43,6 +43,10 @@ fn agent_methods_use_agent_namespace() {
 fn settings_methods_expose_skill_list_and_lazy_skill_details() {
     assert_eq!(SettingsGetSkills::METHOD, "settings/getSkills");
     assert_eq!(SettingsGetSkillDetails::METHOD, "settings/getSkillDetails");
+    assert_eq!(
+        SettingsUpdateNewTaskDefaults::METHOD,
+        "settings/updateNewTaskDefaults"
+    );
 }
 
 #[test]

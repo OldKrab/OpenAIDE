@@ -1,5 +1,5 @@
 pub(super) fn push_method_maps(output: &mut String) {
-    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE;\n");
+    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE;\n");
     // Append new methods outside the legacy monolithic literal so additions remain reviewable.
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
@@ -36,6 +36,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_GET_SKILL_DETAILS]: SettingsSkillDetailsParams;\n");
     output.push_str("  [SETTINGS_GET_PREFERENCES]: AppPreferencesParams;\n");
     output.push_str("  [SETTINGS_UPDATE_PREFERENCES]: AppPreferencesUpdateParams;\n");
+    output.push_str("  [SETTINGS_UPDATE_NEW_TASK_DEFAULTS]: NewTaskDefaultsUpdateParams;\n");
     output.push_str("  [SETTINGS_GET_RUNTIME]: RuntimeSettingsParams;\n");
     output.push_str("  [SETTINGS_UPDATE_RUNTIME]: RuntimeSettingsUpdateParams;\n");
     output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryParams;\n");
@@ -126,6 +127,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_GET_SKILL_DETAILS]: SettingsSkillDetailsResult;\n");
     output.push_str("  [SETTINGS_GET_PREFERENCES]: AppPreferencesResult;\n");
     output.push_str("  [SETTINGS_UPDATE_PREFERENCES]: AppPreferencesResult;\n");
+    output.push_str("  [SETTINGS_UPDATE_NEW_TASK_DEFAULTS]: NewTaskDefaultsSnapshot;\n");
     output.push_str("  [SETTINGS_GET_RUNTIME]: RuntimeSettingsResult;\n");
     output.push_str("  [SETTINGS_UPDATE_RUNTIME]: RuntimeSettingsResult;\n");
     output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryResult;\n");
@@ -270,6 +272,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output.push_str(
         "export type SettingsUpdatePreferencesResponse = ResponseEnvelope<AppPreferencesResult>;\n",
+    );
+    output.push_str(
+        "export type SettingsUpdateNewTaskDefaultsResponse = ResponseEnvelope<NewTaskDefaultsSnapshot>;\n",
     );
     output.push_str(
         "export type SettingsGetRuntimeResponse = ResponseEnvelope<RuntimeSettingsResult>;\n",

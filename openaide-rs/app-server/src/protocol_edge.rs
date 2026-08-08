@@ -44,8 +44,8 @@ use crate::projects::ConfiguredProjectRoots;
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestRuntime;
 use crate::settings::{
-    AppPreferencesWorkflow, McpServersSettingsWorkflow, RuntimeSettingsWorkflow,
-    SkillsSettingsWorkflow,
+    AppPreferencesWorkflow, McpServersSettingsWorkflow, NewTaskDefaultsWorkflow,
+    RuntimeSettingsWorkflow, SkillsSettingsWorkflow,
 };
 use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{SnapshotBuilder, TaskSnapshotSource};
@@ -79,6 +79,7 @@ pub struct RpcGateway {
     mcp_servers_settings: Arc<dyn McpServersSettingsWorkflow>,
     skills_settings: Arc<dyn SkillsSettingsWorkflow>,
     app_preferences: Arc<dyn AppPreferencesWorkflow>,
+    new_task_defaults: Arc<dyn NewTaskDefaultsWorkflow>,
     runtime_settings: Arc<dyn RuntimeSettingsWorkflow>,
     agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
     attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
@@ -194,6 +195,7 @@ impl RpcGateway {
             mcp_servers_settings,
             skills_settings,
             app_preferences,
+            new_task_defaults: Arc::new(NoopNewTaskDefaults),
             runtime_settings,
             agent_list_sessions,
             attachments,
@@ -220,6 +222,14 @@ impl RpcGateway {
         workflow: Arc<dyn TaskStorageMaintenanceWorkflow>,
     ) -> Self {
         self.task_storage_maintenance = workflow;
+        self
+    }
+
+    pub(crate) fn with_new_task_defaults(
+        mut self,
+        workflow: Arc<dyn NewTaskDefaultsWorkflow>,
+    ) -> Self {
+        self.new_task_defaults = workflow;
         self
     }
 
@@ -443,6 +453,20 @@ impl RpcGateway {
 }
 
 struct NoopTaskStorageMaintenance;
+
+struct NoopNewTaskDefaults;
+
+impl NewTaskDefaultsWorkflow for NoopNewTaskDefaults {
+    fn update_project_default(
+        &self,
+        _params: openaide_app_server_protocol::settings::NewTaskDefaultsUpdateParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        unreachable!("New Task defaults workflow is not configured")
+    }
+}
 
 impl TaskStorageMaintenanceWorkflow for NoopTaskStorageMaintenance {
     fn request_task_storage_maintenance(&self) {}

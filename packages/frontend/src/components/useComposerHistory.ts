@@ -44,7 +44,10 @@ export function useComposerHistory({
       })
       .catch((error: unknown) => {
         if (generationRef.current !== generation) return;
-        console.warn("[OpenAIDE] Composer History unavailable", { error, scopeKey });
+        console.warn("[OpenAIDE] Composer History unavailable", {
+          error_kind: error instanceof Error && error.name ? error.name : typeof error,
+          scope_key: scopeKey,
+        });
       });
   }, [refreshKey, scopeKey]);
 

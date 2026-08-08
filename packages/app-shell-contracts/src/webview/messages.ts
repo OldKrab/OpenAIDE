@@ -69,6 +69,8 @@ export type HostToWebviewMessage =
   | { type: "surface.focusChanged"; payload: { task_id?: string } }
   | { type: "attachment.pickFiles.result"; payload: { requestId: string; attachments?: Array<{ handleId: string; label: string }>; error?: string } }
   | { type: "project.pickFolder.result"; payload: { requestId: string; folder?: { path: string; label: string }; error?: string } }
+  | { type: "surface.workspaceChanged"; payload: { project_ids: string[] } }
+  | { type: "surface.newTaskChanged"; payload: { project_id?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }
   | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId } }
   | { type: "diagnostics.snapshot.result"; payload: DiagnosticsSnapshot }

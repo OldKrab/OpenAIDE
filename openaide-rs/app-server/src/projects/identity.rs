@@ -26,7 +26,9 @@ pub fn project_id_for_workspace(workspace_root: &str) -> ProjectId {
 
 fn project_id_from_canonical_root(workspace_root: &str) -> ProjectId {
     let mut hash = 0xcbf29ce484222325_u64;
-    for byte in workspace_root.as_bytes() {
+    // Project IDs are shared with the TypeScript shell contract, whose lexical
+    // canonical form uses forward slashes on every platform.
+    for byte in workspace_root.replace('\\', "/").as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }

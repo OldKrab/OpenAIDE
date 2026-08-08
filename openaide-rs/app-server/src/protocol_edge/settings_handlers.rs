@@ -3,12 +3,13 @@ use openaide_app_server_protocol::events::{AppServerEventPayload, TaskChanges};
 use openaide_app_server_protocol::settings::{
     AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams, McpCreateServerParams,
     McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
-    McpSetServerEnabledParams, McpUpdateServerParams, ResetTaskHistoryParams,
-    ResetTaskHistoryResult, RuntimeSettingsParams, RuntimeSettingsResult,
+    McpSetServerEnabledParams, McpUpdateServerParams, NewTaskDefaultsUpdateParams,
+    ResetTaskHistoryParams, ResetTaskHistoryResult, RuntimeSettingsParams, RuntimeSettingsResult,
     RuntimeSettingsUpdateParams, SettingsMcpServersParams, SettingsMcpServersResult,
     SettingsSkillDetailsParams, SettingsSkillDetailsResult, SettingsSkillsParams,
     SettingsSkillsResult,
 };
+use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
 use serde_json::Value;
 
 use crate::client_lifecycle::ConnectionId;
@@ -256,6 +257,26 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<AppPreferencesResult>(connection_id, id, meta, result)
+    }
+
+    pub(super) fn handle_settings_update_new_task_defaults(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<NewTaskDefaultsUpdateParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error));
+            }
+        };
+        let result = match self.new_task_defaults.update_project_default(params) {
+            Ok(result) => result,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<NewTaskDefaultsSnapshot>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_settings_get_runtime(

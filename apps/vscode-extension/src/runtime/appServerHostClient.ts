@@ -17,6 +17,7 @@ import {
   type BackendUnsubscribe,
   type ClientInstanceId,
   type ClientWorkspaceRoot,
+  type DiagnosticsLogger,
   type InitializeResult,
   type ProtocolMethod,
   type RequestMeta,
@@ -38,6 +39,7 @@ type ConnectionProvider = {
 type HostClientLogger = {
   info(message: string, fields?: Record<string, unknown>): void;
   warn(message: string, fields?: Record<string, unknown>): void;
+  error?(message: string, fields?: Record<string, unknown>): void;
 };
 
 type ViewState = {
@@ -209,7 +211,7 @@ export class AppServerHostClient {
       this.logger?.warn("app server view bridge operation failed", {
         operation: message.type,
         bridge_operation_kind: bridgeOperationKind(message.type),
-        error: error instanceof Error ? error.message : String(error),
+        error_kind: error instanceof Error && error.name ? error.name : typeof error,
         ...reliableHttpErrorDiagnosticFields(error),
       });
       if ("requestId" in message && typeof message.requestId === "string") {
@@ -251,7 +253,8 @@ export class AppServerHostClient {
         await connection?.request(CLIENT_DETACH, {});
       } catch (error) {
         this.logger?.warn("app server host detach failed", {
-          error: error instanceof Error ? error.message : String(error),
+          error_kind: error instanceof Error && error.name ? error.name : typeof error,
+          ...reliableHttpErrorDiagnosticFields(error),
         });
       } finally {
         connection?.close();
@@ -277,6 +280,7 @@ export class AppServerHostClient {
       const connection = createReliableLocalHttpBackendConnection({
         ...info,
         connectionId: `vscode-connection-${randomUUID()}`,
+        ...(this.logger ? { logger: this.createDiagnosticsLogger() } : {}),
         subscribeToReplacement: (listener) => {
           const subscription = this.provider.onAppServerConnectionChanged((replacement) => {
             if (replacement.kind === "localHttp") listener(replacement);
@@ -343,6 +347,17 @@ export class AppServerHostClient {
         this.broadcast({ type: "appServer.session.status", status: serializeSessionStatus(status) });
       }),
     );
+  }
+
+  private createDiagnosticsLogger(): DiagnosticsLogger {
+    return {
+      info: (event, fields = {}) => this.logger?.info(`app_server_client_${event}`, fields),
+      warn: (event, fields = {}) => this.logger?.warn(`app_server_client_${event}`, fields),
+      error: (event, fields = {}) => {
+        const errorLogger = this.logger?.error ?? this.logger?.warn;
+        errorLogger?.(`app_server_client_${event}`, fields);
+      },
+    };
   }
 
   private ensureServerRequestHandler(connection: AppServerSession, method: ServerRequestMethod) {

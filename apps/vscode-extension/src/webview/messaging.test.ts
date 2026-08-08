@@ -576,35 +576,25 @@ describe("webview messaging composer routes", () => {
     });
   });
 
-  it("opens a selected workspace folder in the current VS Code window", async () => {
+  it("opens VS Code's Add Folder to Workspace flow", async () => {
     const posted: unknown[] = [];
-    vi.mocked(vscode.window.showOpenDialog).mockResolvedValue([
-      { fsPath: "/workspace/selected" } as vscode.Uri,
-    ]);
 
     await handleWebviewMessage({ type: "workspace.openFolder" }, context({}, posted));
 
-    expect(vscode.window.showOpenDialog).toHaveBeenCalledWith({
-      canSelectFiles: false,
-      canSelectFolders: true,
-      canSelectMany: false,
-      openLabel: "Open Folder",
-    });
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
-      "vscode.openFolder",
-      { fsPath: "/workspace/selected" },
-      false,
+      "workbench.action.addRootFolder",
     );
     expect(posted).toEqual([]);
   });
 
-  it("keeps the workspace setup state stable when folder selection is cancelled", async () => {
+  it("keeps the workspace setup state stable when Add Folder is invoked", async () => {
     const posted: unknown[] = [];
-    vi.mocked(vscode.window.showOpenDialog).mockResolvedValue(undefined);
 
     await handleWebviewMessage({ type: "workspace.openFolder" }, context({}, posted));
 
-    expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      "workbench.action.addRootFolder",
+    );
     expect(posted).toEqual([]);
   });
 
@@ -629,6 +619,21 @@ describe("webview messaging composer routes", () => {
     expect(posted).toEqual([{
       type: "project.pickFolder.result",
       payload: { requestId: "project-pick-1", folder: { path: "/workspace/project", label: "project" } },
+    }]);
+  });
+
+  it("rejects a failed Project folder picker request", async () => {
+    const posted: unknown[] = [];
+    vi.mocked(vscode.window.showOpenDialog).mockRejectedValue(new Error("picker failed"));
+
+    await handleWebviewMessage(
+      { type: "project.pickFolder", payload: { requestId: "project-pick-2" } } as never,
+      context({}, posted),
+    );
+
+    expect(posted).toEqual([{
+      type: "project.pickFolder.result",
+      payload: { requestId: "project-pick-2", error: "picker failed" },
     }]);
   });
 

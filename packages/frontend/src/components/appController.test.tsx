@@ -11,6 +11,7 @@ import {
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILLS,
+  SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   TASK_ACQUIRE,
@@ -715,9 +716,10 @@ describe("app controller mounted lifecycle", () => {
         { projectId: "project_2" as never, label: "API", workspaceRoot: "/workspace/api", available: true },
       ],
     };
+    const request = vi.fn();
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
-      request: vi.fn(),
+      request,
       close: vi.fn(),
     };
 
@@ -727,17 +729,24 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_1");
+    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
+      projectId: "project_1",
+    });
 
-    act(() => {
+    await act(async () => {
       latestPublicController?.intents.newTask.selectProject({
         projectId: "project_2",
         label: "API",
         workspaceRoot: "/workspace/api",
         available: true,
       });
+      await Promise.resolve();
     });
 
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_2");
+    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
+      projectId: "project_2",
+    });
   });
 
   it("loads only the initial visible rows after adding a Project", async () => {

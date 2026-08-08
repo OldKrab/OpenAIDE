@@ -1,4 +1,5 @@
 import type { RpcMessage, RpcMessageChannel } from "./rpcPeer.js";
+import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.js";
 
 export type ReliableHttpFetch = (
   input: string,
@@ -31,6 +32,7 @@ export type ReliableHttpMessageChannelOptions = {
   deferReceiveUntilFirstUpload?: boolean;
   /** Restarts only the replayable receive poll when a suspended runtime wakes. */
   subscribeToWake?: (wake: () => void) => () => void;
+  logger?: DiagnosticsLogger;
 };
 
 type SessionHandshake = {
@@ -55,6 +57,8 @@ export function createReliableHttpMessageChannel(
 ): ReliableHttpMessageChannel {
   const fetchImpl = options.fetch ?? globalThis.fetch?.bind(globalThis);
   if (!fetchImpl) throw new Error("Reliable HTTP RPC requires fetch");
+  const logger = options.logger ?? createDiagnosticsLogger("openaide-reliable-http");
+  const connectionContext = { connection_id: options.connectionId };
   const listeners = new Set<(message: RpcMessage) => void>();
   const errorListeners = new Set<(error: unknown) => void>();
   const uploads: Array<{ sequence: number; message: RpcMessage; body: string }> = [];
@@ -68,9 +72,10 @@ export function createReliableHttpMessageChannel(
   let receiving = false;
   let closed = false;
   let terminalError: unknown;
+  logger.info("reliable_http_channel_created", connectionContext);
   const unsubscribeWake = options.subscribeToWake?.(() => {
     if (!receiveAbort || receiveAbort.signal.aborted) return;
-    console.info("[OpenAIDE] Browser wake restarted the reliable HTTP receive poll");
+    logger.info("reliable_http_receive_woken", connectionContext);
     receiveAbort.abort();
   });
   const session = openSession().catch((error) => {
@@ -98,6 +103,12 @@ export function createReliableHttpMessageChannel(
           message,
         }),
       });
+      logger.info("reliable_http_upload_queued", {
+        ...connectionContext,
+        sequence,
+        queue_depth: uploads.length,
+        method: rpcMethod(message),
+      });
       void pumpUploads();
     },
     subscribe(receive) {
@@ -112,6 +123,11 @@ export function createReliableHttpMessageChannel(
     close() {
       if (closed) return;
       closed = true;
+      logger.info("reliable_http_channel_closed", {
+        ...connectionContext,
+        queued_uploads: uploads.length,
+        last_server_sequence: lastServerSequence,
+      });
       unsubscribeWake?.();
       abort.abort();
       receiveAbort?.abort();
@@ -121,19 +137,35 @@ export function createReliableHttpMessageChannel(
   };
 
   async function openSession(): Promise<SessionHandshake> {
-    const response = await fetchImpl(options.endpointUrl, {
-      method: "POST",
-      headers: baseHeaders(),
-      body: JSON.stringify({ transport: "open" }),
-      signal: abort.signal,
-    });
-    const text = await response.text();
-    if (!response.ok) throw httpError("open", response.status, text);
-    const handshake = JSON.parse(text) as SessionHandshake;
-    if (handshake.transportVersion !== 1 || !handshake.sessionId || !handshake.serverId) {
-      throw new Error("App Server returned an invalid reliable-session handshake");
+    const startedAt = Date.now();
+    logger.info("reliable_http_session_open_started", connectionContext);
+    try {
+      const response = await fetchImpl(options.endpointUrl, {
+        method: "POST",
+        headers: baseHeaders(),
+        body: JSON.stringify({ transport: "open" }),
+        signal: abort.signal,
+      });
+      const text = await response.text();
+      if (!response.ok) throw httpError("open", response.status, text);
+      const handshake = JSON.parse(text) as SessionHandshake;
+      if (handshake.transportVersion !== 1 || !handshake.sessionId || !handshake.serverId) {
+        throw new Error("App Server returned an invalid reliable-session handshake");
+      }
+      logger.info("reliable_http_session_open_completed", {
+        ...connectionContext,
+        server_id: handshake.serverId,
+        duration_ms: Date.now() - startedAt,
+      });
+      return handshake;
+    } catch (error) {
+      logger.warn("reliable_http_session_open_failed", {
+        ...connectionContext,
+        duration_ms: Date.now() - startedAt,
+        ...diagnosticErrorFields(error),
+      });
+      throw error;
     }
-    return handshake;
   }
 
   async function pumpUploads() {
@@ -141,11 +173,29 @@ export function createReliableHttpMessageChannel(
     pumping = true;
     try {
       const opened = await session;
+      let uploadSequence: number | undefined;
+      let uploadAttempt = 0;
+      let uploadStartedAt = 0;
+      let chunkFallback = false;
       while (!closed && uploads.length > 0) {
         const upload = uploads[0];
         if (!upload) break;
         const body = upload.body.replace("__SESSION_ID__", opened.sessionId);
+        if (uploadSequence !== upload.sequence) {
+          uploadSequence = upload.sequence;
+          uploadAttempt = 0;
+          uploadStartedAt = Date.now();
+          chunkFallback = false;
+        }
+        const attempt = ++uploadAttempt;
         try {
+          logger.info("reliable_http_upload_started", {
+            ...connectionContext,
+            sequence: upload.sequence,
+            attempt,
+            queue_depth: uploads.length,
+            method: rpcMethod(upload.message),
+          });
           const response = await fetchImpl(options.endpointUrl, {
             method: "POST",
             headers: baseHeaders(),
@@ -155,21 +205,51 @@ export function createReliableHttpMessageChannel(
           const text = await response.text();
           if (!response.ok) {
             if (isRequestSizeRejection(response.status, text)) {
+              chunkFallback = true;
               await uploadInChunks(opened, upload, body);
               uploads.shift();
               startReceiving();
+              logger.info("reliable_http_upload_completed", {
+                ...connectionContext,
+                sequence: upload.sequence,
+                attempt,
+                chunk_fallback: true,
+                duration_ms: Date.now() - uploadStartedAt,
+              });
               continue;
             }
             throw httpError("upload", response.status, text);
           }
           uploads.shift();
           startReceiving();
+          logger.info("reliable_http_upload_completed", {
+            ...connectionContext,
+            sequence: upload.sequence,
+            attempt,
+            chunk_fallback: chunkFallback,
+            duration_ms: Date.now() - uploadStartedAt,
+          });
         } catch (error) {
           if (closed || isAbort(error)) return;
           if (isTerminalHttpError(error)) {
+            logger.error("reliable_http_upload_failed_terminal", {
+              ...connectionContext,
+              sequence: upload.sequence,
+              attempt,
+              duration_ms: Date.now() - uploadStartedAt,
+              ...diagnosticErrorFields(error),
+            });
             fail(error);
             return;
           }
+          logger.warn("reliable_http_upload_retry_scheduled", {
+            ...connectionContext,
+            sequence: upload.sequence,
+            attempt,
+            retry_delay_ms: retryDelayMs,
+            duration_ms: Date.now() - uploadStartedAt,
+            ...diagnosticErrorFields(error),
+          });
           await retryDelay();
         }
       }
@@ -213,6 +293,7 @@ export function createReliableHttpMessageChannel(
   function startReceiving() {
     if (receiving || closed || terminalError) return;
     receiving = true;
+    logger.info("reliable_http_receive_started", connectionContext);
     // The first acknowledged client frame initializes product routing. Polling
     // earlier races that frame and makes the real App Server reject the session.
     void receiveLoop();
@@ -228,9 +309,14 @@ export function createReliableHttpMessageChannel(
     while (!closed) {
       const pollAbort = new AbortController();
       receiveAbort = pollAbort;
+      const pollStartedAt = Date.now();
       const receiveTimeout = setTimeout(() => {
         if (closed || receiveAbort !== pollAbort || pollAbort.signal.aborted) return;
-        console.info("[OpenAIDE] Reliable HTTP receive poll exceeded its deadline; restarting");
+        logger.warn("reliable_http_receive_timeout", {
+          ...connectionContext,
+          after_sequence: lastServerSequence,
+          timeout_ms: receiveTimeoutMs,
+        });
         pollAbort.abort();
       }, receiveTimeoutMs);
       try {
@@ -252,6 +338,7 @@ export function createReliableHttpMessageChannel(
         }
         if (!response.ok) throw httpError("receive", response.status, text);
         const batch = JSON.parse(text) as ServerBatch;
+        let receivedFrames = 0;
         for (const frame of batch.frames) {
           if (frame.sequence <= lastServerSequence) continue;
           if (frame.sequence !== lastServerSequence + 1) {
@@ -259,14 +346,36 @@ export function createReliableHttpMessageChannel(
           }
           for (const listener of listeners) listener(frame.message);
           lastServerSequence = frame.sequence;
+          receivedFrames += 1;
+        }
+        if (receivedFrames > 0) {
+          logger.info("reliable_http_receive_batch_received", {
+            ...connectionContext,
+            frame_count: receivedFrames,
+            last_server_sequence: lastServerSequence,
+            duration_ms: Date.now() - pollStartedAt,
+          });
         }
       } catch (error) {
         if (closed) return;
         if (isAbort(error)) continue;
         if (isTerminalHttpError(error)) {
+          logger.error("reliable_http_receive_failed_terminal", {
+            ...connectionContext,
+            after_sequence: lastServerSequence,
+            duration_ms: Date.now() - pollStartedAt,
+            ...diagnosticErrorFields(error),
+          });
           fail(error);
           return;
         }
+        logger.warn("reliable_http_receive_retry_scheduled", {
+          ...connectionContext,
+          after_sequence: lastServerSequence,
+          retry_delay_ms: retryDelayMs,
+          duration_ms: Date.now() - pollStartedAt,
+          ...diagnosticErrorFields(error),
+        });
         await retryDelay();
       } finally {
         clearTimeout(receiveTimeout);
@@ -291,9 +400,26 @@ export function createReliableHttpMessageChannel(
   function fail(error: unknown) {
     if (terminalError) return;
     terminalError = error;
+    logger.error("reliable_http_channel_failed", {
+      ...connectionContext,
+      ...diagnosticErrorFields(error),
+    });
     abort.abort();
     for (const listener of errorListeners) listener(error);
   }
+}
+
+function rpcMethod(message: RpcMessage) {
+  return "method" in message && typeof message.method === "string"
+    ? message.method
+    : "response";
+}
+
+function diagnosticErrorFields(error: unknown) {
+  return {
+    error_kind: error instanceof Error && error.name ? error.name : typeof error,
+    ...reliableHttpErrorDiagnosticFields(error),
+  };
 }
 
 function isRequestSizeRejection(status: number, body: string) {

@@ -1,4 +1,5 @@
 use std::sync::mpsc;
+use std::time::Instant;
 
 use crate::agent::acp_schema::InitializeResponse;
 use agent_client_protocol::{Agent, ConnectionTo};
@@ -46,6 +47,54 @@ pub(super) struct OpenedAcpSession {
 }
 
 pub(super) async fn open_acp_session<'a>(
+    context: OpenAcpSessionContext<'a>,
+) -> Result<OpenedAcpSession, agent_client_protocol::Error> {
+    let started_at = Instant::now();
+    let operation = context.request.operation_name();
+    let task_id = context.request.task_id().to_string();
+    let agent_id = context.request_agent_id.to_string();
+    crate::logging::info(
+        "acp_session_open_started",
+        serde_json::json!({
+            "operation": operation,
+            "task_id": task_id,
+            "agent_id": agent_id,
+        }),
+    );
+    let result = open_acp_session_inner(context).await;
+    match &result {
+        Ok(opened) => crate::logging::info(
+            "acp_session_open_completed",
+            serde_json::json!({
+                "operation": operation,
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "duration_ms": started_at.elapsed().as_millis(),
+                "session_id": opened.started_session.session_id,
+                "config_option_count": opened
+                    .started_session
+                    .config_catalog
+                    .as_ref()
+                    .map(|catalog| catalog.options.len())
+                    .unwrap_or(0),
+                "replayed_message_count": opened.replayed_messages.len(),
+            }),
+        ),
+        Err(_) => crate::logging::warn(
+            "acp_session_open_failed",
+            serde_json::json!({
+                "operation": operation,
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "duration_ms": started_at.elapsed().as_millis(),
+                "error_kind": "acp_error",
+            }),
+        ),
+    }
+    result
+}
+
+async fn open_acp_session_inner<'a>(
     context: OpenAcpSessionContext<'a>,
 ) -> Result<OpenedAcpSession, agent_client_protocol::Error> {
     let cancellation = context.request.cancellation();

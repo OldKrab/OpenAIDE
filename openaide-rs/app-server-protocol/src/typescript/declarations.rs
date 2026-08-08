@@ -69,15 +69,15 @@ use crate::settings::{
     AppPreferencesUpdateParams, ComposerSubmitShortcut, McpCreateServerParams,
     McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
     McpServerConfiguration, McpServerDefinition, McpServerScope, McpSetServerEnabledParams,
-    McpUpdateServerParams, ResetTaskHistoryParams, ResetTaskHistoryResult, RuntimeAcpTraceSettings,
-    RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettings, RuntimeDeveloperSettingsPatch,
-    RuntimeSettingsParams, RuntimeSettingsResult, RuntimeSettingsUpdateParams,
-    SettingsMcpServerRecord, SettingsMcpServerStatus, SettingsMcpServerTransport,
-    SettingsMcpServersParams, SettingsMcpServersResult, SettingsProjectionAvailability,
-    SettingsProjectionNotice, SettingsProjectionNoticeSeverity, SettingsScope,
-    SettingsSkillDetailsParams, SettingsSkillDetailsResult, SettingsSkillDocument,
-    SettingsSkillDocumentField, SettingsSkillRecord, SettingsSkillStatus, SettingsSkillsParams,
-    SettingsSkillsResult,
+    McpUpdateServerParams, NewTaskDefaultsUpdateParams, ResetTaskHistoryParams,
+    ResetTaskHistoryResult, RuntimeAcpTraceSettings, RuntimeAcpTraceSettingsPatch,
+    RuntimeDeveloperSettings, RuntimeDeveloperSettingsPatch, RuntimeSettingsParams,
+    RuntimeSettingsResult, RuntimeSettingsUpdateParams, SettingsMcpServerRecord,
+    SettingsMcpServerStatus, SettingsMcpServerTransport, SettingsMcpServersParams,
+    SettingsMcpServersResult, SettingsProjectionAvailability, SettingsProjectionNotice,
+    SettingsProjectionNoticeSeverity, SettingsScope, SettingsSkillDetailsParams,
+    SettingsSkillDetailsResult, SettingsSkillDocument, SettingsSkillDocumentField,
+    SettingsSkillRecord, SettingsSkillStatus, SettingsSkillsParams, SettingsSkillsResult,
 };
 use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
@@ -273,6 +273,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<SettingsScope>(output, config);
     push_decl::<AppPreferencesParams>(output, config);
     push_decl::<AppPreferencesUpdateParams>(output, config);
+    push_decl::<NewTaskDefaultsUpdateParams>(output, config);
     push_decl::<AppPreferencesPatch>(output, config);
     push_decl::<AppPreferencesResult>(output, config);
     push_decl::<AppPreferences>(output, config);

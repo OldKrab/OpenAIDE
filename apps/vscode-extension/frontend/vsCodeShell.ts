@@ -23,7 +23,8 @@ declare global {
 /** VS Code webview adapter; panel routing remains owned by the extension host. */
 export function createVsCodeShell(): FrontendShell {
   const vscode = window.acquireVsCodeApi?.();
-  const bootstrap = datasetBootstrap;
+  const initialBootstrap = readDatasetBootstrap();
+  let currentBootstrap = initialBootstrap;
   let nextFileRequest = 1;
   let nextProjectRequest = 1;
   const pendingFileRequests = new Map<string, {
@@ -65,7 +66,7 @@ export function createVsCodeShell(): FrontendShell {
       })
     : undefined;
   return {
-    bootstrap,
+    bootstrap: () => bootstrapWithCurrentDocument(currentBootstrap),
     ...(backendConnection ? { backendConnection: () => backendConnection } : {}),
     sentFiles: {
       sentFileAction: "reveal",
@@ -124,8 +125,10 @@ export function createVsCodeShell(): FrontendShell {
       replaceSettingsTab: () => undefined,
       subscribe(listener) {
         const onMessage = (event: MessageEvent) => {
-          const next = bootstrapForRouteMessage(event.data, bootstrap());
-          if (next) listener(next);
+          const next = bootstrapForRouteMessage(event.data, currentBootstrap);
+          if (!next) return;
+          currentBootstrap = next;
+          listener(next);
         };
         window.addEventListener("message", onMessage);
         return () => window.removeEventListener("message", onMessage);
@@ -153,7 +156,12 @@ export function createVsCodeShell(): FrontendShell {
 
 function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): WebviewBootstrap | undefined {
   if (!message || typeof message !== "object") return undefined;
-  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown; agent_id?: unknown; return_to_new_task?: unknown; project_id?: unknown; settings_tab?: unknown } };
+  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown; agent_id?: unknown; return_to_new_task?: unknown; project_id?: unknown; project_ids?: unknown; settings_tab?: unknown } };
+  if (candidate.type === "surface.workspaceChanged") {
+    const projectIds = candidate.payload?.project_ids;
+    if (!Array.isArray(projectIds) || projectIds.some((projectId) => typeof projectId !== "string")) return undefined;
+    return current.surface === "invalid" ? undefined : { ...current, projectIds };
+  }
   if (candidate.type === "surface.settingsChanged") {
     return current.surface === "invalid" ? undefined : {
       ...current,
@@ -163,6 +171,19 @@ function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): 
       returnToNewTask: candidate.payload?.return_to_new_task === true,
       projectId: typeof candidate.payload?.project_id === "string" ? candidate.payload.project_id : undefined,
       taskId: undefined,
+    };
+  }
+  if (candidate.type === "surface.newTaskChanged") {
+    if (candidate.payload?.project_id !== undefined && typeof candidate.payload.project_id !== "string") {
+      return undefined;
+    }
+    return current.surface === "invalid" ? undefined : {
+      ...current,
+      surface: "task",
+      taskId: undefined,
+      projectId: typeof candidate.payload?.project_id === "string" ? candidate.payload.project_id : undefined,
+      settingsTab: undefined,
+      archived: undefined,
     };
   }
   if (
@@ -181,6 +202,24 @@ function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): 
         settingsTab: undefined,
         archived: undefined,
       };
+}
+
+function bootstrapWithCurrentDocument(current: WebviewBootstrap): WebviewBootstrap {
+  const latest = readDatasetBootstrap();
+  if (current.surface === "invalid" || latest.surface === "invalid") {
+    return current.surface === "invalid" ? latest : current;
+  }
+  return {
+    ...current,
+    clientInstanceId: latest.clientInstanceId,
+    shell: latest.shell ?? current.shell,
+    appServerConnection: latest.appServerConnection,
+    preferences: latest.preferences,
+  };
+}
+
+function readDatasetBootstrap(): WebviewBootstrap {
+  return typeof document === "undefined" ? { surface: "invalid" } : datasetBootstrap();
 }
 
 function isSettingsTab(value: unknown): value is import("@openaide/app-shell-contracts").SettingsTabId {

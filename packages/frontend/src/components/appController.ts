@@ -29,6 +29,7 @@ import {
   PROJECT_REFRESH,
   PROJECT_REMOVE,
   PROJECT_RENAME,
+  SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_LIST,
   type ProjectId,
@@ -137,7 +138,14 @@ export type AppController = {
 export type AppControllerOptions = {
   backendConnection?: AppControllerBackendConnection;
 };
-function useAppControllerCore({ backendConnection }: AppControllerOptions = {}): AppControllerTestHarness {
+type AppControllerCoreOptions = AppControllerOptions & {
+  rememberNewTaskProject?: (projectId: string) => void;
+};
+
+function useAppControllerCore({
+  backendConnection,
+  rememberNewTaskProject,
+}: AppControllerCoreOptions = {}): AppControllerTestHarness {
   const backendConnectionRef = useMemo(() => backendConnection ?? getBackendConnection(), [backendConnection]);
   const initialBootstrap = useMemo(() => getBootstrap(), []);
   const clientInstanceId = useMemo(() => clientInstanceIdForBootstrap(initialBootstrap), [initialBootstrap]);
@@ -216,6 +224,7 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
     newTaskSnapshot,
     pendingPreparation: pendingPreparedNewTask,
     replicaEpoch,
+    rememberNewTaskProject,
     startAttempt: newTaskStartAttempt,
     state,
   });
@@ -306,8 +315,23 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
   const defaultBackendConnection = useMemo(() => getBackendConnection(), []);
   const workspaceCapability = useMemo(() => getWorkspaceCapability(), []);
   const backendConnection = options.backendConnection ?? defaultBackendConnection;
-  const core = useAppControllerCore({ backendConnection });
   const request = backendConnection?.request;
+  const rememberNewTaskProject = useCallback((projectId: string) => {
+    if (!request) return;
+    // The preference is auxiliary to the live selection: a storage failure must
+    // never prevent the user from creating a Task in the chosen Project.
+    void Promise.resolve()
+      .then(() => request(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
+        projectId: projectId as ProjectId,
+      }))
+      .catch((error: unknown) => {
+        console.warn("[OpenAIDE] Remembering the New Task Project failed", {
+          error_kind: error instanceof Error && error.name ? error.name : typeof error,
+          projectId,
+        });
+      });
+  }, [request]);
+  const core = useAppControllerCore({ backendConnection, rememberNewTaskProject });
   const { createSnapshotRequestId: _createSnapshotRequestId, dispatch, newTaskSnapshot, state, ...renderState } = core;
   const routedTaskId = state.snapshot?.task.task_id;
   const newTaskViewSnapshot = newTaskSnapshot ?? state.snapshot;
@@ -382,7 +406,10 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         }),
         selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
         selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
-        selectProject: (project) => dispatch({ type: "newTask:project", project }),
+        selectProject: (project) => {
+          dispatch({ type: "newTask:project", project });
+          if (project.available !== false) rememberNewTaskProject(project.projectId);
+        },
         selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
         selectWorktree: (worktree) => dispatch({ type: "newTask:worktree", ...worktree }),
         refreshWorktrees,
@@ -507,7 +534,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
             targetRowCount: initialTaskNavigationRowsPerProject(nextProjectCount),
           }).catch((error: unknown) => {
             console.warn("[OpenAIDE] Initial Project task discovery failed", {
-              error,
+              error_kind: error instanceof Error && error.name ? error.name : typeof error,
               projectId: project.projectId,
             });
           });
