@@ -1,21 +1,21 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::agent::acp_session_client::AcpSessionClient;
+use crate::agent::attached_native_session::AttachedNativeSession;
 use crate::agent::{
-    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSessionDelete,
-    AgentSessionEventSink, AgentSessionKey, AgentSessionLoad,
+    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSession,
+    AgentSessionDelete, AgentSessionEventSink, AgentSessionKey, AgentSessionLoad,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 
-pub(super) struct AcpActiveSessionRegistry {
-    sessions: Mutex<HashMap<AgentSessionKey, AcpSessionClient>>,
-    /// Task sinks outlive one active worker so resume can restore live updates.
+pub(super) struct AttachedNativeSessionRegistry {
+    sessions: Mutex<HashMap<AgentSessionKey, AttachedNativeSession>>,
+    /// Task sinks outlive one active attachment so resume can restore live updates.
     session_event_sinks: Mutex<HashMap<AgentSessionKey, Arc<dyn AgentSessionEventSink>>>,
 }
 
-impl AcpActiveSessionRegistry {
+impl AttachedNativeSessionRegistry {
     pub(super) fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
@@ -30,15 +30,15 @@ impl AcpActiveSessionRegistry {
     pub(super) fn insert_started_session(
         &self,
         session: AgentSessionKey,
-        session_client: AcpSessionClient,
+        session_attachment: AttachedNativeSession,
     ) -> Result<(), RuntimeError> {
         let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
-        // Idle workers close their receivers independently. Pruning before every
-        // insertion keeps dead client handles from accumulating as Tasks are opened.
-        sessions.retain(|_, client| client.is_running());
+        // Idle attachments close their receivers independently. Pruning before every
+        // insertion keeps dead handles from accumulating as Tasks are opened.
+        sessions.retain(|_, attachment| attachment.is_running());
         if sessions.contains_key(&session) {
             drop(sessions);
-            let _ = session_client.close();
+            let _ = session_attachment.close();
             return Err(RuntimeError::InvalidParams(
                 "agent_session_id already active".to_string(),
             ));
@@ -51,14 +51,14 @@ impl AcpActiveSessionRegistry {
             .get(&session)
             .cloned();
         if let Some(sink) = retained_sink {
-            if let Err(error) = session_client.set_event_sink(sink) {
+            if let Err(error) = session_attachment.set_event_sink(sink) {
                 drop(sessions);
-                let _ = session_client.close();
+                let _ = session_attachment.close();
                 return Err(error);
             }
         }
 
-        sessions.insert(session, session_client);
+        sessions.insert(session, session_attachment);
         Ok(())
     }
 
@@ -82,6 +82,15 @@ impl AcpActiveSessionRegistry {
         request: AgentSessionLoad,
     ) -> Result<AgentLoadedSession, RuntimeError> {
         self.require_session(session)?.load_session(request)
+    }
+
+    /// Reads the state held by an already attached Native Session without
+    /// issuing another ACP lifecycle request.
+    pub(super) fn snapshot_session(
+        &self,
+        session: &AgentSessionKey,
+    ) -> Result<AgentSession, RuntimeError> {
+        self.require_session(session)?.snapshot()
     }
 
     pub(super) fn set_config_option(
@@ -115,16 +124,16 @@ impl AcpActiveSessionRegistry {
     }
 
     pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
-        if let Some(client) = self.get(session) {
-            client.cancel()?;
+        if let Some(attachment) = self.get(session) {
+            attachment.cancel()?;
         }
         Ok(())
     }
 
     pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.remove_event_sink(session);
-        if let Some(client) = self.remove(session) {
-            client.close()?;
+        if let Some(attachment) = self.remove(session) {
+            attachment.close()?;
         }
         Ok(())
     }
@@ -132,8 +141,8 @@ impl AcpActiveSessionRegistry {
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
         let key = request.session_key();
         self.remove_event_sink(&key);
-        let client = self.remove(&key).ok_or_else(not_ready)?;
-        client.delete()
+        let attachment = self.remove(&key).ok_or_else(not_ready)?;
+        attachment.delete()
     }
 
     pub(super) fn take_shutdown_close_tasks(&self) -> Vec<Box<dyn FnOnce() + Send + 'static>> {
@@ -153,15 +162,18 @@ impl AcpActiveSessionRegistry {
             .collect()
     }
 
-    fn require_session(&self, session: &AgentSessionKey) -> Result<AcpSessionClient, RuntimeError> {
+    fn require_session(
+        &self,
+        session: &AgentSessionKey,
+    ) -> Result<AttachedNativeSession, RuntimeError> {
         self.get(session).ok_or_else(not_ready)
     }
 
-    fn get(&self, session: &AgentSessionKey) -> Option<AcpSessionClient> {
+    fn get(&self, session: &AgentSessionKey) -> Option<AttachedNativeSession> {
         let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
         if sessions
             .get(session)
-            .is_some_and(AcpSessionClient::is_running)
+            .is_some_and(AttachedNativeSession::is_running)
         {
             return sessions.get(session).cloned();
         }
@@ -182,7 +194,7 @@ impl AcpActiveSessionRegistry {
         None
     }
 
-    fn remove(&self, session: &AgentSessionKey) -> Option<AcpSessionClient> {
+    fn remove(&self, session: &AgentSessionKey) -> Option<AttachedNativeSession> {
         self.sessions
             .lock()
             .expect("ACP session registry poisoned")
@@ -202,5 +214,5 @@ fn not_ready() -> RuntimeError {
 }
 
 #[cfg(test)]
-#[path = "acp_active_session_registry_tests.rs"]
+#[path = "attached_native_session_registry_tests.rs"]
 mod tests;

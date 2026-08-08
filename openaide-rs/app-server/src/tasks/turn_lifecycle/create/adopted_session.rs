@@ -72,6 +72,7 @@ impl TaskTurnLifecycle {
                 tombstoned: false,
                 revision: 0,
                 config_options_catalog: session.config_catalog.clone(),
+                native_session_data_freshness: Default::default(),
                 config_mutation: Default::default(),
                 agent_commands_catalog: session.commands_catalog.clone(),
                 context_usage: None,

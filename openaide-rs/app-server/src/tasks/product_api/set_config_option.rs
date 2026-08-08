@@ -389,7 +389,7 @@ fn inactive_session_can_recover(error: &crate::protocol::errors::RuntimeError) -
         error,
         crate::protocol::errors::RuntimeError::NotReady(message)
             if message == "ACP session is not active"
-                || message == "ACP session worker stopped"
+                || message == "Native Session attachment stopped"
     )
 }
 

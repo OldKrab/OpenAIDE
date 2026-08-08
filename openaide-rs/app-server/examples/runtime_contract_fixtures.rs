@@ -106,6 +106,7 @@ fn main() {
             model_id: Some("gpt-5.5".to_string()),
         },
         config_options_catalog: None,
+        native_session_data_freshness: Default::default(),
         pending_config_change: None,
         agent_commands_catalog: None,
         preparation: TaskPreparationRecord::Ready,

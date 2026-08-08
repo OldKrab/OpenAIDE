@@ -1,5 +1,6 @@
 use crate::storage::records::{
-    TaskAttentionEvent, TaskLifecycle, TaskPreparationRecord, TaskTitle,
+    TaskAttentionEvent, TaskLifecycle, TaskNativeSessionDataFreshness, TaskPreparationRecord,
+    TaskTitle,
 };
 use serde::{Deserialize, Serialize};
 
@@ -88,6 +89,7 @@ pub struct TaskSnapshot {
     pub settings_summary: SettingsSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
+    pub native_session_data_freshness: TaskNativeSessionDataFreshness,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_config_change: Option<PendingTaskConfigChange>,
     #[serde(skip_serializing_if = "Option::is_none")]

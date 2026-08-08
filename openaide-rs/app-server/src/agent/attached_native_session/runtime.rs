@@ -1,56 +1,35 @@
-use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
-
-use agent_client_protocol::{Agent, SessionMessage};
-use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_active_prompt::{cancel_active_prompt, send_steering_prompt_request};
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
 use crate::agent::acp_prompt_runner::{
     dispatch_session_notification, run_prompt, PromptRunContext,
 };
-use crate::agent::acp_schema::InitializeResponse;
 use crate::agent::acp_session_catalogs::{
-    attach_session_event_sink_to_slot, PendingSessionCatalogs,
+    attach_session_event_sink_with_catalog_snapshot, session_with_catalog_snapshots,
+    PendingSessionCatalogs,
 };
-use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigCommand};
-use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
 use crate::agent::acp_session_opening::OpenedAcpSession;
 use crate::agent::acp_session_paths::normalized_session_cwd;
 use crate::agent::acp_session_runner::AcpSessionRunner;
 use crate::agent::acp_session_termination::{close_active_session, delete_active_session};
-use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::{
     AgentLoadedSession, AgentPromptCapabilities, AgentSession, AgentSessionEventSink,
 };
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ConfigOptionsCatalog, ConfigOptionsStatus};
+use crate::protocol::model::{AgentCommandsCatalog, ConfigOptionsCatalog, ConfigOptionsStatus};
+use agent_client_protocol::{Agent, SessionMessage};
 
 const IDLE_SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Long-running owner of one live Agent Native Session and its ACP event loop.
-pub(super) struct NativeSessionWorker {
-    pub(super) opened: OpenedAcpSession,
-    pub(super) request_agent_id: String,
-    pub(super) initialize: InitializeResponse,
-    pub(super) auth_method_id: Option<String>,
-    pub(super) load_replay: LoadReplayCaptures,
-    pub(super) command_rx: tokio_mpsc::UnboundedReceiver<AcpSessionCommand>,
-    pub(super) config_rx: tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
-    pub(super) cancel_rx: tokio_mpsc::UnboundedReceiver<()>,
-    pub(super) close_rx: tokio_mpsc::UnboundedReceiver<mpsc::Sender<Result<(), RuntimeError>>>,
-    pub(super) current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>>,
-    pub(super) trace: Option<AcpTraceSession>,
-    pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
-    pub(super) session_idle_timeout: Duration,
-}
+use super::{AcpSessionCommand, AcpSessionConfigCommand, AttachedNativeSessionRunInput};
 
-pub(super) async fn run_native_session_worker(
-    worker: NativeSessionWorker,
+pub(super) async fn run(
+    runtime: AttachedNativeSessionRunInput,
 ) -> agent_client_protocol::Result<()> {
-    let NativeSessionWorker {
+    let AttachedNativeSessionRunInput {
         opened,
         request_agent_id,
         initialize,
@@ -64,7 +43,7 @@ pub(super) async fn run_native_session_worker(
         trace,
         session_event_sinks,
         session_idle_timeout,
-    } = worker;
+    } = runtime;
     let OpenedAcpSession {
         mut active_session,
         supports_session_close,
@@ -74,10 +53,15 @@ pub(super) async fn run_native_session_worker(
         started_session,
         ..
     } = opened;
+    // The attachment owns the current session snapshot. The registry can ask for
+    // this state when a caller reuses an existing attachment instead of
+    // issuing a duplicate ACP session/resume request.
+    let mut session_snapshot = started_session.clone();
     let mut session_event_sink: Option<Arc<dyn AgentSessionEventSink>> = None;
     let mut session_projection: Option<LivePromptProjection> = None;
     let mut pending_session_catalogs = PendingSessionCatalogs::default();
     let mut config_catalog = active_session_config_catalog(&started_session);
+    let mut commands_catalog = started_session.commands_catalog.clone();
     let session_id = active_session.session_id().to_string();
     let sink_registration = SessionSinkRegistration {
         session_id,
@@ -117,11 +101,18 @@ pub(super) async fn run_native_session_worker(
                     break;
                 };
                 match command {
+                    AcpSessionCommand::Snapshot { reply_tx } => {
+                        let _ = reply_tx.send(Ok(session_snapshot.clone()));
+                    }
                     AcpSessionCommand::SetEventSink { sink } => {
                         sink_registration.set(sink.clone());
-                        attach_session_event_sink_to_slot(
+                        attach_session_event_sink_with_catalog_snapshot(
                             &mut session_event_sink,
                             &mut pending_session_catalogs,
+                            session_snapshot.config_catalog.as_ref().filter(|catalog| {
+                                catalog.status != ConfigOptionsStatus::Empty
+                            }),
+                            session_snapshot.commands_catalog.as_ref(),
                             sink.clone(),
                         )
                         .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
@@ -179,6 +170,10 @@ pub(super) async fn run_native_session_worker(
                                     replayed_messages: replay.messages,
                                 }
                             });
+                        if let Ok(loaded) = &result {
+                            session_snapshot = loaded.session.clone();
+                            commands_catalog = loaded.session.commands_catalog.clone();
+                        }
                         if result.is_ok() {
                             idle_close_eligible = true;
                         }
@@ -215,11 +210,18 @@ pub(super) async fn run_native_session_worker(
                             &mut command_rx,
                             &mut config_rx,
                             &mut config_catalog,
+                            &mut commands_catalog,
+                            &session_snapshot,
                             &mut session_event_sink,
                             &mut session_projection,
                             &mut pending_session_catalogs,
                         )
                         .await;
+                        session_snapshot = session_with_catalog_snapshots(
+                            &session_snapshot,
+                            &config_catalog,
+                            &commands_catalog,
+                        );
                         if result.is_ok() {
                             idle_close_eligible = true;
                         }
@@ -265,6 +267,7 @@ pub(super) async fn run_native_session_worker(
                 handle_session_config_command(
                     &mut active_session,
                     &mut config_catalog,
+                    &mut commands_catalog,
                     session_event_sink.as_ref(),
                     session_projection.clone(),
                     &mut pending_session_catalogs,
@@ -272,6 +275,11 @@ pub(super) async fn run_native_session_worker(
                 )
                 .await
                 .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                session_snapshot = session_with_catalog_snapshots(
+                    &session_snapshot,
+                    &config_catalog,
+                    &commands_catalog,
+                );
             }
             update = active_session.read_update() => {
                 let update = update?;
@@ -279,12 +287,18 @@ pub(super) async fn run_native_session_worker(
                     &request_agent_id,
                     update,
                     &mut config_catalog,
+                    &mut commands_catalog,
                     session_event_sink.as_ref(),
                     session_projection.clone(),
                     &mut pending_session_catalogs,
                 )
                 .await
                 .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                session_snapshot = session_with_catalog_snapshots(
+                    &session_snapshot,
+                    &config_catalog,
+                    &commands_catalog,
+                );
             }
             () = &mut idle_deadline, if supports_session_close && idle_close_eligible => {
                 let idle_session_id = active_session.session_id().clone();
@@ -367,6 +381,7 @@ async fn apply_opened_session_message(
     agent_id: &str,
     update: SessionMessage,
     config_catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
     session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
     session_projection: Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
@@ -374,23 +389,22 @@ async fn apply_opened_session_message(
     let SessionMessage::SessionMessage(dispatch) = update else {
         return Ok(());
     };
-    if let Some(catalog) = dispatch_session_notification(
+    let catalogs = dispatch_session_notification(
         agent_id,
         dispatch,
         session_projection,
         session_event_sink.cloned(),
         pending_session_catalogs,
     )
-    .await?
-    {
-        *config_catalog = catalog;
-    }
+    .await?;
+    apply_session_catalogs(catalogs, config_catalog, commands_catalog);
     Ok(())
 }
 
 async fn handle_session_config_command(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
     session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
     session_projection: Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
@@ -436,6 +450,7 @@ async fn handle_session_config_command(
                     &agent_id,
                     update,
                     catalog,
+                    commands_catalog,
                     session_event_sink,
                     session_projection.clone(),
                     pending_session_catalogs,
@@ -463,4 +478,17 @@ async fn handle_session_config_command(
         }
     }
     Ok(())
+}
+
+fn apply_session_catalogs(
+    catalogs: crate::agent::acp_session_catalogs::DispatchSessionCatalogs,
+    config_catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
+) {
+    if let Some(catalog) = catalogs.config {
+        *config_catalog = catalog;
+    }
+    if let Some(catalog) = catalogs.commands {
+        *commands_catalog = Some(catalog);
+    }
 }

@@ -3671,6 +3671,7 @@ fn client_new_task_record(
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,
+        native_session_data_freshness: Default::default(),
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

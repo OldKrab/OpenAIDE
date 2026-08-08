@@ -3,7 +3,7 @@ use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerm
 use std::sync::mpsc;
 use tokio::sync::mpsc as tokio_mpsc;
 
-fn stopped_client() -> AcpSessionClient {
+fn stopped_attachment() -> AttachedNativeSession {
     let (command_tx, _command_rx) = tokio_mpsc::unbounded_channel();
     let (config_tx, _config_rx) = tokio_mpsc::unbounded_channel();
     let (cancel_tx, _cancel_rx) = tokio_mpsc::unbounded_channel();
@@ -14,7 +14,7 @@ fn stopped_client() -> AcpSessionClient {
     let owner_id = AcpTerminalOwnerId::next();
     terminals.begin_open(owner_id);
 
-    AcpSessionClient::new(
+    AttachedNativeSession::new(
         command_tx,
         config_tx,
         cancel_tx,
@@ -24,7 +24,7 @@ fn stopped_client() -> AcpSessionClient {
     )
 }
 
-fn disconnected_client() -> AcpSessionClient {
+fn disconnected_attachment() -> AttachedNativeSession {
     let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
     let (config_tx, config_rx) = tokio_mpsc::unbounded_channel();
     let (cancel_tx, cancel_rx) = tokio_mpsc::unbounded_channel();
@@ -35,7 +35,7 @@ fn disconnected_client() -> AcpSessionClient {
     let owner_id = AcpTerminalOwnerId::next();
     terminals.begin_open(owner_id);
 
-    AcpSessionClient::new(
+    AttachedNativeSession::new(
         command_tx,
         config_tx,
         cancel_tx,
@@ -47,10 +47,10 @@ fn disconnected_client() -> AcpSessionClient {
 
 #[test]
 fn stopped_session_is_not_reported_as_active() {
-    let registry = AcpActiveSessionRegistry::new();
+    let registry = AttachedNativeSessionRegistry::new();
     let key = AgentSessionKey::new("agent", "session");
     registry
-        .insert_started_session(key.clone(), stopped_client())
+        .insert_started_session(key.clone(), stopped_attachment())
         .expect("insert session");
 
     assert!(!registry.contains(&key));
@@ -58,11 +58,11 @@ fn stopped_session_is_not_reported_as_active() {
 }
 
 #[test]
-fn disconnected_session_worker_is_not_reported_as_active() {
-    let registry = AcpActiveSessionRegistry::new();
+fn disconnected_session_attachment_is_not_reported_as_active() {
+    let registry = AttachedNativeSessionRegistry::new();
     let key = AgentSessionKey::new("agent", "session");
     registry
-        .insert_started_session(key.clone(), disconnected_client())
+        .insert_started_session(key.clone(), disconnected_attachment())
         .expect("insert session");
 
     assert!(!registry.contains(&key));

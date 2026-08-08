@@ -30,6 +30,7 @@ export const Selector = forwardRef<HTMLButtonElement, {
     return (
       <span
         aria-busy={pending || undefined}
+        aria-disabled
         aria-describedby={describedBy}
         aria-label={pending ? `${label}, updating Agent option` : undefined}
         className={`${classes} locked${pending ? " pending" : ""}`}

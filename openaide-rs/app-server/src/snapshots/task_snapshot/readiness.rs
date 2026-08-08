@@ -13,7 +13,9 @@ use crate::protocol::model::{
     AgentCommand, ConfigOption, ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind,
     ConfigOptionValue, TaskSnapshot as StoredTaskSnapshot, TaskStatus as LegacyTaskStatus,
 };
-use crate::storage::records::{TaskPreparationBlockerRecord, TaskPreparationRecord};
+use crate::storage::records::{
+    TaskNativeSessionCatalogFreshness, TaskPreparationBlockerRecord, TaskPreparationRecord,
+};
 
 pub(super) fn preparation_snapshot(preparation: &TaskPreparationRecord) -> TaskPreparationSnapshot {
     match preparation {
@@ -63,13 +65,23 @@ pub(super) fn agent_config_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgentC
         }
         TaskPreparationRecord::Ready => match &snapshot.config_options_catalog {
             Some(_) => TaskAgentConfigSnapshot {
-                state: LiveSessionDataState::Ready,
+                // Recovering and stale controls show the last observed catalog without becoming
+                // editable. Only this server epoch can confirm them as fresh.
+                state: match snapshot.native_session_data_freshness.config() {
+                    TaskNativeSessionCatalogFreshness::Fresh => LiveSessionDataState::Ready,
+                    TaskNativeSessionCatalogFreshness::Recovering => LiveSessionDataState::Loading,
+                    TaskNativeSessionCatalogFreshness::Stale => LiveSessionDataState::Stale,
+                },
                 options: agent_config_options(snapshot),
                 pending_change: pending_config_change(snapshot),
                 error: None,
             },
             None => TaskAgentConfigSnapshot {
-                state: LiveSessionDataState::Unavailable,
+                state: match snapshot.native_session_data_freshness.config() {
+                    TaskNativeSessionCatalogFreshness::Fresh => LiveSessionDataState::Unavailable,
+                    TaskNativeSessionCatalogFreshness::Recovering => LiveSessionDataState::Loading,
+                    TaskNativeSessionCatalogFreshness::Stale => LiveSessionDataState::Unavailable,
+                },
                 options: Vec::new(),
                 pending_change: pending_config_change(snapshot),
                 error: None,
@@ -164,9 +176,24 @@ pub(super) fn agent_commands_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgen
             }
         }
         TaskPreparationRecord::Ready => TaskAgentCommandsSnapshot {
-            state: match &snapshot.agent_commands_catalog {
-                Some(_) => LiveSessionDataState::Ready,
-                None => LiveSessionDataState::Unavailable,
+            state: match (
+                &snapshot.agent_commands_catalog,
+                snapshot.native_session_data_freshness.commands(),
+            ) {
+                (Some(_), TaskNativeSessionCatalogFreshness::Fresh) => LiveSessionDataState::Ready,
+                (Some(_), TaskNativeSessionCatalogFreshness::Recovering) => {
+                    LiveSessionDataState::Loading
+                }
+                (Some(_), TaskNativeSessionCatalogFreshness::Stale) => LiveSessionDataState::Stale,
+                (None, TaskNativeSessionCatalogFreshness::Fresh) => {
+                    LiveSessionDataState::Unavailable
+                }
+                (None, TaskNativeSessionCatalogFreshness::Recovering) => {
+                    LiveSessionDataState::Loading
+                }
+                (None, TaskNativeSessionCatalogFreshness::Stale) => {
+                    LiveSessionDataState::Unavailable
+                }
             },
             commands: snapshot
                 .agent_commands_catalog

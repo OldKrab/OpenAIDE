@@ -602,7 +602,9 @@ impl AgentRuntime for AttachFailingAgent {
         _session: &AgentSessionKey,
         _sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
-        Err(RuntimeError::NotReady("session worker stopped".to_string()))
+        Err(RuntimeError::NotReady(
+            "Native Session attachment stopped".to_string(),
+        ))
     }
 
     fn prompt(
@@ -649,7 +651,9 @@ impl AgentRuntime for FollowupAttachFailingAgent {
     ) -> Result<(), RuntimeError> {
         let call = self.attach_calls.fetch_add(1, Ordering::SeqCst);
         if call == 1 {
-            Err(RuntimeError::NotReady("session worker stopped".to_string()))
+            Err(RuntimeError::NotReady(
+                "Native Session attachment stopped".to_string(),
+            ))
         } else {
             Ok(())
         }

@@ -27,7 +27,7 @@ impl AgentEventSink for NoopEventSink {
 }
 
 #[test]
-fn worker_stopped_error_uses_authentication_failure() {
+fn attachment_stopped_error_uses_authentication_failure() {
     let terminal_error = Arc::new(Mutex::new(None));
     record_terminal_error(
         &terminal_error,
@@ -36,7 +36,7 @@ fn worker_stopped_error_uses_authentication_failure() {
         ),
     );
 
-    let error = worker_stopped_error(&terminal_error);
+    let error = attachment_stopped_error(&terminal_error);
 
     assert_eq!(
         error.to_string(),
@@ -45,25 +45,25 @@ fn worker_stopped_error_uses_authentication_failure() {
 }
 
 #[test]
-fn worker_stopped_error_keeps_generic_fallback_without_terminal_error() {
+fn attachment_stopped_error_keeps_generic_fallback_without_terminal_error() {
     let terminal_error = Arc::new(Mutex::new(None));
 
-    let error = worker_stopped_error(&terminal_error);
+    let error = attachment_stopped_error(&terminal_error);
 
     assert_eq!(
         error.to_string(),
-        "runtime not ready: Native Session worker stopped"
+        "runtime not ready: Native Session attachment stopped"
     );
 }
 
 #[test]
-fn prompt_returns_terminal_error_while_worker_reply_is_pending() {
+fn prompt_returns_terminal_error_while_attachment_reply_is_pending() {
     let (command_tx, _command_rx) = tokio_mpsc::unbounded_channel();
     let (config_tx, _config_rx) = tokio_mpsc::unbounded_channel();
     let (cancel_tx, _cancel_rx) = tokio_mpsc::unbounded_channel();
     let (close_tx, _close_rx) = tokio_mpsc::unbounded_channel();
     let terminal_error = Arc::new(Mutex::new(None));
-    let client = AcpSessionClient::new(
+    let attachment = AttachedNativeSession::new(
         command_tx,
         config_tx,
         cancel_tx,
@@ -81,7 +81,7 @@ fn prompt_returns_terminal_error_while_worker_reply_is_pending() {
             Some("Process exited with status 7".to_string());
     });
 
-    let error = client
+    let error = attachment
         .prompt(
             AgentPrompt {
                 agent_id: "codex".to_string(),

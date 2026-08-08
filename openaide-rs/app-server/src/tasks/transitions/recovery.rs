@@ -39,11 +39,10 @@ impl TaskTransitions {
                     }
                     if plan
                         .as_ref()
-                        .is_some_and(|plan| plan.invalidate_live_session_data)
+                        .is_some_and(|plan| plan.mark_live_session_data_stale)
                     {
                         let task = ctx.task_mut();
-                        task.config_options_catalog = None;
-                        task.agent_commands_catalog = None;
+                        task.mark_native_session_data_stale();
                         task.context_usage = None;
                         task.last_turn_usage = None;
                     }

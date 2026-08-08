@@ -65,6 +65,7 @@ pub(crate) fn apply_task_config_catalog(
         return false;
     }
     task.config_options_catalog = Some(catalog);
+    task.native_session_data_freshness.mark_config_fresh();
     task.model_id = model_id;
     if resolves_pending {
         task.config_mutation.pending = None;

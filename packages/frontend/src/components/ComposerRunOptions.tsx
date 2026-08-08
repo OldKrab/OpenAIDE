@@ -1,4 +1,4 @@
-import { Brain, ChevronLeft, ChevronRight, Code2, Cpu, Shield, SlidersHorizontal } from "lucide-react";
+import { Brain, ChevronLeft, ChevronRight, Code2, Cpu, LoaderCircle, Shield, SlidersHorizontal } from "lucide-react";
 import type { ConfigOption, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { isolationOptions, type ComposerSelection } from "../state/composerOptions";
@@ -46,6 +46,7 @@ export function ComposerRunOptions({
   const [optionHoverActive, setOptionHoverActive] = useState(false);
   const options = configOptions?.options ?? [];
   const pendingChange = configOptions?.pending_change;
+  const catalogStatus = catalogStatusPresentation(configOptions);
   const controls: RunControl[] = [
     ...options.map((option): RunControl => ({ kind: "config", option })),
     ...(showIsolationSelector ? [{ kind: "isolation" } satisfies RunControl] : []),
@@ -60,7 +61,7 @@ export function ComposerRunOptions({
   const overflowLocked = hiddenControls.length > 0 && hiddenControls.every((control) =>
     control.kind === "config" ? configLocked : controlsLocked);
 
-  if (controls.length === 0) return null;
+  if (controls.length === 0 && !catalogStatus) return null;
 
   return (
     <div
@@ -69,6 +70,16 @@ export function ComposerRunOptions({
       onPointerLeave={() => setOptionHoverActive(false)}
       ref={packing.containerRef}
     >
+      {catalogStatus ? (
+        <span
+          aria-busy={catalogStatus.busy || undefined}
+          className={`composer-options-status${catalogStatus.busy ? " is-busy" : ""}`}
+          role="status"
+        >
+          {catalogStatus.busy ? <LoaderCircle aria-hidden size={12} /> : null}
+          {catalogStatus.label}
+        </span>
+      ) : null}
       {visibleControls.map((control) => (
         <DirectRunControl
           configLocked={configLocked}
@@ -167,6 +178,12 @@ export function ComposerRunOptions({
       ) : null}
     </div>
   );
+}
+
+function catalogStatusPresentation(catalog: ConfigOptionsCatalog | undefined) {
+  if (catalog?.status === "loading") return { label: "Starting Agent session", busy: true };
+  if (catalog?.status === "stale") return { label: "Options need refresh", busy: false };
+  return undefined;
 }
 
 function DirectRunControl({

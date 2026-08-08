@@ -13,9 +13,9 @@ use tokio::sync::mpsc;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
-use crate::agent::acp_session_client::PromptRequestGuard;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
+use crate::agent::attached_native_session::PromptRequestGuard;
 use crate::agent::events::{AgentEvent, AgentTurnUsage};
 use crate::agent::prompt_content::{build_prompt_content_with_policy, PromptContentPolicy};
 use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, TurnCancellation};

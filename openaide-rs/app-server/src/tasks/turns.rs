@@ -653,7 +653,7 @@ impl TurnRunner {
         Ok(sink)
     }
 
-    /// Reattaches the Task-owned sink after a Native Session worker was closed and resumed.
+    /// Reattaches the Task-owned sink after a Native Session attachment was closed and resumed.
     pub(crate) fn reattach_session_events(
         &self,
         session: &AgentSessionKey,

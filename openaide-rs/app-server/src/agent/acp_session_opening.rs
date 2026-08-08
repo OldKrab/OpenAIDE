@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::agent::acp_schema::InitializeResponse;
 use agent_client_protocol::{Agent, ConnectionTo};
 
+use crate::agent::acp_agent_process::{AcpSessionOpenRequest, AcpStartedSession};
 use crate::agent::acp_config_projection::normalize_config_options;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
@@ -11,7 +12,6 @@ use crate::agent::acp_session_paths::normalized_session_cwd;
 use crate::agent::acp_session_runner::{
     acp_start_error, initialize_agent_connection, AcpActiveSession, AcpSessionRunner,
 };
-use crate::agent::acp_session_worker::{AcpSessionOpenRequest, AcpStartedSession};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::ReplayProjectionResult;
 use crate::agent::prompt_content::{
