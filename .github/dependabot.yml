@@ -5,6 +5,18 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # VS Code's 1.x minor versions expose new extension API levels. Keep the
+      # types aligned with our declared minimum VS Code version deliberately.
+      - dependency-name: "@types/vscode"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      # Node type majors represent a runtime generation change. Upgrade them
+      # together with the supported Node runtimes instead of independently.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: cargo
     directory: /
     schedule:
