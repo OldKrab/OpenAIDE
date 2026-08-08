@@ -172,7 +172,7 @@
     "@openaide/app-shell-contracts": "*"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "~20.19.0",
     "@types/vscode": "1.100.0",
     "esbuild": "^0.28.1",
     "typescript": "^7.0.2"
