@@ -163,7 +163,7 @@
   min-height: 0;
   display: grid;
   align-content: start;
-  gap: 1px;
+  gap: 0;
   overflow: auto;
   scrollbar-gutter: stable;
   padding-right: 10px;
@@ -206,7 +206,7 @@ body[data-shell="web"] .task-list {
   min-height: 0;
   display: grid;
   align-content: start;
-  gap: 1px;
+  gap: 0;
   overflow: hidden;
 }
 

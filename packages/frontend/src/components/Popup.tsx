@@ -21,6 +21,7 @@ import {
   useLayoutEffect,
   type ButtonHTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEventHandler,
   type ReactNode,
   type RefCallback,
   type RefObject,
@@ -120,9 +121,10 @@ type HoverSurfaceProps = {
   dataKind?: string;
   label?: string;
   onPointerEnter?: () => void;
-  onPointerLeave?: () => void;
+  onPointerLeave?: PointerEventHandler<HTMLDivElement>;
   placement?: Placement;
   semanticRole: "dialog" | "tooltip";
+  sideOffset?: number;
 };
 
 /** Portal-positioned hover surface; its caller owns hover intent and content state. */
@@ -241,10 +243,11 @@ function BrowserHoverSurface({
   onPointerLeave,
   placement = "right-start",
   semanticRole,
+  sideOffset = 8,
 }: HoverSurfaceProps) {
   const { floatingStyles, refs } = useFloating({
     middleware: [
-      offset(8),
+      offset(sideOffset),
       flip({ padding: 8 }),
       shift({ padding: 8 }),
       size({

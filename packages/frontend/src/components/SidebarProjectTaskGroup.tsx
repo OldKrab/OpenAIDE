@@ -118,7 +118,7 @@ export function SidebarProjectTaskGroup({
     <section className="project-task-group" aria-label={group.label}>
       <div
         className="project-task-group-header"
-        onPointerLeave={() => preview?.leave()}
+        onPointerLeave={(event) => preview?.leave(event.relatedTarget)}
         onPointerMove={() => !menuOpen && !renaming && headerRef.current && preview?.enter(projectPreview, headerRef.current)}
         ref={headerRef}
       >
