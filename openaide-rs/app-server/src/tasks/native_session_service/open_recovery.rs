@@ -37,6 +37,38 @@ impl NativeSessionService {
         {
             return Ok(None);
         }
+        // Resume may refresh one catalog while the other is still recovering.
+        // Replacement makes both catalogs non-editable until load publishes its
+        // authoritative whole-session state.
+        if !current_task
+            .native_session_data_freshness
+            .is_fully_recovering()
+        {
+            let recovery = self.mutations.commit_existing_task(
+                &task.task_id,
+                TaskCommitOptions::metadata(),
+                |ctx| {
+                    if ctx.task().agent_session_id.as_deref() != Some(stored_session_id.as_str())
+                        || matches!(ctx.task().status, TaskStatus::Starting | TaskStatus::Active)
+                        || ctx.task().active_turn_id.is_some()
+                    {
+                        return Ok(TaskMutationResult::Rejected);
+                    }
+                    ctx.task_mut().mark_native_session_data_recovering();
+                    Ok(TaskMutationResult::Changed)
+                },
+            )?;
+            if matches!(recovery.outcome, TaskCommitOutcome::Rejected(_)) {
+                return Ok(None);
+            }
+        }
+        // History replay is a Native Session replacement. Loading through the
+        // existing attachment would replace its ACP state in place and could
+        // overwrite Configuration Options accepted immediately before replay.
+        self.agent_gateway.close_session(&AgentSessionKey::new(
+            task.agent_id.clone(),
+            stored_session_id.clone(),
+        ))?;
         let load_started = std::time::Instant::now();
         let loaded = self.agent_gateway.load_session(AgentSessionLoad {
             agent_id: task.agent_id.clone(),

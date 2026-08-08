@@ -94,15 +94,18 @@ impl TaskNativeSessionDataFreshness {
             || self.commands == TaskNativeSessionCatalogFreshness::Recovering
     }
 
+    pub fn is_fully_recovering(&self) -> bool {
+        self.config == TaskNativeSessionCatalogFreshness::Recovering
+            && self.commands == TaskNativeSessionCatalogFreshness::Recovering
+    }
+
     pub fn is_stale(&self) -> bool {
         self.config == TaskNativeSessionCatalogFreshness::Stale
             && self.commands == TaskNativeSessionCatalogFreshness::Stale
     }
 
     fn mark_recovering(&mut self) -> bool {
-        if self.config == TaskNativeSessionCatalogFreshness::Recovering
-            && self.commands == TaskNativeSessionCatalogFreshness::Recovering
-        {
+        if self.is_fully_recovering() {
             return false;
         }
         self.config = TaskNativeSessionCatalogFreshness::Recovering;

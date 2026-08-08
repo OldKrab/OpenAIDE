@@ -34,9 +34,13 @@ pub(super) fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> Change
         agent_config: preparation
             || original.config_options_catalog != task.config_options_catalog
             || original.config_mutation != task.config_mutation
-            || original.model_id != task.model_id,
+            || original.model_id != task.model_id
+            || original.native_session_data_freshness.config()
+                != task.native_session_data_freshness.config(),
         agent_commands: preparation
-            || original.agent_commands_catalog != task.agent_commands_catalog,
+            || original.agent_commands_catalog != task.agent_commands_catalog
+            || original.native_session_data_freshness.commands()
+                != task.native_session_data_freshness.commands(),
         send_capability: preparation || original.status != task.status,
         input_capabilities: original.supports_image_input != task.supports_image_input,
         context_usage: original.context_usage != task.context_usage

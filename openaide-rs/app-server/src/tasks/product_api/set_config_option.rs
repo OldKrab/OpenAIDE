@@ -38,7 +38,7 @@ impl TaskProductApi {
         );
         self.read_interactive_task_for_client(&task_id, client_instance_id)?;
         let queued_at = Instant::now();
-        self.config_operations.serialize(&task_id, || {
+        self.session_operations.serialize(&task_id, || {
             crate::logging::info(
                 "task_config_option_serialization_acquired",
                 serde_json::json!({

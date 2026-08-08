@@ -816,14 +816,16 @@ describe("Composer view behavior", () => {
     expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(0);
   });
 
-  it("names Agent startup and stale options instead of hiding unavailable controls", () => {
+  it("replaces unconfirmed options during refresh and identifies stale options", () => {
     const loading = renderComposer({
       configLocked: true,
-      configOptions: { agent_id: "codex", status: "loading", options: [] },
+      configOptions: { ...configOptions(), status: "loading" },
       showIsolationSelector: false,
     });
-    expect(text(loading.root)).toContain("Starting Agent session");
+    expect(text(loading.root)).toContain("Refreshing options…");
     expect(loading.root.findAllByProps({ role: "status", "aria-busy": true })).toHaveLength(1);
+    expect(configControlButtonsByText(loading.root, "Balanced")).toHaveLength(0);
+    expect(loading.root.findAllByProps({ className: "composer-adaptive-options is-unavailable" })).toHaveLength(1);
 
     const stale = renderComposer({
       configLocked: true,
@@ -832,12 +834,7 @@ describe("Composer view behavior", () => {
     });
     expect(text(stale.root)).toContain("Options need refresh");
     expect(stale.root.findAllByProps({ role: "status", "aria-busy": true })).toHaveLength(0);
-    const lockedControl = stale.root.findAll((node) =>
-      String(node.props.className ?? "").split(/\s+/).includes("composer-pill")
-        && String(node.props.className ?? "").split(/\s+/).includes("composer-config-control")
-        && text(node).includes("Balanced"),
-    )[0];
-    expect(lockedControl.props["aria-disabled"]).toBe(true);
+    expect(configControlButtonsByText(stale.root, "Balanced")).toHaveLength(0);
   });
 
   it("clears immediate pending presentation when the mutation fails", () => {

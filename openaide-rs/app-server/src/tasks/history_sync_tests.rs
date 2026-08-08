@@ -5,27 +5,25 @@ use crate::snapshots::task_snapshot::TaskHistorySyncSnapshotSource;
 use super::HistorySyncCoordinator;
 
 #[test]
-fn stale_passive_generation_cannot_replace_current_history_state() {
+fn passive_checks_coalesce_until_the_current_generation_finishes() {
     let coordinator = HistorySyncCoordinator::default();
-    let stale = coordinator
-        .begin_passive("task-history")
-        .expect("history check generation");
     let current = coordinator
         .begin_passive("task-history")
-        .expect("newer history check generation");
+        .expect("history check generation");
+    assert!(coordinator.begin_passive("task-history").is_none());
     let current_state = TaskHistorySyncSnapshot::Syncing {
         generation: current.value(),
     };
 
     assert!(coordinator.set_current("task-history", current_state.clone()));
-    assert!(!coordinator.set_current(
-        "task-history",
-        TaskHistorySyncSnapshot::Idle {
-            generation: stale.value(),
-        },
-    ));
     assert_eq!(
         coordinator.history_sync_snapshot("task-history"),
         current_state,
     );
+
+    coordinator.finish_passive("task-history", &current);
+    let next = coordinator
+        .begin_passive("task-history")
+        .expect("next history check generation");
+    assert_ne!(next.value(), current.value());
 }

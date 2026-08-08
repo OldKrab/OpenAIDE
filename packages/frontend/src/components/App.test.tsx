@@ -137,10 +137,10 @@ describe("task working status label", () => {
     expect(taskWorkingStatusLabel([], "stopping", false)).toBe("Stopping");
   });
 
-  it("uses the live activity row for conversation history synchronization", async () => {
+  it("identifies whole-session replacement in the live activity row", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
-    expect(taskWorkingStatusLabel([], "active", false, { state: "syncing", generation: 1 })).toBe("Syncing conversation history");
+    expect(taskWorkingStatusLabel([], "active", false, { state: "syncing", generation: 1 })).toBe("Reloading session");
     expect(taskWorkingStatusLabel([], "inactive", false, { state: "updated", generation: 1 })).toBe("History updated");
   });
 });

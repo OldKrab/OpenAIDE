@@ -16,26 +16,25 @@
   flex: 0 0 auto;
 }
 
-/* Runtime catalogs are Agent-owned. Keep their last observed values visible while
-   recovery runs, but name that temporary state so disabled controls never read as broken. */
-.composer-options-status {
+/* Replace unconfirmed Agent-owned controls in place so recovery does not add a
+   second toolbar item or present cached values as current. */
+.composer-adaptive-options.is-unavailable {
   min-height: 28px;
+}
+
+.composer-options-unavailable {
   display: inline-flex;
   align-items: center;
-  flex: 0 0 auto;
   gap: 5px;
-  border: 1px solid color-mix(in oklch, var(--oa-border-strong) 62%, transparent);
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--oa-focus) 6%, var(--oa-panel));
   color: var(--oa-muted);
-  padding: 2px 8px;
+  padding-inline: 8px;
   font-size: 12px;
   font-weight: 550;
   line-height: 1;
   white-space: nowrap;
 }
 
-.composer-options-status.is-busy svg {
+.composer-options-unavailable svg {
   animation: composer-options-status-spin 1.15s linear infinite;
 }
 
@@ -44,7 +43,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-options-status.is-busy svg { animation: none; }
+  .composer-options-unavailable svg { animation: none; }
 }
 
 .composer-config-control-anchor {

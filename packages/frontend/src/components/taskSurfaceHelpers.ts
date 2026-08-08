@@ -31,7 +31,7 @@ export function taskWorkingStatusLabel(
   inputPending: boolean,
   historySync: HistorySyncState = { state: "idle", generation: 0 },
 ) {
-  if (historySync.state === "syncing") return "Syncing conversation history";
+  if (historySync.state === "syncing") return "Reloading session";
   if (historySync.state === "updated") return "History updated";
   // Pending Shell input remains in the frozen composer until App Server acceptance.
   // Chat activity only describes authoritative task state.
