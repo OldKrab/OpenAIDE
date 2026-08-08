@@ -414,7 +414,10 @@
 }
 
 .quote-selection-action:hover {
-  background: var(--oa-raised);
+  /* Host hover tokens may be translucent; keep the popover surface opaque. */
+  background:
+    linear-gradient(var(--oa-raised), var(--oa-raised)),
+    var(--oa-panel);
 }
 
 .quote-selection-action:focus-visible {
