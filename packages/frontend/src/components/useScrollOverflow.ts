@@ -1,17 +1,19 @@
 import { useCallback, useLayoutEffect, useState, type RefObject, type UIEvent } from "react";
 
-const END_THRESHOLD_PX = 2;
+const EDGE_THRESHOLD_PX = 2;
 
-/** Tracks whether a scroll viewport still has content below its visible edge. */
+/** Tracks whether a scroll viewport has content beyond either visible edge. */
 export function useScrollOverflow<T extends HTMLElement>(
   viewportRef: RefObject<T | null>,
   refreshKey?: unknown,
 ) {
+  const [moreAbove, setMoreAbove] = useState(false);
   const [moreBelow, setMoreBelow] = useState(false);
   const update = useCallback((viewport = viewportRef.current) => {
     if (!viewport) return;
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    setMoreBelow(distance > END_THRESHOLD_PX);
+    setMoreAbove(viewport.scrollTop > EDGE_THRESHOLD_PX);
+    setMoreBelow(distance > EDGE_THRESHOLD_PX);
   }, [viewportRef]);
   const onScroll = useCallback((event: UIEvent<T>) => {
     update(event.currentTarget);
@@ -51,5 +53,5 @@ export function useScrollOverflow<T extends HTMLElement>(
     };
   }, [refreshKey, update, viewportRef]);
 
-  return { moreBelow, onScroll, update };
+  return { moreAbove, moreBelow, onScroll, update };
 }

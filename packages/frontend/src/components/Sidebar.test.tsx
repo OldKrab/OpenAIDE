@@ -735,6 +735,32 @@ describe("SidebarNativeSessionRow", () => {
 });
 
 describe("Sidebar", () => {
+  it("exposes when scrolled task content continues above the visible list", () => {
+    const taskList = { clientHeight: 120, scrollHeight: 360, scrollTop: 0 };
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        showArchived={false}
+        tasks={[task()]}
+      />,
+      {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "task-list" ? taskList : null
+        ),
+      },
+    );
+    const taskListShell = tree.root.findByProps({ className: "task-list-shell" });
+    const renderedTaskList = tree.root.findByProps({ className: "task-list" });
+
+    expect(taskListShell.props["data-more-above"]).toBe("false");
+
+    taskList.scrollTop = 3;
+    act(() => renderedTaskList.props.onScroll({ currentTarget: taskList }));
+
+    expect(taskListShell.props["data-more-above"]).toBe("true");
+  });
+
   it("does not render a phantom project group from a removed project selection", () => {
     const tree = render(
       <Sidebar

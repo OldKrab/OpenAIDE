@@ -31,7 +31,7 @@ type Preview = { anchor: HTMLElement; content: SidebarPreviewContent };
 type PreviewContext = {
   dismiss: () => void;
   enter: (content: SidebarPreviewContent, row: HTMLElement, immediate?: boolean) => void;
-  leave: () => void;
+  leave: (nextTarget?: EventTarget | null) => void;
 };
 
 /** Coordinates hover-preview ownership across different sidebar row types. */
@@ -77,7 +77,6 @@ export function SidebarTaskPreviewProvider({
   const previewRef = useRef<HTMLDivElement>(null);
   const pendingRowRef = useRef<HTMLElement | undefined>(undefined);
   const showTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previewOpen = useRef(false);
   const localCoordinator = useRef<SidebarPreviewCoordinator | undefined>(undefined);
   const owner = useRef(Symbol("task-preview")).current;
@@ -87,7 +86,6 @@ export function SidebarTaskPreviewProvider({
 
   useEffect(() => () => {
     clearTimeout(showTimer.current);
-    clearTimeout(hideTimer.current);
     previewCoordinator.closed(owner);
   }, [owner, previewCoordinator]);
 
@@ -100,7 +98,6 @@ export function SidebarTaskPreviewProvider({
     if (!immediate && pendingRowRef.current === row) return;
     const coordinatedImmediate = previewCoordinator.enter(owner);
     clearTimeout(showTimer.current);
-    clearTimeout(hideTimer.current);
     pendingRowRef.current = row;
     const open = () => {
       pendingRowRef.current = undefined;
@@ -113,18 +110,15 @@ export function SidebarTaskPreviewProvider({
     if (immediate || previewOpen.current || coordinatedImmediate) open();
     else showTimer.current = setTimeout(open, SIDEBAR_PREVIEW_DELAY_MS);
   };
-  const leave = () => {
+  const leave = (nextTarget?: EventTarget | null) => {
+    if (containsTarget(preview?.anchor, nextTarget) || containsTarget(previewRef.current, nextTarget)) return;
     clearTimeout(showTimer.current);
-    clearTimeout(hideTimer.current);
     pendingRowRef.current = undefined;
-    hideTimer.current = setTimeout(() => {
-      setPreview(undefined);
-      previewCoordinator.closed(owner);
-    }, 140);
+    setPreview(undefined);
+    previewCoordinator.closed(owner);
   };
   const dismiss = () => {
     clearTimeout(showTimer.current);
-    clearTimeout(hideTimer.current);
     pendingRowRef.current = undefined;
     setPreview(undefined);
     previewCoordinator.closed(owner);
@@ -132,25 +126,38 @@ export function SidebarTaskPreviewProvider({
 
   useEffect(() => {
     if (!preview) return;
-    const dismiss = (event: PointerEvent) => {
-      if (previewRef.current?.contains(event.target as Node)) return;
+    const close = () => {
       setPreview(undefined);
       previewCoordinator.closed(owner);
     };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setPreview(undefined);
-        previewCoordinator.closed(owner);
-      }
+    const dismiss = (event: PointerEvent) => {
+      if (previewRef.current?.contains(event.target as Node)) return;
+      close();
     };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    const taskList = preview.anchor.closest?.(".task-list");
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", escape);
-    return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
+    taskList?.addEventListener("scroll", close, { passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+      taskList?.removeEventListener("scroll", close);
+    };
   }, [owner, preview, previewCoordinator]);
 
   return <Context.Provider value={{ dismiss, enter, leave }}>
     {children}
-    {preview ? <PopupHoverSurface anchor={preview.anchor} className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} containerRef={previewRef} semanticRole="dialog">
+    {preview ? <PopupHoverSurface
+      anchor={preview.anchor}
+      className="task-preview-popover"
+      containerRef={previewRef}
+      onPointerLeave={(event) => leave(event.relatedTarget)}
+      semanticRole="dialog"
+      sideOffset={0}
+    >
       {preview.content.kind === "task"
         ? <TaskPreviewDetails content={preview.content} />
         : preview.content.kind === "project"
@@ -158,6 +165,12 @@ export function SidebarTaskPreviewProvider({
           : <AgentHistoryPreviewDetails content={preview.content} />}
     </PopupHoverSurface> : null}
   </Context.Provider>;
+}
+
+function containsTarget(element: HTMLElement | null | undefined, target: EventTarget | null | undefined) {
+  if (!element || !target) return false;
+  if (element === target) return true;
+  return typeof Node !== "undefined" && target instanceof Node && element.contains(target);
 }
 
 export function useSidebarTaskPreview() { return useContext(Context); }

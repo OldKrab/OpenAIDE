@@ -136,7 +136,7 @@ export function SidebarTaskRow({
     <div
       className={`task-row task-product-row ${task.task_id === activeTaskId ? "selected" : ""}`}
       data-menu-open={menuOpen || undefined}
-      onPointerLeave={() => preview?.leave()}
+      onPointerLeave={(event) => preview?.leave(event.relatedTarget)}
       onPointerMove={() => !menuOpen && rowRef.current && preview?.enter(taskPreviewContent(task), rowRef.current)}
       ref={rowRef}
       role="listitem"

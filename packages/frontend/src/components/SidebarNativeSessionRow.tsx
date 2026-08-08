@@ -66,7 +66,7 @@ export function SidebarNativeSessionRow({
       data-menu-open={menuOpen || undefined}
       onFocus={() => rowRef.current && preview?.enter(previewContent(), rowRef.current, true)}
       onPointerEnter={() => rowRef.current && preview?.enter(previewContent(), rowRef.current)}
-      onPointerLeave={() => preview?.leave()}
+      onPointerLeave={(event) => preview?.leave(event.relatedTarget)}
       ref={rowRef}
       role="listitem"
     >

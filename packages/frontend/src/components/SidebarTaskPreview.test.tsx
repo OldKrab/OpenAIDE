@@ -87,11 +87,119 @@ describe("SidebarTaskPreview", () => {
     });
     expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
   });
+
+  it("closes immediately when the pointer leaves for blank space", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const row = {
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
+    } as HTMLElement;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<SidebarTaskPreviewProvider><HoverTarget row={row} /></SidebarTaskPreviewProvider>);
+    });
+
+    act(() => tree.root.findByType("button").props.onPointerEnter());
+    act(() => {
+      vi.advanceTimersByTime(750);
+    });
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
+
+    act(() => tree.root.findByType("button").props.onPointerLeave({ relatedTarget: null }));
+
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+  });
+
+  it("stays open when the pointer moves directly into the preview", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const row = {
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
+    } as HTMLElement;
+    const previewNode = {} as HTMLDivElement;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <SidebarTaskPreviewProvider><HoverTarget row={row} /></SidebarTaskPreviewProvider>,
+        {
+          createNodeMock: (element) => (
+            (element.props as { role?: string }).role === "dialog" ? previewNode : null
+          ),
+        },
+      );
+    });
+
+    act(() => tree.root.findByType("button").props.onPointerEnter());
+    act(() => {
+      vi.advanceTimersByTime(750);
+    });
+    act(() => tree.root.findByType("button").props.onPointerLeave({ relatedTarget: previewNode }));
+
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
+  });
+
+  it("closes immediately when its owning task list scrolls", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    let onScroll: EventListener | undefined;
+    const taskList = {
+      addEventListener: vi.fn((type: string, listener: EventListener) => {
+        if (type === "scroll") onScroll = listener;
+      }),
+      removeEventListener: vi.fn(),
+    };
+    const row = {
+      closest: () => taskList,
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
+    } as unknown as HTMLElement;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<SidebarTaskPreviewProvider><HoverTarget row={row} /></SidebarTaskPreviewProvider>);
+    });
+
+    act(() => tree.root.findByType("button").props.onPointerEnter());
+    act(() => {
+      vi.advanceTimersByTime(750);
+    });
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
+
+    act(() => onScroll?.(new Event("scroll")));
+
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+  });
 });
 
 function HoverTarget({ row }: { row: HTMLElement }) {
   const preview = useSidebarTaskPreview();
-  return <button onPointerEnter={() => preview?.enter(taskPreviewContent(task()), row)} type="button">Task</button>;
+  return <button
+    onPointerEnter={() => preview?.enter(taskPreviewContent(task()), row)}
+    onPointerLeave={(event) => preview?.leave(event.relatedTarget)}
+    type="button"
+  >Task</button>;
 }
 
 function task(): TaskSummary {
