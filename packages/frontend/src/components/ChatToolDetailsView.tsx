@@ -28,9 +28,9 @@ export function ChatToolDetails({
   step: Extract<ActivityStep, { kind: "tool" }>;
 }) {
   if (!details) {
-    if (step.name === "execute") return <ExecuteToolDetails details={emptyToolDetails} fallbackPreview={fallbackPreview} step={step} />;
     if (loading) return <DelayedToolDetailsSkeleton />;
-    if (error) return <p className="activity-tool-muted">{error}</p>;
+    if (error) return <p className="activity-tool-muted">Tool details unavailable.</p>;
+    if (step.name === "execute") return <ExecuteToolDetails details={emptyToolDetails} fallbackPreview={fallbackPreview} step={step} />;
     return fallbackPreview ? <ToolCodeBlock text={fallbackPreview} /> : null;
   }
   if (step.name === "read") {
@@ -48,7 +48,7 @@ export function ChatToolDetails({
   else if (step.name === "edit") content = <EditToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
   else if (step.name === "search") content = <SearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
   else if (step.name === "web_search") content = <WebSearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
-  else if (step.name === "execute") content = <ExecuteToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  else if (step.name === "execute") content = <ExecuteToolDetails details={details} fallbackPreview={fallbackPreview} showEmptyOutput step={step} />;
   else if (["delete", "move", "think", "fetch", "switch_mode"].includes(step.name)) {
     content = <DefinedToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
   }

@@ -105,23 +105,21 @@ fn skill_name_from_locations(tool_call: &ToolCall) -> Option<String> {
 }
 
 fn tool_content_preview(content: &[ToolCallContent]) -> Option<String> {
-    content
-        .iter()
-        .map(|item| match item {
-            ToolCallContent::Content(content) => match &content.content {
-                ContentBlock::Text(text) => truncate_preview(text.text.clone()),
-                ContentBlock::ResourceLink(_) | ContentBlock::Resource(_) => {
-                    "Resource output".to_string()
-                }
-                ContentBlock::Image(_) => "Image output".to_string(),
-                ContentBlock::Audio(_) => "Audio output".to_string(),
-                _ => "Content output".to_string(),
-            },
-            ToolCallContent::Diff(_) => "Changed file".to_string(),
-            ToolCallContent::Terminal(_) => "Terminal output".to_string(),
-            _ => "Tool call updated.".to_string(),
-        })
-        .next()
+    content.iter().find_map(|item| match item {
+        ToolCallContent::Content(content) => Some(match &content.content {
+            ContentBlock::Text(text) => truncate_preview(text.text.clone()),
+            ContentBlock::ResourceLink(_) | ContentBlock::Resource(_) => {
+                "Resource output".to_string()
+            }
+            ContentBlock::Image(_) => "Image output".to_string(),
+            ContentBlock::Audio(_) => "Audio output".to_string(),
+            _ => "Content output".to_string(),
+        }),
+        ToolCallContent::Diff(_) => Some("Changed file".to_string()),
+        // A terminal item is a reference to separately streamed output, not output itself.
+        ToolCallContent::Terminal(_) => None,
+        _ => Some("Tool call updated.".to_string()),
+    })
 }
 
 fn tool_details(tool_call: &ToolCall) -> Option<Box<ActivityToolDetails>> {
@@ -279,3 +277,7 @@ fn tool_status(status: ToolCallStatus) -> AgentToolCallStatus {
         _ => AgentToolCallStatus::Pending,
     }
 }
+
+#[cfg(test)]
+#[path = "tool_details_tests.rs"]
+mod tests;

@@ -2039,7 +2039,7 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
 }
 
 #[test]
-fn last_client_expiry_after_reconnect_grace_keeps_app_server_running() {
+fn last_client_expiry_after_reconnect_grace_begins_draining() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     let opened = gateway.open_server_request(client_server_request("client-1"), AppServerTime(2));
     assert!(matches!(opened, OpenRequestOutcome::Opened { .. }));
@@ -2057,7 +2057,7 @@ fn last_client_expiry_after_reconnect_grace_keeps_app_server_running() {
             last_client: true,
         } if client_instance_id == ClientInstanceId::from("client-1")
     ));
-    assert_eq!(gateway.lifecycle.state(), LifecycleState::Running);
+    assert_eq!(gateway.lifecycle.state(), LifecycleState::Draining);
     assert!(gateway
         .server_requests
         .pending_for_client(&ClientInstanceId::from("client-1"))
@@ -2111,7 +2111,7 @@ fn heartbeat_refreshes_client_liveness() {
             last_client: true,
         }]
     );
-    assert_eq!(gateway.lifecycle.state(), LifecycleState::Running);
+    assert_eq!(gateway.lifecycle.state(), LifecycleState::Draining);
 }
 
 #[test]

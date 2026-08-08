@@ -202,10 +202,32 @@ impl AttachOrLaunchRunner {
                 ))
             }
             AttachOrLaunchDecision::CleanStaleEndpoint { target, .. } => {
-                if self.remove_if_current_target(fingerprint, &target)? {
-                    Ok(EndpointDecisionResult::RetryAfterCleanup)
-                } else {
-                    Ok(EndpointDecisionResult::RetryWithoutCleanup)
+                // Endpoint cleanup is the launch commit point. Preserve discovery
+                // while another process owns the lock so a temporarily unreachable
+                // server can recover and be probed again by the handoff loop.
+                match RuntimeLock::acquire(&self.launch_lock_path)? {
+                    LockAcquireOutcome::Busy { path } => {
+                        crate::logging::info(
+                            "app_server_endpoint_preserved",
+                            serde_json::json!({ "reason_code": "launch_lock_busy" }),
+                        );
+                        Ok(EndpointDecisionResult::Done(
+                            AttachOrLaunchRunResult::WaitForLaunch { lock_path: path },
+                        ))
+                    }
+                    LockAcquireOutcome::Acquired(lock) => {
+                        if self.remove_if_current_target(fingerprint, &target)? {
+                            crate::logging::info(
+                                "app_server_stale_endpoint_removed",
+                                serde_json::json!({ "launch_lock_acquired": true }),
+                            );
+                            Ok(EndpointDecisionResult::Done(
+                                AttachOrLaunchRunResult::LaunchNew { lock },
+                            ))
+                        } else {
+                            Ok(EndpointDecisionResult::RetryWithoutCleanup)
+                        }
+                    }
                 }
             }
             AttachOrLaunchDecision::Fail { reason } => Ok(EndpointDecisionResult::Done(

@@ -5,10 +5,12 @@ import { executeDetailInfo } from "../state/toolDetailsViewModel";
 export function ExecuteToolDetails({
   details,
   fallbackPreview,
+  showEmptyOutput = false,
   step,
 }: {
   details: ActivityToolDetails;
   fallbackPreview?: string;
+  showEmptyOutput?: boolean;
   step: Extract<ActivityStep, { kind: "tool" }>;
 }) {
   const info = executeDetailInfo(details, step, fallbackPreview);
@@ -21,7 +23,7 @@ export function ExecuteToolDetails({
           <span>{info.outputLabel}</span>
           <pre>{info.outputText}</pre>
         </section>
-      ) : null}
+      ) : showEmptyOutput && info.mode !== "running" ? <p className="activity-tool-muted">No output returned.</p> : null}
       {info.mode !== "running" ? (
         <p className={`execute-result ${info.failed ? "failed" : "completed"}`}>
           {info.failed ? <X size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}

@@ -82,6 +82,32 @@ fn unreachable_endpoint_is_removed_then_launch_is_elected() {
 }
 
 #[test]
+fn unreachable_endpoint_is_preserved_while_another_process_owns_launch() {
+    let fixture = Fixture::new();
+    let record = endpoint_record(fixture.state_root.fingerprint(), "server-1");
+    fixture
+        .endpoint_records
+        .write(fixture.state_root.fingerprint(), &record)
+        .unwrap();
+    let _held_lock = RuntimeLock::acquire(&fixture.launch_lock_path).unwrap();
+    let mut prober = FixedProber::new(EndpointProbeOutcome::Unreachable);
+
+    let result = fixture.run(&mut prober);
+
+    assert!(matches!(
+        result.unwrap(),
+        AttachOrLaunchRunResult::WaitForLaunch { .. }
+    ));
+    assert_eq!(
+        fixture
+            .endpoint_records
+            .read(fixture.state_root.fingerprint())
+            .unwrap(),
+        Some(record)
+    );
+}
+
+#[test]
 fn storage_writer_block_returns_typed_failure_without_probe() {
     let fixture = Fixture::new();
     fixture

@@ -28,6 +28,8 @@ export type ReliableHttpMessageChannelOptions = {
   fetch?: ReliableHttpFetch;
   retryDelayMs?: number;
   receiveTimeoutMs?: number;
+  /** Replaces a transport that cannot complete repeated finite receive attempts. */
+  maxConsecutiveReceiveTimeouts?: number;
   /** Waits for the first acknowledged client frame before polling server messages. */
   deferReceiveUntilFirstUpload?: boolean;
   /** Restarts only the replayable receive poll when a suspended runtime wakes. */
@@ -65,6 +67,7 @@ export function createReliableHttpMessageChannel(
   const abort = new AbortController();
   const retryDelayMs = options.retryDelayMs ?? 250;
   const receiveTimeoutMs = options.receiveTimeoutMs ?? 35_000;
+  const maxConsecutiveReceiveTimeouts = options.maxConsecutiveReceiveTimeouts ?? 2;
   let receiveAbort: AbortController | undefined;
   let nextClientSequence = 1;
   let lastServerSequence = 0;
@@ -72,6 +75,7 @@ export function createReliableHttpMessageChannel(
   let receiving = false;
   let closed = false;
   let terminalError: unknown;
+  let consecutiveReceiveTimeouts = 0;
   logger.info("reliable_http_channel_created", connectionContext);
   const unsubscribeWake = options.subscribeToWake?.(() => {
     if (!receiveAbort || receiveAbort.signal.aborted) return;
@@ -310,8 +314,10 @@ export function createReliableHttpMessageChannel(
       const pollAbort = new AbortController();
       receiveAbort = pollAbort;
       const pollStartedAt = Date.now();
+      let deadlineExpired = false;
       const receiveTimeout = setTimeout(() => {
         if (closed || receiveAbort !== pollAbort || pollAbort.signal.aborted) return;
+        deadlineExpired = true;
         logger.warn("reliable_http_receive_timeout", {
           ...connectionContext,
           after_sequence: lastServerSequence,
@@ -320,16 +326,28 @@ export function createReliableHttpMessageChannel(
         pollAbort.abort();
       }, receiveTimeoutMs);
       try {
-        const response = await fetchImpl(options.endpointUrl, {
-          method: "GET",
-          headers: {
-            ...baseHeaders(),
-            "X-OpenAIDE-Session-Id": opened.sessionId,
-            "X-OpenAIDE-After": String(lastServerSequence),
-          },
-          signal: pollAbort.signal,
+        // AbortSignal is advisory: some embedded HTTP implementations can leave
+        // fetch or body reads pending after abort. Race the complete poll so a
+        // replayable receive attempt always relinquishes ownership on wake or deadline.
+        const interrupted = new Promise<never>((_resolve, reject) => {
+          pollAbort.signal.addEventListener("abort", () => reject(receiveAbortError()), {
+            once: true,
+          });
         });
-        const text = await response.text();
+        const poll = async () => {
+          const response = await fetchImpl(options.endpointUrl, {
+            method: "GET",
+            headers: {
+              ...baseHeaders(),
+              "X-OpenAIDE-Session-Id": opened.sessionId,
+              "X-OpenAIDE-After": String(lastServerSequence),
+            },
+            signal: pollAbort.signal,
+          });
+          return { response, text: await response.text() };
+        };
+        const { response, text } = await Promise.race([poll(), interrupted]);
+        consecutiveReceiveTimeouts = 0;
         if (response.status === 204) {
           // Real polls are held by the server. Yield here as well so a test
           // double or intermediary returning immediately cannot spin the UI.
@@ -358,7 +376,19 @@ export function createReliableHttpMessageChannel(
         }
       } catch (error) {
         if (closed) return;
-        if (isAbort(error)) continue;
+        if (isAbort(error)) {
+          if (!deadlineExpired) continue;
+          consecutiveReceiveTimeouts += 1;
+          if (consecutiveReceiveTimeouts < maxConsecutiveReceiveTimeouts) continue;
+          const stalled = new ReliableHttpReceiveStalledError(consecutiveReceiveTimeouts);
+          logger.error("reliable_http_receive_stalled", {
+            ...connectionContext,
+            after_sequence: lastServerSequence,
+            consecutive_timeout_count: consecutiveReceiveTimeouts,
+          });
+          fail(stalled);
+          return;
+        }
         if (isTerminalHttpError(error)) {
           logger.error("reliable_http_receive_failed_terminal", {
             ...connectionContext,
@@ -449,6 +479,14 @@ class ReliableHttpError extends Error {
   }
 }
 
+class ReliableHttpReceiveStalledError extends Error {
+  readonly name = "ReliableHttpReceiveStalledError";
+
+  constructor(readonly consecutiveTimeoutCount: number) {
+    super("App Server reliable receive remained stalled after repeated deadlines");
+  }
+}
+
 const SAFE_RELIABLE_HTTP_RESPONSE_CODES = new Set([
   "invalid_connection_id",
   "invalid_after",
@@ -507,6 +545,11 @@ export function isReliableHttpReplayExpired(error: unknown) {
   }
 }
 
+/** A receive path that cannot honor finite polls must move to a fresh generation. */
+export function isReliableHttpReceiveStalled(error: unknown) {
+  return error instanceof ReliableHttpReceiveStalledError;
+}
+
 function isTerminalHttpError(error: unknown) {
   return error instanceof ReliableHttpError
     && [400, 401, 403, 409, 410].includes(error.status);
@@ -514,4 +557,10 @@ function isTerminalHttpError(error: unknown) {
 
 function isAbort(error: unknown) {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function receiveAbortError() {
+  const error = new Error("Reliable HTTP receive was interrupted");
+  error.name = "AbortError";
+  return error;
 }

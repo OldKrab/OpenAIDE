@@ -19,6 +19,7 @@ const NATIVE_SESSION_CATALOG_REFRESH_INTERVAL: Duration = Duration::from_secs(5 
 const TASK_STORAGE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 const LOCAL_HTTP_ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(25);
+const LAST_CLIENT_DRAIN_SETTLE_INTERVAL: Duration = Duration::from_millis(250);
 
 pub struct PublishedAppServerEndpoint {
     endpoint_records: EndpointRecordStore,
@@ -105,7 +106,7 @@ pub fn publish_local_http_probe_endpoint(
         },
     )?;
     let (shutdown_sender, shutdown) = mpsc::channel();
-    start_client_liveness_expirer(gateway.clone());
+    start_client_liveness_expirer(gateway.clone(), shutdown_sender.clone());
     let endpoint = PublishedAppServerEndpoint {
         endpoint_records,
         fingerprint: state_root.fingerprint().clone(),
@@ -174,8 +175,8 @@ fn local_http_error_fields(
     fields
 }
 
-/// Expires abandoned product clients while explicit detach owns process shutdown.
-fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
+/// Expires abandoned product clients and wakes the process owner after a bounded drain turn.
+fn start_client_liveness_expirer(gateway: SharedRpcGateway, shutdown_sender: mpsc::Sender<()>) {
     gateway.request_task_storage_maintenance();
     thread::spawn(move || {
         let mut last_native_catalog_refresh = Instant::now();
@@ -192,9 +193,41 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
                 gateway.request_task_storage_maintenance();
                 last_task_storage_maintenance = Instant::now();
             }
-            expire_local_http_clients(&gateway, AppServerTime::now());
+            let expired = expire_local_http_clients(&gateway, AppServerTime::now());
+            if request_shutdown_after_last_client(
+                &gateway,
+                &expired,
+                &shutdown_sender,
+                LAST_CLIENT_DRAIN_SETTLE_INTERVAL,
+            ) {
+                return;
+            }
         }
     });
+}
+
+/// Gives a compatible initialize one process turn to abort draining before teardown begins.
+fn request_shutdown_after_last_client(
+    gateway: &SharedRpcGateway,
+    expired: &[ClientExpiryOutcome],
+    shutdown_sender: &mpsc::Sender<()>,
+    settle_interval: Duration,
+) -> bool {
+    if !expired.iter().any(|outcome| {
+        matches!(
+            outcome,
+            ClientExpiryOutcome::Expired {
+                last_client: true,
+                ..
+            }
+        )
+    }) {
+        return false;
+    }
+    if !settle_interval.is_zero() {
+        thread::sleep(settle_interval);
+    }
+    gateway.should_shutdown_after_last_client() && shutdown_sender.send(()).is_ok()
 }
 
 fn native_session_catalog_refresh_due(elapsed: Duration) -> bool {
@@ -205,7 +238,7 @@ fn task_storage_maintenance_due(elapsed: Duration) -> bool {
     elapsed >= TASK_STORAGE_MAINTENANCE_INTERVAL
 }
 
-/// Expires abandoned client-scoped state without coupling silence to process lifetime.
+/// Expires abandoned client-scoped state; app_lifecycle decides the process transition.
 fn expire_local_http_clients(
     gateway: &SharedRpcGateway,
     now: AppServerTime,

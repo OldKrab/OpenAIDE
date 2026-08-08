@@ -29,13 +29,6 @@ export async function activate(context: vscode.ExtensionContext) {
     taskEditors.updateWorkspaceRoots(roots);
     taskViewProvider.updateWorkspaceRoots(roots);
   });
-  await workspaceProjectSync.ready;
-  const taskNotifications = await registerTaskNotifications(
-    runtime,
-    context.globalState,
-    taskEditors,
-    logger,
-  );
   context.subscriptions.push(runtime);
   context.subscriptions.push(runtimeProcess);
   context.subscriptions.push(fileSystemHostHandlers);
@@ -43,7 +36,6 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(agentAuthTerminalHandler);
   context.subscriptions.push(terminalHostHandlers);
   context.subscriptions.push(workspaceProjectSync);
-  context.subscriptions.push(taskNotifications);
   context.subscriptions.push(taskEditors);
   context.subscriptions.push(taskViewProvider);
   context.subscriptions.push(
@@ -53,6 +45,27 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   registerCommands(context, taskEditors, runtimeProcess, runtime);
+
+  // Activation owns registration only. App Server consumers share the same
+  // in-flight connection attempt and settle independently in the background so
+  // VS Code can render the Tasks view and its recoverable unavailable state.
+  void workspaceProjectSync.ready;
+  void registerTaskNotifications(
+    runtime,
+    context.globalState,
+    taskEditors,
+    logger,
+  ).then((taskNotifications) => {
+    if (activeRuntime !== runtime) {
+      taskNotifications.dispose();
+      return;
+    }
+    context.subscriptions.push(taskNotifications);
+  }, () => {
+    logger.warn("failed to register VS Code Task notifications", {
+      error_kind: "task_notification_registration_failed",
+    });
+  });
 }
 
 export async function deactivate() {

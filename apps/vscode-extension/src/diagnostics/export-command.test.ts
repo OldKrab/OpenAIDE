@@ -83,4 +83,34 @@ describe("Support Export command", () => {
       value: expect.stringContaining("template=bug_report.yml"),
     }));
   });
+
+  it("still opens the save dialog when runtime diagnostics never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      vscodeMocks.showSaveDialog.mockResolvedValue(undefined);
+      const exporting = exportSupportDiagnostics(
+        {
+          appServerRequest: () => new Promise(() => undefined),
+        } as never,
+        {
+          describe: () => ({
+            running: true,
+            runtime_source_kind: "bundled" as const,
+            storage_root_kind: "extension-storage" as const,
+          }),
+          describeSupportHost: () => ({
+            diagnostics_log_directory: "/missing/logs",
+            extension_version: "0.0.1-alpha.4",
+          }),
+        } as never,
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await exporting;
+
+      expect(vscodeMocks.showSaveDialog).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -4,7 +4,10 @@ use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
 
 use super::*;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
-use crate::storage_runtime::{EndpointRecordStore, LockAcquireOutcome, RuntimeLock, StateRoot};
+use crate::storage_runtime::{
+    EndpointRecordStore, LockAcquireOutcome, RuntimeEndpoint, RuntimeEndpointRecord,
+    RuntimeEndpointRecordStatus, RuntimeLock, StateRoot, TransportKind,
+};
 
 #[test]
 fn missing_endpoint_elects_this_process_to_launch() {
@@ -113,6 +116,31 @@ fn busy_launch_lock_waits_then_retries_endpoint_probe() {
         LaunchHandoffResult::AttachExisting { target }
             if target.state_root_fingerprint == fixture.state_root.fingerprint().as_str()
     ));
+    assert_eq!(waiter.calls, 1);
+}
+
+#[test]
+fn unreachable_endpoint_is_preserved_until_launch_owner_publishes_replacement() {
+    let fixture = Fixture::new();
+    fixture
+        .endpoint_records
+        .write(
+            fixture.state_root.fingerprint(),
+            &unreachable_endpoint(fixture.state_root.fingerprint().as_str()),
+        )
+        .unwrap();
+    let held_lock = acquire_launch_lock(&fixture);
+    let mut waiter = PublishAfterWait {
+        held_lock: Some(held_lock),
+        state_root: fixture.state_root.clone(),
+        runtime_root: fixture.runtime_dir.path().to_path_buf(),
+        published: None,
+        calls: 0,
+    };
+
+    let result = fixture.run(&mut waiter).unwrap();
+
+    assert!(matches!(result, LaunchHandoffResult::AttachExisting { .. }));
     assert_eq!(waiter.calls, 1);
 }
 
@@ -276,5 +304,22 @@ fn acquire_launch_lock(fixture: &Fixture) -> RuntimeLock {
     match RuntimeLock::acquire(&fixture.launch_lock_path).unwrap() {
         LockAcquireOutcome::Acquired(lock) => lock,
         LockAcquireOutcome::Busy { .. } => panic!("test launch lock must be free"),
+    }
+}
+
+fn unreachable_endpoint(state_root_fingerprint: &str) -> RuntimeEndpointRecord {
+    RuntimeEndpointRecord {
+        server_id: "stale-server".to_string(),
+        state_root_fingerprint: state_root_fingerprint.to_string(),
+        pid: std::process::id(),
+        protocol_version: APP_SERVER_PROTOCOL_VERSION.to_string(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        status: RuntimeEndpointRecordStatus::Running,
+        auth_token: "stale-token".to_string(),
+        replacement_token: Some("stale-replacement-token".to_string()),
+        endpoints: vec![RuntimeEndpoint {
+            transport: TransportKind::LocalHttp,
+            address: "http://127.0.0.1:9".to_string(),
+        }],
     }
 }

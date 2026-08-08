@@ -7,6 +7,8 @@ import { sanitizeDiagnosticText } from "../logging/logger";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
 
+const RUNTIME_DIAGNOSTICS_TIMEOUT_MS = 5_000;
+
 export async function collectDiagnostics(
   runtime: Pick<RuntimeClient, "appServerRequest">,
   runtimeProcess: Pick<RuntimeProcess, "describe">,
@@ -27,7 +29,10 @@ export async function collectRuntimeDiagnostics(runtime: Pick<RuntimeClient, "ap
   try {
     return {
       diagnostics: allowlistedRuntimeDiagnostics(
-        toShellRuntimeDiagnostics(await runtime.appServerRequest(DIAGNOSTICS_GET_RUNTIME, {})),
+        toShellRuntimeDiagnostics(await withTimeout(
+          runtime.appServerRequest(DIAGNOSTICS_GET_RUNTIME, {}),
+          RUNTIME_DIAGNOSTICS_TIMEOUT_MS,
+        )),
       ),
     };
   } catch (error) {
@@ -50,6 +55,22 @@ export async function collectRuntimeDiagnostics(runtime: Pick<RuntimeClient, "ap
         message: sanitizeDiagnosticText(error),
       },
     };
+  }
+}
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error("Runtime diagnostics timed out"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 

@@ -22,6 +22,7 @@ export type BackendGenerationInvalidation = {
     | "httpSessionExpired"
     | "clientLivenessExpired"
     | "serverReplayExpired"
+    | "receiveStalled"
     | "appServerRestarted";
 };
 export type BackendRecoveryBaseline = BackendGenerationInvalidation & {
