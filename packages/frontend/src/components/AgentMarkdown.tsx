@@ -105,7 +105,9 @@ function MarkdownCodeBlock({ children, text }: { children: ReactNode; text: stri
             await copyText(text);
             setCopyState("copied");
           } catch (error) {
-            console.warn("Failed to copy a Markdown code block.", error);
+            console.warn("Failed to copy a Markdown code block.", {
+              error_kind: error instanceof Error && error.name ? error.name : typeof error,
+            });
             setCopyState("failed");
           }
           resetTimer.current = setTimeout(() => setCopyState("idle"), 1_400);

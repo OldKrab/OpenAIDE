@@ -198,6 +198,20 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-api"');
   });
 
+  it("updates an existing New Task tab when a Project-scoped action is opened", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openNewTask();
+    const panel = vscodeMocks.panels[0];
+    manager.openNewTask("project-api");
+
+    expect(panel.reveal).toHaveBeenCalledWith(1);
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: "surface.newTaskChanged",
+      payload: { project_id: "project-api" },
+    });
+  });
+
   it("opens a Native Session route and adopts the resulting Task in the same panel", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 

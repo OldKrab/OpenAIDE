@@ -27,6 +27,7 @@ pub const SETTINGS_GET_SKILLS: &str = "settings/getSkills";
 pub const SETTINGS_GET_SKILL_DETAILS: &str = "settings/getSkillDetails";
 pub const SETTINGS_GET_PREFERENCES: &str = "settings/getPreferences";
 pub const SETTINGS_UPDATE_PREFERENCES: &str = "settings/updatePreferences";
+pub const SETTINGS_UPDATE_NEW_TASK_DEFAULTS: &str = "settings/updateNewTaskDefaults";
 pub const SETTINGS_GET_RUNTIME: &str = "settings/getRuntime";
 pub const SETTINGS_UPDATE_RUNTIME: &str = "settings/updateRuntime";
 pub const SETTINGS_RESET_TASK_HISTORY: &str = "settings/resetTaskHistory";
@@ -114,6 +115,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     SETTINGS_GET_SKILL_DETAILS,
     SETTINGS_GET_PREFERENCES,
     SETTINGS_UPDATE_PREFERENCES,
+    SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
     SETTINGS_GET_RUNTIME,
     SETTINGS_UPDATE_RUNTIME,
     SETTINGS_RESET_TASK_HISTORY,

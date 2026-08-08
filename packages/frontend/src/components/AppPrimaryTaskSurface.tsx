@@ -68,6 +68,7 @@ type AppPrimaryTaskSurfaceProps = {
   controller: AppController;
   focusRequestKey: number;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
+  projects?: AppController["view"]["navigation"]["projects"];
   onPlanDrawerOpenChange?: (open: boolean) => void;
   onAddProject?: () => void;
   onCheckProject?: (projectId: string) => Promise<void>;
@@ -84,6 +85,7 @@ export function AppPrimaryTaskSurface({
   controller,
   focusRequestKey,
   model,
+  projects,
   onPlanDrawerOpenChange,
   onAddProject,
   onCheckProject,
@@ -192,7 +194,7 @@ export function AppPrimaryTaskSurface({
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={canSelectNewTaskProject ? "selectable" : "fixed"}
-      state={primaryTask.newTask}
+      state={projects ? { ...primaryTask.newTask, projects } : primaryTask.newTask}
       submitShortcut={preferences.composer_submit_shortcut}
     />
   );

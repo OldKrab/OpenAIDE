@@ -264,6 +264,62 @@ describe("host bridge", () => {
     }));
   });
 
+  it("updates the live VS Code bootstrap when workspace Projects change", async () => {
+    const listeners = new Map<string, (event: { data?: unknown }) => void>();
+    vi.stubGlobal("document", {
+      body: { dataset: { shell: "vscodeExtension", navigationMode: "currentProject", surface: "navigation" } },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: vi.fn() }),
+      addEventListener: vi.fn((type: string, listener: (event: { data?: unknown }) => void) => {
+        listeners.set(type, listener);
+      }),
+      removeEventListener: vi.fn(),
+    });
+
+    const { subscribeSurfaceRouteChanges } = await installedHostBridge();
+    const routed = vi.fn();
+    subscribeSurfaceRouteChanges(routed);
+    listeners.get("message")?.({
+      data: {
+        type: "surface.workspaceChanged",
+        payload: { project_ids: ["project-new"] },
+      },
+    });
+
+    expect(routed).toHaveBeenCalledWith(expect.objectContaining({ projectIds: ["project-new"] }));
+  });
+
+  it("changes an existing VS Code New Task route to an explicit Project", async () => {
+    const listeners = new Map<string, (event: { data?: unknown }) => void>();
+    vi.stubGlobal("document", {
+      body: { dataset: { shell: "vscodeExtension", navigationMode: "currentProject", surface: "task" } },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: vi.fn() }),
+      addEventListener: vi.fn((type: string, listener: (event: { data?: unknown }) => void) => {
+        listeners.set(type, listener);
+      }),
+      removeEventListener: vi.fn(),
+    });
+
+    const { subscribeSurfaceRouteChanges } = await installedHostBridge();
+    const routed = vi.fn();
+    subscribeSurfaceRouteChanges(routed);
+    listeners.get("message")?.({
+      data: {
+        type: "surface.newTaskChanged",
+        payload: { project_id: "project-new" },
+      },
+    });
+
+    expect(routed).toHaveBeenCalledWith(expect.objectContaining({
+      surface: "task",
+      taskId: undefined,
+      projectId: "project-new",
+    }));
+  });
+
   it("creates a tokenless WebProxy BackendConnection from bootstrap endpoint info", async () => {
     const fetch = reliableFetch();
     vi.stubGlobal("fetch", fetch);

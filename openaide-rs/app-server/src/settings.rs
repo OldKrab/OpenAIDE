@@ -6,10 +6,12 @@ use std::sync::Arc;
 
 mod app_preferences;
 mod mcp_servers;
+mod new_task_defaults;
 mod runtime_settings;
 mod skills;
 pub(crate) use app_preferences::{AppPreferencesService, AppPreferencesWorkflow};
 pub(crate) use mcp_servers::{McpServersSettingsService, McpServersSettingsWorkflow};
+pub(crate) use new_task_defaults::{NewTaskDefaultsService, NewTaskDefaultsWorkflow};
 pub(crate) use runtime_settings::{RuntimeSettingsService, RuntimeSettingsWorkflow};
 pub(crate) use skills::{SkillsSettingsService, SkillsSettingsWorkflow};
 

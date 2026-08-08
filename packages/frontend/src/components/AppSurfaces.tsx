@@ -134,6 +134,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
   const workspaceBrowser = callbacks.newTask.workspaceBrowser;
+  const workspaceCapability = currentFrontendShell()?.workspace;
   const projectFolderPicker = currentFrontendShell()?.projects;
   const finishAddingProject = async (folder: { path: string }) => {
     const project = await controller.intents.projects.add(folder.path);
@@ -151,9 +152,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   };
   const addProject = workspaceBrowser
     ? () => setProjectFolderDialogOpen(true)
-    : projectFolderPicker
-      ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
-      : undefined;
+    : workspaceCapability
+      ? () => workspaceCapability.openFolder()
+      : projectFolderPicker
+        ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
+        : undefined;
   const projectFolderDialog = projectFolderDialogOpen && workspaceBrowser ? (
     <ProjectFolderDialog
       browser={workspaceBrowser}
@@ -498,7 +501,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               controller={controller}
               focusRequestKey={newTaskFocusRequestKey}
               model={taskSurfaceModel}
-               onAddProject={addProject}
+              projects={navigationProjects}
+              onAddProject={addProject}
               onCheckProject={async (projectId) => { await controller.intents.projects.refresh(projectId); }}
               onRemoveProject={(projectId) => {
                 const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
@@ -524,7 +528,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
         model={taskSurfaceModel}
-         onAddProject={addProject}
+        projects={navigationProjects}
+        onAddProject={addProject}
         onCheckProject={async (projectId) => { await controller.intents.projects.refresh(projectId); }}
         onRemoveProject={(projectId) => {
           const project = navigation.projects.find((candidate) => candidate.projectId === projectId);

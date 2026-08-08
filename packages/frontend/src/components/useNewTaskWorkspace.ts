@@ -24,6 +24,7 @@ type NewTaskWorkspaceOptions = {
   newTaskSnapshot?: import("@openaide/app-shell-contracts").TaskSnapshot;
   pendingPreparation: MutableRefObject<PendingNewTaskPreparation | undefined>;
   replicaEpoch: number;
+  rememberNewTaskProject?: (projectId: string) => void;
   startAttempt: MutableRefObject<NewTaskStartAttempt | undefined>;
   state: AppState;
 };
@@ -41,6 +42,7 @@ export function useNewTaskWorkspace({
   newTaskSnapshot,
   pendingPreparation,
   replicaEpoch,
+  rememberNewTaskProject,
   startAttempt,
   state,
 }: NewTaskWorkspaceOptions) {
@@ -72,6 +74,10 @@ export function useNewTaskWorkspace({
     ? bootstrap.projectId
     : undefined;
   const appliedNewTaskBootstrap = useRef<WebviewBootstrap | undefined>(undefined);
+  const rememberedBootstrapProject = useRef<{
+    bootstrap: WebviewBootstrap;
+    projectId: string;
+  } | undefined>(undefined);
 
   useEffect(() => {
     if (!state.appServerStateRootId) return;
@@ -103,6 +109,23 @@ export function useNewTaskWorkspace({
 
   useEffect(() => {
     if (
+      newTaskBootstrapProjectId
+      && (
+        rememberedBootstrapProject.current?.bootstrap !== bootstrap
+        || rememberedBootstrapProject.current.projectId !== newTaskBootstrapProjectId
+      )
+      && state.projects.some((project) => (
+        project.projectId === newTaskBootstrapProjectId
+        && project.available !== false
+      ))
+    ) {
+      rememberedBootstrapProject.current = {
+        bootstrap,
+        projectId: newTaskBootstrapProjectId,
+      };
+      rememberNewTaskProject?.(newTaskBootstrapProjectId);
+    }
+    if (
       bootstrap.surface === "task"
       && !bootstrap.taskId
       && newTaskBootstrapProjectId
@@ -118,7 +141,14 @@ export function useNewTaskWorkspace({
     if (bootstrap.surface === "task" && !bootstrap.taskId && newTaskBootstrapProjectId) {
       appliedNewTaskBootstrap.current = bootstrap;
     }
-  }, [bootstrap, newTaskBootstrapProjectId, newTaskDispatch, state.newTask.selection.projectId]);
+  }, [
+    bootstrap,
+    newTaskBootstrapProjectId,
+    newTaskDispatch,
+    rememberNewTaskProject,
+    state.newTask.selection.projectId,
+    state.projects,
+  ]);
 
   useEffect(() => {
     const selectedWorktreeId = state.newTask.selection.worktreeId;

@@ -80,6 +80,39 @@ impl NativeSessionService {
 
     /// Acquires and binds the empty New Task's Native Session before Composer becomes sendable.
     pub(crate) fn prepare_task(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
+        let started_at = Instant::now();
+        crate::logging::info(
+            "native_session_prepare_started",
+            serde_json::json!({
+                "task_id": task.task_id,
+                "agent_id": task.agent_id,
+                "has_bound_session": task.agent_session_id.is_some(),
+            }),
+        );
+        let result = self.prepare_task_inner(task);
+        match &result {
+            Ok(()) => crate::logging::info(
+                "native_session_prepare_completed",
+                serde_json::json!({
+                    "task_id": task.task_id,
+                    "agent_id": task.agent_id,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            ),
+            Err(_) => crate::logging::warn(
+                "native_session_prepare_failed",
+                serde_json::json!({
+                    "task_id": task.task_id,
+                    "agent_id": task.agent_id,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "error_kind": "runtime_error",
+                }),
+            ),
+        }
+        result
+    }
+
+    fn prepare_task_inner(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
         let cancellation = TurnCancellation::new();
         let (session, missing_session_id) = match &task.agent_session_id {
             Some(session_id) => match self.agent_gateway.resume_session(AgentSessionResume {

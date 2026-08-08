@@ -1,6 +1,8 @@
+use openaide_app_server_protocol::methods::CLIENT_HEARTBEAT;
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::logging;
 use crate::protocol_edge::stdio::wire::{
     client_response, event_wire_messages, id_to_gateway_id,
     invalid_request as wire_invalid_request, parse_error, server_request_wire_messages,
@@ -78,61 +80,80 @@ impl LocalHttpProtocolHandler {
         body: &str,
     ) -> LocalHttpResponse {
         let parsed = serde_json::from_str::<Value>(body).ok();
-        if parsed
+        let transport_kind = parsed
             .as_ref()
             .and_then(|value| value.get("transport"))
             .and_then(Value::as_str)
-            == Some("chunk")
-        {
-            return self.handle_reliable_upload_chunk(authorization, connection_id, body);
+            .unwrap_or("rpc");
+        let method = parsed
+            .as_ref()
+            .and_then(|value| value.get("method"))
+            .and_then(Value::as_str);
+        let should_log = method != Some(CLIENT_HEARTBEAT);
+        let started_at = std::time::Instant::now();
+        if should_log {
+            logging::info(
+                "local_http_request_started",
+                serde_json::json!({
+                    "connection_id": connection_id,
+                    "transport": transport_kind,
+                    "method": method,
+                    "body_bytes": body.len(),
+                }),
+            );
         }
-        if parsed
-            .as_ref()
-            .and_then(|value| value.get("transport"))
-            .and_then(Value::as_str)
-            == Some("open")
-        {
-            return handle_reliable_session_open(
+        let response = if transport_kind == "chunk" {
+            self.handle_reliable_upload_chunk(authorization, connection_id, body)
+        } else if transport_kind == "open" {
+            handle_reliable_session_open(
                 authorization,
                 &self.auth_token,
                 connection_id,
                 &self.sessions,
-            );
-        }
-        if parsed
-            .as_ref()
-            .and_then(|value| value.get("transport"))
-            .and_then(Value::as_str)
-            == Some("send")
-        {
+            )
+        } else if transport_kind == "send" {
             let now = AppServerTime::now();
             let gateway = self.gateway.clone();
-            return handle_reliable_session_upload(
+            handle_reliable_session_upload(
                 authorization,
                 &self.auth_token,
                 connection_id,
                 body,
                 &self.sessions,
                 |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+            )
+        } else {
+            let now = AppServerTime::now();
+            let gateway = self.gateway.clone();
+            handle_local_http_protocol(
+                authorization,
+                &self.auth_token,
+                connection_id,
+                body,
+                |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+                |connection_id| {
+                    if self.event_streams.is_active(connection_id) {
+                        Vec::new()
+                    } else {
+                        self.gateway
+                            .drain_event_deliveries_for_connection(connection_id)
+                    }
+                },
+            )
+        };
+        if should_log {
+            logging::info(
+                "local_http_request_completed",
+                serde_json::json!({
+                    "connection_id": connection_id,
+                    "transport": transport_kind,
+                    "method": method,
+                    "http_status": response.status,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
             );
         }
-        let now = AppServerTime::now();
-        let gateway = self.gateway.clone();
-        handle_local_http_protocol(
-            authorization,
-            &self.auth_token,
-            connection_id,
-            body,
-            |connection_id, message| gateway.handle_inbound(connection_id, message, now),
-            |connection_id| {
-                if self.event_streams.is_active(connection_id) {
-                    Vec::new()
-                } else {
-                    self.gateway
-                        .drain_event_deliveries_for_connection(connection_id)
-                }
-            },
-        )
+        response
     }
 
     fn handle_reliable_upload_chunk(
@@ -187,7 +208,8 @@ impl LocalHttpProtocolHandler {
         after: u64,
     ) -> LocalHttpResponse {
         let now = AppServerTime::now();
-        handle_reliable_session_poll(
+        let started_at = std::time::Instant::now();
+        let response = handle_reliable_session_poll(
             authorization,
             &self.auth_token,
             connection_id,
@@ -206,7 +228,20 @@ impl LocalHttpProtocolHandler {
                         )
                     })
             },
-        )
+        );
+        if response.status != 204 {
+            logging::info(
+                "local_http_reliable_poll_completed",
+                serde_json::json!({
+                    "connection_id": connection_id,
+                    "session_id": session_id,
+                    "after_sequence": after,
+                    "http_status": response.status,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            );
+        }
+        response
     }
 
     pub(crate) fn begin_event_stream(

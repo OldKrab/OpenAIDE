@@ -76,6 +76,11 @@ export function useTaskRouteLifecycle({
     if (!context) return;
     const taskId = snapshot.task.task_id;
     const subscriptionKey = `${backendStateGeneration}:${taskId}`;
+    const subscriptionStartedAt = Date.now();
+    sendWebviewTelemetry(postHostMessage, "task_state_subscription_started", {
+      task_id: taskId,
+      generation: backendStateGeneration,
+    });
     let active = true;
     const stop = startAppServerStateSubscription({
       backendConnection,
@@ -83,6 +88,10 @@ export function useTaskRouteLifecycle({
       dispatch,
       onBaselineLost: () => {
         if (!active) return;
+        sendWebviewTelemetry(postHostMessage, "task_state_baseline_lost", {
+          task_id: taskId,
+          generation: backendStateGeneration,
+        });
         setBackendConnectionState({
           status: "reconnecting",
           message: "Connection interrupted. Reconnecting automatically.",
@@ -90,10 +99,21 @@ export function useTaskRouteLifecycle({
         setReadyTaskSubscriptionKey((current) => current === subscriptionKey ? undefined : current);
       },
       onBaselineError: (error) => {
-        if (active) markSubscriptionError(subscriptionKey, error);
+        if (!active) return;
+        sendWebviewTelemetry(postHostMessage, "task_state_baseline_failed", {
+          task_id: taskId,
+          generation: backendStateGeneration,
+          error_name: error instanceof Error ? error.name : typeof error,
+        });
+        markSubscriptionError(subscriptionKey, error);
       },
       onBaselineReady: () => {
         if (!active) return;
+        sendWebviewTelemetry(postHostMessage, "task_state_baseline_ready", {
+          task_id: taskId,
+          generation: backendStateGeneration,
+          duration_ms: Date.now() - subscriptionStartedAt,
+        });
         setReadyTaskSubscriptionKey(subscriptionKey);
         markSubscriptionReady(subscriptionKey);
       },
@@ -133,6 +153,11 @@ export function useTaskRouteLifecycle({
     const requestReplicaEpoch = replicaEpochRef.current;
     const requestDispatch = bindAppServerReplicaEpoch(dispatch, requestReplicaEpoch);
     let openAccepted = false;
+    const openStartedAt = Date.now();
+    sendWebviewTelemetry(postHostMessage, "task_route_open_started", {
+      task_id: taskId,
+      generation: backendStateGeneration,
+    });
 
     const openRequest = requestTaskOpen({
       acceptTaskOpen: (openedTaskId, requestId, intent) => {
@@ -145,6 +170,12 @@ export function useTaskRouteLifecycle({
       dispatch: requestDispatch,
     }, taskId, "open")
       .then(() => {
+        sendWebviewTelemetry(postHostMessage, "task_route_open_completed", {
+          task_id: taskId,
+          generation: backendStateGeneration,
+          duration_ms: Date.now() - openStartedAt,
+          accepted: openAccepted,
+        });
         if (openAccepted && operationOwner.owns(openOperation)) {
           setReadyRouteOpenKey(requestKey);
         }
@@ -156,6 +187,8 @@ export function useTaskRouteLifecycle({
           && error.protocolError.code === "notFound";
         sendWebviewTelemetry(postHostMessage, "task_route_open_failed", {
           task_id: taskId,
+          generation: backendStateGeneration,
+          duration_ms: Date.now() - openStartedAt,
           error_name: error instanceof Error ? error.name : typeof error,
           error_code: error instanceof AppServerProtocolError
             ? error.protocolError.code

@@ -22,6 +22,7 @@ import {
 import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
+import { createRuntimeLogger } from "./runtime-logger.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const host = process.env.OPENAIDE_WEB_HOST ?? "127.0.0.1";
@@ -47,6 +48,7 @@ const webPresentation = {
   instanceLabel,
   title: process.env.OPENAIDE_WEB_TITLE?.trim() || (instanceLabel ? `OpenAIDE ${instanceLabel}` : "OpenAIDE"),
 };
+const logger = createRuntimeLogger("openaide-web-server");
 
 if (prototypePort !== undefined && (!Number.isInteger(prototypePort) || prototypePort < 1 || prototypePort > 65_535)) {
   throw new Error("OPENAIDE_WEB_PROTOTYPE_PORT must be a valid TCP port.");
@@ -73,6 +75,7 @@ const vite = staticRoot ? undefined : spawn(
 );
 
 const appServerManager = createAppServerManager({
+  logger,
   readHandoffConnection,
   spawnAppServer,
 });
@@ -177,6 +180,7 @@ server.on("upgrade", (req, socket, head) => {
 
 server.listen(port, host, () => {
   console.log(`OpenAIDE Web dev shell listening on http://${host}:${port}`);
+  logger.info("web_server_listening", { port, host });
   if (authConfig.enabled) {
     console.log("OpenAIDE Web authentication is enabled.");
   } else {
@@ -248,18 +252,63 @@ async function serveStaticFrontend(req, res, url) {
 }
 
 async function proxyAppServer(req, res, url) {
+  const requestId = `web-proxy-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const connectionId = typeof req.headers["x-openaide-connection-id"] === "string"
+    ? req.headers["x-openaide-connection-id"]
+    : undefined;
+  const transportRoute = appServerTransportRoute(req.method, url.pathname);
+  const isUpload = transportRoute?.kind === "upload";
+  const isReliablePoll = req.method === "GET"
+    && transportRoute === undefined
+    && typeof req.headers["x-openaide-session-id"] === "string";
+  const transportOperationKind = isReliablePoll
+    ? "receive"
+    : transportRoute?.kind ?? "rpc";
+  const startedAt = Date.now();
   if (req.method !== "GET" && req.method !== "POST" && req.method !== "OPTIONS") {
     writeText(res, 405, "Method not allowed");
     return;
   }
-  const transportRoute = appServerTransportRoute(req.method, url.pathname);
-  const isUpload = transportRoute?.kind === "upload";
-  await startAppServer();
-  const body = req.method === "POST" && !isUpload ? await readRequestBody(req) : Buffer.alloc(0);
-  // An ambiguous proxy failure may happen after App Server acceptance. Only the
-  // sequenced client transport may retry the identical frame; the proxy must
-  // never manufacture a second application delivery.
-  await forwardAppServerRequest(req, res, url, body, transportRoute);
+  if (!isReliablePoll) {
+    logger.info("web_proxy_request_started", {
+      request_id: requestId,
+      connection_id: connectionId,
+      method: req.method,
+      route: url.pathname,
+      transport_operation_kind: transportOperationKind,
+    });
+  }
+  try {
+    await startAppServer();
+    const body = req.method === "POST" && !isUpload ? await readRequestBody(req) : Buffer.alloc(0);
+    // An ambiguous proxy failure may happen after App Server acceptance. Only the
+    // sequenced client transport may retry the identical frame; the proxy must
+    // never manufacture a second application delivery.
+    await forwardAppServerRequest(req, res, url, body, transportRoute);
+    if (!isReliablePoll || res.statusCode !== 204) {
+      logger.info("web_proxy_request_completed", {
+        request_id: requestId,
+        connection_id: connectionId,
+        method: req.method,
+        route: url.pathname,
+        transport_operation_kind: transportOperationKind,
+        http_status: res.statusCode,
+        body_bytes: body.byteLength,
+        duration_ms: Date.now() - startedAt,
+      });
+    }
+  } catch (error) {
+    logger.warn("web_proxy_request_failed", {
+      request_id: requestId,
+      connection_id: connectionId,
+      method: req.method,
+      route: url.pathname,
+      transport_operation_kind: transportOperationKind,
+      duration_ms: Date.now() - startedAt,
+      error_kind: error instanceof Error && error.name ? error.name : typeof error,
+    });
+    throw error;
+  }
 }
 
 function forwardAppServerRequest(req, res, url, body, transportRoute) {

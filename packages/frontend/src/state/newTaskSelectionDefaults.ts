@@ -33,13 +33,26 @@ export function selectInitialNewTaskContext({
   projects: ProjectOption[];
   agents: AgentSummary[];
 }): NewTaskContextIds {
+  const allProjectIds = projects.map((project) => project.projectId);
+  const availableProjectIds = projects
+    .filter((project) => project.available !== false)
+    .map((project) => project.projectId);
+  const explicitProjectId = shellProjectId !== undefined && allProjectIds.includes(shellProjectId)
+    ? shellProjectId
+    : undefined;
+  const rememberedProjectId = firstValid(
+    availableProjectIds,
+    retained?.projectId,
+    defaults.projectId ?? undefined,
+  );
   return {
-    projectId: firstValid(
-      projects.map((project) => project.projectId),
-      shellProjectId,
-      retained?.projectId,
-      defaults.projectId ?? undefined,
-    ),
+    // An explicit route can point at an unavailable Project for recovery. A
+    // remembered fallback must remain inside the currently usable catalog.
+    projectId: explicitProjectId
+      ?? rememberedProjectId
+      ?? (availableProjectIds.length > 0
+        ? availableProjectIds[0]
+        : firstValid(allProjectIds, retained?.projectId)),
     agentId: firstValid(
       agents.map((agent) => agent.agentId),
       retained?.agentId,

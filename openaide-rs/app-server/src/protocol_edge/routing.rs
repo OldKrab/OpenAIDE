@@ -11,23 +11,80 @@ use openaide_app_server_protocol::methods::{
     PENDING_REQUEST_RESOLVE, PROJECT_ADD, PROJECT_REFRESH, PROJECT_REMOVE, PROJECT_RENAME,
     SETTINGS_GET_AGENT_DETAILS, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
     SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_GET_SKILL_DETAILS,
-    SETTINGS_RESET_TASK_HISTORY, SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME,
-    SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS,
-    TASK_ACQUIRE, TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL,
-    TASK_CHAT_PAGE, TASK_CLOSE_PLAN, TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ,
-    TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND,
-    TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE, TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RESTORE,
-    TASK_SEARCH_FILES, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE,
-    TASK_TOOL_IMAGE_PREVIEW, WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE,
-    WORKTREE_LINKED_TASKS, WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT,
-    WORKTREE_REMOVE, WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
+    SETTINGS_RESET_TASK_HISTORY, SETTINGS_UPDATE_NEW_TASK_DEFAULTS, SETTINGS_UPDATE_PREFERENCES,
+    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
+    SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE, TASK_ACQUIRE_IN_WORKTREE,
+    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_CHAT_PAGE, TASK_CLOSE_PLAN,
+    TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE,
+    TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND, TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE,
+    TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND,
+    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW,
+    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
+    WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
+    WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::logging;
 use crate::protocol_edge::{responses, GatewayOutcome, InboundProtocolMessage, RpcGateway};
+use serde_json::json;
+use std::time::Instant;
 
 impl RpcGateway {
     pub fn handle_inbound(
+        &mut self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let started_at = Instant::now();
+        let (message_kind, method, request_id, client_request_id) =
+            inbound_diagnostic_fields(&message);
+        let should_log = method.as_deref() != Some(CLIENT_HEARTBEAT);
+        let connection_id_value = connection_id.as_str().to_string();
+        if should_log {
+            logging::info(
+                "rpc_request_started",
+                json!({
+                    "connection_id": connection_id_value,
+                    "message_kind": message_kind,
+                    "method": method.clone(),
+                    "request_id": request_id.clone(),
+                    "client_request_id": client_request_id.clone(),
+                }),
+            );
+        }
+        let outcome = self.handle_inbound_inner(connection_id, message, now);
+        let (
+            outcome_kind,
+            response_kind,
+            error_code,
+            error_recoverable,
+            event_count,
+            server_request_count,
+        ) = gateway_outcome_diagnostic_fields(&outcome);
+        if should_log {
+            logging::info(
+                "rpc_request_completed",
+                json!({
+                    "connection_id": connection_id_value,
+                    "message_kind": message_kind,
+                    "method": method,
+                    "request_id": request_id,
+                    "outcome_kind": outcome_kind,
+                    "response_kind": response_kind,
+                    "error_code": error_code,
+                    "error_recoverable": error_recoverable,
+                    "event_count": event_count,
+                    "server_request_count": server_request_count,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            );
+        }
+        outcome
+    }
+
+    fn handle_inbound_inner(
         &mut self,
         connection_id: ConnectionId,
         message: InboundProtocolMessage,
@@ -139,6 +196,9 @@ impl RpcGateway {
             }
             SETTINGS_UPDATE_PREFERENCES => {
                 self.handle_settings_update_preferences(connection_id, id, params, meta)
+            }
+            SETTINGS_UPDATE_NEW_TASK_DEFAULTS => {
+                self.handle_settings_update_new_task_defaults(connection_id, id, params, meta)
             }
             SETTINGS_GET_RUNTIME => {
                 self.handle_settings_get_runtime(connection_id, id, params, meta)
@@ -253,5 +313,66 @@ impl RpcGateway {
                 responses::unsupported_method(&method),
             ),
         }
+    }
+}
+
+fn inbound_diagnostic_fields(
+    message: &InboundProtocolMessage,
+) -> (&'static str, Option<String>, Option<String>, Option<String>) {
+    match message {
+        InboundProtocolMessage::ClientRequest {
+            id, method, meta, ..
+        } => (
+            "client_request",
+            Some(method.clone()),
+            Some(id.clone()),
+            meta.client_request_id
+                .as_ref()
+                .map(|client_request_id| client_request_id.as_str().to_owned()),
+        ),
+        InboundProtocolMessage::ClientNotification { method, .. } => {
+            ("client_notification", Some(method.clone()), None, None)
+        }
+        InboundProtocolMessage::ClientResponse { request_id, .. } => {
+            ("client_response", None, Some(request_id.clone()), None)
+        }
+    }
+}
+
+fn gateway_outcome_diagnostic_fields(
+    outcome: &GatewayOutcome,
+) -> (
+    &'static str,
+    Option<&'static str>,
+    Option<String>,
+    Option<bool>,
+    usize,
+    usize,
+) {
+    match outcome {
+        GatewayOutcome::Noop => ("noop", None, None, None, 0, 0),
+        GatewayOutcome::Respond {
+            response,
+            events,
+            server_requests,
+            ..
+        } => match response {
+            crate::protocol_edge::GatewayResponse::Result(_) => (
+                "respond",
+                Some("result"),
+                None,
+                None,
+                events.len(),
+                server_requests.len(),
+            ),
+            crate::protocol_edge::GatewayResponse::Error(error) => (
+                "respond",
+                Some("error"),
+                Some(format!("{:?}", error.error.code)),
+                Some(error.error.recoverable),
+                events.len(),
+                server_requests.len(),
+            ),
+        },
     }
 }

@@ -11,6 +11,7 @@ import {
   type InitializeResult,
   type SubscriptionScope,
 } from "./generated/protocol.js";
+import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.js";
 import type {
   AppServerSession,
   AppServerSessionStatus,
@@ -39,12 +40,16 @@ type ScopeReplica = {
 
 type RecoveryGate = {
   generation: number;
+  startedAt: number;
   promise: Promise<void>;
   resolve(): void;
 };
 
 /** Deep session module: transport replacement and scope replicas commit behind one readiness gate. */
-export function createAppServerSession(connection: BackendConnection): AppServerSession {
+export function createAppServerSession(
+  connection: BackendConnection,
+  logger = createDiagnosticsLogger("openaide-app-server-session"),
+): AppServerSession {
   const replicas = new Map<string, ScopeReplica>();
   const statusListeners = new Set<(status: AppServerSessionStatus) => void>();
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
@@ -56,6 +61,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   let recoveryGate: RecoveryGate | undefined;
   let status: AppServerSessionStatus = { status: "connecting", generation };
   let initialization: InitializeResult | undefined;
+  logger.info("app_server_session_created");
 
   const stopEvents = connection.handleNotification("app/event", handleEvent);
   const stopInvalidation = connection.handleGenerationInvalidated(beginRecovery);
@@ -68,18 +74,49 @@ export function createAppServerSession(connection: BackendConnection): AppServer
 
   const session: AppServerSession = {
     async initialize(params, meta) {
-      const result = await (meta === undefined
-        ? connection.initialize(params)
-        : connection.initialize(params, meta));
-      initialization = result;
-      initialized = true;
-      await refreshCurrentReplicas();
-      updateStatus({ status: "ready", generation });
-      return result;
+      const startedAt = Date.now();
+      logger.info("app_server_session_initialize_started", {
+        generation,
+        has_client_request_id: Boolean(meta?.clientRequestId),
+      });
+      try {
+        const result = await (meta === undefined
+          ? connection.initialize(params)
+          : connection.initialize(params, meta));
+        initialization = result;
+        initialized = true;
+        await refreshCurrentReplicas();
+        updateStatus({ status: "ready", generation });
+        logger.info("app_server_session_initialize_completed", {
+          generation,
+          duration_ms: Date.now() - startedAt,
+          replica_count: replicas.size,
+        });
+        return result;
+      } catch (error) {
+        logger.error("app_server_session_initialize_failed", {
+          generation,
+          duration_ms: Date.now() - startedAt,
+          ...diagnosticErrorFields(error),
+        });
+        throw error;
+      }
     },
     async request(method, params, meta) {
       const gate = recoveryGate;
-      if (gate) await gate.promise;
+      if (gate) {
+        const startedAt = Date.now();
+        logger.info("app_server_session_request_waiting_for_recovery", {
+          method,
+          generation: gate.generation,
+        });
+        await gate.promise;
+        logger.info("app_server_session_request_recovery_wait_completed", {
+          method,
+          generation: gate.generation,
+          duration_ms: Date.now() - startedAt,
+        });
+      }
       return meta === undefined
         ? connection.request(method, params)
         : connection.request(method, params, meta);
@@ -114,11 +151,15 @@ export function createAppServerSession(connection: BackendConnection): AppServer
           retryDelay: SUBSCRIPTION_RETRY_MS,
         };
         replicas.set(key, replica);
+        logger.info("app_server_state_subscription_registered", {
+          ...scopeDiagnosticFields(scope, key),
+          generation,
+        });
       }
       replica.observers.add(observer);
       if (replica.state && !replica.refreshing) {
-        notifyObserver(observer, "onSnapshot", replica.state.snapshot);
-        notifyObserver(observer, "onBaselineReady");
+        notifyObserver(observer, "onSnapshot", logger, replica.state.snapshot);
+        notifyObserver(observer, "onBaselineReady", logger);
       } else if (initialized && status.status !== "recovering") {
         void refreshReplica(replica, generation);
       }
@@ -126,12 +167,16 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     },
     handleSessionStatus(handler) {
       statusListeners.add(handler);
-      notifyListener(handler, status);
+      notifyListener(handler, logger, "session_status", status);
       return () => statusListeners.delete(handler);
     },
     close() {
       if (closed) return;
       closed = true;
+      logger.info("app_server_session_closed", {
+        generation,
+        replica_count: replicas.size,
+      });
       recoveryGate?.resolve();
       recoveryGate = undefined;
       stopEvents();
@@ -152,22 +197,39 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   function beginRecovery(event: BackendGenerationInvalidation) {
     if (closed || recoveryGate) return;
     generation += 1;
-    recoveryGate = deferredGate(generation);
+    recoveryGate = deferredGate(generation, Date.now());
+    logger.warn("app_server_session_recovery_started", {
+      generation,
+      reason: event.reason,
+      replica_count: replicas.size,
+    });
     updateStatus({ status: "recovering", generation, reason: event.reason });
     for (const replica of replicas.values()) invalidateReplica(replica);
-    notifyListeners(invalidationListeners, event);
+    notifyListeners(invalidationListeners, event, logger, "generation_invalidation");
   }
 
   async function installRecoveryBaseline(baseline: BackendRecoveryBaseline) {
     const gate = recoveryGate;
     if (!gate || gate.generation !== generation || closed) return;
+    logger.info("app_server_session_recovery_baseline_received", {
+      generation,
+      reason: baseline.reason,
+      replica_count: replicas.size,
+      duration_ms: Date.now() - gate.startedAt,
+    });
     initialization = baseline.result;
-    notifyListeners(recoveryBaselineListeners, baseline);
+    notifyListeners(recoveryBaselineListeners, baseline, logger, "recovery_baseline");
     await refreshCurrentReplicas();
     if (closed || recoveryGate !== gate) return;
     recoveryGate = undefined;
     gate.resolve();
     updateStatus({ status: "ready", generation });
+    logger.info("app_server_session_recovery_completed", {
+      generation,
+      reason: baseline.reason,
+      duration_ms: Date.now() - gate.startedAt,
+      replica_count: replicas.size,
+    });
   }
 
   function failRecovery(failure: BackendRecoveryFailure) {
@@ -175,11 +237,23 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     if (!gate || closed) return;
     recoveryGate = undefined;
     gate.resolve();
-    notifyListeners(recoveryFailureListeners, failure);
+    logger.error("app_server_session_recovery_failed", {
+      generation,
+      reason: failure.reason,
+      duration_ms: Date.now() - gate.startedAt,
+      ...diagnosticErrorFields(failure.error),
+    });
+    notifyListeners(recoveryFailureListeners, failure, logger, "recovery_failure");
     updateStatus({ status: "unavailable", generation, error: failure.error });
   }
 
   async function refreshCurrentReplicas() {
+    const startedAt = Date.now();
+    const observedCount = [...replicas.values()].filter((replica) => replica.observers.size > 0).length;
+    logger.info("app_server_state_baselines_refresh_started", {
+      generation,
+      observed_replica_count: observedCount,
+    });
     while (!closed) {
       // Frontend effects may replace an observed scope while recovery baselines arrive.
       // Converge only stale replicas so a newly observed scope cannot invalidate ready peers.
@@ -192,7 +266,14 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       if (active.every((replica) => (
         replica.refreshGeneration === generation
         && !replica.refreshing
-      ))) return;
+      ))) {
+        logger.info("app_server_state_baselines_refresh_completed", {
+          generation,
+          duration_ms: Date.now() - startedAt,
+          replica_count: active.length,
+        });
+        return;
+      }
     }
   }
 
@@ -211,8 +292,16 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   }
 
   async function refreshReplicaUntilReady(replica: ScopeReplica, targetGeneration: number) {
+    let attempt = 0;
     while (!closed && replica.observers.size > 0 && generation === targetGeneration) {
+      attempt += 1;
+      const startedAt = Date.now();
       try {
+        logger.info("app_server_state_baseline_request_started", {
+          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+          generation: targetGeneration,
+          attempt,
+        });
         const result = await connection.request(STATE_SUBSCRIBE, { scope: replica.scope });
         if (closed || replica.observers.size === 0 || generation !== targetGeneration) return;
         const snapshot = initialization?.snapshot;
@@ -223,14 +312,28 @@ export function createAppServerSession(connection: BackendConnection): AppServer
         });
         replica.refreshing = false;
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
-        notifyReplica(replica, "onSnapshot", replica.state.snapshot);
+        notifyReplica(replica, "onSnapshot", logger, replica.state.snapshot);
         replayPendingEvents(replica);
-        notifyReplica(replica, "onBaselineReady");
+        notifyReplica(replica, "onBaselineReady", logger);
+        logger.info("app_server_state_baseline_ready", {
+          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+          generation: targetGeneration,
+          attempt,
+          duration_ms: Date.now() - startedAt,
+        });
         return;
       } catch (error) {
         if (closed || generation !== targetGeneration) return;
-        notifyReplica(replica, "onBaselineError", error);
         const delay = replica.retryDelay;
+        logger.warn("app_server_state_baseline_failed", {
+          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+          generation: targetGeneration,
+          attempt,
+          retry_delay_ms: delay,
+          duration_ms: Date.now() - startedAt,
+          ...diagnosticErrorFields(error),
+        });
+        notifyReplica(replica, "onBaselineError", logger, error);
         replica.retryDelay = Math.min(replica.retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
         await wait(delay);
       }
@@ -239,7 +342,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
 
   function invalidateReplica(replica: ScopeReplica) {
     replica.pendingEvents = [];
-    if (!replica.refreshing) notifyReplica(replica, "onBaselineLost");
+    if (!replica.refreshing) notifyReplica(replica, "onBaselineLost", logger);
     replica.refreshing = true;
     replica.state = undefined;
   }
@@ -268,7 +371,14 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       return false;
     }
     replica.state = result.state;
-    notifyReplica(replica, "onSnapshot", result.state.snapshot, event, result.snapshotChanged);
+    notifyReplica(
+      replica,
+      "onSnapshot",
+      logger,
+      result.state.snapshot,
+      event,
+      result.snapshotChanged,
+    );
     return true;
   }
 
@@ -293,13 +403,38 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     replica.observers.delete(observer);
     if (replica.observers.size > 0 || replicas.get(key) !== replica) return;
     replicas.delete(key);
+    logger.info("app_server_state_subscription_released", {
+      ...scopeDiagnosticFields(replica.scope, key),
+      generation,
+    });
     void connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope }).catch(() => undefined);
   }
 
   function updateStatus(next: AppServerSessionStatus) {
+    if (status.status !== next.status || status.generation !== next.generation) {
+      logger.info("app_server_session_status_changed", {
+        previous_status: status.status,
+        status: next.status,
+        generation: next.generation,
+        ...(next.status === "recovering" ? { reason: next.reason } : {}),
+      });
+    }
     status = next;
-    notifyListeners(statusListeners, next);
+    notifyListeners(statusListeners, next, logger, "session_status");
   }
+}
+
+function scopeDiagnosticFields(scope: SubscriptionScope, key: string) {
+  return {
+    scope_kind: scope.kind,
+    scope_key: key,
+  };
+}
+
+function diagnosticErrorFields(error: unknown) {
+  return {
+    error_kind: error instanceof Error && error.name ? error.name : typeof error,
+  };
 }
 
 function scopeKey(scope: SubscriptionScope) {
@@ -320,12 +455,12 @@ function scopeKey(scope: SubscriptionScope) {
   }
 }
 
-function deferredGate(generation: number): RecoveryGate {
+function deferredGate(generation: number, startedAt: number): RecoveryGate {
   let resolve: () => void = () => undefined;
   const promise = new Promise<void>((done) => {
     resolve = done;
   });
-  return { generation, promise, resolve };
+  return { generation, startedAt, promise, resolve };
 }
 
 function wait(delay: number) {
@@ -335,28 +470,45 @@ function wait(delay: number) {
 function notifyReplica<K extends keyof AppServerStateObserver>(
   replica: ScopeReplica,
   method: K,
+  logger: DiagnosticsLogger,
   ...args: Parameters<NonNullable<AppServerStateObserver[K]>>
 ) {
-  for (const observer of replica.observers) notifyObserver(observer, method, ...args);
+  for (const observer of replica.observers) {
+    notifyObserver(observer, method, logger, ...args);
+  }
 }
 
 function notifyObserver<K extends keyof AppServerStateObserver>(
   observer: AppServerStateObserver,
   method: K,
+  logger: DiagnosticsLogger,
   ...args: Parameters<NonNullable<AppServerStateObserver[K]>>
 ) {
   const listener = observer[method] as ((...values: typeof args) => void) | undefined;
-  if (listener) notifyListener(listener, ...args);
+  if (listener) notifyListener(listener, logger, String(method), ...args);
 }
 
-function notifyListeners<T>(listeners: Iterable<(event: T) => void>, event: T) {
-  for (const listener of listeners) notifyListener(listener, event);
+function notifyListeners<T>(
+  listeners: Iterable<(event: T) => void>,
+  event: T,
+  logger: DiagnosticsLogger,
+  listenerKind: string,
+) {
+  for (const listener of listeners) notifyListener(listener, logger, listenerKind, event);
 }
 
-function notifyListener<T extends unknown[]>(listener: (...args: T) => void, ...args: T) {
+function notifyListener<T extends unknown[]>(
+  listener: (...args: T) => void,
+  logger: DiagnosticsLogger,
+  listenerKind: string,
+  ...args: T
+) {
   try {
     listener(...args);
   } catch (error) {
-    console.error("[OpenAIDE] App Server session observer failed", error);
+    logger.error("app_server_session_listener_failed", {
+      listener_kind: listenerKind,
+      error_kind: error instanceof Error && error.name ? error.name : typeof error,
+    });
   }
 }

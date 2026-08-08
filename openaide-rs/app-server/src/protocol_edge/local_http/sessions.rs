@@ -6,6 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::client_lifecycle::ConnectionId;
+use crate::logging;
 
 pub(super) const MAX_SERVER_REPLAY_FRAMES: usize = 1_024;
 
@@ -68,6 +69,7 @@ impl ReliableSessionRegistry {
 
     pub fn open(&self, connection_id: ConnectionId) -> OpenedSession {
         let session_id = Uuid::new_v4().to_string();
+        let connection_id_value = connection_id.as_str().to_string();
         self.sessions
             .lock()
             .expect("session registry poisoned")
@@ -80,6 +82,13 @@ impl ReliableSessionRegistry {
                     server_frames: VecDeque::new(),
                 },
             );
+        logging::info(
+            "reliable_session_opened",
+            serde_json::json!({
+                "session_id": session_id.clone(),
+                "connection_id": connection_id_value,
+            }),
+        );
         OpenedSession {
             session_id,
             server_id: self.server_id.clone(),
@@ -97,16 +106,52 @@ impl ReliableSessionRegistry {
     ) -> AcceptClientFrame {
         let mut sessions = self.sessions.lock().expect("session registry poisoned");
         let Some(session) = sessions.get_mut(session_id) else {
+            logging::warn(
+                "reliable_session_frame_rejected",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "connection_id": connection_id.as_str(),
+                    "sequence": sequence,
+                    "reason": "unknown_session",
+                }),
+            );
             return AcceptClientFrame::UnknownSession;
         };
         if &session.connection_id != connection_id {
+            logging::warn(
+                "reliable_session_frame_rejected",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "connection_id": connection_id.as_str(),
+                    "sequence": sequence,
+                    "reason": "wrong_connection",
+                }),
+            );
             return AcceptClientFrame::WrongConnection;
         }
         if sequence <= session.last_client_sequence {
+            logging::info(
+                "reliable_session_duplicate_frame",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "sequence": sequence,
+                    "last_client_sequence": session.last_client_sequence,
+                }),
+            );
             return AcceptClientFrame::Duplicate;
         }
         let expected = session.last_client_sequence + 1;
         if sequence != expected {
+            logging::warn(
+                "reliable_session_frame_rejected",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "connection_id": connection_id.as_str(),
+                    "sequence": sequence,
+                    "expected_sequence": expected,
+                    "reason": "sequence_gap",
+                }),
+            );
             return AcceptClientFrame::Gap { expected };
         }
         // Advance before dispatch so a transport retry cannot invoke the handler
@@ -145,9 +190,26 @@ impl ReliableSessionRegistry {
     pub fn poll(&self, session_id: &str, after: u64) -> Result<ServerBatch, PollError> {
         let mut sessions = self.sessions.lock().expect("session registry poisoned");
         let Some(session) = sessions.get_mut(session_id) else {
+            logging::warn(
+                "reliable_session_poll_rejected",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "after_sequence": after,
+                    "reason": "unknown_session",
+                }),
+            );
             return Err(PollError::UnknownSession);
         };
         if after >= session.next_server_sequence {
+            logging::warn(
+                "reliable_session_poll_rejected",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "after_sequence": after,
+                    "next_server_sequence": session.next_server_sequence,
+                    "reason": "invalid_acknowledgement",
+                }),
+            );
             return Err(PollError::InvalidAcknowledgement);
         }
         if session
@@ -155,6 +217,15 @@ impl ReliableSessionRegistry {
             .front()
             .is_some_and(|frame| after.saturating_add(1) < frame.sequence)
         {
+            logging::warn(
+                "reliable_session_poll_rejected",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "after_sequence": after,
+                    "first_available_sequence": session.server_frames.front().map(|frame| frame.sequence),
+                    "reason": "replay_expired",
+                }),
+            );
             return Err(PollError::ReplayExpired);
         }
         while session

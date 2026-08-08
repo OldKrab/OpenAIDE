@@ -44,6 +44,18 @@ describe("New Task initial selection", () => {
     })).toEqual({ projectId: "project-a", agentId: "codex" });
   });
 
+  it("does not restore an unavailable remembered Project when a usable Project exists", () => {
+    expect(selectInitialNewTaskContext({
+      retained: { projectId: "project-unavailable" },
+      defaults: { projectId: "project-unavailable" as never },
+      projects: [
+        { projectId: "project-unavailable", label: "Unavailable", available: false },
+        { projectId: "project-b", label: "B", available: true },
+      ],
+      agents,
+    })).toEqual({ projectId: "project-b", agentId: "codex" });
+  });
+
   it("does not erase retained ids while initialization is still missing a choice", () => {
     const values = new Map<string, string>();
     const storage = {

@@ -12,8 +12,8 @@ use crate::projects::{ConfiguredProjectRoots, StorageProjectResolver};
 use crate::protocol_edge::{AppServerProbeFacts, RpcGateway};
 use crate::server_requests::ServerRequestRuntime;
 use crate::settings::{
-    AppPreferencesService, McpServersSettingsService, RuntimeSettingsService, SettingsCatalog,
-    SkillsSettingsService,
+    AppPreferencesService, McpServersSettingsService, NewTaskDefaultsService,
+    RuntimeSettingsService, SettingsCatalog, SkillsSettingsService,
 };
 use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{
@@ -61,6 +61,7 @@ pub(super) fn gateway(
     let server_requests = ServerRequestRuntime::new();
     let shell_file_reveals = ShellFileRevealRegistry::new();
     let app_preferences = Arc::new(AppPreferencesService::new(store.clone()));
+    let new_task_defaults = Arc::new(NewTaskDefaultsService::new(store.clone()));
     let runtime_settings = Arc::new(RuntimeSettingsService::new(acp_trace_state.clone()));
     let mcp_servers_settings = Arc::new(McpServersSettingsService::new(store.clone()));
     let skills_settings = Arc::new(SkillsSettingsService::with_project_roots(
@@ -170,7 +171,8 @@ pub(super) fn gateway(
         worktrees,
         task_product_api.clone(),
     )
-    .with_task_storage_maintenance(task_product_api);
+    .with_task_storage_maintenance(task_product_api)
+    .with_new_task_defaults(new_task_defaults);
     Ok(GatewayFactoryOutput {
         gateway,
         task_updates,

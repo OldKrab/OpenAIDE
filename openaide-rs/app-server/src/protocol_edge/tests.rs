@@ -6,19 +6,23 @@ use openaide_app_server_protocol::client::{
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta};
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::ids::{ClientInstanceId, ClientRequestId, StateRootId, TaskId};
+use openaide_app_server_protocol::ids::{
+    ClientInstanceId, ClientRequestId, ProjectId, StateRootId, TaskId,
+};
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE,
     DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
     MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
-    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
-    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY, TASK_SET_CONFIG_OPTION,
+    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY,
+    TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
-    RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettingsPatch, RuntimeSettingsUpdateParams,
+    NewTaskDefaultsUpdateParams, RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettingsPatch,
+    RuntimeSettingsUpdateParams,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{
@@ -42,8 +46,8 @@ use crate::diagnostics::RuntimeDiagnosticsWorkflow;
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{OpenRequestOutcome, ServerRequestAnswer, ServerRequestDraft};
 use crate::settings::{
-    AppPreferencesService, McpServersSettingsService, RuntimeSettingsService, SettingsCatalog,
-    SkillsSettingsService,
+    AppPreferencesService, McpServersSettingsService, NewTaskDefaultsService,
+    RuntimeSettingsService, SettingsCatalog, SkillsSettingsService,
 };
 use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{
@@ -236,6 +240,31 @@ fn project_add_publishes_project_without_task_history() {
     assert_eq!(
         subscribed["result"]["snapshot"]["projects"]["projects"][0]["label"],
         json!("app")
+    );
+}
+
+#[test]
+fn updating_new_task_project_default_persists_across_snapshot_reads() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let updated = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+            NewTaskDefaultsUpdateParams {
+                project_id: ProjectId::from("project-api"),
+            },
+        ),
+        AppServerTime(2),
+    ));
+
+    assert_eq!(updated["result"]["projectId"], json!("project-api"));
+    assert_eq!(
+        store.read_new_task_defaults().unwrap().project_id,
+        Some(ProjectId::from("project-api"))
     );
 }
 
@@ -2408,6 +2437,7 @@ fn gateway_with_project_store_and_listing(
         Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
         Arc::new(FixedShutdown),
     )
+    .with_new_task_defaults(Arc::new(NewTaskDefaultsService::new(store)))
 }
 
 fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>) -> RpcGateway {

@@ -37,12 +37,13 @@ use crate::server_requests::{
 use crate::settings::{
     AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams, McpCreateServerParams,
     McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
-    McpSetServerEnabledParams, McpUpdateServerParams, ResetTaskHistoryParams,
-    ResetTaskHistoryResult, RuntimeSettingsParams, RuntimeSettingsResult,
+    McpSetServerEnabledParams, McpUpdateServerParams, NewTaskDefaultsUpdateParams,
+    ResetTaskHistoryParams, ResetTaskHistoryResult, RuntimeSettingsParams, RuntimeSettingsResult,
     RuntimeSettingsUpdateParams, SettingsMcpServersParams, SettingsMcpServersResult,
     SettingsSkillDetailsParams, SettingsSkillDetailsResult, SettingsSkillsParams,
     SettingsSkillsResult,
 };
+use crate::snapshot::NewTaskDefaultsSnapshot;
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
 };
@@ -283,6 +284,12 @@ protocol_method!(
     SETTINGS_UPDATE_PREFERENCES,
     AppPreferencesUpdateParams,
     AppPreferencesResult
+);
+protocol_method!(
+    SettingsUpdateNewTaskDefaults,
+    SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+    NewTaskDefaultsUpdateParams,
+    NewTaskDefaultsSnapshot
 );
 protocol_method!(
     SettingsGetRuntime,

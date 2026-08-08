@@ -26,10 +26,11 @@ export function createAppServerManager({
   let startPromise;
 
   async function startAppServer() {
-    if (appServerConnection) {
-      return { appServer, appServerConnection, appServerUrl };
+    if (appServerConnection) return { appServer, appServerConnection, appServerUrl };
+    if (startPromise) {
+      logger.info("app_server_handoff_joined");
+      return startPromise;
     }
-    if (startPromise) return startPromise;
 
     startPromise = startAppServerProcess()
       .finally(() => {
@@ -39,15 +40,21 @@ export function createAppServerManager({
   }
 
   async function startAppServerProcess() {
+    const startedAt = Date.now();
     logger.info("app_server_handoff_started");
     const child = spawnAppServer();
     appServer = child;
-    child.once("exit", () => {
+    logger.info("app_server_handoff_process_spawned", {
+      process_id: typeof child.pid === "number" ? child.pid : undefined,
+    });
+    child.once("exit", (code, signal) => {
       if (appServer === child) {
         appServer = undefined;
         // The short-lived attach helper normally exits after yielding the live connection.
         logger.info("app_server_handoff_process_exited", {
           connection_status: appServerConnection ? "ready" : "pending",
+          exit_code: code,
+          exit_signal: signal,
         });
       }
     });
@@ -57,10 +64,15 @@ export function createAppServerManager({
       await initializeShellClient(connection);
       appServerConnection = connection;
       appServerUrl = connectionUrl(connection);
-      logger.info("app_server_handoff_completed");
+      logger.info("app_server_handoff_completed", {
+        duration_ms: Date.now() - startedAt,
+      });
       return { appServer, appServerConnection, appServerUrl };
     } catch (error) {
-      logger.warn("app_server_handoff_failed", { error_kind: errorKind(error) });
+      logger.warn("app_server_handoff_failed", {
+        duration_ms: Date.now() - startedAt,
+        error_kind: errorKind(error),
+      });
       if (appServer === child) {
         stopShellClient();
         appServer = undefined;
@@ -87,10 +99,13 @@ export function createAppServerManager({
       void sendShellRequest(connection, CLIENT_HEARTBEAT, {})
         .then(() => {
           if (appServerConnection !== connection) return;
+          const recoveredAfterFailureCount = consecutiveHeartbeatFailures;
           consecutiveHeartbeatFailures = 0;
           if (!heartbeatFailureActive) return;
           heartbeatFailureActive = false;
-          logger.info("app_server_heartbeat_recovered");
+          logger.info("app_server_heartbeat_recovered", {
+            failure_count: recoveredAfterFailureCount,
+          });
         })
         .catch((error) => {
           if (appServerConnection !== connection) return;
@@ -98,13 +113,16 @@ export function createAppServerManager({
           // Log only the transition into failure; the interval itself is intentionally retrying.
           if (!heartbeatFailureActive) {
             heartbeatFailureActive = true;
-            logger.warn("app_server_heartbeat_failed", { error_kind: errorKind(error) });
+            logger.warn("app_server_heartbeat_failed", {
+              error_kind: errorKind(error),
+              failure_count: consecutiveHeartbeatFailures,
+            });
           }
           if (consecutiveHeartbeatFailures < MAX_CONSECUTIVE_HEARTBEAT_FAILURES) return;
           logger.warn("app_server_connection_invalidated", {
             heartbeat_failure_count: consecutiveHeartbeatFailures,
           });
-          clearConnection();
+          clearConnection("heartbeat_failures");
         });
     }, shellHeartbeatIntervalMs);
     shellHeartbeat.unref?.();
@@ -119,20 +137,44 @@ export function createAppServerManager({
     consecutiveHeartbeatFailures = 0;
   }
 
-  function clearConnection() {
+  function clearConnection(reason = "explicit") {
+    logger.warn("app_server_connection_cleared", { reason });
     stopShellClient();
     appServerConnection = undefined;
     appServerUrl = undefined;
     appServer = undefined;
   }
 
-  function sendShellRequest(connection, method, params) {
-    return requestAppServer(connection, WEB_SHELL_CONNECTION_ID, {
-      jsonrpc: "2.0",
-      id: `web-shell-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      method,
-      params,
-    });
+  async function sendShellRequest(connection, method, params) {
+    const startedAt = Date.now();
+    const shouldLog = method !== CLIENT_HEARTBEAT;
+    if (shouldLog) {
+      logger.info("app_server_shell_request_started", { method });
+    }
+    try {
+      const result = await requestAppServer(connection, WEB_SHELL_CONNECTION_ID, {
+        jsonrpc: "2.0",
+        id: `web-shell-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        method,
+        params,
+      });
+      if (shouldLog) {
+        logger.info("app_server_shell_request_completed", {
+          method,
+          duration_ms: Date.now() - startedAt,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (shouldLog) {
+        logger.warn("app_server_shell_request_failed", {
+          method,
+          duration_ms: Date.now() - startedAt,
+          error_kind: errorKind(error),
+        });
+      }
+      throw error;
+    }
   }
 
   return {

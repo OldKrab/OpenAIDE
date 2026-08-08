@@ -34,17 +34,20 @@ describe("VS Code workspace Project synchronization", () => {
   it("reports the initial workspace roots before webviews start", async () => {
     const runtime = { syncWorkspaceRoots: vi.fn(async () => undefined) };
     const logger = { warn: vi.fn() };
+    const onWorkspaceRootsChanged = vi.fn();
 
-    const sync = registerWorkspaceProjectSync(runtime, logger);
+    const sync = registerWorkspaceProjectSync(runtime, logger, onWorkspaceRootsChanged);
     await sync.ready;
 
     expect(runtime.syncWorkspaceRoots).toHaveBeenCalledWith([{ path: "/workspace/app" }]);
+    expect(onWorkspaceRootsChanged).toHaveBeenCalledWith(mocks.roots);
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("reports the complete replacement set when workspace folders change", async () => {
     const runtime = { syncWorkspaceRoots: vi.fn(async () => undefined) };
-    const sync = registerWorkspaceProjectSync(runtime, { warn: vi.fn() });
+    const onWorkspaceRootsChanged = vi.fn();
+    const sync = registerWorkspaceProjectSync(runtime, { warn: vi.fn() }, onWorkspaceRootsChanged);
     await sync.ready;
     mocks.roots = [
       { path: "/workspace/api", label: "API", projectId: "project-api" },
@@ -59,6 +62,7 @@ describe("VS Code workspace Project synchronization", () => {
         { path: "/workspace/web" },
       ]);
     });
+    expect(onWorkspaceRootsChanged).toHaveBeenLastCalledWith(mocks.roots);
     sync.dispose();
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });

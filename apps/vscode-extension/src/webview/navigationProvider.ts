@@ -7,7 +7,7 @@ import { RuntimeClient } from "../runtime/rpcClient";
 import { renderWebviewHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import { VSCODE_SHELL, type TaskFocusSource, type WebviewHost } from "./types";
-import { currentWorkspaceRoot, workspaceRoots } from "../workspace/roots";
+import { currentWorkspaceRoot, workspaceRoots, type WorkspaceRoot } from "../workspace/roots";
 
 export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = "openaide.tasks";
@@ -71,6 +71,13 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         agentSecretStore: this.context.secrets,
         surfaces: this.surfaces,
       });
+    });
+  }
+
+  updateWorkspaceRoots(roots: WorkspaceRoot[]) {
+    void this.view?.webview.postMessage({
+      type: "surface.workspaceChanged",
+      payload: { project_ids: roots.map(({ projectId }) => projectId) },
     });
   }
 

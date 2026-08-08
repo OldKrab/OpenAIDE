@@ -161,6 +161,8 @@ fn is_sensitive_key(key: &str) -> bool {
         "secret",
         "token",
         "password",
+        "credential",
+        "authorization",
         "content",
         "output",
         "path",
@@ -207,7 +209,15 @@ fn is_path_like(word: &str) -> bool {
 fn contains_sensitive_word(word: &str) -> bool {
     let word = word.to_ascii_lowercase();
     [
-        "prompt", "secret", "token", "password", "content", "output", "path",
+        "prompt",
+        "secret",
+        "token",
+        "password",
+        "credential",
+        "authorization",
+        "content",
+        "output",
+        "path",
     ]
     .iter()
     .any(|needle| word.contains(needle))

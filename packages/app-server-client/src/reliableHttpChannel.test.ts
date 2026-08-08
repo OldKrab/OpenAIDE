@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createDiagnosticsLogger } from "./diagnostics";
 import type { RpcMessage } from "./rpcPeer";
 import {
   createReliableHttpMessageChannel,
@@ -9,6 +10,11 @@ import {
 describe("ReliableHttpMessageChannel", () => {
   it("retries the identical sequenced upload and receives the response through polling", async () => {
     const uploadBodies: string[] = [];
+    const loggerSink = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
     let uploadAttempt = 0;
     let pollAttempt = 0;
     const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
@@ -41,6 +47,7 @@ describe("ReliableHttpMessageChannel", () => {
       authToken: "token-1",
       connectionId: "client-1",
       fetch,
+      logger: createDiagnosticsLogger("test", loggerSink),
       retryDelayMs: 0,
     });
     const received: RpcMessage[] = [];
@@ -58,6 +65,12 @@ describe("ReliableHttpMessageChannel", () => {
     ]));
     await vi.waitFor(() => expect(uploadBodies).toHaveLength(2));
     expect(uploadBodies[1]).toBe(uploadBodies[0]);
+    expect(
+      loggerSink.info.mock.calls
+        .map(([line]) => JSON.parse(line as string) as { event: string; fields: { attempt?: number } })
+        .filter(({ event }) => event === "reliable_http_upload_started")
+        .map(({ fields }) => fields.attempt),
+    ).toEqual([1, 2]);
     channel.close();
   });
 

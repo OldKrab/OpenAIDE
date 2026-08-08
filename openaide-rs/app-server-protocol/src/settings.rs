@@ -13,6 +13,13 @@ pub struct RuntimeSettingsParams {}
 #[serde(rename_all = "camelCase")]
 pub struct AppPreferencesParams {}
 
+/// Updates the state-root-wide Project used as the fallback for a generic New Task.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTaskDefaultsUpdateParams {
+    pub project_id: ProjectId,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsMcpServersParams {}

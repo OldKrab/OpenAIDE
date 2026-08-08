@@ -135,6 +135,25 @@ describe("AppSurfaces callback wiring", () => {
     expect(controller.callbacks.newTask.workspaceBrowser.listRoots).toHaveBeenCalledOnce();
   });
 
+  it("limits VS Code New Task Project choices to opened workspace Projects", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: VSCODE_SHELL,
+      projectIds: ["project_1"],
+    };
+    controller.state.projects = [
+      { projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE" },
+      { projectId: "project_2", label: "Other", workspaceRoot: "/workspace/Other" },
+    ];
+
+    render(controller);
+
+    expect(latestMockProps<{ state: { projects: Array<{ projectId: string }> } }>(surfaceMocks.newTask)
+      ?.state.projects)
+      .toEqual([{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE" }]);
+  });
+
   it("opens Project Worktree Management in the Worktrees Settings tab", () => {
     surfaceMocks.renderRealSidebar = true;
     const controller = controllerFor("navigation");

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::Instant;
 
 use crate::agent::acp_schema::InitializeResponse;
 use agent_client_protocol::{Agent, ConnectionTo};
@@ -213,7 +214,18 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 tokio::select! {
                     open = open_rx.recv() => {
                         let Some(open) = open else { break };
-                        if let Err(error) = open_on_shared_process(
+                        let operation = open.request.operation_name();
+                        let task_id = open.request.task_id().to_string();
+                        let started_at = Instant::now();
+                        logging::info(
+                            "acp_shared_session_open_started",
+                            serde_json::json!({
+                                "operation": operation,
+                                "task_id": task_id,
+                                "agent_id": open.request.agent_id(),
+                            }),
+                        );
+                        if open_on_shared_process(
                             &connection,
                             initialize.clone(),
                             &host_bridge,
@@ -224,10 +236,27 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                             &session_event_sinks,
                             &session_traces,
                             open,
-                        ).await {
+                        )
+                        .await
+                        .is_err()
+                        {
                             logging::warn(
                                 "acp_shared_session_open_failed",
-                                serde_json::json!({ "error": error.to_string() }),
+                                serde_json::json!({
+                                    "operation": operation,
+                                    "task_id": task_id,
+                                    "duration_ms": started_at.elapsed().as_millis(),
+                                    "error_kind": "acp_error",
+                                }),
+                            );
+                        } else {
+                            logging::info(
+                                "acp_shared_session_open_completed",
+                                serde_json::json!({
+                                    "operation": operation,
+                                    "task_id": task_id,
+                                    "duration_ms": started_at.elapsed().as_millis(),
+                                }),
                             );
                         }
                     }
