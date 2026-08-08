@@ -67,6 +67,8 @@ impl TaskProductApi {
     ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         let task = self.read_task_for_client(&task_id, client_instance_id)?;
+        let recovering_native_session =
+            task_allows_history_recovery(&task) && task.agent_session_id.is_some();
         self.mark_task_used_now(&task_id)
             .map_err(protocol_error_from_runtime)?;
 
@@ -86,13 +88,21 @@ impl TaskProductApi {
                 if ctx.task().tombstoned {
                     return Err(RuntimeError::TaskNotFound(task_id.clone()));
                 }
-                if !ctx.task().unread && ctx.task().attention.is_none() {
-                    return Ok(TaskMutationResult::Unchanged);
+                let mut changed = false;
+                if ctx.task().unread || ctx.task().attention.is_some() {
+                    let task = ctx.task_mut();
+                    task.unread = false;
+                    task.attention = None;
+                    changed = true;
                 }
-                let task = ctx.task_mut();
-                task.unread = false;
-                task.attention = None;
-                Ok(TaskMutationResult::Changed)
+                if recovering_native_session {
+                    changed |= ctx.task_mut().mark_native_session_data_recovering();
+                }
+                Ok(if changed {
+                    TaskMutationResult::Changed
+                } else {
+                    TaskMutationResult::Unchanged
+                })
             })
             .map_err(protocol_error_from_runtime)?;
         let snapshot = result
@@ -346,6 +356,7 @@ impl TaskProductApi {
                             }),
                         );
                     }
+                    api.mark_native_session_recovery_stale(&task.task_id, &stored_session_id);
                     api.publish_history_sync(
                         &task.task_id,
                         openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
@@ -353,14 +364,17 @@ impl TaskProductApi {
                         },
                     );
                 }
-                (false, Some(Err(error))) => logging::warn(
-                    "adopted_task_background_resume_failed",
-                    serde_json::json!({
-                        "task_id": task.task_id,
-                        "agent_id": task.agent_id,
-                        "error": error.message,
-                    }),
-                ),
+                (false, Some(Err(error))) => {
+                    api.mark_native_session_recovery_stale(&task.task_id, &stored_session_id);
+                    logging::warn(
+                        "adopted_task_background_resume_failed",
+                        serde_json::json!({
+                            "task_id": task.task_id,
+                            "agent_id": task.agent_id,
+                            "error": error.message,
+                        }),
+                    );
+                }
                 (false, _) => {}
             }
         });
@@ -393,6 +407,32 @@ impl TaskProductApi {
             },
         )?;
         Ok(())
+    }
+
+    /// Ends the open-time loading state only if this is still the failed attachment attempt.
+    fn mark_native_session_recovery_stale(&self, task_id: &str, session_id: &str) {
+        if let Err(error) = self.mutations.commit_existing_task(
+            task_id,
+            super::response_snapshot_options(),
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(session_id)
+                    || !ctx.task().native_session_data_freshness.is_recovering()
+                {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                ctx.task_mut().mark_native_session_data_stale();
+                Ok(TaskMutationResult::Changed)
+            },
+        ) {
+            logging::warn(
+                "adopted_task_recovery_state_persist_failed",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "error_code": error.code(),
+                    "error_kind": error.reason(),
+                }),
+            );
+        }
     }
 }
 

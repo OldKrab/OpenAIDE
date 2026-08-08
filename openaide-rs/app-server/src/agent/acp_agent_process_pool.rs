@@ -4,13 +4,13 @@ use std::thread;
 
 use tokio::sync::mpsc as tokio_mpsc;
 
-use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwner};
-use crate::agent::acp_runtime_threading::block_on_new_runtime;
-use crate::agent::acp_session_client::record_terminal_error;
-use crate::agent::acp_session_worker::{
+use crate::agent::acp_agent_process::{
     run_acp_agent_process, AcpAgentProcessControl, AcpAgentProcessInput, AcpAgentProcessList,
     AcpAgentProcessOpen,
 };
+use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwner};
+use crate::agent::acp_runtime_threading::block_on_new_runtime;
+use crate::agent::attached_native_session::record_terminal_error;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{AgentAuthenticateRequest, AgentListSessionsRequest};
 use crate::logging;

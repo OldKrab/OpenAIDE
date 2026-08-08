@@ -15,14 +15,14 @@ fn volatile_recovery_interrupts_active_turns_without_clearing_native_session_ide
         volatile_recovery_plan(&task),
         Some(VolatileRecoveryPlan {
             interrupt_active_turn: true,
-            invalidate_live_session_data: false,
+            mark_live_session_data_stale: false,
             clear_pending_config_change: false,
         })
     );
 }
 
 #[test]
-fn volatile_recovery_invalidates_native_session_catalogs() {
+fn volatile_recovery_marks_native_session_catalogs_stale() {
     let mut task = task_record();
     task.config_options_catalog = Some(crate::protocol::model::ConfigOptionsCatalog {
         agent_id: "codex".to_string(),
@@ -34,7 +34,7 @@ fn volatile_recovery_invalidates_native_session_catalogs() {
         volatile_recovery_plan(&task),
         Some(VolatileRecoveryPlan {
             interrupt_active_turn: false,
-            invalidate_live_session_data: true,
+            mark_live_session_data_stale: true,
             clear_pending_config_change: false,
         })
     );
@@ -55,7 +55,7 @@ fn volatile_recovery_retires_an_interrupted_config_mutation() {
         volatile_recovery_plan(&task),
         Some(VolatileRecoveryPlan {
             interrupt_active_turn: false,
-            invalidate_live_session_data: false,
+            mark_live_session_data_stale: false,
             clear_pending_config_change: true,
         })
     );
@@ -98,6 +98,7 @@ fn task_record() -> TaskRecord {
         tombstoned: false,
         revision: 0,
         config_options_catalog: None,
+        native_session_data_freshness: Default::default(),
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

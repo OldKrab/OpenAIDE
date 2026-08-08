@@ -5,15 +5,46 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwner;
+use crate::agent::acp_schema::InitializeResponse;
+use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
+use crate::agent::acp_session_opening::OpenedAcpSession;
+use crate::agent::acp_trace::AcpTraceSession;
+use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::{
-    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink,
-    AgentSessionLoad, TurnCancellation,
+    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSession,
+    AgentSessionEventSink, AgentSessionLoad, TurnCancellation,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 
+mod runtime;
+
+/// Inputs consumed by the attachment's private event loop.
+///
+/// The shared Agent process supplies the ACP binding and process-scoped registries;
+/// callers interact only with [`AttachedNativeSession`] after startup completes.
+pub(super) struct AttachedNativeSessionRunInput {
+    pub(super) opened: OpenedAcpSession,
+    pub(super) request_agent_id: String,
+    pub(super) initialize: InitializeResponse,
+    pub(super) auth_method_id: Option<String>,
+    pub(super) load_replay: LoadReplayCaptures,
+    pub(super) command_rx: tokio_mpsc::UnboundedReceiver<AcpSessionCommand>,
+    pub(super) config_rx: tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
+    pub(super) cancel_rx: tokio_mpsc::UnboundedReceiver<()>,
+    pub(super) close_rx: tokio_mpsc::UnboundedReceiver<mpsc::Sender<Result<(), RuntimeError>>>,
+    pub(super) current_prompts: Arc<Mutex<std::collections::HashMap<String, LivePromptProjection>>>,
+    pub(super) trace: Option<AcpTraceSession>,
+    pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
+    pub(super) session_idle_timeout: Duration,
+}
+
+/// Process-local handle to one live Native Session attachment.
+///
+/// It is not an ACP connection client. The Agent process owns the shared ACP connection;
+/// this handle serializes commands and snapshot reads for one session on that connection.
 #[derive(Clone)]
-pub(super) struct AcpSessionClient {
+pub(super) struct AttachedNativeSession {
     command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
     config_tx: tokio_mpsc::UnboundedSender<AcpSessionConfigCommand>,
     cancel_tx: tokio_mpsc::UnboundedSender<()>,
@@ -23,7 +54,7 @@ pub(super) struct AcpSessionClient {
     prompt_lifecycle: Arc<PromptLifecycle>,
 }
 
-impl AcpSessionClient {
+impl AttachedNativeSession {
     pub(super) fn new(
         command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
         config_tx: tokio_mpsc::UnboundedSender<AcpSessionConfigCommand>,
@@ -43,13 +74,40 @@ impl AcpSessionClient {
         }
     }
 
+    /// Runs this attachment's event loop until the session closes or fails.
+    pub(super) async fn run(
+        runtime: AttachedNativeSessionRunInput,
+    ) -> agent_client_protocol::Result<()> {
+        runtime::run(runtime).await
+    }
+
     pub(super) fn set_event_sink(
         &self,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
+        if self.has_terminal_error() {
+            return Err(self.attachment_stopped_error());
+        }
         self.command_tx
             .send(AcpSessionCommand::SetEventSink { sink })
-            .map_err(|_| self.worker_stopped_error())
+            .map_err(|_| self.attachment_stopped_error())
+    }
+
+    /// Returns the last complete session snapshot observed by the attachment.
+    ///
+    /// This does not contact the Agent. The session event loop owns the snapshot
+    /// and serializes it with updates from the shared ACP connection.
+    pub(super) fn snapshot(&self) -> Result<AgentSession, RuntimeError> {
+        if self.has_terminal_error() {
+            return Err(self.attachment_stopped_error());
+        }
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.command_tx
+            .send(AcpSessionCommand::Snapshot { reply_tx })
+            .map_err(|_| self.attachment_stopped_error())?;
+        reply_rx
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|error| RuntimeError::NotReady(format!("ACP snapshot timed out: {error}")))?
     }
 
     /// Replays history through the binding that already owns this Native Session.
@@ -61,9 +119,9 @@ impl AcpSessionClient {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
         }
         if self.has_terminal_error() {
-            return Err(self.worker_stopped_error());
+            return Err(self.attachment_stopped_error());
         }
-        // Loading replaces the worker's attached ACP session, so it must not overlap
+        // Loading replaces the attachment's ACP session, so it must not overlap
         // a prompt that is using the same binding.
         let Some(_admission) = self.prompt_lifecycle.admit(&request.cancellation)? else {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
@@ -71,16 +129,16 @@ impl AcpSessionClient {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.command_tx
             .send(AcpSessionCommand::Load { request, reply_tx })
-            .map_err(|_| self.worker_stopped_error())?;
+            .map_err(|_| self.attachment_stopped_error())?;
         loop {
             match reply_rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(result) => return result,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(self.worker_stopped_error());
+                    return Err(self.attachment_stopped_error());
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if self.has_terminal_error() {
-                        return Err(self.worker_stopped_error());
+                        return Err(self.attachment_stopped_error());
                     }
                 }
             }
@@ -115,7 +173,7 @@ impl AcpSessionClient {
             return Ok(AgentPromptOutcome::Cancelled);
         }
         if self.has_terminal_error() {
-            let error = self.worker_stopped_error();
+            let error = self.attachment_stopped_error();
             crate::logging::error(
                 "acp_prompt_terminal_error_before_admission",
                 serde_json::json!({
@@ -128,7 +186,7 @@ impl AcpSessionClient {
             );
             return Err(error);
         }
-        // A cancelled prompt still owns the Native Session until its worker observes
+        // A cancelled prompt still owns the Native Session until its event loop observes
         // the Agent's response. Session updates use the independent permanent listener.
         crate::logging::info(
             "acp_prompt_lifecycle_admission_started",
@@ -176,7 +234,7 @@ impl AcpSessionClient {
             return Ok(AgentPromptOutcome::Cancelled);
         }
         if self.has_terminal_error() {
-            return Err(self.worker_stopped_error());
+            return Err(self.attachment_stopped_error());
         }
         let terminal_activation_started_at = Instant::now();
         crate::logging::info(
@@ -233,7 +291,7 @@ impl AcpSessionClient {
             })
             .is_err()
         {
-            let error = self.worker_stopped_error();
+            let error = self.attachment_stopped_error();
             crate::logging::error(
                 "acp_prompt_command_dispatch_failed",
                 serde_json::json!({
@@ -289,7 +347,7 @@ impl AcpSessionClient {
                     return result;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    let error = self.worker_stopped_error();
+                    let error = self.attachment_stopped_error();
                     crate::logging::error(
                         "acp_prompt_wait_disconnected",
                         serde_json::json!({
@@ -305,7 +363,7 @@ impl AcpSessionClient {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if self.has_terminal_error() {
-                        let error = self.worker_stopped_error();
+                        let error = self.attachment_stopped_error();
                         crate::logging::error(
                             "acp_prompt_wait_terminal_error",
                             serde_json::json!({
@@ -330,7 +388,7 @@ impl AcpSessionClient {
             return Ok(());
         }
         if self.has_terminal_error() {
-            return Err(self.worker_stopped_error());
+            return Err(self.attachment_stopped_error());
         }
         let request_guard = self.prompt_lifecycle.register_steering_request()?;
         self.command_tx
@@ -338,7 +396,7 @@ impl AcpSessionClient {
                 prompt,
                 request_guard,
             })
-            .map_err(|_| self.worker_stopped_error())
+            .map_err(|_| self.attachment_stopped_error())
     }
 
     pub(super) fn set_config_option(
@@ -369,7 +427,7 @@ impl AcpSessionClient {
                 queued_at,
                 reply_tx,
             })
-            .map_err(|_| self.worker_stopped_error())?;
+            .map_err(|_| self.attachment_stopped_error())?;
         // Some Agents serialize configuration behind an active tool call. Keep
         // the request alive while the Frontend presents that pending state.
         let result = match reply_rx.recv_timeout(Duration::from_secs(60)) {
@@ -405,7 +463,7 @@ impl AcpSessionClient {
         let cancel_result = self
             .cancel_tx
             .send(())
-            .map_err(|_| self.worker_stopped_error());
+            .map_err(|_| self.attachment_stopped_error());
         let cleanup_result = self.terminal_owner.cancel();
         cancel_result.and(cleanup_result)
     }
@@ -415,7 +473,7 @@ impl AcpSessionClient {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.close_tx
             .send(reply_tx)
-            .map_err(|_| self.worker_stopped_error())?;
+            .map_err(|_| self.attachment_stopped_error())?;
         let close_result = reply_rx
             .recv_timeout(Duration::from_secs(2))
             .map_err(|error| RuntimeError::NotReady(format!("ACP close timed out: {error}")))?;
@@ -427,20 +485,20 @@ impl AcpSessionClient {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.command_tx
             .send(AcpSessionCommand::Delete { reply_tx })
-            .map_err(|_| self.worker_stopped_error())?;
+            .map_err(|_| self.attachment_stopped_error())?;
         let delete_result = reply_rx
             .recv_timeout(Duration::from_secs(5))
             .map_err(|error| RuntimeError::NotReady(format!("ACP delete timed out: {error}")))?;
         cleanup_result.and(delete_result)
     }
 
-    fn worker_stopped_error(&self) -> RuntimeError {
-        worker_stopped_error(&self.terminal_error)
+    fn attachment_stopped_error(&self) -> RuntimeError {
+        attachment_stopped_error(&self.terminal_error)
     }
 
-    /// A process error or a dropped per-session worker makes this handle unusable.
+    /// A process error or a dropped per-session attachment makes this handle unusable.
     ///
-    /// Individual session workers share an Agent process, so their receiver can disappear
+    /// Individual Native Session attachments share an Agent process, so their receiver can disappear
     /// without setting the process-wide terminal error.
     pub(super) fn is_running(&self) -> bool {
         !self.has_terminal_error() && !self.command_tx.is_closed()
@@ -598,6 +656,9 @@ impl Drop for PromptRequestGuard {
 }
 
 pub(super) enum AcpSessionCommand {
+    Snapshot {
+        reply_tx: mpsc::Sender<Result<AgentSession, RuntimeError>>,
+    },
     SetEventSink {
         sink: Arc<dyn AgentSessionEventSink>,
     },
@@ -639,15 +700,15 @@ pub(super) fn record_terminal_error(
     *terminal_error
         .lock()
         .expect("ACP terminal error lock poisoned") =
-        Some(readable_worker_stopped_message(&error.to_string()));
+        Some(readable_attachment_stopped_message(&error.to_string()));
 }
 
-fn worker_stopped_error(terminal_error: &Arc<Mutex<Option<String>>>) -> RuntimeError {
+fn attachment_stopped_error(terminal_error: &Arc<Mutex<Option<String>>>) -> RuntimeError {
     let message = terminal_error
         .lock()
         .expect("ACP terminal error lock poisoned")
         .clone()
-        .unwrap_or_else(|| "Native Session worker stopped".to_string());
+        .unwrap_or_else(|| "Native Session attachment stopped".to_string());
     RuntimeError::NotReady(message)
 }
 
@@ -663,7 +724,7 @@ fn prompt_outcome_label(result: &Result<AgentPromptOutcome, RuntimeError>) -> &'
     }
 }
 
-fn readable_worker_stopped_message(raw: &str) -> String {
+fn readable_attachment_stopped_message(raw: &str) -> String {
     let message = raw.trim();
     if message.contains("Authentication required") {
         return "Authentication required. Open Settings and authenticate this Agent before starting a Task.".to_string();
@@ -688,5 +749,5 @@ fn strip_runtime_error_prefixes(mut message: &str) -> &str {
 }
 
 #[cfg(test)]
-#[path = "acp_session_client_tests.rs"]
+#[path = "attached_native_session_tests.rs"]
 mod tests;

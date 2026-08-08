@@ -176,6 +176,21 @@ fn legacy_select_config_option_without_kind_remains_readable() {
 }
 
 #[test]
+fn legacy_shared_native_session_catalog_freshness_migrates_to_both_catalogs() {
+    let task = task_record("task-legacy-catalog-freshness", TaskStatus::Inactive, "1");
+    let mut persisted = serde_json::to_value(task).unwrap();
+    persisted["native_session_data_freshness"] = serde_json::json!("stale");
+
+    let loaded: TaskRecord = serde_json::from_value(persisted).unwrap();
+
+    assert!(loaded.native_session_data_freshness.is_stale());
+    assert_eq!(
+        serde_json::to_value(loaded).unwrap()["native_session_data_freshness"],
+        serde_json::json!({ "config": "stale", "commands": "stale" })
+    );
+}
+
+#[test]
 fn blocked_store_open_does_not_create_product_dirs() {
     let dir = tempfile::tempdir().unwrap();
     let runtime_dir = dir.path().join(".openaide-runtime");
@@ -1251,6 +1266,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,
+        native_session_data_freshness: Default::default(),
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

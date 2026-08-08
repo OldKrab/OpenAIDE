@@ -23,8 +23,9 @@ use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::storage::composer_history::ComposerHistoryEntryRecord;
 use crate::storage::records::{
-    QueuedMessageRecord, TaskLifecycle, TaskMessageQueuePauseRecord, TaskPreparationRecord,
-    TaskRecord, TaskTitle, TaskTitleSource,
+    QueuedMessageRecord, TaskLifecycle, TaskMessageQueuePauseRecord,
+    TaskNativeSessionCatalogFreshness, TaskPreparationRecord, TaskRecord, TaskTitle,
+    TaskTitleSource,
 };
 use crate::storage::Store;
 use crate::task_events::{TaskUpdateKind, TaskUpdateNotifier};
@@ -586,7 +587,7 @@ fn archived_task_is_read_only_until_restored() {
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
@@ -2614,7 +2615,7 @@ fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committin
     });
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
@@ -3247,13 +3248,27 @@ fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() 
         snapshot.chat.items[0].parts.first(),
         Some(MessagePart::Text { text }) if text == "Stale cached history."
     ));
-    let syncing = updates
-        .recv_timeout(Duration::from_millis(250))
-        .expect("stale cached history should start loading");
-    assert!(matches!(
-        syncing.kind,
-        crate::task_events::TaskUpdateKind::HistorySync(TaskHistorySyncSnapshot::Syncing { .. })
-    ));
+    let syncing_deadline = Instant::now() + Duration::from_millis(250);
+    let mut saw_history_sync = false;
+    while Instant::now() < syncing_deadline {
+        let remaining = syncing_deadline.saturating_duration_since(Instant::now());
+        let Ok(update) = updates.recv_timeout(remaining) else {
+            break;
+        };
+        if matches!(
+            update.kind,
+            crate::task_events::TaskUpdateKind::HistorySync(
+                TaskHistorySyncSnapshot::Syncing { .. }
+            )
+        ) {
+            saw_history_sync = true;
+            break;
+        }
+    }
+    assert!(
+        saw_history_sync,
+        "stale cached history should start loading"
+    );
     // Loading, attaching the permanent sink, and persisting replay happen in order
     // on the background worker; observe the final durable boundary.
     wait_until(|| {
@@ -3435,6 +3450,133 @@ fn open_returns_cached_task_while_native_session_refresh_is_blocked() {
 }
 
 #[test]
+fn open_marks_last_known_agent_catalogs_loading_while_resume_is_running() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    task.agent_commands_catalog = Some(command_catalog());
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_resume: AtomicBool::new(true),
+        resume_config_catalog: Some(config_catalog("gpt-5.5")),
+        resume_commands_catalog: Some(command_catalog()),
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let opened = api
+        .open_for_test(TaskOpenParams {
+            task_id: "task-existing".into(),
+        })
+        .expect("open task while resume is running");
+
+    assert_eq!(opened.agent_config.state, LiveSessionDataState::Loading);
+    assert_eq!(
+        protocol_value_id(&opened.agent_config.options[0].current_value),
+        Some("gpt-5")
+    );
+    assert_eq!(opened.agent_commands.state, LiveSessionDataState::Loading);
+    wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
+
+    agent.block_resume.store(false, Ordering::SeqCst);
+    wait_until(|| {
+        store
+            .read_task("task-existing")
+            .is_ok_and(|task| task.config_options_catalog == Some(config_catalog("gpt-5.5")))
+    });
+}
+
+#[test]
+fn failed_open_resume_leaves_last_known_agent_catalogs_stale() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    task.agent_commands_catalog = Some(command_catalog());
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_session_missing: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let opened = api
+        .open_for_test(TaskOpenParams {
+            task_id: "task-existing".into(),
+        })
+        .expect("open task while resume is running");
+    assert_eq!(opened.agent_config.state, LiveSessionDataState::Loading);
+
+    wait_until(|| {
+        store
+            .read_task("task-existing")
+            .is_ok_and(|task| task.native_session_data_freshness.is_stale())
+    });
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn resumed_config_does_not_make_unconfirmed_commands_live() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    task.agent_commands_catalog = Some(command_catalog());
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_config_catalog: Some(config_catalog("gpt-5.5")),
+        suppress_commands_on_attach: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.open_for_test(TaskOpenParams {
+        task_id: "task-existing".into(),
+    })
+    .expect("open existing task");
+
+    wait_until(|| {
+        store.read_task("task-existing").is_ok_and(|task| {
+            task.native_session_data_freshness.config() == TaskNativeSessionCatalogFreshness::Fresh
+                && task.native_session_data_freshness.commands()
+                    == TaskNativeSessionCatalogFreshness::Recovering
+        })
+    });
+    let snapshot = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Ready);
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Loading);
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn open_without_a_cached_native_catalog_recovers_the_native_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -3473,11 +3615,19 @@ fn open_without_a_cached_native_catalog_recovers_the_native_session() {
                 .read_task("task-existing")
                 .is_ok_and(|task| task.config_options_catalog.is_some())
     });
-    let recovered = api
-        .open_for_test(TaskOpenParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap();
+    api.open_for_test(TaskOpenParams {
+        task_id: "task-existing".into(),
+    })
+    .unwrap();
+    wait_until(|| {
+        store
+            .read_task("task-existing")
+            .is_ok_and(|task| task.native_session_data_freshness.is_fresh())
+    });
+    let recovered = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+    )
+    .unwrap();
 
     assert!(agent.resumes.load(Ordering::SeqCst) >= 1);
     assert_eq!(agent.list_calls.load(Ordering::SeqCst), 0);
@@ -5300,9 +5450,9 @@ fn send_after_restart_hydrates_loaded_native_session_state_authoritatively() {
     api.send(send_params("task-existing", "hello")).unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     let snapshot = api
-        .open_for_test(TaskOpenParams {
-            task_id: "task-existing".into(),
-        })
+        .project_task_snapshot(
+            crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+        )
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
@@ -5365,9 +5515,9 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
     let snapshot = api
-        .open_for_test(TaskOpenParams {
-            task_id: "task-existing".into(),
-        })
+        .project_task_snapshot(
+            crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+        )
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
@@ -6915,7 +7065,7 @@ fn config_recovery_loads_when_the_agent_does_not_support_resume() {
 }
 
 #[test]
-fn restart_hides_persisted_agent_controls_until_native_session_recovery() {
+fn restart_shows_persisted_agent_controls_as_loading_until_native_session_recovery() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -6939,16 +7089,13 @@ fn restart_hides_persisted_agent_controls_until_native_session_recovery() {
         })
         .unwrap();
 
+    assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Loading);
     assert_eq!(
-        snapshot.agent_config.state,
-        LiveSessionDataState::Unavailable
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5")
     );
-    assert!(snapshot.agent_config.options.is_empty());
-    assert_eq!(
-        snapshot.agent_commands.state,
-        LiveSessionDataState::Unavailable
-    );
-    assert!(snapshot.agent_commands.commands.is_empty());
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Loading);
+    assert_eq!(snapshot.agent_commands.commands[0].name, "web");
 }
 
 #[test]
@@ -7041,7 +7188,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
     });
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
@@ -7054,21 +7201,19 @@ fn task_open_republishes_controls_from_recovered_native_session() {
             task_id: "task-existing".into(),
         })
         .unwrap();
-    assert_eq!(
-        initial.agent_config.state,
-        LiveSessionDataState::Unavailable
-    );
-    assert_eq!(
-        initial.agent_commands.state,
-        LiveSessionDataState::Unavailable
-    );
+    assert_eq!(initial.agent_config.state, LiveSessionDataState::Loading);
+    assert_eq!(initial.agent_commands.state, LiveSessionDataState::Loading);
 
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
-    let recovered = api
-        .open_for_test(TaskOpenParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap();
+    wait_until(|| {
+        store
+            .read_task("task-existing")
+            .is_ok_and(|task| task.native_session_data_freshness.is_fresh())
+    });
+    let recovered = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(recovered.agent_config.state, LiveSessionDataState::Ready);
     assert_eq!(
@@ -7080,7 +7225,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
 }
 
 #[test]
-fn set_config_option_without_native_session_does_not_project_persisted_catalog() {
+fn set_config_option_without_native_session_retains_a_stale_persisted_catalog() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -7106,7 +7251,8 @@ fn set_config_option_without_native_session_does_not_project_persisted_catalog()
         .unwrap_err();
 
     let stored = store.read_task("task-existing").unwrap();
-    assert!(stored.config_options_catalog.is_none());
+    assert!(stored.config_options_catalog.is_some());
+    assert!(stored.native_session_data_freshness.is_stale());
     assert_eq!(error.code, ProtocolErrorCode::Internal);
 }
 
@@ -7135,7 +7281,7 @@ fn set_config_option_without_native_session_does_not_project_unsupported_fallbac
         })
         .unwrap_err();
 
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
+    assert_eq!(error.code, ProtocolErrorCode::ValidationFailed);
 }
 
 #[test]
@@ -8042,6 +8188,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,
+        native_session_data_freshness: Default::default(),
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

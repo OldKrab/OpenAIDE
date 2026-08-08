@@ -28,6 +28,7 @@ pub(super) fn update_task_commands(
                 return Ok(TaskMutationResult::Unchanged);
             }
             task.agent_commands_catalog = Some(catalog);
+            task.native_session_data_freshness.mark_commands_fresh();
             task.updated_at = now.to_string();
             Ok(TaskMutationResult::Changed)
         },

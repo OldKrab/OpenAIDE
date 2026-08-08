@@ -15,20 +15,22 @@ use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_response_boundary::take_preceding_session_updates;
 use crate::agent::acp_session_catalogs::{
-    attach_session_event_sink_to_slot, deliver_session_commands_catalog,
+    attach_session_event_sink_with_catalog_snapshot, deliver_session_commands_catalog,
     deliver_session_config_catalog, deliver_session_metadata_update, session_catalogs_from_update,
-    DispatchSessionCatalogs, PendingSessionCatalogs,
+    session_with_catalog_snapshots, DispatchSessionCatalogs, PendingSessionCatalogs,
 };
-use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigCommand};
 use crate::agent::acp_session_termination::close_active_session;
 use crate::agent::acp_session_termination::delete_active_session;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
+use crate::agent::attached_native_session::{AcpSessionCommand, AcpSessionConfigCommand};
 use crate::agent::prompt_content::PromptContentPolicy;
-use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink};
+use crate::agent::{
+    AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionEventSink,
+};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::ConfigOptionsCatalog;
+use crate::protocol::model::{AgentCommandsCatalog, ConfigOptionsCatalog};
 
 pub(super) struct PromptRunContext<'a> {
     pub(super) agent_id: &'a str,
@@ -49,10 +51,12 @@ pub(super) async fn run_prompt(
     context: PromptRunContext<'_>,
     prompt: AgentPrompt,
     sink: Arc<dyn AgentEventSink>,
-    request_guard: crate::agent::acp_session_client::PromptRequestGuard,
+    request_guard: crate::agent::attached_native_session::PromptRequestGuard,
     command_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionCommand>,
     config_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
     config_catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
+    session_snapshot: &AgentSession,
     session_event_sink: &mut Option<Arc<dyn AgentSessionEventSink>>,
     session_projection: &mut Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
@@ -158,10 +162,23 @@ pub(super) async fn run_prompt(
                     break Err(RuntimeError::NotReady("ACP command channel stopped".to_string()));
                 };
                 match command {
+                    AcpSessionCommand::Snapshot { reply_tx } => {
+                        let _ = reply_tx.send(Ok(session_with_catalog_snapshots(
+                            session_snapshot,
+                            config_catalog,
+                            commands_catalog,
+                        )));
+                    }
                     AcpSessionCommand::SetEventSink { sink } => {
-                        attach_session_event_sink_to_slot(
+                        let config_snapshot = (config_catalog.status
+                            != crate::protocol::model::ConfigOptionsStatus::Empty
+                            && !config_catalog.agent_id.is_empty())
+                            .then_some(&*config_catalog);
+                        attach_session_event_sink_with_catalog_snapshot(
                             session_event_sink,
                             pending_session_catalogs,
+                            config_snapshot,
+                            commands_catalog.as_ref(),
                             sink,
                         )?;
                         *session_projection = session_event_sink.as_ref().map(|sink| {
@@ -218,6 +235,7 @@ pub(super) async fn run_prompt(
                 handle_prompt_config_command(
                     active_session,
                     config_catalog,
+                    commands_catalog,
                     session_projection.clone(),
                     session_event_sink.clone(),
                     pending_session_catalogs,
@@ -230,7 +248,7 @@ pub(super) async fn run_prompt(
                     break Err(RuntimeError::NotReady("ACP prompt completion channel stopped".to_string()));
                 };
                 for update in take_preceding_session_updates(active_session).await? {
-                    if let Some(catalog) = apply_prompt_session_message(
+                    let catalogs = apply_prompt_session_message(
                         context.agent_id,
                         active_prompt.task_id(),
                         active_session_id.as_str(),
@@ -238,9 +256,9 @@ pub(super) async fn run_prompt(
                         session_projection.clone(),
                         session_event_sink.clone(),
                         pending_session_catalogs,
-                    ).await? {
-                        *config_catalog = catalog;
-                    }
+                    )
+                    .await?;
+                    apply_session_catalogs(catalogs, config_catalog, commands_catalog);
                 }
                 active_prompt.mark_settled(PromptSettlementKind::PromptResponse);
                 settled_by_response = true;
@@ -271,8 +289,9 @@ pub(super) async fn run_prompt(
                     session_event_sink.clone(),
                     pending_session_catalogs,
                 ).await {
-                    Ok(Some(catalog)) => *config_catalog = catalog,
-                    Ok(None) => {}
+                    Ok(catalogs) => {
+                        apply_session_catalogs(catalogs, config_catalog, commands_catalog)
+                    }
                     Err(error) => break Err(error),
                 }
             }
@@ -340,7 +359,7 @@ async fn dispatch_prompt_cancel(
             "task_id": task_id,
             "active_session_id": active_session_id,
             "source": source,
-            "boundary": "native_session_worker",
+            "boundary": "attached_native_session",
         }),
     );
     let result = cancel_active_prompt(active_session, trace).await;
@@ -382,7 +401,7 @@ async fn apply_prompt_session_message(
     projection: Option<LivePromptProjection>,
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
-) -> Result<Option<ConfigOptionsCatalog>, RuntimeError> {
+) -> Result<DispatchSessionCatalogs, RuntimeError> {
     match update {
         SessionMessage::SessionMessage(dispatch) => {
             dispatch_session_notification(
@@ -403,9 +422,9 @@ async fn apply_prompt_session_message(
                     "active_session_id": active_session_id,
                 }),
             );
-            Ok(None)
+            Ok(DispatchSessionCatalogs::default())
         }
-        _ => Ok(None),
+        _ => Ok(DispatchSessionCatalogs::default()),
     }
 }
 
@@ -424,6 +443,7 @@ fn runtime_result_name(result: &Result<AgentPromptOutcome, RuntimeError>) -> &'s
 async fn handle_prompt_config_command(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
     projection: Option<LivePromptProjection>,
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
@@ -468,7 +488,7 @@ async fn handle_prompt_config_command(
                 let SessionMessage::SessionMessage(dispatch) = update else {
                     continue;
                 };
-                if let Err(error) = dispatch_session_notification(
+                let catalogs = match dispatch_session_notification(
                     &agent_id,
                     dispatch,
                     projection.clone(),
@@ -477,9 +497,13 @@ async fn handle_prompt_config_command(
                 )
                 .await
                 {
-                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
-                    return Err(error);
-                }
+                    Ok(catalogs) => catalogs,
+                    Err(error) => {
+                        let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
+                        return Err(error);
+                    }
+                };
+                apply_session_catalogs(catalogs, catalog, commands_catalog);
             }
             let result = response.finish_with_session_sink(session_event_sink.as_deref());
             logging::info(
@@ -505,7 +529,7 @@ pub(super) async fn dispatch_session_notification(
     projection: Option<LivePromptProjection>,
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
-) -> Result<Option<ConfigOptionsCatalog>, RuntimeError> {
+) -> Result<DispatchSessionCatalogs, RuntimeError> {
     let catalogs = Arc::new(Mutex::new(DispatchSessionCatalogs::default()));
     let catalogs_sink = catalogs.clone();
     MatchDispatch::new(dispatch)
@@ -524,7 +548,7 @@ pub(super) async fn dispatch_session_notification(
         .await
         .otherwise_ignore()
         .map_err(acp_error)?;
-    let mut catalogs = std::mem::take(
+    let catalogs = std::mem::take(
         &mut *catalogs
             .lock()
             .expect("ACP session catalog update lock poisoned"),
@@ -536,19 +560,32 @@ pub(super) async fn dispatch_session_notification(
             pending_session_catalogs,
         )?;
     }
-    if let Some(catalog) = catalogs.commands.take() {
+    if let Some(catalog) = catalogs.commands.clone() {
         deliver_session_commands_catalog(
             catalog,
             session_event_sink.as_ref(),
             pending_session_catalogs,
         )?;
     }
-    if let Some(update) = catalogs.metadata.take() {
+    if let Some(update) = catalogs.metadata.clone() {
         deliver_session_metadata_update(
             update,
             session_event_sink.as_ref(),
             pending_session_catalogs,
         )?;
     }
-    Ok(catalogs.config)
+    Ok(catalogs)
+}
+
+fn apply_session_catalogs(
+    catalogs: DispatchSessionCatalogs,
+    config_catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
+) {
+    if let Some(catalog) = catalogs.config {
+        *config_catalog = catalog;
+    }
+    if let Some(catalog) = catalogs.commands {
+        *commands_catalog = Some(catalog);
+    }
 }

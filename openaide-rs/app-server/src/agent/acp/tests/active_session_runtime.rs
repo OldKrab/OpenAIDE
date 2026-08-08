@@ -104,6 +104,42 @@ fn fixture_runtime_with_prompt_mode(
     ))
 }
 
+fn fixture_runtime_with_resume_commands(
+    temp: &tempfile::TempDir,
+    session_id: &str,
+) -> Option<(AcpAgentRuntime, PathBuf)> {
+    if !python3_available() {
+        eprintln!("skipping ACP active-session runtime fixture: python3 not found");
+        return None;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    Some((
+        AcpAgentRuntime::new(AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    session_id.to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_RESUME_COMMANDS".to_string(),
+                    "1".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        }),
+        log_path,
+    ))
+}
+
 fn fixture_manager(
     temp: &tempfile::TempDir,
     session_id: &str,
@@ -421,6 +457,7 @@ config_response_delay = float(os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_RESPON
 fixture_title = os.environ.get("OPENAIDE_ACP_FIXTURE_TITLE", "")
 log_details = os.environ.get("OPENAIDE_ACP_FIXTURE_LOG_DETAILS", "") == "1"
 auth_method = os.environ.get("OPENAIDE_ACP_FIXTURE_AUTH_METHOD", "agent")
+with_resume_commands = os.environ.get("OPENAIDE_ACP_FIXTURE_RESUME_COMMANDS", "") == "1"
 pending_prompt_ids = []
 prompt_request_count = 0
 next_session_number = 0
@@ -566,7 +603,7 @@ for line in sys.stdin:
                 notify_title(fixture_title)
     elif method == "session/load":
         if prompt_mode == "load_replay":
-            notify_text_chunk("replayed through active worker")
+            notify_text_chunk("replayed through active attachment")
         respond(message, {"configOptions": []})
     elif method == "session/resume":
         respond(message, {
@@ -581,6 +618,17 @@ for line in sys.stdin:
                 ],
             }],
         })
+        if with_resume_commands:
+            notify("session/update", {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "available_commands_update",
+                    "availableCommands": [{
+                        "name": "web",
+                        "description": "Search the web",
+                    }],
+                },
+            })
         if session_id == "idle-session":
             notify_title("Title after idle resume")
     elif method == "session/list":
@@ -1018,7 +1066,7 @@ fn idle_timeout_does_not_close_when_the_agent_lacks_close_capability() {
     );
     runtime
         .close_session(&session.key())
-        .expect("release local session worker");
+        .expect("release local session attachment");
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new"]
@@ -1461,6 +1509,112 @@ fn resume_and_attach_session_event_sink_use_active_session_registry() {
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/close"]
     );
+}
+
+#[test]
+fn resume_of_an_attached_session_republishes_its_current_config_catalog() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "resumable-session") else {
+        return;
+    };
+
+    let request = || AgentSessionResume {
+        agent_id: "codex".to_string(),
+        task_id: "task-resume-catalog".to_string(),
+        session_id: "resumable-session".to_string(),
+        cwd: cwd_string(),
+        model_id: None,
+        cancellation: TurnCancellation::new(),
+        secret_resolver: None,
+    };
+
+    let first = runtime.resume_session(request()).expect("first resume");
+    assert_eq!(
+        first
+            .config_catalog
+            .as_ref()
+            .and_then(|catalog| catalog_id(catalog, "model")),
+        Some("gpt-5.6-sol")
+    );
+
+    let attached = runtime.resume_session(request()).expect("attached resume");
+    assert_eq!(
+        attached
+            .config_catalog
+            .as_ref()
+            .and_then(|catalog| catalog_id(catalog, "model")),
+        Some("gpt-5.6-sol")
+    );
+
+    runtime
+        .close_session(&attached.key())
+        .expect("close session");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/resume", "session/close"]
+    );
+}
+
+#[test]
+fn attaching_to_a_resumed_session_replays_its_current_config_catalog() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) = fixture_runtime(&temp, "resumable-session") else {
+        return;
+    };
+
+    let session = runtime
+        .resume_session(AgentSessionResume {
+            agent_id: "codex".to_string(),
+            task_id: "task-attach-catalog".to_string(),
+            session_id: "resumable-session".to_string(),
+            cwd: cwd_string(),
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .expect("resume session");
+    let sink = Arc::new(CapturingSessionSink::default());
+
+    runtime
+        .attach_session_event_sink(&session.key(), sink.clone())
+        .expect("attach session sink");
+
+    wait_until(|| sink.current_values() == ["gpt-5.6-sol"]);
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+}
+
+#[test]
+fn attaching_to_a_resumed_session_replays_its_current_commands_catalog() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) =
+        fixture_runtime_with_resume_commands(&temp, "resumable-session")
+    else {
+        return;
+    };
+
+    let session = runtime
+        .resume_session(AgentSessionResume {
+            agent_id: "codex".to_string(),
+            task_id: "task-attach-commands".to_string(),
+            session_id: "resumable-session".to_string(),
+            cwd: cwd_string(),
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .expect("resume session");
+    let sink = Arc::new(CapturingSessionSink::default());
+
+    runtime
+        .attach_session_event_sink(&session.key(), sink.clone())
+        .expect("attach session sink");
+
+    wait_until(|| sink.command_names() == ["web"]);
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
 }
 
 #[test]
@@ -3106,7 +3260,7 @@ fn start_and_load_sessions_reuse_agent_process_for_same_agent() {
 }
 
 #[test]
-fn load_session_reuses_the_native_session_worker() {
+fn load_session_reuses_the_attached_native_session() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) =
         fixture_runtime_with_prompt_mode(&temp, "active-load-session", "load_replay")
@@ -3128,7 +3282,7 @@ fn load_session_reuses_the_native_session_worker() {
             cancellation: TurnCancellation::new(),
             secret_resolver: None,
         })
-        .expect("reload history through active session worker");
+        .expect("reload history through active session attachment");
 
     assert_eq!(loaded.session.session_id, started.session_id);
     assert!(matches!(
@@ -3137,7 +3291,7 @@ fn load_session_reuses_the_native_session_worker() {
             if matches!(
                 &parts[..],
                 [crate::protocol::model::AgentMessagePart::Text { text }]
-                    if text == "replayed through active worker"
+                    if text == "replayed through active attachment"
             )
     ));
     runtime

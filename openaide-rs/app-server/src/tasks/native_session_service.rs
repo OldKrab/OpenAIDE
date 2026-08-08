@@ -710,16 +710,19 @@ impl OpenedSessionTaskState {
             task.config_options_catalog = config_catalog;
             task.agent_commands_catalog = commands_catalog;
             task.model_id = model_id;
+            task.native_session_data_freshness = Default::default();
             return;
         }
         if let Some(catalog) = config_catalog {
             task.config_options_catalog = Some(catalog);
+            task.native_session_data_freshness.mark_config_fresh();
             task.model_id = model_id;
         } else if let Some(model_id) = model_id {
             task.model_id = Some(model_id);
         }
         if let Some(commands_catalog) = commands_catalog {
             task.agent_commands_catalog = Some(commands_catalog);
+            task.native_session_data_freshness.mark_commands_fresh();
         }
     }
 }

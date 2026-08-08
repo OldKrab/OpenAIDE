@@ -3,15 +3,15 @@ use std::time::Duration;
 
 use tokio::sync::mpsc as tokio_mpsc;
 
-use crate::agent::acp_active_session_registry::AcpActiveSessionRegistry;
+use crate::agent::acp_agent_process::{
+    AcpAgentProcessOpen, AcpSessionOpenRequest, AcpStartedSession,
+};
 use crate::agent::acp_agent_process_pool::AcpAgentProcessPool;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwnerId;
-use crate::agent::acp_session_client::AcpSessionClient;
-use crate::agent::acp_session_worker::{
-    AcpAgentProcessOpen, AcpSessionOpenRequest, AcpStartedSession,
-};
 use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
+use crate::agent::attached_native_session::AttachedNativeSession;
+use crate::agent::attached_native_session_registry::AttachedNativeSessionRegistry;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
@@ -33,7 +33,7 @@ pub(super) struct AcpActiveSessionManager {
     trace_state: AcpTraceState,
     start_timeout: Duration,
     session_idle_timeout: Duration,
-    sessions: AcpActiveSessionRegistry,
+    sessions: AttachedNativeSessionRegistry,
     processes: AcpAgentProcessPool,
 }
 
@@ -49,7 +49,7 @@ impl AcpActiveSessionManager {
             trace_state: AcpTraceState::disabled(std::path::Path::new(".")),
             start_timeout: DEFAULT_START_TIMEOUT,
             session_idle_timeout: DEFAULT_SESSION_IDLE_TIMEOUT,
-            sessions: AcpActiveSessionRegistry::new(),
+            sessions: AttachedNativeSessionRegistry::new(),
             processes: AcpAgentProcessPool::new(registry, host_bridge),
         }
     }
@@ -132,7 +132,7 @@ impl AcpActiveSessionManager {
     ) -> Result<AgentSession, RuntimeError> {
         let session = request.session_key();
         if self.sessions.contains(&session) {
-            return Ok(AgentSession::new(request.agent_id, request.session_id));
+            return self.sessions.snapshot_session(&session);
         }
         if request.cancellation.is_cancelled() {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
@@ -242,7 +242,7 @@ impl AcpActiveSessionManager {
             }
         };
 
-        let session_client = AcpSessionClient::new(
+        let session_attachment = AttachedNativeSession::new(
             command_tx,
             config_tx,
             cancel_tx,
@@ -251,7 +251,7 @@ impl AcpActiveSessionManager {
             process_session.terminal_owner,
         );
         self.sessions
-            .insert_started_session(started.session.key(), session_client)?;
+            .insert_started_session(started.session.key(), session_attachment)?;
 
         Ok(started)
     }

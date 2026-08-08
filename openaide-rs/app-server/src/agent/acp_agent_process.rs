@@ -28,7 +28,6 @@ use crate::protocol::model::{
 };
 
 use crate::agent::acp_errors::acp_error;
-use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigCommand};
 use crate::agent::acp_session_connection::{
     connect_acp_session_client, AcpSessionConnectionContext,
 };
@@ -37,7 +36,10 @@ use crate::agent::acp_session_lifecycle::{
 };
 use crate::agent::acp_session_opening::{open_acp_session, OpenAcpSessionContext};
 use crate::agent::acp_update_projection::LivePromptProjection;
-use crate::agent::native_session_worker::{run_native_session_worker, NativeSessionWorker};
+use crate::agent::attached_native_session::{
+    AcpSessionCommand, AcpSessionConfigCommand, AttachedNativeSession,
+    AttachedNativeSessionRunInput,
+};
 
 pub(super) enum AcpSessionOpenRequest {
     Start(AgentSessionStart),
@@ -134,6 +136,7 @@ pub(super) struct AcpAgentProcessList {
     pub(super) reply_tx: mpsc::Sender<Result<AgentListSessionsResult, RuntimeError>>,
 }
 
+/// Owns one shared ACP Agent process and dispatches its Native Session attachments.
 pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result<(), RuntimeError> {
     let AcpAgentProcessInput {
         config,
@@ -530,7 +533,7 @@ async fn open_on_shared_process(
     let session_traces_for_task = Arc::clone(session_traces);
     let session_id_for_task = session_id.clone();
     tokio::spawn(async move {
-        let result = run_native_session_worker(NativeSessionWorker {
+        let result = AttachedNativeSession::run(AttachedNativeSessionRunInput {
             opened,
             request_agent_id,
             initialize,

@@ -46,7 +46,7 @@ fn a_committed_task_survives_store_restart() {
 }
 
 #[test]
-fn durable_task_metadata_and_chat_survive_without_persisting_live_agent_catalogs() {
+fn durable_task_metadata_chat_and_last_known_agent_catalogs_survive_store_reopen() {
     let root = TempDir::new().expect("create state root");
     let mut projection = task_projection("task_split_authority");
     projection
@@ -93,8 +93,15 @@ fn durable_task_metadata_and_chat_survive_without_persisting_live_agent_catalogs
         Some("Durable title")
     );
     assert_eq!(agent_text(&loaded.messages[0]), "durable chat");
-    assert!(loaded.task.agent_commands_catalog.is_none());
-    assert!(loaded.task.config_options_catalog.is_none());
+    assert_eq!(
+        loaded
+            .task
+            .agent_commands_catalog
+            .as_ref()
+            .map(|catalog| catalog.commands[0].name.as_str()),
+        Some("review")
+    );
+    assert!(loaded.task.config_options_catalog.is_some());
     reopened.shutdown().unwrap();
 }
 
@@ -1286,6 +1293,7 @@ fn task_projection(task_id: &str) -> TaskProjection {
             tombstoned: false,
             revision: 1,
             config_options_catalog: None,
+            native_session_data_freshness: Default::default(),
             config_mutation: TaskConfigMutationState::default(),
             agent_commands_catalog: None,
             context_usage: None,

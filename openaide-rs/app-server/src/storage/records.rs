@@ -27,6 +27,107 @@ pub enum TaskPreparationRecord {
     },
 }
 
+/// Whether one Native Session catalog has been confirmed in this App Server epoch.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskNativeSessionCatalogFreshness {
+    #[default]
+    Fresh,
+    /// An open request is reconnecting the Native Session in the background.
+    Recovering,
+    Stale,
+}
+
+/// Freshness of independently delivered Native Session catalogs.
+///
+/// ACP can return config options in `session/resume` and commands later as a session update. A
+/// shared bit would falsely make commands live when only config options were confirmed.
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+pub struct TaskNativeSessionDataFreshness {
+    config: TaskNativeSessionCatalogFreshness,
+    commands: TaskNativeSessionCatalogFreshness,
+}
+
+impl<'de> Deserialize<'de> for TaskNativeSessionDataFreshness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum StoredFreshness {
+            Split {
+                #[serde(default)]
+                config: TaskNativeSessionCatalogFreshness,
+                #[serde(default)]
+                commands: TaskNativeSessionCatalogFreshness,
+            },
+            Legacy(TaskNativeSessionCatalogFreshness),
+        }
+
+        match StoredFreshness::deserialize(deserializer)? {
+            StoredFreshness::Split { config, commands } => Ok(Self { config, commands }),
+            StoredFreshness::Legacy(state) => Ok(Self {
+                config: state,
+                commands: state,
+            }),
+        }
+    }
+}
+
+impl TaskNativeSessionDataFreshness {
+    pub fn is_fresh(&self) -> bool {
+        self.config == TaskNativeSessionCatalogFreshness::Fresh
+            && self.commands == TaskNativeSessionCatalogFreshness::Fresh
+    }
+
+    pub fn config(&self) -> TaskNativeSessionCatalogFreshness {
+        self.config
+    }
+
+    pub fn commands(&self) -> TaskNativeSessionCatalogFreshness {
+        self.commands
+    }
+
+    pub fn is_recovering(&self) -> bool {
+        self.config == TaskNativeSessionCatalogFreshness::Recovering
+            || self.commands == TaskNativeSessionCatalogFreshness::Recovering
+    }
+
+    pub fn is_stale(&self) -> bool {
+        self.config == TaskNativeSessionCatalogFreshness::Stale
+            && self.commands == TaskNativeSessionCatalogFreshness::Stale
+    }
+
+    fn mark_recovering(&mut self) -> bool {
+        if self.config == TaskNativeSessionCatalogFreshness::Recovering
+            && self.commands == TaskNativeSessionCatalogFreshness::Recovering
+        {
+            return false;
+        }
+        self.config = TaskNativeSessionCatalogFreshness::Recovering;
+        self.commands = TaskNativeSessionCatalogFreshness::Recovering;
+        true
+    }
+
+    fn mark_stale(&mut self) -> bool {
+        if self.is_stale() {
+            return false;
+        }
+        self.config = TaskNativeSessionCatalogFreshness::Stale;
+        self.commands = TaskNativeSessionCatalogFreshness::Stale;
+        true
+    }
+
+    pub fn mark_config_fresh(&mut self) {
+        self.config = TaskNativeSessionCatalogFreshness::Fresh;
+    }
+
+    pub fn mark_commands_fresh(&mut self) {
+        self.commands = TaskNativeSessionCatalogFreshness::Fresh;
+    }
+}
+
 /// Stable task-level preparation failures that can be resolved by the user.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -470,10 +571,15 @@ pub struct TaskRecord {
     pub tombstoned: bool,
     #[serde(default)]
     pub revision: u64,
-    /// Last catalog from the bound live Native Session. Process recovery clears
-    /// it before any snapshot can use it; it is never input to session creation.
+    /// Last catalog reported by the bound Native Session. It is display-only until
+    /// `native_session_data_freshness` confirms it in the current server epoch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
+    #[serde(
+        default,
+        skip_serializing_if = "TaskNativeSessionDataFreshness::is_fresh"
+    )]
+    pub native_session_data_freshness: TaskNativeSessionDataFreshness,
     #[serde(default, skip_serializing_if = "TaskConfigMutationState::is_empty")]
     pub config_mutation: TaskConfigMutationState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -547,6 +653,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             #[serde(default)]
             config_options_catalog: Option<ConfigOptionsCatalog>,
             #[serde(default)]
+            native_session_data_freshness: TaskNativeSessionDataFreshness,
+            #[serde(default)]
             config_mutation: TaskConfigMutationState,
             #[serde(default)]
             agent_commands_catalog: Option<AgentCommandsCatalog>,
@@ -598,6 +706,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             tombstoned: stored.tombstoned,
             revision: stored.revision,
             config_options_catalog: stored.config_options_catalog,
+            native_session_data_freshness: stored.native_session_data_freshness,
             config_mutation: stored.config_mutation,
             agent_commands_catalog: stored.agent_commands_catalog,
             context_usage: stored.context_usage,
@@ -612,22 +721,29 @@ impl<'de> Deserialize<'de> for TaskRecord {
 }
 
 impl TaskRecord {
-    /// Starts a new App Server epoch without carrying live Agent controls across processes.
+    pub(crate) fn mark_native_session_data_recovering(&mut self) -> bool {
+        self.native_session_data_freshness.mark_recovering()
+    }
+
+    pub(crate) fn mark_native_session_data_stale(&mut self) -> bool {
+        self.native_session_data_freshness.mark_stale()
+    }
+
+    /// Starts a new App Server epoch without treating its last Agent catalogs as live.
     ///
-    /// These fields describe an attached Native Session, not durable Chat. Clearing them in
-    /// the lightweight catalog keeps startup independent from Task-history size; the same
-    /// overlay is applied if that Task is hydrated later in this process.
+    /// Catalogs remain display-only stale snapshots until a resumed or loaded Native Session
+    /// confirms them. Usage and in-flight mutations are still process-local and are removed.
     pub(crate) fn clear_process_local_agent_state(&mut self) -> bool {
-        let had_config_catalog = self.config_options_catalog.take().is_some();
-        let had_commands_catalog = self.agent_commands_catalog.take().is_some();
+        let became_stale = (self.config_options_catalog.is_some()
+            || self.agent_commands_catalog.is_some())
+            && !self.native_session_data_freshness.is_stale();
         let had_pending_mutation = self.config_mutation.pending.take().is_some();
         let had_context_usage = self.context_usage.take().is_some();
         let had_turn_usage = self.last_turn_usage.take().is_some();
-        had_config_catalog
-            || had_commands_catalog
-            || had_pending_mutation
-            || had_context_usage
-            || had_turn_usage
+        if became_stale {
+            self.mark_native_session_data_stale();
+        }
+        became_stale || had_pending_mutation || had_context_usage || had_turn_usage
     }
 
     /// Updates the automatic title without replacing a visible user override.
