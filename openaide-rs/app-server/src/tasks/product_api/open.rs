@@ -309,6 +309,7 @@ impl TaskProductApi {
                     );
                 }
             }
+            api.history_sync.finish_passive(&task.task_id, &generation);
         });
     }
 
@@ -413,6 +414,7 @@ impl TaskProductApi {
                 }
                 (false, _) => {}
             }
+            api.history_sync.finish_passive(&task.task_id, &generation);
         });
     }
 

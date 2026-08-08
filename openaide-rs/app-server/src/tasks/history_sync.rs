@@ -22,6 +22,7 @@ pub(super) struct HistorySyncCoordinator {
 #[derive(Default)]
 struct TaskSyncState {
     generation: u64,
+    in_flight_generation: Option<u64>,
     current: TaskHistorySyncSnapshot,
 }
 
@@ -87,11 +88,18 @@ impl HistorySyncCoordinator {
     }
 
     /// Registers one passive history-check generation.
+    ///
+    /// Catalog observations coalesce behind an existing check. A replacement owns
+    /// the visible synchronization generation until it publishes a terminal state.
     pub(super) fn begin_passive(&self, task_id: &str) -> Option<PassiveSyncGeneration> {
         let operation = self.operations.begin_passive(task_id);
         let mut tasks = self.tasks.lock().expect("history sync registry poisoned");
         let state = tasks.entry(task_id.to_string()).or_default();
+        if state.in_flight_generation.is_some() {
+            return None;
+        }
         state.generation = state.generation.wrapping_add(1);
+        state.in_flight_generation = Some(state.generation);
         Some(PassiveSyncGeneration {
             value: state.generation,
             operation,
@@ -112,9 +120,23 @@ impl HistorySyncCoordinator {
                     .lock()
                     .expect("history sync registry poisoned")
                     .get(task_id)
-                    .is_some_and(|state| state.generation == generation.value);
+                    .is_some_and(|state| {
+                        state.generation == generation.value
+                            && state.in_flight_generation == Some(generation.value)
+                    });
                 is_current.then(operation)
             })?
+    }
+
+    /// Releases a passive generation after its terminal snapshot was published.
+    pub(super) fn finish_passive(&self, task_id: &str, generation: &PassiveSyncGeneration) {
+        let mut tasks = self.tasks.lock().expect("history sync registry poisoned");
+        let Some(state) = tasks.get_mut(task_id) else {
+            return;
+        };
+        if state.in_flight_generation == Some(generation.value) {
+            state.in_flight_generation = None;
+        }
     }
 
     pub(super) fn is_current(&self, task_id: &str, generation: &PassiveSyncGeneration) -> bool {
@@ -123,6 +145,15 @@ impl HistorySyncCoordinator {
             .expect("history sync registry poisoned")
             .get(task_id)
             .is_some_and(|state| state.generation == generation.value)
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_in_flight_generation(&self, task_id: &str) -> bool {
+        self.tasks
+            .lock()
+            .expect("history sync registry poisoned")
+            .get(task_id)
+            .is_some_and(|state| state.in_flight_generation.is_some())
     }
 
     /// Records only the state owned by the Task's current generation.

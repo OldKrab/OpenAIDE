@@ -3524,7 +3524,7 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
 }
 
 #[test]
-fn catalog_refresh_holds_a_later_option_change_until_replacement_finishes() {
+fn catalog_refresh_coalesces_while_replacement_holds_a_later_option_change() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -3558,16 +3558,18 @@ fn catalog_refresh_holds_a_later_option_change_until_replacement_finishes() {
     let agent = Arc::new(RecordingAgent {
         config_catalog: Some(config_catalog("gpt-5")),
         resume_config_catalog: Some(config_catalog("gpt-5")),
+        commands_catalog: Some(command_catalog()),
         block_load: AtomicBool::new(true),
         ..Default::default()
     });
     let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
+    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
-        TaskUpdateNotifier::disabled(),
+        notifier,
     )
     .unwrap()
     .with_task_subscription_presence(task_subscription_presence.clone());
@@ -3577,10 +3579,12 @@ fn catalog_refresh_holds_a_later_option_change_until_replacement_finishes() {
     })
     .unwrap();
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
+    wait_until(|| !api.history_sync.has_in_flight_generation("task-existing"));
     task_subscription_presence.subscribe_for_test(
         ClientInstanceId::from("client-open-task"),
         TaskId::from("task-existing"),
     );
+    while updates.try_recv().is_ok() {}
     *agent.listed_sessions.lock().unwrap() = vec![AgentListedSession {
         session_id: "native-session".to_string(),
         cwd: "/tmp/openaide-unit-workspace/app".to_string(),
@@ -3596,6 +3600,18 @@ fn catalog_refresh_holds_a_later_option_change_until_replacement_finishes() {
         )
         .is_ok_and(|snapshot| snapshot.agent_config.state == LiveSessionDataState::Loading)
     });
+
+    api.refresh_native_session_catalogs().unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(matches!(
+        api.history_sync.history_sync_snapshot("task-existing"),
+        TaskHistorySyncSnapshot::Syncing { .. }
+    ));
+    assert_eq!(
+        agent.loads.load(Ordering::SeqCst),
+        1,
+        "a catalog observation during replacement must join the in-flight synchronization"
+    );
 
     let config_api = api.clone();
     let config_thread = std::thread::spawn(move || {
@@ -3615,6 +3631,24 @@ fn catalog_refresh_holds_a_later_option_change_until_replacement_finishes() {
         .is_empty());
     agent.block_load.store(false, Ordering::SeqCst);
     config_thread.join().unwrap().unwrap();
+    wait_until(|| {
+        matches!(
+            api.history_sync.history_sync_snapshot("task-existing"),
+            TaskHistorySyncSnapshot::Updated { .. }
+        )
+    });
+    assert!(updates.try_iter().any(|update| {
+        matches!(
+            update.kind,
+            TaskUpdateKind::Changed(change)
+                if change.changes.agent_config.as_ref().is_some_and(|catalog| {
+                    catalog.state == LiveSessionDataState::Ready
+                })
+                    && change.changes.agent_commands.as_ref().is_some_and(|catalog| {
+                        catalog.state == LiveSessionDataState::Ready
+                    })
+        )
+    }));
     assert_eq!(agent.closes.load(Ordering::SeqCst), 1);
     assert_eq!(agent.typed_session_config_updates.lock().unwrap().len(), 1);
 }
