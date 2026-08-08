@@ -216,6 +216,11 @@ pub(super) fn remove_worktree(git_cwd: &Path, worktree: &Path) -> Result<(), Run
     .map(|_| ())
 }
 
+/// Removes Git administrative records whose worktree folders are already gone.
+pub(super) fn prune_missing_worktrees(git_cwd: &Path) -> Result<(), RuntimeError> {
+    git_bytes(git_cwd, &["worktree", "prune", "--expire", "now"]).map(|_| ())
+}
+
 fn validate_branch_format(project_root: &Path, branch: &str) -> Result<(), RuntimeError> {
     if branch.trim() != branch || branch.is_empty() {
         return Err(RuntimeError::InvalidParams(

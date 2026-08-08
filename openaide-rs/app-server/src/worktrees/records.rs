@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -115,7 +116,9 @@ impl WorktreeCatalog {
         &mut self,
         store: &Store,
         discovery: GitRepositoryDiscovery,
-    ) -> Result<ProjectWorktreeRepository, RuntimeError> {
+        referenced_worktree_ids: &HashSet<String>,
+        referenced_paths: &HashSet<String>,
+    ) -> Result<(ProjectWorktreeRepository, usize), RuntimeError> {
         let common_dir = normalized_path(&discovery.common_dir);
         let repository = match self
             .repositories
@@ -138,6 +141,16 @@ impl WorktreeCatalog {
             }
         };
         synchronize_worktrees(store, repository, discovery.worktrees);
+        let worktree_count_before_cleanup = repository.worktrees.len();
+        // Missing worktrees need durable identity only while a Task or Project refers to them.
+        // Discarding unreferenced records keeps transient external worktrees out of inventory.
+        repository.worktrees.retain(|worktree| {
+            worktree.availability == WorktreeAvailability::Available
+                || referenced_worktree_ids.contains(worktree.worktree_id.as_str())
+                || referenced_paths.contains(&worktree.path)
+        });
+        let discarded_worktree_count =
+            worktree_count_before_cleanup.saturating_sub(repository.worktrees.len());
         repository.bases = discovery.bases;
         repository.revision = repository.revision.saturating_add(1);
         let project_path = normalized_path(&discovery.project_root);
@@ -149,10 +162,13 @@ impl WorktreeCatalog {
             .ok_or_else(|| {
                 RuntimeError::Internal("Git did not list the configured Project root".to_string())
             })?;
-        Ok(ProjectWorktreeRepository {
-            project_worktree_id,
-            repository: repository.snapshot(),
-        })
+        Ok((
+            ProjectWorktreeRepository {
+                project_worktree_id,
+                repository: repository.snapshot(),
+            },
+            discarded_worktree_count,
+        ))
     }
 
     pub fn reserve_managed(
@@ -431,7 +447,7 @@ fn managed_path(
     )
 }
 
-fn normalized_path(path: &Path) -> String {
+pub(super) fn normalized_path(path: &Path) -> String {
     std::fs::canonicalize(path)
         .unwrap_or_else(|_| PathBuf::from(path))
         .to_string_lossy()

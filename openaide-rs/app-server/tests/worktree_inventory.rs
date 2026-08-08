@@ -60,6 +60,41 @@ fn discovers_repository_worktrees_with_stable_opaque_identity() {
 }
 
 #[test]
+fn refresh_discards_an_unregistered_worktree_without_task_or_project_references() {
+    let fixture = GitFixture::new();
+    fixture.add_detached_worktree("review");
+    let state = TempDir::new().expect("state root");
+    let manager =
+        WorktreeManager::new(Store::open(state.path().to_path_buf()).expect("open store"));
+    let discovered = manager
+        .refresh_project(fixture.repository())
+        .expect("discover worktrees")
+        .expect("supported repository");
+    let external = discovered
+        .repository
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.path.ends_with("review"))
+        .expect("external worktree")
+        .clone();
+
+    git(
+        fixture.repository(),
+        &["worktree", "remove", "--force", &external.path],
+    );
+    let refreshed = manager
+        .refresh_project(fixture.repository())
+        .expect("refresh worktrees")
+        .expect("supported repository");
+
+    assert!(refreshed
+        .repository
+        .worktrees
+        .iter()
+        .all(|worktree| worktree.worktree_id != external.worktree_id));
+}
+
+#[test]
 fn nested_project_does_not_inherit_parent_repository_support() {
     let fixture = GitFixture::new();
     let nested = fixture.repository().join("packages/frontend");
@@ -510,12 +545,49 @@ fn forgets_an_already_missing_worktree_and_uses_a_new_identity_if_it_returns() {
 }
 
 #[test]
+fn forgetting_a_prunable_worktree_does_not_rediscover_it() {
+    let fixture = GitFixture::new();
+    fixture.add_detached_worktree("review");
+    let state = TempDir::new().expect("state root");
+    let store = Store::open(state.path().to_path_buf()).expect("store");
+    let manager = WorktreeManager::new(store.clone());
+    let discovered = manager
+        .refresh_project(fixture.repository())
+        .expect("discover worktrees")
+        .expect("supported repository");
+    let external = discovered
+        .repository
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.path.ends_with("review"))
+        .expect("external worktree")
+        .clone();
+    let mut task = task_record("linked-task", Path::new(&external.path));
+    task.worktree_id = Some(external.worktree_id.as_str().to_string());
+    task.project_root = Some(fixture.repository().to_string_lossy().to_string());
+    store.write_task(&task).expect("write linked task");
+    fs::remove_dir_all(&external.path).expect("remove worktree folder externally");
+    manager
+        .refresh_project(fixture.repository())
+        .expect("discover missing worktree");
+
+    let forgotten = manager
+        .remove(&discovered.repository.repository_id, &external.worktree_id)
+        .expect("forget missing worktree");
+
+    assert!(forgotten
+        .worktrees
+        .iter()
+        .all(|worktree| { worktree.path != external.path || worktree.forgotten }));
+}
+
+#[test]
 fn recreates_an_unregistered_external_worktree_at_its_recorded_path() {
     let fixture = GitFixture::new();
     fixture.add_detached_worktree("review");
     let state = TempDir::new().expect("state root");
-    let manager =
-        WorktreeManager::new(Store::open(state.path().to_path_buf()).expect("open store"));
+    let store = Store::open(state.path().to_path_buf()).expect("open store");
+    let manager = WorktreeManager::new(store.clone());
     let discovered = manager
         .refresh_project(fixture.repository())
         .unwrap()
@@ -527,6 +599,10 @@ fn recreates_an_unregistered_external_worktree_at_its_recorded_path() {
         .find(|worktree| worktree.path.ends_with("review"))
         .unwrap()
         .clone();
+    let mut task = task_record("linked-task", Path::new(&external.path));
+    task.worktree_id = Some(external.worktree_id.as_str().to_string());
+    task.project_root = Some(fixture.repository().to_string_lossy().to_string());
+    store.write_task(&task).expect("write linked task");
     git(
         fixture.repository(),
         &["worktree", "remove", "--force", &external.path],
