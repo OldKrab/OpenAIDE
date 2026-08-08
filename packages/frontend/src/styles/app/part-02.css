@@ -43,13 +43,14 @@
 }
 
 .chat-column {
+  --oa-chat-inline-gutter: clamp(18px, 6vw, 64px);
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   justify-items: center;
   gap: 0;
-  padding: 14px clamp(18px, 6vw, 64px) 12px;
+  padding: 14px var(--oa-chat-inline-gutter) 12px;
 }
 
 .message-list {

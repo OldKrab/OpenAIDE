@@ -1,4 +1,5 @@
 .task-work-stack {
+  --oa-chat-scrollbar-edge-gap: 4px;
   position: relative;
   container-name: task-work-stack;
   container-type: inline-size;
@@ -23,6 +24,13 @@
   min-height: 0;
   justify-self: stretch;
   grid-template-rows: minmax(0, 1fr) auto auto;
+}
+
+/* Keep the native Chat scroll track at the workbench edge while its content stays centered. */
+.task-conversation > .message-list-shell {
+  width: calc(100% + var(--oa-chat-inline-gutter) + var(--oa-chat-inline-gutter) - var(--oa-chat-scrollbar-edge-gap));
+  justify-self: start;
+  margin-inline: calc(0px - var(--oa-chat-inline-gutter));
 }
 
 .task-plan-column {
@@ -162,7 +170,7 @@
     z-index: 10;
     top: 0;
     bottom: 0;
-    right: max(0px, calc(50% - 808px));
+    right: calc(max(0px, calc(50% - 808px)) + var(--oa-chat-scrollbar-edge-gap));
     display: flex;
     align-items: flex-start;
     padding: 14px 12px;
@@ -181,6 +189,10 @@
 }
 
 @media (max-width: 760px) {
+  .task-conversation {
+    --oa-chat-inline-gutter: 18px;
+  }
+
   .task-plan-drawer-trigger {
     display: none;
   }
