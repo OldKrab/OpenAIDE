@@ -5450,9 +5450,9 @@ fn send_after_restart_hydrates_loaded_native_session_state_authoritatively() {
     api.send(send_params("task-existing", "hello")).unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     let snapshot = api
-        .open_for_test(TaskOpenParams {
-            task_id: "task-existing".into(),
-        })
+        .project_task_snapshot(
+            crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+        )
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
@@ -5515,9 +5515,9 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
     let snapshot = api
-        .open_for_test(TaskOpenParams {
-            task_id: "task-existing".into(),
-        })
+        .project_task_snapshot(
+            crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+        )
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
