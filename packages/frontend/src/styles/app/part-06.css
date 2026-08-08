@@ -19,7 +19,7 @@
 }
 
 .task-surface:not(.new-task-surface) .composer {
-  min-height: 94px;
+  min-height: 88px;
   max-height: 50dvh;
 }
 
@@ -74,7 +74,7 @@
 
 .task-surface:not(.new-task-surface) .composer {
   gap: 4px;
-  padding-block: 8px;
+  padding: 8px 13px 2px;
 }
 
 .composer-reference-token {

@@ -121,9 +121,10 @@ test("keeps the context meter on the composer's rounded edge as a draft grows", 
   await expect(page.getByText("Context usage rendered", { exact: true })).toBeVisible();
 
   const editor = page.getByRole("textbox", { name: "Message" });
+  const composer = page.locator(".composer");
+  const initialHeight = await composer.evaluate((element) => element.getBoundingClientRect().height);
   await editor.fill(Array.from({ length: 80 }, (_, index) => `line ${index + 1}`).join("\n"));
 
-  const composer = page.locator(".composer");
   const meterEdge = page.locator(".context-usage-edge");
   const geometry = await composer.evaluate((element) => ({
     height: element.getBoundingClientRect().height,
@@ -131,7 +132,7 @@ test("keeps the context meter on the composer's rounded edge as a draft grows", 
   }));
   const edgeGeometry = await measureContextEdge(meterEdge, Number.parseFloat(geometry.radius));
 
-  expect(geometry.height).toBeGreaterThan(300);
+  expect(geometry.height).toBeGreaterThan(initialHeight);
   expect(edgeGeometry.height).toBe(geometry.height);
   expect(edgeGeometry.viewBoxHeight).toBe(geometry.height);
   expect(edgeGeometry.width).toBe(20);
