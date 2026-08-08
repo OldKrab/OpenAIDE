@@ -282,6 +282,48 @@ test("copies fenced Markdown code independently at desktop and constrained width
   expect(geometry.buttonInsidePre).toBe(true);
 });
 
+test("quotes selected rendered Chat text into the Composer at desktop and narrow widths", async ({ page }) => {
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:quote-selection");
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+
+  const chat = page.getByLabel("Task chat");
+  const agent = chat.locator('[data-quote-source="agent"]').filter({ hasText: "linked text" });
+  const linkSelectionEnd = await selectRenderedText(agent.getByRole("link", { name: "linked text" }));
+
+  const quote = page.getByRole("button", { name: "Quote selected text" });
+  await expect(quote).toBeVisible();
+  const quoteAtSelectionEnd = await quote.boundingBox();
+  expect(quoteAtSelectionEnd).not.toBeNull();
+  expect(Math.abs(quoteAtSelectionEnd.x + quoteAtSelectionEnd.width / 2 - linkSelectionEnd.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(quoteAtSelectionEnd.y + quoteAtSelectionEnd.height + 8 - linkSelectionEnd.top)).toBeLessThanOrEqual(1);
+  await quote.click();
+
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await expect.poll(() => composer.evaluate(composerText)).toBe("> linked text\n");
+  await expect(composer).toBeFocused();
+
+  await selectRenderedText(agent.locator("p code").first());
+  await expect(quote).toBeVisible();
+  await quote.click();
+  await expect.poll(() => composer.evaluate(composerText)).toBe("> linked text\n> inline\n");
+
+  await page.setViewportSize({ width: 360, height: 640 });
+  await selectRenderedText(agent.locator("pre code").first());
+  await expect(quote).toBeVisible();
+  const quoteBounds = await quote.boundingBox();
+  expect(quoteBounds).not.toBeNull();
+  expect(quoteBounds.x).toBeGreaterThanOrEqual(0);
+  expect(quoteBounds.x + quoteBounds.width).toBeLessThanOrEqual(360);
+  expect(quoteBounds.height).toBeGreaterThanOrEqual(36);
+  await quote.click();
+
+  await expect.poll(() => composer.evaluate(composerText)).toBe(
+    "> linked text\n> inline\n> const selected = true;\n> const next = 2;\n",
+  );
+});
+
 test("keeps a Task actions popup interactive after the pointer leaves its row", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");
@@ -714,6 +756,30 @@ async function send(page, text) {
   const editor = page.getByRole("textbox", { name: "Message" });
   await editor.fill(text);
   await page.getByLabel("Send message").click();
+}
+
+async function selectRenderedText(locator) {
+  return locator.evaluate((element) => {
+    const text = element.firstChild;
+    if (!text?.textContent) throw new Error("The requested rendered text is missing.");
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, text.textContent.length);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+    const endRange = range.cloneRange();
+    endRange.collapse(false);
+    const rect = endRange.getBoundingClientRect();
+    return { left: rect.left, top: rect.top };
+  });
+}
+
+function composerText(element) {
+  // ComposerEditor adds one terminal <br> solely to keep a final empty line
+  // visible and placeable. It is not part of the logical draft text.
+  return element.innerText.endsWith("\n") ? element.innerText.slice(0, -1) : element.innerText;
 }
 
 async function startComposerPlaceholderTrace(page) {

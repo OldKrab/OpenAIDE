@@ -39,6 +39,26 @@ describe("Composer view behavior", () => {
     expect(onRemoveAttachment).toHaveBeenCalledWith("attachment_1");
   });
 
+  it("appends an externally requested Quote and focuses the Composer after it", async () => {
+    const onChange = vi.fn();
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      onChange,
+      prompt: "Keep this draft.",
+    });
+
+    act(() => {
+      renderer.update(composerElement({
+        onChange,
+        prompt: "Keep this draft.",
+        quoteRequest: { id: "quote-1", text: "First line\nSecond line" },
+      }));
+    });
+    await settleRenderer();
+
+    expect(onChange).toHaveBeenCalledWith("Keep this draft.\n> First line\n> Second line\n");
+    expect(editorDom.focus).toHaveBeenCalled();
+  });
+
   it("closes the attachment menu when the user clicks elsewhere in the composer", () => {
     const listeners = new Map<string, (event: Event) => void>();
     vi.stubGlobal("document", {
@@ -1939,6 +1959,7 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       onSelectIsolation={overrides.onSelectIsolation ?? vi.fn()}
       onSubmit={overrides.onSubmit ?? vi.fn()}
       prompt={overrides.prompt ?? ""}
+      quoteRequest={overrides.quoteRequest}
       selection={overrides.selection ?? selection()}
       showAgentSelector={overrides.showAgentSelector}
       showIsolationSelector={overrides.showIsolationSelector}
@@ -1974,6 +1995,7 @@ type ComposerTestProps = {
   onSubmit: (prompt: string) => void;
   placeholder: string;
   prompt: string;
+  quoteRequest: { id: string | number; text: string };
   selection: ComposerSelection;
   showAgentSelector: boolean;
   showIsolationSelector: boolean;

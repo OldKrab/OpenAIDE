@@ -32,6 +32,23 @@ describe("ChatRow", () => {
     expect(agentHtml).toContain('aria-label="Copy message"');
   });
 
+  it("marks User and Agent text bodies as Quote selection sources", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const userHtml = renderToStaticMarkup(
+      <ChatRow message={userMessage("u1", "Quote this user text")} onPermissionRespond={vi.fn()} taskId="task_1" />,
+    );
+    const agentHtml = renderToStaticMarkup(
+      <ChatRow message={agentMessage("a1", "Quote this Agent text")} onPermissionRespond={vi.fn()} taskId="task_1" />,
+    );
+    const thoughtHtml = renderToStaticMarkup(
+      <ChatRow message={thoughtMessage("t1", "Do not quote thought text")} onPermissionRespond={vi.fn()} taskId="task_1" />,
+    );
+
+    expect(userHtml).toContain('data-quote-source="user"');
+    expect(agentHtml).toContain('data-quote-source="agent"');
+    expect(thoughtHtml).not.toContain("data-quote-source");
+  });
+
   it("keeps command and file quick-info metadata in a sent user message", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const html = renderToStaticMarkup(

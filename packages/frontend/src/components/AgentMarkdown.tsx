@@ -7,15 +7,16 @@ import { copyText } from "./clipboard";
 
 type AgentMarkdownProps = {
   className?: string;
+  quoteSource?: "agent";
   streaming?: boolean;
   text: string;
 };
 
 // Unrelated Task and composer updates must not re-enter the synchronous Markdown parser.
-export const AgentMarkdown = memo(function AgentMarkdown({ className, streaming = false, text }: AgentMarkdownProps) {
+export const AgentMarkdown = memo(function AgentMarkdown({ className, quoteSource, streaming = false, text }: AgentMarkdownProps) {
   const parts = splitDataImageMarkdown(text);
   return (
-    <div className={className}>
+    <div className={className} data-quote-source={quoteSource}>
       {parts.map((part, index) => (
         <Fragment key={index}>
           {part.kind === "image" ? (

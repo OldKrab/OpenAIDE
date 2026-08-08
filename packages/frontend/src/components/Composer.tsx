@@ -25,6 +25,7 @@ import {
   type SlashPickerState,
 } from "./ComposerSlashCommands";
 import { attachEveryImage } from "./imageAttachmentBatch";
+import { appendQuoteToDraft } from "./quoteSelection";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
 import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
@@ -64,6 +65,7 @@ type ComposerProps = {
   onSelectIsolation?: (isolation: IsolationKind) => void;
   onSubmit: (prompt: string) => void;
   prompt: string;
+  quoteRequest?: { id: number | string; text: string };
   selection: ComposerSelection;
   submitShortcut: ComposerSubmitShortcut;
   submissionSettlementKey?: number | string;
@@ -97,6 +99,7 @@ export function Composer({
   onSelectIsolation,
   onSubmit,
   prompt,
+  quoteRequest,
   selection,
   submitShortcut,
   submissionSettlementKey,
@@ -117,6 +120,7 @@ export function Composer({
   const draftRef = useRef(prompt);
   const lastPromptRef = useRef(prompt);
   const submittedDraftRef = useRef<string | undefined>(undefined);
+  const handledQuoteRequestRef = useRef<number | string | undefined>(undefined);
   const commandCatalogRevision = commandCatalogKey(commandCatalog);
   const [optimisticConfigChange, setOptimisticConfigChange] = useState<NonNullable<ConfigOptionsCatalog["pending_change"]>>();
   const presentedConfigChange = configOptions?.pending_change ?? optimisticConfigChange;
@@ -324,6 +328,22 @@ export function Composer({
       setTimeout(restore, 0);
     }
   };
+
+  useEffect(() => {
+    if (!quoteRequest || quoteRequest.id === handledQuoteRequestRef.current) return;
+    handledQuoteRequestRef.current = quoteRequest.id;
+    if (disabled) return;
+    const nextText = appendQuoteToDraft(draftRef.current, quoteRequest.text);
+    // A Quote is the same kind of local edit as typing, including leaving
+    // Composer History navigation and any completion affordance behind.
+    composerHistory.edited(nextText, nextText.length);
+    syncDraft(nextText, { renderEditor: true });
+    onChange(nextText);
+    setOpenMenu(undefined);
+    setSlashPicker(undefined);
+    setFileMentionToken(undefined);
+    queueEditorSelection(nextText.length);
+  }, [composerHistory, disabled, onChange, quoteRequest]);
 
   return (
     <section

@@ -172,6 +172,17 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:quote-selection")) {
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Start with [linked text](https://example.com) and `inline`.\n\n```ts\nconst selected = true;\nconst next = 2;\n```",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:context-usage-curve")) {
     update(sessionId, {
       sessionUpdate: "usage_update",

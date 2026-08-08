@@ -226,6 +226,7 @@ function AgentMessageParts({
     <AgentMarkdown
       className={contentProps.muted ? "chat-thought" : "chat-agent"}
       key={index}
+      quoteSource={contentProps.muted ? undefined : "agent"}
       streaming={streaming && index === parts.length - 1}
       text={contentProps.muted ? presentThoughtMarkdown(part.text) : part.text}
     />
@@ -320,5 +321,5 @@ function UserMessageText({
   commandCatalog?: AgentCommandsCatalog;
   text: string;
 }) {
-  return <p className="chat-user"><SlashCommandText commands={commandCatalog} text={text} /></p>;
+  return <p className="chat-user" data-quote-source="user"><SlashCommandText commands={commandCatalog} text={text} /></p>;
 }

@@ -195,6 +195,8 @@ export function TaskView({
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
   showWorkspaceContext?: boolean;
 }) {
+  const quoteRequestSequence = useRef(0);
+  const [quoteRequest, setQuoteRequest] = useState<{ id: number; taskId: string; text: string }>();
   const queueOverlayRef = useCallback((node: HTMLDivElement | null) => (
     node ? installTaskQueueOverlayClearance(node) : undefined
   ), []);
@@ -248,6 +250,16 @@ export function TaskView({
         placeholder: "Moving queued message to Composer.",
       }
     : baseAvailability;
+  const quoteAvailable = availability.canEdit && !archived && !recovery;
+  const requestQuote = useCallback((text: string) => {
+    if (!quoteAvailable) return;
+    quoteRequestSequence.current += 1;
+    setQuoteRequest({
+      id: quoteRequestSequence.current,
+      taskId: snapshot.task.task_id,
+      text,
+    });
+  }, [quoteAvailable, snapshot.task.task_id]);
   const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
   const queue = useMemo(() => {
     const current = snapshot.message_queue ?? { revision: 0, items: [] };
@@ -406,6 +418,7 @@ export function TaskView({
           onLoadToolImagePreview={loadToolImagePreview}
           onPermissionRespond={respondToPermission}
           onQuestionRespond={respondToQuestion}
+          onQuote={quoteAvailable ? requestQuote : undefined}
           onRestoreTask={restoreTask}
           onSubscribeToolDetail={subscribeToolDetail}
           permissionResponses={permissionResponses}
@@ -497,6 +510,7 @@ export function TaskView({
               onSelectConfigOption={onSelectConfigOption}
               onSubmit={submit}
               prompt={taskInput.prompt}
+              quoteRequest={quoteRequest?.taskId === snapshot.task.task_id ? quoteRequest : undefined}
               selection={taskSelection}
               submitShortcut={submitShortcut}
               submissionSettlementKey={taskInput.acceptedUserMessageId ?? taskInput.acceptedQueueRevision}

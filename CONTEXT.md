@@ -56,6 +56,10 @@ _Avoid_: Upload when the App Shell references an original local path, treating `
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
 _Avoid_: Log-style names
 
+**Quote**:
+An editable `>`-prefixed quotation inserted into the Composer from selected visible text in one User or Agent message. It is ordinary User text and carries no durable relationship to its source.
+_Avoid_: Reply, Reply Reference, source metadata
+
 **Queued Message**:
 A user-authored instruction accepted for later automatic or manual delivery. It remains distinct from Chat until delivery begins.
 _Avoid_: Draft, delayed steering message, pending Chat message

@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { ArrowDown, Check, CircleAlert } from "lucide-react";
 import type {
   ChatMessage,
@@ -9,6 +9,7 @@ import type { ToolImagePreview } from "@openaide/app-server-client";
 import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskLiveTextPresentation } from "../state/store";
 import { ChatRow } from "./ChatMessageView";
+import { QuoteSelectionAction } from "./QuoteSelectionAction";
 import {
   permissionResponseForMessage,
   questionResponseForMessage,
@@ -35,6 +36,7 @@ type TaskChatTimelineProps = {
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onPermissionRespond: (requestId: string, optionId: string) => void;
   onQuestionRespond: (requestId: string, response: ElicitationResponse) => void;
+  onQuote?: (text: string) => void;
   onRestoreTask: (taskId: string) => void;
   onSubscribeToolDetail: (artifactId: string) => () => void;
   permissionResponses: AppState["permissionResponses"];
@@ -61,6 +63,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   onLoadToolImagePreview,
   onPermissionRespond,
   onQuestionRespond,
+  onQuote,
   onRestoreTask,
   onSubscribeToolDetail,
   permissionResponses,
@@ -73,6 +76,11 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   timelineStatusLabel,
   workingStartedAt,
 }: TaskChatTimelineProps) {
+  const [messageListElement, setMessageListElement] = useState<HTMLDivElement | null>(null);
+  const setMessageListRef = useCallback((element: HTMLDivElement | null) => {
+    chatScroll.messageListRef.current = element;
+    setMessageListElement(element);
+  }, [chatScroll.messageListRef]);
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   const virtualItems = chatScroll.virtualizer.getVirtualItems();
   const firstVirtualItem = virtualItems[0];
@@ -87,7 +95,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
         onPointerUp={chatScroll.onPointerUp}
         onScroll={chatScroll.onScroll}
         onWheel={chatScroll.onWheel}
-        ref={chatScroll.messageListRef}
+        ref={setMessageListRef}
       >
         <div
           className="message-list-virtualizer"
@@ -170,6 +178,9 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
           })}
         </div>
       </div>
+      {onQuote && messageListElement ? (
+        <QuoteSelectionAction key={taskId} onQuote={onQuote} root={messageListElement} />
+      ) : null}
       {chatScroll.showJumpToLatest ? (
         <button
           aria-label="Jump to latest message"

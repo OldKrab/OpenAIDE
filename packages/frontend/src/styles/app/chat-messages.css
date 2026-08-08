@@ -392,6 +392,36 @@
   outline-offset: 1px;
 }
 
+.quote-selection-action {
+  position: fixed;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  box-shadow: 0 4px 14px color-mix(in srgb, black 16%, transparent);
+  color: var(--oa-text);
+  font: 550 12px/1.2 var(--oa-ui-font);
+  padding: 5px 8px;
+  transform: translate(-50%, -100%);
+}
+
+.quote-selection-action[data-placement="below"] {
+  transform: translateX(-50%);
+}
+
+.quote-selection-action:hover {
+  background: var(--oa-raised);
+}
+
+.quote-selection-action:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
 @media (max-width: 760px), (hover: none), (pointer: coarse) {
   /* A trailing action narrows the reading column and is hard to reach on touch.
      Keep the message action in normal flow beneath the response instead. */
@@ -410,6 +440,11 @@
     min-width: 36px;
     min-height: 36px;
     opacity: 1;
+  }
+
+  .quote-selection-action {
+    min-height: 36px;
+    padding-inline: 10px;
   }
 }
 
