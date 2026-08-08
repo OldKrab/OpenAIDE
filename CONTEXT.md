@@ -117,7 +117,7 @@ The Git repository that owns a shared inventory of registered worktrees. Worktre
 _Avoid_: Walking up from a Project subdirectory to infer worktree support
 
 **Unavailable Worktree**:
-A worktree Git still registers but whose filesystem work area cannot currently be used. It is inventory state, not a failed Task or a special failed-creation record.
+A durable worktree identity still referenced by a Project or Task whose filesystem work area cannot currently be used. Git may still register the worktree or may have already removed it. Unreferenced missing worktrees are discarded from active inventory.
 _Avoid_: Failed Worktree
 
 **Managed Worktree**:

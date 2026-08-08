@@ -8,7 +8,7 @@ mod include_copy;
 mod operations;
 mod records;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -197,11 +197,42 @@ impl WorktreeManager {
         let Some(discovery) = git::discover_project_repository(project_root)? else {
             return Ok(None);
         };
+        let tasks = self.store.list_all_task_records_strict()?;
+        let referenced_worktree_ids = tasks
+            .iter()
+            .filter(|task| !task.tombstoned && task.lifecycle.is_listed())
+            .filter_map(|task| task.worktree_id.clone())
+            .collect::<HashSet<_>>();
+        let mut referenced_paths = tasks
+            .iter()
+            .filter(|task| !task.tombstoned && task.lifecycle.is_listed())
+            .map(|task| records::normalized_path(Path::new(&task.workspace_root)))
+            .collect::<HashSet<_>>();
+        referenced_paths.extend(
+            self.project_roots
+                .projects()
+                .into_iter()
+                .map(|project| records::normalized_path(Path::new(&project.workspace_root))),
+        );
         let write = self.store.lock_worktree_write();
         let mut catalog = WorktreeCatalog::read(&self.store)?;
-        let mut synchronized = catalog.synchronize(&self.store, discovery)?;
+        let (mut synchronized, discarded_worktree_count) = catalog.synchronize(
+            &self.store,
+            discovery,
+            &referenced_worktree_ids,
+            &referenced_paths,
+        )?;
         catalog.write(&self.store)?;
         drop(write);
+        if discarded_worktree_count > 0 {
+            crate::logging::info(
+                "worktree_stale_records_discarded",
+                serde_json::json!({
+                    "discarded_worktree_count": discarded_worktree_count,
+                    "repository_id": synchronized.repository.repository_id.as_str(),
+                }),
+            );
+        }
         self.enrich_repository(&mut synchronized.repository)?;
         self.attach_operations(&mut synchronized.repository);
         crate::logging::info(
@@ -670,6 +701,9 @@ impl WorktreeManager {
                 .any(|project| Path::new(&project.workspace_root) == target.path);
         if target.available {
             git::remove_worktree(&target.git_cwd, &target.path)?;
+        } else {
+            // Forget must clear Git's prunable registration before discovery runs again.
+            git::prune_missing_worktrees(&target.git_cwd)?;
         }
         {
             let _write = self.store.lock_worktree_write();

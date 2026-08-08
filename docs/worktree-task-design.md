@@ -229,12 +229,13 @@ The leased prepared-Task pool is implemented. The remaining decisions in this no
 
 ### Existing worktrees and Tasks
 
-- Discover all worktrees returned by Git's stable NUL-delimited porcelain listing, including worktrees created by other tools and registrations whose folders are unavailable.
+- Discover all usable worktrees returned by Git's stable NUL-delimited porcelain listing, including worktrees created by other tools.
 - Projects whose roots are separate top-level worktrees of the same repository share one repository-scoped inventory and management surface.
 - Label worktrees as **Managed Worktree** or **External Worktree** by merging Git discovery with OpenAIDE metadata.
 - Any valid worktree may be selected as a Task Workspace.
 - A locked worktree remains selectable when its folder is available, but its locked state and optional Git-provided reason are visible and removal is disabled.
-- A prunable or otherwise missing registration remains visible as an **Unavailable Worktree** with Git's reason. Use is disabled; management offers Refresh, Recreate, and **Forget worktree**. Forget removes the stale entry from active worktree inventory without touching Git or Task history.
+- A prunable or otherwise missing registration remains visible as an **Unavailable Worktree** only while a Project or Task references its durable identity or recorded path. Use is disabled; management offers Refresh, Recreate, and **Forget worktree**. Forget prunes stale Git administrative records and removes the entry from active worktree inventory without touching Task history or branches.
+- Successful discovery discards missing worktree records that have no Project or listed-Task references, including unreferenced prunable Git registrations.
 - OpenAIDE does not add a special failed-worktree lifecycle or persisted recovery state for unavailable registrations.
 - If successful discovery marks a running Task's worktree unavailable because of an external change, OpenAIDE immediately shows the unavailable state and rejects new Sends but does not cancel the active turn. That turn may complete, fail naturally, or be cancelled by the user.
 - After that turn becomes terminal, OpenAIDE closes its Native Session while the workspace remains unavailable. Task history is preserved; the session is loaded or recreated only after explicit Recreate restores the recorded path.
@@ -287,7 +288,7 @@ The leased prepared-Task pool is implemented. The remaining decisions in this no
 
 - A linked running Task blocks removal.
 - Clicking **Remove worktree** performs a fresh safety preflight. The panel does not rely on a previously displayed clean/dirty result, which would be expensive to maintain and immediately stale.
-- An unavailable worktree can be forgotten when no linked Task is running. Because its folder and Git registration are already absent, dirty-file, submodule, lock, and detached-commit checks do not apply.
+- An unavailable worktree can be forgotten when no linked Task is running. Because its folder is already absent, dirty-file, submodule, lock, and detached-commit checks do not apply; Forget prunes any remaining stale Git registration before refreshing discovery.
 - Prepared-Task leases do not block confirmed removal. App Server atomically releases and disposes every zero-turn Prepared Task for that worktree, closes their Native Sessions, notifies affected clients, and then proceeds. Each affected Frontend preserves its prompt and Images and falls back to the available Project root; if Project root is unavailable, Send remains blocked until the user chooses another Task Workspace.
 - Staged, unstaged, unmerged, and non-ignored untracked files block removal. The user must commit, stash, move, or clean them outside the removal flow.
 - The removal preflight explicitly requests all untracked entries and does not let user `status.showUntrackedFiles` or similar presentation configuration hide changes from the safety decision.
