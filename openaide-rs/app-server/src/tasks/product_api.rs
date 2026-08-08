@@ -80,7 +80,7 @@ pub(crate) struct TaskProductApi {
     turn_runner: TurnRunner,
     native_sessions: crate::tasks::native_session_service::NativeSessionService,
     turn_acceptance: crate::tasks::turn_acceptance::TurnAcceptanceCoordinator,
-    config_operations: crate::tasks::task_operation::TaskOperationCoordinator,
+    session_operations: crate::tasks::task_operation::TaskOperationCoordinator,
     // ACP may expose a newly started session before its Task metadata commit finishes.
     // Keep that session reserved so external-session listing never leaks a New Task.
     preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
@@ -197,10 +197,16 @@ impl TaskProductApi {
         let agent_registry = agent_registry.into();
         let native_catalog =
             crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone())?;
+        let session_operations = crate::tasks::task_operation::TaskOperationCoordinator::default();
         let turn_runner = TurnRunner::new_with_server_requests(
             mutations.clone(),
             agent_runtime,
             server_requests.clone(),
+        )
+        .with_turn_acceptance(
+            crate::tasks::turn_acceptance::TurnAcceptanceCoordinator::new(
+                session_operations.clone(),
+            ),
         )
         .with_native_catalog(native_catalog.clone());
         let turn_acceptance = turn_runner.turn_acceptance();
@@ -227,9 +233,11 @@ impl TaskProductApi {
             turn_runner,
             native_sessions,
             turn_acceptance,
-            config_operations: Default::default(),
+            session_operations: session_operations.clone(),
             preparing_session_ids,
-            history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
+            history_sync: crate::tasks::history_sync::HistorySyncCoordinator::new(
+                session_operations,
+            ),
             native_catalog,
             native_catalog_refresh: Default::default(),
             storage_maintenance: Default::default(),

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
 use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
+use crate::projects::ProjectIdentity;
 use crate::storage::records::TaskRecord;
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 
@@ -24,6 +25,61 @@ struct NativeCatalogRefreshState {
 }
 
 impl TaskProductApi {
+    /// Refreshes the catalog entry that decides how an existing Task reconnects.
+    ///
+    /// Task opening remains non-blocking; this targeted read runs in its recovery
+    /// worker so cached Chat can render before one authoritative resume/load choice.
+    pub(super) fn refresh_bound_session_for_open(
+        &self,
+        task: &TaskRecord,
+        stored_session_id: &str,
+    ) -> Result<Option<crate::protocol::model::AgentListedSession>, ProtocolError> {
+        self.agent_registry
+            .require(&task.agent_id)
+            .map_err(protocol_error_from_runtime)?;
+        let project_root = task.project_root.as_deref().unwrap_or(&task.workspace_root);
+        let project_id = ProjectIdentity::from_workspace_root(project_root).project_id;
+        let mut cursor = OpaqueSessionCursor::new(None);
+        loop {
+            let result = self
+                .agent_gateway
+                .list_sessions(AgentListSessionsRequest {
+                    agent_id: task.agent_id.clone(),
+                    cwd: Some(task.workspace_root.clone()),
+                    cursor: cursor.current(),
+                })
+                .map_err(protocol_error_from_runtime)?;
+            let matching = result
+                .sessions
+                .iter()
+                .find(|session| session.session_id == stored_session_id)
+                .cloned();
+            self.reconcile_native_session_activity(
+                &task.agent_id,
+                &task.workspace_root,
+                &result.sessions,
+                std::slice::from_ref(task),
+            )?;
+            self.history_sync.record_listed_sessions(
+                &task.agent_id,
+                &task.workspace_root,
+                &result.sessions,
+            );
+            self.record_native_catalog_page(
+                project_id.as_str(),
+                &task.agent_id,
+                &task.workspace_root,
+                &result.sessions,
+            )?;
+            if matching.is_some() {
+                return Ok(matching);
+            }
+            if cursor.advance(result.next_cursor).is_none() {
+                return Ok(None);
+            }
+        }
+    }
+
     pub(crate) fn request_native_session_catalog_load_more(
         &self,
         project_id: &str,

@@ -17,6 +17,13 @@ pub(super) struct TurnAcceptanceCoordinator {
 }
 
 impl TurnAcceptanceCoordinator {
+    pub(super) fn new(acceptance: TaskOperationCoordinator) -> Self {
+        Self {
+            acceptance,
+            pending_turns: Default::default(),
+        }
+    }
+
     pub(super) fn clear(&self) {
         self.pending_turns
             .lock()

@@ -18,6 +18,17 @@ impl TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: TaskArchiveParams,
     ) -> Result<TaskLifecycleChanged, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
+        self.session_operations.serialize(&task_id, || {
+            self.archive_task_serialized(client_instance_id, params)
+        })
+    }
+
+    fn archive_task_serialized(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskArchiveParams,
+    ) -> Result<TaskLifecycleChanged, ProtocolError> {
         let task_id = params.task_id.clone();
         let task = self.read_task_for_client(task_id.as_str(), client_instance_id)?;
         if matches!(task.lifecycle, TaskLifecycle::Prepared { .. }) {

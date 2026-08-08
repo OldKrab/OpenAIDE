@@ -112,8 +112,8 @@ impl TaskProductApi {
         self.project_task_snapshot(snapshot)
     }
 
-    /// Task opening returns cached state first, then recovers the Native Session without
-    /// synchronously listing Agent sessions. The cached clock selects resume or history replay.
+    /// Task opening returns cached state first, then refreshes the Agent catalog before
+    /// choosing exactly one resume or load operation for the Native Session.
     fn spawn_adopted_task_refresh(&self, task: TaskRecord) {
         if !task_allows_history_recovery(&task) {
             return;
@@ -121,34 +121,58 @@ impl TaskProductApi {
         let Some(stored_session_id) = task.agent_session_id.clone() else {
             return;
         };
-        let native_session = self.history_sync.cached_session(
-            &task.agent_id,
-            &task.workspace_root,
-            &stored_session_id,
-        );
-        if native_session.is_none() {
-            self.spawn_adopted_task_resume(task, stored_session_id, None);
-            return;
-        }
-        let native_session = native_session.expect("checked above");
-        let Ok(local_history_updated_at) = self.store.local_history_updated_at(&task.task_id)
-        else {
-            self.spawn_adopted_task_resume(task, stored_session_id, Some(native_session));
+        let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
             return;
         };
-        let Some((native_updated_at, refreshed_at)) =
-            newer_native_activity(&native_session, &local_history_updated_at)
-        else {
-            self.spawn_adopted_task_resume(task, stored_session_id, Some(native_session));
-            return;
-        };
-        self.spawn_history_refresh(
-            task,
-            stored_session_id,
-            native_session,
-            native_updated_at,
-            refreshed_at,
-        );
+        let api = self.clone();
+        std::thread::spawn(move || {
+            let native_session = match api.refresh_bound_session_for_open(&task, &stored_session_id)
+            {
+                Ok(session) => session,
+                Err(error) => {
+                    crate::logging::warn(
+                        "native_session_open_catalog_refresh_failed",
+                        serde_json::json!({
+                            "task_id": task.task_id,
+                            "agent_id": task.agent_id,
+                            "error_code": format!("{:?}", error.code),
+                            "recoverable": error.recoverable,
+                        }),
+                    );
+                    None
+                }
+            };
+            if !api.history_sync.is_current(&task.task_id, &generation) {
+                return;
+            }
+            let refresh = native_session.as_ref().and_then(|native_session| {
+                let local_history_updated_at =
+                    api.store.local_history_updated_at(&task.task_id).ok()?;
+                newer_native_activity(native_session, &local_history_updated_at)
+            });
+            match refresh {
+                Some((native_updated_at, refreshed_at)) => {
+                    let native_session =
+                        native_session.expect("freshness requires a listed Native Session");
+                    api.spawn_history_refresh_for_generation(
+                        task,
+                        stored_session_id,
+                        native_session,
+                        native_updated_at,
+                        refreshed_at,
+                        generation,
+                    );
+                }
+                None => {
+                    api.spawn_adopted_task_resume(
+                        task,
+                        stored_session_id,
+                        native_session,
+                        generation,
+                    );
+                }
+            }
+        });
     }
 
     /// A catalog observation may refresh Chat only while at least one client is
@@ -200,34 +224,47 @@ impl TaskProductApi {
         let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
             return;
         };
+        self.spawn_history_refresh_for_generation(
+            task,
+            stored_session_id,
+            native_session,
+            native_updated_at,
+            refreshed_at,
+            generation,
+        );
+    }
+
+    fn spawn_history_refresh_for_generation(
+        &self,
+        task: TaskRecord,
+        stored_session_id: String,
+        native_session: AgentListedSession,
+        native_updated_at: u128,
+        refreshed_at: String,
+        generation: crate::tasks::history_sync::PassiveSyncGeneration,
+    ) {
         let api = self.clone();
         std::thread::spawn(move || {
-            let result = api.history_sync.run_passive(&task.task_id, generation, || {
-                api.publish_history_sync(
-                    &task.task_id,
-                    openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Syncing {
-                        generation: generation.value(),
-                    },
-                );
-                let Ok(local_history_updated_at) =
-                    api.store.local_history_updated_at(&task.task_id)
-                else {
-                    return Ok(None);
-                };
-                if newer_native_activity(&native_session, &local_history_updated_at).is_none() {
-                    return Ok(None);
-                }
-                api.native_sessions
-                    .refresh_history(HistoryRefreshRequest {
-                        task: task.clone(),
-                        stored_session_id,
-                        native_session,
-                        native_updated_at,
-                        refreshed_at,
-                    })
-                    .map_err(protocol_error_from_runtime)
-            });
-            if !api.history_sync.is_current(&task.task_id, generation) {
+            let result = api
+                .history_sync
+                .run_passive(&task.task_id, &generation, || {
+                    api.publish_history_sync(
+                        &task.task_id,
+                        openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Syncing {
+                            generation: generation.value(),
+                        },
+                    );
+                    api.native_sessions
+                        .refresh_history(HistoryRefreshRequest {
+                            task: task.clone(),
+                            stored_session_id: stored_session_id.clone(),
+                            native_session,
+                            native_updated_at,
+                            refreshed_at,
+                        })
+                        .map_err(protocol_error_from_runtime)
+                });
+            if !api.history_sync.is_current(&task.task_id, &generation) {
                 return;
             }
             match result.unwrap_or(Ok(None)) {
@@ -255,6 +292,7 @@ impl TaskProductApi {
                             }),
                         );
                     }
+                    api.mark_native_session_recovery_stale(&task.task_id, &stored_session_id);
                     api.publish_history_sync(
                         &task.task_id,
                         openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
@@ -281,14 +319,12 @@ impl TaskProductApi {
         task: TaskRecord,
         stored_session_id: String,
         native_session: Option<AgentListedSession>,
+        generation: crate::tasks::history_sync::PassiveSyncGeneration,
     ) {
-        let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
-            return;
-        };
         let api = self.clone();
         std::thread::spawn(move || {
             let load_started = std::cell::Cell::new(false);
-            let result = api.history_sync.run_passive(&task.task_id, generation, || {
+            let result = api.history_sync.run_passive(&task.task_id, &generation, || {
                 match api
                     .native_sessions
                     .resume_for_open(&task, &stored_session_id)
@@ -328,7 +364,7 @@ impl TaskProductApi {
                     }
                 }
             });
-            if !api.history_sync.is_current(&task.task_id, generation) {
+            if !api.history_sync.is_current(&task.task_id, &generation) {
                 return;
             }
             match (load_started.get(), result) {

@@ -79,6 +79,14 @@ impl TurnRunner {
         self
     }
 
+    pub(super) fn with_turn_acceptance(
+        mut self,
+        turn_acceptance: TurnAcceptanceCoordinator,
+    ) -> Self {
+        self.turn_acceptance = turn_acceptance;
+        self
+    }
+
     /// Stops live Native Session work as soon as its Task can no longer be durably updated.
     fn start_storage_failure_monitor(
         &self,
