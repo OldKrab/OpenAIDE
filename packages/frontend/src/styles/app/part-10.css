@@ -163,6 +163,10 @@ textarea:focus-visible,
     padding-inline: 18px;
   }
 
+  .chat-column {
+    --oa-chat-inline-gutter: 18px;
+  }
+
   .settings-view {
     grid-template-columns: minmax(0, 1fr);
     height: 100dvh;

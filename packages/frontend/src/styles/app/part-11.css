@@ -211,10 +211,11 @@ body[data-input-modality="pointer"] button:focus-visible {
   }
 
   body[data-shell="web"] .chat-column {
+    --oa-chat-inline-gutter: 10px;
     height: 100%;
     gap: 10px;
     grid-template-rows: minmax(0, 1fr) auto;
-    padding: 12px 10px 10px;
+    padding: 12px var(--oa-chat-inline-gutter) 10px;
   }
 
   body[data-shell="web"] .sidebar-search,
