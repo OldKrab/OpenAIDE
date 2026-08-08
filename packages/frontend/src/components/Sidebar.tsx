@@ -207,7 +207,11 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
         <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>
       </div> : null}
-      <SidebarTaskPreviewProvider><div className="task-list-shell" data-more-below={String(taskListOverflow.moreBelow)}><div
+      <SidebarTaskPreviewProvider><div
+        className="task-list-shell"
+        data-more-above={String(taskListOverflow.moreAbove)}
+        data-more-below={String(taskListOverflow.moreBelow)}
+      ><div
         className="task-list"
         role="list"
         aria-label={showArchived ? "Archived tasks" : "Tasks"}

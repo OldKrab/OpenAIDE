@@ -122,25 +122,37 @@
   height: 100%;
 }
 
+.task-list-shell::before,
 .task-list-shell::after {
   content: "";
   position: absolute;
   z-index: 1;
   right: 0;
-  bottom: 0;
   left: 0;
   height: 28px;
-  background: linear-gradient(to bottom, transparent, var(--oa-panel));
   opacity: 0;
   pointer-events: none;
   transition: opacity 90ms ease-out;
 }
 
+.task-list-shell::before {
+  top: 0;
+  border-top: 1px solid var(--oa-border);
+  background: linear-gradient(to bottom, var(--oa-panel), transparent);
+}
+
+.task-list-shell::after {
+  bottom: 0;
+  background: linear-gradient(to bottom, transparent, var(--oa-panel));
+}
+
+.task-list-shell[data-more-above="true"]::before,
 .task-list-shell[data-more-below="true"]::after {
   opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .task-list-shell::before,
   .task-list-shell::after {
     transition-duration: 0.01ms;
   }

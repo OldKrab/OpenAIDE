@@ -50,7 +50,7 @@
   grid-template-rows: minmax(0, 1fr) auto;
   justify-items: center;
   gap: 0;
-  padding: 14px var(--oa-chat-inline-gutter) 12px;
+  padding: 0 var(--oa-chat-inline-gutter) 12px;
 }
 
 .message-list {
