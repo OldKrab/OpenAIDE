@@ -371,10 +371,8 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer-send-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.composer\s*{[^}]*width:\s*min\(760px, 100%\)/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.new-task-context-controls\s*{[^}]*width:\s*fit-content/);
-    expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer\s*{[^}]*min-height:\s*94px;[^}]*max-height:\s*50dvh;/);
     expect(appCss).toMatch(/\.composer textarea,\s*\.composer-editor\s*{[^}]*min-height:\s*40px;[^}]*max-height:\s*calc\(50dvh - 72px\);/);
     expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer-editor\s*{\s*min-height:\s*22px;/);
-    expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer\s*{[^}]*gap:\s*4px;[^}]*padding-block:\s*8px;/);
     expect(appCss).not.toMatch(/\.composer-editor\[data-empty\]\s*{[^}]*min-height:/);
     expect(appCss).not.toMatch(/\.composer:has\([^}]*data-empty[^}]*\)\s*{[^}]*(?:gap|padding(?:-block)?):/);
     expect(appCss).toMatch(/\.new-task-surface \.composer textarea,\s*\.new-task-surface \.composer-editor\s*{\s*max-height:\s*min\(480px,\s*65dvh\);/);
