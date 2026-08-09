@@ -27,6 +27,11 @@ export function createVsCodeShell(): FrontendShell {
   let currentBootstrap = initialBootstrap;
   let nextFileRequest = 1;
   let nextProjectRequest = 1;
+  let nextClipboardRequest = 1;
+  const pendingClipboardRequests = new Map<string, {
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }>();
   const pendingFileRequests = new Map<string, {
     resolve: (attachments: PreSendAttachment[]) => void;
     reject: (error: Error) => void;
@@ -36,6 +41,14 @@ export function createVsCodeShell(): FrontendShell {
     reject: (error: Error) => void;
   }>();
   if (typeof window.addEventListener === "function") {
+    window.addEventListener("message", (event: MessageEvent<HostToWebviewMessage>) => {
+      if (event.data?.type !== "shell.clipboard.writeText.result") return;
+      const pending = pendingClipboardRequests.get(event.data.payload.requestId);
+      if (!pending) return;
+      pendingClipboardRequests.delete(event.data.payload.requestId);
+      if (!event.data.payload.ok) pending.reject(new Error(event.data.payload.error ?? "Unable to copy text."));
+      else pending.resolve();
+    });
     window.addEventListener("message", (event: MessageEvent<HostToWebviewMessage>) => {
       if (event.data?.type !== "attachment.pickFiles.result") return;
       const pending = pendingFileRequests.get(event.data.payload.requestId);
@@ -68,6 +81,16 @@ export function createVsCodeShell(): FrontendShell {
   return {
     bootstrap: () => bootstrapWithCurrentDocument(currentBootstrap),
     ...(backendConnection ? { backendConnection: () => backendConnection } : {}),
+    clipboard: {
+      writeText(text) {
+        if (!vscode) return Promise.reject(new Error("VS Code clipboard unavailable."));
+        const requestId = `clipboard-write-${nextClipboardRequest++}`;
+        return new Promise((resolve, reject) => {
+          pendingClipboardRequests.set(requestId, { resolve, reject });
+          vscode.postMessage({ type: "shell.clipboard.writeText", payload: { requestId, text } });
+        });
+      },
+    },
     sentFiles: {
       sentFileAction: "reveal",
       openSentFile({ attachmentIndex, messageId, taskId }) {

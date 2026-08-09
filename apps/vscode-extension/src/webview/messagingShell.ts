@@ -63,6 +63,22 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
 }
 
 export async function routeHostCapabilityCommand(message: WebviewToHostMessage, context: MessageContext) {
+  if (message.type === "shell.clipboard.writeText") {
+    try {
+      await vscode.env.clipboard.writeText(message.payload.text);
+      await context.post({
+        type: "shell.clipboard.writeText.result",
+        payload: { requestId: message.payload.requestId, ok: true },
+      });
+    } catch {
+      // Host clipboard failures stay metadata-only across the webview boundary.
+      await context.post({
+        type: "shell.clipboard.writeText.result",
+        payload: { requestId: message.payload.requestId, ok: false, error: "Unable to copy text." },
+      });
+    }
+    return true;
+  }
   if (message.type === "shell.openExternal" && isObject(message.payload)) {
     const rawUrl = requiredString(message.payload, "url");
     const url = new URL(rawUrl);

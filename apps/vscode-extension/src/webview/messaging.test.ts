@@ -48,7 +48,7 @@ vi.mock("vscode", () => ({
   commands: {
     executeCommand: vi.fn(),
   },
-  env: { openExternal: vi.fn() },
+  env: { clipboard: { writeText: vi.fn() }, openExternal: vi.fn() },
   Range: class {
     endCharacter: number;
     endLine: number;
@@ -86,6 +86,8 @@ describe("webview messaging composer routes", () => {
   beforeEach(() => {
     vi.mocked(vscode.commands.executeCommand).mockClear();
     vi.mocked(vscode.env.openExternal).mockClear();
+    vi.mocked(vscode.env.clipboard.writeText).mockReset();
+    vi.mocked(vscode.env.clipboard.writeText).mockResolvedValue(undefined);
     vi.mocked(vscode.workspace.openTextDocument).mockClear();
     vi.mocked(vscode.window.showTextDocument).mockClear();
     vi.mocked(vscode.window.showInformationMessage).mockClear();
@@ -721,6 +723,36 @@ describe("webview messaging composer routes", () => {
 
     expect(vscode.env.openExternal).toHaveBeenCalledWith({ value: "https://nodejs.org/en/download" });
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
+  });
+
+  it("writes clipboard text through VS Code and acknowledges the request", async () => {
+    const posted: unknown[] = [];
+
+    await handleWebviewMessage(
+      { type: "shell.clipboard.writeText", payload: { requestId: "clipboard-1", text: "copy me" } },
+      context({}, posted),
+    );
+
+    expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith("copy me");
+    expect(posted).toEqual([{
+      type: "shell.clipboard.writeText.result",
+      payload: { requestId: "clipboard-1", ok: true },
+    }]);
+  });
+
+  it("returns a clipboard failure without exposing host error details", async () => {
+    const posted: unknown[] = [];
+    vi.mocked(vscode.env.clipboard.writeText).mockRejectedValue(new Error("machine-specific clipboard failure"));
+
+    await handleWebviewMessage(
+      { type: "shell.clipboard.writeText", payload: { requestId: "clipboard-2", text: "copy me" } },
+      context({}, posted),
+    );
+
+    expect(posted).toEqual([{
+      type: "shell.clipboard.writeText.result",
+      payload: { requestId: "clipboard-2", ok: false, error: "Unable to copy text." },
+    }]);
   });
 
   it("brokers native file paths directly from VS Code to the App Server", async () => {
