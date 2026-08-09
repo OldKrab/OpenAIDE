@@ -145,6 +145,8 @@
 .agent-plan-disclosure-content {
   min-height: 0;
   overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .agent-plan-disclosure-content > .agent-plan-entries {
