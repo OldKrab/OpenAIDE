@@ -132,6 +132,8 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.match(versionBump, /## Changelog/);
   assert.match(versionBump, /node scripts\/check-release-main-ci\.mjs/);
   assert.match(versionBump, /node scripts\/release-version\.mjs next "\$RELEASE_VERSION"/);
+  assert.match(versionBump, /node scripts\/update-extension-changelog\.mjs "\$RELEASE_VERSION" "\$notes_path"/);
+  assert.match(versionBump, /git add package\.json package-lock\.json apps\/vscode-extension\/CHANGELOG\.md/);
   assert.match(versionBump, /git push --atomic origin "HEAD:refs\/heads\/main" "refs\/tags\/v\$RELEASE_VERSION"/);
   assert.doesNotMatch(versionBump, /--follow-tags/);
   assert.doesNotMatch(versionBump, /inputs\.bump|options:\s*\n\s*- patch/);

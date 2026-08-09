@@ -78,13 +78,14 @@ jobs:
           notes_path="$RUNNER_TEMP/release-notes.md"
 
           printf '%s\n' "$RELEASE_NOTES" > "$notes_path"
+          node scripts/update-extension-changelog.mjs "$RELEASE_VERSION" "$notes_path"
           if [[ -n "$previous_tag" ]]; then
             printf '\n## Changelog\n\n**Full Changelog**: %s/%s/compare/%s...v%s\n' \
               "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous_tag" "$RELEASE_VERSION" >> "$notes_path"
           fi
 
           npm version "$RELEASE_VERSION" --allow-same-version=false --no-git-tag-version
-          git add package.json package-lock.json
+          git add package.json package-lock.json apps/vscode-extension/CHANGELOG.md
           git commit --file "$notes_path"
           git tag --annotate "v$RELEASE_VERSION" --message "Release v$RELEASE_VERSION"
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REQUIRED_EXTENSION_FILES = [
+  "CHANGELOG.md",
   "LICENSE.txt",
   "dist/extension.js",
   "webview/dist/assets/index.js",
