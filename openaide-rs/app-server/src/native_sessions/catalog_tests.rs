@@ -234,3 +234,33 @@ fn failed_archive_write_leaves_in_memory_state_unchanged() {
     assert!(catalog.archive(&reference).is_err());
     assert!(!catalog.is_archived(&reference));
 }
+
+#[test]
+fn fork_response_identity_and_local_fallback_survive_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
+    let reference = NativeSessionRef::new("codex", "forked-session");
+
+    catalog
+        .record_fork(
+            "project-1",
+            "/workspace/project",
+            reference.clone(),
+            "Fork of Fix login".to_string(),
+        )
+        .unwrap();
+    drop(catalog);
+
+    let entry = NativeSessionCatalog::open(store)
+        .unwrap()
+        .entry(&reference)
+        .unwrap();
+    assert_eq!(entry.observation.reference, reference);
+    assert_eq!(entry.observation.title, None);
+    assert_eq!(
+        entry.local_fallback_title.as_deref(),
+        Some("Fork of Fix login")
+    );
+    assert!(entry.observation.last_activity.is_some());
+}

@@ -14,10 +14,10 @@ use crate::agent::attached_native_session::AttachedNativeSession;
 use crate::agent::attached_native_session_registry::AttachedNativeSessionRegistry;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionDelete, AgentSessionEventSink,
-    AgentSessionKey, AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest,
-    AgentSessionStart,
+    AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
+    AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionDelete,
+    AgentSessionEventSink, AgentSessionFork, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
+    AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -179,6 +179,13 @@ impl AcpActiveSessionManager {
 
     pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.sessions.close_session(session)
+    }
+
+    pub(super) fn fork_session(
+        &self,
+        request: AgentSessionFork,
+    ) -> Result<AgentForkedSession, RuntimeError> {
+        self.processes.fork_session(request)
     }
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {

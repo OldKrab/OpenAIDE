@@ -2,9 +2,9 @@ use super::*;
 use crate::agent::registry::{AgentCatalogRecord, AgentRegistry};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentEventSink, AgentListSessionsRequest, AgentLoadedSession, AgentPrompt, AgentRuntime,
-    AgentSession, AgentSessionEventSink, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
-    AgentSessionSetConfigOptionRequest, AgentSessionStart,
+    AgentEventSink, AgentForkedSession, AgentListSessionsRequest, AgentLoadedSession, AgentPrompt,
+    AgentRuntime, AgentSession, AgentSessionEventSink, AgentSessionFork, AgentSessionKey,
+    AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::attachment_runtime::AttachmentRuntimeError;
 use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery};
@@ -40,12 +40,12 @@ use openaide_app_server_protocol::snapshot::{
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
     ComposerHistoryParams, ComposerHistoryScope, ComposerImage, ComposerMessage,
-    NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
-    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskClosePlanParams,
-    TaskMarkReadParams, TaskOpenParams, TaskQueueAppendParams, TaskQueueMoveParams,
-    TaskQueueRemoveParams, TaskQueueSendSelection, TaskQueueTakeParams, TaskReleaseParams,
-    TaskSendParams, TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams,
-    TaskTitleSelection,
+    NativeSessionArchiveParams, NativeSessionForkParams, NativeSessionForkSource,
+    NativeSessionRestoreParams, TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams,
+    TaskCancelParams, TaskClosePlanParams, TaskMarkReadParams, TaskOpenParams,
+    TaskQueueAppendParams, TaskQueueMoveParams, TaskQueueRemoveParams, TaskQueueSendSelection,
+    TaskQueueTakeParams, TaskReleaseParams, TaskSendParams, TaskSetConfigOptionParams,
+    TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -2772,6 +2772,50 @@ fn native_session_archive_rejects_task_owned_identity() {
         openaide_app_server_protocol::errors::ProtocolErrorCode::Conflict
     );
     assert!(!api.native_session_catalog().is_archived(&reference));
+}
+
+#[test]
+fn task_native_session_fork_records_the_returned_agent_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-source", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-source".to_string());
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let result = api
+        .fork_native_session(
+            &ClientInstanceId::from("client-a"),
+            NativeSessionForkParams {
+                source: NativeSessionForkSource::Task {
+                    task_id: TaskId::from("task-source"),
+                },
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.reference.agent_id.as_str(), "codex");
+    assert_eq!(result.reference.session_id, "forked-session");
+    assert_eq!(agent.forks.load(Ordering::SeqCst), 1);
+    let entry = api
+        .native_session_catalog()
+        .entry(&crate::native_sessions::catalog::NativeSessionRef::new(
+            "codex",
+            "forked-session",
+        ))
+        .unwrap();
+    assert_eq!(
+        entry.local_fallback_title.as_deref(),
+        Some("Fork of Existing")
+    );
 }
 
 #[test]
@@ -8615,6 +8659,7 @@ struct RecordingAgent {
     attaches: AtomicUsize,
     cancels: AtomicUsize,
     closes: AtomicUsize,
+    forks: AtomicUsize,
     list_calls: AtomicUsize,
     block_list: AtomicBool,
     fail_list: bool,
@@ -8846,6 +8891,14 @@ impl AgentRuntime for OrderedConfigAgent {
 }
 
 impl AgentRuntime for RecordingAgent {
+    fn fork_session(&self, _request: AgentSessionFork) -> Result<AgentForkedSession, RuntimeError> {
+        self.forks.fetch_add(1, Ordering::SeqCst);
+        Ok(AgentForkedSession {
+            session_id: "forked-session".to_string(),
+            close_warning: false,
+        })
+    }
+
     fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

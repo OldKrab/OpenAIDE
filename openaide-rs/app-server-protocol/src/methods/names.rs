@@ -81,6 +81,7 @@ pub const TASK_NAVIGATION_REFRESH: &str = "taskNavigation/refresh";
 pub const TASK_NAVIGATION_LOAD_MORE: &str = "taskNavigation/loadMore";
 pub const NATIVE_SESSION_ARCHIVE: &str = "nativeSession/archive";
 pub const NATIVE_SESSION_RESTORE: &str = "nativeSession/restore";
+pub const NATIVE_SESSION_FORK: &str = "nativeSession/fork";
 pub const TASK_RELEASE: &str = "task/release";
 pub const TASK_ARCHIVE: &str = "task/archive";
 pub const TASK_RESTORE: &str = "task/restore";
@@ -169,6 +170,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_NAVIGATION_LOAD_MORE,
     NATIVE_SESSION_ARCHIVE,
     NATIVE_SESSION_RESTORE,
+    NATIVE_SESSION_FORK,
     TASK_RELEASE,
     TASK_ARCHIVE,
     TASK_RESTORE,

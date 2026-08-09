@@ -6,10 +6,10 @@ use crate::agent::acp_trace::AcpTraceState;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession, AgentSessionDelete,
-    AgentSessionEventSink, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
-    AgentSessionSetConfigOptionRequest, AgentSessionStart,
+    AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
+    AgentLoadedSession, AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession,
+    AgentSessionDelete, AgentSessionEventSink, AgentSessionFork, AgentSessionKey, AgentSessionLoad,
+    AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -135,6 +135,10 @@ impl AgentRuntime for AcpAgentRuntime {
 
     fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.kernel.close_session(session)
+    }
+
+    fn fork_session(&self, request: AgentSessionFork) -> Result<AgentForkedSession, RuntimeError> {
+        self.kernel.fork_session(request)
     }
 
     fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {

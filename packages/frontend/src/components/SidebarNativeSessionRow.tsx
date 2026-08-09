@@ -1,4 +1,4 @@
-import { AlertCircle, Archive, ArrowLeft, ExternalLink, Info, MoreHorizontal, RotateCcw } from "lucide-react";
+import { AlertCircle, Archive, ArrowLeft, Check, ExternalLink, GitFork, Info, MoreHorizontal, RotateCcw } from "lucide-react";
 import { useRef, useState } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
@@ -9,21 +9,25 @@ import { AgentHistoryPreviewDetails, useSidebarTaskPreview } from "./SidebarTask
 
 export function SidebarNativeSessionRow({
   archived,
+  canFork = false,
   mutation,
   nativeSessionAgentId,
   nativeSessionAgentName,
   nativeSessionsAdoptingSessionId,
   onArchiveNativeSession,
+  onForkNativeSession,
   onOpenNativeSession,
   onRestoreNativeSession,
   session,
 }: {
   archived: boolean;
+  canFork?: boolean;
   mutation?: import("../state/store").NativeSessionMutationState;
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
   nativeSessionsAdoptingSessionId?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
+  onForkNativeSession?: (session: AgentListedSession) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onRestoreNativeSession: (session: AgentListedSession) => void;
   session: AgentListedSession;
@@ -34,6 +38,9 @@ export function SidebarNativeSessionRow({
   const preview = useSidebarTaskPreview();
   const adopting = nativeSessionsAdoptingSessionId === session.session_id;
   const pending = mutation?.state === "pending";
+  const forkMutation = mutation?.action === "fork" ? mutation : undefined;
+  const forkPending = forkMutation?.state === "pending";
+  const lifecyclePending = pending && !forkPending;
   const title = nativeSessionTitle(session);
   const timestamp = session.last_activity ?? session.updated_at;
   const age = timestamp ? relativeTime(timestamp) : "";
@@ -78,7 +85,7 @@ export function SidebarNativeSessionRow({
         <button
           aria-label={`Open ${title}`}
           className="task-open"
-          disabled={adopting || pending}
+          disabled={adopting || lifecyclePending}
           onClick={openSession}
           type="button"
         >
@@ -88,21 +95,21 @@ export function SidebarNativeSessionRow({
       <SidebarRowActionSlot>
         {archived ? (
           <button
-            aria-busy={pending || undefined}
+            aria-busy={lifecyclePending || undefined}
             aria-label={`Restore ${title}`}
-            className={`task-row-action ${pending ? "pending" : ""}`}
-            disabled={pending}
+            className={`task-row-action ${lifecyclePending ? "pending" : ""}`}
+            disabled={lifecyclePending}
             onClick={() => onRestoreNativeSession(session)}
-            title={pending ? "Restoring Native Session" : "Restore Native Session"}
+            title={lifecyclePending ? "Restoring Native Session" : "Restore Native Session"}
             type="button"
           >
-            {pending ? <span className="task-state-spinner" /> : <RotateCcw size={13} />}
+            {lifecyclePending ? <span className="task-state-spinner" /> : <RotateCcw size={13} />}
           </button>
         ) : <>
           <button
             aria-label={`Open ${title}`}
             className="task-row-action external-session-open-action"
-            disabled={adopting || pending}
+            disabled={adopting || lifecyclePending}
             onClick={openSession}
             title={adopting ? "Opening task" : "Open task"}
             type="button"
@@ -120,7 +127,7 @@ export function SidebarNativeSessionRow({
                   {...triggerProps}
                   aria-label={`Task actions for ${title}`}
                   className="task-row-action"
-                  disabled={adopting || pending}
+                  disabled={adopting || lifecyclePending}
                   title={adopting ? "Opening task" : menuOpen ? undefined : "Task actions"}
                   type="button"
                 >
@@ -136,6 +143,20 @@ export function SidebarNativeSessionRow({
               </> : <>
                 <button className="task-row-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
                 <button onClick={openSession} type="button" role="menuitem"><ExternalLink size={13} />Open task</button>
+                {canFork && onForkNativeSession ? (
+                  <button
+                    disabled={forkPending}
+                    onClick={() => {
+                      closeMenu();
+                      preview?.dismiss();
+                      onForkNativeSession(session);
+                    }}
+                    type="button"
+                    role="menuitem"
+                  >
+                    <GitFork size={13} />{forkPending ? "Forking…" : "Fork session"}
+                  </button>
+                ) : null}
                 <button onClick={archiveSession} type="button" role="menuitem"><Archive size={13} />Archive</button>
               </>}
             </PopupMenu>
@@ -153,7 +174,21 @@ export function SidebarNativeSessionRow({
       <span className="task-row-body">
         <span className="task-title">{title}</span>
         <span className="task-trailing-meta">
-          {mutation?.state === "failed" ? (
+          {forkMutation ? (
+            <span
+              aria-label={forkMutationLabel(forkMutation)}
+              className={forkMutation.state === "failed" || forkMutation.state === "unknown" || forkMutation.error
+                ? "native-session-mutation-error"
+                : "task-trailing-indicator"}
+              role="status"
+              title={forkMutation.error}
+            >
+              {forkMutation.state === "pending" ? <span className="task-state-spinner" />
+                : forkMutation.state === "created" && !forkMutation.error ? <Check size={12} />
+                  : <AlertCircle size={12} />}
+              <span>{forkMutationLabel(forkMutation)}</span>
+            </span>
+          ) : mutation?.state === "failed" ? (
             <span
               aria-label={mutation.error ?? "Native Session archive failed"}
               className="native-session-mutation-error"
@@ -163,7 +198,7 @@ export function SidebarNativeSessionRow({
               <AlertCircle size={12} />
               <span>{mutation.action === "restore" ? "Restore failed" : "Archive failed"}</span>
             </span>
-          ) : pending ? (
+          ) : lifecyclePending ? (
             <span
               aria-label={mutation.action === "restore" ? "Restoring Native Session" : "Archiving Native Session"}
               className="task-trailing-indicator"
@@ -196,4 +231,11 @@ export function SidebarNativeSessionRow({
       workspaceLabel: session.cwd,
     };
   }
+}
+
+function forkMutationLabel(mutation: import("../state/store").NativeSessionMutationState) {
+  if (mutation.state === "pending") return "Forking";
+  if (mutation.state === "created") return mutation.error ? "Created; cleanup failed" : "Fork created";
+  if (mutation.state === "unknown") return "Check sessions";
+  return "Fork failed";
 }

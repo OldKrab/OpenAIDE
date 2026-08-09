@@ -2,7 +2,7 @@ import { memo, useRef, useState } from "react";
 import { Archive, ArrowLeft, FolderPlus, Plus, RefreshCcw, Search, Settings } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
-import type { AppState } from "../state/store";
+import { taskForkMutationKey, type AppState } from "../state/store";
 import {
   initialTaskNavigationRowsPerProject,
   TASK_NAVIGATION_PAGE_SIZE,
@@ -23,7 +23,10 @@ type SidebarProps = {
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
+  forkableAgentIds?: ReadonlySet<string>;
   onArchiveNativeSession: (session: AgentListedSession) => void;
+  onForkNativeSession?: (session: AgentListedSession) => void;
+  onForkTask?: (taskId: string) => void;
   onAddProject?: () => void;
   onLoadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   onManageWorktrees?: (projectId: string) => void;
@@ -72,7 +75,10 @@ export const Sidebar = memo(function Sidebar({
   nativeSessionAgentId,
   nativeSessionAgentName,
   nativeSessionProjectId,
+  forkableAgentIds = new Set(),
   onArchiveNativeSession,
+  onForkNativeSession,
+  onForkTask,
   onAddProject,
   onLoadNativeSessions,
   onManageWorktrees,
@@ -261,8 +267,11 @@ export const Sidebar = memo(function Sidebar({
                   !showArchived && nativeSessions.loadingProjectIds?.includes(group.key) === true
                 }
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
+                forkableAgentIds={forkableAgentIds}
                 onArchiveNativeSession={onArchiveNativeSession}
                 onArchiveTask={onArchiveTask}
+                onForkNativeSession={onForkNativeSession}
+                onForkTask={onForkTask}
                 onLoadMore={(visibleIncrement) =>
                   {
                     const nextLimit = (projectRowLimits.get(group.key) ?? initialProjectRowLimit) + visibleIncrement;
@@ -313,7 +322,10 @@ export const Sidebar = memo(function Sidebar({
                 <SidebarTaskRow
                   key={`task:${row.task.task_id}`}
                   activeTaskId={activeTaskId}
+                  canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
+                  forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
                   onArchiveTask={onArchiveTask}
+                  onForkTask={onForkTask}
                   onOpenTask={onOpenTask}
                   onRestoreTask={onRestoreTask}
                   onSetTaskPinned={onSetTaskPinned}
@@ -324,6 +336,7 @@ export const Sidebar = memo(function Sidebar({
               ) : (
                 <SidebarNativeSessionRow
                   archived={showArchived}
+                  canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
                   key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
                   mutation={nativeSessionMutations[
                     `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
@@ -332,6 +345,7 @@ export const Sidebar = memo(function Sidebar({
                   nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                   nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                   onArchiveNativeSession={onArchiveNativeSession}
+                  onForkNativeSession={onForkNativeSession}
                   onOpenNativeSession={onOpenNativeSession}
                   onRestoreNativeSession={onRestoreNativeSession}
                   session={row.session}
@@ -392,6 +406,7 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.nativeSessionAgentId === next.nativeSessionAgentId &&
     prev.nativeSessionAgentName === next.nativeSessionAgentName &&
     prev.nativeSessionProjectId === next.nativeSessionProjectId &&
+    prev.forkableAgentIds === next.forkableAgentIds &&
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
     prev.settingsActive === next.settingsActive &&

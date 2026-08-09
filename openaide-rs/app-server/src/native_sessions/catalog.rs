@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::errors::RuntimeError;
 use crate::storage::{atomic, Store};
 
-const CATALOG_VERSION: u32 = 2;
+const CATALOG_VERSION: u32 = 3;
 
 /// Stable Agent-scoped identity for one Agent-owned conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -42,6 +42,9 @@ pub(crate) struct NativeSessionCatalogEntry {
     pub(crate) workspace_root: String,
     #[serde(flatten)]
     pub(crate) observation: NativeSessionObservation,
+    /// Client-owned display fallback for lifecycle responses that carry no Agent title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) local_fallback_title: Option<String>,
 }
 
 /// Durable Native Session listing observations. ACP cursors and refresh generations stay in memory.
@@ -131,9 +134,46 @@ impl NativeSessionCatalog {
                 project_id: project_id.to_string(),
                 workspace_root: workspace_root.to_string(),
                 observation,
+                local_fallback_title: None,
             });
         }
         atomic::write_json(&catalog_path(&self.store), &*state)
+    }
+
+    /// Persists the authoritative identity returned by `session/fork` without
+    /// pretending the local fallback is Agent-owned session metadata.
+    pub(crate) fn record_fork(
+        &self,
+        project_id: &str,
+        workspace_root: &str,
+        reference: NativeSessionRef,
+        local_fallback_title: String,
+    ) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().expect("native session catalog poisoned");
+        if state
+            .entries
+            .iter()
+            .any(|entry| entry.observation.reference == reference)
+        {
+            return Ok(());
+        }
+        // Persist the candidate before publishing it in memory. A failed write
+        // must not make live navigation disagree with the restart baseline.
+        let mut candidate = state.clone();
+        candidate.entries.push(NativeSessionCatalogEntry {
+            project_id: project_id.to_string(),
+            workspace_root: workspace_root.to_string(),
+            observation: NativeSessionObservation {
+                reference,
+                title: None,
+                last_activity: Some(crate::time::now_string()),
+            },
+            local_fallback_title: Some(local_fallback_title),
+        });
+        candidate.version = CATALOG_VERSION;
+        atomic::write_json(&catalog_path(&self.store), &candidate)?;
+        *state = candidate;
+        Ok(())
     }
 
     /// Merges authoritative metadata observed from an already-live Native Session.

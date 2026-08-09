@@ -7,6 +7,7 @@ import {
 import {
   AGENT_PROBE,
   NATIVE_SESSION_ARCHIVE,
+  NATIVE_SESSION_FORK,
   NATIVE_SESSION_RESTORE,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
@@ -15,11 +16,12 @@ import {
   type AgentId,
   type ProjectId,
   type TaskId,
+  AppServerProtocolError,
 } from "@openaide/app-server-client";
 import { applyProtocolAgents } from "../state/appServerAgents";
 import { requestTaskArchive, requestTaskRestore } from "../intents/taskReadIntents";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
-import { nativeSessionMutationKey } from "../state/store";
+import { nativeSessionMutationKey, taskForkMutationKey } from "../state/store";
 import type { AppCallbacksDependencies, NavigationCallbacks } from "./appControllerCallbackTypes";
 import {
   newTaskNavigationTarget,
@@ -52,6 +54,9 @@ export function createNavigationCallbacks({
   setAgents,
   state,
 }: NavigationDependencies): NavigationCallbacks {
+  // Fork is non-idempotent and has no client mutation id. Guard synchronously
+  // so repeated clicks cannot outrun the next React state publication.
+  const pendingForkKeys = new Set<string>();
   return {
     archiveNativeSession: (session) => {
       mutateNativeSessionArchive("archive", session);
@@ -82,6 +87,23 @@ export function createNavigationCallbacks({
         return;
       }
       dispatch({ type: "tasks:error", message: "App Server connection unavailable." });
+    },
+    forkNativeSession: (session) => {
+      const agentId = session.agent_id ?? state.newTask.selection.agentId;
+      mutateNativeSessionFork(
+        nativeSessionMutationKey(agentId, session.session_id),
+        {
+          kind: "nativeSession",
+          agentId: agentId as AgentId,
+          nativeSessionId: session.session_id,
+        },
+      );
+    },
+    forkTask: (taskId) => {
+      mutateNativeSessionFork(taskForkMutationKey(taskId), {
+        kind: "task",
+        taskId: taskId as TaskId,
+      });
     },
     changeSearch: (query) => dispatch({ type: "search:set", query }),
     loadNativeSessions: (cursor, projectId, targetRowCount) => {
@@ -237,6 +259,53 @@ export function createNavigationCallbacks({
           : `Unable to ${action} Native Session.`,
       });
     });
+  }
+
+  function mutateNativeSessionFork(
+    key: string,
+    source: import("@openaide/app-server-client").NativeSessionForkSource,
+  ) {
+    if (pendingForkKeys.has(key) || state.nativeSessionMutations[key]?.state === "pending") return;
+    if (!backendConnection?.request) {
+      dispatch({
+        type: "nativeSessionFork:error",
+        key,
+        unknown: true,
+        message: "Fork may have been created. Refresh sessions to check.",
+      });
+      scheduleForkStateClear(key);
+      return;
+    }
+    pendingForkKeys.add(key);
+    dispatch({ type: "nativeSessionFork:start", key });
+    void backendConnection.request(NATIVE_SESSION_FORK, { source }).then((result) => {
+      pendingForkKeys.delete(key);
+      dispatch({
+        type: "nativeSessionFork:complete",
+        key,
+        closeWarning: result.closeWarning,
+      });
+      scheduleForkStateClear(key);
+    }).catch((error) => {
+      pendingForkKeys.delete(key);
+      // Internal failures can occur after the Agent accepted the non-idempotent
+      // fork but before OpenAIDE persisted or returned its identity.
+      const definite = error instanceof AppServerProtocolError
+        && error.protocolError.code !== "internal";
+      dispatch({
+        type: "nativeSessionFork:error",
+        key,
+        unknown: !definite,
+        message: definite
+          ? "Couldn't fork this session. Try again."
+          : "Fork may have been created. Refresh sessions to check.",
+      });
+      scheduleForkStateClear(key);
+    });
+  }
+
+  function scheduleForkStateClear(key: string) {
+    setTimeout(() => dispatch({ type: "nativeSessionFork:clear", key }), 5_000);
   }
 }
 

@@ -41,13 +41,17 @@ export type NativeSessionsState = {
 };
 
 export type NativeSessionMutationState = {
-  action: "archive" | "restore";
-  state: "pending" | "failed";
+  action: "archive" | "restore" | "fork";
+  state: "pending" | "created" | "failed" | "unknown";
   error?: string;
 };
 
 export function nativeSessionMutationKey(agentId: string, sessionId: string) {
   return `${agentId}\u0000${sessionId}`;
+}
+
+export function taskForkMutationKey(taskId: string) {
+  return `task:${taskId}`;
 }
 
 export type NewTaskState = {

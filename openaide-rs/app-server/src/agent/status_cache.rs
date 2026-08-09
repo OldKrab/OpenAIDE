@@ -146,6 +146,7 @@ fn capabilities_from_probe(result: &AgentProbeResult) -> AgentCapabilities {
     AgentCapabilities {
         resume_tasks: result.typed_capabilities.resume_sessions,
         delete_native_sessions: result.typed_capabilities.delete_sessions,
+        fork_native_sessions: result.typed_capabilities.fork_sessions,
     }
 }
 

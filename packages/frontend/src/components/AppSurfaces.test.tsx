@@ -1324,6 +1324,8 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
       navigation: {
         archiveNativeSession: vi.fn(),
         archiveTask: vi.fn(),
+        forkNativeSession: vi.fn(),
+        forkTask: vi.fn(),
         changeSearch: vi.fn(),
         loadNativeSessions: vi.fn(),
         openNativeSession: vi.fn(),

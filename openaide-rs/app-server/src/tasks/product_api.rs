@@ -8,10 +8,10 @@ use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
 use openaide_app_server_protocol::task::{
-    NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
-    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskClosePlanParams,
-    TaskLifecycleChanged, TaskRestoreParams, TaskSendParams, TaskSetPinnedParams,
-    TaskSetTitleParams,
+    NativeSessionArchiveParams, NativeSessionForkParams, NativeSessionRestoreParams,
+    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
+    TaskClosePlanParams, TaskLifecycleChanged, TaskRestoreParams, TaskSendParams,
+    TaskSetPinnedParams, TaskSetTitleParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -50,6 +50,7 @@ mod file_search;
 mod list_sessions;
 mod native_session_archive;
 mod native_session_discovery;
+mod native_session_fork;
 mod open;
 mod prepare;
 mod queue;
@@ -644,6 +645,14 @@ impl TaskArchiveWorkflow for TaskProductApi {
         params: NativeSessionRestoreParams,
     ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
         self.set_native_session_archived(params.agent_id.as_str(), &params.native_session_id, false)
+    }
+
+    fn fork_native_session_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: NativeSessionForkParams,
+    ) -> Result<NativeSessionForkMutation, ProtocolError> {
+        self.fork_native_session(client_instance_id, params)
     }
 }
 

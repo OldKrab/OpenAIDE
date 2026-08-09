@@ -175,6 +175,7 @@ fn main() {
                 typed_capabilities: AgentProbeCapabilities {
                     resume_sessions: true,
                     delete_sessions: true,
+                    fork_sessions: true,
                 },
                 auth_methods: vec![AgentAuthMethodSummary {
                     id: "codex-login".to_string(),

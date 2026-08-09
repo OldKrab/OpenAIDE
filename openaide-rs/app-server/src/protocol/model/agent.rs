@@ -183,6 +183,7 @@ pub struct AgentProbeResult {
 pub struct AgentProbeCapabilities {
     pub resume_sessions: bool,
     pub delete_sessions: bool,
+    pub fork_sessions: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

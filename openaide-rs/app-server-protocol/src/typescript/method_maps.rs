@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
+        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -94,6 +94,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreParams;\n");
     output.push_str("  [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveParams;\n");
     output.push_str("  [NATIVE_SESSION_RESTORE]: NativeSessionRestoreParams;\n");
+    output.push_str("  [NATIVE_SESSION_FORK]: NativeSessionForkParams;\n");
     output.push_str("  [TASK_RELEASE]: TaskReleaseParams;\n");
     output.push_str("  [TASK_ARCHIVE]: TaskArchiveParams;\n  [TASK_RESTORE]: TaskRestoreParams;\n");
     output.push_str("};\n\n");
@@ -185,6 +186,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreResult;\n");
     output.push_str("  [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveResult;\n");
     output.push_str("  [NATIVE_SESSION_RESTORE]: NativeSessionRestoreResult;\n");
+    output.push_str("  [NATIVE_SESSION_FORK]: NativeSessionForkResult;\n");
     output.push_str("  [TASK_RELEASE]: TaskReleaseResult;\n");
     output.push_str("  [TASK_ARCHIVE]: TaskArchiveResult;\n  [TASK_RESTORE]: TaskRestoreResult;\n");
     output.push_str("};\n\n");

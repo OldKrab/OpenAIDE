@@ -50,8 +50,9 @@ use crate::state::{
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ComposerHistoryParams, ComposerHistoryResult, NativeSessionArchiveParams,
-    NativeSessionArchiveResult, NativeSessionRestoreParams, NativeSessionRestoreResult,
-    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    NativeSessionArchiveResult, NativeSessionForkParams, NativeSessionForkResult,
+    NativeSessionRestoreParams, NativeSessionRestoreResult, TaskAcquireInWorktreeParams,
+    TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
     TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
     TaskClosePlanParams, TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams,
@@ -501,6 +502,12 @@ protocol_method!(
     NATIVE_SESSION_RESTORE,
     NativeSessionRestoreParams,
     NativeSessionRestoreResult
+);
+protocol_method!(
+    NativeSessionFork,
+    NATIVE_SESSION_FORK,
+    NativeSessionForkParams,
+    NativeSessionForkResult
 );
 protocol_method!(
     TaskAdoptNativeSession,

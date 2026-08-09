@@ -11,13 +11,16 @@ use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
-use crate::agent::acp_schema::AuthenticateRequest;
-use crate::agent::acp_session_capabilities::validate_auth_method;
+use crate::agent::acp_schema::{AuthenticateRequest, CloseSessionRequest, ForkSessionRequest};
+use crate::agent::acp_session_capabilities::{
+    validate_auth_method, validate_session_fork_capabilities,
+};
 use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connection};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::{
-    AgentAuthenticateRequest, AgentListSessionsRequest, AgentSecretResolver, AgentSession,
-    AgentSessionLoad, AgentSessionResume, AgentSessionStart, TurnCancellation,
+    AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSecretResolver,
+    AgentSession, AgentSessionFork, AgentSessionLoad, AgentSessionResume, AgentSessionStart,
+    TurnCancellation,
 };
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
@@ -127,6 +130,10 @@ pub(super) enum AcpAgentProcessControl {
     Authenticate {
         request: AgentAuthenticateRequest,
         reply_tx: mpsc::Sender<Result<AgentAuthenticateResult, RuntimeError>>,
+    },
+    Fork {
+        request: AgentSessionFork,
+        reply_tx: mpsc::Sender<Result<AgentForkedSession, RuntimeError>>,
     },
 }
 
@@ -289,6 +296,14 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                                 ).await;
                                 let _ = reply_tx.send(result);
                             }
+                            AcpAgentProcessControl::Fork { request, reply_tx } => {
+                                let result = fork_session_on_shared_process(
+                                    &connection,
+                                    &initialize,
+                                    request,
+                                ).await;
+                                let _ = reply_tx.send(result);
+                            }
                         }
                     }
                 }
@@ -307,6 +322,56 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         .await
         .map_err(|error| RuntimeError::Internal(error.to_string()))?;
     result
+}
+
+async fn fork_session_on_shared_process(
+    connection: &ConnectionTo<Agent>,
+    initialize: &InitializeResponse,
+    request: AgentSessionFork,
+) -> Result<AgentForkedSession, RuntimeError> {
+    validate_session_fork_capabilities(initialize)?;
+    let mcp_servers = match request.secret_resolver {
+        Some(resolver) => {
+            resolver.resolve_mcp_servers(&initialize.agent_capabilities.mcp_capabilities)?
+        }
+        None => Vec::new(),
+    };
+    let started_at = Instant::now();
+    logging::info(
+        "acp_session_fork_started",
+        serde_json::json!({
+            "agent_id": request.agent_id,
+            "source_session_id": request.source_session_id,
+        }),
+    );
+    let response = connection
+        .send_request(
+            ForkSessionRequest::new(request.source_session_id.clone(), request.cwd)
+                .mcp_servers(mcp_servers),
+        )
+        .block_task()
+        .await
+        .map_err(acp_error)?;
+    let session_id = response.session_id.to_string();
+    let close_warning = connection
+        .send_request(CloseSessionRequest::new(response.session_id))
+        .block_task()
+        .await
+        .is_err();
+    logging::info(
+        "acp_session_fork_completed",
+        serde_json::json!({
+            "agent_id": request.agent_id,
+            "source_session_id": request.source_session_id,
+            "forked_session_id": session_id,
+            "duration_ms": started_at.elapsed().as_millis(),
+            "close_warning": close_warning,
+        }),
+    );
+    Ok(AgentForkedSession {
+        session_id,
+        close_warning,
+    })
 }
 
 async fn authenticate_on_shared_process(
