@@ -41,6 +41,9 @@ fn typed_capabilities(initialize: &InitializeResponse) -> AgentProbeCapabilities
     AgentProbeCapabilities {
         resume_sessions: caps.session_capabilities.resume.is_some(),
         delete_sessions: caps.session_capabilities.delete.is_some(),
+        fork_sessions: caps.load_session
+            && caps.session_capabilities.fork.is_some()
+            && caps.session_capabilities.close.is_some(),
     }
 }
 
@@ -76,6 +79,9 @@ fn capability_labels(initialize: &InitializeResponse) -> Vec<String> {
     }
     if caps.session_capabilities.delete.is_some() {
         labels.push("Delete sessions".to_string());
+    }
+    if caps.session_capabilities.fork.is_some() {
+        labels.push("Fork sessions (experimental)".to_string());
     }
     labels
 }

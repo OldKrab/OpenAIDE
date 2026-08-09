@@ -167,11 +167,13 @@ pub struct AgentCapabilities {
     pub resume_tasks: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub delete_native_sessions: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fork_native_sessions: bool,
 }
 
 impl AgentCapabilities {
     pub fn is_empty(&self) -> bool {
-        !self.resume_tasks && !self.delete_native_sessions
+        !self.resume_tasks && !self.delete_native_sessions && !self.fork_native_sessions
     }
 }
 

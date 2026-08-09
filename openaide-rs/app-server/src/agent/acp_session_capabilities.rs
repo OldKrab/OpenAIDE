@@ -18,6 +18,28 @@ pub(super) fn initialize_supports_session_delete(initialize: &InitializeResponse
         .is_some()
 }
 
+pub(super) fn validate_session_fork_capabilities(
+    initialize: &InitializeResponse,
+) -> Result<(), RuntimeError> {
+    let caps = &initialize.agent_capabilities;
+    if caps.session_capabilities.fork.is_none() {
+        return Err(RuntimeError::CapabilityMissing(
+            "agent session fork is not available".to_string(),
+        ));
+    }
+    if !caps.load_session {
+        return Err(RuntimeError::CapabilityMissing(
+            "forked sessions cannot be loaded".to_string(),
+        ));
+    }
+    if caps.session_capabilities.close.is_none() {
+        return Err(RuntimeError::CapabilityMissing(
+            "forked sessions cannot be closed".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_initialize_protocol(
     initialize: &InitializeResponse,
 ) -> Result<(), RuntimeError> {

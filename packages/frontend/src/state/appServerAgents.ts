@@ -26,6 +26,7 @@ export function agentOptionsFromProtocol(snapshot: AgentCollectionSnapshot): Age
       enabled: true,
       status: agent.status,
       setupReason: agent.setupReason ?? undefined,
+      capabilities: agent.capabilities,
     };
   });
 }

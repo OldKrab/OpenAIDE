@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
+  AlertCircle,
   ArrowLeft,
   Check,
   GitBranch,
+  GitFork,
   Info,
   MoreHorizontal,
   Pencil,
@@ -18,10 +20,14 @@ import { PopupMenu } from "./Popup";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { relativeTime } from "./taskSurfaceHelpers";
 import { TaskPreviewDetails, taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
+import type { NativeSessionMutationState } from "../state/store";
 
 export function SidebarTaskRow({
   activeTaskId,
+  canFork = false,
+  forkMutation,
   onArchiveTask,
+  onForkTask,
   onOpenTask,
   onRestoreTask,
   onSetTaskPinned,
@@ -30,7 +36,10 @@ export function SidebarTaskRow({
   task,
 }: {
   activeTaskId?: string;
+  canFork?: boolean;
+  forkMutation?: NativeSessionMutationState;
   onArchiveTask: (taskId: string) => void;
+  onForkTask?: (taskId: string) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
   onSetTaskPinned?: (taskId: string, pinned: boolean) => Promise<void>;
@@ -53,6 +62,7 @@ export function SidebarTaskRow({
   const preview = useSidebarTaskPreview();
   const title = task.title || "Untitled task";
   const actionLabel = showArchived ? "Restore task" : "Archive task";
+  const forkPending = forkMutation?.action === "fork" && forkMutation.state === "pending";
   const openTask = () => {
     preview?.dismiss();
     onOpenTask(task.task_id);
@@ -185,6 +195,7 @@ export function SidebarTaskRow({
         <span className="task-row-body">
           <span className="task-title">{title}</span>
           <TaskTrailingMeta
+            forkMutation={forkMutation}
             pinned={task.pinned}
             pinSaving={pinSaving}
             status={task.status}
@@ -231,6 +242,20 @@ export function SidebarTaskRow({
                 <Pin size={13} />{task.pinned ? "Unpin task" : "Pin task"}
               </button>
             ) : null}
+            {canFork && onForkTask && !showArchived ? (
+              <button
+                disabled={forkPending}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setDetailsOpen(false);
+                  onForkTask(task.task_id);
+                }}
+                type="button"
+                role="menuitem"
+              >
+                <GitFork size={13} />{forkPending ? "Forking…" : "Fork session"}
+              </button>
+            ) : null}
             <button onClick={runAction} type="button" role="menuitem">
               {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
               {actionLabel}
@@ -247,6 +272,7 @@ export function SidebarTaskRow({
 }
 
 function TaskTrailingMeta({
+  forkMutation,
   pinned,
   pinSaving,
   status,
@@ -254,6 +280,7 @@ function TaskTrailingMeta({
   unread,
   worktreeName,
 }: {
+  forkMutation?: NativeSessionMutationState;
   pinned: boolean;
   pinSaving: boolean;
   status: TaskStatus;
@@ -263,6 +290,21 @@ function TaskTrailingMeta({
 }) {
   return (
     <span className="task-trailing-meta">
+      {forkMutation?.action === "fork" ? (
+        <span
+          aria-label={forkMutationLabel(forkMutation)}
+          className={forkMutation.state === "failed" || forkMutation.state === "unknown" || forkMutation.error
+            ? "native-session-mutation-error"
+            : "task-trailing-indicator"}
+          role="status"
+          title={forkMutation.error}
+        >
+          {forkMutation.state === "pending" ? <span className="task-state-spinner" />
+            : forkMutation.state === "created" && !forkMutation.error ? <Check size={12} />
+              : <AlertCircle size={12} />}
+          <span>{forkMutationLabel(forkMutation)}</span>
+        </span>
+      ) : null}
       {pinned ? (
         <span aria-label="Pinned" className="task-pin-marker" role="img" title="Pinned">
           <Pin size={12} />
@@ -281,6 +323,13 @@ function TaskTrailingMeta({
       <TaskStateOrAge status={status} timestamp={timestamp} unread={unread} />
     </span>
   );
+}
+
+function forkMutationLabel(mutation: NativeSessionMutationState) {
+  if (mutation.state === "pending") return "Forking";
+  if (mutation.state === "created") return mutation.error ? "Created; cleanup failed" : "Fork created";
+  if (mutation.state === "unknown") return "Check sessions";
+  return "Fork failed";
 }
 
 function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; timestamp?: string; unread: boolean }) {

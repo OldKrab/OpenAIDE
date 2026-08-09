@@ -111,7 +111,8 @@ use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
     ActivityToolOutput, ActivityToolValue, ComposerHistoryEntry, ComposerHistoryParams,
     ComposerHistoryResult, ComposerHistoryScope, ComposerImage, ComposerMessage,
-    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
+    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionForkParams,
+    NativeSessionForkResult, NativeSessionForkSource, NativeSessionRestoreParams,
     NativeSessionRestoreResult, TakenQueuedMessage, TaskAcquireInWorktreeParams,
     TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
@@ -459,6 +460,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<NativeSessionArchiveResult>(output, config);
     push_decl::<NativeSessionRestoreParams>(output, config);
     push_decl::<NativeSessionRestoreResult>(output, config);
+    push_decl::<NativeSessionForkSource>(output, config);
+    push_decl::<NativeSessionForkParams>(output, config);
+    push_decl::<NativeSessionForkResult>(output, config);
     push_decl::<TaskReleaseParams>(output, config);
     push_decl::<TaskReleaseResult>(output, config);
     push_decl::<TaskArchiveParams>(output, config);

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::agent::{
-    AgentAuthenticateRequest, AgentListSessionsRequest, AgentLoadedSession, AgentProbeRequest,
-    AgentRuntime, AgentSession, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
-    AgentSessionSetConfigOptionRequest, AgentSessionStart,
+    AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentLoadedSession,
+    AgentProbeRequest, AgentRuntime, AgentSession, AgentSessionFork, AgentSessionKey,
+    AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -72,6 +72,13 @@ impl AgentGateway {
 
     pub(crate) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.agent.close_session(session)
+    }
+
+    pub(crate) fn fork_session(
+        &self,
+        request: AgentSessionFork,
+    ) -> Result<AgentForkedSession, RuntimeError> {
+        self.agent.fork_session(request)
     }
 
     pub(crate) fn native_session_lifecycle(&self) -> NativeSessionLifecycle<'_> {

@@ -57,6 +57,7 @@ impl AgentRuntime for ReadyAgent {
             typed_capabilities: AgentProbeCapabilities {
                 resume_sessions: true,
                 delete_sessions: false,
+                fork_sessions: false,
             },
             auth_methods: Vec::new(),
             logout_supported: false,

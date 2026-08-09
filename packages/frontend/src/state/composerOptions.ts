@@ -11,6 +11,7 @@ export type AgentOption = {
   enabled?: boolean;
   status?: import("@openaide/app-server-client").AgentStatus;
   setupReason?: import("@openaide/app-server-client").AgentSetupReason;
+  capabilities?: import("@openaide/app-server-client").AgentCapabilities;
 };
 
 export type IsolationOption = {

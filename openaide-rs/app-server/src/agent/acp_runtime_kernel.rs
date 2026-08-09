@@ -7,10 +7,10 @@ use crate::agent::acp_runtime_threading::close_in_parallel;
 use crate::agent::acp_trace::AcpTraceState;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentProbeRequest, AgentPrompt, AgentSession, AgentSessionDelete, AgentSessionEventSink,
-    AgentSessionKey, AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest,
-    AgentSessionStart,
+    AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
+    AgentLoadedSession, AgentProbeRequest, AgentPrompt, AgentSession, AgentSessionDelete,
+    AgentSessionEventSink, AgentSessionFork, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
+    AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -137,6 +137,18 @@ impl AcpRuntimeKernel {
 
     pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.active_sessions.close_session(session)
+    }
+
+    pub(super) fn fork_session(
+        &self,
+        request: AgentSessionFork,
+    ) -> Result<AgentForkedSession, RuntimeError> {
+        let _operation = self.lock_agent_process_operations()?;
+        self.registry.require(&request.agent_id)?;
+        if !std::path::Path::new(&request.cwd).is_absolute() {
+            return Err(RuntimeError::InvalidParams("workspace_root".to_string()));
+        }
+        self.active_sessions.fork_session(request)
     }
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {

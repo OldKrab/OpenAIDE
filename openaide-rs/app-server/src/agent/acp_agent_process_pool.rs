@@ -12,7 +12,9 @@ use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerm
 use crate::agent::acp_runtime_threading::block_on_new_runtime;
 use crate::agent::attached_native_session::record_terminal_error;
 use crate::agent::registry_handle::AgentRegistryHandle;
-use crate::agent::{AgentAuthenticateRequest, AgentListSessionsRequest};
+use crate::agent::{
+    AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSessionFork,
+};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -108,6 +110,23 @@ impl AcpAgentProcessPool {
         reply_rx
             .recv_timeout(std::time::Duration::from_secs(30))
             .map_err(|_| RuntimeError::NotReady("ACP session listing timed out".to_string()))?
+    }
+
+    pub(super) fn fork_session(
+        &self,
+        request: AgentSessionFork,
+    ) -> Result<AgentForkedSession, RuntimeError> {
+        let process = self.get_or_launch_process(&request.agent_id)?;
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        process
+            .control_tx
+            .send(AcpAgentProcessControl::Fork { request, reply_tx })
+            .map_err(|_| {
+                RuntimeError::NotReady("ACP agent process ended before session fork".to_string())
+            })?;
+        reply_rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .map_err(|_| RuntimeError::NotReady("ACP session fork timed out".to_string()))?
     }
 
     pub(super) fn probe(

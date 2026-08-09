@@ -66,6 +66,43 @@ describe("sidebarViewModel", () => {
 });
 
 describe("SidebarTaskRow", () => {
+  it("offers session fork only when the Task Agent advertises support", () => {
+    const onForkTask = vi.fn();
+    const source = task({ task_id: "task_1", title: "Source task" });
+    const tree = render(
+      <SidebarTaskRow
+        canFork
+        onArchiveTask={vi.fn()}
+        onForkTask={onForkTask}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        showArchived={false}
+        task={source}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Source task" }).props.onClick());
+    act(() => buttonWithText(tree, "Fork session").props.onClick());
+
+    expect(onForkTask).toHaveBeenCalledWith("task_1");
+  });
+
+  it("shows the row-local state for an uncertain Task fork", () => {
+    const tree = render(
+      <SidebarTaskRow
+        forkMutation={{ action: "fork", state: "unknown", error: "Fork may have been created." }}
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        showArchived={false}
+        task={task()}
+      />,
+    );
+
+    expect(tree.root.findByProps({ "aria-label": "Check sessions" }).props.title)
+      .toBe("Fork may have been created.");
+  });
+
   it("uses the agent icon as the stable leading marker", () => {
     const tree = render(
       <SidebarTaskRow
@@ -541,6 +578,27 @@ describe("SidebarTaskRow", () => {
 });
 
 describe("SidebarNativeSessionRow", () => {
+  it("forks a supported active Native Session from its row menu", () => {
+    const onForkNativeSession = vi.fn();
+    const session = nativeSession({ session_id: "session_1", title: "Existing session" });
+    const tree = render(
+      <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
+        canFork
+        nativeSessionAgentId="codex"
+        nativeSessionAgentName="Codex"
+        onForkNativeSession={onForkNativeSession}
+        session={session}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+    act(() => buttonWithText(tree, "Fork session").props.onClick());
+
+    expect(onForkNativeSession).toHaveBeenCalledWith(session);
+  });
+
   it("uses the shared agent-left layout while opening task history", () => {
     const tree = render(
       <SidebarNativeSessionRow

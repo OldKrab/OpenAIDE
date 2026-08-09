@@ -11,6 +11,7 @@ import {
 } from "./sidebarProjectModel";
 import { useSidebarTaskPreview } from "./SidebarTaskPreview";
 import { useRef } from "react";
+import { taskForkMutationKey } from "../state/store";
 
 type SidebarProjectTaskGroupProps = {
   activeTaskId?: string;
@@ -26,8 +27,11 @@ type SidebarProjectTaskGroupProps = {
   nativeSessionsHaveMore: boolean;
   loading: boolean;
   canManageWorktrees: boolean;
+  forkableAgentIds?: ReadonlySet<string>;
   onArchiveNativeSession: (session: AgentListedSession) => void;
   onArchiveTask: (taskId: string) => void;
+  onForkNativeSession?: (session: AgentListedSession) => void;
+  onForkTask?: (taskId: string) => void;
   onLoadMore: (visibleIncrement: number) => void;
   onManageWorktrees?: () => void;
   onNewTask: () => void;
@@ -60,8 +64,11 @@ export function SidebarProjectTaskGroup({
   nativeSessionsHaveMore,
   loading,
   canManageWorktrees,
+  forkableAgentIds = new Set(),
   onArchiveNativeSession,
   onArchiveTask,
+  onForkNativeSession,
+  onForkTask,
   onLoadMore,
   onManageWorktrees,
   onNewTask,
@@ -171,7 +178,10 @@ export function SidebarProjectTaskGroup({
               <SidebarTaskRow
                 key={`task:${row.task.task_id}`}
                 activeTaskId={activeTaskId}
+                canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
+                forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
                 onArchiveTask={onArchiveTask}
+                onForkTask={onForkTask}
                 onOpenTask={onOpenTask}
                 onRestoreTask={onRestoreTask}
                 onSetTaskPinned={onSetTaskPinned}
@@ -182,6 +192,7 @@ export function SidebarProjectTaskGroup({
             ) : (
               <SidebarNativeSessionRow
                 archived={showArchived}
+                canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
                 key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
                 mutation={nativeSessionMutations[
                   `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
@@ -190,6 +201,7 @@ export function SidebarProjectTaskGroup({
                 nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                 nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
                 onArchiveNativeSession={onArchiveNativeSession}
+                onForkNativeSession={onForkNativeSession}
                 onOpenNativeSession={onOpenNativeSession}
                 onRestoreNativeSession={onRestoreNativeSession}
                 session={row.session}

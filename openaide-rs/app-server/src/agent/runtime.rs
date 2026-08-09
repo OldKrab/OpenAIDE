@@ -248,6 +248,22 @@ pub struct AgentSessionDelete {
     pub session_id: String,
 }
 
+/// Requests an Agent-owned branch without creating or mutating an OpenAIDE Task.
+#[derive(Clone)]
+pub struct AgentSessionFork {
+    pub agent_id: String,
+    pub source_session_id: String,
+    pub cwd: String,
+    pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentForkedSession {
+    pub session_id: String,
+    /// Fork creation succeeded, but releasing its active Agent resources failed.
+    pub close_warning: bool,
+}
+
 impl AgentSessionDelete {
     pub fn session_key(&self) -> AgentSessionKey {
         AgentSessionKey::new(self.agent_id.clone(), self.session_id.clone())
@@ -383,6 +399,12 @@ pub trait AgentRuntime: Send + Sync {
     fn delete_session(&self, _request: AgentSessionDelete) -> Result<(), RuntimeError> {
         Err(RuntimeError::CapabilityMissing(
             "agent_session_delete".to_string(),
+        ))
+    }
+
+    fn fork_session(&self, _request: AgentSessionFork) -> Result<AgentForkedSession, RuntimeError> {
+        Err(RuntimeError::CapabilityMissing(
+            "agent session fork is not available".to_string(),
         ))
     }
 

@@ -192,7 +192,7 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                             project_id,
                             workspace_root: entry.workspace_root,
                             worktree_id: None,
-                            title: entry.observation.title,
+                            title: entry.observation.title.or(entry.local_fallback_title),
                             last_activity: entry.observation.last_activity,
                         },
                     });

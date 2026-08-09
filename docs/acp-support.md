@@ -62,7 +62,7 @@ This document tracks three things:
 | Proxy chains | planned | registry/proxy metadata | Agent extension/proxy capability model. |
 | Request cancellation mechanism | planned | RFD/capabilities | Request-level cancellation beyond prompt cancel. |
 | Session delete | partial | session capabilities | Confirmed Task delete calls `session/delete` for active bound Native Sessions when advertised; local tombstones prevent re-adoption when native deletion is unavailable or fails. |
-| Session fork | planned | session capabilities | Fork existing sessions when advertised. |
+| Session fork | supported (experimental) | `agentCapabilities.sessionCapabilities.fork` plus load/close capabilities | Capability-gated `nativeSession/fork` creates an unowned catalog entry from a Task-bound or listed source, preserves no OpenAIDE Chat history, and closes the returned active session after creation. The ACP RFD remains Draft, so the SDK schema and boundary tests pin the currently supported shape. |
 | Session usage/context status | planned | session updates | Context usage and limits in UI. |
 | Streamable HTTP/WebSocket transport | planned | transport metadata | Non-stdio transports; not blocking first stdio process iteration. |
 | ACP v2 proposal | planned | protocol negotiation | Do not use v2 semantics unless negotiated. |

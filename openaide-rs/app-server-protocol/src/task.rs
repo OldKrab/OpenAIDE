@@ -81,6 +81,37 @@ pub struct TaskAdoptNativeSessionResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(rename_all = "camelCase")]
+pub enum NativeSessionForkSource {
+    Task {
+        task_id: TaskId,
+    },
+    NativeSession {
+        agent_id: AgentId,
+        native_session_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionForkParams {
+    pub source: NativeSessionForkSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionForkResult {
+    pub reference: crate::snapshot::NativeSessionReference,
+    pub project_id: ProjectId,
+    pub close_warning: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSendParams {
     pub task_id: TaskId,

@@ -10,9 +10,10 @@ use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::snapshot::AgentCollectionSnapshot;
 use openaide_app_server_protocol::task::{
-    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
-    NativeSessionRestoreResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionForkParams,
+    NativeSessionForkResult, NativeSessionRestoreParams, NativeSessionRestoreResult,
+    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult,
 };
 use serde_json::Value;
 
@@ -78,6 +79,45 @@ impl RpcGateway {
             NativeSessionRestoreResult {
                 reference: mutation.reference,
                 archived: mutation.archived,
+            },
+            events,
+        )
+    }
+
+    pub(super) fn handle_native_session_fork(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<NativeSessionForkParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Native Session fork");
+        let mutation = match self
+            .task_archive
+            .fork_native_session_for_client(&client.client_instance_id, params)
+        {
+            Ok(mutation) => mutation,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
+        self.result_with_events::<NativeSessionForkResult>(
+            connection_id,
+            id,
+            meta,
+            NativeSessionForkResult {
+                reference: mutation.reference,
+                project_id: mutation.project_id,
+                close_warning: mutation.close_warning,
             },
             events,
         )

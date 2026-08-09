@@ -1,5 +1,5 @@
 import { ListTodo, Menu, X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
 import { Sidebar } from "./Sidebar";
@@ -19,6 +19,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const taskNotifications = useWebTaskNotifications(controller);
   const { activeNavigationTaskId, activeTask, backendReady, bootstrap, callbacks, preferences, view, visibleTasks } = controller;
   const { appServerError, navigation, settings } = view;
+  const forkableAgentIds = useMemo(
+    () => new Set((controller.agents ?? [])
+      .filter((agent) => agent.capabilities?.forkNativeSessions)
+      .map((agent) => agent.id)),
+    [controller.agents],
+  );
   // The App Server Project catalog is global; current-Project shells expose only
   // the ordered Project identities represented by this App Shell workspace.
   const currentNavigationProjectIds = bootstrap.surface !== "invalid"
@@ -294,9 +300,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
+          forkableAgentIds={forkableAgentIds}
           onArchiveTask={callbacks.navigation.archiveTask}
           onAddProject={addProject}
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
+          onForkNativeSession={callbacks.navigation.forkNativeSession}
+          onForkTask={callbacks.navigation.forkTask}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
           onManageWorktrees={manageWorktrees}
           onRemoveProject={prepareProjectRemoval}
@@ -402,7 +411,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         nativeSessionAgentId={navigation.newTaskSelection.agentId}
         nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
         nativeSessionProjectId={navigation.newTaskSelection.projectId}
+        forkableAgentIds={forkableAgentIds}
         onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
+        onForkNativeSession={callbacks.navigation.forkNativeSession}
+        onForkTask={callbacks.navigation.forkTask}
         onAddProject={addProject}
         onArchiveTask={callbacks.navigation.archiveTask}
         onLoadNativeSessions={callbacks.navigation.loadNativeSessions}

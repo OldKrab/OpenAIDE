@@ -69,6 +69,10 @@ type AppActionPayload =
       action: "archive" | "restore";
       message: string;
     }
+  | { type: "nativeSessionFork:start"; key: string }
+  | { type: "nativeSessionFork:complete"; key: string; closeWarning: boolean }
+  | { type: "nativeSessionFork:error"; key: string; unknown: boolean; message: string }
+  | { type: "nativeSessionFork:clear"; key: string }
   | { type: "tasks:error"; message: string }
   | { type: "task:list:remove"; taskId: string }
   | { type: "task:promoted"; snapshot: TaskSnapshot; activate: boolean }
@@ -195,6 +199,10 @@ type GlobalAction = Extract<
   | { type: "nativeSessionArchive:start" }
   | { type: "nativeSessionArchive:complete" }
   | { type: "nativeSessionArchive:error" }
+  | { type: "nativeSessionFork:start" }
+  | { type: "nativeSessionFork:complete" }
+  | { type: "nativeSessionFork:error" }
+  | { type: "nativeSessionFork:clear" }
   | { type: "appServer:error" }
   | { type: "appServer:ready" }
   | { type: "appServer:replica" }
@@ -246,6 +254,10 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "nativeSessionArchive:start":
     case "nativeSessionArchive:complete":
     case "nativeSessionArchive:error":
+    case "nativeSessionFork:start":
+    case "nativeSessionFork:complete":
+    case "nativeSessionFork:error":
+    case "nativeSessionFork:clear":
     case "appServer:error":
     case "appServer:ready":
     case "appServer:replica":
@@ -342,6 +354,42 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           [key]: { action: action.action, state: "failed", error: action.message },
         },
       };
+    }
+    case "nativeSessionFork:start":
+      return {
+        ...state,
+        nativeSessionMutations: {
+          ...state.nativeSessionMutations,
+          [action.key]: { action: "fork", state: "pending" },
+        },
+      };
+    case "nativeSessionFork:complete":
+      return {
+        ...state,
+        nativeSessionMutations: {
+          ...state.nativeSessionMutations,
+          [action.key]: {
+            action: "fork",
+            state: "created",
+            error: action.closeWarning ? "Fork created, but Agent resource cleanup failed." : undefined,
+          },
+        },
+      };
+    case "nativeSessionFork:error":
+      return {
+        ...state,
+        nativeSessionMutations: {
+          ...state.nativeSessionMutations,
+          [action.key]: {
+            action: "fork",
+            state: action.unknown ? "unknown" : "failed",
+            error: action.message,
+          },
+        },
+      };
+    case "nativeSessionFork:clear": {
+      const { [action.key]: _cleared, ...nativeSessionMutations } = state.nativeSessionMutations;
+      return { ...state, nativeSessionMutations };
     }
     case "tasks:error":
       return { ...state, taskListError: action.message };

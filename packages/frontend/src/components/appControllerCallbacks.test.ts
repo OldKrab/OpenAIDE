@@ -19,6 +19,7 @@ import {
   CLIENT_HEARTBEAT,
   MCP_CREATE_SERVER,
   NATIVE_SESSION_ARCHIVE,
+  NATIVE_SESSION_FORK,
   NATIVE_SESSION_RESTORE,
   PENDING_REQUEST_RESOLVE,
   SETTINGS_GET_AGENT_DETAILS,
@@ -2829,6 +2830,39 @@ describe("app controller callbacks", () => {
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
       type: "newTask:nativeSessions:remove",
     }));
+  });
+
+  it("dispatches a Native Session fork exactly once with its tagged source", () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(() => new Promise(() => undefined));
+    const state = createInitialState();
+    const session = {
+      agent_id: "codex",
+      cwd: "/workspace",
+      session_id: "native_1",
+      title: "Native Session",
+    };
+
+    const navigation = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).navigation;
+    navigation.forkNativeSession(session);
+    navigation.forkNativeSession(session);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(NATIVE_SESSION_FORK, {
+      source: {
+        kind: "nativeSession",
+        agentId: "codex",
+        nativeSessionId: "native_1",
+      },
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "nativeSessionFork:start",
+      key: "codex\u0000native_1",
+    });
   });
 
   it("includes discovered Agent and Project context in the Native Session route", async () => {

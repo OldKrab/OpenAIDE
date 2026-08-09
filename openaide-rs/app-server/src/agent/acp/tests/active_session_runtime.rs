@@ -529,6 +529,7 @@ def initialize_result():
     }
     if supports_close:
         session_capabilities["close"] = {}
+        session_capabilities["fork"] = {}
     if supports_resume:
         session_capabilities["resume"] = {}
     advertised_auth = {"id": "test-auth", "name": "Test auth"}
@@ -736,6 +737,8 @@ for line in sys.stdin:
             time.sleep(0.3)
         while pending_prompt_ids:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "cancelled"})
+    elif method == "session/fork":
+        respond(message, {"sessionId": "forked-session"})
     elif method == "session/close":
         respond(message, {})
         if session_id == "idle-session":
@@ -3409,6 +3412,30 @@ fn delete_session_dispatches_to_active_session() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/delete"]
+    );
+}
+
+#[test]
+fn fork_session_dispatches_and_closes_the_returned_session() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "fork-source") else {
+        return;
+    };
+
+    let result = runtime
+        .fork_session(AgentSessionFork {
+            agent_id: "codex".to_string(),
+            source_session_id: "fork-source".to_string(),
+            cwd: cwd_string(),
+            secret_resolver: None,
+        })
+        .expect("fork session");
+
+    assert_eq!(result.session_id, "forked-session");
+    assert!(!result.close_warning);
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/fork", "session/close"]
     );
 }
 

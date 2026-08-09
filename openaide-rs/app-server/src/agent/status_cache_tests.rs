@@ -20,6 +20,7 @@ fn successful_probe_records_connected_status_and_capabilities() {
         typed_capabilities: AgentProbeCapabilities {
             resume_sessions: true,
             delete_sessions: true,
+            fork_sessions: false,
         },
         auth_methods: Vec::new(),
         logout_supported: false,
