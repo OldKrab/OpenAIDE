@@ -47,7 +47,13 @@ async function fixtureVsix() {
     publisher: "openaide",
     version: "0.0.2-beta.1",
   }));
-  for (const relativePath of ["LICENSE.txt", "dist/extension.js", "webview/dist/assets/index.js", "webview/dist/assets/index.css"]) {
+  for (const relativePath of [
+    "CHANGELOG.md",
+    "LICENSE.txt",
+    "dist/extension.js",
+    "webview/dist/assets/index.js",
+    "webview/dist/assets/index.css",
+  ]) {
     await writeFile(path.join(extensionRoot, relativePath), "fixture");
   }
   await writeFile(
