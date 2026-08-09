@@ -1,12 +1,14 @@
 import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
 import { createStandaloneHost, standaloneBootstrap } from "./standaloneHost";
 import { subscribeWindowMessages } from "../../../packages/frontend/src/shells/domBootstrap";
+import { writeBrowserClipboardText } from "../../../packages/frontend/src/shells/browserClipboard";
 
 /** Standalone preview adapter used when no Web or VS Code shell bootstraps the page. */
 export function createStandaloneShell(): FrontendShell {
   const host = createStandaloneHost();
   return {
     bootstrap: () => standaloneBootstrap() ?? { surface: "invalid" },
+    clipboard: { writeText: writeBrowserClipboardText },
     messages: {
       post: (message) => host?.postMessage(message),
       subscribe: subscribeWindowMessages,

@@ -21,6 +21,7 @@ import {
   safeWebviewTelemetryFields,
 } from "../src/runtime-logger.mjs";
 import { uploadFile } from "./fileUpload";
+import { writeBrowserClipboardText } from "../../../packages/frontend/src/shells/browserClipboard";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
 const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "worktrees"]);
@@ -63,6 +64,7 @@ export function createWebAppShell(): FrontendShell {
   );
   return {
     bootstrap,
+    clipboard: { writeText: writeBrowserClipboardText },
     sentFiles: {
       sentFileAction: "download",
       openSentFile({ attachmentIndex, label, messageId, taskId }) {

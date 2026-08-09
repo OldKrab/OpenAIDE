@@ -39,6 +39,10 @@ export type FrontendFileAcquisition =
 
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
+  /** Writes text through the App Shell that owns system clipboard access. */
+  clipboard?: {
+    writeText(text: string): Promise<void>;
+  };
   /** Supplies a shell-owned logical session when the renderer must not own transport. */
   backendConnection?: () => AppServerSession;
   messages: {

@@ -1,17 +1,8 @@
-/** Copies plain text using the browser API with a fallback for older WebViews. */
+import { currentFrontendShell } from "../services/frontendShell";
+import { writeBrowserClipboardText } from "../shells/browserClipboard";
+
+/** Copies plain text through the owning App Shell. */
 export async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.setAttribute("readonly", "");
-  textArea.style.position = "fixed";
-  textArea.style.opacity = "0";
-  document.body.append(textArea);
-  textArea.select();
-  const copied = document.execCommand("copy");
-  textArea.remove();
-  if (!copied) throw new Error("The browser did not copy the text.");
+  const shellClipboard = currentFrontendShell()?.clipboard;
+  await (shellClipboard?.writeText(text) ?? writeBrowserClipboardText(text));
 }

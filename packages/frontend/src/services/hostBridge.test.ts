@@ -93,6 +93,45 @@ describe("host bridge", () => {
     expect(posted).toContainEqual({ type: "workspace.openFolder" });
   });
 
+  it("correlates VS Code clipboard requests with host acknowledgments", async () => {
+    const posted: unknown[] = [];
+    const messageListeners: Array<(event: { data: unknown }) => void> = [];
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "vscodeExtension",
+          navigationMode: "currentProject",
+          surface: "navigation",
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: (message: unknown) => posted.push(message) }),
+      addEventListener: (type: string, listener: (event: { data: unknown }) => void) => {
+        if (type === "message") messageListeners.push(listener);
+      },
+      removeEventListener: vi.fn(),
+    });
+    const { createVsCodeShell } = await import("../../../../apps/vscode-extension/frontend/vsCodeShell");
+    const shell = createVsCodeShell();
+
+    const writing = shell.clipboard?.writeText("copy me");
+    expect(posted).toContainEqual({
+      type: "shell.clipboard.writeText",
+      payload: { requestId: "clipboard-write-1", text: "copy me" },
+    });
+
+    for (const listener of messageListeners) {
+      listener({
+        data: {
+          type: "shell.clipboard.writeText.result",
+          payload: { requestId: "clipboard-write-1", ok: true },
+        },
+      });
+    }
+    await expect(writing).resolves.toBeUndefined();
+  });
+
   it("passes a requested Settings tab through the VS Code shell boundary", async () => {
     const posted: unknown[] = [];
     vi.stubGlobal("document", {
