@@ -157,6 +157,10 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(artifactBuild, /npm exec -- vsce package/);
   assert.match(artifactBuild, /--no-dependencies/);
   assert.match(artifactBuild, /cargo build --locked --release/);
+  assert.equal(occurrences(artifactBuild, "cargo build --locked --release -p openaide-app-server"), 1);
+  assert.match(artifactBuild, /name: app-server-\$\{\{ matrix\.target \}\}/);
+  assert.match(artifactBuild, /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.match(artifactBuild, /needs: \[prepare, app-server\]/);
   assert.match(artifactBuild, /node scripts\/smoke-release-vsix\.mjs/);
   assert.match(artifactBuild, /node scripts\/set-release-artifact-version\.mjs "\$\{\{ needs\.prepare\.outputs\.version \}\}"/);
   assert.match(artifactBuild, /target_triple: x86_64-pc-windows-msvc/);

@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       artifact_suffix: ${{ steps.build.outputs.artifact_suffix }}
+      server_matrix: ${{ steps.build.outputs.server_matrix }}
       version: ${{ steps.build.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -52,6 +53,12 @@ jobs:
             *) echo "artifacts must be all, vsix, or desktop" >&2; exit 1 ;;
           esac
 
+          if [[ "$ARTIFACT_SELECTION" == "desktop" ]]; then
+            server_matrix='{"include":[{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"}]}'
+          else
+            server_matrix='{"include":[{"os":"ubuntu-24.04","target":"linux-x64","binary":"openaide-app-server"},{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"}]}'
+          fi
+
           if [[ -n "$REQUESTED_VERSION" ]]; then
             version="$REQUESTED_VERSION"
             artifact_suffix=""
@@ -66,13 +73,48 @@ jobs:
             fi
             artifact_suffix="-g${short_sha}"
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "artifact_suffix=$artifact_suffix" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "artifact_suffix=$artifact_suffix"
+            echo "server_matrix=$server_matrix"
+          } >> "$GITHUB_OUTPUT"
+
+  app-server:
+    name: Build ${{ matrix.target }} App Server
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.server_matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Set artifact versions
+        run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
+      - name: Build App Server once for both package formats
+        run: cargo build --locked --release -p openaide-app-server
+      - name: Stage App Server artifact
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp "target/release/${{ matrix.binary }}" artifacts/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
 
   vsix:
     name: Build and smoke-test ${{ matrix.target }} VSIX
     if: inputs.artifacts == 'all' || inputs.artifacts == 'vsix'
-    needs: prepare
+    needs: [prepare, app-server]
     strategy:
       fail-fast: false
       matrix:
@@ -93,14 +135,16 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-        with:
-          toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: npm ci
       - name: Set artifact versions
         run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
-      - run: cargo build --locked --release -p openaide-app-server
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: app-server
+      - name: Restore App Server executable permission
+        if: runner.os != 'Windows'
+        run: chmod +x "app-server/${{ matrix.binary }}"
       - run: npm run build:frontend
       - name: Add extension license
         shell: bash
@@ -111,7 +155,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p artifacts apps/vscode-extension/dist/app-server
-          cp "target/release/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
+          cp "app-server/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
           cd apps/vscode-extension
           package_args=(
             --target "${{ matrix.target }}"
@@ -143,7 +187,7 @@ jobs:
   desktop:
     name: Build self-contained ${{ matrix.target }} desktop app
     if: inputs.artifacts == 'all' || inputs.artifacts == 'desktop'
-    needs: prepare
+    needs: [prepare, app-server]
     strategy:
       fail-fast: false
       matrix:
@@ -180,14 +224,19 @@ jobs:
       - run: npm ci
       - name: Set artifact versions
         run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
-      - name: Build bundled App Server
-        run: cargo build --locked --release -p openaide-app-server
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: app-server
+      - name: Restore App Server executable permission
+        if: runner.os != 'Windows'
+        run: chmod +x "app-server/${{ matrix.binary }}"
       - name: Stage App Server sidecar for Tauri
         shell: bash
         run: |
           mkdir -p apps/desktop-validation/src-tauri/binaries
           cp \
-            "target/release/${{ matrix.binary }}" \
+            "app-server/${{ matrix.binary }}" \
             "apps/desktop-validation/src-tauri/binaries/openaide-app-server-${{ matrix.target_triple }}${{ matrix.sidecar_extension }}"
       - name: Build unsigned desktop installer
         run: >-
@@ -201,7 +250,7 @@ jobs:
         shell: bash
         run: |
           bundled_server="apps/desktop-validation/src-tauri/target/release/${{ matrix.binary }}"
-          cmp "target/release/${{ matrix.binary }}" "$bundled_server"
+          cmp "app-server/${{ matrix.binary }}" "$bundled_server"
           source_artifact="$(find \
             "apps/desktop-validation/src-tauri/target/release/bundle/${{ matrix.bundle_directory }}" \
             -maxdepth 1 -type f -name '*.${{ matrix.extension }}' -print -quit)"
@@ -213,14 +262,14 @@ jobs:
             hdiutil attach "$source_artifact" -nobrowse -readonly -mountpoint "$mount_root"
             trap 'hdiutil detach "$mount_root"' EXIT
             cmp \
-              "target/release/openaide-app-server" \
+              "app-server/openaide-app-server" \
               "$mount_root/OpenAIDE.app/Contents/MacOS/openaide-app-server"
           else
             extraction_root="$RUNNER_TEMP/openaide-desktop-nsis"
             7z x -y "$source_artifact" "-o$extraction_root"
             packaged_server="$(find "$extraction_root" -type f -iname 'openaide-app-server.exe' -print -quit)"
             test -n "$packaged_server"
-            cmp "target/release/openaide-app-server.exe" "$packaged_server"
+            cmp "app-server/openaide-app-server.exe" "$packaged_server"
           fi
 
           mkdir -p artifacts
