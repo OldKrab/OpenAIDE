@@ -1,0 +1,5 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenAIDE Development",
+  "identifier": "dev.openaide.desktop-development"
+}

@@ -4,6 +4,7 @@ import readline from "node:readline";
 
 const sessions = new Map();
 const pendingClientRequests = new Map();
+const nativeSessionScenario = process.argv.includes("--active-writer") ? "active-writer" : undefined;
 let nextSession = 1;
 let nextClientRequest = 1;
 
@@ -54,7 +55,15 @@ async function handleRequestOrNotification(message) {
       loadSession(message);
       break;
     case "session/list":
-      respond(message.id, { sessions: [] });
+      respond(message.id, {
+        sessions: nativeSessionScenario === "active-writer"
+          ? [{
+              sessionId: "smoke-active-writer-session",
+              cwd: params.cwd,
+              title: "Session open elsewhere",
+            }]
+          : [],
+      });
       break;
     case "session/set_config_option":
       setConfigOption(message);
@@ -98,6 +107,14 @@ function createSession(message) {
 
 function loadSession(message) {
   const sessionId = message.params.sessionId;
+  if (sessionId === "smoke-active-writer-session") {
+    respondError(
+      message.id,
+      -32603,
+      'Internal error: {"details":"thread smoke-active-writer already has an active writer"}',
+    );
+    return;
+  }
   sessions.set(sessionId, { activePrompts: new Map(), promptCount: 0 });
   textUpdate(sessionId, "user_message_chunk", "Earlier question", "replay-user");
   textUpdate(sessionId, "agent_thought_chunk", "Earlier reasoning", "replay-thought");

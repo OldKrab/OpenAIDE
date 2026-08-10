@@ -9,6 +9,7 @@ const rootPackage = packageJson("package.json");
 const maintainedWorkspaceNames = [
   "@openaide/app-server-client",
   "@openaide/app-shell-contracts",
+  "openaide-desktop-validation",
   "openaide-frontend",
   "openaide-vscode-extension",
   "openaide-web",
@@ -59,6 +60,7 @@ test("default npm check includes every workspace that exposes a check script", (
   assert.deepEqual(checkedWorkspaceNames, [
     "@openaide/app-server-client",
     "@openaide/app-shell-contracts",
+    "openaide-desktop-validation",
     "openaide-frontend",
     "openaide-vscode-extension",
   ]);
