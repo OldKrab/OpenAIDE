@@ -1,6 +1,6 @@
 import { Fragment, isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, Copy } from "lucide-react";
-import Markdown, { defaultUrlTransform } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { postHostMessage } from "../services/hostBridge";
 import { copyText } from "./clipboard";
@@ -41,46 +41,49 @@ function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: strin
       remarkPlugins={[remarkGfm]}
       skipHtml
       urlTransform={safeMarkdownUrl}
-      components={{
-        a: ({ children, href, node: _node, ...props }) => {
-          const label = plainText(children) || "Image";
-          if (isSafeDataImageUrl(href)) {
-            return <AgentMarkdownImage label={label} url={href} />;
-          }
-          const fileLocation = markdownFileLocation(href);
-          if (fileLocation) {
-            return (
-              <a
-                {...props}
-                href={href}
-                onClick={(event) => {
-                  event.preventDefault();
-                  postHostMessage({ type: "tool.openPath", payload: fileLocation });
-                }}
-              >
-                {children}
-              </a>
-            );
-          }
-          return href ? (
-            <a {...props} href={href} rel="noreferrer" target="_blank">
-              {children}
-            </a>
-          ) : (
-            <span>{children}</span>
-          );
-        },
-        pre: ({ children, node: _node, ...props }) => (
-          <MarkdownCodeBlock text={plainText(children).replace(/\n$/, "")}>
-            <pre {...props}>{children}</pre>
-          </MarkdownCodeBlock>
-        ),
-      }}
+      components={agentMarkdownComponents}
     >
       {text}
     </Markdown>
   );
 }
+
+// Stable component identities keep native pointer gestures alive across streamed Markdown updates.
+const agentMarkdownComponents: Components = {
+  a: ({ children, href, node: _node, ...props }) => {
+    const label = plainText(children) || "Image";
+    if (isSafeDataImageUrl(href)) {
+      return <AgentMarkdownImage label={label} url={href} />;
+    }
+    const fileLocation = markdownFileLocation(href);
+    if (fileLocation) {
+      return (
+        <a
+          {...props}
+          href={href}
+          onClick={(event) => {
+            event.preventDefault();
+            postHostMessage({ type: "tool.openPath", payload: fileLocation });
+          }}
+        >
+          {children}
+        </a>
+      );
+    }
+    return href ? (
+      <a {...props} href={href} rel="noreferrer" target="_blank">
+        {children}
+      </a>
+    ) : (
+      <span>{children}</span>
+    );
+  },
+  pre: ({ children, node: _node, ...props }) => (
+    <MarkdownCodeBlock text={plainText(children).replace(/\n$/, "")}>
+      <pre {...props}>{children}</pre>
+    </MarkdownCodeBlock>
+  ),
+};
 
 type CopyState = "idle" | "copied" | "failed";
 

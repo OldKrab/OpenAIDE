@@ -183,6 +183,25 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:streaming-link-click")) {
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "[Streaming link](https://example.com)\n\nFirst paragraph.",
+      `agent-${promptNumber}`,
+    );
+    await delay(400);
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "\n\nSecond paragraph arrives while the link is pressed.",
+      `agent-${promptNumber}`,
+    );
+    await delay(400);
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:context-usage-curve")) {
     update(sessionId, {
       sessionUpdate: "usage_update",
