@@ -114,6 +114,33 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("keeps an Agent link clickable while its message is streaming", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await send(page, "smoke:streaming-link-click");
+
+  const link = page.getByRole("link", { name: "Streaming link" });
+  await expect(link).toBeVisible();
+  await page.evaluate(() => {
+    window.__openaideStreamingLinkClicks = 0;
+    document.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("a")?.textContent === "Streaming link") {
+        event.preventDefault();
+        window.__openaideStreamingLinkClicks += 1;
+      }
+    }, { once: true });
+  });
+
+  const bounds = await link.boundingBox();
+  expect(bounds).not.toBeNull();
+  const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await expect(page.getByText("Second paragraph arrives while the link is pressed.", { exact: true })).toBeVisible();
+  await page.mouse.up();
+
+  await expect.poll(() => page.evaluate(() => window.__openaideStreamingLinkClicks)).toBe(1);
+});
+
 test("keeps the context meter on the composer's rounded edge as a draft grows", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 640 });
   await openPreparedNewTask(page);
