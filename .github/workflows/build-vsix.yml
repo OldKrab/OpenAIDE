@@ -202,14 +202,27 @@ jobs:
         run: |
           bundled_server="apps/desktop-validation/src-tauri/target/release/${{ matrix.binary }}"
           cmp "target/release/${{ matrix.binary }}" "$bundled_server"
-          if [[ "${{ matrix.target }}" == "darwin-arm64" ]]; then
-            test -x "apps/desktop-validation/src-tauri/target/release/bundle/macos/OpenAIDE.app/Contents/MacOS/openaide-app-server"
-          fi
-
           source_artifact="$(find \
             "apps/desktop-validation/src-tauri/target/release/bundle/${{ matrix.bundle_directory }}" \
             -maxdepth 1 -type f -name '*.${{ matrix.extension }}' -print -quit)"
           test -n "$source_artifact"
+
+          if [[ "${{ matrix.target }}" == "darwin-arm64" ]]; then
+            mount_root="$RUNNER_TEMP/openaide-desktop-dmg"
+            mkdir -p "$mount_root"
+            hdiutil attach "$source_artifact" -nobrowse -readonly -mountpoint "$mount_root"
+            trap 'hdiutil detach "$mount_root"' EXIT
+            cmp \
+              "target/release/openaide-app-server" \
+              "$mount_root/OpenAIDE.app/Contents/MacOS/openaide-app-server"
+          else
+            extraction_root="$RUNNER_TEMP/openaide-desktop-nsis"
+            7z x -y "$source_artifact" "-o$extraction_root"
+            packaged_server="$(find "$extraction_root" -type f -iname 'openaide-app-server.exe' -print -quit)"
+            test -n "$packaged_server"
+            cmp "target/release/openaide-app-server.exe" "$packaged_server"
+          fi
+
           mkdir -p artifacts
           cp "$source_artifact" \
             "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-unsigned.${{ matrix.extension }}"
