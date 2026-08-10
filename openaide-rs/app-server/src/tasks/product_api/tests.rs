@@ -734,6 +734,18 @@ fn create_reactivates_the_reused_draft_native_session() {
     );
     let reopened = store.read_task("task-draft").unwrap();
     assert_eq!(task_config_id(&reopened, "model"), Some("gpt-5"));
+    assert_eq!(
+        reopened.native_session_data_freshness.config(),
+        TaskNativeSessionCatalogFreshness::Fresh
+    );
+    let prepared_snapshot = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-draft", 100).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        prepared_snapshot.agent_config.state,
+        LiveSessionDataState::Ready
+    );
     let updated = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-draft".into(),
@@ -1983,14 +1995,21 @@ fn resumed_identity_only_session_preserves_known_image_capability() {
 #[test]
 fn acquiring_recovers_a_prepared_task_whose_native_session_is_missing() {
     let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let state_root = temp.path().to_path_buf();
+    let store = Store::open(state_root.clone()).unwrap();
     let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("missing-session".to_string());
+    draft.config_options_catalog = Some(config_catalog("gpt-5"));
+    draft.agent_commands_catalog = Some(command_catalog());
     store.write_task(&draft).unwrap();
+    drop(store);
+    let store = Store::open(state_root).unwrap();
     let agent = Arc::new(RecordingAgent {
         fail_list: true,
         resume_session_missing: true,
+        config_catalog: Some(config_catalog("gpt-5.5")),
+        commands_catalog: Some(command_catalog()),
         ..Default::default()
     });
     let api = TaskProductApi::new(
@@ -2024,6 +2043,20 @@ fn acquiring_recovers_a_prepared_task_whose_native_session_is_missing() {
         store.read_task("task-draft").unwrap().agent_session_id,
         Some("recorded-session".to_string())
     );
+    assert!(
+        store
+            .read_task("task-draft")
+            .unwrap()
+            .native_session_data_freshness
+            .is_fresh(),
+        "a replacement Native Session owns fresh config and command catalogs"
+    );
+    let snapshot = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-draft", 100).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Ready);
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
 }
 
 #[test]

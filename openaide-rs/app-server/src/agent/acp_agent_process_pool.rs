@@ -92,24 +92,62 @@ impl AcpAgentProcessPool {
         request: AgentListSessionsRequest,
         preferred_auth_method_id: Option<String>,
     ) -> Result<crate::protocol::model::AgentListSessionsResult, RuntimeError> {
-        let process = self.get_or_launch_process(&request.agent_id)?;
-        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        if process
-            .list_tx
-            .send(AcpAgentProcessList {
-                request,
-                preferred_auth_method_id,
+        let agent_id = request.agent_id.clone();
+        for attempt in 1..=2 {
+            let process = self.get_or_launch_process(&agent_id)?;
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            let sent = process.list_tx.send(AcpAgentProcessList {
+                request: request.clone(),
+                preferred_auth_method_id: preferred_auth_method_id.clone(),
                 reply_tx,
-            })
-            .is_err()
-        {
-            return Err(RuntimeError::NotReady(
-                "ACP agent process ended before session listing".to_string(),
-            ));
+            });
+            if sent.is_err() {
+                self.remove_process_if_current(&agent_id, &process);
+                if attempt == 1 {
+                    logging::info(
+                        "acp_session_list_retry",
+                        serde_json::json!({
+                            "operation": "agent/list_sessions",
+                            "agent_id": agent_id,
+                            "attempt": 2,
+                            "reason": "process_ended",
+                        }),
+                    );
+                    continue;
+                }
+                return Err(RuntimeError::NotReady(
+                    "ACP agent process ended before session listing".to_string(),
+                ));
+            }
+            match reply_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                Ok(result) => return result,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    self.remove_process_if_current(&agent_id, &process);
+                    if attempt == 1 {
+                        logging::info(
+                            "acp_session_list_retry",
+                            serde_json::json!({
+                                "operation": "agent/list_sessions",
+                                "agent_id": agent_id,
+                                "attempt": 2,
+                                "reason": "process_ended",
+                            }),
+                        );
+                        continue;
+                    }
+                    return Err(RuntimeError::NotReady(
+                        "ACP agent process ended during session listing".to_string(),
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    self.stop_process(&agent_id, &process);
+                    return Err(RuntimeError::NotReady(
+                        "ACP session listing timed out".to_string(),
+                    ));
+                }
+            }
         }
-        reply_rx
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .map_err(|_| RuntimeError::NotReady("ACP session listing timed out".to_string()))?
+        unreachable!("ACP session listing attempts are bounded")
     }
 
     pub(super) fn fork_session(
@@ -242,9 +280,25 @@ impl AcpAgentProcessPool {
             .remove(agent_id);
     }
 
+    /// A failed client must not evict a replacement installed by another caller.
+    fn remove_process_if_current(&self, agent_id: &str, process: &AcpAgentProcessClient) -> bool {
+        let mut processes = self
+            .processes
+            .lock()
+            .expect("ACP process registry poisoned");
+        let is_current = processes
+            .get(agent_id)
+            .is_some_and(|current| current.list_tx.same_channel(&process.list_tx));
+        if is_current {
+            processes.remove(agent_id);
+        }
+        is_current
+    }
+
     fn stop_process(&self, agent_id: &str, process: &AcpAgentProcessClient) {
-        self.remove_process(agent_id);
-        let _ = process.shutdown_tx.send(true);
+        if self.remove_process_if_current(agent_id, process) {
+            let _ = process.shutdown_tx.send(true);
+        }
     }
 
     fn get_or_launch_process(&self, agent_id: &str) -> Result<AcpAgentProcessClient, RuntimeError> {

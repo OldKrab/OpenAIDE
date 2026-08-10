@@ -442,6 +442,39 @@ fn replayed_acp_chunks_use_live_logical_message_grouping() {
 }
 
 #[test]
+fn adopting_a_native_session_open_elsewhere_returns_a_recoverable_conflict() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, _store, workspace_root)) = task_chat_fixture(&temp, "active_writer") else {
+        return;
+    };
+
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace(&workspace_root),
+        cursor: None,
+    })
+    .expect("list externally owned ACP session");
+
+    let error = api
+        .adopt_native_session(TaskAdoptNativeSessionParams {
+            agent_id: AgentId::from("codex"),
+            native_session_id: "task-chat-session".to_string(),
+        })
+        .expect_err("an active writer cannot be adopted into this App Server");
+
+    assert_eq!(
+        error.code,
+        openaide_app_server_protocol::errors::ProtocolErrorCode::Conflict
+    );
+    assert!(error.recoverable);
+    assert_eq!(
+        error.message,
+        "Native Session is currently in use elsewhere"
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn non_text_acp_output_is_visible_as_typed_chat_parts() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "content_blocks") else {
@@ -789,6 +822,16 @@ for line in sys.stdin:
         cwd = message.get("params", {}).get("cwd") or os.getcwd()
         respond(message, {"sessions": [{"sessionId": session_id, "cwd": cwd, "title": "Task chat session"}]})
     elif method == "session/load":
+        if mode == "active_writer":
+            write({
+                "jsonrpc": "2.0",
+                "id": message.get("id"),
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error: {\"details\":\"thread active-writer-fixture already has an active writer\"}",
+                },
+            })
+            continue
         if mode == "replay":
             update_chunk("user_message_chunk", "Prior ", "33333333-3333-4333-8333-333333333333")
             update_chunk("user_message_chunk", "question", "33333333-3333-4333-8333-333333333333")

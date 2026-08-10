@@ -189,13 +189,19 @@ impl NativeSessionService {
                 task.config_options_catalog = config_catalog.clone();
                 task.agent_commands_catalog = commands_catalog.clone();
                 task.model_id = model_id.clone();
+                // A newly started replacement session defines the complete
+                // process-local catalog state, including an authoritative
+                // absence of options or commands.
+                task.native_session_data_freshness = Default::default();
             } else {
-                if config_catalog.is_some() {
-                    task.config_options_catalog = config_catalog.clone();
+                if let Some(catalog) = config_catalog.clone() {
+                    task.config_options_catalog = Some(catalog);
+                    task.native_session_data_freshness.mark_config_fresh();
                     task.model_id = model_id.clone();
                 }
-                if task.agent_commands_catalog.is_none() {
-                    task.agent_commands_catalog = commands_catalog.clone();
+                if let Some(catalog) = commands_catalog.clone() {
+                    task.agent_commands_catalog = Some(catalog);
+                    task.native_session_data_freshness.mark_commands_fresh();
                 }
             }
             task.updated_at = now.clone();
