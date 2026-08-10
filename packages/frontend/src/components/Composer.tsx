@@ -589,7 +589,7 @@ export function Composer({
           {showStopAction && onCancel ? (
             <IconButton ariaLabel="Stop task" className="composer-stop-button" icon={<CircleStop size={14} />} onClick={onCancel} />
           ) : null}
-          {onAddToQueue && !availability.submitting ? (
+          {onAddToQueue && hasDraftContent && !availability.submitting ? (
             <IconButton
               ariaLabel="Add to queue"
               className="composer-queue-button"
