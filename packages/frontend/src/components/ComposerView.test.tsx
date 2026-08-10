@@ -1240,6 +1240,16 @@ describe("Composer view behavior", () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
+  it("hides Add to queue beside Stop when the composer is empty", () => {
+    const renderer = renderComposer({
+      onAddToQueue: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    expect(buttonsByLabel(renderer.root, "Stop task")).toHaveLength(1);
+    expect(buttonsByLabel(renderer.root, "Add to queue")).toHaveLength(0);
+  });
+
   it("submits from the textarea shortcut only when submit is enabled", () => {
     const onSubmit = vi.fn();
     const preventDefault = vi.fn();
