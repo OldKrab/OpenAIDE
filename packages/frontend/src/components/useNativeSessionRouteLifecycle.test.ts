@@ -73,6 +73,7 @@ describe("Native Session route lifecycle", () => {
       type: "newTask:nativeSessions:error",
       sessionId: "session-1",
       recoverable: false,
+      kind: "notFound",
       message: "This session no longer exists.",
     });
     expect(dispatch).toHaveBeenCalledWith({
@@ -82,6 +83,7 @@ describe("Native Session route lifecycle", () => {
     expect(openTaskSurface).not.toHaveBeenCalled();
   });
 
+  it("keeps the opening route and explains when the session is in use elsewhere", async () => {
   it("keeps the opening route and explains when the session is in use elsewhere", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async () => {
@@ -100,6 +102,7 @@ describe("Native Session route lifecycle", () => {
       type: "newTask:nativeSessions:error",
       sessionId: "session-1",
       recoverable: true,
+      kind: "conflict",
       message: "This session is currently in use elsewhere. Close it there, then try again.",
     });
     expect(dispatch).not.toHaveBeenCalledWith({

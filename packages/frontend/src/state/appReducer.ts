@@ -106,7 +106,13 @@ type AppActionPayload =
   | { type: "newTask:nativeSessions:start"; append: boolean }
   | { type: "newTask:nativeSessions:result"; result: AgentListSessionsResult; append: boolean }
   | { type: "newTask:nativeSessions:listError"; message: string; recoveryKind?: NativeSessionsState["recoveryKind"] }
-  | { type: "newTask:nativeSessions:error"; sessionId: string; message: string; recoverable?: boolean }
+  | {
+      type: "newTask:nativeSessions:error";
+      sessionId: string;
+      kind?: "conflict" | "notFound";
+      message: string;
+      recoverable?: boolean;
+    }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }

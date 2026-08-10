@@ -4,7 +4,7 @@ import type { SettingsTabId } from "./preferences.js";
 export type WebviewSurfaceKind = "navigation" | "nativeSession" | "task" | "settings";
 
 export type AppShellBootstrap = {
-  kind: "web" | "vscodeExtension";
+  kind: "desktop" | "web" | "vscodeExtension";
   /** Selects Project Navigation or current-Project Task Navigation independently of transport. */
   navigationMode: "project" | "currentProject";
 };

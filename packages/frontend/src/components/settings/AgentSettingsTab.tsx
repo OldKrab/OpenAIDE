@@ -59,7 +59,7 @@ export function AgentSettingsTab({
   const selected = draft ? undefined : selectedAgent;
   const activeDraft = draft ?? (selected ? draftFromAgent(selected) : newAgentDraft());
   const isCustom = draft !== undefined || selected?.source_kind === "custom";
-  const isCreating = draft?.agent_id === undefined;
+  const isCreating = draft !== undefined && draft.agent_id === undefined;
   const missingRequiredLaunchFields = isCustom && (!activeDraft.label.trim() || !activeDraft.command_line.trim());
   const saveChecksConnection = isCreating
     || Boolean(selectedAgent?.source_kind === "custom" && draftChangesLaunch(selectedAgent, activeDraft));
@@ -159,6 +159,7 @@ export function AgentSettingsTab({
           agents={agents}
           onAdd={() => setDraft(newAgentDraft())}
           onSelectAgent={selectAgent}
+          onSetAgentEnabled={onSetAgentEnabled}
         />
       </div>
     );
@@ -184,6 +185,7 @@ export function AgentSettingsTab({
           confirmReplaceAgentId={confirmReplaceAgentId}
           isCreating={isCreating}
           isCustom={isCustom}
+          isEditing={draft !== undefined}
           onAuthenticate={onAuthenticate}
           onCancelDraft={draft !== undefined ? cancelDraft : undefined}
           onDeleteClick={deleteDraft}

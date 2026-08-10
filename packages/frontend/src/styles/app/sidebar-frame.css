@@ -7,6 +7,46 @@
   display: contents;
 }
 
+.app-sidebar-frame-with-header {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.app-sidebar-frame-header {
+  min-width: 0;
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.app-sidebar-frame-overlay-header {
+  position: absolute;
+  z-index: 20;
+  inset: 0 0 auto;
+  min-width: 0;
+  height: 32px;
+}
+
+.app-sidebar-frame-with-overlay-header .sidebar {
+  padding-top: 36px;
+}
+
+.app-sidebar-frame.app-sidebar-frame-with-header .app-sidebar-pane > *,
+.app-sidebar-frame.app-sidebar-frame-with-header .sidebar,
+.app-sidebar-frame-with-header > :not(.app-sidebar-frame-header):not(.app-sidebar-resizer):not(.app-sidebar-expand) {
+  grid-row: 2;
+}
+
+.app-sidebar-frame-with-header .app-sidebar-resizer {
+  top: 44px;
+}
+
+.app-sidebar-frame-with-header.sidebar-collapsed .app-sidebar-expand {
+  top: 54px;
+}
+
+.app-sidebar-frame-with-overlay-header.sidebar-collapsed .app-sidebar-expand {
+  top: 36px;
+}
+
 .app-sidebar-frame.sidebar-collapsed {
   grid-template-columns: 0 minmax(0, 1fr);
   background: var(--oa-bg);

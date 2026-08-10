@@ -10,6 +10,7 @@ type TestController = AppController & { state: AppState };
 
 const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
 const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
+const DESKTOP_SHELL = { kind: "desktop", navigationMode: "project" } as const;
 
 const surfaceMocks = vi.hoisted(() => ({
   newTask: vi.fn(() => null),
@@ -1205,6 +1206,19 @@ describe("AppSurfaces callback wiring", () => {
     expect(secondFocusKey).toBe(firstFocusKey + 1);
     expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalled();
     expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
+  });
+
+  it("renders the shared project workbench for Desktop", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: DESKTOP_SHELL,
+    };
+
+    const tree = render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledOnce();
+    expect(tree.root.findByProps({ "aria-label": "Open task navigation" })).toBeDefined();
   });
 
   it("passes project loading state to new task view until backend initialize completes", () => {

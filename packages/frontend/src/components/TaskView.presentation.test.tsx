@@ -319,6 +319,26 @@ describe("TaskView timeline presentation", () => {
     expect(rendered).not.toContain("task not found: task_unknown");
   });
 
+  it("renders a Native Session writer conflict as an open-elsewhere state", async () => {
+    const { TaskLoadingView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskLoadingView
+          error="This session is open in another OpenAIDE window. Close it there, then try again."
+          errorKind="conflict"
+        />,
+      );
+    });
+
+    expect(tree.root.findByType("section").props["aria-label"]).toBe("Session open elsewhere");
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Session open elsewhere.");
+    expect(rendered).toContain("Close it there, then try again.");
+    expect(rendered).not.toContain("Unable to open task.");
+  });
+
   it("uses the route-specific opening label", async () => {
     const { TaskLoadingView } = await import("./TaskView");
     let tree!: ReactTestRenderer;

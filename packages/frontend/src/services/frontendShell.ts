@@ -9,6 +9,20 @@ import type { AppServerSession } from "@openaide/app-server-client";
 import type { PreSendAttachment } from "@openaide/app-server-client";
 
 export type FileUploadProgress = { loaded: number; total: number };
+export type AppThemePreference = "system" | "light" | "dark";
+
+export type FrontendShellAppearance = {
+  theme(): AppThemePreference;
+  setTheme(theme: AppThemePreference): void;
+};
+
+export type DesktopWindowCapability = {
+  platform: "linux" | "macos" | "windows";
+  close(): Promise<void>;
+  minimize(): Promise<void>;
+  startDragging(): Promise<void>;
+  toggleMaximize(): Promise<void>;
+};
 
 export type SentFileOpenRequest = {
   taskId: string;
@@ -43,8 +57,12 @@ export type FrontendShell = {
   clipboard?: {
     writeText(text: string): Promise<void>;
   };
+  /** Shell-owned appearance; omitted when the embedding host owns theme selection. */
+  appearance?: FrontendShellAppearance;
   /** Supplies a shell-owned logical session when the renderer must not own transport. */
   backendConnection?: () => AppServerSession;
+  /** Native window operations exposed only by the Desktop shell. */
+  desktopWindow?: DesktopWindowCapability;
   messages: {
     post: PostHostMessage;
     subscribe(listener: (message: HostToWebviewMessage) => void): () => void;

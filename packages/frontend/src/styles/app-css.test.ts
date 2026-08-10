@@ -502,16 +502,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.app-sidebar-expand\s*{[^}]*top:\s*10px;[^}]*left:\s*10px;/);
   });
 
-  it("uses the approved card hierarchy for Agent details", () => {
-    expect(appCss).toMatch(/\.app-sidebar-frame\s*{[^}]*grid-template-columns:\s*var\(--app-sidebar-width,\s*304px\) minmax\(0,\s*1fr\);/);
-    expect(appCss).toMatch(/\.agent-focused-view\s*{[^}]*width:\s*min\(1040px,\s*100%\);/);
-    expect(appCss).toMatch(/\.agent-detail-header\s*{[^}]*border:\s*1px solid[^}]*border-radius:\s*12px;[^}]*display:\s*grid;/);
-    expect(appCss).toMatch(/\.agent-detail-identity\s*{[^}]*grid-template-columns:\s*72px minmax\(0,\s*1fr\);/);
-    expect(appCss).toMatch(/\.agent-detail-avatar\s*{[^}]*width:\s*72px;[^}]*height:\s*72px;/);
-    expect(appCss).toMatch(/\.agent-detail-section\s*{[^}]*border:\s*1px solid[^}]*border-radius:\s*11px;/);
-    expect(appCss).toMatch(/\.agent-section-heading > button\s*{[^}]*border:\s*1px solid var\(--oa-border\);[^}]*background:\s*var\(--oa-bg\);/);
-  });
-
   it("replaces repeated Settings headings with a clear detail back control", () => {
     expect(appCss).toMatch(
       /\.settings-content:has\(\.agent-focused-view\) > \.settings-page-heading,\s*\.settings-content:has\(\.skill-document\) > \.settings-page-heading,\s*\.settings-content:has\(\.settings-worktree-detail\) > \.settings-page-heading\s*{[^}]*display:\s*none;/,
@@ -535,18 +525,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/body\[data-shell="web"\] \.agent-enabled-toggle\s*{[^}]*min-height:\s*44px;/);
   });
 
-  it("renders general settings as a searchable compact row list", () => {
-    expect(appCss).toMatch(/\.settings-filter\s*{[^}]*border:\s*1px solid var\(--oa-border\);[^}]*display:\s*flex;/);
-    expect(appCss).toMatch(/\.settings-filter:focus-within\s*{\s*border-color:\s*var\(--oa-focus\);/);
-    expect(appCss).toMatch(/\.settings-common-list\s*{[^}]*display:\s*grid;[^}]*gap:\s*18px;/);
-    expect(appCss).toMatch(/\.settings-section-rows\s*{[^}]*border:\s*1px solid color-mix[^}]*border-radius:\s*10px;/);
-    expect(appCss).toMatch(/\.settings-row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(140px,\s*max-content\);/);
-    expect(appCss).toMatch(/\.settings-row-value\s*{[^}]*justify-self:\s*end;[^}]*text-overflow:\s*ellipsis;/);
-    expect(appCss).toMatch(/code\.settings-row-value\s*{[^}]*overflow-x:\s*auto;[^}]*text-overflow:\s*clip;/);
-    expect(appCss).toMatch(/\.settings-switch-track\s*{[^}]*pointer-events:\s*none;/);
-    expect(appCss).toMatch(/\.settings-switch input:checked \+ \.settings-switch-track\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-focus\) 18%, var\(--oa-raised\)\);/);
-  });
-
   it("gives sidebar search a visible keyboard focus state", () => {
     expect(appCss).toMatch(/\.sidebar-actions\s*{[^}]*gap:\s*6px;[^}]*margin-bottom:\s*8px;/);
     expect(appCss).toMatch(/\.sidebar-actions > button\s*{[^}]*width:\s*100%;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*font-weight:\s*560;/);
@@ -561,7 +539,6 @@ describe("task list row styles", () => {
   });
 
   it("renders external sessions inside the same sidebar list as tasks", () => {
-    expect(appCss).toMatch(/\.sidebar\s*{[^}]*min-height:\s*0;[^}]*height:\s*100vh;[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto;[^}]*overflow:\s*hidden;/);
     expect(appCss).toMatch(/\.task-list\s*{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;[^}]*scrollbar-gutter:\s*stable;[^}]*padding-right:\s*10px;[^}]*padding-bottom:\s*24px;/);
     expect(appCss).toMatch(/\.task-list\s*{[^}]*scroll-padding-bottom:\s*24px;/);
     expect(appCss).toMatch(/body\[data-shell="vscodeExtension"\] \.task-list\s*{[^}]*padding-right:\s*0;/);

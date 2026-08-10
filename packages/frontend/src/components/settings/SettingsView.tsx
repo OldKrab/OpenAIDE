@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import type {
   AppPreferencesRecord,
   ComposerSubmitShortcut,
@@ -33,6 +33,7 @@ import type { McpServerSaveInput } from "../../intents/mcpSettingsIntents";
 import type { NewTaskViewIntents } from "../NewTaskView";
 import { AgentSettingsTab } from "./AgentSettingsTab";
 import { GeneralSettingsTab } from "./GeneralSettingsTab";
+import { currentFrontendShell, type FrontendShellAppearance } from "../../services/frontendShell";
 import { SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { McpSettingsTab } from "./McpSettingsTab";
 import { WorktreesSettingsTab } from "./WorktreesSettingsTab";
@@ -55,7 +56,10 @@ const tabs: Array<{
 ];
 
 export function SettingsView({
+  appearance = currentFrontendShell()?.appearance,
   desktopNotifications,
+  frameHeader,
+  frameHeaderPlacement,
   onAuthenticate,
   onBackToApp,
   onCreateCustomAgent,
@@ -84,7 +88,10 @@ export function SettingsView({
   worktreeIntents,
   worktreeRepositories = {},
 }: {
+  appearance?: FrontendShellAppearance;
   desktopNotifications?: DesktopNotificationSettings;
+  frameHeader?: ReactNode;
+  frameHeaderPlacement?: "overlay" | "row";
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onBackToApp?: () => void;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
@@ -165,26 +172,25 @@ export function SettingsView({
   const sidebar = (
     <aside className="settings-sidebar">
         <div className="settings-sidebar-heading">
-          {onBackToApp ? (
-            <button
-              aria-label="Back to app"
-              className="settings-back-to-app"
-              onClick={onBackToApp}
-              type="button"
-            >
-              <ArrowLeft size={14} /> Back to app
-            </button>
-          ) : null}
           <header className="settings-header">
+            {onBackToApp ? (
+              <button
+                aria-label="Close settings"
+                className="settings-back-to-app"
+                onClick={onBackToApp}
+                title="Back to tasks"
+                type="button"
+              >
+                <ArrowLeft aria-hidden="true" size={15} />
+              </button>
+            ) : null}
             <span>
               <button className="settings-title-button" onClick={onTitleClick} type="button">
                 Settings
               </button>
-              <small>OpenAIDE</small>
-            </span>
-            <span className="settings-header-actions">
               <button
                 aria-label="Refresh settings"
+                className="settings-refresh-button"
                 disabled={busy}
                 onClick={onRefresh}
                 title="Refresh settings"
@@ -242,16 +248,22 @@ export function SettingsView({
       </aside>
   );
   return (
-    <AppSidebarFrame aria-label="Settings" className="settings-view" sidebar={sidebar}>
+    <AppSidebarFrame
+      aria-label="Settings"
+      className="settings-view"
+      header={frameHeader}
+      headerPlacement={frameHeaderPlacement}
+      sidebar={sidebar}
+    >
       <section className={`settings-mobile-index ${mobileIndexOpen ? "open" : ""}`}>
         {onBackToApp ? (
           <button
-            aria-label="Back to app"
-            className="settings-back-to-app"
+            aria-label="Close settings"
+            className="settings-mobile-back-to-app"
             onClick={onBackToApp}
             type="button"
           >
-            <ArrowLeft size={14} /> Back to app
+            <ArrowLeft size={14} /> Back to tasks
           </button>
         ) : null}
         <header>
@@ -298,6 +310,7 @@ export function SettingsView({
           </button>
           <span>{tabs.find((tab) => tab.id === activeTab)?.group}</span>
           <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
+          {activeTab === "common" ? <p>Choose how OpenAIDE looks and responds while you work.</p> : null}
         </header>
         {state.error ? (
           <section className="settings-error" aria-label="Settings error">
@@ -309,6 +322,7 @@ export function SettingsView({
           <SettingsSkeleton />
         ) : (
           <SettingsTabContent
+            appearance={appearance}
             desktopNotifications={desktopNotifications}
             agents={state.agentDetails ?? []}
             authPending={state.loading}
@@ -357,6 +371,7 @@ function isNarrowSettingsViewport() {
 }
 
 function SettingsTabContent({
+  appearance,
   desktopNotifications,
   onAuthenticate,
   onCreateCustomAgent,
@@ -390,6 +405,7 @@ function SettingsTabContent({
   worktreeIntents,
   worktreeRepositories,
 }: {
+  appearance?: FrontendShellAppearance;
   desktopNotifications?: DesktopNotificationSettings;
   authPending: boolean;
   agents: AgentSettingsRecord[];
@@ -449,6 +465,7 @@ function SettingsTabContent({
       ) : null}
       {tab === "common" ? (
         <GeneralSettingsTab
+          appearance={appearance}
           developerSettingsUnlocked={developerSettingsUnlocked}
           desktopNotifications={desktopNotifications}
           onSetAcpTrace={onSetAcpTrace}

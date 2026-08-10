@@ -2,9 +2,10 @@ import { ListTodo, Menu, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
+import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
-import { taskStatusLabel } from "./TaskHeader";
+import { TaskHeader, taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
@@ -50,11 +51,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
-  const isWebWorkbench = isWebShell && (
+  const isProjectWorkbench = bootstrap.surface !== "invalid"
+    && bootstrap.shell.navigationMode === "project" && (
     bootstrap.surface === "task"
     || bootstrap.surface === "nativeSession"
     || bootstrap.surface === "settings"
   );
+  const isWebWorkbench = isWebShell && isProjectWorkbench;
   const sidebarActiveTaskId = bootstrap.surface === "settings"
     ? undefined
     : bootstrap.surface === "task"
@@ -91,7 +94,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     });
     callbacks.navigation.openNewTask(project.projectId);
   };
-  const backFromSettings = isWebShell
+  const backFromSettings = isProjectWorkbench
     ? () => {
         if (activeNavigationTaskId) {
           callbacks.navigation.openTask(activeNavigationTaskId);
@@ -142,6 +145,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const workspaceBrowser = callbacks.newTask.workspaceBrowser;
   const workspaceCapability = currentFrontendShell()?.workspace;
   const projectFolderPicker = currentFrontendShell()?.projects;
+  const desktopWindow = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
+    ? currentFrontendShell()?.desktopWindow
+    : undefined;
   const finishAddingProject = async (folder: { path: string }) => {
     const project = await controller.intents.projects.add(folder.path);
     setProjectFolderDialogOpen(false);
@@ -163,6 +169,43 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       : projectFolderPicker
         ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
         : undefined;
+  const desktopTaskSnapshot = renderableTaskSnapshot?.task.has_messages
+    ? renderableTaskSnapshot
+    : undefined;
+  const desktopTitleBarCommands = {
+    addProject,
+    newTask: () => callbacks.navigation.openNewTask(),
+    openSettings: () => callbacks.navigation.openSettings(),
+  };
+  const desktopTitleBar = desktopWindow ? (
+    <DesktopTitleBar
+      commands={desktopTitleBarCommands}
+      window={desktopWindow}
+    >
+      {desktopTaskSnapshot ? (
+        <TaskHeader
+          agentId={desktopTaskSnapshot.task.agent_id}
+          agentName={activeTask?.agent_name ?? desktopTaskSnapshot.task.agent_name}
+          gitRef={desktopTaskSnapshot.task.git_ref}
+          status={desktopTaskSnapshot.task.status}
+          title={activeTask?.title ?? desktopTaskSnapshot.task.title}
+          workspaceRoot={desktopTaskSnapshot.task.workspace_root}
+          worktreeName={desktopTaskSnapshot.task.worktree_name}
+        />
+      ) : null}
+    </DesktopTitleBar>
+  ) : undefined;
+  const desktopSettingsTitleBar = desktopWindow ? (
+    <DesktopTitleBar commands={desktopTitleBarCommands} window={desktopWindow} />
+  ) : undefined;
+  // macOS supplies its own caption controls. Empty chrome therefore overlays the
+  // sidebar inset instead of taking a dedicated row from the working surface.
+  const desktopTitleBarPlacement = desktopWindow?.platform === "macos" && !desktopTaskSnapshot
+    ? "overlay"
+    : "row";
+  const desktopSettingsTitleBarPlacement = desktopWindow?.platform === "macos"
+    ? "overlay"
+    : "row";
   const projectFolderDialog = projectFolderDialogOpen && workspaceBrowser ? (
     <ProjectFolderDialog
       browser={workspaceBrowser}
@@ -338,7 +381,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
 
   if (appServerError && !isWebShell) {
     return (
-      <main className="app-shell editor-shell">
+      <main className={`app-shell editor-shell ${desktopTitleBar ? "desktop-error-shell" : ""}`}>
+        {desktopTitleBar}
         <AppServerErrorView message={appServerError} />
       </main>
     );
@@ -348,6 +392,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return (
       <SettingsView
         desktopNotifications={taskNotifications?.settings}
+        frameHeader={desktopSettingsTitleBar}
+        frameHeaderPlacement={desktopSettingsTitleBarPlacement}
         onAuthenticate={authenticateAndReturn}
         onBackToApp={backFromSettings}
         onCreateCustomAgent={callbacks.settings.createCustomAgent}
@@ -379,7 +425,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (isWebWorkbench) {
+  if (isProjectWorkbench) {
     const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = renderableTaskSnapshot?.task.title
       ?? routedActiveTask?.title
@@ -448,6 +494,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           mobileNavigationOpen ? "mobile-navigation-open" : undefined,
           mobileNavigation.dragging ? "mobile-navigation-dragging" : undefined,
         ].filter(Boolean).join(" ")}
+        header={desktopTitleBar}
+        headerPlacement={desktopTitleBarPlacement}
         onKeyDown={trapMobileNavigationFocus}
         onPointerCancel={mobileNavigation.cancelSwipe}
         onPointerDownCapture={mobileNavigation.beginSwipe}

@@ -344,6 +344,7 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.state.newTask.nativeSessions.adoptionError).toEqual({
       sessionId: "missing_session",
+      kind: "notFound",
       message: "This session no longer exists.",
     });
   });

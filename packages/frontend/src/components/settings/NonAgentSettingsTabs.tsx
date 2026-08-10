@@ -3,7 +3,7 @@ import type {
   SkillSettingsDetails,
   SkillSettingsRecord,
 } from "@openaide/app-shell-contracts";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { AgentMarkdown } from "../AgentMarkdown";
 import { SettingsCatalogSearch } from "./SettingsCatalogSearch";
@@ -86,11 +86,12 @@ export function SkillsSettingsTab({
   }
   return (
     <div className="skill-settings-page">
-      <div className="settings-catalog-tools settings-catalog-tools-search-only">
+      <div className="skill-library-intro">
+        <p>Skills teach agents repeatable ways to work. Open one to understand when it applies and the instructions it adds.</p>
         <SettingsCatalogSearch
           label="Search skills"
           onChange={setQuery}
-          placeholder="Search skills"
+          placeholder="Search"
           value={query}
         />
       </div>
@@ -103,7 +104,6 @@ export function SkillsSettingsTab({
             <section className="skill-settings-group" key={group.key}>
               <header>
                 <strong>{group.label}</strong>
-                <small>{group.skills.length}</small>
               </header>
               <div className="skill-settings-list">
                 {group.skills.map((skill) => (
@@ -114,12 +114,13 @@ export function SkillsSettingsTab({
                     onClick={() => void openSkill(skill)}
                     type="button"
                   >
+                    <span className="skill-settings-icon"><Sparkles aria-hidden="true" size={16} /></span>
                     <span className="skill-settings-copy">
                       <strong>{skill.label}</strong>
                       <small>{skill.description ?? skill.source_label}</small>
                     </span>
                     <span className="skill-settings-origin">{skill.source_label}</span>
-                    {skill.status === "valid" ? null : <StatusBadge status={skill.status} />}
+                    <span className="skill-settings-status-slot">{skill.status === "valid" ? null : <StatusBadge status={skill.status} />}</span>
                     <ChevronRight aria-hidden="true" size={15} />
                   </button>
                 ))}
@@ -185,7 +186,8 @@ function SkillDocumentView({
         Back to Skills
       </button>
       <header className="skill-document-header">
-        <span>
+        <span className="skill-document-icon"><Sparkles aria-hidden="true" size={20} /></span>
+        <span className="skill-document-identity">
           <h2>{details?.document.name ?? skill.label}</h2>
           <small>{skill.source_label}</small>
         </span>

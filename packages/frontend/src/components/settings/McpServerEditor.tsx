@@ -7,7 +7,12 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  FileKey2,
+  Globe2,
+  Network,
   Plus,
+  Server,
+  Terminal,
   Trash2,
   X,
 } from "lucide-react";
@@ -80,34 +85,53 @@ export function McpServerEditor({
   return (
     <section className="mcp-editor">
       <button className="mcp-back" onClick={onBack} type="button">
-        <ArrowLeft size={14} /> MCP Servers
+        <ArrowLeft size={14} /><span>Back to MCP Servers</span>
       </button>
       <header className="mcp-editor-header">
         <McpTransportIcon large transport={transport} />
-        <span>
+        <span className="mcp-editor-identity">
           <h2>{editor.server.label || "New MCP server"}</h2>
           <p>{editor.server.description || "Configure a tool server."}</p>
+          <small>{formError ? "Connection needs attention" : (creating ? "Not saved yet" : "Configured")}</small>
+        </span>
+        <span className="mcp-editor-availability">
+          <McpToggle
+            checked={editor.server.enabled}
+            label="MCP server enabled"
+            onChange={(enabled) => {
+              setEditor(withServer(editor, { enabled }));
+              if (!creating) onSetEnabled(initial.id, enabled);
+            }}
+          />
+          <small>{editor.server.enabled ? "Available" : "Unavailable"}</small>
         </span>
       </header>
       {formError ? <InlineFailure message={formError} /> : null}
       <section className="mcp-editor-section">
-        <h3>Configuration</h3>
+        <h3>Identity</h3>
         <div className="mcp-editor-panel">
-          <Field label="Name" wide>
+          <EditorRow icon={<Server size={16} />} label="Name">
             <input
+              aria-label="Server name"
               onChange={(event) => setEditor(withServer(editor, { label: event.currentTarget.value }))}
               value={editor.server.label}
             />
-          </Field>
-          <Field label="Description" wide>
+          </EditorRow>
+          <EditorRow icon={<Network size={16} />} label="Description">
             <input
+              aria-label="Server description"
               onChange={(event) => setEditor(withServer(editor, {
                 description: event.currentTarget.value || undefined,
               }))}
               value={editor.server.description ?? ""}
             />
-          </Field>
-          <Field label="Scope">
+          </EditorRow>
+        </div>
+      </section>
+      <section className="mcp-editor-section">
+        <h3>Connection</h3>
+        <div className="mcp-editor-panel">
+          <EditorRow icon={<Globe2 size={16} />} label="Scope">
             <PopupSelect
               label="Scope"
               onChange={(value) => setEditor(withServer(editor, {
@@ -118,8 +142,8 @@ export function McpServerEditor({
               options={scopeOptions}
               value={scopeValue}
             />
-          </Field>
-          <Field label="Transport">
+          </EditorRow>
+          <EditorRow icon={<Terminal size={16} />} label="Transport">
             <PopupSelect
               label="Transport"
               onChange={(value) => setEditor(changeTransport(
@@ -133,16 +157,18 @@ export function McpServerEditor({
               ]}
               value={transport}
             />
-          </Field>
-          <Field label={transport === "stdio" ? "Command" : "URL"} wide>
+          </EditorRow>
+          <EditorRow icon={<Network size={16} />} label={transport === "stdio" ? "Command" : "URL"}>
             <input
+              aria-label={transport === "stdio" ? "Command" : "URL"}
+              className="mono"
               onChange={(event) => setEditor({ ...editor, commandLine: event.currentTarget.value })}
               placeholder={transport === "stdio"
                 ? "/absolute/path/to/server --arg"
                 : "https://example.com/mcp"}
               value={editor.commandLine}
             />
-          </Field>
+          </EditorRow>
         </div>
       </section>
       <ConfigFields
@@ -150,23 +176,6 @@ export function McpServerEditor({
         onChange={(fields) => setEditor({ ...editor, fields })}
         transport={transport}
       />
-      <section className="mcp-editor-section">
-        <h3>Availability</h3>
-        <div className="mcp-availability">
-          <span>
-            <strong>Enabled</strong>
-            <small>Use this server for future agent sessions in scope.</small>
-          </span>
-          <McpToggle
-            checked={editor.server.enabled}
-            label="MCP server enabled"
-            onChange={(enabled) => {
-              setEditor(withServer(editor, { enabled }));
-              if (!creating) onSetEnabled(initial.id, enabled);
-            }}
-          />
-        </div>
-      </section>
       <div className="mcp-editor-actions">
         {!creating ? (
           confirmDelete ? (
@@ -185,16 +194,16 @@ export function McpServerEditor({
               onClick={() => setConfirmDelete(true)}
               type="button"
             >
-              <Trash2 size={14} /> Delete server
+              <Trash2 size={14} /><span>Delete</span>
             </button>
           )
         ) : <span />}
         <span>
           <button className="mcp-action" onClick={onBack} type="button">
-            <X size={14} /> Cancel
+            <X size={14} /><span>Cancel</span>
           </button>
           <button className="mcp-action primary" onClick={save} type="button">
-            <Check size={14} /> Save
+            <Check size={14} /><span>Save</span>
           </button>
         </span>
       </div>
@@ -221,11 +230,16 @@ function ConfigFields({
           onClick={() => onChange([...fields, emptyConfigField()])}
           type="button"
         >
-          <Plus size={13} /> Add field
+          <Plus size={13} /><span>Add field</span>
         </button>
       </div>
       {!fields.length ? (
-        <p className="mcp-fields-empty">No {noun.toLowerCase()} configured.</p>
+        <div className="mcp-editor-panel">
+          <div className="mcp-config-summary">
+            <span className="mcp-editor-row-icon"><FileKey2 size={16} /></span>
+            <span><strong>Variables</strong><small>No {noun.toLowerCase()} configured.</small></span>
+          </div>
+        </div>
       ) : (
         <div className="mcp-fields">
           {fields.map((field) => (
@@ -278,20 +292,21 @@ function ConfigFields({
   );
 }
 
-function Field({
+function EditorRow({
   children,
+  icon,
   label,
-  wide = false,
 }: {
   children: ReactNode;
+  icon: ReactNode;
   label: string;
-  wide?: boolean;
 }) {
   return (
-    <label className={`mcp-form-field ${wide ? "wide" : ""}`}>
-      <span>{label}</span>
-      {children}
-    </label>
+    <div className="mcp-editor-row">
+      <span className="mcp-editor-row-icon">{icon}</span>
+      <strong>{label}</strong>
+      <span className="mcp-editor-row-action">{children}</span>
+    </div>
   );
 }
 

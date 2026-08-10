@@ -21,6 +21,8 @@ type SidebarFrameState = {
 
 type AppSidebarFrameProps = Omit<ComponentPropsWithoutRef<"main">, "children"> & {
   children: ReactNode;
+  header?: ReactNode;
+  headerPlacement?: "overlay" | "row";
   sidebar: ReactNode;
 };
 
@@ -31,6 +33,8 @@ type AppSidebarFrameProps = Omit<ComponentPropsWithoutRef<"main">, "children"> &
 export function AppSidebarFrame({
   children,
   className,
+  header,
+  headerPlacement = "row",
   sidebar,
   style,
   ...rootProps
@@ -41,6 +45,8 @@ export function AppSidebarFrame({
       {...rootProps}
       className={[
         "app-sidebar-frame",
+        header && headerPlacement === "row" ? "app-sidebar-frame-with-header" : undefined,
+        header && headerPlacement === "overlay" ? "app-sidebar-frame-with-overlay-header" : undefined,
         sidebarState.collapsed ? "sidebar-collapsed" : undefined,
         className,
       ].filter(Boolean).join(" ")}
@@ -49,6 +55,14 @@ export function AppSidebarFrame({
         "--app-sidebar-width": `${sidebarState.width}px`,
       } as React.CSSProperties}
     >
+      {header ? (
+        <div className={headerPlacement === "overlay"
+          ? "app-sidebar-frame-overlay-header"
+          : "app-sidebar-frame-header"}
+        >
+          {header}
+        </div>
+      ) : null}
       <div className="app-sidebar-pane">{sidebar}</div>
       {!sidebarState.collapsed ? (
         <>
@@ -101,6 +115,8 @@ function useAppSidebarState() {
   };
   const beginResize = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
+    // A drag on a separator is a resize gesture, never a text-selection gesture.
+    event.preventDefault();
     dragRef.current = {
       pointerId: event.pointerId,
       startWidth: stateRef.current.width,

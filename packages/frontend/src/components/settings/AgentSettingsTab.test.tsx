@@ -231,6 +231,18 @@ describe("AgentSettingsTab interactions", () => {
     expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false);
   });
 
+  it("toggles Agent availability directly from the catalog", () => {
+    const onSetAgentEnabled = vi.fn();
+    const view = renderAgentSettings({ agents: [builtInAgent("codex")], onSetAgentEnabled, openFirst: false });
+    const availabilityToggle = view.root.findByProps({ "aria-label": "Codex available", type: "checkbox" });
+
+    act(() => {
+      availabilityToggle.props.onChange({ currentTarget: { checked: false } });
+    });
+
+    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false);
+  });
+
   it("describes disabled built-in Agent availability as disabled", () => {
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", { enabled: false, status: "disabled" })],
@@ -395,7 +407,9 @@ function renderAgentSettings({
   });
   if (openFirst && agents.length) {
     act(() => {
-      view!.root.findAllByProps({ className: "agent-catalog-row" })[0].props.onClick();
+      view!.root.findAllByProps({ className: "agent-catalog-row" })
+        .find((button) => textContent(button).includes(agents[0].label))!
+        .props.onClick();
     });
   }
   return view!;

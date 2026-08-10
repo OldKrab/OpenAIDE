@@ -70,6 +70,14 @@ export function TaskLoadingView({
   onRetry?: () => void;
 }) {
   if (error) {
+    if (errorKind === "conflict") {
+      return (
+        <section className="task-surface task-loading" aria-label="Session open elsewhere">
+          <p>Session open elsewhere.</p>
+          <small className="inline-error" role="alert">{error}</small>
+        </section>
+      );
+    }
     if (errorKind === "notFound") {
       return (
         <section className="task-surface task-loading" aria-label="Task not found">
