@@ -1,19 +1,19 @@
 use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
-#[cfg(target_os = "macos")]
-use tauri::Manager;
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::{Emitter, Manager};
 
+mod desktop_runtime;
 #[cfg(target_os = "macos")]
 mod macos_webview_resize;
+
+use desktop_runtime::DesktopRuntimePaths;
 
 const HANDOFF_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_HANDOFF_LINE_BYTES: usize = 8 * 1024;
@@ -38,13 +38,15 @@ struct DesktopBootstrap {
 struct DesktopState {
     client_instance_id: String,
     connection: Mutex<Option<LocalHttpConnection>>,
+    runtime_paths: DesktopRuntimePaths,
 }
 
-impl Default for DesktopState {
-    fn default() -> Self {
+impl DesktopState {
+    fn new(runtime_paths: DesktopRuntimePaths) -> Self {
         Self {
             client_instance_id: format!("desktop-{}", uuid::Uuid::new_v4()),
             connection: Mutex::new(None),
+            runtime_paths,
         }
     }
 }
@@ -54,8 +56,13 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(DesktopState::default())
         .setup(|app| {
+            let app_local_data = app.path().app_local_data_dir()?;
+            let executable_dir = app.path().executable_dir()?;
+            app.manage(DesktopState::new(DesktopRuntimePaths::resolve(
+                &app_local_data,
+                &executable_dir,
+            )));
             #[cfg(target_os = "macos")]
             install_macos_menu(app)?;
             #[cfg(target_os = "macos")]
@@ -177,13 +184,15 @@ async fn desktop_bootstrap(
     }
 
     eprintln!("desktop_app_server_handoff_started");
-    let connection = tauri::async_runtime::spawn_blocking(launch_app_server_handoff)
-        .await
-        .map_err(|_| "App Server handoff task failed".to_string())?
-        .map_err(|error| {
-            eprintln!("desktop_app_server_handoff_failed stage={}", error.stage);
-            error.user_message
-        })?;
+    let runtime_paths = state.runtime_paths.clone();
+    let connection =
+        tauri::async_runtime::spawn_blocking(move || launch_app_server_handoff(&runtime_paths))
+            .await
+            .map_err(|_| "App Server handoff task failed".to_string())?
+            .map_err(|error| {
+                eprintln!("desktop_app_server_handoff_failed stage={}", error.stage);
+                error.user_message
+            })?;
     eprintln!("desktop_app_server_handoff_completed");
     *state
         .connection
@@ -201,17 +210,16 @@ struct HandoffFailure {
     user_message: String,
 }
 
-fn launch_app_server_handoff() -> Result<LocalHttpConnection, HandoffFailure> {
-    let binary = required_path("OPENAIDE_APP_SERVER_BIN", "binary_configuration")?;
-    let storage_root = required_path("OPENAIDE_STORAGE_ROOT", "storage_configuration")?;
-    let runtime_root = required_path("OPENAIDE_RUNTIME_ROOT", "runtime_configuration")?;
-    create_directory(&storage_root, "storage_create")?;
-    create_directory(&runtime_root, "runtime_create")?;
+fn launch_app_server_handoff(
+    runtime_paths: &DesktopRuntimePaths,
+) -> Result<LocalHttpConnection, HandoffFailure> {
+    create_directory(&runtime_paths.storage_root, "storage_create")?;
+    create_directory(&runtime_paths.runtime_root, "runtime_create")?;
 
-    let mut child = Command::new(&binary)
+    let mut child = Command::new(&runtime_paths.app_server_binary)
         .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
-        .env("OPENAIDE_STORAGE_ROOT", &storage_root)
-        .env("OPENAIDE_RUNTIME_ROOT", &runtime_root)
+        .env("OPENAIDE_STORAGE_ROOT", &runtime_paths.storage_root)
+        .env("OPENAIDE_RUNTIME_ROOT", &runtime_paths.runtime_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -276,20 +284,9 @@ fn read_handoff_line(
     }
 }
 
-fn required_path(variable: &str, stage: &'static str) -> Result<PathBuf, HandoffFailure> {
-    std::env::var_os(variable)
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            failure(
-                stage,
-                "Desktop Development is not configured for this checkout.",
-            )
-        })
-}
-
 fn create_directory(path: &std::path::Path, stage: &'static str) -> Result<(), HandoffFailure> {
     std::fs::create_dir_all(path)
-        .map_err(|_| failure(stage, "OpenAIDE could not prepare its development storage."))
+        .map_err(|_| failure(stage, "OpenAIDE could not prepare its local storage."))
 }
 
 fn validate_connection(connection: &LocalHttpConnection) -> Result<(), HandoffFailure> {
