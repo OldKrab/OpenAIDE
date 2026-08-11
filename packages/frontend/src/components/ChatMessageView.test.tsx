@@ -716,9 +716,10 @@ describe("ChatRow", () => {
     const html = renderToStaticMarkup(
       <ChatRow
         message={permissionMessage("p1", "mkdir .openaide-acp-tool-fixture/archive", [
-          { id: "approved", label: "Yes, proceed", kind: "allow" },
-          { id: "approved-execpolicy-amendment", label: "Yes, and don't ask again for commands that start with `mkdir`", kind: "allow" },
-          { id: "abort", label: "No, and tell Codex what to do differently", kind: "deny" },
+          { id: "approved", label: "Yes, proceed", kind: "allow_once" },
+          { id: "approved-execpolicy-amendment", label: "Yes, and don't ask again for commands that start with `mkdir`", kind: "allow_always" },
+          { id: "abort", label: "No, and tell Codex what to do differently", kind: "reject_once" },
+          { id: "always-abort", label: "Always reject", kind: "reject_always" },
         ])}
         onPermissionRespond={vi.fn()}
         taskId="task_1"
@@ -726,17 +727,21 @@ describe("ChatRow", () => {
     );
 
     expect(html).toContain("Approval required");
-    expect(html).toContain("<strong>Approve command</strong>");
-    expect(html).toContain("execute-command-chip");
+    expect(html).toContain("Choose how the Agent may continue");
+    expect(html).toContain("mkdir .openaide-acp-tool-fixture/archive");
     expect(html).toContain("permission-body");
-    expect(html).toContain('class="remember"');
+    expect(html).toContain("lucide-check");
+    expect(html).toContain("lucide-check-check");
+    expect(html).toContain("lucide-x");
+    expect(html).toContain("lucide-shield-x");
+    expect(html).toContain("<code>mkdir</code>");
   });
 
   it("renders resolved denied permissions as answered history blocks even without a selected option", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const message = permissionMessage("p1", "npm exec --workspace openaide-frontend", [
-      { id: "allow_once", label: "Allow Once", kind: "allow" },
-      { id: "reject_once", label: "Reject", kind: "deny" },
+      { id: "allow_once", label: "Allow Once", kind: "allow_once" },
+      { id: "reject_once", label: "Reject", kind: "reject_once" },
     ]);
     message.message = {
       ...message.message,
@@ -764,8 +769,8 @@ describe("ChatRow", () => {
   it("renders cancelled permissions without calling them denied", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const message = permissionMessage("p1", "npm exec --workspace openaide-frontend", [
-      { id: "allow_once", label: "Allow Once", kind: "allow" },
-      { id: "reject_once", label: "Reject", kind: "deny" },
+      { id: "allow_once", label: "Allow Once", kind: "allow_once" },
+      { id: "reject_once", label: "Reject", kind: "reject_once" },
     ]);
     message.message = {
       ...message.message,
@@ -790,9 +795,9 @@ describe("ChatRow", () => {
   it("uses explicit permission lifecycle labels", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const base = permissionMessage("p1", "npm run web:target:restart", [
-      { id: "allow_once", label: "Allow Once", kind: "allow" },
-      { id: "allow_session", label: "Allow for Session", kind: "allow" },
-      { id: "reject_once", label: "Reject", kind: "deny" },
+      { id: "allow_once", label: "Allow Once", kind: "allow_once" },
+      { id: "allow_session", label: "Allow for Session", kind: "allow_always" },
+      { id: "reject_once", label: "Reject", kind: "reject_once" },
     ]);
     const renderPermission = (
       overrides: Partial<Extract<ChatMessage["message"], { kind: "permission" }>>,
@@ -822,28 +827,27 @@ describe("ChatRow", () => {
     })).toContain("Task stopped while approval was pending.");
   });
 
-  it("uses command option text instead of the generic Tool call permission placeholder", async () => {
+  it("does not derive Tool context from Agent-provided option labels", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const html = renderToStaticMarkup(
       <ChatRow
         message={permissionMessage("p1", "Tool call", [
-          { id: "allow_once", label: "Allow Once", kind: "allow" },
-          { id: "allow_always", label: "Allow for Session", kind: "allow" },
+          { id: "allow_once", label: "Allow Once", kind: "allow_once" },
+          { id: "allow_always", label: "Allow for Session", kind: "allow_always" },
           {
             id: "accept_execpolicy_amendment",
             label: "Allow Commands Starting With `node /tmp/openaide-pw/verify-tool-activity.mjs`",
-            kind: "allow",
+            kind: "allow_always",
           },
-          { id: "reject_once", label: "Reject", kind: "deny" },
+          { id: "reject_once", label: "Reject", kind: "reject_once" },
         ])}
         onPermissionRespond={vi.fn()}
         taskId="task_1"
       />,
     );
 
-    expect(html).toContain("node /tmp/openaide-pw/verify-tool-activity.mjs");
-    expect(html).not.toContain("<strong>Tool call</strong>");
-    expect(html).not.toContain("&gt;_ Tool call");
+    expect(html).toContain("Tool call");
+    expect(html).toContain("<code>node /tmp/openaide-pw/verify-tool-activity.mjs</code>");
   });
 
   it("explains OpenCode external directory permission requests", async () => {
@@ -851,17 +855,16 @@ describe("ChatRow", () => {
     const html = renderToStaticMarkup(
       <ChatRow
         message={permissionMessage("p1", "external_directory", [
-          { id: "allow_once", label: "Allow once", kind: "allow" },
-          { id: "reject", label: "Reject", kind: "deny" },
+          { id: "allow_once", label: "Allow once", kind: "allow_once" },
+          { id: "reject", label: "Reject", kind: "reject_once" },
         ], "other")}
         onPermissionRespond={vi.fn()}
         taskId="task_1"
       />,
     );
 
-    expect(html).toContain("External directory access");
-    expect(html).toContain("outside the current workspace");
-    expect(html).not.toContain("&gt;_ external_directory");
+    expect(html).toContain("external_directory");
+    expect(html).not.toContain("outside the current workspace");
   });
 
   it("subscribes to tool details only while the rendered disclosure is open", async () => {
@@ -1620,15 +1623,15 @@ describe("ChatRow", () => {
 
   it("maps rendered permission buttons to allow and deny decisions only", async () => {
     const { ChatPermissionCard, permissionDecisionForOption } = await import("./ChatPermissionCard");
-    expect(permissionDecisionForOption({ id: "allow_once", label: "Allow once", kind: "allow" })).toBe("approved");
-    expect(permissionDecisionForOption({ id: "reject", label: "Reject", kind: "deny" })).toBe("denied");
+    expect(permissionDecisionForOption({ id: "allow_once", label: "Allow once", kind: "allow_once" })).toBe("approved");
+    expect(permissionDecisionForOption({ id: "reject", label: "Reject", kind: "reject_once" })).toBe("denied");
     expect(permissionDecisionForOption({ id: "remember", label: "Remember", kind: "other" })).toBeUndefined();
 
     const onRespond = vi.fn();
     const permission = permissionMessage("p1", "mkdir archive", [
-      { id: "allow_once", label: "Allow once", kind: "allow" },
+      { id: "allow_once", label: "Allow once", kind: "allow_once" },
       { id: "remember", label: "Remember", kind: "other" },
-      { id: "reject", label: "Reject", kind: "deny" },
+      { id: "reject", label: "Reject", kind: "reject_once" },
     ]).message as Extract<ChatMessage["message"], { kind: "permission" }>;
     const element = ChatPermissionCard({ permission, onRespond });
     const buttons = findElements(element, (candidate) => candidate.type === "button");
@@ -1647,7 +1650,7 @@ describe("ChatRow", () => {
     expect(onRespond).toHaveBeenLastCalledWith("server-request-1", "allow_once");
 
     const respondingElement = ChatPermissionCard({
-      permission: permissionMessage("p1", "mkdir archive", [{ id: "allow_once", label: "Allow once", kind: "allow" }]).message as Extract<
+      permission: permissionMessage("p1", "mkdir archive", [{ id: "allow_once", label: "Allow once", kind: "allow_once" }]).message as Extract<
         ChatMessage["message"],
         { kind: "permission" }
       >,
@@ -1665,18 +1668,156 @@ describe("ChatRow", () => {
     expect(error.props.role).toBe("alert");
   });
 
+  it("renders the related Tool as permission context when it is available", async () => {
+    const { ChatPermissionCard } = await import("./ChatPermissionCard");
+    const permission = permissionMessage("p1", "Generic permission", [
+      { id: "allow_once", label: "Allow once", kind: "allow_once" },
+    ]).message as Extract<ChatMessage["message"], { kind: "permission" }>;
+    const html = renderToStaticMarkup(
+      <ChatPermissionCard
+        onRespond={vi.fn()}
+        permission={permission}
+        relatedTool={{
+          kind: "tool",
+          tool_call_id: permission.tool_call.id,
+          name: "execute",
+          status: "running",
+          input_summary: "npm run linked-check",
+        }}
+        taskId="task_1"
+      />,
+    );
+
+    expect(html).toContain("npm run linked-check");
+    expect(html).toContain("Running");
+  });
+
+  it("renders loaded edit Tool details inside its permission request", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const permission = permissionMessage("p1", "Editing files", [
+      { id: "allow_once", label: "Allow once", kind: "allow_once" },
+    ]);
+    const toolCallId = (permission.message as Extract<ChatMessage["message"], { kind: "permission" }>).tool_call.id;
+    const html = renderToStaticMarkup(
+      <ChatRow
+        message={permission}
+        onPermissionRespond={vi.fn()}
+        permissionTool={{
+          kind: "tool",
+          tool_call_id: toolCallId,
+          name: "edit",
+          status: "running",
+          input_summary: "recovery.md",
+          output_preview: "Changed file",
+          detail_artifact_id: "artifact_edit",
+        }}
+        taskId="task_1"
+        toolDetails={{
+          ["task_1\0artifact_edit"]: {
+            loading: false,
+            details: {
+              locations: [],
+              content: [{
+                kind: "diff",
+                path: "/workspace/docs/recovery.md",
+                new_text: "Recovered diff content\n",
+              }],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain("activity-tool-edit-detail");
+    expect(html).toContain("docs/recovery.md");
+    expect(html).toContain("Recovered diff content");
+  });
+
+  it("loads permission Tool details when the user opens its disclosure", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const onSubscribeToolDetail = vi.fn(() => vi.fn());
+    const permission = permissionMessage("p1", "Editing files", [
+      { id: "allow_once", label: "Allow once", kind: "allow_once" },
+    ]);
+    const toolCallId = (permission.message as Extract<ChatMessage["message"], { kind: "permission" }>).tool_call.id;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ChatRow
+          message={permission}
+          onPermissionRespond={vi.fn()}
+          onSubscribeToolDetail={onSubscribeToolDetail}
+          permissionTool={{
+            kind: "tool",
+            tool_call_id: toolCallId,
+            name: "edit",
+            status: "running",
+            input_summary: "recovery.md",
+            output_preview: "Changed file",
+            detail_artifact_id: "artifact_edit",
+          }}
+          taskId="task_1"
+          toolDetails={{}}
+        />,
+      );
+    });
+
+    act(() => tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick());
+    expect(onSubscribeToolDetail).toHaveBeenCalledWith("artifact_edit");
+  });
+
+  it("loads permission Tool image previews through the standard Tool detail path", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const onLoadToolImagePreview = vi.fn(async () => undefined);
+    const permission = permissionMessage("p1", "Reading image", [
+      { id: "allow_once", label: "Allow once", kind: "allow_once" },
+    ]);
+    const toolCallId = (permission.message as Extract<ChatMessage["message"], { kind: "permission" }>).tool_call.id;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ChatRow
+          message={permission}
+          onLoadToolImagePreview={onLoadToolImagePreview}
+          onPermissionRespond={vi.fn()}
+          permissionTool={{
+            kind: "tool",
+            tool_call_id: toolCallId,
+            name: "read",
+            status: "running",
+            input_summary: "diagram.png",
+            detail_artifact_id: "artifact_image",
+          }}
+          taskId="task_1"
+          toolDetails={{
+            ["task_1\0artifact_image"]: {
+              loading: false,
+              details: { locations: [], content: [] },
+            },
+          }}
+        />,
+      );
+    });
+
+    await act(async () => {
+      tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick();
+      await Promise.resolve();
+    });
+    expect(onLoadToolImagePreview).toHaveBeenCalledWith("artifact_image");
+  });
+
   it("moves focus off the action before resolving a permission", async () => {
     const { ChatPermissionCard } = await import("./ChatPermissionCard");
     const focus = vi.fn();
     const onRespond = vi.fn();
     const permission = permissionMessage("p1", "mkdir archive", [
-      { id: "allow_once", label: "Allow once", kind: "allow" },
+      { id: "allow_once", label: "Allow once", kind: "allow_once" },
     ]).message as Extract<ChatMessage["message"], { kind: "permission" }>;
     const element = ChatPermissionCard({ permission, onRespond });
     const card = findElement(element, (candidate) => candidate.type === "section");
-    const action = findElement(element, (candidate) => candidate.props.className === "allow");
+    const action = findElement(element, (candidate) => candidate.props.className === "permission-option permission-option-allow_once");
     const status = findElement(element, (candidate) => (
-      typeof candidate.props.className === "string" && candidate.props.className.startsWith("permission-state")
+      candidate.props.className === "permission-title"
     ));
     action.props.onClick({
       currentTarget: {

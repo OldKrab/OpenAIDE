@@ -16,12 +16,26 @@
   background: color-mix(in oklch, var(--oa-raised) 24%, transparent);
 }
 
+.permission-card.pending {
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+  border-color: color-mix(in oklch, var(--oa-border) 78%, transparent);
+  background: var(--oa-panel);
+}
+
 .permission-head {
   min-width: 0;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+}
+
+.permission-card.pending .permission-head {
+  min-height: 38px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 48%, transparent);
 }
 
 .permission-icon {
@@ -66,6 +80,12 @@
   font-weight: 600;
 }
 
+.permission-queue {
+  color: var(--oa-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .permission-state {
   max-width: min(34ch, 44vw);
   min-width: 0;
@@ -106,6 +126,52 @@
   padding-left: 26px;
 }
 
+.permission-card.pending .permission-body {
+  gap: 0;
+  padding-left: 0;
+}
+
+.permission-tool-summary {
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  background: color-mix(in oklch, var(--oa-raised) 22%, transparent);
+  color: var(--oa-text);
+  font-size: 12px;
+}
+
+.permission-tool-summary > span:first-child {
+  color: var(--oa-muted);
+  display: inline-flex;
+}
+
+.permission-tool-summary > code,
+.permission-tool-summary > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-tool-summary > code {
+  font-family: var(--oa-mono-font);
+  font-size: 11.5px;
+}
+
+.permission-tool-context {
+  min-width: 0;
+  padding: 7px 12px;
+  background: color-mix(in oklch, var(--oa-raised) 22%, transparent);
+}
+
+.permission-tool-context .activity-step {
+  margin: 0;
+}
+
 .permission-body .execute-command-chip {
   width: 100%;
   max-width: 100%;
@@ -141,40 +207,90 @@
   color: color-mix(in oklch, var(--oa-muted) 78%, var(--oa-text));
 }
 
+.permission-decision {
+  min-width: 0;
+  padding: 8px 10px 9px;
+  border-top: 1px solid color-mix(in oklch, var(--oa-border) 48%, transparent);
+  background: color-mix(in oklch, var(--oa-bg) 26%, transparent);
+}
+
+.permission-prompt {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--oa-muted);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
 .permission-actions {
   min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  gap: 2px;
   margin: 0;
+  padding: 3px;
+  border: 1px solid color-mix(in oklch, var(--oa-border) 58%, transparent);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-raised) 20%, transparent);
 }
 
 .permission-actions button {
+  width: 100%;
   max-width: 100%;
-  min-height: 28px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border: 1px solid var(--oa-border);
+  min-height: 36px;
+  min-width: 0;
+  padding: 5px 8px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  border: 1px solid transparent;
   border-radius: var(--oa-radius-sm);
-  background: color-mix(in oklch, var(--oa-bg) 48%, transparent);
+  background: transparent;
   color: var(--oa-text);
   font-size: 12px;
-  padding: 4px 8px;
+  text-align: left;
 }
 
-.permission-actions button.allow {
-  border-color: color-mix(in oklch, var(--oa-success) 42%, var(--oa-border));
-  background: color-mix(in oklch, var(--oa-success) 9%, transparent);
-  color: var(--oa-text);
+.permission-option-icon {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-success) 10%, var(--oa-raised));
+  color: var(--oa-success);
 }
 
-.permission-actions button.remember {
-  color: color-mix(in oklch, var(--oa-text) 82%, var(--oa-muted));
+.permission-option strong {
+  min-width: 0;
+  padding-top: 2px;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
-.permission-actions button.deny {
-  border-color: color-mix(in oklch, var(--oa-danger) 48%, var(--oa-border));
+.permission-option strong code {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--oa-text) 6%, transparent);
+  color: inherit;
+  font-family: var(--oa-mono-font);
+  font-size: 0.94em;
+  font-weight: 500;
+}
+
+.permission-option-reject_once,
+.permission-option-reject_always {
+  box-shadow: 0 -3px 0 -2px color-mix(in oklch, var(--oa-border) 52%, transparent);
+  color: var(--oa-danger);
+}
+
+.permission-option-reject_once .permission-option-icon,
+.permission-option-reject_always .permission-option-icon {
+  background: color-mix(in oklch, var(--oa-danger) 9%, var(--oa-raised));
   color: var(--oa-danger);
 }
 

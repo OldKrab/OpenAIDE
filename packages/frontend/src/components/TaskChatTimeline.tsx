@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import { ArrowDown, Check, CircleAlert } from "lucide-react";
 import type {
+  ActivityStep,
   ChatMessage,
   ElicitationResponse,
   TaskSnapshot,
@@ -21,7 +22,13 @@ export type TaskChatTimelineRow =
   | { key: "archived"; kind: "archived" }
   | { key: "load-earlier"; kind: "loadEarlier" }
   | { key: "chat-error"; kind: "error" }
-  | { key: string; kind: "message"; message: ChatMessage }
+  | {
+      key: string;
+      kind: "message";
+      message: ChatMessage;
+      permissionQueueCount?: number;
+      permissionTool?: Extract<ActivityStep, { kind: "tool" }>;
+    }
   | { key: "timeline-status"; kind: "status" };
 
 type TaskChatTimelineProps = {
@@ -160,7 +167,9 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                     onPermissionRespond={onPermissionRespond}
                     onQuestionRespond={onQuestionRespond}
                     onSubscribeToolDetail={onSubscribeToolDetail}
+                    permissionQueueCount={row.permissionQueueCount}
                     permissionResponse={permissionResponseForMessage(row.message.message, permissionResponses)}
+                    permissionTool={row.permissionTool}
                     presentLiveText={taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping"}
                     questionResponse={questionResponseForMessage(row.message.message, questionResponses)}
                     taskId={taskId}
@@ -208,17 +217,46 @@ export function buildTaskChatTimelineRows({
   items: ChatMessage[];
   timelineStatusLabel?: string;
 }): TaskChatTimelineRow[] {
+  const toolSteps = permissionToolSteps(items);
+  const messageRows: Extract<TaskChatTimelineRow, { kind: "message" }>[] = [];
+  const permissionRowsByTool = new Map<string, number>();
+  for (const message of items) {
+    const permission = message.message.kind === "permission" && message.message.state === "pending"
+      ? message.message
+      : undefined;
+    const existingIndex = permission ? permissionRowsByTool.get(permission.tool_call.id) : undefined;
+    if (existingIndex !== undefined) {
+      const existing = messageRows[existingIndex];
+      existing.permissionQueueCount = (existing.permissionQueueCount ?? 0) + 1;
+      continue;
+    }
+    const row: Extract<TaskChatTimelineRow, { kind: "message" }> = {
+      key: `message:${chatRowKey(message)}`,
+      kind: "message",
+      message,
+      permissionTool: permission ? toolSteps.get(permission.tool_call.id) : undefined,
+    };
+    if (permission) permissionRowsByTool.set(permission.tool_call.id, messageRows.length);
+    messageRows.push(row);
+  }
   return [
     ...(archived ? [{ key: "archived", kind: "archived" } as const] : []),
     ...(chat.hasBefore ? [{ key: "load-earlier", kind: "loadEarlier" } as const] : []),
     ...(chat.error ? [{ key: "chat-error", kind: "error" } as const] : []),
-    ...items.map((message) => ({
-      key: `message:${chatRowKey(message)}`,
-      kind: "message" as const,
-      message,
-    })),
+    ...messageRows,
     ...(timelineStatusLabel ? [{ key: "timeline-status", kind: "status" } as const] : []),
   ];
+}
+
+function permissionToolSteps(items: ChatMessage[]) {
+  const tools = new Map<string, Extract<ActivityStep, { kind: "tool" }>>();
+  for (const item of items) {
+    if (item.message.kind !== "activity") continue;
+    for (const step of item.message.steps) {
+      if (step.kind === "tool" && step.tool_call_id) tools.set(step.tool_call_id, step);
+    }
+  }
+  return tools;
 }
 
 export function chatRowKey(message: ChatMessage) {

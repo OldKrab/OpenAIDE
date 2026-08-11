@@ -17,6 +17,7 @@ import type {
   Attachment,
   ChatMessage,
   NormalizedMessage,
+  PermissionOptionKind,
   ToolPresentationAction,
 } from "@openaide/app-shell-contracts";
 import { mapPendingProtocolQuestion, mapProtocolQuestion } from "./questionProtocolMapping";
@@ -78,9 +79,11 @@ function permissionMessageFromPendingRequest(
   });
 }
 
-function permissionOptionKind(kind: PermissionRequestOptionKind) {
-  if (kind === "allowOnce" || kind === "allowAlways") return "allow";
-  if (kind === "rejectOnce" || kind === "rejectAlways") return "deny";
+function permissionOptionKind(kind: PermissionRequestOptionKind): PermissionOptionKind {
+  if (kind === "allowOnce") return "allow_once";
+  if (kind === "allowAlways") return "allow_always";
+  if (kind === "rejectOnce") return "reject_once";
+  if (kind === "rejectAlways") return "reject_always";
   return "other";
 }
 

@@ -1,6 +1,6 @@
 import { CircleAlert, ChevronRight, FileText } from "lucide-react";
 import { memo, useRef, useState } from "react";
-import type { ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
+import type { ActivityStep, ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
@@ -24,7 +24,9 @@ export const ChatRow = memo(function ChatRow({
   onSubscribeToolDetail,
   onPermissionRespond,
   onQuestionRespond,
+  permissionQueueCount,
   permissionResponse,
+  permissionTool,
   questionResponse,
   taskId,
   toolDetails,
@@ -42,7 +44,9 @@ export const ChatRow = memo(function ChatRow({
     optionId: string,
   ) => void;
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
+  permissionQueueCount?: number;
   permissionResponse?: { responding: boolean; error?: string };
+  permissionTool?: Extract<ActivityStep, { kind: "tool" }>;
   questionResponse?: { responding: boolean; error?: string };
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
@@ -113,7 +117,19 @@ export const ChatRow = memo(function ChatRow({
     return <p className="chat-system">{body.message}</p>;
   }
   if (body.kind === "permission") {
-    return <ChatPermissionCard permission={body} response={permissionResponse} onRespond={onPermissionRespond} />;
+    return (
+      <ChatPermissionCard
+        onLoadToolImagePreview={onLoadToolImagePreview}
+        onRespond={onPermissionRespond}
+        onSubscribeToolDetail={onSubscribeToolDetail}
+        permission={body}
+        queued={permissionQueueCount}
+        relatedTool={permissionTool}
+        response={permissionResponse}
+        taskId={taskId}
+        toolDetails={toolDetails}
+      />
+    );
   }
   if (body.kind === "elicitation") {
     return <QuestionCard elicitation={body} response={questionResponse} onRespond={onQuestionRespond ?? unavailableQuestionResponse} />;

@@ -774,7 +774,9 @@ describe("App Server Protocol state mapping", () => {
             toolCall: { id: "tool-1", title: "Shell command", kind: "execute" },
             options: [
               { optionId: "allow-once", name: "Allow", kind: "allowOnce" },
+              { optionId: "allow-always", name: "Always allow", kind: "allowAlways" },
               { optionId: "reject-once", name: "Deny", kind: "rejectOnce" },
+              { optionId: "reject-always", name: "Always deny", kind: "rejectAlways" },
             ],
           },
         },
@@ -794,8 +796,10 @@ describe("App Server Protocol state mapping", () => {
           tool_call: { id: "tool-1", title: "Shell command", kind: "execute" },
           state: "pending",
           options: [
-            { id: "allow-once", label: "Allow", kind: "allow" },
-            { id: "reject-once", label: "Deny", kind: "deny" },
+            { id: "allow-once", label: "Allow", kind: "allow_once" },
+            { id: "allow-always", label: "Always allow", kind: "allow_always" },
+            { id: "reject-once", label: "Deny", kind: "reject_once" },
+            { id: "reject-always", label: "Always deny", kind: "reject_always" },
           ],
         }),
       ]),
