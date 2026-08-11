@@ -51,8 +51,11 @@ child.stdout.setEncoding("utf8").on("data", (chunk) => {
     const waiter = pending.get(String(message.id));
     if (!waiter) continue;
     pending.delete(String(message.id));
-    if (message.error) waiter.reject(new Error(JSON.stringify(message.error)));
-    else waiter.resolve(message.result);
+    if (message.error) {
+      const rpcError = new Error(message.error?.error?.message ?? "App Server request failed");
+      rpcError.code = message.error?.error?.code;
+      waiter.reject(rpcError);
+    } else waiter.resolve(message.result);
   }
 });
 
@@ -84,15 +87,22 @@ try {
     throw new Error("App Server did not add the smoke-test project");
   }
 
-  const listedEnvelope = await request("agent/listSessions", {
-    agentId: "codex",
-    projectId: project.projectId,
-  });
-  const listed = listedEnvelope?.result;
-  if (listed?.agentId !== "codex" || !Array.isArray(listed.sessions)) {
-    throw new Error("Unexpected Codex session-list response shape");
+  try {
+    const listedEnvelope = await request("agent/listSessions", {
+      agentId: "codex",
+      projectId: project.projectId,
+    });
+    const listed = listedEnvelope?.result;
+    if (listed?.agentId !== "codex" || !Array.isArray(listed.sessions)) {
+      throw new Error("Unexpected Codex session-list response shape");
+    }
+    console.log("Verified packaged App Server Codex ACP initialization and session listing.");
+  } catch (error) {
+    // An unauthenticated release runner cannot list private Codex sessions, but
+    // this response proves the adapter initialized and survived the ACP request.
+    if (error.code !== "unauthorized") throw error;
+    console.log("Verified packaged App Server Codex ACP initialization through the authentication boundary.");
   }
-  console.log("Verified packaged App Server Codex ACP initialization and session listing.");
 } catch (error) {
   throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
 } finally {
