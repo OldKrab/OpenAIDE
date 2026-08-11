@@ -5,7 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REQUIRED_EXTENSION_FILES = [
-  "CHANGELOG.md",
+  // VSCE normalizes the conventional changelog asset to lowercase in VSIX archives.
+  "changelog.md",
   "LICENSE.txt",
   "dist/extension.js",
   "webview/dist/assets/index.js",

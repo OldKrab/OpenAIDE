@@ -83,7 +83,8 @@ async function fixtureVsix({ version = "0.0.2-beta.1", preRelease = true } = {})
     version,
   }));
   for (const relativePath of [
-    "CHANGELOG.md",
+    // VSCE normalizes this conventional package asset to lowercase in the archive.
+    "changelog.md",
     "LICENSE.txt",
     "dist/extension.js",
     "webview/dist/assets/index.js",
