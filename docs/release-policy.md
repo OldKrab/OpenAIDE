@@ -33,8 +33,9 @@ version.
 
 ## Open VSX setup
 
-OpenAIDE will begin Open VSX publication with the next stable release; do not
-backfill `0.0.1`.
+OpenAIDE will begin Open VSX publication with the next release; do not backfill
+`0.0.1`. Prereleases use Open VSX's native prerelease channel, while stable
+releases are also published to the VS Code Marketplace.
 
 Before that release:
 
@@ -71,14 +72,15 @@ Before that release:
    the `main` update and tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, repeats
    release checks, then builds Linux x64, Windows x64, and macOS Apple Silicon
-   VSIX packages. Each runner inspects the packaged files and exercises its
-   bundled App Server through startup and graceful JSON-RPC shutdown before the
-   VSIX can be uploaded.
+   VSIX packages. Prerelease packages carry the registry's native prerelease
+   metadata. Each runner inspects the packaged files and exercises its bundled
+   App Server through startup and graceful JSON-RPC shutdown before the VSIX can
+   be uploaded.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. This GitHub
-   Release is the canonical release. Stable releases then reconcile the same
-   downloaded bytes with the VS Code Marketplace and Open VSX. Prereleases stay
-   on GitHub only.
+   Release is the canonical release. Every release then reconciles the same
+   downloaded bytes with Open VSX; stable releases also reconcile them with the
+   VS Code Marketplace.
 7. Confirm that the Release workflow completed successfully. No manual rebuild
    or replacement of its assets is permitted.
 
@@ -93,8 +95,9 @@ requires a new patch or prerelease version; for example, replace a bad
 `0.0.2-beta.1` with `0.0.2-beta.2`.
 
 If registry publication was merely interrupted, run **Reconcile Release
-Registries** with the existing stable version. It downloads the immutable GitHub
-assets and handles each target independently:
+Registries** with the existing version. It downloads the immutable GitHub assets
+and handles each applicable target independently. Prereleases reconcile only
+Open VSX; stable releases reconcile both registries:
 
 - missing package: publish it;
 - same version, target, and SHA-256: skip successfully;

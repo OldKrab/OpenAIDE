@@ -70,14 +70,22 @@ jobs:
         run: cp LICENSE apps/vscode-extension/LICENSE
       - name: Package platform VSIX
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p artifacts apps/vscode-extension/dist/app-server
           cp "target/release/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
           cd apps/vscode-extension
-          npm exec -- vsce package \
-            --target "${{ matrix.target }}" \
-            --no-dependencies \
-            --out "../../artifacts/openaide-vscode-${{ matrix.target }}-${{ steps.version.outputs.version }}.vsix"
+          package_args=(
+            --target "${{ matrix.target }}"
+            --no-dependencies
+            --out "../../artifacts/openaide-vscode-${{ matrix.target }}-${RELEASE_VERSION}.vsix"
+          )
+          # Registry clients use VSIX metadata, not the SemVer suffix, to select the prerelease channel.
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            package_args+=(--pre-release)
+          fi
+          npm exec -- vsce package "${package_args[@]}"
       - name: Verify packaged content and bundled App Server lifecycle
         shell: bash
         run: |

@@ -43,6 +43,16 @@ export async function smokeReleaseVsix({ extensionRoot, version, target, binaryN
   if (!new RegExp(`TargetPlatform[^>]+${escapedTarget}|${escapedTarget}[^>]+TargetPlatform`).test(vsixManifest)) {
     throw new Error(`VSIX manifest does not declare target ${target}`);
   }
+  const declaresPreRelease = /<Property\b(?=[^>]*\bId=["']Microsoft\.VisualStudio\.Code\.PreRelease["'])(?=[^>]*\bValue=["']true["'])[^>]*\/>/i
+    .test(vsixManifest);
+  const versionIsPreRelease = version.includes("-");
+  if (declaresPreRelease !== versionIsPreRelease) {
+    throw new Error(
+      versionIsPreRelease
+        ? `VSIX ${version} must declare native prerelease metadata`
+        : `Stable VSIX ${version} must not declare prerelease metadata`,
+    );
+  }
 
   await smokeAppServer(binaryPath);
 }
