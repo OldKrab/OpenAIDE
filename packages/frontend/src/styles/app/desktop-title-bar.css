@@ -14,6 +14,10 @@
   background: transparent;
 }
 
+.app-sidebar-frame-overlay-header .desktop-caption-buttons button {
+  height: 32px;
+}
+
 .desktop-title-bar-sidebar {
   min-width: 0;
   position: relative;

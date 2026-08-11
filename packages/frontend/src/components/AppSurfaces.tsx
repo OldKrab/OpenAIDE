@@ -142,11 +142,18 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
-  const workspaceBrowser = callbacks.newTask.workspaceBrowser;
-  const workspaceCapability = currentFrontendShell()?.workspace;
-  const projectFolderPicker = currentFrontendShell()?.projects;
+  const frontendShell = currentFrontendShell();
+  // Folder acquisition belongs to the App Shell: Web browses through the App
+  // Server, Desktop opens the OS picker, and VS Code delegates to its host.
+  const workspaceBrowser = isWebShell ? callbacks.newTask.workspaceBrowser : undefined;
+  const workspaceCapability = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "vscodeExtension"
+    ? frontendShell?.workspace
+    : undefined;
+  const projectFolderPicker = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
+    ? frontendShell?.projects
+    : undefined;
   const desktopWindow = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
-    ? currentFrontendShell()?.desktopWindow
+    ? frontendShell?.desktopWindow
     : undefined;
   const finishAddingProject = async (folder: { path: string }) => {
     const project = await controller.intents.projects.add(folder.path);
@@ -162,12 +169,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     });
     callbacks.navigation.openNewTask(project.projectId);
   };
-  const addProject = workspaceBrowser
-    ? () => setProjectFolderDialogOpen(true)
+  const addProject = projectFolderPicker
+    ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
     : workspaceCapability
       ? () => workspaceCapability.openFolder()
-      : projectFolderPicker
-        ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
+      : workspaceBrowser
+        ? () => setProjectFolderDialogOpen(true)
         : undefined;
   const desktopTaskSnapshot = renderableTaskSnapshot?.task.has_messages
     ? renderableTaskSnapshot
@@ -198,9 +205,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopSettingsTitleBar = desktopWindow ? (
     <DesktopTitleBar commands={desktopTitleBarCommands} window={desktopWindow} />
   ) : undefined;
-  // macOS supplies its own caption controls. Empty chrome therefore overlays the
-  // sidebar inset instead of taking a dedicated row from the working surface.
-  const desktopTitleBarPlacement = desktopWindow?.platform === "macos" && !desktopTaskSnapshot
+  // Empty desktop chrome overlays New Task so platform controls remain available
+  // without consuming a blank row from the working surface.
+  const desktopTitleBarPlacement = desktopWindow && !desktopTaskSnapshot
     ? "overlay"
     : "row";
   const desktopSettingsTitleBarPlacement = desktopWindow?.platform === "macos"
