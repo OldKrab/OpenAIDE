@@ -87,6 +87,15 @@ try {
     throw new Error("App Server did not add the smoke-test project");
   }
 
+  const acquiredEnvelope = await request("task/acquire", {
+    projectId: project.projectId,
+    agentId: "codex",
+  }, 30_000);
+  const acquired = acquiredEnvelope?.result?.task;
+  if (!acquired?.task?.taskId) {
+    throw new Error("App Server did not persist the packaged smoke-test Task");
+  }
+
   try {
     const listedEnvelope = await request("agent/listSessions", {
       agentId: "codex",
@@ -96,12 +105,12 @@ try {
     if (listed?.agentId !== "codex" || !Array.isArray(listed.sessions)) {
       throw new Error("Unexpected Codex session-list response shape");
     }
-    console.log("Verified packaged App Server Codex ACP initialization and session listing.");
+    console.log("Verified packaged App Server Task persistence, Codex ACP initialization, and session listing.");
   } catch (error) {
     // An unauthenticated release runner cannot list private Codex sessions, but
     // this response proves the adapter initialized and survived the ACP request.
     if (error.code !== "unauthorized") throw error;
-    console.log("Verified packaged App Server Codex ACP initialization through the authentication boundary.");
+    console.log("Verified packaged App Server Task persistence and Codex ACP initialization through the authentication boundary.");
   }
 } catch (error) {
   throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
