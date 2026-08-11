@@ -291,7 +291,7 @@ jobs:
             -RedirectStandardOutput $stdout `
             -RedirectStandardError $stderr
           try {
-            if ($process.WaitForExit(10_000)) {
+            if ($process.WaitForExit(10000)) {
               $capturedOutput = (Get-Content $stdout, $stderr -ErrorAction SilentlyContinue) -join "`n"
               throw "Packaged Windows desktop exited during startup with code $($process.ExitCode): $capturedOutput"
             }
