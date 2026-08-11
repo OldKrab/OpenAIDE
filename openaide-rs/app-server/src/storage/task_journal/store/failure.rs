@@ -25,7 +25,7 @@ pub(super) fn ensure_status(task_dir: &Path) -> Result<(), RuntimeError> {
         .open(&path)?;
     file.write_all(&[HEALTHY])?;
     file.sync_all()?;
-    fs::File::open(task_dir)?.sync_all()?;
+    sync_directory(task_dir)?;
     Ok(())
 }
 
@@ -62,4 +62,24 @@ pub(super) fn quarantine(task_dir: &Path) -> Result<(), RuntimeError> {
     file.write_all(&[QUARANTINED])?;
     file.sync_all()?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<(), RuntimeError> {
+    fs::File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn sync_directory(_path: &Path) -> Result<(), RuntimeError> {
+    // The marker file is flushed above. Windows has no portable directory
+    // fsync, and opening a directory as a File returns ERROR_ACCESS_DENIED.
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn sync_directory(_path: &Path) -> Result<(), RuntimeError> {
+    Err(RuntimeError::Storage(
+        "Task storage status directory sync is unsupported on this platform".to_string(),
+    ))
 }
