@@ -1,0 +1,106 @@
+import { spawn } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+const [binaryPath, workspaceRoot] = process.argv.slice(2);
+if (!binaryPath || !workspaceRoot) {
+  throw new Error("Usage: node scripts/smoke-packaged-codex-acp.mjs <app-server> <workspace>");
+}
+
+const stateParent = await mkdtemp(path.join(os.tmpdir(), "openaide-codex-acp-smoke-"));
+const child = spawn(path.resolve(binaryPath), [], {
+  env: {
+    ...process.env,
+    OPENAIDE_APP_SERVER_PROTOCOL: "app-server-protocol",
+    OPENAIDE_STORAGE_ROOT: path.join(stateParent, "state"),
+  },
+  stdio: "pipe",
+  windowsHide: true,
+});
+
+let stderr = "";
+let stdoutBuffer = "";
+let nextRequestId = 1;
+const pending = new Map();
+const closed = new Promise((resolve) => {
+  child.once("close", (code, signal) => {
+    const error = new Error(`App Server exited before the smoke completed (code=${code}, signal=${signal})`);
+    for (const waiter of pending.values()) waiter.reject(error);
+    pending.clear();
+    resolve();
+  });
+});
+
+child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+child.once("error", (error) => {
+  for (const waiter of pending.values()) waiter.reject(error);
+  pending.clear();
+});
+child.stdin.on("error", () => {});
+child.stdout.setEncoding("utf8").on("data", (chunk) => {
+  stdoutBuffer += chunk;
+  for (;;) {
+    const newline = stdoutBuffer.indexOf("\n");
+    if (newline < 0) break;
+    const line = stdoutBuffer.slice(0, newline).trim();
+    stdoutBuffer = stdoutBuffer.slice(newline + 1);
+    if (!line) continue;
+    let message;
+    try { message = JSON.parse(line); } catch { continue; }
+    const waiter = pending.get(String(message.id));
+    if (!waiter) continue;
+    pending.delete(String(message.id));
+    if (message.error) waiter.reject(new Error(JSON.stringify(message.error)));
+    else waiter.resolve(message.result);
+  }
+});
+
+function request(method, params, timeoutMs = 120_000) {
+  const id = String(nextRequestId++);
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`${method} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    pending.set(id, {
+      resolve: (value) => { clearTimeout(timeout); resolve(value); },
+      reject: (error) => { clearTimeout(timeout); reject(error); },
+    });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+  });
+}
+
+try {
+  await request("client/initialize", {
+    clientInstanceId: "packaged-codex-acp-smoke",
+    shell: { kind: "desktop" },
+    requestedSurface: { kind: "home" },
+    workspaceRoots: [],
+  }, 30_000);
+  const added = await request("project/add", { workspaceRoot: path.resolve(workspaceRoot) }, 30_000);
+  const project = added?.result?.project;
+  if (!project?.projectId) {
+    throw new Error("App Server did not add the smoke-test project");
+  }
+
+  const listedEnvelope = await request("agent/listSessions", {
+    agentId: "codex",
+    projectId: project.projectId,
+  });
+  const listed = listedEnvelope?.result;
+  if (listed?.agentId !== "codex" || !Array.isArray(listed.sessions)) {
+    throw new Error("Unexpected Codex session-list response shape");
+  }
+  console.log("Verified packaged App Server Codex ACP initialization and session listing.");
+} catch (error) {
+  throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
+} finally {
+  if (!child.stdin.destroyed) child.stdin.end();
+  await Promise.race([
+    closed,
+    new Promise((resolve) => setTimeout(resolve, 10_000)),
+  ]);
+  if (child.exitCode === null) child.kill();
+  await rm(stateParent, { recursive: true, force: true });
+}

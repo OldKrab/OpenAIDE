@@ -275,6 +275,21 @@ jobs:
           mkdir -p artifacts
           cp "$source_artifact" \
             "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-unsigned.${{ matrix.extension }}"
+      - name: Smoke-test packaged Windows Codex ACP launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packagedServer = Get-ChildItem `
+            "$env:RUNNER_TEMP/openaide-desktop-nsis" `
+            -Filter "openaide-app-server.exe" `
+            -Recurse |
+            Select-Object -First 1
+          if (-not $packagedServer) {
+            throw "Packaged App Server was not found"
+          }
+          node scripts/smoke-packaged-codex-acp.mjs `
+            $packagedServer.FullName `
+            $env:GITHUB_WORKSPACE
       - name: Smoke-test packaged Windows desktop startup
         if: runner.os == 'Windows'
         shell: pwsh

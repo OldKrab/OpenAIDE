@@ -3289,6 +3289,30 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
 }
 
 #[test]
+fn background_native_session_refresh_logs_completion() {
+    let diagnostic_logs = crate::logging::capture_test_logs();
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_refresh();
+    wait_until(|| !api.native_session_catalog().refreshing());
+
+    assert!(diagnostic_logs
+        .snapshot()
+        .iter()
+        .any(|entry| entry["event"] == "native_session_catalog_refresh_completed"));
+}
+
+#[test]
 fn open_resumes_a_known_session_without_waiting_for_catalog_listing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
