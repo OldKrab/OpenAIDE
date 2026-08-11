@@ -1,9 +1,36 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   formatExtensionChangelogEntry,
   prependExtensionChangelogEntry,
+  updateExtensionChangelog,
 } from "./update-extension-changelog.mjs";
+
+test("leaves the extension changelog unchanged for prereleases", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "openaide-prerelease-changelog-"));
+  const notesPath = path.join(root, "release-notes.md");
+  const changelogPath = path.join(root, "CHANGELOG.md");
+  const changelog = "# Changelog\n\n## 0.0.2 - 2026-08-09\n\nPrevious notes.\n";
+  try {
+    await writeFile(notesPath, "## Features\n\n- Alpha feature.\n");
+    await writeFile(changelogPath, changelog);
+
+    const updated = await updateExtensionChangelog({
+      version: "0.1.0-alpha.1",
+      notesPath,
+      changelogPath,
+      releaseDate: "2026-08-11",
+    });
+
+    assert.equal(updated, false);
+    assert.equal(await readFile(changelogPath, "utf8"), changelog);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("formats release notes as a versioned extension changelog entry", () => {
   const entry = formatExtensionChangelogEntry({

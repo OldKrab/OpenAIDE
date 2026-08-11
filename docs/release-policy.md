@@ -56,7 +56,10 @@ Before that release:
    OpenAIDE version without a `v` prefix, such as `0.0.2-beta.1` or `0.0.2`.
 2. Write concise user-facing Markdown in `release-notes.md`. Prefer sections
    such as `## Features`, `## Bug Fixes`, and `## Chores`; describe user impact.
-   Do not add a changelog section because the workflow appends it.
+   Do not add a changelog section because the workflow appends it. These notes
+   become the GitHub Release body for every release, but only stable releases
+   add them to the extension changelog. Alpha, beta, and release-candidate
+   versions never create extension changelog entries.
 3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh
@@ -68,8 +71,9 @@ Before that release:
 4. `Version Bump` is serialized and cannot be cancelled in progress. It checks
    that the exact checked-out `main` commit has a completed successful CI push
    run, validates the monotonic version, updates the root package and lockfile,
-   commits the release notes, creates the explicit tag, and atomically pushes
-   the `main` update and tag.
+   updates the extension changelog for stable releases, commits the release
+   notes, creates the explicit tag, and atomically pushes the `main` update and
+   tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, repeats
    release checks, then builds Linux x64, Windows x64, and macOS Apple Silicon
    VSIX packages. Prerelease packages carry the registry's native prerelease
