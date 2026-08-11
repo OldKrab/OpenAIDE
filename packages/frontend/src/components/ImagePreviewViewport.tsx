@@ -19,6 +19,7 @@ const MIN_SCALE = 0.25;
 const FIT_SCALE = 1;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 0.25;
+const WHEEL_ZOOM_FACTOR_PER_100_DELTA = 1.25;
 
 type ImageView = {
   scale: number;
@@ -52,9 +53,14 @@ export function ImagePreviewViewport({
     return () => stage.removeEventListener("wheel", preventPageScroll);
   }, []);
 
-  const zoomAt = (nextScale: number, clientX?: number, clientY?: number) => {
+  const zoomAt = (
+    nextScale: number | ((currentScale: number) => number),
+    clientX?: number,
+    clientY?: number,
+  ) => {
     setView((current) => {
-      const scale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
+      const requestedScale = typeof nextScale === "function" ? nextScale(current.scale) : nextScale;
+      const scale = clamp(requestedScale, MIN_SCALE, MAX_SCALE);
       const stage = stageRef.current;
       if (!stage) return { ...current, scale };
       const bounds = stage.getBoundingClientRect();
@@ -70,8 +76,10 @@ export function ImagePreviewViewport({
   };
 
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
-    const direction = event.deltaY < 0 ? 1 : -1;
-    zoomAt(view.scale + direction * ZOOM_STEP, event.clientX, event.clientY);
+    // Trackpads split one gesture into many small wheel events, so zoom must depend on
+    // accumulated movement rather than event count.
+    const factor = WHEEL_ZOOM_FACTOR_PER_100_DELTA ** (-event.deltaY / 100);
+    zoomAt((currentScale) => currentScale * factor, event.clientX, event.clientY);
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {

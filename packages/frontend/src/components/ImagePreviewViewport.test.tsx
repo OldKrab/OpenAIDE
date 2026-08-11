@@ -59,6 +59,28 @@ describe("ImagePreviewViewport", () => {
     expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("Fit");
   });
 
+  it("applies trackpad wheel zoom from total gesture movement instead of event count", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ImagePreviewViewport image={{ label: "diagram.png", url: "data:image/png;base64,aW1hZ2U=" }} />,
+        { createNodeMock: viewportNodeMock },
+      );
+    });
+
+    for (let event = 0; event < 10; event += 1) {
+      act(() => {
+        tree.root.findByProps({ "aria-label": "diagram.png zoomable preview" }).props.onWheel({
+          clientX: 300,
+          clientY: 200,
+          deltaY: -10,
+        });
+      });
+    }
+
+    expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("125%");
+  });
+
   it("pans a zoomed image by dragging without using browser image drag", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
