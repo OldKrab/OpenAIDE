@@ -37,7 +37,42 @@ test("rejects missing package assets before publication", async () => {
   }
 });
 
-async function fixtureVsix() {
+test("rejects a prerelease package without native prerelease metadata", async () => {
+  const fixture = await fixtureVsix();
+  try {
+    await writeFile(
+      path.join(fixture.root, "extension.vsixmanifest"),
+      '<Property Id="Microsoft.VisualStudio.Code.TargetPlatform" Value="linux-x64" />',
+    );
+    await assert.rejects(
+      smokeReleaseVsix({
+        extensionRoot: fixture.extensionRoot,
+        version: "0.0.2-beta.1",
+        target: "linux-x64",
+        binaryName: "openaide-app-server",
+      }),
+      /must declare native prerelease metadata/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("accepts a stable package without prerelease metadata", async () => {
+  const fixture = await fixtureVsix({ version: "0.0.2", preRelease: false });
+  try {
+    await smokeReleaseVsix({
+      extensionRoot: fixture.extensionRoot,
+      version: "0.0.2",
+      target: "linux-x64",
+      binaryName: "openaide-app-server",
+    });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+async function fixtureVsix({ version = "0.0.2-beta.1", preRelease = true } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-vsix-fixture-"));
   const extensionRoot = path.join(root, "extension");
   await mkdir(path.join(extensionRoot, "dist", "app-server"), { recursive: true });
@@ -45,7 +80,7 @@ async function fixtureVsix() {
   await writeFile(path.join(extensionRoot, "package.json"), JSON.stringify({
     name: "openaide-vscode-extension",
     publisher: "openaide",
-    version: "0.0.2-beta.1",
+    version,
   }));
   for (const relativePath of [
     "CHANGELOG.md",
@@ -58,7 +93,10 @@ async function fixtureVsix() {
   }
   await writeFile(
     path.join(root, "extension.vsixmanifest"),
-    '<Property Id="Microsoft.VisualStudio.Code.TargetPlatform" Value="linux-x64" />',
+    [
+      '<Property Id="Microsoft.VisualStudio.Code.TargetPlatform" Value="linux-x64" />',
+      preRelease ? '<Property Id="Microsoft.VisualStudio.Code.PreRelease" Value="true" />' : undefined,
+    ].filter(Boolean).join("\n"),
   );
   const binary = path.join(extensionRoot, "dist", "app-server", "openaide-app-server");
   await writeFile(
