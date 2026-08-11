@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
 
 const APP_SERVER_BINARY_NAME: &str = if cfg!(windows) {
@@ -17,21 +18,27 @@ pub(crate) struct DesktopRuntimePaths {
 
 impl DesktopRuntimePaths {
     /// Keeps development/test overrides explicit while giving installed bundles
-    /// stable, platform-native defaults derived from Tauri's application identity.
-    pub(crate) fn resolve(app_local_data: &Path, executable_dir: &Path) -> Self {
+    /// stable defaults derived from the app data and installed executable paths.
+    pub(crate) fn resolve(app_local_data: &Path, executable_path: &Path) -> io::Result<Self> {
         Self::resolve_with_overrides(
             app_local_data,
-            executable_dir,
+            executable_path,
             RuntimePathOverrides::from_environment(),
         )
     }
 
     fn resolve_with_overrides(
         app_local_data: &Path,
-        executable_dir: &Path,
+        executable_path: &Path,
         overrides: RuntimePathOverrides,
-    ) -> Self {
-        Self {
+    ) -> io::Result<Self> {
+        let executable_dir = executable_path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "desktop executable path has no parent directory",
+            )
+        })?;
+        Ok(Self {
             app_server_binary: overrides
                 .app_server_binary
                 .map(PathBuf::from)
@@ -44,7 +51,7 @@ impl DesktopRuntimePaths {
                 .runtime_root
                 .map(PathBuf::from)
                 .unwrap_or_else(|| app_local_data.join("runtime")),
-        }
+        })
     }
 }
 

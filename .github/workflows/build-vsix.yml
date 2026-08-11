@@ -275,6 +275,31 @@ jobs:
           mkdir -p artifacts
           cp "$source_artifact" \
             "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-unsigned.${{ matrix.extension }}"
+      - name: Smoke-test packaged Windows desktop startup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $desktopExecutable = Join-Path $env:RUNNER_TEMP `
+            "openaide-desktop-nsis/openaide-desktop-validation.exe"
+          node scripts/assert-windows-gui-executable.mjs $desktopExecutable
+
+          $stdout = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stderr.log"
+          $process = Start-Process `
+            -FilePath $desktopExecutable `
+            -PassThru `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr
+          try {
+            if ($process.WaitForExit(10_000)) {
+              $capturedOutput = (Get-Content $stdout, $stderr -ErrorAction SilentlyContinue) -join "`n"
+              throw "Packaged Windows desktop exited during startup with code $($process.ExitCode): $capturedOutput"
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              taskkill.exe /PID $process.Id /T /F | Out-Null
+            }
+          }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: desktop-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}

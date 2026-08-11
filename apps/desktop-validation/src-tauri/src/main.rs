@@ -1,4 +1,8 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::io::{BufRead, BufReader, Read};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -18,6 +22,8 @@ use desktop_runtime::DesktopRuntimePaths;
 const HANDOFF_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_HANDOFF_LINE_BYTES: usize = 8 * 1024;
 const MIN_AUTH_TOKEN_BYTES: usize = 32;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,11 +64,13 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_local_data = app.path().app_local_data_dir()?;
-            let executable_dir = app.path().executable_dir()?;
+            // Tauri's `executable_dir` means a user-level bin directory and is
+            // unsupported on Windows and macOS; the sidecar lives by this process.
+            let executable_path = std::env::current_exe()?;
             app.manage(DesktopState::new(DesktopRuntimePaths::resolve(
                 &app_local_data,
-                &executable_dir,
-            )));
+                &executable_path,
+            )?));
             #[cfg(target_os = "macos")]
             install_macos_menu(app)?;
             #[cfg(target_os = "macos")]
@@ -216,13 +224,19 @@ fn launch_app_server_handoff(
     create_directory(&runtime_paths.storage_root, "storage_create")?;
     create_directory(&runtime_paths.runtime_root, "runtime_create")?;
 
-    let mut child = Command::new(&runtime_paths.app_server_binary)
+    let mut command = Command::new(&runtime_paths.app_server_binary);
+    command
         .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
         .env("OPENAIDE_STORAGE_ROOT", &runtime_paths.storage_root)
         .env("OPENAIDE_RUNTIME_ROOT", &runtime_paths.runtime_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    #[cfg(target_os = "windows")]
+    // The App Server remains a console binary for VSIX use, but Desktop owns it
+    // as a background child and must not flash a second console window.
+    command.creation_flags(CREATE_NO_WINDOW);
+    let mut child = command
         .spawn()
         .map_err(|_| failure("process_spawn", "OpenAIDE could not start its App Server."))?;
     let stdout = child.stdout.take().ok_or_else(|| {
