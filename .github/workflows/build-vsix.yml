@@ -97,6 +97,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Set artifact versions
         run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
+      - name: Test repeated Windows Project persistence
+        if: matrix.target == 'win32-x64'
+        run: cargo test --locked -p openaide-app-server managed_projects_survive_repeated_catalog_writes
       - name: Build App Server once for both package formats
         run: cargo build --locked --release -p openaide-app-server
       - name: Stage App Server artifact
