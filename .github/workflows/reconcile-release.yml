@@ -50,7 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: v${{ inputs.version }}
+          # Recovery uses the latest reviewed publisher while assets remain pinned to the immutable release.
+          ref: main
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .node-version
@@ -70,7 +71,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: v${{ inputs.version }}
+          # Recovery uses the latest reviewed publisher while assets remain pinned to the immutable release.
+          ref: main
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .node-version

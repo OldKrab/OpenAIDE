@@ -110,6 +110,9 @@ Open VSX; stable releases reconcile both registries:
 Publisher acceptance completes a missing-package attempt. The reconciler does
 not wait for eventually consistent registry indexing or security scans after
 publication; a later run verifies the published SHA-256 and fills any target
-whose earlier publication was interrupted.
+whose earlier publication was interrupted. Recovery validates the requested
+release at its immutable tag, then uses the current reviewed reconciler from
+`main` so publishing fixes can recover older releases without rebuilding or
+changing their assets.
 
 This recovery path resumes incomplete publication; it never rebuilds a release.
