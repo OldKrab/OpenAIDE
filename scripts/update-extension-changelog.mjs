@@ -35,6 +35,21 @@ export function prependExtensionChangelogEntry({ changelog, entry, version }) {
   return `${CHANGELOG_HEADING}\n\n${entry}\n\n${history}\n`;
 }
 
+/** Updates stable Marketplace history; prereleases intentionally have no changelog entries. */
+export async function updateExtensionChangelog({ version, notesPath, changelogPath, releaseDate }) {
+  validateProjectVersion(version, "Changelog version");
+  if (version.includes("-")) return false;
+
+  const [releaseNotes, changelog] = await Promise.all([
+    readFile(path.resolve(notesPath), "utf8"),
+    readFile(changelogPath, "utf8"),
+  ]);
+  const entry = formatExtensionChangelogEntry({ version, releaseDate, releaseNotes });
+  const updated = prependExtensionChangelogEntry({ changelog, entry, version });
+  await writeFile(changelogPath, updated);
+  return true;
+}
+
 async function main() {
   const [version, notesPath, changelogArgument] = process.argv.slice(2);
   if (!version || !notesPath) {
@@ -47,14 +62,15 @@ async function main() {
     ? path.resolve(changelogArgument)
     : path.join(repoRoot, "apps", "vscode-extension", "CHANGELOG.md");
   const releaseDate = process.env.RELEASE_DATE ?? new Date().toISOString().slice(0, 10);
-  const [releaseNotes, changelog] = await Promise.all([
-    readFile(path.resolve(notesPath), "utf8"),
-    readFile(changelogPath, "utf8"),
-  ]);
-  const entry = formatExtensionChangelogEntry({ version, releaseDate, releaseNotes });
-  const updated = prependExtensionChangelogEntry({ changelog, entry, version });
-  await writeFile(changelogPath, updated);
-  console.log(`Added ${version} to ${path.relative(repoRoot, changelogPath)}`);
+  const updated = await updateExtensionChangelog({
+    version,
+    notesPath,
+    changelogPath,
+    releaseDate,
+  });
+  console.log(updated
+    ? `Added ${version} to ${path.relative(repoRoot, changelogPath)}`
+    : `Skipped extension changelog for prerelease ${version}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
