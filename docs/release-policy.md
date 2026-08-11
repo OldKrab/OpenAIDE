@@ -107,4 +107,9 @@ Open VSX; stable releases reconcile both registries:
 - same version, target, and SHA-256: skip successfully;
 - same version and target with a different SHA-256: fail without publishing.
 
+Publisher acceptance completes a missing-package attempt. The reconciler does
+not wait for eventually consistent registry indexing or security scans after
+publication; a later run verifies the published SHA-256 and fills any target
+whose earlier publication was interrupted.
+
 This recovery path resumes incomplete publication; it never rebuilds a release.

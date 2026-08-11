@@ -21,8 +21,6 @@ export async function reconcileRegistry({
   packages,
   fetchImpl = fetch,
   publish = publishPackage,
-  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-  attempts = 30,
 }) {
   const lookup = registry === "marketplace" ? lookupMarketplaceDigest : registry === "open-vsx" ? lookupOpenVsxDigest : undefined;
   if (!lookup) throw new Error(`Unsupported release registry: ${registry}`);
@@ -45,20 +43,9 @@ export async function reconcileRegistry({
     }
 
     await publish({ registry, packagePath: releasePackage.path });
-    let published;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      published = await lookup(facts);
-      if (published) break;
-      await wait(2_000);
-    }
-    if (published !== expected) {
-      throw new Error(
-        published
-          ? `${registry} ${version} ${releasePackage.target} published digest ${published}, expected ${expected}`
-          : `${registry} ${version} ${releasePackage.target} was not visible after publication`,
-      );
-    }
-    console.log(`Published ${registry} ${version} ${releasePackage.target} with digest ${expected}.`);
+    // Registry indexing and security scans are eventually consistent. Publisher
+    // acceptance is terminal for this run; a later reconciliation verifies the digest.
+    console.log(`Submitted ${registry} ${version} ${releasePackage.target} with digest ${expected}.`);
   }
 }
 
