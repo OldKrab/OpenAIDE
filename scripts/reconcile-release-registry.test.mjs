@@ -52,7 +52,7 @@ test("treats Open VSX 404 as missing and reads its published checksum", async ()
   assert.equal(digest, "d".repeat(64));
 });
 
-test("skips identical packages, publishes missing packages, and rejects conflicts", async () => {
+test("checks once, skips identical packages, publishes missing packages, and rejects conflicts", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-registry-fixture-"));
   const packagePath = path.join(root, "package.vsix");
   await writeFile(packagePath, "canonical-package");
@@ -73,11 +73,15 @@ test("skips identical packages, publishes missing packages, and rejects conflict
       registry: "marketplace",
       version: "0.0.2",
       packages: [{ target: "linux-x64", path: packagePath }],
-      async fetchImpl() { return marketplaceResponse(lookups++ === 0 ? undefined : expected); },
+      async fetchImpl() {
+        lookups += 1;
+        return marketplaceResponse(undefined);
+      },
       async publish() { published += 1; },
-      async wait() {},
+      async wait() { throw new Error("must not wait after accepted publication"); },
     });
     assert.equal(published, 1);
+    assert.equal(lookups, 1);
 
     await assert.rejects(
       reconcileRegistry({
