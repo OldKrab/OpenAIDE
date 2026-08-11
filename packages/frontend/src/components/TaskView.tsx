@@ -38,6 +38,7 @@ import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
 import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
 import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
+import { TaskSessionReloadNotice } from "./TaskSessionReloadNotice";
 
 export {
   scrollTopAfterPrependedContent,
@@ -129,6 +130,7 @@ export function TaskView({
   onRevealAttachment,
   onRemoveAttachment,
   onRemoveQueueMessage,
+  onReloadNativeSession,
   onTakeQueueMessage,
   onMoveQueueMessage,
   onPlanDrawerOpenChange,
@@ -176,6 +178,7 @@ export function TaskView({
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
   onRemoveQueueMessage?: (queuedMessageId: string) => void;
+  onReloadNativeSession?: () => Promise<void>;
   onTakeQueueMessage?: (queuedMessageId: string) => void;
   onMoveQueueMessage?: (queuedMessageId: string, targetIndex: number) => void | Promise<void>;
   onPlanDrawerOpenChange?: (open: boolean) => void;
@@ -275,6 +278,8 @@ export function TaskView({
   const completedPlanSteps = snapshot.current_plan?.entries.filter((entry) => entry.status === "completed").length ?? 0;
   const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
+  const [reloadPending, setReloadPending] = useState(false);
+  const [reloadError, setReloadError] = useState<string>();
   const [showReconnectNotice, setShowReconnectNotice] = useState(false);
   const announcedHistoryUpdate = useRef<string | undefined>(undefined);
   const reconnecting = backendConnectionState?.status === "reconnecting";
@@ -304,6 +309,12 @@ export function TaskView({
     return () => window.clearTimeout(timer);
   }, [snapshot.history_sync.generation, snapshot.history_sync.state, snapshot.task.task_id]);
   useEffect(() => {
+    if (snapshot.history_sync.state !== "reloadAvailable") {
+      setReloadPending(false);
+      setReloadError(undefined);
+    }
+  }, [snapshot.history_sync.state]);
+  useEffect(() => {
     if (!snapshot.current_plan) {
       resetAgentPlanDisclosure(snapshot.task.task_id);
       resetAgentPlanDisclosure(`${snapshot.task.task_id}:column`);
@@ -320,7 +331,7 @@ export function TaskView({
   );
   const timelineStatusKind = showHistoryUpdated && snapshot.history_sync.state === "updated"
     ? "notice"
-    : snapshot.task.status === "waiting"
+      : snapshot.task.status === "waiting"
       ? "blocked"
     : "progress";
   const workingStartedAt = snapshot.active_turn_started_at;
@@ -340,7 +351,9 @@ export function TaskView({
   const chatScroll = useTaskChatScroll({
     beforeCursor: chat.beforeCursor,
     hasEarlier: chat.hasBefore,
-    historySyncState: snapshot.history_sync.state,
+    historySyncState: snapshot.history_sync.state === "reloadAvailable"
+      ? "idle"
+      : snapshot.history_sync.state,
     itemKeys: timelineRowKeys,
     latestMessageKey: chatItems.at(-1)?.message_id,
     onLoadEarlier: loadChatPage,
@@ -358,6 +371,27 @@ export function TaskView({
   const restoreTask = useCurrentCallback((taskId: string) => {
     onRestoreTask?.(taskId);
   });
+  const canReloadNativeSession = snapshot.history_sync.state === "reloadAvailable"
+    && snapshot.task.status === "inactive"
+    && !archived
+    && backendReady
+    && backendConnectionState?.status !== "unavailable"
+    && onReloadNativeSession !== undefined;
+
+  const reloadNativeSession = async () => {
+    if (!canReloadNativeSession || reloadPending || !onReloadNativeSession) return;
+    setReloadPending(true);
+    setReloadError(undefined);
+    try {
+      await onReloadNativeSession();
+    } catch {
+      // Transport and Agent errors may contain sensitive details; the notice is a
+      // recovery surface, so it stays concise and lets the user retry explicitly.
+      setReloadError("Unable to reload Task. Try again.");
+    } finally {
+      setReloadPending(false);
+    }
+  };
 
   const submit = (prompt: string) => {
     if (!canSubmit) return;
@@ -443,6 +477,13 @@ export function TaskView({
               <button type="button" onClick={onRetryConnection}>Retry</button>
             ) : null}
           </div>
+        ) : null}
+        {canReloadNativeSession ? (
+          <TaskSessionReloadNotice
+            error={reloadError}
+            onReload={reloadNativeSession}
+            pending={reloadPending}
+          />
         ) : null}
         {!workspaceAvailable ? <div className="task-workspace-unavailable" role="status">
           <CircleAlert size={15} />

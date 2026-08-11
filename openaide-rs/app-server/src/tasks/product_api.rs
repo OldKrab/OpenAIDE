@@ -54,6 +54,7 @@ mod native_session_fork;
 mod open;
 mod prepare;
 mod queue;
+mod reload_native_session;
 mod reset_task_history;
 mod retention;
 pub(crate) mod secret_resolver;
@@ -441,6 +442,16 @@ impl TaskProductApi {
         params: openaide_app_server_protocol::task::TaskMarkReadParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.mark_task_read(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn reload_native_session_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskReloadNativeSessionParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.reload_native_session(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
         )

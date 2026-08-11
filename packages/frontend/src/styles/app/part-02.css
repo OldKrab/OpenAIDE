@@ -137,6 +137,65 @@
   padding: 2px 8px;
 }
 
+.task-session-reload-notice {
+  width: min(760px, 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px auto 2px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in oklch, var(--oa-warning) 32%, var(--oa-border));
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-warning) 7%, var(--oa-panel));
+}
+
+.task-session-reload-notice > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.task-session-reload-notice strong {
+  color: var(--oa-text);
+  font-size: 12px;
+}
+
+.task-session-reload-notice small {
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.task-session-reload-error {
+  color: var(--oa-danger) !important;
+}
+
+.task-session-reload-notice button {
+  min-height: 26px;
+  flex: 0 0 auto;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  padding: 3px 9px;
+}
+
+.task-session-reload-notice button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+@media (max-width: 560px) {
+  .task-session-reload-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .task-session-reload-notice button {
+    align-self: flex-start;
+  }
+}
+
 .message-list-shell > .message-list {
   height: 100%;
 }

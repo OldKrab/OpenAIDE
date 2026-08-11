@@ -1681,6 +1681,19 @@ describe("app reducer composer state", () => {
     expect(state.snapshot?.history_sync).toEqual({ state: "idle", generation: 7 });
   });
 
+  it("does not let a same-generation baseline hide an explicit reload choice", () => {
+    let state = createInitialState();
+    const reloadAvailable = snapshot("task_1", [chatMessage("m1", "Current history")], 2);
+    reloadAvailable.history_sync = { state: "reloadAvailable", generation: 7 };
+    state = appReducer(state, { type: "snapshot", intent: "open", snapshot: reloadAvailable });
+
+    const staleBaseline = snapshot("task_1", [chatMessage("m1", "Current history")], 2);
+    staleBaseline.history_sync = { state: "idle", generation: 7 };
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: staleBaseline });
+
+    expect(state.snapshot?.history_sync).toEqual({ state: "reloadAvailable", generation: 7 });
+  });
+
   it("merges durable snapshot growth without regressing its independent history sync clock", () => {
     let state = createInitialState();
     const completed = snapshot("task_1", [chatMessage("m1", "Current history")], 2);

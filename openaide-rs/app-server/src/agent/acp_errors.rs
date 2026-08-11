@@ -29,6 +29,11 @@ pub(super) fn acp_request_error(error: &agent_client_protocol::Error) -> Runtime
     {
         return RuntimeError::TaskNotFound(message);
     }
+    // Codex allows only one writable attachment per thread. Treat this provider-specific
+    // rejection as product contention rather than exposing its raw internal error.
+    if normalized.contains("already has an active writer") {
+        return RuntimeError::Conflict("Native Session is currently in use elsewhere".to_string());
+    }
     acp_error(error)
 }
 

@@ -266,6 +266,15 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     snapshot: StoredTaskSnapshot,
     history_sync: TaskHistorySyncSnapshot,
 ) -> Result<TaskSnapshot, ProtocolError> {
+    let history_sync = match (
+        history_sync,
+        snapshot.native_session_reload_requirement.as_ref(),
+    ) {
+        (TaskHistorySyncSnapshot::Idle { generation }, Some(_)) => {
+            TaskHistorySyncSnapshot::ReloadAvailable { generation }
+        }
+        (history_sync, _) => history_sync,
+    };
     let lifecycle = match snapshot.lifecycle {
         crate::storage::records::TaskLifecycle::Prepared { .. } => {
             openaide_app_server_protocol::snapshot::TaskLifecycle::Prepared

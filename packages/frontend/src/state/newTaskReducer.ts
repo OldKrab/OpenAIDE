@@ -38,7 +38,7 @@ type NewTaskAction =
   | { type: "newTask:nativeSessions:start"; append: boolean }
   | { type: "newTask:nativeSessions:result"; result: AgentListSessionsResult; append: boolean }
   | { type: "newTask:nativeSessions:listError"; message: string }
-  | { type: "newTask:nativeSessions:error"; sessionId: string; message: string }
+  | { type: "newTask:nativeSessions:error"; sessionId: string; message: string; recoverable?: boolean }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
@@ -296,7 +296,11 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             adoptingSessionId: undefined,
             loading: false,
             loaded: true,
-            adoptionError: { sessionId: action.sessionId, message: action.message },
+            adoptionError: {
+              sessionId: action.sessionId,
+              message: action.message,
+              ...(action.recoverable ? { recoverable: true } : {}),
+            },
           },
         },
       };

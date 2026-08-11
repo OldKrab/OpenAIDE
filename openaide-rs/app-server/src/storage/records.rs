@@ -531,6 +531,16 @@ pub enum TaskMessageQueuePauseRecord {
     AttachmentUnavailable,
 }
 
+/// A durable hint that a bound Native Session may contain external changes.
+///
+/// This is deliberately independent from process-local catalog freshness: the Agent's
+/// `updatedAt` cannot prove what changed, so it authorizes a later explicit replay rather
+/// than replacing an already editable attachment.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskNativeSessionReloadRequirement {
+    pub observed_activity_at: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskRecord {
     pub task_id: String,
@@ -583,6 +593,9 @@ pub struct TaskRecord {
         skip_serializing_if = "TaskNativeSessionDataFreshness::is_fresh"
     )]
     pub native_session_data_freshness: TaskNativeSessionDataFreshness,
+    /// A persisted possible-external-change hint awaiting an authoritative load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_session_reload_requirement: Option<TaskNativeSessionReloadRequirement>,
     #[serde(default, skip_serializing_if = "TaskConfigMutationState::is_empty")]
     pub config_mutation: TaskConfigMutationState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -658,6 +671,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             #[serde(default)]
             native_session_data_freshness: TaskNativeSessionDataFreshness,
             #[serde(default)]
+            native_session_reload_requirement: Option<TaskNativeSessionReloadRequirement>,
+            #[serde(default)]
             config_mutation: TaskConfigMutationState,
             #[serde(default)]
             agent_commands_catalog: Option<AgentCommandsCatalog>,
@@ -710,6 +725,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             revision: stored.revision,
             config_options_catalog: stored.config_options_catalog,
             native_session_data_freshness: stored.native_session_data_freshness,
+            native_session_reload_requirement: stored.native_session_reload_requirement,
             config_mutation: stored.config_mutation,
             agent_commands_catalog: stored.agent_commands_catalog,
             context_usage: stored.context_usage,
@@ -730,6 +746,48 @@ impl TaskRecord {
 
     pub(crate) fn mark_native_session_data_stale(&mut self) -> bool {
         self.native_session_data_freshness.mark_stale()
+    }
+
+    /// Records only newer valid Agent activity so repeated catalog pages coalesce safely.
+    pub(crate) fn mark_native_session_reload_required(
+        &mut self,
+        observed_activity_at: String,
+    ) -> bool {
+        let Some(observed_time) = crate::time::activity_millis(&observed_activity_at) else {
+            return false;
+        };
+        if self
+            .native_session_reload_requirement
+            .as_ref()
+            .and_then(|requirement| crate::time::activity_millis(&requirement.observed_activity_at))
+            .is_some_and(|current_time| current_time >= observed_time)
+        {
+            return false;
+        }
+        self.native_session_reload_requirement = Some(TaskNativeSessionReloadRequirement {
+            observed_activity_at,
+        });
+        true
+    }
+
+    /// A replay clears only the requirement it actually covered; a newer observation survives.
+    pub(crate) fn clear_native_session_reload_requirement_through(
+        &mut self,
+        observed_activity_at: &str,
+    ) -> bool {
+        let Some(captured_time) = crate::time::activity_millis(observed_activity_at) else {
+            return false;
+        };
+        if self
+            .native_session_reload_requirement
+            .as_ref()
+            .and_then(|requirement| crate::time::activity_millis(&requirement.observed_activity_at))
+            .is_some_and(|current_time| current_time <= captured_time)
+        {
+            self.native_session_reload_requirement = None;
+            return true;
+        }
+        false
     }
 
     /// Starts a new App Server epoch without treating its last Agent catalogs as live.

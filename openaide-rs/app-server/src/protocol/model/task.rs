@@ -90,6 +90,10 @@ pub struct TaskSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
     pub native_session_data_freshness: TaskNativeSessionDataFreshness,
+    /// Durable possible-external-change hint, projected as `historySync.reloadAvailable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_session_reload_requirement:
+        Option<crate::storage::records::TaskNativeSessionReloadRequirement>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_config_change: Option<PendingTaskConfigChange>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -72,9 +72,37 @@ describe("Native Session route lifecycle", () => {
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:nativeSessions:error",
       sessionId: "session-1",
+      recoverable: false,
       message: "This session no longer exists.",
     });
     expect(dispatch).toHaveBeenCalledWith({
+      type: "newTask:nativeSessions:remove",
+      sessionId: "session-1",
+    });
+    expect(openTaskSurface).not.toHaveBeenCalled();
+  });
+
+  it("keeps the opening route and explains when the session is in use elsewhere", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async () => {
+      throw new AppServerProtocolError({
+        error: {
+          code: "conflict",
+          message: "Native Session is currently in use elsewhere",
+          recoverable: true,
+        },
+      });
+    });
+
+    await adoptRoutedNativeSession(routeLifecycle({ dispatch, request }));
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "newTask:nativeSessions:error",
+      sessionId: "session-1",
+      recoverable: true,
+      message: "This session is currently in use elsewhere. Close it there, then try again.",
+    });
+    expect(dispatch).not.toHaveBeenCalledWith({
       type: "newTask:nativeSessions:remove",
       sessionId: "session-1",
     });

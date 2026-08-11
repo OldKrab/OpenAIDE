@@ -1414,6 +1414,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
       },
     },
     preferences: { composer_submit_shortcut: "mod_enter" },
+    retryNativeSessionOpen: vi.fn(),
     retryTaskOpen: vi.fn(),
     state,
     view: viewFor(state),

@@ -225,6 +225,7 @@ impl TaskProductApi {
             revision: 0,
             config_options_catalog: loaded.session.config_catalog.clone(),
             native_session_data_freshness: Default::default(),
+            native_session_reload_requirement: None,
             config_mutation: Default::default(),
             agent_commands_catalog: loaded.session.commands_catalog.clone(),
             context_usage: None,

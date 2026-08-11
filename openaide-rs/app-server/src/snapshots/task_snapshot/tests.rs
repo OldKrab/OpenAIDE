@@ -158,6 +158,28 @@ fn open_overlays_current_history_sync_state_for_resubscribe() {
 }
 
 #[test]
+fn open_projects_a_durable_reload_requirement_after_process_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-1");
+    task.native_session_reload_requirement = Some(
+        crate::storage::records::TaskNativeSessionReloadRequirement {
+            observed_activity_at: crate::time::now_string(),
+        },
+    );
+    store.write_task(&task).unwrap();
+
+    let snapshot = TaskSnapshotStore::new(store)
+        .open_internal(&TaskId::from("task-1"))
+        .expect("open");
+
+    assert_eq!(
+        snapshot.history_sync,
+        TaskHistorySyncSnapshot::ReloadAvailable { generation: 0 }
+    );
+}
+
+#[test]
 fn open_projects_durable_chat_without_raw_attachment_paths() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -856,6 +878,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         revision: 7,
         config_options_catalog: None,
         native_session_data_freshness: Default::default(),
+        native_session_reload_requirement: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

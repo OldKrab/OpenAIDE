@@ -1,7 +1,9 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::snapshot::TaskSnapshot;
-use openaide_app_server_protocol::task::{TaskMarkReadParams, TaskOpenParams};
+use openaide_app_server_protocol::task::{
+    TaskMarkReadParams, TaskOpenParams, TaskReloadNativeSessionParams,
+};
 
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
@@ -16,8 +18,6 @@ use crate::tasks::native_session_service::OpenSessionResumeOutcome;
 
 use super::{internal_error, protocol_error_from_runtime, TaskProductApi};
 
-const NATIVE_HISTORY_CLOCK_TOLERANCE_MS: i128 = 5_000;
-
 pub(crate) trait TaskOpenWorkflow: Send + Sync {
     fn open_for_client(
         &self,
@@ -29,6 +29,18 @@ pub(crate) trait TaskOpenWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskMarkReadParams,
     ) -> Result<TaskSnapshot, ProtocolError>;
+    fn reload_native_session_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: TaskReloadNativeSessionParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        Err(ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::CapabilityUnavailable,
+            message: "Task Native Session reload is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
 }
 
 impl TaskProductApi {
@@ -112,8 +124,8 @@ impl TaskProductApi {
         self.project_task_snapshot(snapshot)
     }
 
-    /// Task opening returns cached state first, then refreshes the Agent catalog before
-    /// choosing exactly one resume or load operation for the Native Session.
+    /// Task opening returns cached state first, then restores the known binding directly.
+    /// Catalog observation is discovery work and must never gate `session/resume`.
     fn spawn_adopted_task_refresh(&self, task: TaskRecord) {
         if !task_allows_history_recovery(&task) {
             return;
@@ -124,187 +136,86 @@ impl TaskProductApi {
         let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
             return;
         };
-        let api = self.clone();
-        std::thread::spawn(move || {
-            let native_session = match api.refresh_bound_session_for_open(&task, &stored_session_id)
-            {
-                Ok(session) => session,
-                Err(error) => {
-                    crate::logging::warn(
-                        "native_session_open_catalog_refresh_failed",
-                        serde_json::json!({
-                            "task_id": task.task_id,
-                            "agent_id": task.agent_id,
-                            "error_code": format!("{:?}", error.code),
-                            "recoverable": error.recoverable,
-                        }),
-                    );
-                    None
-                }
-            };
-            if !api.history_sync.is_current(&task.task_id, &generation) {
-                return;
-            }
-            let refresh = native_session.as_ref().and_then(|native_session| {
-                let local_history_updated_at =
-                    api.store.local_history_updated_at(&task.task_id).ok()?;
-                newer_native_activity(native_session, &local_history_updated_at)
-            });
-            match refresh {
-                Some((native_updated_at, refreshed_at)) => {
-                    let native_session =
-                        native_session.expect("freshness requires a listed Native Session");
-                    api.spawn_history_refresh_for_generation(
-                        task,
-                        stored_session_id,
-                        native_session,
-                        native_updated_at,
-                        refreshed_at,
-                        generation,
-                    );
-                }
-                None => {
-                    api.spawn_adopted_task_resume(
-                        task,
-                        stored_session_id,
-                        native_session,
-                        generation,
-                    );
-                }
-            }
-        });
-    }
-
-    /// A catalog observation may refresh Chat only while at least one client is
-    /// actively subscribed to this idle Task. The clocks remain App Server-owned.
-    pub(super) fn spawn_subscribed_task_history_refresh(&self, task: TaskRecord) {
-        if !self
-            .task_subscription_presence
-            .has_subscribers(&task.task_id)
-            || !task_allows_history_recovery(&task)
-        {
-            return;
+        if let Some(requirement) = task.native_session_reload_requirement.clone() {
+            self.spawn_adopted_task_load(
+                task,
+                stored_session_id,
+                requirement.observed_activity_at,
+                generation,
+            );
+        } else {
+            self.spawn_adopted_task_resume(task, stored_session_id, None, generation);
         }
-        let Some(stored_session_id) = task.agent_session_id.clone() else {
-            return;
-        };
-        let Some(native_session) = self.history_sync.cached_session(
-            &task.agent_id,
-            &task.workspace_root,
-            &stored_session_id,
-        ) else {
-            return;
-        };
-        let Ok(local_history_updated_at) = self.store.local_history_updated_at(&task.task_id)
-        else {
-            return;
-        };
-        let Some((native_updated_at, refreshed_at)) =
-            newer_native_activity(&native_session, &local_history_updated_at)
-        else {
-            return;
-        };
-        self.spawn_history_refresh(
-            task,
-            stored_session_id,
-            native_session,
-            native_updated_at,
-            refreshed_at,
-        );
     }
 
-    fn spawn_history_refresh(
+    /// A deferred requirement belongs to the next attachment recovery, so open loads first
+    /// instead of resuming and later overwriting controls with a second restore.
+    fn spawn_adopted_task_load(
         &self,
         task: TaskRecord,
         stored_session_id: String,
-        native_session: AgentListedSession,
-        native_updated_at: u128,
-        refreshed_at: String,
-    ) {
-        let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
-            return;
-        };
-        self.spawn_history_refresh_for_generation(
-            task,
-            stored_session_id,
-            native_session,
-            native_updated_at,
-            refreshed_at,
-            generation,
-        );
-    }
-
-    fn spawn_history_refresh_for_generation(
-        &self,
-        task: TaskRecord,
-        stored_session_id: String,
-        native_session: AgentListedSession,
-        native_updated_at: u128,
-        refreshed_at: String,
+        observed_activity_at: String,
         generation: crate::tasks::history_sync::PassiveSyncGeneration,
     ) {
         let api = self.clone();
         std::thread::spawn(move || {
-            let result = api
-                .history_sync
-                .run_passive(&task.task_id, &generation, || {
-                    api.publish_history_sync(
+            let native_updated_at = crate::time::activity_millis(&observed_activity_at)
+                .and_then(|time| u128::try_from(time).ok());
+            let result = native_updated_at.map(|native_updated_at| {
+                api.history_sync
+                    .run_passive(&task.task_id, &generation, || {
+                        api.publish_history_sync(
                         &task.task_id,
                         openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Syncing {
                             generation: generation.value(),
                         },
                     );
-                    api.native_sessions
-                        .refresh_history(HistoryRefreshRequest {
-                            task: task.clone(),
-                            stored_session_id: stored_session_id.clone(),
-                            native_session,
-                            native_updated_at,
-                            refreshed_at,
-                        })
-                        .map_err(protocol_error_from_runtime)
-                });
+                        api.native_sessions
+                            .refresh_history(HistoryRefreshRequest {
+                                task: task.clone(),
+                                stored_session_id: stored_session_id.clone(),
+                                native_session: AgentListedSession {
+                                    session_id: stored_session_id.clone(),
+                                    cwd: task.workspace_root.clone(),
+                                    title: None,
+                                    last_activity: Some(observed_activity_at.clone()),
+                                    updated_at: Some(observed_activity_at.clone()),
+                                },
+                                native_updated_at,
+                                refreshed_at: crate::time::now_string(),
+                                clear_reload_requirement_through: Some(
+                                    observed_activity_at.clone(),
+                                ),
+                            })
+                            .map_err(protocol_error_from_runtime)
+                    })
+            });
             if !api.history_sync.is_current(&task.task_id, &generation) {
                 return;
             }
-            match result.unwrap_or(Ok(None)) {
-                Ok(Some(_)) => api.publish_history_sync(
+            match result.flatten() {
+                Some(Ok(Some(_))) => api.publish_history_sync(
                     &task.task_id,
                     openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Updated {
                         generation: generation.value(),
                     },
                 ),
-                Ok(None) => api.publish_history_sync(
+                Some(Ok(None)) | None => api.publish_history_sync(
                     &task.task_id,
-                    openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
-                        generation: generation.value(),
-                    },
+                    api.history_sync.reload_available_snapshot(&task.task_id),
                 ),
-                Err(error) => {
-                    if let Err(persist_error) =
-                        api.record_history_update_failure(&task.task_id, &error.message)
-                    {
-                        logging::warn(
-                            "history_update_failure_activity_persist_failed",
-                            serde_json::json!({
-                                "task_id": task.task_id,
-                                "error": persist_error.to_string(),
-                            }),
-                        );
-                    }
+                Some(Err(error)) => {
                     api.mark_native_session_recovery_stale(&task.task_id, &stored_session_id);
                     api.publish_history_sync(
                         &task.task_id,
-                        openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
-                            generation: generation.value(),
-                        },
+                        api.history_sync.reload_available_snapshot(&task.task_id),
                     );
                     logging::warn(
-                        "adopted_task_background_refresh_failed",
+                        "native_session_open_load_failed",
                         serde_json::json!({
                             "task_id": task.task_id,
                             "agent_id": task.agent_id,
-                            "error": error.message,
+                            "error_code": format!("{:?}", error.code),
                         }),
                     );
                 }
@@ -360,6 +271,7 @@ impl TaskProductApi {
                                 native_session,
                                 native_updated_at,
                                 refreshed_at,
+                                clear_reload_requirement_through: None,
                             })
                             .map_err(protocol_error_from_runtime)
                     }
@@ -448,7 +360,7 @@ impl TaskProductApi {
     }
 
     /// Ends the open-time loading state only if this is still the failed attachment attempt.
-    fn mark_native_session_recovery_stale(&self, task_id: &str, session_id: &str) {
+    pub(super) fn mark_native_session_recovery_stale(&self, task_id: &str, session_id: &str) {
         if let Err(error) = self.mutations.commit_existing_task(
             task_id,
             super::response_snapshot_options(),
@@ -484,29 +396,6 @@ fn task_allows_history_recovery(task: &TaskRecord) -> bool {
     ) && task.active_turn_id.is_none()
 }
 
-/// Native history replacement is destructive, so missing or incomparable clocks never win.
-fn newer_native_activity(
-    native_session: &AgentListedSession,
-    local_history_updated_at: &str,
-) -> Option<(u128, String)> {
-    let (native_time, native_value) = [
-        native_session.last_activity.as_deref(),
-        native_session.updated_at.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter_map(|value| crate::time::activity_millis(value).map(|time| (time, value)))
-    .max_by_key(|(time, _)| *time)?;
-    let local_time = crate::time::activity_millis(local_history_updated_at)?;
-    (native_time > local_time.saturating_add(NATIVE_HISTORY_CLOCK_TOLERANCE_MS))
-        .then(|| {
-            u128::try_from(native_time)
-                .ok()
-                .map(|native_time| (native_time, native_value.to_string()))
-        })
-        .flatten()
-}
-
 impl TaskOpenWorkflow for TaskProductApi {
     fn open_for_client(
         &self,
@@ -522,5 +411,13 @@ impl TaskOpenWorkflow for TaskProductApi {
         params: TaskMarkReadParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.mark_task_read(client_instance_id, params)
+    }
+
+    fn reload_native_session_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskReloadNativeSessionParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.reload_native_session(client_instance_id, params)
     }
 }

@@ -56,6 +56,14 @@ _Avoid_: Upload when the App Shell references an original local path, treating `
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
 _Avoid_: Log-style names
 
+**Permission Request**:
+A transient request for the user to approve or reject one proposed Agent Tool action. It belongs to the linked Tool and is not an independent Chat message.
+_Avoid_: Approval Request, Permission Panel, standalone Permission Chat item
+
+**Approval Required**:
+The user-facing pending state of a Tool whose Permission Request awaits a decision.
+_Avoid_: Using Approval Required as the domain name for a Permission Request
+
 **Quote**:
 An editable `>`-prefixed quotation inserted into the Composer from selected visible text in one User or Agent message. It is ordinary User text and carries no durable relationship to its source.
 _Avoid_: Reply, Reply Reference, source metadata

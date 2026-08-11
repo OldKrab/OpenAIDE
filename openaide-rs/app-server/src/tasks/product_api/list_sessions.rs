@@ -6,8 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
 use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
-use crate::projects::ProjectIdentity;
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 
 use super::session_cursor::OpaqueSessionCursor;
@@ -25,61 +24,6 @@ struct NativeCatalogRefreshState {
 }
 
 impl TaskProductApi {
-    /// Refreshes the catalog entry that decides how an existing Task reconnects.
-    ///
-    /// Task opening remains non-blocking; this targeted read runs in its recovery
-    /// worker so cached Chat can render before one authoritative resume/load choice.
-    pub(super) fn refresh_bound_session_for_open(
-        &self,
-        task: &TaskRecord,
-        stored_session_id: &str,
-    ) -> Result<Option<crate::protocol::model::AgentListedSession>, ProtocolError> {
-        self.agent_registry
-            .require(&task.agent_id)
-            .map_err(protocol_error_from_runtime)?;
-        let project_root = task.project_root.as_deref().unwrap_or(&task.workspace_root);
-        let project_id = ProjectIdentity::from_workspace_root(project_root).project_id;
-        let mut cursor = OpaqueSessionCursor::new(None);
-        loop {
-            let result = self
-                .agent_gateway
-                .list_sessions(AgentListSessionsRequest {
-                    agent_id: task.agent_id.clone(),
-                    cwd: Some(task.workspace_root.clone()),
-                    cursor: cursor.current(),
-                })
-                .map_err(protocol_error_from_runtime)?;
-            let matching = result
-                .sessions
-                .iter()
-                .find(|session| session.session_id == stored_session_id)
-                .cloned();
-            self.reconcile_native_session_activity(
-                &task.agent_id,
-                &task.workspace_root,
-                &result.sessions,
-                std::slice::from_ref(task),
-            )?;
-            self.history_sync.record_listed_sessions(
-                &task.agent_id,
-                &task.workspace_root,
-                &result.sessions,
-            );
-            self.record_native_catalog_page(
-                project_id.as_str(),
-                &task.agent_id,
-                &task.workspace_root,
-                &result.sessions,
-            )?;
-            if matching.is_some() {
-                return Ok(matching);
-            }
-            if cursor.advance(result.next_cursor).is_none() {
-                return Ok(None);
-            }
-        }
-    }
-
     pub(crate) fn request_native_session_catalog_load_more(
         &self,
         project_id: &str,
@@ -186,22 +130,9 @@ impl TaskProductApi {
         self.refresh_native_session_project_trees(project_filter, None)
     }
 
-    pub(super) fn refresh_subscribed_task_histories(
-        &self,
-        agent_id: &str,
-        workspace_root: &str,
-        task_records: &[TaskRecord],
-    ) {
-        for task in task_records.iter().filter(|task| {
-            task.agent_id == agent_id
-                && task.workspace_root == workspace_root
-                && task.agent_session_id.is_some()
-        }) {
-            self.spawn_subscribed_task_history_refresh(task.clone());
-        }
-    }
-
-    /// Advances owned Task activity from listings without importing stale runtime metadata.
+    /// Advances owned Task activity and records possible external changes without replacing
+    /// an active attachment. Catalog timestamps cannot distinguish history from option/title
+    /// changes, so replay remains an explicit Task action.
     pub(super) fn reconcile_native_session_activity(
         &self,
         agent_id: &str,
@@ -236,6 +167,22 @@ impl TaskProductApi {
             .filter_map(|value| crate::time::activity_millis(value).map(|time| (time, value)))
             .max_by_key(|(time, _)| *time)
             .map(|(_, value)| value.to_string());
+            let deferred_reload_activity = native_activity
+                .as_ref()
+                .filter(|activity| {
+                    let Some(native_time) = crate::time::activity_millis(activity) else {
+                        return false;
+                    };
+                    let Ok(local_history_updated_at) =
+                        self.store.local_history_updated_at(&record.task_id)
+                    else {
+                        return false;
+                    };
+                    crate::time::activity_millis(&local_history_updated_at)
+                        .is_some_and(|local_time| native_time > local_time.saturating_add(5_000))
+                })
+                .cloned();
+            let reload_requirement_changed = std::cell::Cell::new(false);
             self.mutations
                 .commit_existing_task(&record.task_id, TaskCommitOptions::metadata(), |ctx| {
                     let task = ctx.task_mut();
@@ -258,6 +205,16 @@ impl TaskProductApi {
                             changed = true;
                         }
                     }
+                    if matches!(task.lifecycle, TaskLifecycle::Open)
+                        && matches!(task.status, crate::protocol::model::TaskStatus::Inactive)
+                        && task.active_turn_id.is_none()
+                        && deferred_reload_activity.as_ref().is_some_and(|activity| {
+                            task.mark_native_session_reload_required(activity.clone())
+                        })
+                    {
+                        reload_requirement_changed.set(true);
+                        changed = true;
+                    }
                     Ok(if changed {
                         TaskMutationResult::Changed
                     } else {
@@ -265,6 +222,12 @@ impl TaskProductApi {
                     })
                 })
                 .map_err(protocol_error_from_runtime)?;
+            if reload_requirement_changed.get() {
+                self.publish_history_sync(
+                    &record.task_id,
+                    self.history_sync.reload_available_snapshot(&record.task_id),
+                );
+            }
         }
         Ok(())
     }
@@ -301,16 +264,6 @@ impl TaskProductApi {
                 &result.sessions,
                 &task_records,
             )?;
-            self.history_sync.record_listed_sessions(
-                params.agent_id.as_str(),
-                &project.workspace_root,
-                &result.sessions,
-            );
-            self.refresh_subscribed_task_histories(
-                params.agent_id.as_str(),
-                &project.workspace_root,
-                &task_records,
-            );
             self.record_native_catalog_page(
                 project.project_id.as_str(),
                 params.agent_id.as_str(),

@@ -123,12 +123,12 @@ use crate::task::{
     TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
     TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
     TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueSendSelection, TaskQueueTakeParams,
-    TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams,
-    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams,
-    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskTitleSelection,
-    TaskToolImagePreviewParams, TaskToolImagePreviewResult, TerminalOutputSnapshot,
-    ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
+    TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
+    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
+    TaskSetTitleResult, TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -446,6 +446,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ActivityToolValue>(output, config);
     push_decl::<TaskOpenParams>(output, config);
     push_decl::<TaskOpenResult>(output, config);
+    push_decl::<TaskReloadNativeSessionParams>(output, config);
+    push_decl::<TaskReloadNativeSessionResult>(output, config);
     push_decl::<TaskMarkReadParams>(output, config);
     push_decl::<TaskMarkReadResult>(output, config);
     push_decl::<TaskListParams>(output, config);

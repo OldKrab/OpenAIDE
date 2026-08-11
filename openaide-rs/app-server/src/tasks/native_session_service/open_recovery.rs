@@ -7,6 +7,8 @@ pub(crate) struct HistoryRefreshRequest {
     pub(crate) native_session: AgentListedSession,
     pub(crate) native_updated_at: u128,
     pub(crate) refreshed_at: String,
+    /// The durable possible-change hint this replay covers, when it was user-approved.
+    pub(crate) clear_reload_requirement_through: Option<String>,
 }
 
 pub(crate) enum OpenSessionResumeOutcome {
@@ -26,6 +28,7 @@ impl NativeSessionService {
             native_session,
             native_updated_at,
             refreshed_at,
+            clear_reload_requirement_through,
         } = request;
         let current_task = self.mutations.store().read_task(&task.task_id)?;
         if current_task.agent_session_id.as_deref() != Some(stored_session_id.as_str())
@@ -123,6 +126,9 @@ impl NativeSessionService {
                 task.completed_plan_message_id = replayed_plan.completed_plan_message_id.clone();
                 task.updated_at = refreshed_at.clone();
                 task.last_activity = refreshed_at.clone();
+                if let Some(observed_activity_at) = &clear_reload_requirement_through {
+                    task.clear_native_session_reload_requirement_through(observed_activity_at);
+                }
                 Ok(TaskMutationResult::Changed)
             },
         )?;

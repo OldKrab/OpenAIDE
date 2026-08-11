@@ -113,6 +113,7 @@ export type TaskCallbacks = {
   revealAttachment: (attachmentId: string) => Promise<void>;
   removeAttachment: (attachmentId: string) => void;
   removeQueueMessage: (queuedMessageId: string) => void;
+  reloadNativeSession?: () => Promise<void>;
   takeQueueMessage: (queuedMessageId: string) => void;
   moveQueueMessage: (queuedMessageId: string, targetIndex: number) => Promise<void>;
   sendQueueMessageNow: (queuedMessageId: string) => void;

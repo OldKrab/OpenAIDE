@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK",
+        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -86,6 +86,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewParams;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelParams;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenParams;\n");
+    output.push_str("  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionParams;\n");
     output.push_str("  [TASK_MARK_READ]: TaskMarkReadParams;\n");
     output.push_str("  [TASK_CHAT_PAGE]: TaskChatPageParams;\n");
     output.push_str("  [TASK_COMPOSER_HISTORY]: ComposerHistoryParams;\n");
@@ -178,6 +179,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewResult;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelResult;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenResult;\n");
+    output.push_str("  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionResult;\n");
     output.push_str("  [TASK_MARK_READ]: TaskMarkReadResult;\n");
     output.push_str("  [TASK_CHAT_PAGE]: TaskChatPageResult;\n");
     output.push_str("  [TASK_COMPOSER_HISTORY]: ComposerHistoryResult;\n");
@@ -362,6 +364,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output.push_str("export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;\n");
     output.push_str("export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;\n");
+    output.push_str(
+        "export type TaskReloadNativeSessionResponse = ResponseEnvelope<TaskReloadNativeSessionResult>;\n",
+    );
     output.push_str("export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;\n");
     output.push_str(
         "export type TaskComposerHistoryResponse = ResponseEnvelope<ComposerHistoryResult>;\n",
