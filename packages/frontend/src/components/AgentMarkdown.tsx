@@ -1,6 +1,17 @@
-import { Fragment, isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  createContext,
+  isValidElement,
+  memo,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { Check, CircleAlert, Copy } from "lucide-react";
-import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { postHostMessage } from "../services/hostBridge";
 import { copyText } from "./clipboard";
@@ -36,17 +47,21 @@ export const AgentMarkdown = memo(function AgentMarkdown({ className, quoteSourc
 function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: string }) {
   if (!text) return streaming ? <StreamingCaret /> : null;
   return (
-    <Markdown
-      rehypePlugins={streaming ? [appendStreamingCaret] : []}
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-      urlTransform={safeMarkdownUrl}
-      components={agentMarkdownComponents}
-    >
-      {text}
-    </Markdown>
+    <MarkdownSourceContext.Provider value={text}>
+      <Markdown
+        rehypePlugins={streaming ? [appendStreamingCaret] : []}
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        urlTransform={safeMarkdownUrl}
+        components={agentMarkdownComponents}
+      >
+        {text}
+      </Markdown>
+    </MarkdownSourceContext.Provider>
   );
 }
+
+const MarkdownSourceContext = createContext("");
 
 // Stable component identities keep native pointer gestures alive across streamed Markdown updates.
 const agentMarkdownComponents: Components = {
@@ -79,37 +94,54 @@ const agentMarkdownComponents: Components = {
     );
   },
   pre: ({ children, node: _node, ...props }) => (
-    <MarkdownCodeBlock text={plainText(children).replace(/\n$/, "")}>
+    <MarkdownCopyBlock kind="code" text={plainText(children).replace(/\n$/, "")}>
       <pre {...props}>{children}</pre>
-    </MarkdownCodeBlock>
+    </MarkdownCopyBlock>
   ),
+  blockquote: MarkdownQuoteBlock,
 };
+
+function MarkdownQuoteBlock({ children, node, ...props }: ComponentProps<"blockquote"> & ExtraProps) {
+  const source = useContext(MarkdownSourceContext);
+  const start = node?.position?.start.offset;
+  const end = node?.position?.end.offset;
+  // Rendered children have already lost Markdown markers, so copy from the source span and remove only this quote level.
+  const text = typeof start === "number" && typeof end === "number"
+    ? source.slice(start, end).replace(/^ {0,3}> ?/gm, "").trim()
+    : markdownPlainText(children);
+  return (
+    <MarkdownCopyBlock kind="quote" text={text}>
+      <blockquote {...props}>{children}</blockquote>
+    </MarkdownCopyBlock>
+  );
+}
 
 type CopyState = "idle" | "copied" | "failed";
 
-function MarkdownCodeBlock({ children, text }: { children: ReactNode; text: string }) {
+function MarkdownCopyBlock({ children, kind, text }: { children: ReactNode; kind: "code" | "quote"; text: string }) {
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(resetTimer.current), []);
+  const capitalizedKind = kind === "code" ? "Code" : "Quote";
   const feedback = copyState === "copied"
-    ? { label: "Code copied", text: "Copied", title: "Copied" }
+    ? { label: `${capitalizedKind} copied`, text: "Copied", title: "Copied" }
     : copyState === "failed"
-      ? { label: "Copy code failed", text: "Copy failed", title: "Copy failed" }
-      : { label: "Copy code", text: "", title: "Copy code" };
+      ? { label: `Copy ${kind} failed`, text: "Copy failed", title: "Copy failed" }
+      : { label: `Copy ${kind}`, text: "", title: `Copy ${kind}` };
   const Icon = copyState === "copied" ? Check : copyState === "failed" ? CircleAlert : Copy;
 
   return (
-    <div className="agent-markdown-code-block" data-copy-state={copyState}>
+    <div className={`agent-markdown-copy-block agent-markdown-${kind}-block`} data-copy-state={copyState}>
       <button
         aria-label={feedback.label}
-        className="agent-markdown-code-copy"
+        className={`agent-markdown-copy agent-markdown-${kind}-copy`}
         onClick={async () => {
           clearTimeout(resetTimer.current);
           try {
             await copyText(text);
             setCopyState("copied");
           } catch (error) {
-            console.warn("Failed to copy a Markdown code block.", {
+            console.warn(`Failed to copy a Markdown ${kind} block.`, {
               error_kind: error instanceof Error && error.name ? error.name : typeof error,
             });
             setCopyState("failed");
@@ -241,4 +273,18 @@ function plainText(children: ReactNode): string {
   if (Array.isArray(children)) return children.map(plainText).join("");
   if (isValidElement<{ children?: ReactNode }>(children)) return plainText(children.props.children);
   return "";
+}
+
+const markdownBlockTags = new Set(["blockquote", "li", "ol", "p", "pre", "ul"]);
+
+function markdownPlainText(children: ReactNode): string {
+  return markdownTextWithBreaks(children).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function markdownTextWithBreaks(children: ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(markdownTextWithBreaks).join("");
+  if (!isValidElement<{ children?: ReactNode }>(children)) return "";
+  const text = markdownTextWithBreaks(children.props.children);
+  return typeof children.type === "string" && markdownBlockTags.has(children.type) ? `${text}\n\n` : text;
 }

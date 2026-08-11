@@ -237,12 +237,12 @@
   padding: 0;
 }
 
-.agent-markdown-code-block {
+.agent-markdown-copy-block {
   max-width: 100%;
   position: relative;
 }
 
-.agent-markdown-code-copy {
+.agent-markdown-copy {
   min-width: 22px;
   min-height: 22px;
   position: absolute;
@@ -262,25 +262,29 @@
   transition: opacity 120ms ease-out, background 120ms ease-out, color 120ms ease-out;
 }
 
-.agent-markdown-code-block:hover .agent-markdown-code-copy,
-.agent-markdown-code-copy:focus-visible,
-.agent-markdown-code-block[data-copy-state="copied"] .agent-markdown-code-copy,
-.agent-markdown-code-block[data-copy-state="failed"] .agent-markdown-code-copy {
+.agent-markdown-copy-block:hover .agent-markdown-copy,
+.agent-markdown-copy:focus-visible,
+.agent-markdown-copy-block[data-copy-state="copied"] .agent-markdown-copy,
+.agent-markdown-copy-block[data-copy-state="failed"] .agent-markdown-copy {
   opacity: 1;
 }
 
-.agent-markdown-code-copy:hover {
+.agent-markdown-copy:hover {
   background: var(--oa-raised);
   color: var(--oa-text);
 }
 
-.agent-markdown-code-copy:focus-visible {
+.agent-markdown-copy:focus-visible {
   outline: 1px solid var(--oa-focus);
   outline-offset: 1px;
 }
 
-.agent-markdown-code-block[data-copy-state="failed"] .agent-markdown-code-copy {
+.agent-markdown-copy-block[data-copy-state="failed"] .agent-markdown-copy {
   color: var(--oa-danger);
+}
+
+.agent-markdown-quote-block > blockquote {
+  padding-right: 30px;
 }
 
 .chat-agent blockquote {
@@ -439,7 +443,7 @@
     opacity: 1;
   }
 
-  .agent-markdown-code-copy {
+  .agent-markdown-copy {
     min-width: 36px;
     min-height: 36px;
     opacity: 1;
@@ -452,7 +456,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-markdown-code-copy {
+  .agent-markdown-copy {
     transition-duration: 0.01ms;
   }
 }

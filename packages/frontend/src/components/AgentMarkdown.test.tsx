@@ -112,7 +112,7 @@ describe("AgentMarkdown", () => {
     );
 
     expect(html).toContain('aria-label="Copy code"');
-    expect(html).toContain('class="agent-markdown-code-block"');
+    expect(html).toContain("agent-markdown-code-block");
     expect(html.match(/aria-label="Copy code"/g)).toHaveLength(1);
   });
 
@@ -136,6 +136,30 @@ describe("AgentMarkdown", () => {
     expect(writeText).toHaveBeenCalledWith("def second():\n    return 2");
     expect(tree!.root.findAllByProps({ "aria-label": "Copy code" })).toHaveLength(1);
     expect(tree!.root.findByProps({ "aria-label": "Code copied" }).props.title).toBe("Copied");
+  });
+
+  it("copies each quote independently while preserving its inner Markdown", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentMarkdown text={"> First **quote**.\n\n> **Second quote:**\n> 1. First step\n> 2. Second step\n>\n> Second paragraph."} />,
+      );
+    });
+    const buttons = tree!.root.findAllByProps({ "aria-label": "Copy quote" });
+
+    expect(buttons).toHaveLength(2);
+    await act(async () => {
+      await buttons[1]!.props.onClick();
+    });
+
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(
+      "**Second quote:**\n1. First step\n2. Second step\n\nSecond paragraph.",
+    );
+    expect(tree!.root.findAllByProps({ "aria-label": "Copy quote" })).toHaveLength(1);
+    expect(tree!.root.findByProps({ "aria-label": "Quote copied" }).props.title).toBe("Copied");
   });
 
   it("reports clipboard failure without claiming success", async () => {
