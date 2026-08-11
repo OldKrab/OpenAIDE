@@ -34,6 +34,8 @@ export function primaryTaskSurfaceModel(controller: AppController) {
   const nativeRouteError = adoptionError && adoptionError.sessionId === routedNativeSessionId
     ? adoptionError.message
     : undefined;
+  const nativeRouteRetryable = adoptionError?.sessionId === routedNativeSessionId
+    && adoptionError?.recoverable === true;
   const routedTaskOpenError = bootstrap.taskId
     && primaryTask.taskOpenError?.taskId === bootstrap.taskId
     ? primaryTask.taskOpenError
@@ -49,6 +51,7 @@ export function primaryTaskSurfaceModel(controller: AppController) {
     startupConfigOptions,
     taskLoadingError,
     taskLoadingErrorKind,
+    nativeRouteRetryable,
   };
 }
 
@@ -102,6 +105,7 @@ export function AppPrimaryTaskSurface({
     startupConfigOptions,
     taskLoadingError,
     taskLoadingErrorKind,
+    nativeRouteRetryable,
   } = model;
   const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
   const canSelectNewTaskProject = usesProjectNavigation
@@ -109,6 +113,9 @@ export function AppPrimaryTaskSurface({
   const retryTaskOpen = !openingNativeSession
     && (taskLoadingError || controller.backendConnectionState.status === "unavailable")
     ? controller.retryTaskOpen
+    : undefined;
+  const retryNativeSessionOpen = openingNativeSession && nativeRouteRetryable
+    ? controller.retryNativeSessionOpen
     : undefined;
   const recoveryActions = createAgentRecoveryActions(controller);
 
@@ -142,6 +149,7 @@ export function AppPrimaryTaskSurface({
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
         onRemoveQueueMessage={callbacks.task.removeQueueMessage}
+        onReloadNativeSession={callbacks.task.reloadNativeSession}
         onTakeQueueMessage={callbacks.task.takeQueueMessage}
         onMoveQueueMessage={callbacks.task.moveQueueMessage}
         onPlanDrawerOpenChange={onPlanDrawerOpenChange}
@@ -170,7 +178,7 @@ export function AppPrimaryTaskSurface({
         error={taskLoadingError}
         errorKind={taskLoadingErrorKind}
         label={openingNativeSession ? "Opening session" : undefined}
-        onRetry={retryTaskOpen}
+        onRetry={retryNativeSessionOpen ?? retryTaskOpen}
       />
     );
   }

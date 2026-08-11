@@ -60,10 +60,11 @@ use crate::task::{
     TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult,
     TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
     TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult,
-    TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
-    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult,
-    TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
+    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
+    TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -572,6 +573,12 @@ protocol_method!(
     TaskClosePlanResult
 );
 protocol_method!(TaskOpen, TASK_OPEN, TaskOpenParams, TaskOpenResult);
+protocol_method!(
+    TaskReloadNativeSession,
+    TASK_RELOAD_NATIVE_SESSION,
+    TaskReloadNativeSessionParams,
+    TaskReloadNativeSessionResult
+);
 protocol_method!(
     TaskMarkRead,
     TASK_MARK_READ,

@@ -20,3 +20,18 @@ fn acp_request_error_reports_missing_codex_rollout_as_task_not_found() {
 
     assert!(matches!(normalized, RuntimeError::TaskNotFound(_)));
 }
+
+#[test]
+fn acp_request_error_reports_an_active_codex_writer_as_conflict() {
+    let error = agent_client_protocol::util::internal_error(
+        r#"{"details":"thread native-session-1 already has an active writer"}"#,
+    );
+
+    let normalized = acp_request_error(&error);
+
+    assert!(matches!(
+        normalized,
+        RuntimeError::Conflict(message)
+            if message == "Native Session is currently in use elsewhere"
+    ));
+}

@@ -43,6 +43,7 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
         },
         config_options_catalog: task.config_options_catalog.clone(),
         native_session_data_freshness: task.native_session_data_freshness,
+        native_session_reload_requirement: task.native_session_reload_requirement.clone(),
         pending_config_change: task.config_mutation.pending.as_ref().map(|pending| {
             crate::protocol::model::PendingTaskConfigChange {
                 client_mutation_id: pending.client_mutation_id.clone(),

@@ -309,9 +309,19 @@ pub struct TaskInputCapabilities {
     rename_all_fields = "camelCase"
 )]
 pub enum TaskHistorySyncSnapshot {
-    Idle { generation: u64 },
-    Syncing { generation: u64 },
-    Updated { generation: u64 },
+    Idle {
+        generation: u64,
+    },
+    /// A catalog observation suggests an external change, but the current attachment remains live.
+    ReloadAvailable {
+        generation: u64,
+    },
+    Syncing {
+        generation: u64,
+    },
+    Updated {
+        generation: u64,
+    },
 }
 
 impl Default for TaskHistorySyncSnapshot {

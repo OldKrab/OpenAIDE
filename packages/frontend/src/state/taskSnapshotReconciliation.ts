@@ -176,8 +176,12 @@ export function reconcileTaskSnapshot(
   const keepCurrent = currentSync.generation > incomingSync.generation
     || (
       currentSync.generation === incomingSync.generation
-      && historySyncIsTerminal(currentSync)
-      && historySyncIsPending(incomingSync)
+      && (
+        (historySyncIsTerminal(currentSync) && historySyncIsPending(incomingSync))
+        // `reloadAvailable` is durable App Server state. A concurrent baseline that
+        // still reports idle must not erase the user's explicit recovery choice.
+        || (currentSync.state === "reloadAvailable" && incomingSync.state === "idle")
+      )
     );
   const historySync = keepCurrent ? currentSync : incomingSync;
   const durableSnapshot = shouldIgnoreStaleTaskSnapshot(current, incoming) ? current : incoming;
@@ -198,7 +202,7 @@ export function reconcileTaskSnapshot(
 }
 
 function historySyncIsTerminal(sync: TaskSnapshot["history_sync"]) {
-  return sync.state === "idle" || sync.state === "updated";
+  return sync.state === "idle" || sync.state === "reloadAvailable" || sync.state === "updated";
 }
 
 function historySyncIsPending(sync: TaskSnapshot["history_sync"]) {

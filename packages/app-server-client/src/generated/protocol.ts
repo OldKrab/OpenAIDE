@@ -94,6 +94,7 @@ export const TASK_CLOSE_PLAN = "task/closePlan" as const;
 export const TASK_TOOL_IMAGE_PREVIEW = "task/toolImagePreview" as const;
 export const TASK_CANCEL = "task/cancel" as const;
 export const TASK_OPEN = "task/open" as const;
+export const TASK_RELOAD_NATIVE_SESSION = "task/reloadNativeSession" as const;
 export const TASK_MARK_READ = "task/markRead" as const;
 export const TASK_CHAT_PAGE = "task/chatPage" as const;
 export const TASK_COMPOSER_HISTORY = "task/composerHistory" as const;
@@ -777,6 +778,10 @@ export type TaskOpenParams = { taskId: TaskId, };
 
 export type TaskOpenResult = { task: TaskSnapshot, };
 
+export type TaskReloadNativeSessionParams = { taskId: TaskId, clientMutationId: ClientMutationId, };
+
+export type TaskReloadNativeSessionResult = { task: TaskSnapshot, };
+
 export type TaskMarkReadParams = { taskId: TaskId, };
 
 export type TaskMarkReadResult = { task: TaskSnapshot, };
@@ -957,7 +962,7 @@ export type TaskUsageCost = { amount: string, currency: string, };
 
 export type TaskTurnUsage = { totalTokens: number, inputTokens: number, outputTokens: number, reasoningTokens?: number | null, cachedReadTokens?: number | null, cachedWriteTokens?: number | null, };
 
-export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, };
+export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "reloadAvailable", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, };
 
 export type TaskPreparationSnapshot = { "kind": "preparing", steps: Array<TaskPreparationStep>, } | { "kind": "ready" } | { "kind": "blocked", blocker: TaskSetupBlocker, actions: Array<TaskPreparationAction>, } | { "kind": "failed", error: ProtocolError, actions: Array<TaskPreparationAction>, };
 
@@ -1047,7 +1052,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -1124,6 +1129,7 @@ export type RequestParamsByMethod = {
   [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewParams;
   [TASK_CANCEL]: TaskCancelParams;
   [TASK_OPEN]: TaskOpenParams;
+  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionParams;
   [TASK_MARK_READ]: TaskMarkReadParams;
   [TASK_CHAT_PAGE]: TaskChatPageParams;
   [TASK_COMPOSER_HISTORY]: ComposerHistoryParams;
@@ -1214,6 +1220,7 @@ export type ResponseResultByMethod = {
   [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewResult;
   [TASK_CANCEL]: TaskCancelResult;
   [TASK_OPEN]: TaskOpenResult;
+  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionResult;
   [TASK_MARK_READ]: TaskMarkReadResult;
   [TASK_CHAT_PAGE]: TaskChatPageResult;
   [TASK_COMPOSER_HISTORY]: ComposerHistoryResult;
@@ -1303,6 +1310,7 @@ export type TaskQueueMoveResponse = ResponseEnvelope<TaskQueueMoveResult>;
 export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionResult>;
 export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;
 export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;
+export type TaskReloadNativeSessionResponse = ResponseEnvelope<TaskReloadNativeSessionResult>;
 export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;
 export type TaskComposerHistoryResponse = ResponseEnvelope<ComposerHistoryResult>;
 export type TaskListResponse = ResponseEnvelope<TaskListResult>;

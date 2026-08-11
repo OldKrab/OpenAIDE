@@ -8,10 +8,11 @@ use openaide_app_server_protocol::task::{
     TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
     TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
     TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskReleaseResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
-    TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use serde_json::Value;
 
@@ -533,6 +534,39 @@ impl RpcGateway {
         };
         let task = self.task_with_pending_requests(task);
         self.result::<TaskOpenResult>(connection_id, id, meta, TaskOpenResult { task })
+    }
+
+    pub(super) fn handle_task_reload_native_session(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskReloadNativeSessionParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task reload");
+        let task = match self
+            .task_open
+            .reload_native_session_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => task,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let task = self.task_with_pending_requests(task);
+        self.result::<TaskReloadNativeSessionResult>(
+            connection_id,
+            id,
+            meta,
+            TaskReloadNativeSessionResult { task },
+        )
     }
 
     pub(super) fn handle_task_mark_read(

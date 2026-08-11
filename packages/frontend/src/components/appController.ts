@@ -73,6 +73,7 @@ export type AppControllerTestHarness = {
   newTaskSnapshot?: import("@openaide/app-shell-contracts").TaskSnapshot;
   preferences: AppPreferencesRecord;
   retryTaskOpen: () => void;
+  retryNativeSessionOpen: () => void;
   state: AppState;
   visibleTasks: AppState["tasks"];
 };
@@ -124,6 +125,7 @@ export type AppController = {
   };
   preferences: AppPreferencesRecord;
   retryTaskOpen: () => void;
+  retryNativeSessionOpen: () => void;
   taskNotifications?: {
     stateRootId?: string;
     tasks: TaskSummary[];
@@ -231,7 +233,7 @@ function useAppControllerCore({
   const newTaskDispatch = newTaskWorkspace.dispatch;
   const attachmentResources = newTaskWorkspace.attachmentResources;
   attachmentResourcesRef.current = attachmentResources;
-  useNativeSessionRouteLifecycle({
+  const retryNativeSessionOpen = useNativeSessionRouteLifecycle({
     asyncOperations: operationOwner,
     attachmentResources,
     backendConnection: backendConnectionRef,
@@ -303,6 +305,7 @@ function useAppControllerCore({
     dispatch: newTaskDispatch,
     newTaskSnapshot,
     preferences,
+    retryNativeSessionOpen,
     retryTaskOpen,
     state,
     visibleTasks,

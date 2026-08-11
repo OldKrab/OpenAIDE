@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch } from "react";
 import {
   AppServerProtocolError,
   TASK_ADOPT_NATIVE_SESSION,
@@ -40,6 +40,7 @@ export function useNativeSessionRouteLifecycle({
   state: AppState;
 }) {
   const startedRouteKey = useRef<string | undefined>(undefined);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const routedAgentId = bootstrap.surface === "nativeSession" ? bootstrap.agentId : undefined;
   const routedNativeSessionId = bootstrap.surface === "nativeSession" ? bootstrap.nativeSessionId : undefined;
 
@@ -51,7 +52,7 @@ export function useNativeSessionRouteLifecycle({
     const agentId = routedAgentId;
     const nativeSessionId = routedNativeSessionId;
     if (!agentId || !nativeSessionId || !backendReady || !backendConnection) return;
-    const routeKey = `${replicaEpoch}\u0000${agentId}\u0000${nativeSessionId}`;
+    const routeKey = `${replicaEpoch}\u0000${retryGeneration}\u0000${agentId}\u0000${nativeSessionId}`;
     if (startedRouteKey.current === routeKey) return;
     startedRouteKey.current = routeKey;
 
@@ -75,10 +76,16 @@ export function useNativeSessionRouteLifecycle({
     dispatch,
     newTaskController,
     replicaEpoch,
+    retryGeneration,
     routedAgentId,
     routedNativeSessionId,
     state,
   ]);
+
+  return useCallback(() => {
+    if (bootstrap.surface !== "nativeSession" || !routedAgentId || !routedNativeSessionId) return;
+    setRetryGeneration((generation) => generation + 1);
+  }, [bootstrap.surface, routedAgentId, routedNativeSessionId]);
 }
 
 export async function adoptRoutedNativeSession({
@@ -138,11 +145,16 @@ export async function adoptRoutedNativeSession({
     if (!ownsOperation) return;
     const noLongerExists = error instanceof AppServerProtocolError
       && error.protocolError.code === "notFound";
+    const inUseElsewhere = error instanceof AppServerProtocolError
+      && error.protocolError.code === "conflict";
     dispatch({
       type: "newTask:nativeSessions:error",
       sessionId: nativeSessionId,
+      recoverable: error instanceof AppServerProtocolError && error.protocolError.recoverable,
       message: noLongerExists
         ? "This session no longer exists."
+        : inUseElsewhere
+          ? "This session is currently in use elsewhere. Close it there, then try again."
         : error instanceof Error ? error.message : "Unable to open task.",
     });
     if (noLongerExists) {

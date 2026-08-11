@@ -349,6 +349,20 @@ pub struct TaskOpenResult {
     pub task: TaskSnapshot,
 }
 
+/// Explicitly replaces a live Task attachment with an authoritative Agent replay.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskReloadNativeSessionParams {
+    pub task_id: TaskId,
+    pub client_mutation_id: ClientMutationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskReloadNativeSessionResult {
+    pub task: TaskSnapshot,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskMarkReadParams {

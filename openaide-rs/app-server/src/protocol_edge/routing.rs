@@ -17,8 +17,8 @@ use openaide_app_server_protocol::methods::{
     TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_CHAT_PAGE, TASK_CLOSE_PLAN,
     TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE,
     TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND, TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE,
-    TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND,
-    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW,
+    TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION, TASK_RESTORE, TASK_SEARCH_FILES,
+    TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW,
     WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
     WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
     WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
@@ -308,6 +308,9 @@ impl RpcGateway {
             TASK_RESTORE => self.handle_task_restore(connection_id, id, params, meta),
             TASK_LIST => self.handle_task_list(connection_id, id, params, meta),
             TASK_OPEN => self.handle_task_open(connection_id, id, params, meta),
+            TASK_RELOAD_NATIVE_SESSION => {
+                self.handle_task_reload_native_session(connection_id, id, params, meta)
+            }
             TASK_MARK_READ => self.handle_task_mark_read(connection_id, id, params, meta, now),
             _ => self.error(
                 connection_id,

@@ -6,6 +6,7 @@ import {
   TASK_QUEUE_MOVE,
   TASK_QUEUE_REMOVE,
   TASK_QUEUE_TAKE,
+  TASK_RELOAD_NATIVE_SESSION,
   TASK_SEND,
   type BackendConnection,
   type ClientInstanceId,
@@ -76,6 +77,26 @@ export function cancelTaskIntent(
         message: taskMutationErrorMessage(error, "Unable to stop task."),
       });
     });
+}
+
+/** Requests one user-approved full Native Session replay. This mutation is never retried. */
+export async function reloadNativeSessionIntent(
+  dependencies: TaskMutationIntentDependencies,
+  snapshot: TaskSnapshot | undefined,
+): Promise<void> {
+  if (!snapshot) throw new Error("Task snapshot unavailable.");
+  const taskId = snapshot.task.task_id;
+  const request = dependencies.backendConnection?.request;
+  if (!request) throw new Error("App Server connection unavailable.");
+  const result = await request(TASK_RELOAD_NATIVE_SESSION, {
+    taskId: taskId as TaskId,
+    clientMutationId: createReloadNativeSessionMutationId(),
+  });
+  dependencies.dispatch({
+    type: "snapshot",
+    snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
+    intent: "refresh",
+  });
 }
 
 export async function closeTaskPlanIntent(
@@ -430,6 +451,13 @@ function mutateTaskQueue(
 let nextQueueRemoveMutationId = 1;
 let nextQueueMutationId = 1;
 let nextQueueTakeMutationId = 1;
+let nextReloadNativeSessionMutationId = 1;
+
+function createReloadNativeSessionMutationId(): ClientMutationId {
+  const id = `frontend-native-session-reload-${nextReloadNativeSessionMutationId}`;
+  nextReloadNativeSessionMutationId += 1;
+  return id as ClientMutationId;
+}
 
 function createQueueRemoveMutationId(): ClientMutationId {
   const id = `frontend-queue-remove-${nextQueueRemoveMutationId}`;

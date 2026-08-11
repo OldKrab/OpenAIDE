@@ -30,6 +30,7 @@ import {
   cancelTaskIntent,
   closeTaskPlanIntent,
   removeTaskQueueMessageIntent,
+  reloadNativeSessionIntent,
   moveTaskQueueMessageIntent,
   takeTaskQueueMessageIntent,
   sendTaskQueueMessageNowIntent,
@@ -226,6 +227,15 @@ export function createTaskCallbacks({
         stateRootId: state.appServerStateRootId,
       }, state.snapshot, queuedMessageId);
     },
+    reloadNativeSession: () => reloadNativeSessionIntent({
+      attachmentResources,
+      backendConnection,
+      clientInstanceId,
+      createSnapshotRequestId,
+      dispatch,
+      postHostMessage,
+      stateRootId: state.appServerStateRootId,
+    }, state.snapshot),
     takeQueueMessage: (queuedMessageId) => {
       const taskId = state.snapshot?.task.task_id;
       if (!taskId) return;

@@ -261,6 +261,7 @@ function mapTaskPreparation(
 
 function mapHistorySync(sync: ProtocolTaskSnapshot["historySync"]): NonNullable<TaskSnapshot["history_sync"]> {
   switch (sync.state) {
+    case "reloadAvailable": return { state: "reloadAvailable", generation: sync.generation };
     case "syncing": return { state: "syncing", generation: sync.generation };
     case "updated": return { state: "updated", generation: sync.generation };
     case "idle": return { state: "idle", generation: sync.generation };

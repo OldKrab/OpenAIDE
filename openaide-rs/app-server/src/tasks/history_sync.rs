@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 
 use openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot;
 
-use crate::protocol::model::AgentListedSession;
 use crate::snapshots::task_snapshot::TaskHistorySyncSnapshotSource;
 use crate::tasks::task_operation::{PassiveTaskOperation, TaskOperationCoordinator};
 
@@ -15,7 +14,6 @@ mod tests;
 #[derive(Clone, Default)]
 pub(super) struct HistorySyncCoordinator {
     tasks: Arc<Mutex<HashMap<String, TaskSyncState>>>,
-    listings: NativeSessionCache,
     operations: TaskOperationCoordinator,
 }
 
@@ -42,7 +40,6 @@ impl HistorySyncCoordinator {
     pub(super) fn new(operations: TaskOperationCoordinator) -> Self {
         Self {
             tasks: Default::default(),
-            listings: Default::default(),
             operations,
         }
     }
@@ -52,39 +49,6 @@ impl HistorySyncCoordinator {
             .lock()
             .expect("history sync registry poisoned")
             .clear();
-    }
-
-    /// Returns only catalog state already refreshed outside Task opening.
-    pub(super) fn cached_session(
-        &self,
-        agent_id: &str,
-        workspace_root: &str,
-        session_id: &str,
-    ) -> Option<AgentListedSession> {
-        self.listings
-            .get(agent_id, workspace_root)
-            .into_iter()
-            .find(|session| session.session_id == session_id)
-    }
-
-    /// Merges one successful Native Session page into the shared catalog.
-    pub(super) fn record_listed_sessions(
-        &self,
-        agent_id: &str,
-        workspace_root: &str,
-        sessions: &[AgentListedSession],
-    ) {
-        self.listings.merge(agent_id, workspace_root, sessions);
-    }
-
-    /// Replaces one fully paged catalog only after the refresh succeeds.
-    pub(super) fn replace_listed_sessions(
-        &self,
-        agent_id: &str,
-        workspace_root: &str,
-        sessions: Vec<AgentListedSession>,
-    ) {
-        self.listings.replace(agent_id, workspace_root, sessions);
     }
 
     /// Registers one passive history-check generation.
@@ -147,6 +111,37 @@ impl HistorySyncCoordinator {
             .is_some_and(|state| state.generation == generation.value)
     }
 
+    /// Catalog observation does not acquire the session gate. It can surface a durable
+    /// possible-change hint while a direct resume finishes the current attachment.
+    pub(super) fn reload_available_snapshot(&self, task_id: &str) -> TaskHistorySyncSnapshot {
+        let generation = self
+            .tasks
+            .lock()
+            .expect("history sync registry poisoned")
+            .entry(task_id.to_string())
+            .or_default()
+            .generation;
+        TaskHistorySyncSnapshot::ReloadAvailable { generation }
+    }
+
+    /// Starts a user-approved replay after its caller has acquired the Task operation gate.
+    pub(super) fn begin_interactive(&self, task_id: &str) -> u64 {
+        let mut tasks = self.tasks.lock().expect("history sync registry poisoned");
+        let state = tasks.entry(task_id.to_string()).or_default();
+        state.generation = state.generation.wrapping_add(1);
+        state.in_flight_generation = Some(state.generation);
+        state.generation
+    }
+
+    pub(super) fn finish_interactive(&self, task_id: &str, generation: u64) {
+        let mut tasks = self.tasks.lock().expect("history sync registry poisoned");
+        if let Some(state) = tasks.get_mut(task_id) {
+            if state.in_flight_generation == Some(generation) {
+                state.in_flight_generation = None;
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn has_in_flight_generation(&self, task_id: &str) -> bool {
         self.tasks
@@ -183,63 +178,8 @@ impl TaskHistorySyncSnapshotSource for HistorySyncCoordinator {
 fn history_sync_generation(snapshot: &TaskHistorySyncSnapshot) -> u64 {
     match snapshot {
         TaskHistorySyncSnapshot::Idle { generation }
+        | TaskHistorySyncSnapshot::ReloadAvailable { generation }
         | TaskHistorySyncSnapshot::Syncing { generation }
         | TaskHistorySyncSnapshot::Updated { generation } => *generation,
-    }
-}
-
-#[derive(Clone, Default)]
-struct NativeSessionCache {
-    entries: Arc<Mutex<HashMap<CacheKey, Vec<AgentListedSession>>>>,
-}
-
-#[derive(Clone, Eq, Hash, PartialEq)]
-struct CacheKey {
-    agent_id: String,
-    workspace_root: String,
-}
-
-impl NativeSessionCache {
-    fn get(&self, agent_id: &str, workspace_root: &str) -> Vec<AgentListedSession> {
-        let key = CacheKey {
-            agent_id: agent_id.to_string(),
-            workspace_root: workspace_root.to_string(),
-        };
-        self.entries
-            .lock()
-            .expect("native session cache poisoned")
-            .get(&key)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn merge(&self, agent_id: &str, workspace_root: &str, sessions: &[AgentListedSession]) {
-        let key = CacheKey {
-            agent_id: agent_id.to_string(),
-            workspace_root: workspace_root.to_string(),
-        };
-        let mut entries = self.entries.lock().expect("native session cache poisoned");
-        let entry = entries.entry(key).or_default();
-        for session in sessions {
-            if let Some(existing) = entry
-                .iter_mut()
-                .find(|existing| existing.session_id == session.session_id)
-            {
-                *existing = session.clone();
-            } else {
-                entry.push(session.clone());
-            }
-        }
-    }
-
-    fn replace(&self, agent_id: &str, workspace_root: &str, sessions: Vec<AgentListedSession>) {
-        let key = CacheKey {
-            agent_id: agent_id.to_string(),
-            workspace_root: workspace_root.to_string(),
-        };
-        self.entries
-            .lock()
-            .expect("native session cache poisoned")
-            .insert(key, sessions);
     }
 }

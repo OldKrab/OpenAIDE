@@ -363,6 +363,25 @@ describe("TaskView timeline presentation", () => {
     expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
   });
 
+  it("offers an explicit reload when an inactive Task may have changed elsewhere", async () => {
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.task.status = "inactive";
+    snapshot.history_sync = { state: "reloadAvailable", generation: 3 };
+    const onReloadNativeSession = vi.fn().mockResolvedValue(undefined);
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot)} onReloadNativeSession={onReloadNativeSession} />);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("This Task may have changed elsewhere.");
+    await act(async () => {
+      tree.root.findByProps({ "aria-label": "Reload Task from Agent" }).props.onClick();
+    });
+    expect(onReloadNativeSession).toHaveBeenCalledTimes(1);
+  });
+
   it("presents a bare waiting fallback as blocked instead of working", async () => {
     const { TaskView } = await import("./TaskView");
     const waiting = snapshotWithAuthoritativeTail(true);

@@ -35,7 +35,7 @@ export type NativeSessionsState = {
   loaded: boolean;
   nextCursor?: string;
   error?: string;
-  adoptionError?: { sessionId: string; message: string };
+  adoptionError?: { sessionId: string; message: string; recoverable?: boolean };
   recoveryKind?: "nodeJsRequired" | "authRequired" | "setupRequired" | "launchFailed";
   adoptingSessionId?: string;
 };

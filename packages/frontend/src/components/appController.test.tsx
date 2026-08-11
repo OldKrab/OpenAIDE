@@ -348,6 +348,57 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
+  it("retries a Native Session route that was in use elsewhere", async () => {
+    bootstrap = nativeSessionBootstrap("codex", "busy_session");
+    let adoptionAttempts = 0;
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === TASK_ADOPT_NATIVE_SESSION) {
+        adoptionAttempts += 1;
+        if (adoptionAttempts === 1) {
+          throw new AppServerProtocolError({
+            error: {
+              code: "conflict",
+              message: "Native Session is currently in use elsewhere",
+              recoverable: true,
+            },
+          });
+        }
+        return { task: protocolTaskSnapshot("task_adopted", "Recovered session") };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.newTask.nativeSessions.adoptionError?.message).toContain(
+      "currently in use elsewhere",
+    );
+
+    await act(async () => {
+      latestController?.retryNativeSessionOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_ADOPT_NATIVE_SESSION)).toHaveLength(2);
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "surface.openTask",
+      payload: { task_id: "task_adopted", title: "Recovered session" },
+    });
+  });
+
   it("opens a task without coupling navigation to Native Session listing", async () => {
     bootstrap = navigationBootstrap({ projectId: "project_1" });
     const request = vi.fn(async (method: string) => {

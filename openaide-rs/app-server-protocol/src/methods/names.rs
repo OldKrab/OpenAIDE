@@ -73,6 +73,7 @@ pub const TASK_CLOSE_PLAN: &str = "task/closePlan";
 pub const TASK_TOOL_IMAGE_PREVIEW: &str = "task/toolImagePreview";
 pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
+pub const TASK_RELOAD_NATIVE_SESSION: &str = "task/reloadNativeSession";
 pub const TASK_MARK_READ: &str = "task/markRead";
 pub const TASK_CHAT_PAGE: &str = "task/chatPage";
 pub const TASK_COMPOSER_HISTORY: &str = "task/composerHistory";

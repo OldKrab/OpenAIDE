@@ -127,6 +127,7 @@ export type TaskContextUsage = {
 
 export type HistorySyncState =
   | { state: "idle"; generation: number }
+  | { state: "reloadAvailable"; generation: number }
   | { state: "syncing"; generation: number }
   | { state: "updated"; generation: number };
 

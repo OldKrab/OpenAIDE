@@ -72,6 +72,7 @@ impl TaskProductApi {
             revision: 0,
             config_options_catalog: None,
             native_session_data_freshness: Default::default(),
+            native_session_reload_requirement: None,
             config_mutation: Default::default(),
             agent_commands_catalog: None,
             context_usage: None,

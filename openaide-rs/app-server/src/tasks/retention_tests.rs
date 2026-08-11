@@ -299,6 +299,7 @@ fn task_record(task_id: &str, workspace: &str, activity: String) -> TaskRecord {
         revision: 1,
         config_options_catalog: None,
         native_session_data_freshness: Default::default(),
+        native_session_reload_requirement: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

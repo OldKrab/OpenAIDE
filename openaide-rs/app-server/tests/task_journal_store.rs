@@ -1294,6 +1294,7 @@ fn task_projection(task_id: &str) -> TaskProjection {
             revision: 1,
             config_options_catalog: None,
             native_session_data_freshness: Default::default(),
+            native_session_reload_requirement: None,
             config_mutation: TaskConfigMutationState::default(),
             agent_commands_catalog: None,
             context_usage: None,

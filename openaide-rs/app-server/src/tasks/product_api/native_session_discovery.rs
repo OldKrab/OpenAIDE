@@ -164,12 +164,6 @@ impl TaskProductApi {
                     &sessions,
                     &task_records,
                 )?;
-                self.history_sync.replace_listed_sessions(
-                    &agent.id,
-                    &workspace_root,
-                    sessions.clone(),
-                );
-                self.refresh_subscribed_task_histories(&agent.id, &workspace_root, &task_records);
             }
             if stopped_with_more {
                 break;
