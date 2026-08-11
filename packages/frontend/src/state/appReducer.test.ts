@@ -2526,7 +2526,7 @@ function permissionMessage(requestId: string): PermissionChatMessage {
       },
       state: "pending",
       created_at: "2026-05-17T00:00:00Z",
-      options: [{ id: "allow_once", label: "Allow Once", kind: "allow" }],
+      options: [{ id: "allow_once", label: "Allow Once", kind: "allow_once" }],
     },
   };
 }

@@ -501,7 +501,23 @@ describe("TaskView timeline presentation", () => {
         tool_call: { id: "tool-pending", title: "Final command", kind: "execute" },
         state: "pending",
         created_at: "2026-07-13T00:00:04Z",
-        options: [{ id: "allow", label: "Allow", kind: "allow" }],
+        options: [{ id: "allow", label: "Allow", kind: "allow_once" }],
+      },
+    }, {
+      cursor: "pending-request-2",
+      identity: "pending-request-2",
+      message_id: "pending-request-2",
+      message_type: "permission",
+      message: {
+        kind: "permission",
+        id: "pending-request-2",
+        request_id: "request-2",
+        app_server_request_id: "request-2",
+        title: "Approve final command again",
+        tool_call: { id: "tool-pending", title: "Final command", kind: "execute" },
+        state: "pending",
+        created_at: "2026-07-13T00:00:05Z",
+        options: [{ id: "allow", label: "Allow", kind: "allow_once" }],
       },
     }];
 
@@ -512,6 +528,9 @@ describe("TaskView timeline presentation", () => {
 
     const rendered = JSON.stringify(tree.toJSON());
     expect(rendered.indexOf("Final command")).toBeGreaterThan(rendered.indexOf("Latest update"));
+    expect(rendered.match(/Approval required/g)).toHaveLength(1);
+    const queueLabel = tree.root.findByProps({ className: "permission-queue" });
+    expect(queueLabel.children.join("")).toBe("1 more pending");
   });
 
   it("keeps a draft editable while the Task subscription reconnects", async () => {

@@ -1,30 +1,45 @@
-import { Check, CircleX, Clock3, Folder, LoaderCircle } from "lucide-react";
-import type { NormalizedMessage, PermissionOption } from "@openaide/app-shell-contracts";
+import { Check, CheckCheck, CircleAlert, CircleX, Folder, LoaderCircle, ShieldCheck, ShieldX, X } from "lucide-react";
+import type { ActivityStep, ActivityToolDetails, NormalizedMessage, PermissionOption, PermissionOptionKind } from "@openaide/app-shell-contracts";
+import type { ToolImagePreview } from "@openaide/app-server-client";
 import { toolKindClass } from "../state/toolDetailsViewModel";
+import { ActivityStepRow } from "./ChatActivityView";
 import { toolKindIcon } from "./chatToolIcons";
 
+type ToolStep = Extract<ActivityStep, { kind: "tool" }>;
+
 export function ChatPermissionCard({
+  onLoadToolImagePreview,
   onRespond,
+  onSubscribeToolDetail,
   permission,
+  queued = 0,
+  relatedTool,
   response,
+  taskId,
+  toolDetails,
 }: {
   permission: Extract<NormalizedMessage, { kind: "permission" }>;
+  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  queued?: number;
+  relatedTool?: ToolStep;
   response?: { responding: boolean; error?: string };
   onRespond: (
     requestId: string,
     optionId: string,
   ) => void;
+  onSubscribeToolDetail?: (artifactId: string) => () => void;
+  taskId?: string;
+  toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
 }) {
   const selected = permission.options.find((option) => option.id === permission.selected_option);
   const terminal = permission.state === "resolved" || permission.state === "cancelled";
   const approved = permission.state === "resolved" && permission.decision === "approved";
   const responding = response?.responding ?? false;
   const resolution = terminal ? permissionResolutionLabel(permission, selected) : undefined;
-  const statusLabel = terminal ? resolution?.status : responding ? "Sending response" : "Waiting";
   const display = permissionDisplay(permission);
   const showCommand = Boolean(display.chip && display.chip !== display.title);
   const showFacts = Boolean(permission.scope || permission.risk);
-  const showBody = Boolean(display.description || showCommand || showFacts || response?.error || !terminal);
+  const showBody = !terminal || Boolean(display.description || showCommand || showFacts || response?.error);
 
   const respond = (option: PermissionOption, action?: HTMLButtonElement) => {
     if (responding || terminal) return;
@@ -41,43 +56,57 @@ export function ChatPermissionCard({
 
   return (
     <section
-      className={`permission-card tool-${toolKindClass(permission.tool_call.kind ?? "other")} ${terminal ? "resolved" : ""}`}
+      className={`permission-card tool-${toolKindClass(permission.tool_call.kind ?? "other")} ${terminal ? "resolved" : "pending"}`}
       aria-label="Permission request"
       tabIndex={-1}
     >
       <header className="permission-head">
         <span className="permission-icon" aria-hidden="true">
-          {toolKindIcon(permission.tool_call.kind, 14)}
-        </span>
-        <span className="permission-title">
-          <strong>{display.title}</strong>
+          {terminal ? toolKindIcon(permission.tool_call.kind, 14) : <ShieldCheck size={14} />}
         </span>
         <span
-          aria-atomic="true"
-          aria-live="polite"
-          className={`permission-state ${
-            responding ? "responding" : terminal ? (approved ? "approved" : permission.state === "cancelled" ? "cancelled" : "denied") : "waiting"
-          }`}
-          role="status"
+          aria-atomic={!terminal && !responding ? "true" : undefined}
+          aria-live={!terminal && !responding ? "polite" : undefined}
+          className="permission-title"
+          role={!terminal && !responding ? "status" : undefined}
         >
-          {responding ? (
-            <LoaderCircle size={14} aria-hidden="true" />
-          ) : terminal ? (
-            approved ? (
-              <Check size={14} aria-hidden="true" />
-            ) : (
-              <CircleX size={14} aria-hidden="true" />
-            )
-          ) : (
-            <Clock3 size={14} aria-hidden="true" />
-          )}
-          {terminal || responding ? statusLabel : "Approval required"}
+          <strong>{terminal ? display.title : "Approval required"}</strong>
         </span>
+        {responding || terminal ? (
+          <span
+            aria-atomic="true"
+            aria-live="polite"
+            className={`permission-state ${responding ? "responding" : approved ? "approved" : permission.state === "cancelled" ? "cancelled" : "denied"}`}
+            role="status"
+          >
+            {responding
+              ? <LoaderCircle size={14} aria-hidden="true" />
+              : approved
+                ? <Check size={14} aria-hidden="true" />
+                : <CircleX size={14} aria-hidden="true" />}
+            {responding ? "Sending response" : resolution?.status}
+          </span>
+        ) : queued > 0 ? <small className="permission-queue">{queued} more pending</small> : null}
       </header>
       {showBody ? (
         <div className="permission-body">
-          {display.description ? <p>{display.description}</p> : null}
-          {showCommand ? <code className="execute-command-chip">&gt;_ {display.chip}</code> : null}
+          {!terminal ? (
+            relatedTool && taskId ? (
+              <div className="permission-tool-context">
+                <ActivityStepRow
+                  onLoadToolImagePreview={onLoadToolImagePreview}
+                  onSubscribeToolDetail={onSubscribeToolDetail}
+                  step={relatedTool}
+                  taskId={taskId}
+                  toolDetails={toolDetails}
+                />
+              </div>
+            ) : <PermissionToolSummary permission={permission} />
+          ) : null}
+          {(terminal ? display.description : permission.description) ? (
+            <p>{terminal ? display.description : permission.description}</p>
+          ) : null}
+          {terminal && showCommand ? <code className="execute-command-chip">&gt;_ {display.chip}</code> : null}
           {showFacts ? (
             <dl className="permission-facts">
               {permission.scope ? (
@@ -98,24 +127,46 @@ export function ChatPermissionCard({
             </dl>
           ) : null}
           {!terminal ? (
-            <div className="permission-actions" aria-label="Permission options">
-              {permission.options.map((option) => (
-                <button
-                  key={option.id}
-                  className={option.kind === "deny" ? "deny" : option.id.includes("amendment") ? "remember" : "allow"}
-                  disabled={responding || !permissionDecisionForOption(option)}
-                  onClick={(event) => respond(option, event.currentTarget)}
-                  type="button"
-                >
-                  {option.label}
-                </button>
-              ))}
+            <div className="permission-decision">
+              <span className="permission-prompt">Choose how the Agent may continue</span>
+              <div className="permission-actions" aria-label="Permission options">
+                {permission.options.map((option) => (
+                  <button
+                    key={option.id}
+                    className={`permission-option permission-option-${option.kind ?? "other"}`}
+                    disabled={responding || !permissionDecisionForOption(option)}
+                    onClick={(event) => respond(option, event.currentTarget)}
+                    type="button"
+                  >
+                    <span className="permission-option-icon" aria-hidden="true">
+                      {permissionOptionIcon(option.kind)}
+                    </span>
+                    <strong><PermissionOptionLabel label={option.label} /></strong>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
           {response?.error ? <p className="permission-error" role="alert">{response.error}</p> : null}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function PermissionToolSummary({
+  permission,
+}: {
+  permission: Extract<NormalizedMessage, { kind: "permission" }>;
+}) {
+  const title = (permission.tool_call.title || permission.title).trim() || "Tool call";
+  return (
+    <div className="permission-tool-summary">
+      <span aria-hidden="true">{toolKindIcon(permission.tool_call.kind, 13)}</span>
+      {permission.tool_call.kind === "execute"
+        ? <code>{title}</code>
+        : <span>{title}</span>}
+    </div>
   );
 }
 
@@ -183,7 +234,23 @@ function commandFromPermissionOptions(options: PermissionOption[]) {
 }
 
 export function permissionDecisionForOption(option: PermissionOption): "approved" | "denied" | undefined {
-  if (option.kind === "allow") return "approved";
-  if (option.kind === "deny") return "denied";
+  if (option.kind === "allow_once" || option.kind === "allow_always") return "approved";
+  if (option.kind === "reject_once" || option.kind === "reject_always") return "denied";
   return undefined;
+}
+
+function permissionOptionIcon(kind: PermissionOptionKind | undefined) {
+  if (kind === "allow_once") return <Check size={14} />;
+  if (kind === "allow_always") return <CheckCheck size={14} />;
+  if (kind === "reject_once") return <X size={14} />;
+  if (kind === "reject_always") return <ShieldX size={14} />;
+  return <CircleAlert size={14} />;
+}
+
+function PermissionOptionLabel({ label }: { label: string }) {
+  return label.split(/(`[^`]+`)/g).filter(Boolean).map((part, index) => (
+    part.startsWith("`") && part.endsWith("`")
+      ? <code key={`${part}:${index}`}>{part.slice(1, -1)}</code>
+      : <span key={`${part}:${index}`}>{part}</span>
+  ));
 }
