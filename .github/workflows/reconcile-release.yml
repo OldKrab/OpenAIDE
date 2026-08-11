@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Existing OpenAIDE version to reconcile, without v"
+        description: "Existing stable OpenAIDE version to reconcile, without v"
         type: string
         required: true
 
@@ -29,13 +29,17 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      - name: Require an immutable canonical release
+      - name: Require a stable version and immutable canonical release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           node scripts/release-version.mjs tag "v$RELEASE_VERSION"
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            echo "Registries only receive stable OpenAIDE releases" >&2
+            exit 1
+          fi
           immutable="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$RELEASE_VERSION" --jq .immutable)"
           if [[ "$immutable" != "true" ]]; then
             echo "Canonical GitHub release v$RELEASE_VERSION is not immutable" >&2
@@ -44,7 +48,6 @@ jobs:
 
   marketplace:
     name: Reconcile VS Code Marketplace
-    if: ${{ !contains(inputs.version, '-') }}
     needs: validate
     runs-on: ubuntu-24.04
     steps:

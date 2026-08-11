@@ -142,6 +142,7 @@ jobs:
 
   open-vsx:
     name: Reconcile Open VSX packages
+    if: ${{ !contains(github.ref_name, '-') }}
     needs: [validate, github-release]
     runs-on: ubuntu-24.04
     steps:
