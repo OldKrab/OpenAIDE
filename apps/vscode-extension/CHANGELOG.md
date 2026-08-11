@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.3-alpha.1 - 2026-08-11
+
+### Features
+
+- Add copy actions to Markdown quotes while preserving their Markdown formatting.
+- Improve ACP permission requests with distinct decision types, grouped repeats, and complete Tool details including edit diffs.
+
+### Bug Fixes
+
+- Make Native Session recovery explicit, restore controls sooner, and provide clear reload and retry paths for stale history or active-writer conflicts.
+- Keep Agent links clickable while responses stream.
+- Hide the queue action when the queue is empty and fix Plan panel scrolling.
+
+### Chores
+
+- Publish prereleases to Open VSX with native prerelease metadata while keeping the Microsoft Marketplace stable-only.
+- Automate the extension changelog and update the Rust futures dependency.
+
 ## 0.0.2 - 2026-08-09
 
 ### Features
