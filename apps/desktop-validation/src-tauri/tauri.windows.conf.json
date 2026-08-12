@@ -19,7 +19,8 @@
     "icon": ["icons/windows/icon.ico"],
     "windows": {
       "nsis": {
-        "installerIcon": "icons/windows/installer.ico"
+        "installerIcon": "icons/windows/installer.ico",
+        "uninstallerIcon": "icons/windows/installer.ico"
       }
     },
     "resources": {

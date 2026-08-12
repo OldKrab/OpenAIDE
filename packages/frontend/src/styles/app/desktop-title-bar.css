@@ -46,6 +46,18 @@
 
 .desktop-title-bar-content {
   min-width: 0;
+  display: grid;
+  place-items: center;
+}
+
+.desktop-title-bar-label {
+  overflow: hidden;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .desktop-title-bar-native-end {

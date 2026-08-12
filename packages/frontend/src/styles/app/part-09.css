@@ -306,8 +306,9 @@
 }
 
 .desktop-runtime-choices {
-  width: min(100%, 640px);
+  width: 100%;
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border: 1px solid var(--oa-border);
   border-radius: var(--oa-radius-md);
   background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));
@@ -331,7 +332,7 @@
 }
 
 .desktop-runtime-choices button + button {
-  border-top: 1px solid var(--oa-border);
+  border-left: 1px solid var(--oa-border);
 }
 
 .desktop-runtime-choices button:hover:not(:disabled) {
@@ -340,7 +341,6 @@
 }
 
 .desktop-runtime-choices button:focus-visible,
-.desktop-runtime-confirm-actions button:focus-visible,
 .desktop-runtime-distro select:focus-visible {
   outline: 2px solid var(--oa-focus);
   outline-offset: -2px;
@@ -351,8 +351,12 @@
   color: var(--oa-text);
 }
 
-.desktop-runtime-choices button:disabled {
+.desktop-runtime-choices button:disabled:not(.selected):not([aria-busy="true"]) {
   opacity: 0.46;
+}
+
+.desktop-runtime-choices button[aria-busy="true"] {
+  cursor: progress;
 }
 
 .desktop-runtime-choice-icon {
@@ -431,80 +435,8 @@
   color: var(--oa-warning);
 }
 
-.desktop-runtime-confirm {
-  width: min(100%, 640px);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  border-radius: var(--oa-radius-md);
-  background: var(--oa-raised);
-  padding: 12px;
-}
-
-.desktop-runtime-confirm > span:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.desktop-runtime-confirm strong {
-  font-size: 13px;
-  font-weight: 630;
-}
-
-.desktop-runtime-confirm small {
-  max-width: 52ch;
-  color: var(--oa-muted);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.desktop-runtime-confirm-actions {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 7px;
-}
-
-.desktop-runtime-confirm-actions button {
-  min-height: 30px;
-  border: 1px solid var(--oa-border);
-  border-radius: var(--oa-radius-sm);
-  background: var(--oa-panel);
-  color: var(--oa-text);
-  padding: 5px 9px;
-  font-size: 12px;
-  font-weight: 570;
-}
-
-.desktop-runtime-confirm-actions button:hover:not(:disabled) {
-  border-color: var(--oa-border-strong);
-  background: var(--oa-selected);
-}
-
-.desktop-runtime-confirm-actions button.primary {
-  border-color: var(--oa-focus);
-  background: var(--oa-focus);
-  color: white;
-}
-
-.desktop-runtime-confirm-actions button:disabled {
-  opacity: 0.55;
-}
-
 .desktop-runtime-settings > p.desktop-runtime-error {
   color: var(--oa-danger);
-}
-
-@media (max-width: 720px) {
-  .desktop-runtime-confirm {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .desktop-runtime-confirm-actions {
-    justify-content: flex-end;
-  }
 }
 
 .general-theme-choice {

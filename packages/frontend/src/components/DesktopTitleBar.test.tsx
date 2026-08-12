@@ -19,6 +19,7 @@ describe("DesktopTitleBar", () => {
 
     expect(tree.root.findAllByProps({ "aria-haspopup": "menu" })).toHaveLength(0);
     expect(tree.root.findByProps({ "aria-label": "Window controls" })).toBeTruthy();
+    expect(tree.root.findByProps({ className: "desktop-title-bar-label" }).props.children).toBe("OpenAIDE");
 
     act(() => tree.root.findByProps({ className: "desktop-title-bar-content" }).props.onDoubleClick(mouseEvent(2)));
     expect(windowControls.toggleMaximize).toHaveBeenCalledOnce();

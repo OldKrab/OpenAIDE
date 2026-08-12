@@ -29,7 +29,9 @@ export function DesktopTitleBar({
       className={`desktop-title-bar desktop-title-bar-${desktopWindow.platform}`}
     >
       <div className="desktop-title-bar-sidebar" {...dragRegionProps} />
-      <div className="desktop-title-bar-content" {...dragRegionProps} />
+      <div className="desktop-title-bar-content" {...dragRegionProps}>
+        {windowsChrome ? <span className="desktop-title-bar-label">OpenAIDE</span> : null}
+      </div>
       {windowsChrome ? (
         <div className="desktop-caption-buttons" aria-label="Window controls">
           <button aria-label="Minimize" onClick={() => void desktopWindow.minimize()} type="button"><Minus size={14} /></button>
