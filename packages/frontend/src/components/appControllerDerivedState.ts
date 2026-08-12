@@ -25,7 +25,6 @@ export function deriveAppControllerState(
   navigationFocusedTaskId?: string | null,
 ): AppControllerDerivedState {
   const activeTask = state.tasks.find((task) => task.task_id === state.activeTaskId);
-  const filteredTasks = visibleTasks(state.tasks, state.searchQuery);
   const navigationTask = navigationFocusedTaskId === undefined
     ? activeTask
     : navigationFocusedTaskId === null
@@ -36,9 +35,7 @@ export function deriveAppControllerState(
     activeTask,
     activeNavigationTaskId: navigationTaskShouldStayVisible ? navigationTask.task_id : undefined,
     hasActiveTask: activeTask !== undefined,
-    visibleTasks: navigationTaskShouldStayVisible && !filteredTasks.some((task) => task.task_id === navigationTask.task_id)
-      ? [...filteredTasks, navigationTask]
-      : filteredTasks,
+    visibleTasks: visibleTasks(state.tasks, state.searchQuery),
   };
 }
 

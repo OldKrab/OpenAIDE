@@ -283,6 +283,14 @@ body[data-input-modality="pointer"] button:focus-visible {
     font-size: 16px;
   }
 
+  body[data-shell="web"] .sidebar-search .sidebar-search-clear {
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+    margin-right: -6px;
+  }
+
   body[data-shell="web"] .project-task-group-header {
     min-height: 44px;
     height: auto;

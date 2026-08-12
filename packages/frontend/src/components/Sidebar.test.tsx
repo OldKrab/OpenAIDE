@@ -793,6 +793,62 @@ describe("SidebarNativeSessionRow", () => {
 });
 
 describe("Sidebar", () => {
+  it("offers a clear action and identifies filtered task results", () => {
+    const onSearchChange = vi.fn();
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchChange={onSearchChange}
+        searchQuery="release"
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    expect(tree.root.findByProps({ className: "task-section-title" }).children.join("")).toBe("Search results");
+    expect(tree.root.findByProps({ className: "task-list" }).props["aria-label"]).toBe("Task search results");
+
+    act(() => tree.root.findByProps({ "aria-label": "Clear task search" }).props.onClick());
+
+    expect(onSearchChange).toHaveBeenCalledWith("");
+  });
+
+  it("hides the clear action and restores the task-list label without a query", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ "aria-label": "Clear task search" })).toHaveLength(0);
+    expect(tree.root.findByProps({ className: "task-section-title" }).children.join("")).toBe("Tasks");
+    expect(tree.root.findByProps({ className: "task-list" }).props["aria-label"]).toBe("Tasks");
+  });
+
+  it("identifies and clears filtered archive results", () => {
+    const onSearchChange = vi.fn();
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchChange={onSearchChange}
+        searchQuery="release"
+        showArchived={true}
+        tasks={[]}
+      />,
+    );
+
+    expect(tree.root.findByType("small").children).toEqual(["Search results"]);
+    expect(tree.root.findByProps({ className: "task-list" }).props["aria-label"]).toBe("Archive search results");
+
+    act(() => tree.root.findByProps({ "aria-label": "Clear archive search" }).props.onClick());
+    expect(onSearchChange).toHaveBeenCalledWith("");
+  });
+
   it("exposes when scrolled task content continues above the visible list", () => {
     const taskList = { clientHeight: 120, scrollHeight: 360, scrollTop: 0 };
     const tree = render(
@@ -1614,33 +1670,6 @@ describe("Sidebar", () => {
 
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
     expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
-  });
-
-  it("explains when search keeps the selected task visible outside the match set", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        activeTaskId="task_1"
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        searchQuery="billing"
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_1",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            title: "Selected task",
-          }),
-        ]}
-      />,
-    );
-
-    expect(tree.root.findByProps({ className: "search-context-note" }).children.join("")).toBe(
-      "Selected task is shown outside the search results.",
-    );
-    expect(rowTitles(tree)).toEqual(["Selected task"]);
   });
 
   it("renders native sessions inside the selected project group in grouped mode", () => {

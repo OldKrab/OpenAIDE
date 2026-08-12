@@ -61,15 +61,6 @@ export function groupedTasks(
   );
 }
 
-export function taskMatchesSearch(task: TaskSummary, query: string) {
-  return [
-    task.title,
-    task.agent_name,
-    task.project_label,
-    task.workspace_root,
-  ].some((value) => value?.toLowerCase().includes(query));
-}
-
 export function projectGroupRows(tasks: TaskSummary[], sessions: AgentListedSession[]): SidebarProjectRow[] {
   return [
     ...tasks.map((task) => ({ kind: "task" as const, task, timestamp: taskNavigationTimestamp(task) })),

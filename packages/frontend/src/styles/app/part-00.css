@@ -218,6 +218,15 @@ body[data-shell="web"] .sidebar {
   color: var(--oa-text);
 }
 
+.sidebar-search.search-active {
+  border-color: color-mix(in oklch, var(--oa-focus) 42%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-focus) 8%, var(--oa-raised));
+}
+
+.sidebar-search.search-active > svg {
+  color: var(--oa-focus);
+}
+
 .sidebar-search input {
   min-width: 0;
   width: 100%;
@@ -230,6 +239,27 @@ body[data-shell="web"] .sidebar {
 
 .sidebar-search input::placeholder {
   color: var(--oa-muted);
+}
+
+.sidebar-search .sidebar-search-clear {
+  width: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.sidebar-search .sidebar-search-clear:hover,
+.sidebar-search .sidebar-search-clear:focus-visible {
+  background: var(--oa-raised);
+  color: var(--oa-text);
 }
 
 .sidebar-footer {

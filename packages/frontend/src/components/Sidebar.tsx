@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import { Archive, ArrowLeft, FolderPlus, Plus, RefreshCcw, Search, Settings } from "lucide-react";
+import { Archive, ArrowLeft, FolderPlus, Plus, RefreshCcw, Search, Settings, X } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
 import { taskForkMutationKey, type AppState } from "../state/store";
@@ -10,7 +10,7 @@ import {
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
-import { groupedTasks, projectGroupRows, recentVisibleGroups, taskMatchesSearch } from "./sidebarProjectModel";
+import { groupedTasks, projectGroupRows, recentVisibleGroups } from "./sidebarProjectModel";
 import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
@@ -112,6 +112,7 @@ export const Sidebar = memo(function Sidebar({
   showNativeSessions = true,
 }: SidebarProps) {
   const taskListRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const taskListOverflow = useScrollOverflow(taskListRef, showArchived);
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
   const [projectRowLimits, setProjectRowLimits] = useState<Map<string, number>>(() => new Map());
@@ -132,10 +133,9 @@ export const Sidebar = memo(function Sidebar({
     showNativeSessions ? viewModel.visibleNativeSessions : [],
   );
   const groupSearchQuery = searchQuery.trim().toLowerCase();
+  const hasSearchInput = searchQuery.length > 0;
   const hasSearchQuery = groupSearchQuery.length > 0;
   const activeTask = activeTaskId ? tasks.find((task) => task.task_id === activeTaskId) : undefined;
-  const activeTaskShownOutsideSearch =
-    hasSearchQuery && activeTask !== undefined && !taskMatchesSearch(activeTask, groupSearchQuery);
   const groups = groupedTasks(tasks, projects, {
     includeProjectId: nativeSessionProjectId,
     includedProjectSessions:
@@ -176,7 +176,10 @@ export const Sidebar = memo(function Sidebar({
         <div className="archive-section-head">
           <button aria-label="Back to tasks" onClick={onToggleArchived} type="button"><ArrowLeft size={15} /></button>
           <Archive size={15} />
-          <span><strong>Archive</strong><small>Tasks and Native Sessions</small></span>
+          <span>
+            <strong>Archive</strong>
+            <small>{hasSearchQuery ? "Search results" : "Tasks and Native Sessions"}</small>
+          </span>
         </div>
       ) : null}
       <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
@@ -184,19 +187,36 @@ export const Sidebar = memo(function Sidebar({
           <Plus size={15} />
           New task
         </button> : null}
-        <label className="sidebar-search">
+        <div className={`sidebar-search ${hasSearchQuery ? "search-active" : ""}`}>
           <Search size={15} />
           <input
             aria-label={showArchived ? "Search archive" : "Search tasks"}
             disabled={noProjects}
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={showArchived ? "Search archive" : "Search"}
+            ref={searchInputRef}
             value={searchQuery}
           />
-        </label>
+          {hasSearchInput ? (
+            <button
+              aria-label={showArchived ? "Clear archive search" : "Clear task search"}
+              className="sidebar-search-clear"
+              onClick={() => {
+                onSearchChange("");
+                searchInputRef.current?.focus();
+              }}
+              title="Clear search"
+              type="button"
+            >
+              <X size={13} />
+            </button>
+          ) : null}
+        </div>
       </div>
       {!showArchived ? <div className="task-section-head">
-        <span className="task-section-title">Tasks</span>
+        <span aria-live="polite" className="task-section-title">
+          {hasSearchQuery ? "Search results" : "Tasks"}
+        </span>
         {showSessionRefresh ? (
           <span className="task-section-tools">
             <button
@@ -220,7 +240,9 @@ export const Sidebar = memo(function Sidebar({
       ><div
         className="task-list"
         role="list"
-        aria-label={showArchived ? "Archived tasks" : "Tasks"}
+        aria-label={hasSearchQuery
+          ? showArchived ? "Archive search results" : "Task search results"
+          : showArchived ? "Archived tasks" : "Tasks"}
         onScroll={taskListOverflow.onScroll}
         ref={taskListRef}
       >
@@ -231,9 +253,6 @@ export const Sidebar = memo(function Sidebar({
         {!showWorkspaceSetup && showEmptyState
           ? <p className="empty-list">{viewModel.emptyMessage}</p>
           : null}
-        {!showWorkspaceSetup && activeTaskShownOutsideSearch ? (
-          <p className="search-context-note">Selected task is shown outside the search results.</p>
-        ) : null}
         {!showWorkspaceSetup && !showArchived && showNativeSessions && nativeSessions.error ? (
           <div className="native-session-recovery" role="status">
             <span>{nativeSessions.error}</span>

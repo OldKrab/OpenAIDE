@@ -309,15 +309,6 @@ body[data-shell="web"] .task-list {
   margin: 8px;
 }
 
-.search-context-note {
-  border-left: 2px solid color-mix(in oklch, var(--oa-focus) 45%, var(--oa-border));
-  color: color-mix(in oklch, var(--oa-muted) 86%, var(--oa-text));
-  font-size: 12px;
-  line-height: 1.35;
-  margin: 7px 8px 5px;
-  padding: 2px 0 2px 8px;
-}
-
 .task-row {
   position: relative;
   min-width: 0;
