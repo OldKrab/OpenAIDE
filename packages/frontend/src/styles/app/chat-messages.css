@@ -289,9 +289,9 @@
 
 .chat-agent blockquote {
   border-left: 1px solid var(--oa-border);
-  /* App Shell host styles must not turn quoted Agent text into a filled panel. */
+  /* Keep quotes secondary without inheriting an unreadably dim host description color. */
   background: transparent;
-  color: var(--oa-muted);
+  color: color-mix(in oklch, var(--oa-text) 82%, var(--oa-muted));
   padding-left: 10px;
 }
 
