@@ -3,6 +3,7 @@ import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertNoPrereleaseChangelogEntries } from "./update-extension-changelog.mjs";
 
 const REQUIRED_EXTENSION_FILES = [
   // VSCE normalizes the conventional changelog asset to lowercase in VSIX archives.
@@ -27,6 +28,7 @@ export async function smokeReleaseVsix({ extensionRoot, version, target, binaryN
   for (const relativePath of REQUIRED_EXTENSION_FILES) {
     await access(path.join(extensionRoot, relativePath));
   }
+  assertNoPrereleaseChangelogEntries(await readFile(path.join(extensionRoot, "changelog.md"), "utf8"));
 
   const appServerDirectory = path.join(extensionRoot, "dist", "app-server");
   const entries = (await readdir(appServerDirectory)).toSorted();

@@ -72,6 +72,27 @@ test("accepts a stable package without prerelease metadata", async () => {
   }
 });
 
+test("rejects packaged changelogs containing prerelease release notes", async () => {
+  const fixture = await fixtureVsix({ version: "0.1.0", preRelease: false });
+  try {
+    await writeFile(
+      path.join(fixture.extensionRoot, "changelog.md"),
+      "# Changelog\n\n## 0.1.0 - 2026-08-12\n\nStable.\n\n## 0.1.0-alpha.1 - 2026-08-11\n\nAlpha.\n",
+    );
+    await assert.rejects(
+      smokeReleaseVsix({
+        extensionRoot: fixture.extensionRoot,
+        version: "0.1.0",
+        target: "linux-x64",
+        binaryName: "openaide-app-server",
+      }),
+      /must not contain prerelease entries/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 async function fixtureVsix({ version = "0.0.2-beta.1", preRelease = true } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-vsix-fixture-"));
   const extensionRoot = path.join(root, "extension");

@@ -58,6 +58,30 @@ test("prepends the new release without discarding history", () => {
   );
 });
 
+test("removes legacy prerelease entries when adding a stable release", () => {
+  const updated = prependExtensionChangelogEntry({
+    changelog: [
+      "# Changelog",
+      "",
+      "## 0.1.0-alpha.1 - 2026-08-11",
+      "",
+      "Testing notes.",
+      "",
+      "## 0.0.2 - 2026-08-09",
+      "",
+      "Previous stable notes.",
+      "",
+    ].join("\n"),
+    entry: "## 0.1.0 - 2026-08-12\n\nStable notes.",
+    version: "0.1.0",
+  });
+
+  assert.equal(
+    updated,
+    "# Changelog\n\n## 0.1.0 - 2026-08-12\n\nStable notes.\n\n## 0.0.2 - 2026-08-09\n\nPrevious stable notes.\n",
+  );
+});
+
 test("rejects duplicate versions and malformed changelog files", () => {
   const entry = "## 0.0.2 - 2026-08-09\n\nNotes.";
   assert.throws(
