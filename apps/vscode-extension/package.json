@@ -41,6 +41,13 @@
     "onCommand:openaide.recoverStuckSessions"
   ],
   "contributes": {
+    "configurationDefaults": {
+      "remote.extensionKind": {
+        "openaide.openaide-vscode-extension": [
+          "workspace"
+        ]
+      }
+    },
     "commands": [
       {
         "command": "openaide.newTask",

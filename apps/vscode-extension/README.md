@@ -1,5 +1,11 @@
 # OpenAIDE for VS Code
 
+OpenAIDE runs as a workspace extension. In remote windows such as WSL, SSH, and
+Dev Containers, its App Server and Agent processes run with the remote
+workspace. The extension also contributes an explicit remote-placement default
+so clients migrate installations created before OpenAIDE declared its workspace
+extension kind.
+
 OpenAIDE brings coding agents into a VS Code-native task workspace. Follow what
 they do, approve sensitive actions, and return to saved task history without
 leaving your editor.
