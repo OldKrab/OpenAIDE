@@ -180,6 +180,43 @@ describe("webview messaging composer routes", () => {
     expect(posted).toEqual([]);
   });
 
+  it("keeps Diagram lifecycle telemetry metadata-only", async () => {
+    const posted: unknown[] = [];
+    const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
+
+    await handleWebviewMessage(
+      {
+        type: "webview.telemetry",
+        payload: {
+          event: "diagram_render_terminal",
+          operation_id: "diagram-operation-1",
+          attempt: 1,
+          duration_ms: 42,
+          queue_depth: 0,
+          source_length: 120,
+          output_bytes: 900,
+          outcome: "success",
+          cache_hit: false,
+          source: "flowchart LR; secret --> token",
+          svg: "<svg>secret</svg>",
+        },
+      },
+      context({}, posted, undefined, logger),
+    );
+
+    expect(logger.info).toHaveBeenCalledWith("webview telemetry", {
+      event: "diagram_render_terminal",
+      operation_id: "diagram-operation-1",
+      attempt: 1,
+      duration_ms: 42,
+      queue_depth: 0,
+      source_length: 120,
+      output_bytes: 900,
+      outcome: "success",
+      cache_hit: false,
+    });
+  });
+
   it("records native session load failures as structured error logs", async () => {
     const posted: unknown[] = [];
     const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn() };

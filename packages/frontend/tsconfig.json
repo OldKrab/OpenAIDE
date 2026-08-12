@@ -6,5 +6,5 @@
     "rootDir": "../..",
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "../../apps/browser/frontend", "vite.config.ts"]
+  "include": ["src", "../../apps/browser/frontend", "vite.config.ts", "vite.mermaid-renderer.config.ts"]
 }

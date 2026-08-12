@@ -57,6 +57,10 @@ export type WebviewTelemetryPayload = {
   request_id?: string;
   route?: string;
   body_bytes?: number;
+  source_length?: number;
+  output_bytes?: number;
+  outcome?: string;
+  cache_hit?: boolean;
   sequence?: number;
   last_client_sequence?: number;
   expected_sequence?: number;

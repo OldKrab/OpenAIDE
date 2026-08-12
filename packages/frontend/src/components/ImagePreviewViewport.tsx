@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type WheelEvent,
 } from "react";
 
@@ -33,9 +34,15 @@ const FITTED_VIEW: ImageView = { scale: FIT_SCALE, x: 0, y: 0 };
 export function ImagePreviewViewport({
   image,
   onClose,
+  contentNoun = "image",
+  imageClassName = "attachment-preview-image",
+  toolbarActions,
 }: {
   image: ImagePreviewViewportSource;
   onClose?: () => void;
+  contentNoun?: string;
+  imageClassName?: string;
+  toolbarActions?: ReactNode;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -63,9 +70,9 @@ export function ImagePreviewViewport({
       const scale = clamp(requestedScale, MIN_SCALE, MAX_SCALE);
       const stage = stageRef.current;
       if (!stage) return { ...current, scale };
-      const bounds = stage.getBoundingClientRect();
-      const focusX = (clientX ?? bounds.left + bounds.width / 2) - bounds.left - bounds.width / 2;
-      const focusY = (clientY ?? bounds.top + bounds.height / 2) - bounds.top - bounds.height / 2;
+      const origin = imageLayoutOrigin(stage, imageRef.current, current);
+      const focusX = (clientX ?? origin.x + current.x) - origin.x;
+      const focusY = (clientY ?? origin.y + current.y) - origin.y;
       const ratio = scale / current.scale;
       return constrainView({
         scale,
@@ -113,9 +120,9 @@ export function ImagePreviewViewport({
           MIN_SCALE,
           MAX_SCALE,
         );
-        const bounds = stage.getBoundingClientRect();
-        const previousMidpoint = pointerMidpoint(previousPair, bounds);
-        const nextMidpoint = pointerMidpoint(nextPair, bounds);
+        const origin = imageLayoutOrigin(stage, imageRef.current, current);
+        const previousMidpoint = pointerMidpoint(previousPair, origin);
+        const nextMidpoint = pointerMidpoint(nextPair, origin);
         const ratio = scale / current.scale;
         return constrainView({
           scale,
@@ -202,7 +209,7 @@ export function ImagePreviewViewport({
         <span className="attachment-preview-label" title={image.label}>{image.label}</span>
         <div className="attachment-preview-actions">
           <button
-            aria-label="Zoom image out"
+            aria-label={`Zoom ${contentNoun} out`}
             className="attachment-preview-action"
             disabled={view.scale <= MIN_SCALE}
             onClick={() => zoomAt(view.scale - ZOOM_STEP)}
@@ -211,7 +218,7 @@ export function ImagePreviewViewport({
             <Minus aria-hidden="true" size={16} />
           </button>
           <button
-            aria-label="Reset image zoom"
+            aria-label={`Reset ${contentNoun} zoom`}
             className="attachment-preview-zoom"
             disabled={isCenteredFit}
             onClick={() => setView(FITTED_VIEW)}
@@ -220,7 +227,7 @@ export function ImagePreviewViewport({
             {view.scale === FIT_SCALE ? "Fit" : `${Math.round(view.scale * 100)}%`}
           </button>
           <button
-            aria-label="Zoom image in"
+            aria-label={`Zoom ${contentNoun} in`}
             className="attachment-preview-action"
             disabled={view.scale >= MAX_SCALE}
             onClick={() => zoomAt(view.scale + ZOOM_STEP)}
@@ -228,9 +235,10 @@ export function ImagePreviewViewport({
           >
             <Plus aria-hidden="true" size={16} />
           </button>
+          {toolbarActions}
           {onClose ? (
             <button
-              aria-label="Close image preview"
+              aria-label={`Close ${contentNoun} preview`}
               className="attachment-preview-close"
               onClick={onClose}
               type="button"
@@ -260,7 +268,7 @@ export function ImagePreviewViewport({
       >
         <img
           alt={image.label}
-          className="attachment-preview-image"
+          className={imageClassName}
           draggable={false}
           ref={imageRef}
           src={image.url}
@@ -286,6 +294,24 @@ function constrainView(
   };
 }
 
+function imageLayoutOrigin(
+  stage: HTMLDivElement,
+  image: HTMLImageElement | null,
+  view: ImageView,
+): PointerPoint {
+  if (image) {
+    const bounds = image.getBoundingClientRect();
+    return {
+      // The transformed image bounds include the current translation. Remove it
+      // to recover the actual CSS transform origin used by the fitted image.
+      x: bounds.left + bounds.width / 2 - view.x,
+      y: bounds.top + bounds.height / 2 - view.y,
+    };
+  }
+  const bounds = stage.getBoundingClientRect();
+  return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+}
+
 /** Every zoom level uses the same recoverable edge-to-center pan boundary. */
 function panLimit(contentSize: number) {
   return contentSize / 2;
@@ -307,9 +333,9 @@ function pointerDistance([first, second]: PointerPair) {
   return Math.hypot(second.x - first.x, second.y - first.y);
 }
 
-function pointerMidpoint([first, second]: PointerPair, bounds: DOMRect): PointerPoint {
+function pointerMidpoint([first, second]: PointerPair, origin: PointerPoint): PointerPoint {
   return {
-    x: (first.x + second.x) / 2 - bounds.left - bounds.width / 2,
-    y: (first.y + second.y) / 2 - bounds.top - bounds.height / 2,
+    x: (first.x + second.x) / 2 - origin.x,
+    y: (first.y + second.y) / 2 - origin.y,
   };
 }

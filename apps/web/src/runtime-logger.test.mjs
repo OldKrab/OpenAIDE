@@ -38,3 +38,28 @@ test("webview telemetry keeps correlation metadata and drops arbitrary detail", 
     task_id: "task_123",
   });
 });
+
+test("webview telemetry keeps Diagram lifecycle outcomes without source content", () => {
+  assert.deepEqual(safeWebviewTelemetryFields({
+    event: "diagram_render_terminal",
+    operation_id: "diagram-operation-1",
+    attempt: 1,
+    duration_ms: 30_000,
+    queue_depth: 0,
+    source_length: 320,
+    output_bytes: 12_000,
+    outcome: "startup_timeout",
+    cache_hit: false,
+    source: "flowchart LR; private --> content",
+  }), {
+    event: "diagram_render_terminal",
+    operation_id: "diagram-operation-1",
+    attempt: 1,
+    duration_ms: 30_000,
+    queue_depth: 0,
+    source_length: 320,
+    output_bytes: 12_000,
+    outcome: "startup_timeout",
+    cache_hit: false,
+  });
+});

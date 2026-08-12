@@ -1,5 +1,6 @@
 import type { Attachment } from "@openaide/app-shell-contracts";
 import type { ComposerAttachment } from "../state/composerOptions";
+import type { ReactNode } from "react";
 import {
   ImagePreviewViewport,
   type ImagePreviewViewportSource,
@@ -20,9 +21,13 @@ export function attachmentImageLayout(count: number): AttachmentImageLayout {
 export function AttachmentImagePreviewLightbox({
   image,
   onClose,
+  contentNoun,
+  toolbarActions,
 }: {
   image: AttachmentImagePreviewSource;
   onClose: () => void;
+  contentNoun?: string;
+  toolbarActions?: ReactNode;
 }) {
   return (
     <PopupDialog
@@ -38,7 +43,12 @@ export function AttachmentImagePreviewLightbox({
         className="attachment-preview-lightbox"
         tabIndex={-1}
       >
-        <ImagePreviewViewport image={image} onClose={onClose} />
+        <ImagePreviewViewport
+          contentNoun={contentNoun}
+          image={image}
+          onClose={onClose}
+          toolbarActions={toolbarActions}
+        />
       </div>
     </PopupDialog>
   );

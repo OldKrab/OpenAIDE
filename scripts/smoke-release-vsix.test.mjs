@@ -89,6 +89,8 @@ async function fixtureVsix({ version = "0.0.2-beta.1", preRelease = true } = {})
     "dist/extension.js",
     "webview/dist/assets/index.js",
     "webview/dist/assets/index.css",
+    "webview/dist/mermaid-renderer.html",
+    "webview/dist/mermaid-renderer.js",
   ]) {
     await writeFile(path.join(extensionRoot, relativePath), "fixture");
   }
