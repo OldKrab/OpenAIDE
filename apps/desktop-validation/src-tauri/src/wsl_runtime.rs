@@ -80,7 +80,10 @@ pub(crate) fn launch_wsl_app_server_handoff(
         format!("Installing OpenAIDE runtime in {distro}"),
     );
     let installed = install_runtime(distro, resource_binary)?;
-    progress("wsl_launch", format!("Starting OpenAIDE in {distro}"));
+    progress(
+        "wsl_launch",
+        format!("Loading your shell environment in {distro}"),
+    );
     let launch_id = uuid::Uuid::new_v4().to_string();
     let mut child = launch_runtime(distro, &installed, &launch_id)?;
     let stdout = child.stdout.take().ok_or_else(|| {
@@ -210,21 +213,6 @@ fn launch_runtime(
     installed: &str,
     launch_id: &str,
 ) -> Result<std::process::Child, HandoffFailure> {
-    let script = r#"set -eu
-data_root="$HOME/.local/share/openaide"
-mkdir -p "$data_root/state" "$data_root/runtime"
-pid_file="$data_root/runtime/desktop-launch-$2.pid"
-env OPENAIDE_APP_SERVER_PROTOCOL=app-server-handoff \
-  OPENAIDE_STORAGE_ROOT="$data_root/state" \
-  OPENAIDE_RUNTIME_ROOT="$data_root/runtime" "$1" &
-server_pid="$!"
-printf '%s\n' "$server_pid" > "$pid_file"
-set +e
-wait "$server_pid"
-status="$?"
-rm -f "$pid_file"
-exit "$status"
-"#;
     let mut command = Command::new("wsl.exe");
     command.args([
         "--distribution",
@@ -232,7 +220,7 @@ exit "$status"
         "--exec",
         "/bin/sh",
         "-c",
-        script,
+        wsl_launch_script(),
         "openaide-launch",
         installed,
         launch_id,
@@ -244,6 +232,45 @@ exit "$status"
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|_| failure("wsl_process_spawn", "OpenAIDE could not start WSL."))
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn wsl_launch_script() -> &'static str {
+    r#"set -eu
+data_root="$HOME/.local/share/openaide"
+mkdir -p "$data_root/state" "$data_root/runtime"
+pid_file="$data_root/runtime/desktop-launch-$2.pid"
+user_shell="${3:-}"
+if [ -z "$user_shell" ]; then
+  user_shell="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f7 | head -n 1)"
+fi
+if [ ! -x "$user_shell" ]; then
+  user_shell="${SHELL:-/bin/sh}"
+fi
+if [ ! -x "$user_shell" ]; then
+  user_shell=/bin/sh
+fi
+
+# Agent tools installed by shell managers such as nvm only exist after the
+# user's login shell initializes. Startup output is redirected separately so
+# the App Server's first stdout line remains the framed handoff response. It is
+# intentionally discarded because shell startup output may contain user data.
+"$user_shell" -ilc '
+  exec 1>&3 2>&4
+  exec env \
+    OPENAIDE_APP_SERVER_PROTOCOL=app-server-handoff \
+    OPENAIDE_STORAGE_ROOT="$2/state" \
+    OPENAIDE_RUNTIME_ROOT="$2/runtime" \
+    "$1"
+' openaide-user-shell "$1" "$data_root" 3>&1 4>&2 >/dev/null 2>&1 &
+server_pid="$!"
+printf '%s\n' "$server_pid" > "$pid_file"
+set +e
+wait "$server_pid"
+status="$?"
+rm -f "$pid_file"
+exit "$status"
+"#
 }
 
 #[cfg(target_os = "windows")]
@@ -320,3 +347,7 @@ fn probe_connection(connection: &LocalHttpConnection) -> std::io::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+#[path = "wsl_runtime_tests.rs"]
+mod tests;

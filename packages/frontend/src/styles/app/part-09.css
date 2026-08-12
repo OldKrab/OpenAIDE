@@ -302,42 +302,102 @@
 
 .desktop-runtime-settings {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .desktop-runtime-choices {
-  width: fit-content;
-  display: inline-grid;
-  grid-template-columns: repeat(2, minmax(96px, 1fr));
-  gap: 3px;
+  width: min(100%, 640px);
+  display: grid;
   border: 1px solid var(--oa-border);
-  border-radius: 8px;
-  background: var(--oa-raised);
-  padding: 3px;
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));
+  overflow: hidden;
 }
 
 .desktop-runtime-choices button {
-  min-height: 32px;
+  min-width: 0;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 0;
   background: transparent;
   color: var(--oa-muted);
-  font-weight: 550;
+  padding: 10px 12px;
+  text-align: left;
+  transition: background 140ms ease-out, color 140ms ease-out;
+}
+
+.desktop-runtime-choices button + button {
+  border-top: 1px solid var(--oa-border);
 }
 
 .desktop-runtime-choices button:hover:not(:disabled) {
-  background: color-mix(in oklch, var(--oa-panel) 76%, var(--oa-raised));
+  background: var(--oa-raised);
   color: var(--oa-text);
 }
 
+.desktop-runtime-choices button:focus-visible,
+.desktop-runtime-confirm-actions button:focus-visible,
+.desktop-runtime-distro select:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: -2px;
+}
+
 .desktop-runtime-choices button.selected {
-  background: var(--oa-panel);
+  background: color-mix(in oklch, var(--oa-selected) 62%, var(--oa-panel));
   color: var(--oa-text);
-  box-shadow: 0 1px 3px rgb(20 35 55 / 12%);
 }
 
 .desktop-runtime-choices button:disabled {
   opacity: 0.46;
+}
+
+.desktop-runtime-choice-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+}
+
+.desktop-runtime-choices button.selected .desktop-runtime-choice-icon {
+  background: var(--oa-panel);
+  color: var(--oa-focus);
+}
+
+.desktop-runtime-choice-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.desktop-runtime-choice-copy strong {
+  color: var(--oa-text);
+  font-size: 13px;
+  font-weight: 630;
+}
+
+.desktop-runtime-choice-copy small {
+  overflow: hidden;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-runtime-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--oa-focus);
+  font-size: 11px;
+  font-weight: 620;
 }
 
 .desktop-runtime-distro {
@@ -369,6 +429,82 @@
 
 .desktop-runtime-settings > p.desktop-runtime-unavailable {
   color: var(--oa-warning);
+}
+
+.desktop-runtime-confirm {
+  width: min(100%, 640px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-raised);
+  padding: 12px;
+}
+
+.desktop-runtime-confirm > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.desktop-runtime-confirm strong {
+  font-size: 13px;
+  font-weight: 630;
+}
+
+.desktop-runtime-confirm small {
+  max-width: 52ch;
+  color: var(--oa-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.desktop-runtime-confirm-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 7px;
+}
+
+.desktop-runtime-confirm-actions button {
+  min-height: 30px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 570;
+}
+
+.desktop-runtime-confirm-actions button:hover:not(:disabled) {
+  border-color: var(--oa-border-strong);
+  background: var(--oa-selected);
+}
+
+.desktop-runtime-confirm-actions button.primary {
+  border-color: var(--oa-focus);
+  background: var(--oa-focus);
+  color: white;
+}
+
+.desktop-runtime-confirm-actions button:disabled {
+  opacity: 0.55;
+}
+
+.desktop-runtime-settings > p.desktop-runtime-error {
+  color: var(--oa-danger);
+}
+
+@media (max-width: 720px) {
+  .desktop-runtime-confirm {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .desktop-runtime-confirm-actions {
+    justify-content: flex-end;
+  }
 }
 
 .general-theme-choice {
