@@ -33,9 +33,9 @@ version.
 
 ## Open VSX setup
 
-OpenAIDE will begin Open VSX publication with the next stable release; do not
-backfill `0.0.1`. Prereleases remain GitHub-only. Stable releases are published
-to Open VSX and the VS Code Marketplace.
+OpenAIDE publishes prereleases through Open VSX's native prerelease channel.
+Stable releases are published to Open VSX and the VS Code Marketplace. Do not
+backfill `0.0.1`.
 
 Before that release:
 
@@ -82,9 +82,9 @@ Before that release:
    be uploaded.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. This GitHub
-   Release is the canonical release. Stable releases then reconcile the same
-   downloaded bytes with Open VSX and the VS Code Marketplace. Prereleases stop
-   after GitHub publication.
+   Release is the canonical release. Every release then reconciles the same
+   downloaded bytes with Open VSX; stable releases also reconcile them with the
+   VS Code Marketplace.
 7. Confirm that the Release workflow completed successfully. No manual rebuild
    or replacement of its assets is permitted.
 
@@ -98,9 +98,10 @@ GitHub assets and registry packages are immutable release facts. A bad artifact
 requires a new patch or prerelease version; for example, replace a bad
 `0.0.2-beta.1` with `0.0.2-beta.2`.
 
-If stable registry publication was merely interrupted, run **Reconcile Release
-Registries** with the existing stable version. It downloads the immutable GitHub
-assets and handles both registry targets independently:
+If registry publication was merely interrupted, run **Reconcile Release
+Registries** with the existing version. It downloads the immutable GitHub assets
+and handles each applicable target independently. Prereleases reconcile only
+Open VSX; stable releases reconcile both registries:
 
 - missing package: publish it;
 - same version, target, and SHA-256: skip successfully;
