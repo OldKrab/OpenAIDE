@@ -393,7 +393,10 @@ jobs:
             }
           } finally {
             if (-not $process.HasExited) {
-              taskkill.exe /PID $process.Id /T /F | Out-Null
+              # A descendant can exit between WaitForExit and taskkill. The desktop
+              # process is the assertion target; cleanup races must not fail the job.
+              taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+              $global:LASTEXITCODE = 0
             }
           }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
