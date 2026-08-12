@@ -37,7 +37,7 @@ describe("deriveAppControllerState", () => {
     expect(derived.visibleTasks.map((task) => task.task_id)).toEqual(["task_2"]);
   });
 
-  it("keeps the active task visible when search does not match it", () => {
+  it("keeps a non-matching active task open but excludes it from search results", () => {
     const state = createInitialState();
     state.activeTaskId = "task_2";
     state.searchQuery = "no-match-navigation-qa";
@@ -48,7 +48,8 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((item) => item.task_id)).toEqual(["task_1", "task_2"]);
+    expect(derived.activeTask?.task_id).toBe("task_2");
+    expect(derived.visibleTasks.map((item) => item.task_id)).toEqual(["task_1"]);
   });
 
   it("uses shell editor focus for Task Navigation without changing active product state", () => {
