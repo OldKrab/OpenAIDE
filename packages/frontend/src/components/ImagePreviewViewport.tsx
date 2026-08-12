@@ -18,7 +18,8 @@ export type ImagePreviewViewportSource = {
 
 const MIN_SCALE = 0.25;
 const FIT_SCALE = 1;
-const MAX_SCALE = 5;
+const MAX_SCALE = 32;
+const DETAILED_ZOOM_THRESHOLD = 5;
 const ZOOM_STEP = 0.25;
 const WHEEL_ZOOM_FACTOR_PER_100_DELTA = 1.25;
 
@@ -29,6 +30,14 @@ type ImageView = {
 };
 
 const FITTED_VIEW: ImageView = { scale: FIT_SCALE, x: 0, y: 0 };
+
+function nextZoomIn(scale: number) {
+  return scale < DETAILED_ZOOM_THRESHOLD ? scale + ZOOM_STEP : scale * 1.5;
+}
+
+function nextZoomOut(scale: number) {
+  return scale > DETAILED_ZOOM_THRESHOLD ? scale / 1.5 : scale - ZOOM_STEP;
+}
 
 /** Provides bounded zoom and pan controls for the shared image inspection surface. */
 export function ImagePreviewViewport({
@@ -46,6 +55,7 @@ export function ImagePreviewViewport({
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const fittedImageSizeRef = useRef<{ width: number; height: number } | undefined>(undefined);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const movedRef = useRef(false);
   const pressedImageRef = useRef(false);
@@ -78,7 +88,7 @@ export function ImagePreviewViewport({
         scale,
         x: focusX - (focusX - current.x) * ratio,
         y: focusY - (focusY - current.y) * ratio,
-      }, stage, imageRef.current);
+      }, fittedImageSize(imageRef.current, current.scale, fittedImageSizeRef));
     });
   };
 
@@ -128,7 +138,7 @@ export function ImagePreviewViewport({
           scale,
           x: nextMidpoint.x - (previousMidpoint.x - current.x) * ratio,
           y: nextMidpoint.y - (previousMidpoint.y - current.y) * ratio,
-        }, stage, imageRef.current);
+        }, fittedImageSize(imageRef.current, current.scale, fittedImageSizeRef));
       });
       return;
     }
@@ -140,7 +150,7 @@ export function ImagePreviewViewport({
         ...current,
         x: current.x + next.x - previous.x,
         y: current.y + next.y - previous.y,
-      }, stage, imageRef.current);
+      }, fittedImageSize(imageRef.current, current.scale, fittedImageSizeRef));
     });
   };
 
@@ -166,12 +176,12 @@ export function ImagePreviewViewport({
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "+" || event.key === "=") {
       event.preventDefault();
-      zoomAt(view.scale + ZOOM_STEP);
+      zoomAt(nextZoomIn(view.scale));
       return;
     }
     if (event.key === "-") {
       event.preventDefault();
-      zoomAt(view.scale - ZOOM_STEP);
+      zoomAt(nextZoomOut(view.scale));
       return;
     }
     if (event.key === "0") {
@@ -194,12 +204,14 @@ export function ImagePreviewViewport({
         ...current,
         x: current.x + movement.x,
         y: current.y + movement.y,
-      }, stage, imageRef.current);
+      }, fittedImageSize(imageRef.current, current.scale, fittedImageSizeRef));
     });
   };
 
   const imageStyle: CSSProperties = {
-    transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
+    height: `calc((100% - var(--attachment-preview-image-height-inset)) * ${view.scale})`,
+    transform: `translate3d(calc(-50% + ${view.x}px), calc(-50% + ${view.y}px), 0)`,
+    width: `calc((100% - var(--attachment-preview-image-width-inset)) * ${view.scale})`,
   };
   const isCenteredFit = view.scale === FIT_SCALE && view.x === 0 && view.y === 0;
 
@@ -212,7 +224,7 @@ export function ImagePreviewViewport({
             aria-label={`Zoom ${contentNoun} out`}
             className="attachment-preview-action"
             disabled={view.scale <= MIN_SCALE}
-            onClick={() => zoomAt(view.scale - ZOOM_STEP)}
+            onClick={() => zoomAt(nextZoomOut(view.scale))}
             type="button"
           >
             <Minus aria-hidden="true" size={16} />
@@ -230,7 +242,7 @@ export function ImagePreviewViewport({
             aria-label={`Zoom ${contentNoun} in`}
             className="attachment-preview-action"
             disabled={view.scale >= MAX_SCALE}
-            onClick={() => zoomAt(view.scale + ZOOM_STEP)}
+            onClick={() => zoomAt(nextZoomIn(view.scale))}
             type="button"
           >
             <Plus aria-hidden="true" size={16} />
@@ -281,17 +293,30 @@ export function ImagePreviewViewport({
 
 function constrainView(
   view: ImageView,
-  stage: HTMLDivElement,
-  image: HTMLImageElement | null,
+  fittedSize: { width: number; height: number } | undefined,
 ): ImageView {
-  if (!image) return view;
-  const maxX = panLimit(image.offsetWidth * view.scale);
-  const maxY = panLimit(image.offsetHeight * view.scale);
+  if (!fittedSize) return view;
+  const maxX = panLimit(fittedSize.width * view.scale);
+  const maxY = panLimit(fittedSize.height * view.scale);
   return {
     ...view,
     x: clamp(view.x, -maxX, maxX),
     y: clamp(view.y, -maxY, maxY),
   };
+}
+
+function fittedImageSize(
+  image: HTMLImageElement | null,
+  renderedScale: number,
+  ref: { current: { width: number; height: number } | undefined },
+) {
+  if (!ref.current && image) {
+    ref.current = {
+      width: image.offsetWidth / renderedScale,
+      height: image.offsetHeight / renderedScale,
+    };
+  }
+  return ref.current;
 }
 
 function imageLayoutOrigin(

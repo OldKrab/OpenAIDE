@@ -31,15 +31,20 @@ describe("webview html", () => {
     expect(html).toContain("img-src data:;");
   });
 
-  it("admits only the packaged Mermaid renderer frame", () => {
+  it("provides the packaged Mermaid renderer script without navigating a local HTML document", () => {
     const html = renderWebviewHtml(context(), webview(), {
       surface: "task",
       shell: VSCODE_SHELL,
     });
 
     expect(html).toContain("frame-src vscode-webview:;");
-    expect(html).toContain('name="openaide-mermaid-renderer"');
-    expect(html).toContain("/extension/webview/dist/mermaid-renderer.html");
+    expect(html).toContain("connect-src vscode-webview:;");
+    expect(html).toContain('name="openaide-mermaid-renderer-script"');
+    expect(html).toContain("/extension/webview/dist/mermaid-renderer.js");
+    expect(html).not.toContain("/extension/webview/dist/mermaid-renderer.html");
+    const parentNonce = html.match(/script-src 'nonce-([^']+)'/)?.[1];
+    const rendererNonce = html.match(/name="openaide-mermaid-renderer-nonce" content="([^"]+)"/)?.[1];
+    expect(rendererNonce).toBe(parentNonce);
     expect(html).not.toContain("style-src 'unsafe-inline'");
   });
 

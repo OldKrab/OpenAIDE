@@ -444,14 +444,19 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       const replicaEpoch = action.replicaEpoch ?? state.appServerReplicaEpoch;
       if (replicaEpoch < state.appServerReplicaEpoch) return state;
       if (action.intent === "refresh" && state.activeTaskId !== action.snapshot.task.task_id) {
-        return reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch);
+        return settleTaskLiveTextPresentation(
+          reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch),
+          action.snapshot.task.task_id,
+          action.snapshot.task.status,
+        );
       }
       const taskId = action.snapshot.task.task_id;
       const reconciliation = reconcileTaskSnapshotDependents(state, action.snapshot, replicaEpoch);
       if (reconciliation.state === state) {
-        return action.liveText
+        const nextState = settleTaskLiveTextPresentation(state, taskId, action.snapshot.task.status);
+        return action.liveText && taskAcceptsLiveText(action.snapshot.task.status)
           ? applyTaskLiveTextPresentation(state, taskId, action.liveText)
-          : state;
+          : nextState;
       }
       const { snapshot } = reconciliation;
       const tasks = replaceTaskSummary(state.tasks, snapshot.task) ?? state.tasks;
@@ -473,9 +478,10 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           configOptionsError: undefined,
         },
       };
-      return action.liveText
+      const presentationState = settleTaskLiveTextPresentation(nextState, taskId, snapshot.task.status);
+      return action.liveText && taskAcceptsLiveText(snapshot.task.status)
         ? applyTaskLiveTextPresentation(nextState, taskId, action.liveText)
-        : nextState;
+        : presentationState;
     }
     case "taskScroll:record":
       return {
@@ -570,6 +576,21 @@ function applyTaskLiveTextPresentation(
       },
     },
   };
+}
+
+function settleTaskLiveTextPresentation(
+  state: AppState,
+  taskId: string,
+  status: TaskSnapshot["task"]["status"],
+): AppState {
+  if (taskAcceptsLiveText(status)) return state;
+  if (!state.taskLiveTextPresentation[taskId]) return state;
+  const { [taskId]: _settled, ...taskLiveTextPresentation } = state.taskLiveTextPresentation;
+  return { ...state, taskLiveTextPresentation };
+}
+
+function taskAcceptsLiveText(status: TaskSnapshot["task"]["status"]) {
+  return status === "active" || status === "waiting" || status === "stopping";
 }
 
 function abandonNativeSessionOpening(newTask: AppState["newTask"]): AppState["newTask"] {

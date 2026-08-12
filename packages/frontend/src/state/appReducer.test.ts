@@ -9,6 +9,25 @@ type PermissionChatMessage = ChatMessage & {
 };
 
 describe("app reducer composer state", () => {
+  it("clears live text ownership when a task settles", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "taskChat:liveText",
+      taskId: "task_1",
+      channel: "agent",
+      eventCursor: "cursor-live",
+      messageId: "agent-live",
+    });
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [chatMessage("agent-live", "Complete")]),
+    });
+
+    expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
+  });
+
   it("applies a config result without replacing a pending permission request", () => {
     const initial = snapshot("task_1");
     initial.agent_config = configCatalog("off");

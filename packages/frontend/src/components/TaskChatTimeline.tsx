@@ -170,7 +170,10 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                     permissionQueueCount={row.permissionQueueCount}
                     permissionResponse={permissionResponseForMessage(row.message.message, permissionResponses)}
                     permissionTool={row.permissionTool}
-                    presentLiveText={taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping"}
+                    presentLiveText={
+                      (taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping")
+                      && isLiveTextMessage(liveTextPresentation, row.message)
+                    }
                     questionResponse={questionResponseForMessage(row.message.message, questionResponses)}
                     taskId={taskId}
                     toolDetails={toolDetails}
@@ -272,6 +275,14 @@ function liveTextCursorForMessage(
   if (latestMessageIds[message.message.role] !== message.message_id) return undefined;
   const signal = presentation?.[message.message.role];
   return signal?.messageId === message.message_id ? signal.eventCursor : undefined;
+}
+
+export function isLiveTextMessage(
+  presentation: TaskLiveTextPresentation | undefined,
+  message: ChatMessage,
+) {
+  if (message.message.kind !== "agent_message") return false;
+  return presentation?.[message.message.role]?.messageId === message.message_id;
 }
 
 function latestTextMessageIdsByChannel(items: ChatMessage[]) {
