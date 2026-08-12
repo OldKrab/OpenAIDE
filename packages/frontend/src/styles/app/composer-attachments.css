@@ -264,7 +264,7 @@
   z-index: 80;
   display: grid;
   place-items: center;
-  background: color-mix(in oklch, var(--oa-bg) 88%, transparent);
+  background: color-mix(in oklch, var(--oa-bg) 96%, transparent);
   padding: 0;
 }
 
