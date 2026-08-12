@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.0 - 2026-08-12
+
+### Features
+
+- Render Mermaid diagrams directly in Agent Chat with reliable diagram inspection.
+- Add copy actions to Markdown quotes while preserving their Markdown formatting.
+- Improve ACP permission requests with distinct decisions, grouped repeats, and complete Tool details including edit diffs.
+- Make task search feedback clearer when filtering and navigating results.
+
+### Bug Fixes
+
+- Ensure legacy OpenAIDE installations move to the remote workspace in WSL, SSH, and Dev Containers.
+- Make Native Session recovery explicit, restore controls sooner, and provide clear reload and retry paths.
+- Keep Agent links clickable while responses stream.
+- Make trackpad image zoom easier to control and improve quoted-text contrast in the dark theme.
+- Hide the queue action when the queue is empty and fix Plan panel scrolling.
+
 ## 0.1.0-alpha.1 - 2026-08-11
 
 ### Features
