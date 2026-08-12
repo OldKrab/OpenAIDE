@@ -46,6 +46,14 @@ export function webviewTelemetryFields(payload: Record<string, unknown>) {
     agent_id: stringField(payload.agent_id),
     project_id: stringField(payload.project_id),
     session_list_request_id: numberField(payload.session_list_request_id),
+    operation_id: stringField(payload.operation_id),
+    attempt: numberField(payload.attempt),
+    duration_ms: numberField(payload.duration_ms),
+    queue_depth: numberField(payload.queue_depth),
+    source_length: numberField(payload.source_length),
+    output_bytes: numberField(payload.output_bytes),
+    outcome: stringField(payload.outcome),
+    cache_hit: booleanField(payload.cache_hit),
     error_message:
       typeof payload.error_message === "string" && payload.error_message.length > 0
         ? sanitizeDiagnosticText(payload.error_message)

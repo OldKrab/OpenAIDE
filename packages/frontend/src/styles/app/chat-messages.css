@@ -204,6 +204,141 @@
   white-space: nowrap;
 }
 
+.agent-mermaid {
+  max-width: 100%;
+  position: relative;
+  margin: 0 0 7px;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: var(--oa-radius-md);
+  background: transparent;
+  overflow: hidden;
+}
+
+.agent-mermaid-viewport {
+  height: min(480px, 60vh);
+  min-height: 260px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.agent-mermaid-viewport .attachment-preview-chrome {
+  background: transparent;
+}
+
+.agent-mermaid-toolbar,
+.agent-mermaid-source-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.agent-mermaid-toolbar {
+  position: absolute;
+  z-index: 1;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.agent-mermaid:hover .agent-mermaid-toolbar,
+.agent-mermaid:focus-within .agent-mermaid-toolbar {
+  opacity: 1;
+}
+
+.agent-mermaid-action {
+  min-height: 26px;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-panel) 94%, var(--oa-bg));
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 7px;
+}
+
+.agent-mermaid-action:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.agent-mermaid-action:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+
+.agent-mermaid-source {
+  min-width: 0;
+  position: relative;
+}
+
+.agent-mermaid-source-actions {
+  position: absolute;
+  z-index: 1;
+  top: 6px;
+  right: 6px;
+}
+
+.agent-mermaid-source pre {
+  margin: 6px;
+  padding-right: 190px;
+}
+
+.agent-mermaid-status {
+  min-height: 30px;
+  border-bottom: 1px solid var(--oa-border-subtle);
+  color: var(--oa-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px 5px 10px;
+}
+
+.agent-mermaid-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-mermaid-spinner {
+  flex: 0 0 auto;
+  animation: agent-mermaid-spin 900ms linear infinite;
+}
+
+@keyframes agent-mermaid-spin {
+  to { transform: rotate(360deg); }
+}
+
+.mermaid-renderer-frame,
+.mermaid-theme-probe,
+.visually-hidden {
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mermaid-renderer-frame,
+.mermaid-theme-probe {
+  pointer-events: none;
+}
+
+.mermaid-theme-probe {
+  color: var(--oa-text);
+  background-color: var(--oa-bg);
+  border-top-color: var(--oa-border-strong);
+  border-right-color: var(--oa-focus);
+  border-bottom-color: var(--oa-panel);
+  border-left-color: var(--oa-muted);
+  font-family: var(--oa-ui-font);
+}
+
 .chat-agent strong {
   color: var(--oa-text);
   font-weight: 600;
@@ -449,6 +584,16 @@
     opacity: 1;
   }
 
+  .agent-mermaid-toolbar {
+    position: static;
+    opacity: 1;
+    padding: 6px 6px 0;
+  }
+
+  .agent-mermaid-action {
+    min-height: 36px;
+  }
+
   .quote-selection-action {
     min-height: 36px;
     padding-inline: 10px;
@@ -458,6 +603,14 @@
 @media (prefers-reduced-motion: reduce) {
   .agent-markdown-copy {
     transition-duration: 0.01ms;
+  }
+
+  .agent-mermaid-toolbar {
+    transition-duration: 0.01ms;
+  }
+
+  .agent-mermaid-spinner {
+    animation: none;
   }
 }
 

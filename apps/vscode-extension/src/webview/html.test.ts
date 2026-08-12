@@ -31,6 +31,18 @@ describe("webview html", () => {
     expect(html).toContain("img-src data:;");
   });
 
+  it("admits only the packaged Mermaid renderer frame", () => {
+    const html = renderWebviewHtml(context(), webview(), {
+      surface: "task",
+      shell: VSCODE_SHELL,
+    });
+
+    expect(html).toContain("frame-src vscode-webview:;");
+    expect(html).toContain('name="openaide-mermaid-renderer"');
+    expect(html).toContain("/extension/webview/dist/mermaid-renderer.html");
+    expect(html).not.toContain("style-src 'unsafe-inline'");
+  });
+
   it("never exposes App Server endpoint or token material to a VS Code webview", () => {
     const html = renderWebviewHtml(context(), webview(), {
       surface: "navigation",

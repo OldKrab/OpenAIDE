@@ -691,7 +691,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.attachment-preview-actions\s*{[^}]*display:\s*flex;[^}]*gap:\s*2px;/);
     expect(appCss).toMatch(/\.attachment-preview-stage\s*{[^}]*overflow:\s*hidden;[^}]*touch-action:\s*none;/);
     expect(appCss).not.toMatch(/\.attachment-preview-stage\s*{[^}]*(?:border|background):/);
-    expect(appCss).toMatch(/\.attachment-preview-stage img\s*{[^}]*width:\s*auto;[^}]*height:\s*auto;[^}]*max-width:\s*100%;[^}]*max-height:\s*100%;/);
     expect(appCss).toMatch(/\.attachment-preview-close\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/);
   });
 

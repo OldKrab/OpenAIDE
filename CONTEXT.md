@@ -48,6 +48,10 @@ _Avoid_: Orphan Task, idle visible Task
 Visual content added to a message through paste, drag and drop, or the image picker; those input methods do not create different content kinds.
 _Avoid_: PastedImage, treating Image as a workspace-file attachment
 
+**Diagram**:
+A visual projection of explicitly marked diagram source inside Agent Chat text. Its source remains the durable Chat content; the generated visual is not an Image or File Attachment.
+_Avoid_: Image, Attachment, persisted SVG
+
 **File Attachment**:
 A general file explicitly linked to one unsent message through **Attach files**. It is distinct from an Image and from an `@file` mention.
 _Avoid_: Upload when the App Shell references an original local path, treating `@file` text as attached content

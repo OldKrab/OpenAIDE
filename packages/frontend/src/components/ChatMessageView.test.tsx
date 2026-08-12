@@ -130,6 +130,45 @@ describe("ChatRow", () => {
     expect(html).toContain("Check current files first.");
   });
 
+  it("enables Mermaid presentation only for ordinary Agent messages", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const source = "```mermaid\nflowchart LR\n  A --> B\n```";
+    const agentHtml = renderToStaticMarkup(
+      <ChatRow message={agentMessage("a1", source)} onPermissionRespond={vi.fn()} taskId="task_1" />,
+    );
+    const thoughtHtml = renderToStaticMarkup(
+      <ChatRow message={thoughtMessage("t1", source)} onPermissionRespond={vi.fn()} taskId="task_1" />,
+    );
+
+    expect(agentHtml).toContain('class="agent-mermaid"');
+    expect(thoughtHtml).not.toContain('class="agent-mermaid"');
+    expect(thoughtHtml).toContain('class="language-mermaid"');
+  });
+
+  it("keeps every Mermaid part as source until the whole Agent message completes", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const source = "```mermaid\nflowchart LR\n  A --> B\n```";
+    const message = agentMessage("a1", source);
+    if (message.message.kind !== "agent_message") throw new Error("Agent fixture is invalid.");
+    message.message.parts.push({ kind: "text", text: "Still streaming." });
+
+    const streamingHtml = renderToStaticMarkup(
+      <ChatRow message={message} onPermissionRespond={vi.fn()} showStreamingCaret taskId="task_1" />,
+    );
+    const activeTurnHtml = renderToStaticMarkup(
+      <ChatRow message={message} onPermissionRespond={vi.fn()} presentLiveText taskId="task_1" />,
+    );
+    const completedHtml = renderToStaticMarkup(
+      <ChatRow message={message} onPermissionRespond={vi.fn()} taskId="task_1" />,
+    );
+
+    expect(streamingHtml).not.toContain('class="agent-mermaid"');
+    expect(streamingHtml).toContain('class="language-mermaid"');
+    expect(activeTurnHtml).not.toContain('class="agent-mermaid"');
+    expect(activeTurnHtml).toContain('class="language-mermaid"');
+    expect(completedHtml).toContain('class="agent-mermaid"');
+  });
+
   it("keeps a running activity group collapsed even when its source requests expansion", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const html = renderToStaticMarkup(

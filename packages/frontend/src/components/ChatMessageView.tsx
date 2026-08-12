@@ -166,6 +166,7 @@ function AgentMessageRow({
       muted={body.role === "thought"}
       onOpenImage={onOpenImage}
       parts={presentation.parts}
+      renderDiagrams={!presentLiveText && !streaming}
       streaming={streaming}
     />
   );
@@ -230,10 +231,12 @@ function UserAttachments({
 
 function AgentMessageParts({
   parts,
+  renderDiagrams,
   streaming,
   ...contentProps
 }: {
   parts: AgentMessagePart[];
+  renderDiagrams: boolean;
   streaming: boolean;
   muted: boolean;
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
@@ -243,6 +246,7 @@ function AgentMessageParts({
       className={contentProps.muted ? "chat-thought" : "chat-agent"}
       key={index}
       quoteSource={contentProps.muted ? undefined : "agent"}
+      renderDiagrams={!contentProps.muted && renderDiagrams}
       streaming={streaming && index === parts.length - 1}
       text={contentProps.muted ? presentThoughtMarkdown(part.text) : part.text}
     />

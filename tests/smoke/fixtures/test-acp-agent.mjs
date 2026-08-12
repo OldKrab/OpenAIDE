@@ -172,6 +172,29 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:mermaid-preview")) {
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "```mermaid\nflowchart TD\n  A[Lost Robot Wakes Up] --> B{Battery Level?}\n  B -->|High| C[Explore the Moon]\n  B -->|Low| D[Search for Charger]\n  C --> E{Finds Signal?}\n  E -->|Yes| F[Contact Earth]\n  E -->|No| G[Build Giant Antenna]\n  D --> H[Recharge]\n  F --> I[Mission Complete]\n  G --> I\n  H --> C\n```",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
+  if (text.includes("smoke:mermaid-streaming")) {
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "```mermaid\nflowchart LR\n  A[Streaming] --> B[Complete]\n```",
+      `agent-${promptNumber}`,
+    );
+    await delay(5_000);
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:quote-selection")) {
     textUpdate(
       sessionId,

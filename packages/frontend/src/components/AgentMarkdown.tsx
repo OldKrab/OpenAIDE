@@ -15,16 +15,18 @@ import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from 
 import remarkGfm from "remark-gfm";
 import { postHostMessage } from "../services/hostBridge";
 import { copyText } from "./clipboard";
+import { MermaidDiagram } from "./MermaidDiagram";
 
 type AgentMarkdownProps = {
   className?: string;
   quoteSource?: "agent";
+  renderDiagrams?: boolean;
   streaming?: boolean;
   text: string;
 };
 
 // Unrelated Task and composer updates must not re-enter the synchronous Markdown parser.
-export const AgentMarkdown = memo(function AgentMarkdown({ className, quoteSource, streaming = false, text }: AgentMarkdownProps) {
+export const AgentMarkdown = memo(function AgentMarkdown({ className, quoteSource, renderDiagrams = false, streaming = false, text }: AgentMarkdownProps) {
   const parts = splitDataImageMarkdown(text);
   return (
     <div className={className} data-quote-source={quoteSource}>
@@ -36,7 +38,11 @@ export const AgentMarkdown = memo(function AgentMarkdown({ className, quoteSourc
               {streaming && index === parts.length - 1 ? <StreamingCaret /> : null}
             </>
           ) : (
-            <MarkdownRenderer streaming={streaming && index === parts.length - 1} text={part.text} />
+            <MarkdownRenderer
+              renderDiagrams={renderDiagrams}
+              streaming={streaming && index === parts.length - 1}
+              text={part.text}
+            />
           )}
         </Fragment>
       ))}
@@ -44,10 +50,10 @@ export const AgentMarkdown = memo(function AgentMarkdown({ className, quoteSourc
   );
 });
 
-function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: string }) {
+function MarkdownRenderer({ renderDiagrams, streaming, text }: { renderDiagrams: boolean; streaming: boolean; text: string }) {
   if (!text) return streaming ? <StreamingCaret /> : null;
   return (
-    <MarkdownSourceContext.Provider value={text}>
+    <MarkdownSourceContext.Provider value={{ renderDiagrams, source: text, streaming }}>
       <Markdown
         rehypePlugins={streaming ? [appendStreamingCaret] : []}
         remarkPlugins={[remarkGfm]}
@@ -61,7 +67,7 @@ function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: strin
   );
 }
 
-const MarkdownSourceContext = createContext("");
+const MarkdownSourceContext = createContext({ renderDiagrams: false, source: "", streaming: false });
 
 // Stable component identities keep native pointer gestures alive across streamed Markdown updates.
 const agentMarkdownComponents: Components = {
@@ -93,16 +99,25 @@ const agentMarkdownComponents: Components = {
       <span>{children}</span>
     );
   },
-  pre: ({ children, node: _node, ...props }) => (
-    <MarkdownCopyBlock kind="code" text={plainText(children).replace(/\n$/, "")}>
-      <pre {...props}>{children}</pre>
-    </MarkdownCopyBlock>
-  ),
+  pre: MarkdownPreBlock,
   blockquote: MarkdownQuoteBlock,
 };
 
+function MarkdownPreBlock({ children, node: _node, ...props }: ComponentProps<"pre"> & ExtraProps) {
+  const context = useContext(MarkdownSourceContext);
+  const text = plainText(children).replace(/\n$/, "");
+  if (context.renderDiagrams && !context.streaming && isMermaidCode(children)) {
+    return <MermaidDiagram source={text} />;
+  }
+  return (
+    <MarkdownCopyBlock kind="code" text={text}>
+      <pre {...props}>{children}</pre>
+    </MarkdownCopyBlock>
+  );
+}
+
 function MarkdownQuoteBlock({ children, node, ...props }: ComponentProps<"blockquote"> & ExtraProps) {
-  const source = useContext(MarkdownSourceContext);
+  const { source } = useContext(MarkdownSourceContext);
   const start = node?.position?.start.offset;
   const end = node?.position?.end.offset;
   // Rendered children have already lost Markdown markers, so copy from the source span and remove only this quote level.
@@ -114,6 +129,11 @@ function MarkdownQuoteBlock({ children, node, ...props }: ComponentProps<"blockq
       <blockquote {...props}>{children}</blockquote>
     </MarkdownCopyBlock>
   );
+}
+
+function isMermaidCode(children: ReactNode) {
+  if (!isValidElement<{ className?: string }>(children)) return false;
+  return children.props.className?.split(/\s+/).includes("language-mermaid") === true;
 }
 
 type CopyState = "idle" | "copied" | "failed";

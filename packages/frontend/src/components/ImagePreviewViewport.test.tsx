@@ -4,7 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ImagePreviewViewport } from "./ImagePreviewViewport";
 
 const addEventListener = vi.fn();
-const imageNodeMock = { offsetHeight: 360, offsetWidth: 560 };
+const imageNodeMock = {
+  getBoundingClientRect: () => ({ bottom: 380, height: 360, left: 20, right: 580, top: 20, width: 560 }),
+  offsetHeight: 360,
+  offsetWidth: 560,
+};
 const removeEventListener = vi.fn();
 
 describe("ImagePreviewViewport", () => {
@@ -57,6 +61,26 @@ describe("ImagePreviewViewport", () => {
 
     expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1)");
     expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("Fit");
+  });
+
+  it("keeps the visible image center fixed when it differs from the stage center", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ImagePreviewViewport image={{ label: "diagram.png", url: "data:image/png;base64,aW1hZ2U=" }} />,
+        { createNodeMock: offCenterViewportNodeMock },
+      );
+    });
+
+    act(() => {
+      tree.root.findByProps({ "aria-label": "diagram.png zoomable preview" }).props.onWheel({
+        clientX: 260,
+        clientY: 180,
+        deltaY: -100,
+      });
+    });
+
+    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1.25)");
   });
 
   it("applies trackpad wheel zoom from total gesture movement instead of event count", () => {
@@ -225,6 +249,16 @@ function viewportNodeMock(element: ReactElement) {
   }
   if (element.type === "img") return imageNodeMock;
   return null;
+}
+
+function offCenterViewportNodeMock(element: ReactElement) {
+  if (element.type === "img") {
+    return {
+      ...imageNodeMock,
+      getBoundingClientRect: () => ({ bottom: 360, height: 360, left: -20, right: 540, top: 0, width: 560 }),
+    };
+  }
+  return viewportNodeMock(element);
 }
 
 function pointerEvent(

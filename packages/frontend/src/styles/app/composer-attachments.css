@@ -368,7 +368,8 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  padding: 8px 16px 16px;
+  position: relative;
+  padding: 0;
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -384,11 +385,13 @@
 }
 
 .attachment-preview-stage img {
+  position: absolute;
+  inset: 8px 16px 16px;
   display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
+  width: calc(100% - 32px);
+  height: calc(100% - 24px);
+  max-width: none;
+  max-height: none;
   object-fit: contain;
   transform-origin: center;
   transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -412,6 +415,12 @@
   }
 
   .attachment-preview-stage {
-    padding: 4px 8px 8px;
+    padding: 0;
+  }
+
+  .attachment-preview-stage img {
+    inset: 4px 8px 8px;
+    width: calc(100% - 16px);
+    height: calc(100% - 12px);
   }
 }

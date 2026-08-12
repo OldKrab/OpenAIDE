@@ -11,6 +11,8 @@ const REQUIRED_EXTENSION_FILES = [
   "dist/extension.js",
   "webview/dist/assets/index.js",
   "webview/dist/assets/index.css",
+  "webview/dist/mermaid-renderer.html",
+  "webview/dist/mermaid-renderer.js",
 ];
 
 /** Verifies packaged content and exercises the bundled native App Server lifecycle. */

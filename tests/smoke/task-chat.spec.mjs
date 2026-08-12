@@ -310,6 +310,120 @@ test("copies fenced Markdown code independently at desktop and constrained width
   expect(geometry.buttonInsidePre).toBe(true);
 });
 
+test("fits and inspects a Mermaid diagram inline and expanded without source dead space", async ({ page }) => {
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:mermaid-preview");
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+
+  const diagram = page.locator(".agent-mermaid");
+  await expect(diagram.locator(".agent-mermaid-image")).toBeVisible({ timeout: 30_000 });
+  const copySource = diagram.getByRole("button", { name: "Copy source" });
+  await expect(copySource).toBeVisible();
+  expect((await copySource.boundingBox())?.width).toBeLessThanOrEqual(30);
+  await expectPreviewToFit(page, diagram.locator(".attachment-preview-stage"));
+  const inlineImage = diagram.locator(".agent-mermaid-image");
+  const inlineBefore = await inlineImage.evaluate((element) => getComputedStyle(element).transform);
+  const inlineBounds = await inlineImage.boundingBox();
+  expect(inlineBounds).not.toBeNull();
+  await page.mouse.move(
+    inlineBounds.x + inlineBounds.width / 2,
+    inlineBounds.y + inlineBounds.height / 2,
+  );
+  await page.mouse.wheel(0, -100);
+  await expect(diagram.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("125%");
+  const inlineAfter = await inlineImage.evaluate((element) => getComputedStyle(element).transform);
+  expect(inlineAfter).not.toBe(inlineBefore);
+  await page.mouse.down();
+  await page.mouse.move(
+    inlineBounds.x + inlineBounds.width / 2 + 40,
+    inlineBounds.y + inlineBounds.height / 2 + 25,
+  );
+  await page.mouse.up();
+  const inlineAfterPan = await inlineImage.evaluate((element) => getComputedStyle(element).transform);
+  expect(inlineAfterPan).not.toBe(inlineAfter);
+  await diagram.getByRole("button", { name: "Reset diagram zoom" }).click();
+
+  await diagram.getByRole("button", { name: "View diagram source" }).click();
+  const sourceGeometry = await diagram.evaluate((element) => {
+    const code = element.querySelector("code");
+    const source = element.querySelector(".agent-mermaid-source");
+    const actions = element.querySelector(".agent-mermaid-source-actions");
+    if (!code || !source || !actions) throw new Error("Mermaid source structure is incomplete.");
+    const firstLine = document.createRange();
+    const firstLineLength = code.textContent?.indexOf("\n") ?? -1;
+    firstLine.setStart(code.firstChild, 0);
+    firstLine.setEnd(code.firstChild, firstLineLength < 0 ? code.textContent.length : firstLineLength);
+    const codeBounds = firstLine.getBoundingClientRect();
+    const sourceBounds = source.getBoundingClientRect();
+    const actionsBounds = actions.getBoundingClientRect();
+    return {
+      firstLineInset: codeBounds.top - sourceBounds.top,
+      firstLineDoesNotOverlapActions:
+        codeBounds.right <= actionsBounds.left
+        || codeBounds.left >= actionsBounds.right
+        || codeBounds.bottom <= actionsBounds.top
+        || codeBounds.top >= actionsBounds.bottom,
+    };
+  });
+  expect(sourceGeometry.firstLineInset).toBeLessThanOrEqual(20);
+  expect(sourceGeometry.firstLineDoesNotOverlapActions).toBe(true);
+
+  await diagram.getByRole("button", { name: "Show diagram" }).click();
+  await diagram.getByRole("button", { name: "Expand diagram" }).click();
+  const preview = page.getByRole("dialog", { name: "Mermaid diagram preview" });
+  await expect(preview.locator(".attachment-preview-image")).toBeVisible();
+  await expectPreviewToFit(page, preview.locator(".attachment-preview-stage"));
+
+  const image = preview.locator(".attachment-preview-image");
+  const before = await image.boundingBox();
+  expect(before).not.toBeNull();
+  const focus = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
+  await page.mouse.move(focus.x, focus.y);
+  await page.mouse.wheel(0, -100);
+  await expect(page.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("125%");
+  const after = await image.boundingBox();
+  expect(after).not.toBeNull();
+  expect(after.x + after.width / 2).toBeCloseTo(focus.x, 0);
+  expect(after.y + after.height / 2).toBeCloseTo(focus.y, 0);
+
+  await page.getByRole("button", { name: "Close diagram preview" }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await diagram.getByRole("button", { name: "Expand diagram" }).click();
+  const narrowPreview = page.getByRole("dialog", { name: "Mermaid diagram preview" });
+  await expect(narrowPreview.locator(".attachment-preview-image")).toBeVisible();
+  await expectPreviewToFit(page, narrowPreview.locator(".attachment-preview-stage"));
+  const dialogGeometry = await narrowPreview.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(dialogGeometry.scrollWidth).toBe(dialogGeometry.clientWidth);
+});
+
+test("waits for the Agent message to complete before rendering Mermaid", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await send(page, "smoke:mermaid-streaming");
+
+  const chat = page.getByLabel("Task chat");
+  await expect(chat.locator("code.language-mermaid")).toBeVisible();
+  await expect(chat.locator(".agent-mermaid")).toHaveCount(0);
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible({ timeout: 10_000 });
+  await expect(chat.locator(".agent-mermaid")).toBeVisible({ timeout: 30_000 });
+});
+
+async function expectPreviewToFit(page, stage) {
+  await expect.poll(async () => stage.evaluate((stageElement) => {
+    const image = stageElement.querySelector("img");
+    if (!image) return false;
+    const stageBounds = stageElement.getBoundingClientRect();
+    const imageBounds = image.getBoundingClientRect();
+    return imageBounds.left >= stageBounds.left
+      && imageBounds.right <= stageBounds.right
+      && imageBounds.top >= stageBounds.top
+      && imageBounds.bottom <= stageBounds.bottom;
+  })).toBe(true);
+}
+
 test("quotes selected rendered Chat text into the Composer at desktop and narrow widths", async ({ page }) => {
   await page.setViewportSize({ width: 1_200, height: 800 });
   await openPreparedNewTask(page);

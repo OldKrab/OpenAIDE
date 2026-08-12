@@ -116,6 +116,23 @@ describe("AgentMarkdown", () => {
     expect(html.match(/aria-label="Copy code"/g)).toHaveLength(1);
   });
 
+  it("recognizes explicit Mermaid fences only when Agent Chat enables diagrams", () => {
+    const enabled = renderToStaticMarkup(
+      <AgentMarkdown renderDiagrams text={"```mermaid\nflowchart LR\n  A --> B\n```"} />,
+    );
+    const disabled = renderToStaticMarkup(
+      <AgentMarkdown text={"```mermaid\nflowchart LR\n  A --> B\n```"} />,
+    );
+    const streaming = renderToStaticMarkup(
+      <AgentMarkdown renderDiagrams streaming text={"```mermaid\nflowchart LR\n  A --> B\n```"} />,
+    );
+
+    expect(enabled).toContain("agent-mermaid");
+    expect(disabled).not.toContain("agent-mermaid");
+    expect(streaming).not.toContain("agent-mermaid");
+    expect(streaming).toContain("language-mermaid");
+  });
+
   it("copies each fenced block independently without Markdown fences or language markers", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
