@@ -332,16 +332,19 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   );
   await page.mouse.wheel(0, -100);
   await expect(diagram.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("125%");
+  await expect.poll(
+    () => inlineImage.evaluate((element) => getComputedStyle(element).transform),
+  ).not.toBe(inlineBefore);
   const inlineAfter = await inlineImage.evaluate((element) => getComputedStyle(element).transform);
-  expect(inlineAfter).not.toBe(inlineBefore);
   await page.mouse.down();
   await page.mouse.move(
     inlineBounds.x + inlineBounds.width / 2 + 40,
     inlineBounds.y + inlineBounds.height / 2 + 25,
   );
   await page.mouse.up();
-  const inlineAfterPan = await inlineImage.evaluate((element) => getComputedStyle(element).transform);
-  expect(inlineAfterPan).not.toBe(inlineAfter);
+  await expect.poll(
+    () => inlineImage.evaluate((element) => getComputedStyle(element).transform),
+  ).not.toBe(inlineAfter);
   await diagram.getByRole("button", { name: "Reset diagram zoom" }).click();
 
   await diagram.getByRole("button", { name: "View diagram source" }).click();
