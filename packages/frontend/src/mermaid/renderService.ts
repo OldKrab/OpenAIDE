@@ -213,20 +213,35 @@ class MermaidRenderCoordinator {
 class RenderTimeoutError extends Error {}
 class RendererStartupTimeoutError extends Error {}
 
-function configuredRendererUri() {
-  const configured = document.querySelector<HTMLMetaElement>('meta[name="openaide-mermaid-renderer"]')?.content;
+function configuredRendererScriptUri() {
+  const configured = document.querySelector<HTMLMetaElement>('meta[name="openaide-mermaid-renderer-script"]')?.content;
   return configured || undefined;
+}
+
+function configuredRendererNonce() {
+  const configured = document.querySelector<HTMLMetaElement>('meta[name="openaide-mermaid-renderer-nonce"]')?.content;
+  return configured && /^[a-zA-Z0-9_-]{16,128}$/.test(configured) ? configured : undefined;
 }
 
 /**
  * Web authentication cookies are unavailable inside the opaque sandbox. The
  * parent therefore fetches the packaged renderer and gives the child a
- * self-contained document, while VS Code uses its admitted resource URI.
+ * self-contained document. VS Code builds the same sandbox locally around its
+ * packaged script because Remote hosts do not serve local HTML as frame documents.
  */
 async function configureRendererFrame(frame: HTMLIFrameElement) {
-  const configured = configuredRendererUri();
+  const configured = configuredRendererScriptUri();
   if (configured) {
-    frame.src = configured;
+    const nonce = configuredRendererNonce();
+    if (!nonce) throw new Error("renderer unavailable");
+    const response = await fetch(configured);
+    if (!response.ok) throw new Error("renderer unavailable");
+    const rendererDocument = buildPackagedRendererDocument(configured, nonce);
+    frame.srcdoc = buildSelfContainedRendererDocument(
+      rendererDocument,
+      await response.text(),
+      nonce,
+    );
     return;
   }
   const documentUri = new URL("/mermaid-renderer.html", window.location.href);
@@ -239,27 +254,52 @@ async function configureRendererFrame(frame: HTMLIFrameElement) {
   frame.srcdoc = buildSelfContainedRendererDocument(rendererDocument, rendererScript);
 }
 
-export function buildSelfContainedRendererDocument(rendererDocument: string, rendererScript: string) {
+export function buildPackagedRendererDocument(rendererScriptUri: string, nonce: string) {
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(nonce)) throw new Error("invalid renderer nonce");
+  const escapedScriptUri = rendererScriptUri
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; font-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
+    <title>OpenAIDE Diagram Renderer</title>
+  </head>
+  <body>
+    <script nonce="${nonce}" src="${escapedScriptUri}"></script>
+  </body>
+</html>`;
+}
+
+export function buildSelfContainedRendererDocument(
+  rendererDocument: string,
+  rendererScript: string,
+  nonce = "openaide-mermaid-renderer",
+) {
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(nonce)) throw new Error("invalid renderer nonce");
   const bytes = new TextEncoder().encode(rendererScript);
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += 32_768) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
   }
   const payload = globalThis.btoa(binary);
-  const embeddedRenderer = `<script nonce="openaide-mermaid-renderer" type="application/octet-stream" id="openaide-mermaid-payload">${payload}</script>
-    <script nonce="openaide-mermaid-renderer">
+  const embeddedRenderer = `<script nonce="${nonce}" type="application/octet-stream" id="openaide-mermaid-payload">${payload}</script>
+    <script nonce="${nonce}">
       const payload = document.getElementById("openaide-mermaid-payload").textContent || "";
       const binary = atob(payload);
       const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
       const script = document.createElement("script");
-      script.nonce = "openaide-mermaid-renderer";
+      script.nonce = ${JSON.stringify(nonce)};
       script.textContent = new TextDecoder().decode(bytes);
       document.head.append(script);
     </script>`;
-  return rendererDocument.replace(
-    '<script nonce="openaide-mermaid-renderer" src="./mermaid-renderer.js"></script>',
-    embeddedRenderer,
+  const externalScript = new RegExp(
+    `<script nonce="${nonce}" src="[^"]+"></script>`,
   );
+  if (!externalScript.test(rendererDocument)) throw new Error("renderer unavailable");
+  return rendererDocument.replace(externalScript, embeddedRenderer);
 }
 
 let coordinator: MermaidRenderCoordinator | undefined;

@@ -323,7 +323,6 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   expect((await copySource.boundingBox())?.width).toBeLessThanOrEqual(30);
   await expectPreviewToFit(page, diagram.locator(".attachment-preview-stage"));
   const inlineImage = diagram.locator(".agent-mermaid-image");
-  const inlineBefore = await inlineImage.evaluate((element) => getComputedStyle(element).transform);
   const inlineBounds = await inlineImage.boundingBox();
   expect(inlineBounds).not.toBeNull();
   await page.mouse.move(
@@ -333,8 +332,8 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   await page.mouse.wheel(0, -100);
   await expect(diagram.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("125%");
   await expect.poll(
-    () => inlineImage.evaluate((element) => getComputedStyle(element).transform),
-  ).not.toBe(inlineBefore);
+    async () => (await inlineImage.boundingBox())?.width,
+  ).toBeGreaterThan(inlineBounds.width);
   const inlineAfter = await inlineImage.evaluate((element) => getComputedStyle(element).transform);
   await page.mouse.down();
   await page.mouse.move(
@@ -345,6 +344,13 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   await expect.poll(
     () => inlineImage.evaluate((element) => getComputedStyle(element).transform),
   ).not.toBe(inlineAfter);
+  await diagram.getByRole("button", { name: "Reset diagram zoom" }).click();
+  const zoomIn = diagram.getByRole("button", { name: "Zoom diagram in" });
+  for (let step = 0; step < 16; step += 1) await zoomIn.click();
+  await expect(diagram.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("500%");
+  await expect(zoomIn).toBeEnabled();
+  await zoomIn.click();
+  await expect(diagram.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("750%");
   await diagram.getByRole("button", { name: "Reset diagram zoom" }).click();
 
   await diagram.getByRole("button", { name: "View diagram source" }).click();
@@ -390,6 +396,14 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   expect(after.x + after.width / 2).toBeCloseTo(focus.x, 0);
   expect(after.y + after.height / 2).toBeCloseTo(focus.y, 0);
 
+  await preview.getByRole("button", { name: "Reset diagram zoom" }).click();
+  const previewZoomIn = preview.getByRole("button", { name: "Zoom diagram in" });
+  for (let step = 0; step < 16; step += 1) await previewZoomIn.click();
+  await expect(preview.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("500%");
+  await expect(previewZoomIn).toBeEnabled();
+  await previewZoomIn.click();
+  await expect(preview.getByRole("button", { name: "Reset diagram zoom" })).toHaveText("750%");
+
   await page.getByRole("button", { name: "Close diagram preview" }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await diagram.getByRole("button", { name: "Expand diagram" }).click();
@@ -405,13 +419,17 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
 
 test("waits for the Agent message to complete before rendering Mermaid", async ({ page }) => {
   await openPreparedNewTask(page);
+  await send(page, "smoke:mermaid-preview");
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  const chat = page.getByLabel("Task chat");
+  await expect(chat.locator(".agent-mermaid")).toHaveCount(1, { timeout: 30_000 });
+
   await send(page, "smoke:mermaid-streaming");
 
-  const chat = page.getByLabel("Task chat");
   await expect(chat.locator("code.language-mermaid")).toBeVisible();
-  await expect(chat.locator(".agent-mermaid")).toHaveCount(0);
+  await expect(chat.locator(".agent-mermaid")).toHaveCount(1);
   await expect(page.getByLabel("Task status: Ready")).toBeVisible({ timeout: 10_000 });
-  await expect(chat.locator(".agent-mermaid")).toBeVisible({ timeout: 30_000 });
+  await expect(chat.locator(".agent-mermaid")).toHaveCount(2, { timeout: 30_000 });
 });
 
 async function expectPreviewToFit(page, stage) {

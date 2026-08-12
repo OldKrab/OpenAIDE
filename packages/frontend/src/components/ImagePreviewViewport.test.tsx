@@ -12,6 +12,38 @@ const imageNodeMock = {
 const removeEventListener = vi.fn();
 
 describe("ImagePreviewViewport", () => {
+  it("repaints the image at the requested zoom instead of transform-scaling a cached layer", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ImagePreviewViewport image={{ label: "diagram.svg", url: "data:image/svg+xml,%3Csvg/%3E" }} />,
+        { createNodeMock: viewportNodeMock },
+      );
+    });
+
+    act(() => tree.root.findByProps({ "aria-label": "Zoom image in" }).props.onClick());
+
+    expect(viewportImage(tree.root).props.style.width).toContain("1.25");
+    expect(viewportImage(tree.root).props.style.height).toContain("1.25");
+    expect(viewportImage(tree.root).props.style.transform).not.toContain("scale(");
+  });
+
+  it("allows detailed inspection beyond five times the fitted size", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ImagePreviewViewport image={{ label: "large-diagram.svg", url: "data:image/svg+xml,%3Csvg/%3E" }} />,
+        { createNodeMock: viewportNodeMock },
+      );
+    });
+    const zoomIn = tree.root.findByProps({ "aria-label": "Zoom image in" });
+
+    for (let step = 0; step < 16; step += 1) act(() => zoomIn.props.onClick());
+
+    expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("500%");
+    expect(tree.root.findByProps({ "aria-label": "Zoom image in" }).props.disabled).toBe(false);
+  });
+
   it("zooms out below the fitted size and resets back to fit", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
@@ -25,12 +57,12 @@ describe("ImagePreviewViewport", () => {
     expect(zoomOut.props.disabled).toBe(false);
     act(() => zoomOut.props.onClick());
 
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(0.75)");
+    expect(viewportImage(tree.root).props.style.width).toContain("0.75");
     expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("75%");
 
     act(() => tree.root.findByProps({ "aria-label": "Reset image zoom" }).props.onClick());
 
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1)");
+    expect(viewportImage(tree.root).props.style.width).toContain("* 1)");
     expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("Fit");
   });
 
@@ -54,12 +86,12 @@ describe("ImagePreviewViewport", () => {
     act(() => stage.props.onWheel({ clientX: 450, clientY: 200, deltaY: -120 }));
 
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(viewportImage(tree.root).props.style.transform).not.toBe("translate3d(0px, 0px, 0) scale(1)");
+    expect(viewportImage(tree.root).props.style.width).not.toContain("* 1)");
     expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).not.toBe("100%");
 
     act(() => tree.root.findByProps({ "aria-label": "Reset image zoom" }).props.onClick());
 
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1)");
+    expect(viewportImage(tree.root).props.style.width).toContain("* 1)");
     expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("Fit");
   });
 
@@ -80,7 +112,8 @@ describe("ImagePreviewViewport", () => {
       });
     });
 
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1.25)");
+    expect(viewportImage(tree.root).props.style.width).toContain("1.25");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 0px");
   });
 
   it("applies trackpad wheel zoom from total gesture movement instead of event count", () => {
@@ -123,7 +156,8 @@ describe("ImagePreviewViewport", () => {
 
     expect(capture).toHaveBeenCalledWith(1);
     expect(viewportImage(tree.root).props.draggable).toBe(false);
-    expect(viewportImage(tree.root).props.style.transform).toContain("translate3d(40px, 25px, 0)");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 40px");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 25px");
   });
 
   it("lets a zoomed image edge reach the canvas center", () => {
@@ -141,7 +175,8 @@ describe("ImagePreviewViewport", () => {
     act(() => stage.props.onPointerDown(pointerEvent(1, 300, 200)));
     act(() => stage.props.onPointerMove(pointerEvent(1, 900, 800)));
 
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(420px, 270px, 0) scale(1.5)");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 420px");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 270px");
   });
 
   it("lets a fitted image edge reach the canvas center", () => {
@@ -157,12 +192,13 @@ describe("ImagePreviewViewport", () => {
     act(() => stage.props.onPointerDown(pointerEvent(1, 300, 200)));
     act(() => stage.props.onPointerMove(pointerEvent(1, 900, 800)));
 
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(280px, 180px, 0) scale(1)");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 280px");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 180px");
     expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).props.disabled).toBe(false);
 
     act(() => tree.root.findByProps({ "aria-label": "Reset image zoom" }).props.onClick());
 
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1)");
+    expect(viewportImage(tree.root).props.style.transform).toContain("+ 0px");
   });
 
   it("closes from the empty canvas but not from the image", () => {
@@ -226,7 +262,7 @@ describe("ImagePreviewViewport", () => {
 
     act(() => stage.props.onKeyDown({ key: "0", preventDefault }));
     expect(preventDefault).toHaveBeenCalledTimes(2);
-    expect(viewportImage(tree.root).props.style.transform).toBe("translate3d(0px, 0px, 0) scale(1)");
+    expect(viewportImage(tree.root).props.style.width).toContain("* 1)");
   });
 });
 

@@ -361,6 +361,8 @@
 }
 
 .attachment-preview-stage {
+  --attachment-preview-image-width-inset: 32px;
+  --attachment-preview-image-height-inset: 24px;
   min-width: 0;
   min-height: 0;
   max-width: inherit;
@@ -386,26 +388,16 @@
 
 .attachment-preview-stage img {
   position: absolute;
-  inset: 8px 16px 16px;
+  left: 50%;
+  top: 50%;
   display: block;
-  width: calc(100% - 32px);
-  height: calc(100% - 24px);
   max-width: none;
   max-height: none;
   object-fit: contain;
-  transform-origin: center;
-  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform;
 }
 
 .attachment-preview-stage.is-interacting img {
-  transition: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .attachment-preview-stage img {
-    transition: none;
-  }
+  will-change: transform;
 }
 
 @media (max-width: 430px) {
@@ -415,12 +407,13 @@
   }
 
   .attachment-preview-stage {
+    --attachment-preview-image-width-inset: 16px;
+    --attachment-preview-image-height-inset: 12px;
     padding: 0;
   }
 
   .attachment-preview-stage img {
-    inset: 4px 8px 8px;
-    width: calc(100% - 16px);
-    height: calc(100% - 12px);
+    left: 50%;
+    top: 50%;
   }
 }

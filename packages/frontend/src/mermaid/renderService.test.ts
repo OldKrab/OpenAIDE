@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../services/hostBridge", () => ({ postHostMessage: vi.fn() }));
 vi.mock("../state/hostMessageTelemetry", () => ({ sendWebviewTelemetry: vi.fn() }));
 
-import { buildSelfContainedRendererDocument, renderMermaidDiagram } from "./renderService";
+import {
+  buildPackagedRendererDocument,
+  buildSelfContainedRendererDocument,
+  renderMermaidDiagram,
+} from "./renderService";
 
 const theme = {
   background: "rgb(10, 10, 10)",
@@ -35,6 +39,25 @@ describe("Mermaid render service", () => {
     expect(document).toContain(btoa('const closingTag = "</script>";'));
     expect(document).toContain('id="openaide-mermaid-payload"');
     expect(document).toContain('script.nonce = "openaide-mermaid-renderer"');
+  });
+
+  it("builds an isolated renderer document around a packaged script resource", () => {
+    const wrapper = buildPackagedRendererDocument(
+      "vscode-webview://extension/dist/mermaid-renderer.js?value=one&next=two",
+      "parent-webview-nonce",
+    );
+    const document = buildSelfContainedRendererDocument(
+      wrapper,
+      'globalThis.rendererLoaded = true;',
+      "parent-webview-nonce",
+    );
+
+    expect(document).toContain("default-src 'none'");
+    expect(document).toContain("<title>OpenAIDE Diagram Renderer</title>");
+    expect(document).toContain("script-src 'nonce-parent-webview-nonce'");
+    expect(document).toContain('id="openaide-mermaid-payload"');
+    expect(document).toContain('script.nonce = "parent-webview-nonce"');
+    expect(document).not.toContain("vscode-webview://extension");
   });
 
   it("classifies a renderer that never becomes ready as a startup timeout", async () => {
