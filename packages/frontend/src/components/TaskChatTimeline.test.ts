@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "@openaide/app-shell-contracts";
-import { currentTurnTextMessageIds, isLiveTextMessage } from "./TaskChatTimeline";
+import { isLiveTextMessage } from "./TaskChatTimeline";
 
 describe("TaskChatTimeline live text ownership", () => {
   it("does not treat an earlier completed Agent message as streaming", () => {
     const previous = agentMessage("agent-previous");
     const current = agentMessage("agent-current");
-    const user = userMessage("user-current");
+    const presentation = {
+      agent: { eventCursor: "cursor-current", messageId: current.message_id },
+    };
 
-    expect(isLiveTextMessage(currentTurnTextMessageIds([previous, user]), previous)).toBe(false);
-    const currentTurn = currentTurnTextMessageIds([previous, user, current]);
-    expect(isLiveTextMessage(currentTurn, previous)).toBe(false);
-    expect(isLiveTextMessage(currentTurn, current)).toBe(true);
+    expect(isLiveTextMessage(presentation, previous)).toBe(false);
+    expect(isLiveTextMessage(presentation, current)).toBe(true);
   });
 });
 
@@ -27,21 +27,6 @@ function agentMessage(messageId: string): ChatMessage {
       created_at: "2026-08-12T00:00:00.000Z",
       role: "agent",
       parts: [],
-    },
-  };
-}
-
-function userMessage(messageId: string): ChatMessage {
-  return {
-    cursor: `cursor-${messageId}`,
-    identity: messageId,
-    message_type: "user",
-    message_id: messageId,
-    message: {
-      kind: "user",
-      id: messageId,
-      created_at: "2026-08-12T00:00:00.000Z",
-      text: "Continue",
     },
   };
 }

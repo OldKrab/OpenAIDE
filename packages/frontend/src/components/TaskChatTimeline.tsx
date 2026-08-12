@@ -88,7 +88,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
     chatScroll.messageListRef.current = element;
     setMessageListElement(element);
   }, [chatScroll.messageListRef]);
-  const latestTextMessageIds = currentTurnTextMessageIds(items);
+  const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   const virtualItems = chatScroll.virtualizer.getVirtualItems();
   const firstVirtualItem = virtualItems[0];
   const lastVirtualItem = virtualItems.at(-1);
@@ -172,7 +172,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                     permissionTool={row.permissionTool}
                     presentLiveText={
                       (taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping")
-                      && isLiveTextMessage(latestTextMessageIds, row.message)
+                      && isLiveTextMessage(liveTextPresentation, row.message)
                     }
                     questionResponse={questionResponseForMessage(row.message.message, questionResponses)}
                     taskId={taskId}
@@ -278,20 +278,17 @@ function liveTextCursorForMessage(
 }
 
 export function isLiveTextMessage(
-  latestMessageIds: Partial<Record<"agent" | "thought", string>>,
+  presentation: TaskLiveTextPresentation | undefined,
   message: ChatMessage,
 ) {
   if (message.message.kind !== "agent_message") return false;
-  return latestMessageIds[message.message.role] === message.message_id;
+  return presentation?.[message.message.role]?.messageId === message.message_id;
 }
 
-export function currentTurnTextMessageIds(items: ChatMessage[]) {
+function latestTextMessageIdsByChannel(items: ChatMessage[]) {
   const latest: Partial<Record<"agent" | "thought", string>> = {};
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
-    // A new user message ends ownership of presentation signals left by the
-    // preceding turn, before the new Agent response has emitted any text.
-    if (item?.message.kind === "user") break;
     if (item?.message.kind !== "agent_message") continue;
     latest[item.message.role] ??= item.message_id;
     if (latest.agent && latest.thought) break;
