@@ -348,8 +348,8 @@ jobs:
           Add-Type -AssemblyName System.Drawing
           $expectedIconPath = Join-Path $env:GITHUB_WORKSPACE `
             "apps/desktop-validation/src-tauri/icons/windows/icon.ico"
-          function Assert-AssociatedIconMatches([string] $binaryPath) {
-            $expectedIcon = New-Object System.Drawing.Icon($expectedIconPath, 32, 32)
+          function Assert-AssociatedIconMatches([string] $binaryPath, [string] $iconPath) {
+            $expectedIcon = New-Object System.Drawing.Icon($iconPath, 32, 32)
             $actualIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($binaryPath)
             if (-not $actualIcon) { throw "No Windows icon was embedded in $binaryPath" }
             $expectedBitmap = $expectedIcon.ToBitmap()
@@ -369,13 +369,15 @@ jobs:
               $actualIcon.Dispose()
             }
           }
-          Assert-AssociatedIconMatches $desktopExecutable
+          Assert-AssociatedIconMatches $desktopExecutable $expectedIconPath
           $installer = Get-ChildItem `
             "apps/desktop-validation/src-tauri/target/release/bundle/nsis" `
             -Filter "*.exe" |
             Select-Object -First 1
           if (-not $installer) { throw "Windows installer was not found" }
-          Assert-AssociatedIconMatches $installer.FullName
+          $expectedInstallerIconPath = Join-Path $env:GITHUB_WORKSPACE `
+            "apps/desktop-validation/src-tauri/icons/windows/installer.ico"
+          Assert-AssociatedIconMatches $installer.FullName $expectedInstallerIconPath
 
           $stdout = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stderr.log"
