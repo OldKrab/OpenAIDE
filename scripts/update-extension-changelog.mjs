@@ -4,6 +4,22 @@ import { fileURLToPath } from "node:url";
 import { validateProjectVersion } from "./release-version.mjs";
 
 const CHANGELOG_HEADING = "# Changelog";
+const PRERELEASE_ENTRY = /^## \d+\.\d+\.\d+-(?:alpha|beta|rc)\.[1-9]\d*(?: -|$)/m;
+
+/** Rejects Marketplace changelogs that expose testing-build release notes. */
+export function assertNoPrereleaseChangelogEntries(changelog) {
+  if (PRERELEASE_ENTRY.test(changelog.replace(/\r\n?/g, "\n"))) {
+    throw new Error("Extension changelog must not contain prerelease entries");
+  }
+}
+
+function removePrereleaseChangelogEntries(changelog) {
+  return changelog
+    .split(/(?=^## )/m)
+    .filter((section) => !PRERELEASE_ENTRY.test(section))
+    .join("")
+    .trim();
+}
 
 /** Builds one Marketplace changelog entry from the same Markdown used by the GitHub release. */
 export function formatExtensionChangelogEntry({ version, releaseDate, releaseNotes }) {
@@ -21,7 +37,7 @@ export function formatExtensionChangelogEntry({ version, releaseDate, releaseNot
   return `## ${version} - ${releaseDate}\n\n${nestedNotes}`;
 }
 
-/** Prepends an entry while preserving the existing user-visible release history. */
+/** Prepends an entry while preserving stable user-visible release history. */
 export function prependExtensionChangelogEntry({ changelog, entry, version }) {
   const normalized = changelog.replace(/\r\n?/g, "\n").trimEnd();
   if (!normalized.startsWith(`${CHANGELOG_HEADING}\n`)) {
@@ -31,7 +47,11 @@ export function prependExtensionChangelogEntry({ changelog, entry, version }) {
   if (new RegExp(`^## ${escapedVersion}(?: -|$)`, "m").test(normalized)) {
     throw new Error(`Extension changelog already contains ${version}`);
   }
-  const history = normalized.slice(CHANGELOG_HEADING.length).trimStart();
+  // Clean legacy prerelease entries as stable history is rebuilt. Packaged
+  // validation below also prevents a manually added entry from shipping.
+  const history = removePrereleaseChangelogEntries(
+    normalized.slice(CHANGELOG_HEADING.length).trimStart(),
+  );
   return `${CHANGELOG_HEADING}\n\n${entry}\n\n${history}\n`;
 }
 
