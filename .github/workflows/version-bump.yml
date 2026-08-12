@@ -74,7 +74,9 @@ jobs:
           RELEASE_NOTES: ${{ inputs.release_notes }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          previous_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+          # Stable notes cover changes since the previous stable release; prerelease
+          # tags are intentionally not exposed in stable release notes.
+          previous_tag="$(node scripts/release-version.mjs previous-tag "$RELEASE_VERSION")"
           notes_path="$RUNNER_TEMP/release-notes.md"
 
           printf '%s\n' "$RELEASE_NOTES" > "$notes_path"
