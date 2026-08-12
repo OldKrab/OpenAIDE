@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,10 @@ export async function reconcileRegistry({
   const lookup = registry === "marketplace" ? lookupMarketplaceDigest : registry === "open-vsx" ? lookupOpenVsxDigest : undefined;
   if (!lookup) throw new Error(`Unsupported release registry: ${registry}`);
 
-  for (const releasePackage of packages) {
+  // Resolve every target before mutating either registry. Besides avoiding a
+  // partial publish when a later target conflicts, this keeps independent
+  // registry reads and accepted publications off the release critical path.
+  const states = await Promise.all(packages.map(async (releasePackage) => {
     const expected = await sha256(releasePackage.path);
     const facts = {
       fetchImpl,
@@ -36,17 +39,22 @@ export async function reconcileRegistry({
     const existing = await lookup(facts);
     if (existing === expected) {
       console.log(`${registry} ${version} ${releasePackage.target} already matches ${expected}; skipping.`);
-      continue;
+      return { releasePackage, expected, publish: false };
     }
     if (existing) {
       throw new Error(`${registry} ${version} ${releasePackage.target} has digest ${existing}, expected ${expected}`);
     }
 
+    return { releasePackage, expected, publish: true };
+  }));
+
+  await Promise.all(states.map(async ({ releasePackage, expected, publish: shouldPublish }) => {
+    if (!shouldPublish) return;
     await publish({ registry, packagePath: releasePackage.path });
     // Registry indexing and security scans are eventually consistent. Publisher
     // acceptance is terminal for this run; a later reconciliation verifies the digest.
     console.log(`Submitted ${registry} ${version} ${releasePackage.target} with digest ${expected}.`);
-  }
+  }));
 }
 
 export async function lookupMarketplaceDigest({ fetchImpl, version, target, extensionId = EXTENSION_ID }) {
@@ -115,14 +123,26 @@ function normalizeDigest(value) {
   return digest;
 }
 
-async function publishPackage({ registry, packagePath }) {
+function publishPackage({ registry, packagePath }) {
   const executable = process.platform === "win32" ? "npm.cmd" : "npm";
   const args = registry === "marketplace"
     ? ["exec", "--", "vsce", "publish", "--packagePath", packagePath]
     : ["exec", "--", "ovsx", "publish", packagePath];
-  const result = spawnSync(executable, args, { encoding: "utf8", stdio: "inherit" });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${registry} publisher exited with status ${result.status}`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, { stdio: "inherit" });
+    child.once("error", reject);
+    child.once("exit", (status, signal) => {
+      if (status === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(
+        signal
+          ? `${registry} publisher exited from signal ${signal}`
+          : `${registry} publisher exited with status ${status}`,
+      ));
+    });
+  });
 }
 
 async function main() {

@@ -98,6 +98,39 @@ test("checks once, skips identical packages, publishes missing packages, and rej
   }
 });
 
+test("publishes independent platform packages concurrently", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "openaide-registry-fixture-"));
+  const linuxPath = path.join(root, "linux.vsix");
+  const windowsPath = path.join(root, "windows.vsix");
+  await writeFile(linuxPath, "linux-package");
+  await writeFile(windowsPath, "windows-package");
+  try {
+    let started = 0;
+    let releasePublishers;
+    const publishersStarted = new Promise((resolve) => { releasePublishers = resolve; });
+    await reconcileRegistry({
+      registry: "open-vsx",
+      version: "0.1.0-beta.1",
+      packages: [
+        { target: "linux-x64", path: linuxPath },
+        { target: "win32-x64", path: windowsPath },
+      ],
+      async fetchImpl() { return new Response("missing", { status: 404 }); },
+      async publish() {
+        started += 1;
+        if (started === 2) releasePublishers();
+        await Promise.race([
+          publishersStarted,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("publishers ran serially")), 100)),
+        ]);
+      },
+    });
+    assert.equal(started, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("requires all canonical platform filenames", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-release-assets-"));
   try {

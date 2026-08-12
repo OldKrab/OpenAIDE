@@ -5,6 +5,7 @@ on:
     tags: ["v*.*.*"]
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -39,8 +40,8 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  checks:
-    name: Release checks
+  ci:
+    name: Require successful CI for release commit
     needs: validate
     runs-on: ubuntu-24.04
     steps:
@@ -48,26 +49,19 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .node-version
-          cache: npm
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-        with:
-          toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: npm ci
-      - run: npm run check
-      - run: cargo test --locked --workspace
-      - run: npm run test:gate
-      - run: npm run test --workspaces --if-present
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-release-main-ci.mjs --wait
 
   artifacts:
-    needs: [validate, checks]
+    needs: validate
     uses: ./.github/workflows/build-vsix.yml
     with:
       version: ${{ needs.validate.outputs.version }}
 
   github-release:
     name: Publish canonical immutable GitHub release
-    needs: [validate, artifacts]
+    needs: [validate, ci, artifacts]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

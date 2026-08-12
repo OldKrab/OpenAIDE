@@ -74,12 +74,13 @@ Before that release:
    updates the extension changelog for stable releases, commits the release
    notes, creates the explicit tag, and atomically pushes the `main` update and
    tag.
-5. The tag starts `Release`. It rejects tags not reachable from `main`, repeats
-   release checks, then builds Linux x64, Windows x64, and macOS Apple Silicon
-   VSIX packages. Prerelease packages carry the registry's native prerelease
-   metadata. Each runner inspects the packaged files and exercises its bundled
-   App Server through startup and graceful JSON-RPC shutdown before the VSIX can
-   be uploaded.
+5. The tag starts `Release`. It rejects tags not reachable from `main`, then
+   builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages while
+   normal CI validates the exact version commit. Publication requires both to
+   succeed; the release workflow does not repeat the CI suite. Prerelease
+   packages carry the registry's native prerelease metadata. Each runner
+   inspects the packaged files and exercises its bundled App Server through
+   startup and graceful JSON-RPC shutdown before the VSIX can be uploaded.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. This GitHub
    Release is the canonical release. Every release then reconciles the same
@@ -107,12 +108,13 @@ Open VSX; stable releases reconcile both registries:
 - same version, target, and SHA-256: skip successfully;
 - same version and target with a different SHA-256: fail without publishing.
 
-Publisher acceptance completes a missing-package attempt. The reconciler does
-not wait for eventually consistent registry indexing or security scans after
-publication; a later run verifies the published SHA-256 and fills any target
-whose earlier publication was interrupted. Recovery validates the requested
-release at its immutable tag, then uses the current reviewed reconciler from
-`main` so publishing fixes can recover older releases without rebuilding or
-changing their assets.
+Publisher acceptance completes a missing-package attempt. The reconciler checks
+all target digests before publishing, then submits missing platform packages in
+parallel. It does not wait for eventually consistent registry indexing or
+security scans after publication; a later run verifies the published SHA-256
+and fills any target whose earlier publication was interrupted. Recovery
+validates the requested release at its immutable tag, then uses the current
+reviewed reconciler from `main` so publishing fixes can recover older releases
+without rebuilding or changing their assets.
 
 This recovery path resumes incomplete publication; it never rebuilds a release.

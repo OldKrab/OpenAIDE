@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requireSuccessfulMainCi } from "./check-release-main-ci.mjs";
+import { requireSuccessfulMainCi, waitForSuccessfulMainCi } from "./check-release-main-ci.mjs";
 
 test("accepts a successful CI push run for the exact main commit", async () => {
   const requests = [];
@@ -49,5 +49,53 @@ test("surfaces GitHub API failures without treating them as a failed check", asy
       },
     }),
     /lookup failed \(403\): rate limited/,
+  );
+});
+
+test("waits for the tagged main commit CI without rerunning the suite", async () => {
+  const responses = [
+    { status: "in_progress", conclusion: null },
+    { status: "completed", conclusion: "success" },
+  ];
+  let waits = 0;
+  const run = await waitForSuccessfulMainCi({
+    repository: "OldKrab/OpenAIDE",
+    sha: "release-sha",
+    token: "test-token",
+    attempts: 3,
+    async wait() { waits += 1; },
+    async fetchImpl() {
+      const state = responses.shift();
+      return Response.json({ workflow_runs: [{
+        id: 84,
+        head_sha: "release-sha",
+        event: "push",
+        ...state,
+      }] });
+    },
+  });
+
+  assert.equal(run.id, 84);
+  assert.equal(waits, 1);
+});
+
+test("stops waiting when the tagged main commit CI fails", async () => {
+  await assert.rejects(
+    waitForSuccessfulMainCi({
+      repository: "OldKrab/OpenAIDE",
+      sha: "release-sha",
+      token: "test-token",
+      async wait() { throw new Error("must not wait after terminal failure"); },
+      async fetchImpl() {
+        return Response.json({ workflow_runs: [{
+          id: 85,
+          head_sha: "release-sha",
+          event: "push",
+          status: "completed",
+          conclusion: "failure",
+        }] });
+      },
+    }),
+    /completed with failure/,
   );
 });
