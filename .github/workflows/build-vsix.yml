@@ -53,11 +53,17 @@ jobs:
             *) echo "artifacts must be all, vsix, or desktop" >&2; exit 1 ;;
           esac
 
-          if [[ "$ARTIFACT_SELECTION" == "desktop" ]]; then
-            server_matrix='{"include":[{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"}]}'
-          else
-            server_matrix='{"include":[{"os":"ubuntu-24.04","target":"linux-x64","binary":"openaide-app-server"},{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"}]}'
-          fi
+          case "$ARTIFACT_SELECTION" in
+            desktop)
+              server_matrix='{"include":[{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"},{"os":"ubuntu-24.04","target":"linux-x64-musl","binary":"openaide-app-server","rust_target":"x86_64-unknown-linux-musl"}]}'
+              ;;
+            vsix)
+              server_matrix='{"include":[{"os":"ubuntu-24.04","target":"linux-x64","binary":"openaide-app-server"},{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"}]}'
+              ;;
+            all)
+              server_matrix='{"include":[{"os":"ubuntu-24.04","target":"linux-x64","binary":"openaide-app-server"},{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"},{"os":"ubuntu-24.04","target":"linux-x64-musl","binary":"openaide-app-server","rust_target":"x86_64-unknown-linux-musl"}]}'
+              ;;
+          esac
 
           if [[ -n "$REQUESTED_VERSION" ]]; then
             version="$REQUESTED_VERSION"
@@ -95,18 +101,39 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install static Linux build prerequisites
+        if: matrix.target == 'linux-x64-musl'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
       - name: Set artifact versions
         run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
       - name: Test repeated Windows Project persistence
         if: matrix.target == 'win32-x64'
         run: cargo test --locked -p openaide-app-server --test project_persistence managed_projects_survive_repeated_catalog_writes
       - name: Build App Server once for both package formats
-        run: cargo build --locked --release -p openaide-app-server
+        shell: bash
+        run: |
+          if [[ -n "${{ matrix.rust_target }}" ]]; then
+            cargo build --locked --release -p openaide-app-server --target "${{ matrix.rust_target }}"
+          else
+            cargo build --locked --release -p openaide-app-server
+          fi
       - name: Stage App Server artifact
         shell: bash
         run: |
           mkdir -p artifacts
-          cp "target/release/${{ matrix.binary }}" artifacts/
+          if [[ -n "${{ matrix.rust_target }}" ]]; then
+            file "target/${{ matrix.rust_target }}/release/${{ matrix.binary }}" | grep -q 'static-pie linked'
+            if readelf -l "target/${{ matrix.rust_target }}/release/${{ matrix.binary }}" | grep -q 'INTERP'; then
+              echo "WSL App Server must not require a dynamic loader" >&2
+              exit 1
+            fi
+            cp "target/${{ matrix.rust_target }}/release/${{ matrix.binary }}" artifacts/
+          else
+            cp "target/release/${{ matrix.binary }}" artifacts/
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
@@ -231,6 +258,11 @@ jobs:
         with:
           name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
           path: app-server
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: matrix.target == 'win32-x64'
+        with:
+          name: app-server-linux-x64-musl${{ needs.prepare.outputs.artifact_suffix }}
+          path: wsl-app-server
       - name: Restore App Server executable permission
         if: runner.os != 'Windows'
         run: chmod +x "app-server/${{ matrix.binary }}"
@@ -241,6 +273,15 @@ jobs:
           cp \
             "app-server/${{ matrix.binary }}" \
             "apps/desktop-validation/src-tauri/binaries/openaide-app-server-${{ matrix.target_triple }}${{ matrix.sidecar_extension }}"
+      - name: Stage WSL App Server resource for Tauri
+        if: matrix.target == 'win32-x64'
+        shell: bash
+        run: |
+          mkdir -p apps/desktop-validation/src-tauri/resources/wsl
+          cp \
+            wsl-app-server/openaide-app-server \
+            apps/desktop-validation/src-tauri/resources/wsl/openaide-app-server
+          test "$(od -An -tx1 -N4 apps/desktop-validation/src-tauri/resources/wsl/openaide-app-server | tr -d ' \n')" = "7f454c46"
       - name: Build unsigned desktop installer
         run: >-
           npm run tauri --workspace openaide-desktop-validation --
@@ -273,6 +314,9 @@ jobs:
             packaged_server="$(find "$extraction_root" -type f -iname 'openaide-app-server.exe' -print -quit)"
             test -n "$packaged_server"
             cmp "app-server/openaide-app-server.exe" "$packaged_server"
+            packaged_wsl_server="$extraction_root/wsl/openaide-app-server"
+            test -f "$packaged_wsl_server"
+            cmp "wsl-app-server/openaide-app-server" "$packaged_wsl_server"
           fi
 
           mkdir -p artifacts
@@ -300,6 +344,38 @@ jobs:
           $desktopExecutable = Join-Path $env:RUNNER_TEMP `
             "openaide-desktop-nsis/openaide-desktop-validation.exe"
           node scripts/assert-windows-gui-executable.mjs $desktopExecutable
+
+          Add-Type -AssemblyName System.Drawing
+          $expectedIconPath = Join-Path $env:GITHUB_WORKSPACE `
+            "apps/desktop-validation/src-tauri/icons/windows/icon.ico"
+          function Assert-AssociatedIconMatches([string] $binaryPath) {
+            $expectedIcon = New-Object System.Drawing.Icon($expectedIconPath, 32, 32)
+            $actualIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($binaryPath)
+            if (-not $actualIcon) { throw "No Windows icon was embedded in $binaryPath" }
+            $expectedBitmap = $expectedIcon.ToBitmap()
+            $actualBitmap = $actualIcon.ToBitmap()
+            try {
+              for ($x = 0; $x -lt 32; $x++) {
+                for ($y = 0; $y -lt 32; $y++) {
+                  if ($expectedBitmap.GetPixel($x, $y).ToArgb() -ne $actualBitmap.GetPixel($x, $y).ToArgb()) {
+                    throw "Embedded Windows icon does not match OpenAIDE icon: $binaryPath"
+                  }
+                }
+              }
+            } finally {
+              $expectedBitmap.Dispose()
+              $actualBitmap.Dispose()
+              $expectedIcon.Dispose()
+              $actualIcon.Dispose()
+            }
+          }
+          Assert-AssociatedIconMatches $desktopExecutable
+          $installer = Get-ChildItem `
+            "apps/desktop-validation/src-tauri/target/release/bundle/nsis" `
+            -Filter "*.exe" |
+            Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not found" }
+          Assert-AssociatedIconMatches $installer.FullName
 
           $stdout = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stderr.log"

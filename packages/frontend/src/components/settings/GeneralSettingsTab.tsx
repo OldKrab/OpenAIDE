@@ -19,8 +19,10 @@ import type {
 } from "@openaide/app-shell-contracts";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
 import type { AppThemePreference, FrontendShellAppearance } from "../../services/frontendShell";
+import { currentFrontendShell } from "../../services/frontendShell";
 import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
 import { PopupDialog } from "../Popup";
+import { DesktopRuntimeSettings } from "./DesktopRuntimeSettings";
 
 export function GeneralSettingsTab({
   developerSettingsUnlocked = false,
@@ -47,6 +49,7 @@ export function GeneralSettingsTab({
   const enterSends = preferences.composer_submit_shortcut === "enter";
   const newLineShortcut = enterSends ? "Ctrl/Cmd+Enter" : "Enter";
   const developerSettings = runtimeSettings?.developer;
+  const desktopRuntime = currentFrontendShell()?.desktopRuntime;
 
   return (
     <div className="general-settings-panel">
@@ -56,6 +59,15 @@ export function GeneralSettingsTab({
           label="Appearance"
         >
           <ThemePicker appearance={appearance} />
+        </GeneralSection>
+      ) : null}
+
+      {desktopRuntime ? (
+        <GeneralSection
+          description="Choose the operating system that owns this OpenAIDE environment. Switching restarts the app."
+          label="Environment"
+        >
+          <DesktopRuntimeSettings capability={desktopRuntime} />
         </GeneralSection>
       ) : null}
 

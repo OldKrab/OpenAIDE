@@ -11,35 +11,28 @@ import { createShellAppearance } from "../../../packages/frontend/src/services/s
 import type { PostHostMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
 import { quitDesktop } from "./desktopQuitLifecycle";
-
-type DesktopBootstrap = {
-  clientInstanceId: string;
-  connection: {
-    kind: "localHttp";
-    endpointUrl: string;
-    authToken: string;
-  };
-  platform: "linux" | "macos" | "windows";
-};
+import { createDesktopProjectPicker } from "./desktopProjectPicker";
+import type { DesktopBootstrap } from "./desktopBootstrap";
+import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
 
 type DesktopRoute =
   | { surface: "nativeSession"; agentId: string; nativeSessionId: string; projectId?: string }
   | { surface: "settings"; projectId?: string; settingsAgentId?: string; settingsTab?: SettingsTabId; returnToNewTask?: boolean }
   | { surface: "task"; projectId?: string; taskId?: string };
 
-type DesktopCommand = "new-task" | "open-project" | "quit" | "settings";
-
 /** Adapts the native validation host to the shared Frontend shell seam. */
 export function createDesktopValidationShell(
   host: DesktopBootstrap,
   session: AppServerSession,
 ): FrontendShell {
+  document.body.dataset.platform = host.platform;
   const nativeWindow = getCurrentWindow();
   const nativeWebview = getCurrentWebview();
   let backgroundSyncSequence = 0;
   let nativeZoomSequence = 0;
   let nativeZoomInFlight = false;
   let quitInFlight = false;
+  const commandListeners = new Set<(command: DesktopSurfaceCommand) => void>();
   let unzoomedViewport: ViewportSize | undefined;
   const syncNativeBackground = (theme: "light" | "dark") => {
     const operationId = `desktop-background-${++backgroundSyncSequence}`;
@@ -79,10 +72,7 @@ export function createDesktopValidationShell(
   };
 
   void listen<DesktopCommand>("desktop-command", ({ payload }) => {
-    if (payload === "new-task") navigate({ surface: "task" });
-    else if (payload === "settings") navigate({ surface: "settings" });
-    else if (payload === "open-project") void pickProjectFolder();
-    else if (payload === "quit" && !quitInFlight) {
+    if (payload === "quit" && !quitInFlight) {
       quitInFlight = true;
       const operationId = `desktop-quit-${crypto.randomUUID()}`;
       const startedAt = performance.now();
@@ -97,7 +87,15 @@ export function createDesktopValidationShell(
         },
         exitApp: () => invoke("complete_desktop_quit"),
       });
+    } else if (payload !== "quit") {
+      for (const listener of commandListeners) listener(payload);
     }
+  });
+  window.addEventListener("keydown", (event) => {
+    const command = desktopCommandForKeyboardEvent(event);
+    if (!command) return;
+    event.preventDefault();
+    for (const listener of commandListeners) listener(command);
   });
 
   const post: PostHostMessage = (message) => {
@@ -106,11 +104,11 @@ export function createDesktopValidationShell(
     }
   };
 
-  const pickProjectFolder = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected !== "string") return undefined;
-    return { path: selected, label: folderLabel(selected) };
-  };
+  const pickProjectFolder = createDesktopProjectPicker({
+    confirm: (message) => window.confirm(message),
+    invoke,
+    openDirectory: () => open({ directory: true, multiple: false }),
+  });
   const toggleMaximize = async () => {
     if (host.platform !== "macos") {
       await nativeWindow.toggleMaximize();
@@ -164,6 +162,19 @@ export function createDesktopValidationShell(
       minimize: () => nativeWindow.minimize(),
       startDragging: () => nativeWindow.startDragging(),
       toggleMaximize,
+    },
+    desktopRuntime: host.platform === "windows" ? {
+      snapshot: () => ({
+        active: host.runtimeEnvironment,
+        wslDistros: host.runtimeOptions.wslDistros,
+      }),
+      select: (environment) => invoke("set_desktop_runtime_environment", { environment }),
+    } : undefined,
+    desktopCommands: {
+      subscribe(listener) {
+        commandListeners.add(listener);
+        return () => commandListeners.delete(listener);
+      },
     },
     bootstrap: () => routeBootstrap(route, host.clientInstanceId),
     messages: {
@@ -253,9 +264,4 @@ function routeBootstrap(
     preferences: { composer_submit_shortcut: "mod_enter" },
     shell: { kind: "desktop", navigationMode: "project" },
   };
-}
-
-function folderLabel(selected: string) {
-  const parts = selected.replace(/[\\/]+$/, "").split(/[\\/]/);
-  return parts.at(-1) || selected;
 }

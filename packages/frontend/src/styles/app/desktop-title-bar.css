@@ -1,6 +1,6 @@
 .desktop-title-bar {
   min-width: 0;
-  height: 44px;
+  height: 32px;
   display: grid;
   grid-template-columns: var(--app-sidebar-width, 304px) minmax(0, 1fr) auto;
   border-bottom: 1px solid var(--oa-border-subtle);
@@ -48,117 +48,12 @@
   min-width: 0;
 }
 
-.desktop-title-bar-content .task-header {
-  height: 43px;
-  border: 0;
-  padding-inline: 14px;
-}
-
 .desktop-title-bar-native-end {
   width: 12px;
 }
 
 .desktop-error-shell {
   grid-template-rows: auto minmax(0, 1fr);
-}
-
-.desktop-app-command {
-  min-height: 28px;
-  border: 0;
-  border-radius: var(--oa-radius-sm);
-  background: transparent;
-  color: var(--oa-text);
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 8px 3px 5px;
-}
-
-.desktop-app-command:hover,
-.desktop-app-command[aria-expanded="true"] {
-  background: var(--oa-raised);
-}
-
-.desktop-app-command > span {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  background: color-mix(in oklch, var(--oa-focus) 13%, var(--oa-raised));
-  color: var(--oa-focus);
-  display: grid;
-  place-items: center;
-}
-
-.desktop-app-command strong {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.desktop-app-command > svg {
-  color: var(--oa-muted);
-}
-
-.desktop-app-menu {
-  position: absolute;
-  z-index: 100;
-  top: 35px;
-  left: 8px;
-  width: min(272px, calc(var(--app-sidebar-width, 304px) - 16px));
-  overflow: hidden;
-  border: 1px solid var(--oa-border-strong);
-  border-radius: 9px;
-  background: color-mix(in oklch, var(--oa-panel) 96%, black);
-  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.42);
-  padding: 5px;
-}
-
-.desktop-app-menu button {
-  width: 100%;
-  min-height: 36px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--oa-text);
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  padding: 5px 8px;
-  text-align: left;
-}
-
-.desktop-app-menu button:hover,
-.desktop-app-menu button:focus-visible {
-  background: var(--oa-hover);
-}
-
-.desktop-app-menu button > svg {
-  color: var(--oa-muted);
-}
-
-.desktop-app-menu button > span {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.desktop-app-menu button strong {
-  font-size: 12px;
-  font-weight: 550;
-}
-
-.desktop-app-menu button small {
-  color: var(--oa-muted);
-  font-size: 10px;
-}
-
-.desktop-app-menu hr {
-  height: 1px;
-  border: 0;
-  background: var(--oa-border);
-  margin: 4px 6px;
 }
 
 .desktop-caption-buttons {
@@ -168,7 +63,7 @@
 
 .desktop-caption-buttons button {
   width: 46px;
-  height: 43px;
+  height: 31px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -184,24 +79,4 @@
 .desktop-caption-buttons button:last-child:hover {
   background: #c42b1c;
   color: white;
-}
-
-body[data-shell="desktop"] .app-sidebar-frame-with-header .task-work-stack-header {
-  display: none;
-}
-
-body[data-shell="desktop"] .app-sidebar-frame-with-header .task-surface {
-  grid-template-rows: minmax(0, 1fr);
-}
-
-@media (max-width: 980px) {
-  .desktop-title-bar-content .task-header-workspace {
-    display: none;
-  }
-}
-
-@media (max-width: 840px) {
-  .desktop-title-bar-content .task-header-agent > span {
-    display: none;
-  }
 }

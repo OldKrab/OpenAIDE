@@ -9,7 +9,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "vite",
     "tauri": "tauri",
-    "test": "node --test scripts/development-launch.test.mjs"
+    "test": "vitest run frontend/*.test.ts && node --test scripts/development-launch.test.mjs"
   },
   "dependencies": {
     "@openaide/app-server-client": "*",

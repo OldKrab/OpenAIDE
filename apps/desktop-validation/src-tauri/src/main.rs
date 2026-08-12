@@ -3,10 +3,11 @@
 use std::io::{BufRead, BufReader, Read};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
@@ -16,8 +17,13 @@ use tauri::{Emitter, Manager};
 mod desktop_runtime;
 #[cfg(target_os = "macos")]
 mod macos_webview_resize;
+mod wsl_runtime;
 
-use desktop_runtime::DesktopRuntimePaths;
+use desktop_runtime::{
+    DesktopBootstrapPreferences, DesktopRuntimeEnvironment, DesktopRuntimePaths,
+    PreparedProjectFolder, prepare_project_path,
+};
+use wsl_runtime::{discover_wsl_distros, launch_wsl_app_server_handoff, translate_path_with_wsl};
 
 const HANDOFF_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_HANDOFF_LINE_BYTES: usize = 8 * 1024;
@@ -39,20 +45,52 @@ struct DesktopBootstrap {
     client_instance_id: String,
     connection: LocalHttpConnection,
     platform: &'static str,
+    runtime_environment: DesktopRuntimeEnvironment,
+    runtime_options: DesktopRuntimeOptions,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopRuntimeOptions {
+    wsl_distros: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopBootstrapContext {
+    environment: DesktopRuntimeEnvironment,
+    can_recover: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DesktopBootstrapProgress {
+    message: String,
+    stage: &'static str,
 }
 
 struct DesktopState {
     client_instance_id: String,
     connection: Mutex<Option<LocalHttpConnection>>,
     runtime_paths: DesktopRuntimePaths,
+    preferences: Mutex<DesktopBootstrapPreferences>,
+    preferences_path: PathBuf,
+    wsl_resource_binary: PathBuf,
 }
 
 impl DesktopState {
-    fn new(runtime_paths: DesktopRuntimePaths) -> Self {
+    fn new(
+        runtime_paths: DesktopRuntimePaths,
+        preferences: DesktopBootstrapPreferences,
+        preferences_path: PathBuf,
+        wsl_resource_binary: PathBuf,
+    ) -> Self {
         Self {
             client_instance_id: format!("desktop-{}", uuid::Uuid::new_v4()),
             connection: Mutex::new(None),
             runtime_paths,
+            preferences: Mutex::new(preferences),
+            preferences_path,
+            wsl_resource_binary,
         }
     }
 }
@@ -67,10 +105,15 @@ fn main() {
             // Tauri's `executable_dir` means a user-level bin directory and is
             // unsupported on Windows and macOS; the sidecar lives by this process.
             let executable_path = std::env::current_exe()?;
-            app.manage(DesktopState::new(DesktopRuntimePaths::resolve(
-                &app_local_data,
-                &executable_path,
-            )?));
+            let preferences_path = app_local_data.join("desktop-bootstrap.json");
+            let preferences = read_bootstrap_preferences(&preferences_path);
+            let resource_dir = app.path().resource_dir()?;
+            app.manage(DesktopState::new(
+                DesktopRuntimePaths::resolve(&app_local_data, &executable_path)?,
+                preferences,
+                preferences_path,
+                resource_dir.join("wsl").join("openaide-app-server"),
+            ));
             #[cfg(target_os = "macos")]
             install_macos_menu(app)?;
             #[cfg(target_os = "macos")]
@@ -84,13 +127,32 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             desktop_bootstrap,
+            desktop_bootstrap_context,
             complete_desktop_quit,
             record_desktop_telemetry,
             prepare_desktop_native_zoom,
-            perform_desktop_native_zoom
+            perform_desktop_native_zoom,
+            set_desktop_runtime_environment,
+            desktop_prepare_project_folder,
+            desktop_dismiss_path_warning,
+            recover_desktop_runtime_environment
         ])
         .run(tauri::generate_context!())
         .expect("failed to run OpenAIDE desktop validation shell");
+}
+
+#[tauri::command]
+fn desktop_bootstrap_context(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<DesktopBootstrapContext, String> {
+    let preferences = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?;
+    Ok(DesktopBootstrapContext {
+        environment: preferences.environment.clone(),
+        can_recover: preferences.previous_environment.is_some(),
+    })
 }
 
 #[tauri::command]
@@ -176,8 +238,18 @@ fn install_macos_menu(app: &mut tauri::App) -> tauri::Result<()> {
 
 #[tauri::command]
 async fn desktop_bootstrap(
+    app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
 ) -> Result<DesktopBootstrap, String> {
+    let environment = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?
+        .environment
+        .clone();
+    let runtime_options = DesktopRuntimeOptions {
+        wsl_distros: discover_wsl_distros(),
+    };
     if let Some(connection) = state
         .connection
         .lock()
@@ -188,28 +260,64 @@ async fn desktop_bootstrap(
             client_instance_id: state.client_instance_id.clone(),
             connection,
             platform: std::env::consts::OS,
+            runtime_environment: environment,
+            runtime_options,
         });
     }
 
-    eprintln!("desktop_app_server_handoff_started");
+    let operation_id = format!("desktop-bootstrap-{}", uuid::Uuid::new_v4());
+    let started_at = Instant::now();
+    eprintln!("desktop_app_server_handoff_started operation_id={operation_id}");
     let runtime_paths = state.runtime_paths.clone();
-    let connection =
-        tauri::async_runtime::spawn_blocking(move || launch_app_server_handoff(&runtime_paths))
-            .await
-            .map_err(|_| "App Server handoff task failed".to_string())?
-            .map_err(|error| {
-                eprintln!("desktop_app_server_handoff_failed stage={}", error.stage);
-                error.user_message
-            })?;
-    eprintln!("desktop_app_server_handoff_completed");
+    let wsl_resource_binary = state.wsl_resource_binary.clone();
+    let launch_environment = environment.clone();
+    let progress_app = app.clone();
+    let connection = tauri::async_runtime::spawn_blocking(move || {
+        launch_app_server_handoff(
+            &runtime_paths,
+            &launch_environment,
+            &wsl_resource_binary,
+            |stage, message| emit_bootstrap_progress(&progress_app, stage, message),
+        )
+    })
+    .await
+    .map_err(|_| {
+        eprintln!(
+            "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage=task_join duration_ms={}",
+            started_at.elapsed().as_millis()
+        );
+        "App Server handoff task failed".to_string()
+    })?
+    .map_err(|error| {
+        eprintln!(
+            "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage={} duration_ms={}",
+            error.stage,
+            started_at.elapsed().as_millis()
+        );
+        error.user_message
+    })?;
+    eprintln!(
+        "desktop_app_server_handoff_completed operation_id={operation_id} outcome=success duration_ms={}",
+        started_at.elapsed().as_millis()
+    );
     *state
         .connection
         .lock()
         .map_err(|_| "desktop connection state unavailable")? = Some(connection.clone());
+    let mut preferences = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?;
+    if preferences.previous_environment.take().is_some() {
+        write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+    }
+    drop(preferences);
     Ok(DesktopBootstrap {
         client_instance_id: state.client_instance_id.clone(),
         connection,
         platform: std::env::consts::OS,
+        runtime_environment: environment,
+        runtime_options,
     })
 }
 
@@ -218,9 +326,132 @@ struct HandoffFailure {
     user_message: String,
 }
 
+fn emit_bootstrap_progress(app: &tauri::AppHandle, stage: &'static str, message: String) {
+    let _ = app.emit(
+        "desktop-bootstrap-progress",
+        DesktopBootstrapProgress { message, stage },
+    );
+}
+
+fn read_bootstrap_preferences(path: &Path) -> DesktopBootstrapPreferences {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn write_bootstrap_preferences(
+    path: &Path,
+    preferences: &DesktopBootstrapPreferences,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())?;
+    }
+    let bytes = serde_json::to_vec_pretty(preferences)
+        .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())?;
+    std::fs::write(path, bytes)
+        .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())
+}
+
+#[tauri::command]
+fn set_desktop_runtime_environment(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    environment: DesktopRuntimeEnvironment,
+) -> Result<(), String> {
+    if let DesktopRuntimeEnvironment::Wsl { distro } = &environment {
+        let distros = discover_wsl_distros();
+        if !distros
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(distro))
+        {
+            return Err("The selected WSL distribution is unavailable.".to_string());
+        }
+    }
+    let mut preferences = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?;
+    if preferences.environment == environment {
+        return Ok(());
+    }
+    preferences.previous_environment = Some(preferences.environment.clone());
+    preferences.environment = environment;
+    write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+    drop(preferences);
+    app.restart();
+}
+
+#[tauri::command]
+fn recover_desktop_runtime_environment(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<(), String> {
+    let mut preferences = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?;
+    let previous = preferences
+        .previous_environment
+        .take()
+        .ok_or_else(|| "No previous Desktop environment is available.".to_string())?;
+    preferences.environment = previous;
+    write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+    drop(preferences);
+    app.restart();
+}
+
+#[tauri::command]
+fn desktop_dismiss_path_warning(
+    state: tauri::State<'_, DesktopState>,
+    key: String,
+) -> Result<(), String> {
+    let mut preferences = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?;
+    if !preferences.dismissed_path_warnings.contains(&key) {
+        preferences.dismissed_path_warnings.push(key);
+        write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn desktop_prepare_project_folder(
+    state: tauri::State<'_, DesktopState>,
+    path: String,
+) -> Result<PreparedProjectFolder, String> {
+    let preferences = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?
+        .clone();
+    let environment = preferences.environment.clone();
+    prepare_project_path(
+        &path,
+        &environment,
+        &preferences.dismissed_path_warnings,
+        |windows_path| match &environment {
+            DesktopRuntimeEnvironment::Wsl { distro } => {
+                translate_path_with_wsl(distro, windows_path)
+            }
+            DesktopRuntimeEnvironment::Native => Ok(windows_path.to_string()),
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn launch_app_server_handoff(
     runtime_paths: &DesktopRuntimePaths,
+    environment: &DesktopRuntimeEnvironment,
+    wsl_resource_binary: &Path,
+    progress: impl Fn(&'static str, String),
 ) -> Result<LocalHttpConnection, HandoffFailure> {
+    if let DesktopRuntimeEnvironment::Wsl { distro } = environment {
+        return launch_wsl_app_server_handoff(distro, wsl_resource_binary, progress);
+    }
     create_directory(&runtime_paths.storage_root, "storage_create")?;
     create_directory(&runtime_paths.runtime_root, "runtime_create")?;
 

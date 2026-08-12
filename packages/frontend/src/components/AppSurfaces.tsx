@@ -5,7 +5,7 @@ import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceMo
 import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
-import { TaskHeader, taskStatusLabel } from "./TaskHeader";
+import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
@@ -155,6 +155,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopWindow = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
     ? frontendShell?.desktopWindow
     : undefined;
+  const desktopRuntimeEnvironment = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
+    ? frontendShell?.desktopRuntime?.snapshot().active
+    : undefined;
+  const desktopEnvironmentLabel = desktopRuntimeEnvironment?.kind === "wsl"
+    ? `WSL · ${desktopRuntimeEnvironment.distro}`
+    : desktopRuntimeEnvironment ? "Windows" : undefined;
   const finishAddingProject = async (folder: { path: string }) => {
     const project = await controller.intents.projects.add(folder.path);
     setProjectFolderDialogOpen(false);
@@ -176,34 +182,19 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       : workspaceBrowser
         ? () => setProjectFolderDialogOpen(true)
         : undefined;
+  useEffect(() => frontendShell?.desktopCommands?.subscribe((command) => {
+    if (command === "new-task") callbacks.navigation.openNewTask();
+    else if (command === "settings") callbacks.navigation.openSettings();
+    else if (command === "open-project") addProject?.();
+  }), [addProject, callbacks.navigation, frontendShell]);
   const desktopTaskSnapshot = renderableTaskSnapshot?.task.has_messages
     ? renderableTaskSnapshot
     : undefined;
-  const desktopTitleBarCommands = {
-    addProject,
-    newTask: () => callbacks.navigation.openNewTask(),
-    openSettings: () => callbacks.navigation.openSettings(),
-  };
-  const desktopTitleBar = desktopWindow ? (
-    <DesktopTitleBar
-      commands={desktopTitleBarCommands}
-      window={desktopWindow}
-    >
-      {desktopTaskSnapshot ? (
-        <TaskHeader
-          agentId={desktopTaskSnapshot.task.agent_id}
-          agentName={activeTask?.agent_name ?? desktopTaskSnapshot.task.agent_name}
-          gitRef={desktopTaskSnapshot.task.git_ref}
-          status={desktopTaskSnapshot.task.status}
-          title={activeTask?.title ?? desktopTaskSnapshot.task.title}
-          workspaceRoot={desktopTaskSnapshot.task.workspace_root}
-          worktreeName={desktopTaskSnapshot.task.worktree_name}
-        />
-      ) : null}
-    </DesktopTitleBar>
-  ) : undefined;
+  const desktopTitleBar = desktopWindow
+    ? <DesktopTitleBar window={desktopWindow} />
+    : undefined;
   const desktopSettingsTitleBar = desktopWindow ? (
-    <DesktopTitleBar commands={desktopTitleBarCommands} window={desktopWindow} />
+    <DesktopTitleBar window={desktopWindow} />
   ) : undefined;
   // Empty desktop chrome overlays New Task so platform controls remain available
   // without consuming a blank row from the working surface.
@@ -351,6 +342,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
           forkableAgentIds={forkableAgentIds}
+          environmentLabel={desktopEnvironmentLabel}
           onArchiveTask={callbacks.navigation.archiveTask}
           onAddProject={addProject}
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
@@ -465,6 +457,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
         nativeSessionProjectId={navigation.newTaskSelection.projectId}
         forkableAgentIds={forkableAgentIds}
+        environmentLabel={desktopEnvironmentLabel}
         onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
         onForkNativeSession={callbacks.navigation.forkNativeSession}
         onForkTask={callbacks.navigation.forkTask}

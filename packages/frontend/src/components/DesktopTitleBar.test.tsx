@@ -8,33 +8,17 @@ describe("DesktopTitleBar", () => {
     vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   });
 
-  it("puts frequent Windows commands and caption controls in native chrome", () => {
-    const newTask = vi.fn();
-    const addProject = vi.fn();
-    const openSettings = vi.fn();
+  it("keeps Windows chrome draggable without duplicating sidebar commands", () => {
     const windowControls = controls("windows");
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
-        <DesktopTitleBar
-          commands={{ addProject, newTask, openSettings }}
-          window={windowControls}
-        >
-          <strong>Current task</strong>
-        </DesktopTitleBar>,
+        <DesktopTitleBar window={windowControls} />,
       );
     });
 
-    act(() => tree.root.findByProps({ "aria-haspopup": "menu" }).props.onClick());
-    const menu = tree.root.findByProps({ "aria-label": "OpenAIDE actions" });
-    const newTaskButton = menu.findAllByType("button").find((button) =>
-      button.findAll((node) => node.type === "strong" && node.children.includes("New task")).length > 0,
-    );
-    act(() => newTaskButton?.props.onClick());
-
-    expect(newTask).toHaveBeenCalledOnce();
+    expect(tree.root.findAllByProps({ "aria-haspopup": "menu" })).toHaveLength(0);
     expect(tree.root.findByProps({ "aria-label": "Window controls" })).toBeTruthy();
-    expect(tree.root.findByProps({ children: "Current task" })).toBeTruthy();
 
     act(() => tree.root.findByProps({ className: "desktop-title-bar-content" }).props.onDoubleClick(mouseEvent(2)));
     expect(windowControls.toggleMaximize).toHaveBeenCalledOnce();
@@ -45,15 +29,12 @@ describe("DesktopTitleBar", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
-        <DesktopTitleBar commands={{ newTask: vi.fn(), openSettings: vi.fn() }} window={windowControls}>
-          <strong>Current task</strong>
-        </DesktopTitleBar>,
+        <DesktopTitleBar window={windowControls} />,
       );
     });
 
     expect(tree.root.findAllByProps({ "aria-haspopup": "menu" })).toHaveLength(0);
     expect(tree.root.findAllByProps({ "aria-label": "Window controls" })).toHaveLength(0);
-    expect(tree.root.findByProps({ children: "Current task" })).toBeTruthy();
   });
 
   it("prepares macOS native drag and zoom through the Desktop capability", () => {
@@ -61,7 +42,7 @@ describe("DesktopTitleBar", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
-        <DesktopTitleBar commands={{ newTask: vi.fn(), openSettings: vi.fn() }} window={windowControls} />,
+        <DesktopTitleBar window={windowControls} />,
       );
     });
 

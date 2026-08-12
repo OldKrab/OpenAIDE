@@ -176,6 +176,14 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .task-list-shell::be
   scroll-padding-bottom: 24px;
 }
 
+/* Chromium reserves a full classic scrollbar lane on Windows when the gutter
+   is stable. Keep the empty list edge optically balanced; a scrollbar claims
+   space only when the Task list actually overflows. */
+body[data-shell="desktop"][data-platform="windows"] .task-list {
+  scrollbar-gutter: auto;
+  padding-right: 6px;
+}
+
 /* VS Code already reserves the stable scrollbar gutter; extra row padding
    would leave a second empty strip beside every Task. */
 body[data-shell="vscodeExtension"] .task-list {
@@ -234,6 +242,36 @@ body[data-shell="web"] .task-list {
 .project-task-group-actions > button:hover,
 .project-task-group-actions > button[aria-expanded="true"] { background: var(--oa-raised); color: var(--oa-text); }
 .project-task-group-menu { min-width: 164px; }
+
+.project-task-group-environment {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid var(--oa-border-subtle);
+  color: var(--oa-muted);
+  margin: 1px 5px 5px;
+  padding: 5px 3px 8px;
+}
+
+.project-task-group-environment > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.project-task-group-environment small {
+  font-size: 10px;
+}
+
+.project-task-group-environment strong {
+  overflow: hidden;
+  color: var(--oa-text);
+  font-size: 11px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .project-task-group-toggle {
   height: 32px;

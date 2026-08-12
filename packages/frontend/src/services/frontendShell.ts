@@ -24,6 +24,24 @@ export type DesktopWindowCapability = {
   toggleMaximize(): Promise<void>;
 };
 
+export type DesktopRuntimeEnvironment =
+  | { kind: "native" }
+  | { kind: "wsl"; distro: string };
+
+export type DesktopRuntimeCapability = {
+  snapshot(): {
+    active: DesktopRuntimeEnvironment;
+    wslDistros: string[];
+  };
+  select(environment: DesktopRuntimeEnvironment): Promise<void>;
+};
+
+export type DesktopCommand = "new-task" | "open-project" | "settings";
+
+export type DesktopCommandCapability = {
+  subscribe(listener: (command: DesktopCommand) => void): () => void;
+};
+
 export type SentFileOpenRequest = {
   taskId: string;
   messageId: string;
@@ -63,6 +81,10 @@ export type FrontendShell = {
   backendConnection?: () => AppServerSession;
   /** Native window operations exposed only by the Desktop shell. */
   desktopWindow?: DesktopWindowCapability;
+  /** Desktop-owned backend OS selection, resolved before App Server startup. */
+  desktopRuntime?: DesktopRuntimeCapability;
+  /** Native menu and keyboard commands routed into the shared Desktop surface. */
+  desktopCommands?: DesktopCommandCapability;
   messages: {
     post: PostHostMessage;
     subscribe(listener: (message: HostToWebviewMessage) => void): () => void;

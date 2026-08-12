@@ -167,7 +167,7 @@ export function AppPrimaryTaskSurface({
         submitShortcut={preferences.composer_submit_shortcut}
         taskInput={primaryTask.taskInput ?? { prompt: "", context: [] }}
         toolDetails={primaryTask.toolDetails}
-        showWorkspaceContext={usesProjectNavigation}
+        showWorkspaceContext={usesProjectNavigation && bootstrap.shell.kind !== "desktop"}
       />
     );
   }

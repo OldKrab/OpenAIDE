@@ -300,6 +300,77 @@
   gap: 12px;
 }
 
+.desktop-runtime-settings {
+  display: grid;
+  gap: 10px;
+}
+
+.desktop-runtime-choices {
+  width: fit-content;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 3px;
+  border: 1px solid var(--oa-border);
+  border-radius: 8px;
+  background: var(--oa-raised);
+  padding: 3px;
+}
+
+.desktop-runtime-choices button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--oa-muted);
+  font-weight: 550;
+}
+
+.desktop-runtime-choices button:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--oa-panel) 76%, var(--oa-raised));
+  color: var(--oa-text);
+}
+
+.desktop-runtime-choices button.selected {
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  box-shadow: 0 1px 3px rgb(20 35 55 / 12%);
+}
+
+.desktop-runtime-choices button:disabled {
+  opacity: 0.46;
+}
+
+.desktop-runtime-distro {
+  max-width: 360px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.desktop-runtime-distro select {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  padding-inline: 9px;
+}
+
+.desktop-runtime-settings > p {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.desktop-runtime-settings > p.desktop-runtime-unavailable {
+  color: var(--oa-warning);
+}
+
 .general-theme-choice {
   position: relative;
   min-width: 0;
