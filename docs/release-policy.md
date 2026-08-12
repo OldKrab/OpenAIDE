@@ -59,7 +59,8 @@ Before that release:
    Do not add a changelog section because the workflow appends it. These notes
    become the GitHub Release body for every release, but only stable releases
    add them to the extension changelog. Alpha, beta, and release-candidate
-   versions never create extension changelog entries.
+   versions never create extension changelog entries. Stable release notes
+   compare against the previous stable release and never name prereleases.
 3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh

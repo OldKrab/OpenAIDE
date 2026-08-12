@@ -1,10 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  selectPreviousReleaseTag,
   validateNextReleaseVersion,
   validateProjectVersion,
   validateReleaseTag,
 } from "./release-version.mjs";
+
+test("stable release notes compare against the previous stable tag", () => {
+  assert.equal(
+    selectPreviousReleaseTag({
+      candidate: "0.1.0",
+      tags: ["v0.0.2", "v0.1.0-alpha.1", "v0.1.0-beta.1"],
+    }),
+    "v0.0.2",
+  );
+});
+
+test("prerelease notes compare against the immediately preceding release tag", () => {
+  assert.equal(
+    selectPreviousReleaseTag({
+      candidate: "0.1.0-beta.2",
+      tags: ["v0.0.2", "v0.1.0-alpha.1", "v0.1.0-beta.1"],
+    }),
+    "v0.1.0-beta.1",
+  );
+});
 
 test("accepts the supported stable and numbered prerelease forms", () => {
   for (const version of ["0.0.2-alpha.1", "0.0.2-beta.12", "0.0.2-rc.1", "0.0.2"]) {
