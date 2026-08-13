@@ -43,7 +43,7 @@ impl AcpAgentConfig {
             command: "npx".to_string(),
             args: vec![
                 "-y".to_string(),
-                "@agentclientprotocol/codex-acp@1.1.14".to_string(),
+                "@agentclientprotocol/codex-acp@1.2.0".to_string(),
             ],
             env: Vec::new(),
             secret_env: Vec::new(),
