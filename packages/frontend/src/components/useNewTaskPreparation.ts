@@ -28,6 +28,7 @@ import {
 export type PendingNewTaskPreparation = {
   key: string;
   promise: Promise<PendingNewTaskPreparationResult>;
+  settled: boolean;
 };
 
 type NewTaskPreparationOptions = {
@@ -71,7 +72,8 @@ export function useNewTaskPreparation({
   const currentOperationId = useRef(operation.id);
   if (currentOperationId.current !== operation.id) {
     currentOperationId.current = operation.id;
-    pendingPreparation.current = undefined;
+    // Keep an older acquire promise visible so a replacement chains behind its
+    // server-side lease instead of issuing a conflicting acquire in parallel.
     completedPreparationKey.current = undefined;
     failedPreparationKey.current = undefined;
   }
@@ -81,7 +83,9 @@ export function useNewTaskPreparation({
   previousBootstrap.current = bootstrap;
   if (!isNewTaskRoute) completedPreparationKey.current = undefined;
   if (enteredNewTaskRoute) {
-    pendingPreparation.current = undefined;
+    // A completed preparation from the previous route must not mask a fresh
+    // acquire. Keep only an in-flight promise so route changes remain ordered.
+    if (pendingPreparation.current?.settled) pendingPreparation.current = undefined;
     completedPreparationKey.current = undefined;
   }
   const retainedSnapshot = newTaskController.getSnapshot();
@@ -162,10 +166,13 @@ export function useNewTaskPreparation({
       const task = state.newTask.selection.worktreeId
         ? (await request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))).task
         : (await request(TASK_ACQUIRE, taskAcquireParams(state, projectId))).task;
+      const taskId = task.task.taskId as TaskId;
       if (!asyncOperations.owns(operation)) {
+        // The server may have leased this Prepared Task before the response
+        // became stale locally; release that exact identity before continuing.
+        await discard(taskId);
         throw new SupersededPreparation();
       }
-      const taskId = task.task.taskId as TaskId;
       if (state.appServerStateRootId) {
         retainPreparedTaskLease(state.appServerStateRootId, clientInstanceId, {
           preparationKey,
@@ -205,7 +212,8 @@ export function useNewTaskPreparation({
       failedPreparationKey.current = undefined;
       return { taskId, task };
     });
-    pendingPreparation.current = { key: preparationKey, promise };
+    const pending = { key: preparationKey, promise, settled: false };
+    pendingPreparation.current = pending;
 
     void promise.catch((error) => {
       if (error instanceof SupersededPreparation) return;
@@ -216,6 +224,7 @@ export function useNewTaskPreparation({
         message: error instanceof Error ? error.message : "Unable to prepare Task.",
       });
     }).then(() => undefined, () => undefined).finally(() => {
+      pending.settled = true;
       // Successful preparations stay available so immediate submit/upload can reuse
       // the exact Task even before React publishes its mapped snapshot.
       if (newTaskController.ownsPreparation(preparationKey)) return;
