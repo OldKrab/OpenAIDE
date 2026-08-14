@@ -22,18 +22,13 @@ pub struct AcpAgentConfig {
 }
 
 impl AcpAgentConfig {
+    /// The built-in Codex adapter is product-controlled and version-pinned.
+    ///
+    /// A `codex-acp` executable found on PATH is intentionally not used here:
+    /// users who need a different adapter build can register it as a Custom
+    /// Agent, while the built-in entry stays reproducible across releases.
     pub fn codex() -> Self {
-        if command_in_path("codex-acp") {
-            Self {
-                agent_id: "codex".to_string(),
-                command: "codex-acp".to_string(),
-                args: Vec::new(),
-                env: Vec::new(),
-                secret_env: Vec::new(),
-            }
-        } else {
-            Self::codex_npx_fallback()
-        }
+        Self::codex_npx_fallback()
     }
 
     /// The fallback is versioned with OpenAIDE so unchanged builds remain reproducible.
@@ -41,10 +36,7 @@ impl AcpAgentConfig {
         Self {
             agent_id: "codex".to_string(),
             command: "npx".to_string(),
-            args: vec![
-                "-y".to_string(),
-                "@agentclientprotocol/codex-acp@1.1.14".to_string(),
-            ],
+            args: vec!["-y".to_string(), "@openaide/codex-acp@1.0.0".to_string()],
             env: Vec::new(),
             secret_env: Vec::new(),
         }

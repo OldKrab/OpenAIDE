@@ -2,14 +2,14 @@ import { appendFile, readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const packageName = "@agentclientprotocol/codex-acp";
+const packageName = "@openaide/codex-acp";
 const configPath =
   process.env.CODEX_ACP_CONFIG_PATH ??
   fileURLToPath(
     new URL("../openaide-rs/app-server/src/agent/acp_agent_config.rs", import.meta.url),
   );
 const packagePattern =
-  /@agentclientprotocol\/codex-acp@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/g;
+  /@openaide\/codex-acp@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/g;
 
 async function publishedVersion() {
   const override = process.env.CODEX_ACP_LATEST_VERSION;
