@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 - 2026-08-14
+
+### Fixes
+
+- Serialize New Task prepared-task replacement and release stale late acquires before switching context.
+
 ## 0.1.2 - 2026-08-14
 
 ### Fixes
