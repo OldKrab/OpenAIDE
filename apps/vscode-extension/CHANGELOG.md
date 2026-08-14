@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 - 2026-08-14
+
+### Bug Fixes
+
+- Prevent a failed custom Agent command from freezing the Settings page.
+- Keep broken Agents editable and deletable while their status is checked.
+- Refresh only the changed Agent and clean stale prepared Tasks after Agent changes.
+
 ## 0.1.0 - 2026-08-12
 
 ### Features
