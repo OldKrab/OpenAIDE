@@ -36,10 +36,7 @@ impl AcpAgentConfig {
         Self {
             agent_id: "codex".to_string(),
             command: "npx".to_string(),
-            args: vec![
-                "-y".to_string(),
-                "@openaide/codex-acp@1.0.0".to_string(),
-            ],
+            args: vec!["-y".to_string(), "@openaide/codex-acp@1.0.0".to_string()],
             env: Vec::new(),
             secret_env: Vec::new(),
         }
