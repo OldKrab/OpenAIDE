@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-08-14
+
+### Fixes
+
+- Prevent custom-agent replacement saves from hanging while stale prepared tasks are cleaned up.
+- Expose Cursor ACP model, thinking effort, and fast-mode controls in the task composer.
+
 ## 0.1.1 - 2026-08-14
 
 ### Bug Fixes
