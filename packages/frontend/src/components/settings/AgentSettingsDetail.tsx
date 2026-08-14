@@ -156,6 +156,7 @@ function agentSettingsRecoveryKind(agent: AgentSettingsRecord): AgentRecoveryKin
   if (agent.status === "setup_required") {
     return agent.setup_reason === "nodeJsRequired" ? "nodeJsRequired" : "setupRequired";
   }
+  if (agent.status === "disconnected") return "launchFailed";
   if (agent.status === "failed") return "launchFailed";
   return undefined;
 }

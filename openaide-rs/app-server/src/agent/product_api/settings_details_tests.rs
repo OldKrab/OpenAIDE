@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use openaide_app_server_protocol::agent::{
     AgentSettingsDetailsParams, AgentSettingsSourceKind, AgentSettingsStatus,
@@ -28,6 +28,18 @@ fn agent_settings_details_expose_the_structured_setup_reason() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let statuses = AgentStatusCache::default();
+    statuses.record_for_test(
+        CODEX_AGENT_ID.to_string(),
+        AgentStatusSnapshot {
+            status: AgentStatus::SetupRequired,
+            setup_reason: Some(AgentSetupReason::NodeJsRequired),
+            capabilities: AgentCapabilities::default(),
+            auth_methods: Vec::new(),
+            logout_supported: false,
+            authenticating_method_id: None,
+            status_before_authentication: None,
+        },
+    );
     let api = AgentProductApi::new(
         AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
         AgentCatalogStore::new(store),
@@ -109,6 +121,13 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
             status_before_authentication: None,
         },
     );
+    statuses.record_probe_success(
+        &ProbeReadyAgentRuntime
+            .probe(AgentProbeRequest {
+                agent_id: OPENCODE_AGENT_ID.to_string(),
+            })
+            .unwrap(),
+    );
     let api = AgentProductApi::new(
         AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
         catalog_store,
@@ -162,9 +181,75 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
     assert!(!method.variables[1].secret);
 }
 
+#[test]
+fn agent_settings_details_read_cached_status_without_probing_processes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let probes = Arc::new(Mutex::new(Vec::new()));
+    let statuses = AgentStatusCache::default();
+    statuses.record_for_test(
+        CODEX_AGENT_ID.to_string(),
+        AgentStatusSnapshot {
+            status: AgentStatus::SetupRequired,
+            setup_reason: Some(AgentSetupReason::NodeJsRequired),
+            capabilities: AgentCapabilities::default(),
+            auth_methods: Vec::new(),
+            logout_supported: false,
+            authenticating_method_id: None,
+            status_before_authentication: None,
+        },
+    );
+    let api = AgentProductApi::new(
+        AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
+        AgentCatalogStore::new(store),
+        Arc::new(RecordingProbeRuntime {
+            probes: probes.clone(),
+        }),
+        statuses,
+    );
+
+    let result = api
+        .agent_settings_details(AgentSettingsDetailsParams {})
+        .unwrap();
+
+    assert!(probes.lock().unwrap().is_empty());
+    let codex = result
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == CODEX_AGENT_ID)
+        .unwrap();
+    assert_eq!(codex.status, AgentSettingsStatus::SetupRequired);
+    assert_eq!(codex.setup_reason, Some(AgentSetupReason::NodeJsRequired));
+}
+
 struct ProbeReadyAgentRuntime;
 
 struct ProbeNodeJsRequiredRuntime;
+
+struct RecordingProbeRuntime {
+    probes: Arc<Mutex<Vec<String>>>,
+}
+
+impl AgentRuntime for RecordingProbeRuntime {
+    fn probe(&self, request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
+        self.probes.lock().unwrap().push(request.agent_id);
+        Err(RuntimeError::Internal(
+            "probe must not run during a Settings read".to_string(),
+        ))
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        unreachable!("settings details must not start agent sessions")
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        unreachable!("settings details must not prompt agents")
+    }
+}
 
 impl AgentRuntime for ProbeNodeJsRequiredRuntime {
     fn probe(&self, _request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {

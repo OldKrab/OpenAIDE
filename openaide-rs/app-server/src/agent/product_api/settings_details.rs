@@ -31,50 +31,11 @@ impl AgentSettingsDetailsWorkflow for AgentProductApi {
             .catalog_store
             .load_records()
             .map_err(protocol_error_from_runtime)?;
-        refresh_enabled_agent_statuses(&records, self);
         Ok(AgentSettingsDetailsResult {
             generated_at: generated_at(),
             agents: details_from_catalog(&records, self),
         })
     }
-}
-
-fn refresh_enabled_agent_statuses(records: &[AgentCatalogRecord], api: &AgentProductApi) {
-    for agent_id in enabled_agent_ids(records) {
-        let probe = api.gateway.probe(crate::agent::AgentProbeRequest {
-            agent_id: agent_id.clone(),
-        });
-        let _ = api.record_probe_result(&agent_id, probe);
-    }
-}
-
-fn enabled_agent_ids(records: &[AgentCatalogRecord]) -> Vec<String> {
-    let mut overlays = HashMap::new();
-    for record in records {
-        if let Ok(id) = record.id() {
-            overlays.insert(id, record);
-        }
-    }
-
-    let mut ids: Vec<_> = BUILT_IN_AGENT_METADATA
-        .iter()
-        .filter(|metadata| {
-            overlays
-                .get(metadata.id)
-                .map(|record| record.enabled())
-                .unwrap_or(true)
-        })
-        .map(|metadata| metadata.id.to_string())
-        .collect();
-
-    ids.extend(records.iter().filter_map(|record| {
-        (record.is_custom() && record.enabled())
-            .then(|| record.id().ok())
-            .flatten()
-    }));
-    ids.sort();
-    ids.dedup();
-    ids
 }
 
 fn details_from_catalog(

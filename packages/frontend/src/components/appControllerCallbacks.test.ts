@@ -4,6 +4,7 @@ import {
   AGENT_AUTHENTICATE,
   AGENT_CREATE_CUSTOM,
   AGENT_DELETE_CUSTOM,
+  AGENT_PROBE,
   AGENT_REPLACE_CUSTOM,
   AGENT_SET_ENABLED,
   AGENT_UPDATE_CUSTOM_METADATA,
@@ -1518,6 +1519,7 @@ describe("app controller callbacks", () => {
       enabled: true,
     });
     expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
+    expect(request).toHaveBeenCalledWith(AGENT_PROBE, { agentId: "custom.local" });
     expect(setAgents).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ id: "custom.local" })]));
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "settings:start" });
     expect(dispatch).toHaveBeenCalledWith({
@@ -1530,11 +1532,12 @@ describe("app controller callbacks", () => {
     });
     const detailsDispatch = dispatch.mock.calls.findIndex(([action]) => action.type === "settings:agentDetailsResult");
     const savedDispatch = dispatch.mock.calls.findIndex(([action]) => action.type === "settings:agentSaved");
-    expect(detailsDispatch).toBeLessThan(savedDispatch);
-    expect(dispatch).toHaveBeenCalledWith({
+    expect(savedDispatch).toBeLessThan(detailsDispatch);
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "settings:agentSaved",
       agentId: "custom.local",
-    });
+      agent: expect.objectContaining({ id: "custom.local" }),
+    }));
     expect(JSON.stringify(dispatch.mock.calls)).not.toContain("secret-token");
     expect(beginAgentSecretTransaction).toHaveBeenCalledWith({
       writes: [
@@ -1570,6 +1573,49 @@ describe("app controller callbacks", () => {
       message: "Secure storage is unavailable in the Web App.",
     });
     expect(JSON.stringify(dispatch.mock.calls)).not.toContain("secret-token");
+  });
+
+  it("does not launch a disabled custom Agent during save", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === SETTINGS_GET_AGENT_DETAILS) {
+        return {
+          generatedAt: "after-disabled-save",
+          agents: [{
+            agentId: "custom.disabled",
+            label: "Disabled Agent",
+            enabled: false,
+            sourceKind: "custom",
+            icon: "bot",
+            transport: "stdio",
+            status: "disabled",
+            launchLabel: "disabled-agent",
+            commandLine: "disabled-agent",
+            env: [],
+            description: "Custom ACP stdio Agent",
+            capabilities: [],
+            authMethods: [],
+          }],
+        };
+      }
+      return {
+        agentId: "custom.disabled",
+        agents: protocolAgents(["codex", "custom.disabled"]),
+      };
+    });
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+    }).settings.createCustomAgent({
+      label: "Disabled Agent",
+      icon: "bot",
+      command_line: "disabled-agent",
+      enabled: false,
+      env: [],
+    });
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalledWith(AGENT_PROBE, expect.anything());
+    expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
   });
 
   it("keeps a created Agent saved when its automatic connection check fails", async () => {
@@ -1916,20 +1962,97 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
+  it("checks a custom Agent when metadata editing re-enables it", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === SETTINGS_GET_AGENT_DETAILS) {
+        return {
+          generatedAt: "after-enable-check",
+          agents: [{
+            agentId: "custom.local",
+            label: "Custom Agent",
+            enabled: true,
+            sourceKind: "custom",
+            icon: "bot",
+            transport: "stdio",
+            status: "connected",
+            launchLabel: "agent run",
+            commandLine: "agent run",
+            env: [],
+            description: "Custom ACP stdio Agent",
+            capabilities: [],
+            authMethods: [],
+          }],
+        };
+      }
+      return {
+        agentId: "custom.local",
+        agents: protocolAgents(["codex", "custom.local"]),
+      };
+    });
+    const state = createInitialState();
+    state.settings.agentDetails = [{
+      ...customSettingsAgent("custom.local"),
+      enabled: false,
+      status: "disabled",
+    }];
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state,
+    }).settings.updateCustomAgentMetadata({
+      agent_id: "custom.local",
+      label: "Custom Agent",
+      icon: "bot",
+      enabled: true,
+    });
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(AGENT_PROBE, { agentId: "custom.local" });
+    expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
+  });
+
   it("replaces custom Agent identity through BackendConnection for confirmed launch edits", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async () => ({
-      oldAgentId: "custom.local",
-      newAgentId: "custom.new",
-      cleanup: {
-        removedCatalogRecord: true,
-        removedCachedStatus: false,
-        removedSettingsOverlay: false,
-        removedSecretEnv: ["TOKEN", "OLD_TOKEN"],
-        historyPolicy: "preserveHistoricalTasks",
-      },
-      agents: protocolAgents(["codex", "custom.new"]),
-    }));
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_REPLACE_CUSTOM) {
+        return {
+          oldAgentId: "custom.local",
+          newAgentId: "custom.new",
+          cleanup: {
+            removedCatalogRecord: true,
+            removedCachedStatus: false,
+            removedSettingsOverlay: false,
+            removedSecretEnv: ["TOKEN", "OLD_TOKEN"],
+            historyPolicy: "preserveHistoricalTasks",
+          },
+          agents: protocolAgents(["codex", "custom.new"]),
+        };
+      }
+      if (method === AGENT_PROBE) {
+        return { agents: protocolAgents(["codex", "custom.new"]) };
+      }
+      return {
+        generatedAt: "after-replace-check",
+        agents: [{
+          agentId: "custom.new",
+          label: "Replacement Agent",
+          enabled: true,
+          sourceKind: "custom",
+          icon: "bot",
+          transport: "stdio",
+          status: "connected",
+          launchLabel: "replacement-agent",
+          commandLine: "replacement-agent",
+          env: [
+            { name: "TOKEN", secret: true },
+            { name: "ROTATED_TOKEN", secret: true },
+          ],
+          description: "Custom ACP stdio Agent",
+          capabilities: [],
+          authMethods: [],
+        }],
+      };
+    });
     const state = createInitialState();
     state.settings.agentDetails = [customSettingsAgent("custom.local")];
     state.settings.agentDetails[0].env = [
@@ -1962,6 +2085,8 @@ describe("app controller callbacks", () => {
       commandLine: "replacement-agent",
       confirmation: { acceptedLaunchIdentityChange: true },
     }));
+    expect(request).toHaveBeenCalledWith(AGENT_PROBE, { agentId: "custom.new" });
+    expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
     expect(beginAgentSecretTransaction).toHaveBeenCalledWith({
       writes: [
           {
@@ -2067,6 +2192,41 @@ describe("app controller callbacks", () => {
       agent: expect.objectContaining({ id: "codex", enabled: false, status: "disabled" }),
     }));
     expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("checks an Agent after it is enabled", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === SETTINGS_GET_AGENT_DETAILS) {
+        return {
+          generatedAt: "after-enable-check",
+          agents: [{
+            agentId: "codex",
+            label: "Codex",
+            enabled: true,
+            sourceKind: "builtIn",
+            icon: "bot",
+            transport: "stdio",
+            status: "connected",
+            launchLabel: "Built-in stdio launch policy",
+            description: "OpenAI coding agent.",
+            capabilities: [],
+            authMethods: [],
+          }],
+        };
+      }
+      return { agents: protocolAgents(["codex"]) };
+    });
+    const state = createInitialState();
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state,
+    }).settings.setAgentEnabled("codex", true);
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, { agentId: "codex", enabled: true });
+    expect(request).toHaveBeenCalledWith(AGENT_PROBE, { agentId: "codex" });
+    expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
   });
 
   it("keeps settings errors local after BackendConnection rejection", async () => {

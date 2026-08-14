@@ -43,7 +43,7 @@ export function agentStatusCopy(agent: AgentSettingsRecord) {
   if (agent.status === "unsupported") return "This process launched, but did not satisfy OpenAIDE's ACP requirements.";
   if (agent.status === "disabled") return "Disabled in settings.";
   if (agent.status === "failed") return "Connection check failed.";
-  return "Status check needed. Refresh to verify this agent.";
+  return "Status check needed. Run the status check to verify this agent.";
 }
 
 export function shouldConsumeAgentSaveAck({

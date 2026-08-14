@@ -2,6 +2,7 @@ import {
   AGENT_AUTHENTICATE,
   AGENT_CREATE_CUSTOM,
   AGENT_DELETE_CUSTOM,
+  AGENT_PROBE,
   AGENT_REPLACE_CUSTOM,
   AGENT_SET_ENABLED,
   AGENT_UPDATE_CUSTOM_METADATA,
@@ -78,24 +79,14 @@ export async function createCustomAgentThroughBackend(
   ));
   await secretTransaction?.commit();
   applyAgentMutationResult(context, result.agents);
-  // Saving is not complete from the user's perspective until the new launch
-  // configuration has been probed and its authoritative status is visible.
-  try {
-    await refreshAgentSettingsThroughBackend(context);
-  } catch (error) {
-    // The catalog mutation already committed. Acknowledge it with the safe
-    // local projection so retrying the check cannot create a duplicate Agent.
-    context.dispatch({
-      type: "settings:agentSaved",
-      agentId: result.agentId,
-      agent: settingsRecordFromCustomPayload(result.agentId, payload),
-    });
-    throw error;
-  }
+  // The catalog mutation is durable before the potentially slow process check.
+  // Release the editor now so a broken command remains editable and deletable.
   context.dispatch({
     type: "settings:agentSaved",
     agentId: result.agentId,
+    agent: settingsRecordFromCustomPayload(result.agentId, payload),
   });
+  await refreshSavedAgentSettings(context, result.agentId, payload.enabled);
   return true;
 }
 
@@ -156,6 +147,9 @@ export async function updateCustomAgentMetadataThroughBackend(
 ) {
   const backendConnection = context.backendConnection;
   if (!backendConnection) return false;
+  const wasEnabled = context.state.settings.agentDetails
+    ?.find((agent) => agent.id === payload.agent_id)
+    ?.enabled;
   const result = await backendConnection.request(AGENT_UPDATE_CUSTOM_METADATA, {
     agentId: payload.agent_id as AgentId,
     label: payload.label,
@@ -168,6 +162,9 @@ export async function updateCustomAgentMetadataThroughBackend(
     agentId: result.agentId,
     agent: settingsRecordWithMetadata(context.state, result.agentId, payload, result.agents),
   });
+  if (payload.enabled && wasEnabled === false) {
+    await probeAgentSettingsThroughBackend(context, result.agentId);
+  }
   return true;
 }
 
@@ -216,6 +213,7 @@ export async function replaceCustomAgentThroughBackend(
     newAgentId: result.newAgentId,
     agent: settingsRecordFromCustomPayload(result.newAgentId, payload),
   });
+  await refreshSavedAgentSettings(context, result.newAgentId, payload.enabled);
   return true;
 }
 
@@ -253,6 +251,9 @@ export async function setAgentEnabledThroughBackend(
     type: "settings:agentUpdated",
     agent: settingsRecordWithEnabled(context.state, agentId, enabled, result.agents),
   });
+  if (enabled) {
+    await probeAgentSettingsThroughBackend(context, agentId);
+  }
   return true;
 }
 
@@ -294,6 +295,27 @@ export async function refreshAgentSettingsThroughBackend(context: AgentSettingsI
     agents: result.agents.map(agentSettingsRecordFromProtocol),
   });
   return true;
+}
+
+async function probeAgentSettingsThroughBackend(
+  context: AgentSettingsIntentContext,
+  agentId: string,
+) {
+  const backendConnection = context.backendConnection;
+  if (!backendConnection) return false;
+  const result = await backendConnection.request(AGENT_PROBE, { agentId: agentId as AgentId });
+  applyAgentMutationResult(context, result.agents);
+  return refreshAgentSettingsThroughBackend(context);
+}
+
+function refreshSavedAgentSettings(
+  context: AgentSettingsIntentContext,
+  agentId: string,
+  enabled: boolean,
+) {
+  return enabled
+    ? probeAgentSettingsThroughBackend(context, agentId)
+    : refreshAgentSettingsThroughBackend(context);
 }
 
 export function parseAgentCommandLine(input: string): { command: string; args: string[] } {

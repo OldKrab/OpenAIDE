@@ -10,7 +10,8 @@ use openaide_app_server_protocol::ids::{
     ClientInstanceId, ClientRequestId, ProjectId, StateRootId, TaskId,
 };
 use openaide_app_server_protocol::methods::{
-    AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
+    AGENT_AUTHENTICATE, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_REPLACE_CUSTOM,
+    AGENT_SET_ENABLED, AGENT_UPDATE_CUSTOM_METADATA, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE,
     DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
     MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
@@ -888,6 +889,128 @@ fn agent_authenticate_returns_typed_result() {
     assert_eq!(value["result"]["agentId"], json!("codex"));
     assert_eq!(value["result"]["methodId"], json!("codex-login"));
     assert_eq!(value["result"]["status"], json!("authenticated"));
+}
+
+#[test]
+fn deleting_an_agent_acknowledges_the_catalog_commit_when_prepared_cleanup_fails() {
+    let task_release = Arc::new(FailingPreparedTaskDisposal::default());
+    let mut gateway = gateway_with_agent_mutations_and_task_release(
+        Arc::new(SuccessfulAgentCatalogMutations),
+        task_release.clone(),
+    );
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let outcome = gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            AGENT_DELETE_CUSTOM,
+            serde_json::json!({
+                "agentId": "custom.local",
+                "expectedSecretEnv": [],
+            }),
+        ),
+        AppServerTime(2),
+    );
+
+    assert_eq!(response_value(outcome)["result"]["agentId"], "custom.local");
+    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn disabling_an_agent_acknowledges_the_catalog_commit_when_prepared_cleanup_fails() {
+    let task_release = Arc::new(FailingPreparedTaskDisposal::default());
+    let mut gateway = gateway_with_agent_mutations_and_task_release(
+        Arc::new(SuccessfulAgentCatalogMutations),
+        task_release.clone(),
+    );
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let outcome = gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            AGENT_SET_ENABLED,
+            serde_json::json!({
+                "agentId": "custom.local",
+                "enabled": false,
+            }),
+        ),
+        AppServerTime(2),
+    );
+
+    assert!(response_value(outcome)["result"]["agents"].is_object());
+    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn replacing_an_agent_acknowledges_the_catalog_commit_when_prepared_cleanup_fails() {
+    let task_release = Arc::new(FailingPreparedTaskDisposal::default());
+    let mut gateway = gateway_with_agent_mutations_and_task_release(
+        Arc::new(SuccessfulAgentCatalogMutations),
+        task_release.clone(),
+    );
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let outcome = gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            AGENT_REPLACE_CUSTOM,
+            serde_json::json!({
+                "sourceAgentId": "custom.local",
+                "targetAgentId": "custom.replacement",
+                "expectedSourceSecretEnv": [],
+                "label": "Replacement",
+                "icon": "bot",
+                "commandLine": "replacement-agent",
+                "command": "replacement-agent",
+                "args": [],
+                "env": {},
+                "secretEnv": [],
+                "enabled": true,
+                "confirmation": { "acceptedLaunchIdentityChange": true },
+            }),
+        ),
+        AppServerTime(2),
+    );
+
+    let value = response_value(outcome);
+    assert_eq!(value["result"]["oldAgentId"], "custom.local");
+    assert_eq!(value["result"]["newAgentId"], "custom.replacement");
+    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn disabling_a_custom_agent_through_metadata_cleans_up_prepared_tasks() {
+    let task_release = Arc::new(FailingPreparedTaskDisposal::default());
+    let mut gateway = gateway_with_agent_mutations_and_task_release(
+        Arc::new(SuccessfulAgentCatalogMutations),
+        task_release.clone(),
+    );
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let outcome = gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            AGENT_UPDATE_CUSTOM_METADATA,
+            serde_json::json!({
+                "agentId": "custom.local",
+                "label": "Local Agent",
+                "icon": "bot",
+                "enabled": false,
+            }),
+        ),
+        AppServerTime(2),
+    );
+
+    assert_eq!(response_value(outcome)["result"]["agentId"], "custom.local");
+    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -2479,6 +2602,48 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
     )
 }
 
+fn gateway_with_agent_mutations_and_task_release(
+    agent_catalog_mutations: Arc<dyn AgentCatalogMutationWorkflow>,
+    task_release: Arc<dyn TaskReleaseWorkflow>,
+) -> RpcGateway {
+    RpcGateway::new(
+        ClientHub::new(ClientLivenessPolicy::new(10, 10)),
+        AppLifecycle::new(),
+        StateStream::new(StateRootId::from("root-1")),
+        ServerRequestRuntime::new(),
+        ShellFileRevealRegistry::new(),
+        SnapshotBuilder::new("server-1".into(), "root-1".into()),
+        Arc::new(EmptyTaskSnapshots),
+        crate::projects::ConfiguredProjectRoots::default(),
+        AppServerProbeFacts::new("root-1"),
+        runtime_diagnostics(),
+        Arc::new(RejectingAgentProbe),
+        Arc::new(RejectingAgentAuthenticate),
+        agent_catalog_mutations,
+        Arc::new(RejectingAgentSettingsDetails),
+        mcp_servers(),
+        Arc::new(SkillsSettingsService::new()),
+        app_preferences(),
+        runtime_settings(),
+        Arc::new(RejectingAgentListSessions),
+        Arc::new(RejectingAttachments),
+        Arc::new(RejectingTaskAcquire),
+        Arc::new(RejectingTaskFileSearch),
+        Arc::new(RejectingTaskAdoptNativeSession),
+        Arc::new(RejectingTaskSend),
+        Arc::new(RejectingTaskCancel),
+        Arc::new(RejectingTaskOpen),
+        Arc::new(RejectingTaskHistory),
+        Arc::new(RejectingTaskSetConfigOption),
+        Arc::new(RejectingTaskSetTitle),
+        Arc::new(RejectingTaskSetTitle),
+        task_release,
+        Arc::new(RejectingTaskArchive),
+        test_worktrees(),
+        Arc::new(FixedShutdown),
+    )
+}
+
 fn runtime_settings() -> Arc<RuntimeSettingsService> {
     Arc::new(RuntimeSettingsService::new(
         crate::agent::acp_trace::AcpTraceState::disabled(std::path::Path::new(".")),
@@ -3131,6 +3296,95 @@ impl AgentCatalogMutationWorkflow for RejectingAgentCatalogMutations {
     }
 }
 
+struct SuccessfulAgentCatalogMutations;
+
+impl AgentCatalogMutationWorkflow for SuccessfulAgentCatalogMutations {
+    fn create_custom(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentCreateCustomParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentCreateCustomResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(
+            openaide_app_server_protocol::agent::AgentCreateCustomResult {
+                agent_id: params.agent_id.unwrap_or_else(|| "custom.created".into()),
+                agents: empty_agent_collection(),
+            },
+        )
+    }
+
+    fn update_custom_metadata(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentUpdateCustomMetadataParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentUpdateCustomMetadataResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(
+            openaide_app_server_protocol::agent::AgentUpdateCustomMetadataResult {
+                agent_id: params.agent_id,
+                agents: empty_agent_collection(),
+            },
+        )
+    }
+
+    fn replace_custom(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentReplaceCustomParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentReplaceCustomResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(openaide_app_server_protocol::agent::AgentReplaceCustomResult {
+            old_agent_id: params.source_agent_id,
+            new_agent_id: params
+                .target_agent_id
+                .unwrap_or_else(|| "custom.replacement".into()),
+            cleanup: openaide_app_server_protocol::agent::AgentReplaceCustomCleanup {
+                removed_catalog_record: true,
+                removed_cached_status: false,
+                removed_settings_overlay: false,
+                removed_secret_env: Vec::new(),
+                history_policy: openaide_app_server_protocol::agent::AgentReplaceCustomHistoryPolicy::PreserveHistoricalTasks,
+            },
+            agents: empty_agent_collection(),
+        })
+    }
+
+    fn delete_custom(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentDeleteCustomParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentDeleteCustomResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(
+            openaide_app_server_protocol::agent::AgentDeleteCustomResult {
+                agent_id: params.agent_id,
+                removed_secret_env: Vec::new(),
+                agents: empty_agent_collection(),
+            },
+        )
+    }
+
+    fn set_enabled(
+        &self,
+        _params: openaide_app_server_protocol::agent::AgentSetEnabledParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentSetEnabledResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(openaide_app_server_protocol::agent::AgentSetEnabledResult {
+            agents: empty_agent_collection(),
+        })
+    }
+}
+
+fn empty_agent_collection() -> openaide_app_server_protocol::snapshot::AgentCollectionSnapshot {
+    openaide_app_server_protocol::snapshot::AgentCollectionSnapshot { agents: Vec::new() }
+}
+
 fn rejecting_agent_catalog_error() -> openaide_app_server_protocol::errors::ProtocolError {
     openaide_app_server_protocol::errors::ProtocolError {
         code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
@@ -3589,6 +3843,41 @@ impl TaskReleaseWorkflow for RejectingTaskRelease {
         _agent_id: &str,
     ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
         Ok(())
+    }
+}
+
+#[derive(Default)]
+struct FailingPreparedTaskDisposal {
+    calls: AtomicUsize,
+}
+
+impl TaskReleaseWorkflow for FailingPreparedTaskDisposal {
+    fn release_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskReleaseParams,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        unreachable!("this test only disposes prepared Tasks by Agent")
+    }
+
+    fn release_expired_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        Ok(())
+    }
+
+    fn dispose_prepared_tasks_for_agent(
+        &self,
+        _agent_id: &str,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "prepared task disposal unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
     }
 }
 
