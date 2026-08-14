@@ -428,6 +428,8 @@ function configCategoryFromProtocol(category: string | null | undefined): Config
     case "model":
     case "thought_level":
       return category;
+    case "thoughtLevel":
+      return "thought_level";
     default:
       return "other";
   }

@@ -22,7 +22,15 @@ mod tests;
 const HOST_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) fn initialize_request(host_bridge: &HostBridge) -> InitializeRequest {
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "parameterizedModelPicker".to_string(),
+        serde_json::Value::Bool(true),
+    );
     let capabilities = ClientCapabilities::new()
+        // Cursor uses this ACP extension to expose model parameters (such as
+        // thinking effort and fast mode) as independent session options.
+        .meta(meta)
         .session(ClientSessionCapabilities::new().config_options(
             SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
         ))

@@ -16,6 +16,7 @@ use openaide_app_server_protocol::task::{
     TaskNavigationRefreshResult,
 };
 use serde_json::Value;
+use std::time::Instant;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 
@@ -411,17 +412,43 @@ impl RpcGateway {
     fn dispose_prepared_tasks_after_agent_mutation(&self, agent_id: &str, operation: &str) {
         // The catalog mutation is already durable and authoritative. Cleanup
         // failure must not turn that committed user action into an RPC error;
-        // stale Prepared Tasks contain no accepted user history and remain recoverable.
-        if self
-            .task_release
-            .dispose_prepared_tasks_for_agent(agent_id)
-            .is_err()
-        {
+        // stale Prepared Tasks contain no accepted user history and remain recoverable. The
+        // cleanup can close an unresponsive ACP process, so it must not hold up the mutation RPC.
+        let task_release = self.task_release.clone();
+        let agent_id = agent_id.to_string();
+        let operation = operation.to_string();
+        let log_agent_id = agent_id.clone();
+        let log_operation = operation.clone();
+        let spawn = std::thread::Builder::new()
+            .name("openaide-agent-cleanup".to_string())
+            .spawn(move || {
+                let started_at = Instant::now();
+                crate::logging::info(
+                    "prepared_task_cleanup_started",
+                    serde_json::json!({
+                        "operation": operation.clone(),
+                        "agent_id": agent_id.clone(),
+                    }),
+                );
+                let succeeded = task_release
+                    .dispose_prepared_tasks_for_agent(agent_id.as_str())
+                    .is_ok();
+                crate::logging::info(
+                    "prepared_task_cleanup_completed",
+                    serde_json::json!({
+                        "operation": operation.clone(),
+                        "agent_id": agent_id.clone(),
+                        "outcome": if succeeded { "succeeded" } else { "failed" },
+                        "duration_ms": started_at.elapsed().as_millis(),
+                    }),
+                );
+            });
+        if spawn.is_err() {
             crate::logging::warn(
-                "prepared_task_cleanup_failed",
+                "prepared_task_cleanup_spawn_failed",
                 serde_json::json!({
-                    "operation": operation,
-                    "agent_id": agent_id,
+                    "operation": log_operation,
+                    "agent_id": log_agent_id,
                 }),
             );
         }

@@ -49,14 +49,19 @@ export function agentStatusCopy(agent: AgentSettingsRecord) {
 export function shouldConsumeAgentSaveAck({
   hasDraft,
   pendingSaveAgentId,
+  removedAgentId,
   savedAgentId,
 }: {
   hasDraft: boolean;
   pendingSaveAgentId?: string;
+  /** Replacement mutations acknowledge the new id while the draft still owns the old id. */
+  removedAgentId?: string;
   savedAgentId?: string;
 }) {
   if (!savedAgentId || !hasDraft || !pendingSaveAgentId) return false;
-  return pendingSaveAgentId === "__new__" || pendingSaveAgentId === savedAgentId;
+  return pendingSaveAgentId === "__new__"
+    || pendingSaveAgentId === savedAgentId
+    || pendingSaveAgentId === removedAgentId;
 }
 
 export function shouldConsumeAgentDeleteAck({
