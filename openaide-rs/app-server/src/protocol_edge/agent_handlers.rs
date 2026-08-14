@@ -269,10 +269,17 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error));
             }
         };
+        let disabled_agent_id = (!params.enabled).then(|| params.agent_id.clone());
         let result = match self.agent_catalog_mutations.update_custom_metadata(params) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        if let Some(agent_id) = disabled_agent_id {
+            self.dispose_prepared_tasks_after_agent_mutation(
+                agent_id.as_str(),
+                "agent/updateCustomMetadata",
+            );
+        }
         let events = self.publish_agent_collection_update(result.agents.clone(), now);
         self.result_with_events::<AgentUpdateCustomMetadataResult>(
             connection_id,
@@ -297,10 +304,15 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error));
             }
         };
+        let replaced_agent_id = params.source_agent_id.clone();
         let result = match self.agent_catalog_mutations.replace_custom(params) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        self.dispose_prepared_tasks_after_agent_mutation(
+            replaced_agent_id.as_str(),
+            "agent/replaceCustom",
+        );
         let events = self.publish_agent_collection_update(result.agents.clone(), now);
         self.result_with_events::<AgentReplaceCustomResult>(connection_id, id, meta, result, events)
     }
@@ -324,12 +336,10 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        if let Err(error) = self
-            .task_release
-            .dispose_prepared_tasks_for_agent(deleted_agent_id.as_str())
-        {
-            return self.error(connection_id, id, meta, error);
-        }
+        self.dispose_prepared_tasks_after_agent_mutation(
+            deleted_agent_id.as_str(),
+            "agent/deleteCustom",
+        );
         let events = self.publish_agent_collection_update(result.agents.clone(), now);
         self.result_with_events::<AgentDeleteCustomResult>(connection_id, id, meta, result, events)
     }
@@ -354,12 +364,7 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         if let Some(agent_id) = disabled_agent_id {
-            if let Err(error) = self
-                .task_release
-                .dispose_prepared_tasks_for_agent(agent_id.as_str())
-            {
-                return self.error(connection_id, id, meta, error);
-            }
+            self.dispose_prepared_tasks_after_agent_mutation(agent_id.as_str(), "agent/setEnabled");
         }
         let events = self.publish_agent_collection_update(result.agents.clone(), now);
         self.result_with_events::<AgentSetEnabledResult>(connection_id, id, meta, result, events)
@@ -401,5 +406,24 @@ impl RpcGateway {
         ));
         events.extend(self.publish_navigation_replacement(now));
         events
+    }
+
+    fn dispose_prepared_tasks_after_agent_mutation(&self, agent_id: &str, operation: &str) {
+        // The catalog mutation is already durable and authoritative. Cleanup
+        // failure must not turn that committed user action into an RPC error;
+        // stale Prepared Tasks contain no accepted user history and remain recoverable.
+        if self
+            .task_release
+            .dispose_prepared_tasks_for_agent(agent_id)
+            .is_err()
+        {
+            crate::logging::warn(
+                "prepared_task_cleanup_failed",
+                serde_json::json!({
+                    "operation": operation,
+                    "agent_id": agent_id,
+                }),
+            );
+        }
     }
 }

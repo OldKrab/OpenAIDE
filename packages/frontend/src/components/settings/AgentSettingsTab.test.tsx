@@ -242,12 +242,16 @@ describe("AgentSettingsTab interactions", () => {
   });
 
   it("explains enabled Agents whose status has not been checked yet", () => {
+    const onRetry = vi.fn(async () => true);
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", { enabled: true, status: "disconnected" })],
+      recoveryActions: recoveryActions({ onRetry }),
     });
 
-    expect(textContent(view.root)).toContain("Status check needed. Refresh to verify this agent.");
+    expect(textContent(view.root)).toContain("Status check needed. Run the status check to verify this agent.");
     expect(textContent(view.root)).not.toContain("Status has not been checked.");
+    act(() => buttonByText(view.root, "Try again").props.onClick());
+    expect(onRetry).toHaveBeenCalledWith("codex");
   });
 
   it("offers recovery when the selected Agent requires setup", () => {
