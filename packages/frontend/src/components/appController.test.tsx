@@ -2397,6 +2397,96 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
+  it("waits for a late Prepared Task acquire to release before replacing its context", async () => {
+    const firstAcquire = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const preparedTask = (agentId: string) => {
+      const prepared = protocolTaskSnapshot(`task_${agentId}`, "New task", { hasMessages: false });
+      return {
+        ...prepared,
+        task: { ...prepared.task, agentId: agentId as never },
+        agentConfig: { ...prepared.agentConfig, agentId: agentId as never },
+        agentCommands: { ...prepared.agentCommands, agentId: agentId as never },
+      };
+    };
+    let leasedTaskId: string | undefined;
+    let acquireCount = 0;
+    const request = vi.fn((
+      method: string,
+      params?: { agentId?: string; taskId?: string },
+    ) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return Promise.resolve({ agentId: params?.agentId, projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
+      }
+      if (method === TASK_RELEASE) {
+        if (params?.taskId === leasedTaskId) leasedTaskId = undefined;
+        return Promise.resolve({ discardedTaskId: params?.taskId });
+      }
+      if (method === TASK_ACQUIRE) {
+        acquireCount += 1;
+        if (leasedTaskId) {
+          return Promise.reject(new Error("Release the current Prepared Task before acquiring another context"));
+        }
+        const agentId = params?.agentId ?? "codex";
+        leasedTaskId = `task_${agentId}`;
+        const task = preparedTask(agentId);
+        return acquireCount === 1 ? firstAcquire.promise : Promise.resolve({ task });
+      }
+      return Promise.reject(new Error(method));
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({
+        snapshot: clientSnapshot({
+          includeActiveTask: false,
+          agents: [
+            { agentId: "codex" as never, label: "Codex", status: "connected" },
+            { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+          ],
+        }),
+      })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
+
+    await act(async () => {
+      latestController?.dispatch({ type: "newTask:agent", agentId: "opencode", agentLabel: "OpenCode" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
+
+    await act(async () => {
+      firstAcquire.resolve({ task: preparedTask("codex") });
+      await firstAcquire.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([
+      [TASK_RELEASE, { taskId: "task_codex" }],
+    ]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(2);
+    expect(latestController?.newTaskSnapshot?.task).toMatchObject({
+      task_id: "task_opencode",
+      agent_id: "opencode",
+      has_messages: false,
+    });
+    expect(latestController?.state.newTask.error).toBeUndefined();
+  });
+
   it("does not show task-start submitting state while new-task options load", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === TASK_ACQUIRE) {
