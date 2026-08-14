@@ -8,7 +8,7 @@ fn built_in_codex_uses_the_product_pinned_adapter() {
 
     assert_eq!(config.agent_id, "codex");
     assert_eq!(config.command, "npx");
-    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.3.0-openaide.1"]);
+    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.0.0"]);
 }
 
 #[test]
