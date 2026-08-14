@@ -658,6 +658,24 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("accepts ACP category spelling from the task snapshot projection", () => {
+    const mapped = mapProtocolConfigOptions({
+      state: "ready",
+      options: [
+        {
+          configId: "thinking" as never,
+          label: "Thinking level",
+          category: "thoughtLevel",
+          kind: "select",
+          currentValue: { type: "id", value: "high" },
+          values: [{ value: "high", label: "High" }],
+        },
+      ],
+    }, "cursor");
+
+    expect(mapped.options[0]?.category).toBe("thought_level");
+  });
+
   it("preserves unavailable and pending Configuration Option state", () => {
     expect(mapProtocolConfigOptions({ state: "unavailable" }, "codex")).toEqual({
       agent_id: "codex",

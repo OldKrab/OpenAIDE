@@ -71,11 +71,16 @@ export function AgentSettingsTab({
   }, [agents, preferredAgentId]);
 
   useEffect(() => {
-    if (!shouldConsumeAgentSaveAck({ savedAgentId, pendingSaveAgentId, hasDraft: draft !== undefined })) return;
+    if (!shouldConsumeAgentSaveAck({
+      savedAgentId,
+      removedAgentId: deletedAgentId,
+      pendingSaveAgentId,
+      hasDraft: draft !== undefined,
+    })) return;
     setDraft(undefined);
     setSelectedId(savedAgentId!);
     setPendingSaveAgentId(undefined);
-  }, [draft, pendingSaveAgentId, savedAgentId]);
+  }, [deletedAgentId, draft, pendingSaveAgentId, savedAgentId]);
 
   useEffect(() => {
     // Failed mutations have no save acknowledgement, so release the local

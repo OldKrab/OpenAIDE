@@ -33,6 +33,7 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::agent::product_api::{
     AgentAuthenticateWorkflow, AgentCatalogMutationWorkflow, AgentProbeWorkflow,
@@ -915,7 +916,7 @@ fn deleting_an_agent_acknowledges_the_catalog_commit_when_prepared_cleanup_fails
     );
 
     assert_eq!(response_value(outcome)["result"]["agentId"], "custom.local");
-    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+    wait_for_prepared_cleanup(&task_release);
 }
 
 #[test]
@@ -942,7 +943,7 @@ fn disabling_an_agent_acknowledges_the_catalog_commit_when_prepared_cleanup_fail
     );
 
     assert!(response_value(outcome)["result"]["agents"].is_object());
-    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+    wait_for_prepared_cleanup(&task_release);
 }
 
 #[test]
@@ -981,7 +982,55 @@ fn replacing_an_agent_acknowledges_the_catalog_commit_when_prepared_cleanup_fail
     let value = response_value(outcome);
     assert_eq!(value["result"]["oldAgentId"], "custom.local");
     assert_eq!(value["result"]["newAgentId"], "custom.replacement");
-    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+    wait_for_prepared_cleanup(&task_release);
+}
+
+#[test]
+fn replacing_an_agent_acknowledges_before_prepared_cleanup_finishes() {
+    let task_release = Arc::new(BlockingPreparedTaskDisposal::default());
+    let mut gateway = gateway_with_agent_mutations_and_task_release(
+        Arc::new(SuccessfulAgentCatalogMutations),
+        task_release.clone(),
+    );
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let (response_tx, response_rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let outcome = gateway.handle_inbound(
+            connection_id,
+            request(
+                "2",
+                AGENT_REPLACE_CUSTOM,
+                serde_json::json!({
+                    "sourceAgentId": "custom.local",
+                    "targetAgentId": "custom.replacement",
+                    "expectedSourceSecretEnv": [],
+                    "label": "Replacement",
+                    "icon": "bot",
+                    "commandLine": "replacement-agent",
+                    "command": "replacement-agent",
+                    "args": [],
+                    "env": {},
+                    "secretEnv": [],
+                    "enabled": true,
+                    "confirmation": { "acceptedLaunchIdentityChange": true },
+                }),
+            ),
+            AppServerTime(2),
+        );
+        response_tx
+            .send(response_value(outcome)["result"]["newAgentId"].clone())
+            .unwrap();
+    });
+
+    assert_eq!(
+        response_rx
+            .recv_timeout(Duration::from_millis(250))
+            .unwrap(),
+        "custom.replacement"
+    );
+    task_release.release.store(true, Ordering::SeqCst);
 }
 
 #[test]
@@ -1010,7 +1059,7 @@ fn disabling_a_custom_agent_through_metadata_cleans_up_prepared_tasks() {
     );
 
     assert_eq!(response_value(outcome)["result"]["agentId"], "custom.local");
-    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+    wait_for_prepared_cleanup(&task_release);
 }
 
 #[test]
@@ -3851,6 +3900,14 @@ struct FailingPreparedTaskDisposal {
     calls: AtomicUsize,
 }
 
+fn wait_for_prepared_cleanup(task_release: &FailingPreparedTaskDisposal) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while task_release.calls.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
+}
+
 impl TaskReleaseWorkflow for FailingPreparedTaskDisposal {
     fn release_for_client(
         &self,
@@ -3878,6 +3935,38 @@ impl TaskReleaseWorkflow for FailingPreparedTaskDisposal {
             recoverable: true,
             target: None,
         })
+    }
+}
+
+#[derive(Default)]
+struct BlockingPreparedTaskDisposal {
+    release: std::sync::atomic::AtomicBool,
+}
+
+impl TaskReleaseWorkflow for BlockingPreparedTaskDisposal {
+    fn release_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskReleaseParams,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        unreachable!("this test only disposes prepared Tasks by Agent")
+    }
+
+    fn release_expired_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        Ok(())
+    }
+
+    fn dispose_prepared_tasks_for_agent(
+        &self,
+        _agent_id: &str,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        while !self.release.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
     }
 }
 

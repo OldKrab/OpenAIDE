@@ -90,6 +90,15 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(
       shouldConsumeAgentSaveAck({
         hasDraft: true,
+        pendingSaveAgentId: "custom.local",
+        removedAgentId: "custom.local",
+        savedAgentId: "custom.replacement",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldConsumeAgentSaveAck({
+        hasDraft: true,
         pendingSaveAgentId: "__new__",
         savedAgentId: "created.agent",
       }),

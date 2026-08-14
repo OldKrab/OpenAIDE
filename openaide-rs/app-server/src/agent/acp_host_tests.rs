@@ -16,6 +16,10 @@ fn form_elicitation_is_advertised_without_shell_host_capabilities() {
         value["clientCapabilities"]["session"]["configOptions"]["boolean"],
         serde_json::json!({})
     );
+    assert_eq!(
+        value["clientCapabilities"]["_meta"]["parameterizedModelPicker"],
+        true
+    );
 }
 
 #[test]
