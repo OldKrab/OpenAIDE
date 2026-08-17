@@ -296,12 +296,6 @@ function SettingsSwitch({ checked, label, onChange }: { checked: boolean; label:
   );
 }
 
-function agentSettingsRecoveryKind(agent: AgentSettingsRecord): AgentRecoveryKind | undefined {
-  if (agent.status === "setup_required") return agent.setup_reason === "nodeJsRequired" ? "nodeJsRequired" : "setupRequired";
-  if (agent.status === "failed") return "launchFailed";
-  return undefined;
-}
-
 function needsAttention(agent: AgentSettingsRecord) {
   return agent.status === "auth_required" || agent.status === "failed" || agent.status === "setup_required";
 }

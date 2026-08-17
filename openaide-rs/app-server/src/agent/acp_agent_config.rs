@@ -160,6 +160,12 @@ fn command_in_path(command: &str) -> bool {
 }
 
 fn resolved_command_or_name(command: &str) -> String {
+    // Unix can execute the command name through PATH. Windows needs the
+    // resolved launcher suffix (usually `.cmd`) so CreateProcess can delegate
+    // it through `cmd.exe` reliably.
+    if !cfg!(windows) {
+        return command.to_string();
+    }
     resolve_command_in_path(command)
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|| command.to_string())

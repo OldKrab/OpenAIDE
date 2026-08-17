@@ -157,7 +157,9 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(artifactBuild, /npm exec -- vsce package/);
   assert.match(artifactBuild, /--no-dependencies/);
   assert.match(artifactBuild, /cargo build --locked --release/);
-  assert.equal(occurrences(artifactBuild, "cargo build --locked --release -p openaide-app-server"), 1);
+  // The shared App Server job has one command for target-specific builds and
+  // one fallback command for hosts without a Rust target override.
+  assert.equal(occurrences(artifactBuild, "cargo build --locked --release -p openaide-app-server"), 2);
   assert.match(artifactBuild, /name: app-server-\$\{\{ matrix\.target \}\}/);
   assert.match(artifactBuild, /actions\/download-artifact@[0-9a-f]{40}/);
   assert.match(artifactBuild, /needs: \[prepare, app-server\]/);

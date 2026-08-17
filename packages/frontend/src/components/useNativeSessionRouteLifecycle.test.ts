@@ -84,7 +84,6 @@ describe("Native Session route lifecycle", () => {
   });
 
   it("keeps the opening route and explains when the session is in use elsewhere", async () => {
-  it("keeps the opening route and explains when the session is in use elsewhere", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async () => {
       throw new AppServerProtocolError({
