@@ -450,6 +450,7 @@ import time
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
 prompt_mode = os.environ.get("OPENAIDE_ACP_FIXTURE_PROMPT_MODE", "")
+exit_on_second_new = os.environ.get("OPENAIDE_ACP_FIXTURE_EXIT_ON_SECOND_NEW", "") == "1"
 supports_resume = os.environ.get("OPENAIDE_ACP_FIXTURE_RESUME", "1") == "1"
 supports_close = os.environ.get("OPENAIDE_ACP_FIXTURE_CLOSE", "1") == "1"
 with_config_options = os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS", "") == "1"
@@ -566,6 +567,8 @@ for line in sys.stdin:
         next_session_number += 1
         if prompt_mode == "hang_second_new" and next_session_number >= 2:
             continue
+        elif exit_on_second_new and next_session_number >= 2:
+            sys.exit(1)
         elif prompt_mode == "host_terminal_during_new_hang":
             request_terminal("startup-terminal-create")
         elif session_id == "__counter__":
@@ -3563,6 +3566,60 @@ fn session_start_retry_launches_a_fresh_process_after_timeout() {
         .start_session(start_request("task-after-timeout", cwd_string()))
         .expect("retry with fresh Agent process");
     assert_eq!(retried.session_id, "counter-session-1");
+    assert_eq!(
+        read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| method.as_str() == "initialize")
+            .count(),
+        2,
+    );
+}
+
+#[test]
+fn session_start_retries_after_agent_process_ends_during_open() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let manager = AcpActiveSessionManager::new(
+        AgentRegistry::codex(AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    "__counter__".to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_EXIT_ON_SECOND_NEW".to_string(),
+                    "1".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        }),
+        HostBridge::disabled(),
+        AcpAuthMethodCache::default(),
+    );
+
+    let first = manager
+        .start_session(start_request("task-before-process-exit", cwd_string()))
+        .expect("first session");
+    manager
+        .close_session(&first.key())
+        .expect("close first session");
+    let second = manager
+        .start_session(start_request("task-after-process-exit", cwd_string()))
+        .expect("retry with fresh Agent process");
+
+    assert_eq!(second.session_id, "counter-session-1");
     assert_eq!(
         read_fixture_methods(&log_path)
             .iter()

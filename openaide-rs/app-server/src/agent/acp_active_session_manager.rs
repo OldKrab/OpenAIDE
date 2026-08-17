@@ -27,6 +27,7 @@ use crate::protocol::model::{
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const MAX_SESSION_OPEN_ATTEMPTS: usize = 2;
 
 pub(super) struct AcpActiveSessionManager {
     auth_method_cache: AcpAuthMethodCache,
@@ -200,72 +201,96 @@ impl AcpActiveSessionManager {
         &self,
         request: AcpSessionOpenRequest,
     ) -> Result<AcpStartedSession, RuntimeError> {
-        let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
-        let (config_tx, config_rx) = tokio_mpsc::unbounded_channel();
-        let (cancel_tx, cancel_rx) = tokio_mpsc::unbounded_channel();
-        let (close_tx, close_rx) = tokio_mpsc::unbounded_channel();
-        let (started_tx, started_rx) = mpsc::channel();
-        let trace = Some(AcpTraceSession::new(
-            self.trace_state.clone(),
-            request.task_id(),
-            request.operation_name(),
-        ));
-        let startup_cancellation = request.cancellation();
-        let auth_method_id = self.auth_method_cache.preferred_method();
         let agent_id = request.agent_id().to_string();
-        let process_open = AcpAgentProcessOpen {
-            request,
-            command_rx,
-            config_rx,
-            cancel_rx,
-            close_rx,
-            started_tx,
-            auth_method_id,
-            trace,
-            terminal_owner_id: AcpTerminalOwnerId::next(),
-            session_idle_timeout: self.session_idle_timeout,
-        };
-        let process_session = self.processes.open_session(&agent_id, process_open)?;
+        for attempt in 1..=MAX_SESSION_OPEN_ATTEMPTS {
+            let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
+            let (config_tx, config_rx) = tokio_mpsc::unbounded_channel();
+            let (cancel_tx, cancel_rx) = tokio_mpsc::unbounded_channel();
+            let (close_tx, close_rx) = tokio_mpsc::unbounded_channel();
+            let (started_tx, started_rx) = mpsc::channel();
+            let trace = Some(AcpTraceSession::new(
+                self.trace_state.clone(),
+                request.task_id(),
+                request.operation_name(),
+            ));
+            let startup_cancellation = request.cancellation();
+            let auth_method_id = self.auth_method_cache.preferred_method();
+            let process_open = AcpAgentProcessOpen {
+                request: request.clone(),
+                command_rx,
+                config_rx,
+                cancel_rx,
+                close_rx,
+                started_tx,
+                auth_method_id,
+                trace,
+                terminal_owner_id: AcpTerminalOwnerId::next(),
+                session_idle_timeout: self.session_idle_timeout,
+            };
+            let process_session = self.processes.open_session(&agent_id, process_open)?;
 
-        let started_result = match started_rx.recv_timeout(self.start_timeout) {
-            Ok(result) => result.map_err(normalize_startup_error),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                startup_cancellation.cancel();
-                let _ = process_session.terminal_owner.close();
-                close_starting_session(&close_tx);
-                // A session request that never answers leaves the shared Agent
-                // process unusable for retries. Evict only the process that
-                // handled this request so a concurrent replacement survives.
-                self.processes
-                    .stop_session_process(&agent_id, &process_session);
-                Err(RuntimeError::NotReady(
-                    "ACP session start timed out".to_string(),
-                ))
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(RuntimeError::NotReady(
-                "ACP session ended before startup completed".to_string(),
-            )),
-        };
-        let started = match started_result {
-            Ok(started) => started,
-            Err(error) => {
-                let _ = process_session.terminal_owner.close();
-                return Err(error);
-            }
-        };
+            let started_result = match started_rx.recv_timeout(self.start_timeout) {
+                Ok(result) => result.map_err(normalize_startup_error),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    startup_cancellation.cancel();
+                    let _ = process_session.terminal_owner.close();
+                    close_starting_session(&close_tx);
+                    // A session request that never answers leaves the shared Agent
+                    // process unusable for retries. Evict only the process that
+                    // handled this request so a concurrent replacement survives.
+                    self.processes
+                        .stop_session_process(&agent_id, &process_session);
+                    Err(RuntimeError::NotReady(
+                        "ACP session start timed out".to_string(),
+                    ))
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    // A shared process can terminate after accepting this open
+                    // request. Remove it immediately and retry once so a dead
+                    // process cannot turn a transient switch into a hard failure.
+                    let _ = process_session.terminal_owner.close();
+                    self.processes
+                        .stop_session_process(&agent_id, &process_session);
+                    if attempt < MAX_SESSION_OPEN_ATTEMPTS {
+                        crate::logging::info(
+                            "acp_session_start_retry",
+                            serde_json::json!({
+                                "operation": request.operation_name(),
+                                "task_id": request.task_id(),
+                                "agent_id": agent_id,
+                                "attempt": attempt + 1,
+                                "reason": "process_ended",
+                            }),
+                        );
+                        continue;
+                    }
+                    Err(RuntimeError::NotReady(
+                        "ACP session ended before startup completed".to_string(),
+                    ))
+                }
+            };
+            let started = match started_result {
+                Ok(started) => started,
+                Err(error) => {
+                    let _ = process_session.terminal_owner.close();
+                    return Err(error);
+                }
+            };
 
-        let session_attachment = AttachedNativeSession::new(
-            command_tx,
-            config_tx,
-            cancel_tx,
-            close_tx,
-            process_session.terminal_error,
-            process_session.terminal_owner,
-        );
-        self.sessions
-            .insert_started_session(started.session.key(), session_attachment)?;
+            let session_attachment = AttachedNativeSession::new(
+                command_tx,
+                config_tx,
+                cancel_tx,
+                close_tx,
+                process_session.terminal_error,
+                process_session.terminal_owner,
+            );
+            self.sessions
+                .insert_started_session(started.session.key(), session_attachment)?;
 
-        Ok(started)
+            return Ok(started);
+        }
+        unreachable!("ACP session open attempts are bounded")
     }
 }
 

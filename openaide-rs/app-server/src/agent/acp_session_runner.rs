@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::Instant;
 
 use crate::agent::acp_schema::{
     InitializeRequest, InitializeResponse, McpServer, SessionConfigOption,
@@ -22,12 +23,28 @@ pub(super) async fn initialize_agent_connection(
     trace: Option<&AcpTraceSession>,
     start_error_tx: &mpsc::Sender<Result<impl Send, RuntimeError>>,
 ) -> Result<InitializeResponse, agent_client_protocol::Error> {
+    let started_at = Instant::now();
+    crate::logging::info(
+        "acp_initialize_started",
+        serde_json::json!({
+            "source": "session_start",
+            "task_id": trace.map(AcpTraceSession::task_id),
+        }),
+    );
     if let Some(trace) = trace {
         trace.record("client_to_agent", "initialize.request", &request);
     }
     let initialize = match connection.send_request(request).block_task().await {
         Ok(initialize) => initialize,
         Err(error) => {
+            crate::logging::warn(
+                "acp_initialize_failed",
+                serde_json::json!({
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "error_kind": "protocol_error",
+                    "task_id": trace.map(AcpTraceSession::task_id),
+                }),
+            );
             let _ = start_error_tx.send(Err(crate::agent::acp_errors::acp_error(&error)));
             return Err(error);
         }
@@ -36,11 +53,27 @@ pub(super) async fn initialize_agent_connection(
         trace.record("agent_to_client", "initialize.response", &initialize);
     }
     if let Err(error) = validate_initialize_protocol(&initialize) {
+        crate::logging::warn(
+            "acp_initialize_failed",
+            serde_json::json!({
+                "duration_ms": started_at.elapsed().as_millis(),
+                "error_kind": "invalid_capabilities",
+                "task_id": trace.map(AcpTraceSession::task_id),
+            }),
+        );
         let _ = start_error_tx.send(Err(error.clone()));
         return Err(agent_client_protocol::util::internal_error(
             error.to_string(),
         ));
     }
+    crate::logging::info(
+        "acp_initialize_completed",
+        serde_json::json!({
+            "duration_ms": started_at.elapsed().as_millis(),
+            "auth_method_count": initialize.auth_methods.len(),
+            "task_id": trace.map(AcpTraceSession::task_id),
+        }),
+    );
     Ok(initialize)
 }
 

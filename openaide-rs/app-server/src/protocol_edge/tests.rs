@@ -2774,7 +2774,10 @@ fn gateway_with_agent_mutations_and_task_release(
 }
 
 fn runtime_settings() -> Arc<RuntimeSettingsService> {
+    let dir = tempfile::tempdir().unwrap().keep();
+    let store = crate::storage::Store::open(dir).unwrap();
     Arc::new(RuntimeSettingsService::new(
+        store,
         crate::agent::acp_trace::AcpTraceState::disabled(std::path::Path::new(".")),
     ))
 }

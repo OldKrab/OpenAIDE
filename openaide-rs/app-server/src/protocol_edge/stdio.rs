@@ -70,7 +70,10 @@ impl ProtocolEdgeStdioDispatcher {
             }
             AcpHostRequestTransport::Unavailable => (HostBridge::disabled(), None),
         };
-        let acp_trace_state = crate::agent::acp_trace::AcpTraceState::from_env(state_root.path());
+        let acp_trace_state = crate::agent::acp_trace::AcpTraceState::from_env_with_persisted(
+            state_root.path(),
+            store.read_acp_trace_enabled()?,
+        );
         let agent_runtime = Arc::new(
             AcpAgentRuntime::new_with_registry(agent_registry.clone(), host_bridge.clone())
                 .with_trace_state(acp_trace_state.clone()),

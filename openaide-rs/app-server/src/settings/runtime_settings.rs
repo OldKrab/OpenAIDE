@@ -6,6 +6,7 @@ use openaide_app_server_protocol::settings::{
 
 use crate::agent::acp_trace::{AcpTraceState, AcpTraceStatus};
 use crate::protocol::errors::RuntimeError;
+use crate::storage::Store;
 
 pub(crate) trait RuntimeSettingsWorkflow: Send + Sync {
     fn runtime_settings(&self) -> Result<RuntimeSettingsResult, ProtocolError>;
@@ -15,14 +16,18 @@ pub(crate) trait RuntimeSettingsWorkflow: Send + Sync {
     ) -> Result<RuntimeSettingsResult, ProtocolError>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct RuntimeSettingsService {
+    store: Store,
     acp_trace_state: AcpTraceState,
 }
 
 impl RuntimeSettingsService {
-    pub(crate) fn new(acp_trace_state: AcpTraceState) -> Self {
-        Self { acp_trace_state }
+    pub(crate) fn new(store: Store, acp_trace_state: AcpTraceState) -> Self {
+        Self {
+            store,
+            acp_trace_state,
+        }
     }
 
     fn current(&self) -> RuntimeSettingsResult {
@@ -42,6 +47,9 @@ impl RuntimeSettingsWorkflow for RuntimeSettingsService {
         if let Some(enabled) = params.developer.acp_trace.enabled {
             self.acp_trace_state
                 .set_enabled(enabled)
+                .map_err(protocol_error_from_runtime)?;
+            self.store
+                .write_acp_trace_enabled(enabled)
                 .map_err(protocol_error_from_runtime)?;
         }
         Ok(self.current())

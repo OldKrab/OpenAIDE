@@ -51,6 +51,7 @@ pub type RuntimeResult<T> = Result<T, protocol::errors::RuntimeError>;
 pub struct Runtime {
     service: TaskService,
     host_bridge: HostBridge,
+    store: Store,
     acp_trace_state: AcpTraceState,
     storage_fatal_events:
         std::sync::Mutex<Option<mpsc::Receiver<storage::task_journal::TaskStorageFatalFailure>>>,
@@ -59,7 +60,8 @@ pub struct Runtime {
 impl Runtime {
     pub fn new(storage_root: PathBuf) -> RuntimeResult<Self> {
         let store = Store::open(storage_root.clone())?;
-        let acp_trace_state = AcpTraceState::from_env(&storage_root);
+        let acp_trace_state =
+            AcpTraceState::from_env_with_persisted(&storage_root, store.read_acp_trace_enabled()?);
         let agent_registry =
             AgentRegistryHandle::new(AgentCatalogStore::new(store.clone()).registry()?);
         let agent_runtime =
@@ -80,7 +82,8 @@ impl Runtime {
         let store = Store::open(storage_root.clone())?;
         let (task_notifier, task_updates) = TaskUpdateNotifier::channel();
         let (host_bridge, host_requests) = HostBridge::channel();
-        let acp_trace_state = AcpTraceState::from_env(&storage_root);
+        let acp_trace_state =
+            AcpTraceState::from_env_with_persisted(&storage_root, store.read_acp_trace_enabled()?);
         let agent_registry =
             AgentRegistryHandle::new(AgentCatalogStore::new(store.clone()).registry()?);
         let agent_runtime =
@@ -114,33 +117,16 @@ impl Runtime {
         task_update_notifier: TaskUpdateNotifier,
         host_bridge: HostBridge,
     ) -> RuntimeResult<Self> {
-        let acp_trace_state = AcpTraceState::disabled(&storage_root);
-        Self::new_with_agent_and_task_update_notifier_and_trace(
-            storage_root,
-            agent,
-            task_update_notifier,
-            host_bridge,
-            acp_trace_state,
-            AgentRegistry::default_built_ins(),
-        )
-    }
-
-    fn new_with_agent_and_task_update_notifier_and_trace(
-        storage_root: PathBuf,
-        agent: Arc<dyn AgentRuntime>,
-        task_update_notifier: TaskUpdateNotifier,
-        host_bridge: HostBridge,
-        acp_trace_state: AcpTraceState,
-        agent_registry: AgentRegistry,
-    ) -> RuntimeResult<Self> {
-        let store = Store::open(storage_root)?;
+        let store = Store::open(storage_root.clone())?;
+        let acp_trace_state =
+            AcpTraceState::from_env_with_persisted(&storage_root, store.read_acp_trace_enabled()?);
         Self::new_with_open_store_and_agent(
             store,
             agent,
             task_update_notifier,
             host_bridge,
             acp_trace_state,
-            AgentRegistryHandle::new(agent_registry),
+            AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
         )
     }
 
@@ -155,12 +141,13 @@ impl Runtime {
         let storage_fatal_events = store.take_task_storage_fatal_events();
         Ok(Self {
             service: TaskService::open_with_task_update_notifier_and_agent_registry(
-                store,
+                store.clone(),
                 agent,
                 task_update_notifier,
                 agent_registry.current(),
             )?,
             host_bridge,
+            store,
             acp_trace_state,
             storage_fatal_events: std::sync::Mutex::new(Some(storage_fatal_events)),
         })
@@ -211,6 +198,7 @@ impl Runtime {
     ) -> RuntimeResult<RuntimeSettings> {
         if let Some(enabled) = params.developer.acp_trace.enabled {
             self.acp_trace_state.set_enabled(enabled)?;
+            self.store.write_acp_trace_enabled(enabled)?;
         }
         Ok(self.settings())
     }

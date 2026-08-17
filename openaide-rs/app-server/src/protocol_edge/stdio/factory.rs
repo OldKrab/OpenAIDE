@@ -62,7 +62,10 @@ pub(super) fn gateway(
     let shell_file_reveals = ShellFileRevealRegistry::new();
     let app_preferences = Arc::new(AppPreferencesService::new(store.clone()));
     let new_task_defaults = Arc::new(NewTaskDefaultsService::new(store.clone()));
-    let runtime_settings = Arc::new(RuntimeSettingsService::new(acp_trace_state.clone()));
+    let runtime_settings = Arc::new(RuntimeSettingsService::new(
+        store.clone(),
+        acp_trace_state.clone(),
+    ));
     let mcp_servers_settings = Arc::new(McpServersSettingsService::new(store.clone()));
     let skills_settings = Arc::new(SkillsSettingsService::with_project_roots(
         configured_projects.clone(),
