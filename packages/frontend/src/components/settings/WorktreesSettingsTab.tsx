@@ -133,26 +133,33 @@ export function WorktreesSettingsTab({
                   >
                     <span className="settings-worktree-copy">
                       <strong>{worktree.name}</strong>
-                      <small className="settings-worktree-location">
+                      <small
+                        className="settings-worktree-location"
+                        onClick={() => setSelection({
+                          projectId: project.projectId,
+                          worktreeId: worktree.worktreeId,
+                        })}
+                      >
                         <FolderOpen size={11} />
                         <span>{worktreeLocation(worktree)}</span>
+                        <button
+                          aria-label={`Copy full path for ${worktree.name}`}
+                          className="settings-worktree-copy-path"
+                          onClick={async (event) => {
+                            event.stopPropagation();
+                            setError(undefined);
+                            try {
+                              await copyText(worktree.path);
+                            } catch (cause) {
+                              setError(cause instanceof Error ? cause.message : "Unable to copy worktree path.");
+                            }
+                          }}
+                          title="Copy full path"
+                          type="button"
+                        >
+                          <Copy size={12} />
+                        </button>
                       </small>
-                      <button
-                        aria-label={`Copy full path for ${worktree.name}`}
-                        className="settings-worktree-copy-path"
-                        onClick={async () => {
-                          setError(undefined);
-                          try {
-                            await copyText(worktree.path);
-                          } catch (cause) {
-                            setError(cause instanceof Error ? cause.message : "Unable to copy worktree path.");
-                          }
-                        }}
-                        title="Copy full path"
-                        type="button"
-                      >
-                        <Copy size={12} />
-                      </button>
                     </span>
                     {worktree.linkedTaskCount || worktree.runningTaskCount ? (
                       <span className={`settings-worktree-activity${worktree.runningTaskCount ? " running" : ""}`}>
