@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3 - 2026-08-17
+
+### Bug Fixes
+
+- Restore the VS Code Developer settings unlock after a webview reload.
+- Remember the latest New Task Agent selection as the next default.
+
 ## 0.2.2 - 2026-08-17
 
 ### Bug Fixes
