@@ -2304,6 +2304,91 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.error).toBeUndefined();
   });
 
+  it("releases a superseded in-flight Prepared Task before acquiring another context", async () => {
+    const firstAcquire = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    let leasedTaskId: string | undefined;
+    let acquireCount = 0;
+    const request = vi.fn(async (
+      method: string,
+      params?: { projectId?: string; taskId?: string },
+    ) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "Project", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_RELEASE) {
+        if (params?.taskId === leasedTaskId) leasedTaskId = undefined;
+        return { discardedTaskId: params?.taskId };
+      }
+      if (method === TASK_ACQUIRE) {
+        if (leasedTaskId) {
+          throw new Error("Release the current Prepared Task before acquiring another context");
+        }
+        const projectId = params?.projectId ?? "project_1";
+        const taskId = projectId === "project_1" ? "task_project_1" : "task_project_2";
+        const task = protocolTaskSnapshot(taskId, "New task", { hasMessages: false });
+        task.task.projectId = projectId as never;
+        acquireCount += 1;
+        if (acquireCount === 1) {
+          return firstAcquire.promise.then((result) => {
+            leasedTaskId = result.task.task.taskId;
+            return result;
+          });
+        }
+        leasedTaskId = taskId;
+        return { task };
+      }
+      throw new Error(method);
+    });
+    const snapshot = clientSnapshot({ includeActiveTask: false });
+    const projects = [
+      { projectId: "project_1", label: "One", workspaceRoot: "/workspace/project_1", available: true },
+      { projectId: "project_2", label: "Two", workspaceRoot: "/workspace/project_2", available: true },
+    ];
+    snapshot.projects = { projects: projects.map((project) => ({ ...project, projectId: project.projectId as never })) };
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
+
+    await act(async () => {
+      latestController?.dispatch({ type: "newTask:project", project: projects[1] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const firstTask = protocolTaskSnapshot("task_project_1", "New task", { hasMessages: false });
+    firstTask.task.projectId = "project_1" as never;
+    await act(async () => {
+      firstAcquire.resolve({ task: firstTask });
+      await firstAcquire.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toContainEqual([
+      TASK_RELEASE,
+      { taskId: "task_project_1" },
+    ]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toEqual([
+      [TASK_ACQUIRE, { projectId: "project_1", agentId: "codex" }],
+      [TASK_ACQUIRE, { projectId: "project_2", agentId: "codex" }],
+    ]);
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_project_2");
+    expect(latestController?.state.newTask.error).toBeUndefined();
+  });
+
   it("replaces the prepared empty Task when the selected Agent changes", async () => {
     const staleTaskOpen = deferredValue<never>();
     const request = vi.fn(async (method: string, params?: { agentId?: string; taskId?: string }) => {

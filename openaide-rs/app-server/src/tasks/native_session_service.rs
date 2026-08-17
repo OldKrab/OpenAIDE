@@ -194,13 +194,15 @@ impl NativeSessionService {
                 // absence of options or commands.
                 task.native_session_data_freshness = Default::default();
             } else {
-                if let Some(catalog) = config_catalog.clone() {
-                    task.config_options_catalog = Some(catalog);
+                if config_catalog.is_some() {
+                    task.config_options_catalog = config_catalog.clone();
                     task.native_session_data_freshness.mark_config_fresh();
                     task.model_id = model_id.clone();
                 }
-                if let Some(catalog) = commands_catalog.clone() {
-                    task.agent_commands_catalog = Some(catalog);
+                if commands_catalog.is_some() {
+                    if task.agent_commands_catalog.is_none() {
+                        task.agent_commands_catalog = commands_catalog.clone();
+                    }
                     task.native_session_data_freshness.mark_commands_fresh();
                 }
             }

@@ -204,6 +204,7 @@ test("linked worktrees reuse the primary worktree role-local env", (t) => {
 test("target role uses a durable isolated systemd service", () => {
   const targetEnv = readFileSync(new URL("./local-web.target.env", import.meta.url), "utf8");
 
+  assert.match(targetEnv, /^OPENAIDE_WEB_ALLOWED_HOSTS=target\.old\.dedyn\.io,localhost,127\.0\.0\.1$/m);
   assert.match(targetEnv, /^OPENAIDE_WEB_DAEMON=systemd$/m);
   assert.match(targetEnv, /^OPENAIDE_WEB_SYSTEMD_UNIT=openaide-web-target-5574$/m);
   assert.match(targetEnv, /^OPENAIDE_WEB_PROTOTYPE_PORT=5572$/m);
