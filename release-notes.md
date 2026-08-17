@@ -1,13 +1,7 @@
-<!-- OPENAIDE_RELEASE_NOTES_TEMPLATE: replace this file before dispatching Version Bump. -->
-
-## Features
-
-- Replace this placeholder with user-facing changes since the previous canonical release.
-
 ## Bug Fixes
 
-- Replace this placeholder with user-facing fixes since the previous canonical release.
+- Recover agent startup after an ACP session times out by replacing the unresponsive shared process before retrying.
 
 ## Chores
 
-- Replace this placeholder with relevant release infrastructure or maintenance changes.
+- Harden release-note validation and canonical release checks.
