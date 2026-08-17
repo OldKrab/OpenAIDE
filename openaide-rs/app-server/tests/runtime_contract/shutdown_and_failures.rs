@@ -34,6 +34,28 @@ fn runtime_shutdown_acknowledges_and_sets_stop_flag() {
 }
 
 #[test]
+fn acp_trace_setting_survives_runtime_restart() {
+    let tmp = TempDir::new().unwrap();
+    let store_root = tmp.path().join("store");
+    let runtime = Runtime::new_with_agent(store_root.clone(), Arc::new(MockAgent)).unwrap();
+
+    runtime
+        .update_settings(openaide_app_server::protocol::params::RuntimeUpdateSettingsParams {
+            developer: openaide_app_server::protocol::params::RuntimeDeveloperSettingsPatch {
+                acp_trace: openaide_app_server::protocol::params::RuntimeAcpTraceSettingsPatch {
+                    enabled: Some(true),
+                },
+            },
+        })
+        .unwrap();
+    assert!(runtime.settings().developer.acp_trace.enabled);
+    drop(runtime);
+
+    let restarted = Runtime::new_with_agent(store_root, Arc::new(MockAgent)).unwrap();
+    assert!(restarted.settings().developer.acp_trace.enabled);
+}
+
+#[test]
 fn shutdown_preserves_durable_native_session_bindings_before_restart() {
     let tmp = TempDir::new().unwrap();
     let store_root = tmp.path().join("store");

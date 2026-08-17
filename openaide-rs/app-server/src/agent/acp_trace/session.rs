@@ -53,6 +53,10 @@ impl AcpTraceSession {
         }
     }
 
+    pub(crate) fn task_id(&self) -> &str {
+        &self.task_id
+    }
+
     pub fn record_line(&self, line: &str, direction: LineDirection) {
         let direction = match direction {
             LineDirection::Stdout => "agent_to_client.raw_stdout",

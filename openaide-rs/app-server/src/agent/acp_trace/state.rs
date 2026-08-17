@@ -31,12 +31,22 @@ struct AcpTraceInner {
 
 impl AcpTraceState {
     pub fn from_env(storage_root: &Path) -> Self {
+        Self::from_env_with_persisted(storage_root, false)
+    }
+
+    /// Builds trace state from durable settings, with the environment taking
+    /// precedence for explicit diagnostics overrides.
+    pub fn from_env_with_persisted(storage_root: &Path, persisted_enabled: bool) -> Self {
         let root = std::env::var_os(TRACE_DIR_ENV)
             .map(PathBuf::from)
             .unwrap_or_else(|| default_trace_root(storage_root));
+        let enabled = std::env::var(TRACE_ENV)
+            .ok()
+            .map(|value| trace_enabled(Some(&value)))
+            .unwrap_or(persisted_enabled);
         let state = Self {
             inner: Arc::new(Mutex::new(AcpTraceInner {
-                enabled: trace_enabled(std::env::var(TRACE_ENV).ok().as_deref()),
+                enabled,
                 root,
                 policy: TracePolicy::default(),
                 active_paths: HashSet::new(),

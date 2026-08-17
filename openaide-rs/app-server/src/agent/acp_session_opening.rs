@@ -97,6 +97,9 @@ pub(super) async fn open_acp_session<'a>(
 async fn open_acp_session_inner<'a>(
     context: OpenAcpSessionContext<'a>,
 ) -> Result<OpenedAcpSession, agent_client_protocol::Error> {
+    let operation = context.request.operation_name();
+    let task_id = context.request.task_id().to_string();
+    let agent_id = context.request_agent_id.to_string();
     let cancellation = context.request.cancellation();
     let initialize = match context.initialize {
         Some(initialize) => initialize,
@@ -223,6 +226,19 @@ async fn open_acp_session_inner<'a>(
             }
         }
     };
+    crate::logging::info(
+        "acp_session_options_ready",
+        serde_json::json!({
+            "operation": operation,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "availability": if applied_options.is_some() { "available" } else { "absent" },
+            "config_option_count": applied_options
+                .as_ref()
+                .map(|catalog| catalog.options.len())
+                .unwrap_or(0),
+        }),
+    );
 
     let session_id = active_session.session_id().to_string();
     let mut started_session = AgentSession::new(context.request_agent_id, session_id)

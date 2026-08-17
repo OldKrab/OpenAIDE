@@ -11,6 +11,7 @@ pub mod new_task_defaults;
 pub(crate) mod projects;
 pub mod records;
 pub mod root;
+pub mod runtime_settings;
 pub mod task_journal;
 pub mod task_store;
 pub mod tool_artifacts;
