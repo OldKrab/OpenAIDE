@@ -54,27 +54,33 @@ Before that release:
 
 1. Confirm that `main` contains exactly the changes to release. Choose a new
    OpenAIDE version without a `v` prefix, such as `0.0.2-beta.1` or `0.0.2`.
-2. Write concise user-facing Markdown in `release-notes.md`. Prefer sections
-   such as `## Features`, `## Bug Fixes`, and `## Chores`; describe user impact.
-   Do not add a changelog section because the workflow appends it. These notes
-   become the GitHub Release body for every release, but only stable releases
-   add them to the extension changelog. Alpha, beta, and release-candidate
-   versions never create extension changelog entries. Stable release notes
-   compare against the previous stable release and never name prereleases.
+2. Replace the checked-in next-release template in `release-notes.md` with
+   concise user-facing Markdown. Make that change in a reviewed PR after the
+   previous canonical release; do not reuse an old release summary. Prefer
+   sections such as `## Features`, `## Bug Fixes`, and `## Chores`, and describe
+   user impact. Do not add a changelog section because the workflow appends it.
+   Version Bump requires the submitted notes to exactly match the checked-in
+   file, rejects the template marker, rejects notes identical to any existing
+   extension changelog entry, and rejects an unchanged notes file since the
+   previous canonical release. These notes become the GitHub Release body for
+   every release, but only stable releases add them to the extension changelog.
+   Alpha, beta, and release-candidate versions never create extension changelog
+   entries. Stable release notes compare against the previous canonical
+   immutable release and never name prereleases.
 3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh
    gh workflow run version-bump.yml --ref main \
-     -f version=0.0.2-beta.1 \
-     -F release_notes=@release-notes.md
+     -f version=0.0.2-beta.1
    ```
 
 4. `Version Bump` is serialized and cannot be cancelled in progress. It checks
    that the exact checked-out `main` commit has a completed successful CI push
-   run, validates the monotonic version, updates the root package and lockfile,
-   updates the extension changelog for stable releases, commits the release
-   notes, creates the explicit tag, and atomically pushes the `main` update and
-   tag.
+   run, validates the monotonic version and release notes before making any
+   commit, resolves the changelog baseline from canonical immutable releases,
+   updates the root package and lockfile, updates the extension changelog for
+   stable releases, commits the release notes, creates the explicit tag, and
+   atomically pushes the `main` update and tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, then
    builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
    self-contained Windows x64 and macOS Apple Silicon desktop installers while
@@ -104,8 +110,10 @@ GitHub assets and registry packages are immutable release facts. A bad artifact
 requires a new patch or prerelease version; for example, replace a bad
 `0.0.2-beta.1` with `0.0.2-beta.2`.
 
-If registry publication was merely interrupted, run **Reconcile Release
-Registries** with the existing version. It downloads the immutable GitHub assets
+Tags without a published immutable GitHub Release are failed or incomplete
+release attempts, not changelog baselines. If registry publication was merely
+interrupted, run **Reconcile Release Registries** with the existing version. It
+downloads the immutable GitHub assets
 and handles each applicable target independently. Prereleases reconcile only
 Open VSX; stable releases reconcile both registries:
 

@@ -42,6 +42,7 @@ test("default gate runs maintained repository integration tests", () => {
     "scripts/redeploy-web-dev.test.mjs",
     "scripts/release-version.test.mjs",
     "scripts/smoke-release-vsix.test.mjs",
+    "scripts/validate-release-notes.test.mjs",
   ]) {
     assert.match(gate, new RegExp(testFile.replaceAll(".", "\\.")));
   }
@@ -122,7 +123,6 @@ test("a manual workflow commits and tags an exact release version", () => {
 
   assert.match(versionBump, /workflow_dispatch:/);
   assert.match(versionBump, /version:/);
-  assert.match(versionBump, /release_notes:/);
   assert.match(versionBump, /type: string/);
   assert.match(versionBump, /concurrency:[\s\S]*cancel-in-progress: false/);
   assert.match(versionBump, /actions\/create-github-app-token@[0-9a-f]{40}/);
@@ -134,6 +134,11 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.match(versionBump, /## Changelog/);
   assert.match(versionBump, /node scripts\/check-release-main-ci\.mjs/);
   assert.match(versionBump, /node scripts\/release-version\.mjs next "\$RELEASE_VERSION"/);
+  assert.match(versionBump, /node scripts\/validate-release-notes\.mjs/);
+  assert.match(versionBump, /cp release-notes\.md "\$notes_path"/);
+  assert.match(versionBump, /git diff --quiet .*release-notes\.md/);
+  assert.match(versionBump, /releases\?per_page=100/);
+  assert.doesNotMatch(versionBump, /inputs\.release_notes/);
   assert.match(versionBump, /node scripts\/update-extension-changelog\.mjs "\$RELEASE_VERSION" "\$notes_path"/);
   assert.match(versionBump, /git add package\.json package-lock\.json apps\/vscode-extension\/CHANGELOG\.md/);
   assert.match(versionBump, /git push --atomic origin "HEAD:refs\/heads\/main" "refs\/tags\/v\$RELEASE_VERSION"/);
@@ -155,6 +160,8 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(artifactBuild, /cp LICENSE apps\/vscode-extension\/LICENSE/);
   assert.match(artifactBuild, /cd apps\/vscode-extension/);
   assert.match(artifactBuild, /npm exec -- vsce package/);
+  assert.match(artifactBuild, /RELEASE_VERSION: \$\{\{ needs\.prepare\.outputs\.version \}\}/);
+  assert.doesNotMatch(artifactBuild, /RELEASE_VERSION: \$\{\{ steps\.version\.outputs\.version \}\}/);
   assert.match(artifactBuild, /--no-dependencies/);
   assert.match(artifactBuild, /cargo build --locked --release/);
   // The shared App Server job has one command for target-specific builds and

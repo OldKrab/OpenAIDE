@@ -27,6 +27,17 @@ test("prerelease notes compare against the immediately preceding release tag", (
   );
 });
 
+test("stable notes ignore tags that never became canonical releases", () => {
+  assert.equal(
+    selectPreviousReleaseTag({
+      candidate: "0.2.1",
+      tags: ["v0.1.3", "v0.2.0"],
+      canonicalTags: ["v0.1.3"],
+    }),
+    "v0.1.3",
+  );
+});
+
 test("accepts the supported stable and numbered prerelease forms", () => {
   for (const version of ["0.0.2-alpha.1", "0.0.2-beta.12", "0.0.2-rc.1", "0.0.2"]) {
     assert.equal(validateProjectVersion(version), version);
