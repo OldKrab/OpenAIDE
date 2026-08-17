@@ -1,7 +1,4 @@
 ## Bug Fixes
 
-- Recover agent startup after an ACP session times out by replacing the unresponsive shared process before retrying.
-
-## Chores
-
-- Harden release-note validation and canonical release checks.
+- Restore the VS Code Developer settings unlock after a webview reload.
+- Remember the latest New Task Agent selection as the next default.
