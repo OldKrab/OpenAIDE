@@ -1,6 +1,6 @@
 {
   "name": "openaide",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "AGPL-3.0-only",
   "private": true,
   "description": "Local agent workbench for inspectable task execution.",

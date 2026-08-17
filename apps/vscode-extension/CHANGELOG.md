@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2 - 2026-08-17
+
+### Bug Fixes
+
+- Recover agent startup after an ACP session times out by replacing the unresponsive shared process before retrying.
+
+### Chores
+
+- Harden release-note validation and canonical release checks.
+
 ## 0.2.1 - 2026-08-17
 
 ### Features
