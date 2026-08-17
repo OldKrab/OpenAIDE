@@ -1,7 +1,7 @@
+use super::AcpAgentConfig;
 use super::{
     command_not_found_error, process_args, resolve_command_in_paths, windows_command_extensions,
 };
-use super::AcpAgentConfig;
 use crate::protocol::errors::RuntimeError;
 use std::ffi::OsStr;
 use std::fs;
@@ -72,10 +72,7 @@ fn windows_command_extensions_follow_pathext_and_ignore_unsupported_scripts() {
 fn windows_batch_launcher_is_invoked_through_cmd_exe() {
     let args = process_args(
         r"C:\Program Files\nodejs\npx.cmd",
-        &[
-            "-y".to_string(),
-            "@openaide/codex-acp@1.0.0".to_string(),
-        ],
+        &["-y".to_string(), "@openaide/codex-acp@1.0.0".to_string()],
         &[("AGENT_TOKEN".to_string(), "secret".to_string())],
         true,
     );
