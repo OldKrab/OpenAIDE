@@ -182,7 +182,8 @@ jobs:
       - name: Package platform VSIX
         shell: bash
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          # The prepare job owns release-version resolution; this job has no version step.
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           mkdir -p artifacts apps/vscode-extension/dist/app-server
           cp "app-server/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
