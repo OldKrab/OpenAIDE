@@ -7,7 +7,7 @@ use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta};
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{
-    ClientInstanceId, ClientRequestId, ProjectId, StateRootId, TaskId,
+    AgentId, ClientInstanceId, ClientRequestId, ProjectId, StateRootId, TaskId,
 };
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_REPLACE_CUSTOM,
@@ -257,7 +257,8 @@ fn updating_new_task_project_default_persists_across_snapshot_reads() {
             "2",
             SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
             NewTaskDefaultsUpdateParams {
-                project_id: ProjectId::from("project-api"),
+                project_id: Some(ProjectId::from("project-api")),
+                agent_id: None,
             },
         ),
         AppServerTime(2),
@@ -267,6 +268,32 @@ fn updating_new_task_project_default_persists_across_snapshot_reads() {
     assert_eq!(
         store.read_new_task_defaults().unwrap().project_id,
         Some(ProjectId::from("project-api"))
+    );
+}
+
+#[test]
+fn updating_new_task_agent_default_persists_across_snapshot_reads() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let updated = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+            NewTaskDefaultsUpdateParams {
+                project_id: None,
+                agent_id: Some(AgentId::from("cursor")),
+            },
+        ),
+        AppServerTime(2),
+    ));
+
+    assert_eq!(updated["result"]["agentId"], json!("cursor"));
+    assert_eq!(
+        store.read_new_task_defaults().unwrap().agent_id,
+        Some(AgentId::from("cursor"))
     );
 }
 

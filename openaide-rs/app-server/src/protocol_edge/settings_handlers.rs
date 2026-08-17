@@ -272,7 +272,7 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error));
             }
         };
-        let result = match self.new_task_defaults.update_project_default(params) {
+        let result = match self.new_task_defaults.update_defaults(params) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };

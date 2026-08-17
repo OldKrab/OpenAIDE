@@ -457,7 +457,7 @@ struct NoopTaskStorageMaintenance;
 struct NoopNewTaskDefaults;
 
 impl NewTaskDefaultsWorkflow for NoopNewTaskDefaults {
-    fn update_project_default(
+    fn update_defaults(
         &self,
         _params: openaide_app_server_protocol::settings::NewTaskDefaultsUpdateParams,
     ) -> Result<

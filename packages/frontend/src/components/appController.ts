@@ -334,6 +334,20 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         });
       });
   }, [request]);
+  const rememberNewTaskAgent = useCallback((agentId: string) => {
+    if (!request) return;
+    // The preference is auxiliary to the live selection: a storage failure must
+    // never prevent the user from creating a Task with the chosen Agent.
+    void Promise.resolve()
+      .then(() => request(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
+        agentId: agentId as AgentId,
+      }))
+      .catch((error: unknown) => {
+        console.warn("[OpenAIDE] Remembering the New Task Agent failed", {
+          error_kind: error instanceof Error && error.name ? error.name : typeof error,
+        });
+      });
+  }, [request]);
   const core = useAppControllerCore({ backendConnection, rememberNewTaskProject });
   const { createSnapshotRequestId: _createSnapshotRequestId, dispatch, newTaskSnapshot, state, ...renderState } = core;
   const routedTaskId = state.snapshot?.task.task_id;
@@ -407,7 +421,10 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
           type: "submit:error",
           message: message ?? "Images can be attached after the Task is open.",
         }),
-        selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
+        selectAgent: (agentId, agentLabel) => {
+          dispatch({ type: "newTask:agent", agentId, agentLabel });
+          rememberNewTaskAgent(agentId);
+        },
         selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
         selectProject: (project) => {
           dispatch({ type: "newTask:project", project });

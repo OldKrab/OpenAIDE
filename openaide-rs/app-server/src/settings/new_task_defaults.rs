@@ -6,7 +6,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::storage::Store;
 
 pub(crate) trait NewTaskDefaultsWorkflow: Send + Sync {
-    fn update_project_default(
+    fn update_defaults(
         &self,
         params: NewTaskDefaultsUpdateParams,
     ) -> Result<NewTaskDefaultsSnapshot, ProtocolError>;
@@ -24,7 +24,7 @@ impl NewTaskDefaultsService {
 }
 
 impl NewTaskDefaultsWorkflow for NewTaskDefaultsService {
-    fn update_project_default(
+    fn update_defaults(
         &self,
         params: NewTaskDefaultsUpdateParams,
     ) -> Result<NewTaskDefaultsSnapshot, ProtocolError> {
@@ -32,7 +32,12 @@ impl NewTaskDefaultsWorkflow for NewTaskDefaultsService {
             .store
             .read_new_task_defaults()
             .map_err(protocol_error_from_runtime)?;
-        defaults.project_id = Some(params.project_id);
+        if let Some(project_id) = params.project_id {
+            defaults.project_id = Some(project_id);
+        }
+        if let Some(agent_id) = params.agent_id {
+            defaults.agent_id = Some(agent_id);
+        }
         self.store
             .write_new_task_defaults(&defaults)
             .map_err(protocol_error_from_runtime)?;

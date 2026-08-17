@@ -406,7 +406,7 @@ export type AppPreferencesParams = Record<symbol, never>;
 
 export type AppPreferencesUpdateParams = { preferences: AppPreferencesPatch, };
 
-export type NewTaskDefaultsUpdateParams = { projectId: ProjectId, };
+export type NewTaskDefaultsUpdateParams = { projectId?: ProjectId | null, agentId?: AgentId | null, };
 
 export type AppPreferencesPatch = { composerSubmitShortcut: ComposerSubmitShortcut, };
 

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::ProjectId;
+use crate::ids::{AgentId, ProjectId};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -13,11 +13,14 @@ pub struct RuntimeSettingsParams {}
 #[serde(rename_all = "camelCase")]
 pub struct AppPreferencesParams {}
 
-/// Updates the state-root-wide Project used as the fallback for a generic New Task.
+/// Patches the state-root-wide defaults used when opening a generic New Task.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTaskDefaultsUpdateParams {
-    pub project_id: ProjectId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<AgentId>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]

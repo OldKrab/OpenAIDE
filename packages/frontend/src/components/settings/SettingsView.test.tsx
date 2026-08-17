@@ -223,6 +223,35 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(tree.root.findAllByType("code").some((code) => code.props.title === "/runtime/traces")).toBe(false);
   });
 
+  it("restores the persisted developer unlock supplied by the App Shell", () => {
+    const tree = render(
+      <SettingsView
+        developerSettingsUnlocked
+        onAuthenticate={() => undefined}
+        onCreateCustomAgent={() => undefined}
+        onDeleteCustomAgent={() => undefined}
+        onRefresh={() => undefined}
+        onReplaceCustomAgent={() => undefined}
+        onSelectTab={() => undefined}
+        onSetAcpTrace={() => undefined}
+        onSetAgentEnabled={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onUpdateCustomAgentMetadata={() => undefined}
+        onUnlockDeveloperSettings={() => undefined}
+        preferences={{ composer_submit_shortcut: "mod_enter" }}
+        state={{
+          activeTab: "common",
+          loading: false,
+          runtimeSettings: {
+            developer: { acp_trace: { enabled: true, directory: "/runtime/traces" } },
+          },
+        }}
+      />,
+    );
+
+    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "ACP logs")).toBe(true);
+  });
+
   it("renders browser-local desktop notification state and forwards opt-in", () => {
     const onSetDesktopNotifications = vi.fn();
     const tree = render(

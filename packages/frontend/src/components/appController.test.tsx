@@ -801,6 +801,38 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
+  it("persists a user-selected New Task Agent as the next default", async () => {
+    bootstrap = vscodeNewTaskBootstrap("project_1");
+    const initializedSnapshot = clientSnapshot({
+      includeActiveTask: false,
+      agents: [
+        { agentId: "codex" as never, label: "Codex", status: "connected" },
+        { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+      ],
+    });
+    const request = vi.fn();
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
+      request,
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      latestPublicController?.intents.newTask.selectAgent("opencode", "OpenCode");
+      await Promise.resolve();
+    });
+
+    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
+      agentId: "opencode",
+    });
+  });
+
   it("loads only the initial visible rows after adding a Project", async () => {
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
     initializedSnapshot.projects = {

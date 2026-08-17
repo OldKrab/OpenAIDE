@@ -390,6 +390,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   if (bootstrap.surface === "settings") {
     return (
       <SettingsView
+        developerSettingsUnlocked={bootstrap.developerSettingsUnlocked}
         desktopNotifications={taskNotifications?.settings}
         frameHeader={desktopSettingsTitleBar}
         frameHeaderPlacement={desktopSettingsTitleBarPlacement}
