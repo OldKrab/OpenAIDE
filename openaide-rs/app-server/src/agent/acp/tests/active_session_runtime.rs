@@ -607,6 +607,8 @@ for line in sys.stdin:
             notify_text_chunk("replayed through active attachment")
         respond(message, {"configOptions": []})
     elif method == "session/resume":
+        if prompt_mode == "exit_on_resume":
+            sys.exit(1)
         respond(message, {
             "configOptions": [{
                 "id": "model",
@@ -1165,6 +1167,43 @@ fn listing_sessions_reuses_the_active_agent_process() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/list", "session/close"]
+    );
+}
+
+#[test]
+fn listing_sessions_recovers_after_a_failed_resume_ends_the_shared_process() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "missing-session", "exit_on_resume")
+    else {
+        return;
+    };
+
+    let resume_result = runtime.resume_session(AgentSessionResume {
+        agent_id: "codex".to_string(),
+        task_id: "task-stale-session".to_string(),
+        session_id: "missing-session".to_string(),
+        cwd: cwd_string(),
+        model_id: None,
+        cancellation: TurnCancellation::new(),
+        secret_resolver: None,
+    });
+    assert!(
+        resume_result.is_err(),
+        "the stale session should end the first Agent process"
+    );
+
+    runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: Some(cwd_string()),
+            cursor: None,
+        })
+        .expect("listing should relaunch the ended Agent process");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/resume", "initialize", "session/list"]
     );
 }
 

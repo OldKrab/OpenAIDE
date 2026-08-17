@@ -1,5 +1,5 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
-import { Check, Folder, FolderOpen, GitBranch, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Folder, FolderOpen, GitBranch, Monitor, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
@@ -28,6 +28,7 @@ type SidebarProjectTaskGroupProps = {
   loading: boolean;
   canManageWorktrees: boolean;
   forkableAgentIds?: ReadonlySet<string>;
+  environmentLabel?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
   onArchiveTask: (taskId: string) => void;
   onForkNativeSession?: (session: AgentListedSession) => void;
@@ -65,6 +66,7 @@ export function SidebarProjectTaskGroup({
   loading,
   canManageWorktrees,
   forkableAgentIds = new Set(),
+  environmentLabel,
   onArchiveNativeSession,
   onArchiveTask,
   onForkNativeSession,
@@ -159,6 +161,12 @@ export function SidebarProjectTaskGroup({
               </button>
             )}
           >
+            {environmentLabel ? (
+              <div className="project-task-group-environment" role="none">
+                <Monitor aria-hidden="true" size={13} />
+                <span><small>Environment</small><strong>{environmentLabel}</strong></span>
+              </div>
+            ) : null}
             <button onClick={() => { setMenuOpen(false); onNewTask(); }} role="menuitem" type="button"><Plus size={13} />New task</button>
             {canManageWorktrees && onManageWorktrees ? <button onClick={() => { setMenuOpen(false); onManageWorktrees(); }} role="menuitem" type="button"><GitBranch size={13} />Manage worktrees</button> : null}
             {onRenameProject ? <button onClick={() => { setMenuOpen(false); setRenameDraft(group.label); setRenameError(undefined); setRenaming(true); }} role="menuitem" type="button"><Pencil size={13} />Rename Project</button> : null}

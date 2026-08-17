@@ -145,15 +145,16 @@ export async function adoptRoutedNativeSession({
     if (!ownsOperation) return;
     const noLongerExists = error instanceof AppServerProtocolError
       && error.protocolError.code === "notFound";
-    const inUseElsewhere = error instanceof AppServerProtocolError
+    const conflict = error instanceof AppServerProtocolError
       && error.protocolError.code === "conflict";
     dispatch({
       type: "newTask:nativeSessions:error",
       sessionId: nativeSessionId,
       recoverable: error instanceof AppServerProtocolError && error.protocolError.recoverable,
+      kind: noLongerExists ? "notFound" : conflict ? "conflict" : undefined,
       message: noLongerExists
         ? "This session no longer exists."
-        : inUseElsewhere
+        : conflict
           ? "This session is currently in use elsewhere. Close it there, then try again."
         : error instanceof Error ? error.message : "Unable to open task.",
     });

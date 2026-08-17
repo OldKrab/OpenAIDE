@@ -1,4 +1,15 @@
-import { AlertTriangle, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  Bell,
+  Bug,
+  Check,
+  Folder,
+  Keyboard,
+  Laptop,
+  Moon,
+  Sun,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type {
@@ -7,12 +18,16 @@ import type {
   RuntimeSettingsResult,
 } from "@openaide/app-shell-contracts";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
+import type { AppThemePreference, FrontendShellAppearance } from "../../services/frontendShell";
+import { currentFrontendShell } from "../../services/frontendShell";
 import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
 import { PopupDialog } from "../Popup";
+import { DesktopRuntimeSettings } from "./DesktopRuntimeSettings";
 
 export function GeneralSettingsTab({
   developerSettingsUnlocked = false,
   desktopNotifications,
+  appearance,
   onResetTaskHistory,
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
@@ -22,6 +37,7 @@ export function GeneralSettingsTab({
 }: {
   developerSettingsUnlocked?: boolean;
   desktopNotifications?: DesktopNotificationSettings;
+  appearance?: FrontendShellAppearance;
   onResetTaskHistory?: () => Promise<void>;
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
@@ -29,168 +45,222 @@ export function GeneralSettingsTab({
   preferences: AppPreferencesRecord;
   runtimeSettings?: RuntimeSettingsResult;
 }) {
-  const [query, setQuery] = useState("");
   const mobileComposerBehavior = usesMobileComposerBehavior();
   const enterSends = preferences.composer_submit_shortcut === "enter";
   const newLineShortcut = enterSends ? "Ctrl/Cmd+Enter" : "Enter";
   const developerSettings = runtimeSettings?.developer;
-  const groups: GeneralSettingsGroup[] = mobileComposerBehavior ? [] : [
-    {
-      id: "composer",
-      label: "Composer",
-      rows: [
-        {
-          id: "enter-sends-message",
-          label: "Enter sends message",
-          detail: "Send from the composer with Enter.",
-          searchText: `composer enter sends message send ${enterSends ? "on" : "off"}`,
-          value: (
-            <label className="settings-switch" aria-label="Enter sends message">
-              <input
-                aria-label="Enter sends message"
-                checked={enterSends}
-                onChange={(event) => onSetComposerSubmitShortcut(event.currentTarget.checked ? "enter" : "mod_enter")}
-                type="checkbox"
-              />
-              <span className="settings-switch-track" aria-hidden="true" />
-            </label>
-          ),
-        },
-        {
-          id: "new-line-shortcut",
-          label: "New line shortcut",
-          searchText: `composer new line shortcut ${newLineShortcut}`,
-          value: <span className="settings-row-value">{newLineShortcut}</span>,
-        },
-      ],
-    },
-  ];
-
-  if (desktopNotifications && onSetDesktopNotifications) {
-    groups.push({
-      id: "notifications",
-      label: "Notifications",
-      rows: [{
-        id: "desktop-notifications",
-        label: "Desktop notifications",
-        detail: desktopNotificationDetail(desktopNotifications.status),
-        searchText: `desktop notifications operating system ${desktopNotifications.status}`,
-        value: (
-          <label className="settings-switch" aria-label="Desktop notifications">
-            <input
-              aria-label="Desktop notifications"
-              checked={desktopNotifications.status === "enabled" || desktopNotifications.status === "blocked"}
-              disabled={desktopNotifications.status === "unsupported"}
-              onChange={(event) => { void onSetDesktopNotifications(event.currentTarget.checked); }}
-              type="checkbox"
-            />
-            <span className="settings-switch-track" aria-hidden="true" />
-          </label>
-        ),
-      }],
-    });
-  }
-
-  if (developerSettings && developerSettingsUnlocked) {
-    groups.push({
-      id: "developer",
-      label: "Developer",
-      rows: [
-        {
-          id: "acp-logs",
-          label: "ACP logs",
-          detail: "Write ACP trace files for local debugging.",
-          searchText: `developer acp logs trace ${developerSettings.acp_trace.enabled ? "on" : "off"}`,
-          value: (
-            <label className="settings-switch" aria-label="ACP logs">
-              <input
-                aria-label="ACP logs"
-                checked={developerSettings.acp_trace.enabled}
-                onChange={(event) => onSetAcpTrace(event.currentTarget.checked)}
-                type="checkbox"
-              />
-              <span className="settings-switch-track" aria-hidden="true" />
-            </label>
-          ),
-        },
-        {
-          id: "trace-directory",
-          label: "Trace directory",
-          searchText: `developer trace directory ${developerSettings.acp_trace.directory}`,
-          value: (
-            <code className="settings-row-value" title={developerSettings.acp_trace.directory}>
-              {compactPathForSettings(developerSettings.acp_trace.directory)}
-            </code>
-          ),
-        },
-      ],
-    });
-  }
-
-  if (onResetTaskHistory) {
-    groups.push({
-      id: "recovery",
-      label: "Recovery",
-      rows: [{
-        id: "reset-task-history",
-        label: "Reset task history",
-        detail: "Delete local Tasks, chats, tool details, and recalled composer prompts.",
-        searchText: "recovery reset task history clear delete local data chats tool details composer prompts",
-        value: <ResetTaskHistoryButton onReset={onResetTaskHistory} />,
-      }],
-    });
-  }
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const visibleGroups = normalizedQuery
-    ? groups
-        .map((group) => ({
-          ...group,
-          rows: group.rows.filter((row) => `${group.label} ${row.label} ${row.detail ?? ""} ${row.searchText}`.toLowerCase().includes(normalizedQuery)),
-        }))
-        .filter((group) => group.rows.length)
-    : groups;
+  const desktopRuntime = currentFrontendShell()?.desktopRuntime;
 
   return (
-    <div className="settings-panel">
-      <label className="settings-filter">
-        <Search size={13} />
-        <input
-          aria-label="Search settings"
-          value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Search settings"
-          type="search"
-        />
-      </label>
-      <div className="settings-common-list">
-        {visibleGroups.length ? (
-          visibleGroups.map((group) => (
-            <section className="settings-section" aria-label={group.label} key={group.id}>
-              <div className="settings-section-title">
-                <strong>{group.label}</strong>
-              </div>
-              <div className="settings-section-rows">
-                {group.rows.map((row) => (
-                  <div className="settings-row" key={row.id}>
-                    <span className="settings-row-copy">
-                      <strong>{row.label}</strong>
-                      {row.detail ? <small>{row.detail}</small> : null}
-                    </span>
-                    {row.value}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))
-        ) : (
-          <div className="settings-empty">
-            <strong>No settings found</strong>
-            <span>Try a different search.</span>
+    <div className="general-settings-panel">
+      {appearance ? (
+        <GeneralSection
+          description="Theme changes apply immediately in this OpenAIDE app."
+          label="Appearance"
+        >
+          <ThemePicker appearance={appearance} />
+        </GeneralSection>
+      ) : null}
+
+      {desktopRuntime ? (
+        <GeneralSection
+          description="Choose the operating system that owns this OpenAIDE environment. Switching restarts the app."
+          label="Environment"
+        >
+          <DesktopRuntimeSettings capability={desktopRuntime} />
+        </GeneralSection>
+      ) : null}
+
+      {!mobileComposerBehavior ? (
+        <GeneralSection label="Composer">
+          <div className="general-preference-surface">
+            <GeneralPreferenceRow
+              action={(
+                <span className="general-preference-action">
+                  <kbd className="general-shortcut-key">{enterSends ? "Enter" : "Ctrl/Cmd+Enter"}</kbd>
+                  <SettingsSwitch
+                    checked={enterSends}
+                    label="Send with Enter"
+                    onChange={(checked) => onSetComposerSubmitShortcut(checked ? "enter" : "mod_enter")}
+                  />
+                </span>
+              )}
+              detail={`Press ${newLineShortcut} to add a new line.`}
+              icon={<Keyboard size={17} />}
+              label="Send with Enter"
+            />
           </div>
-        )}
-      </div>
+        </GeneralSection>
+      ) : null}
+
+      {desktopNotifications && onSetDesktopNotifications ? (
+        <GeneralSection label="Notifications">
+          <div className="general-preference-surface">
+            <GeneralPreferenceRow
+              action={(
+                <SettingsSwitch
+                  checked={desktopNotifications.status === "enabled" || desktopNotifications.status === "blocked"}
+                  disabled={desktopNotifications.status === "unsupported"}
+                  label="Desktop notifications"
+                  onChange={(checked) => { void onSetDesktopNotifications(checked); }}
+                />
+              )}
+              detail={desktopNotificationDetail(desktopNotifications.status)}
+              icon={<Bell size={17} />}
+              label="Desktop notifications"
+            />
+          </div>
+        </GeneralSection>
+      ) : null}
+
+      {developerSettings && developerSettingsUnlocked ? (
+        <GeneralSection description="Local diagnostic controls for this App Server." label="Developer">
+          <div className="general-preference-surface">
+            <GeneralPreferenceRow
+              action={(
+                <SettingsSwitch
+                  checked={developerSettings.acp_trace.enabled}
+                  label="ACP logs"
+                  onChange={onSetAcpTrace}
+                />
+              )}
+              detail="Write ACP trace files for local debugging."
+              icon={<Bug size={17} />}
+              label="ACP logs"
+            />
+            <GeneralPreferenceRow
+              action={(
+                <code className="general-path-value" title={developerSettings.acp_trace.directory}>
+                  {compactPathForSettings(developerSettings.acp_trace.directory)}
+                </code>
+              )}
+              icon={<Folder size={17} />}
+              label="Trace directory"
+            />
+          </div>
+        </GeneralSection>
+      ) : null}
+
+      {onResetTaskHistory ? (
+        <GeneralSection description="Manage history stored on this device." label="Local data">
+          <div className="general-danger-surface">
+            <GeneralPreferenceRow
+              action={<ResetTaskHistoryButton onReset={onResetTaskHistory} />}
+              detail="Delete local tasks, chats, tool details, and recalled prompts."
+              icon={<Trash2 size={16} />}
+              label="Task history"
+              tone="danger"
+            />
+          </div>
+        </GeneralSection>
+      ) : null}
     </div>
+  );
+}
+
+function GeneralSection({
+  children,
+  description,
+  label,
+}: {
+  children: ReactNode;
+  description?: string;
+  label: string;
+}) {
+  const headingId = `general-${label.toLowerCase().replaceAll(" ", "-")}`;
+  return (
+    <section className="general-settings-section" aria-labelledby={headingId}>
+      <header className="general-settings-section-heading">
+        <h2 id={headingId}>{label}</h2>
+        {description ? <p>{description}</p> : null}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function ThemePicker({ appearance }: { appearance: FrontendShellAppearance }) {
+  const [theme, setTheme] = useState<AppThemePreference>(() => appearance.theme());
+  return (
+    <div className="general-theme-grid" role="radiogroup" aria-label="App theme">
+      {(["system", "light", "dark"] as const).map((choice) => {
+        const Icon = choice === "system" ? Laptop : choice === "light" ? Sun : Moon;
+        const selected = theme === choice;
+        return (
+          <button
+            aria-checked={selected}
+            className={`general-theme-choice ${selected ? "selected" : ""}`}
+            key={choice}
+            onClick={() => {
+              appearance.setTheme(choice);
+              setTheme(choice);
+            }}
+            role="radio"
+            type="button"
+          >
+            {selected ? <span className="general-theme-check"><Check size={13} /></span> : null}
+            <span className={`general-theme-preview ${choice}`} aria-hidden="true">
+              <span className="general-theme-preview-sidebar" />
+              <span className="general-theme-preview-main"><i /><i /><i /></span>
+            </span>
+            <span className="general-theme-label">
+              <Icon size={14} />
+              {choice[0].toUpperCase() + choice.slice(1)}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function GeneralPreferenceRow({
+  action,
+  detail,
+  icon,
+  label,
+  tone,
+}: {
+  action: ReactNode;
+  detail?: string;
+  icon: ReactNode;
+  label: string;
+  tone?: "danger";
+}) {
+  return (
+    <div className="general-preference-row">
+      <span className={`general-preference-icon ${tone ?? ""}`}>{icon}</span>
+      <span className="general-preference-copy">
+        <strong>{label}</strong>
+        {detail ? <small>{detail}</small> : null}
+      </span>
+      {action}
+    </div>
+  );
+}
+
+function SettingsSwitch({
+  checked,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange(checked: boolean): void;
+}) {
+  return (
+    <label className="settings-switch" aria-label={label}>
+      <input
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        type="checkbox"
+      />
+      <span className="settings-switch-track" aria-hidden="true" />
+    </label>
   );
 }
 
@@ -220,11 +290,11 @@ function ResetTaskHistoryButton({ onReset }: { onReset: () => Promise<void> }) {
     <>
       <button
         aria-label="Reset task history"
-        className="settings-danger-button"
+        className="general-reset-history"
         onClick={() => setOpen(true)}
         type="button"
       >
-        Reset
+        Reset history…
       </button>
       <PopupDialog
         className="settings-reset-dialog"
@@ -271,20 +341,6 @@ function desktopNotificationDetail(status: DesktopNotificationSettings["status"]
       return "Show OS notifications when OpenAIDE is not focused.";
   }
 }
-
-type GeneralSettingsGroup = {
-  id: string;
-  label: string;
-  rows: GeneralSettingsRow[];
-};
-
-type GeneralSettingsRow = {
-  id: string;
-  label: string;
-  detail?: string;
-  searchText: string;
-  value: ReactNode;
-};
 
 export function compactPathForSettings(path: string, visibleSegments = 3): string {
   if (!path) return path;

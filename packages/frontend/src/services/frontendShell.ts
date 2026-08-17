@@ -9,6 +9,38 @@ import type { AppServerSession } from "@openaide/app-server-client";
 import type { PreSendAttachment } from "@openaide/app-server-client";
 
 export type FileUploadProgress = { loaded: number; total: number };
+export type AppThemePreference = "system" | "light" | "dark";
+
+export type FrontendShellAppearance = {
+  theme(): AppThemePreference;
+  setTheme(theme: AppThemePreference): void;
+};
+
+export type DesktopWindowCapability = {
+  platform: "linux" | "macos" | "windows";
+  close(): Promise<void>;
+  minimize(): Promise<void>;
+  startDragging(): Promise<void>;
+  toggleMaximize(): Promise<void>;
+};
+
+export type DesktopRuntimeEnvironment =
+  | { kind: "native" }
+  | { kind: "wsl"; distro: string };
+
+export type DesktopRuntimeCapability = {
+  snapshot(): {
+    active: DesktopRuntimeEnvironment;
+    wslDistros: string[];
+  };
+  select(environment: DesktopRuntimeEnvironment): Promise<void>;
+};
+
+export type DesktopCommand = "new-task" | "open-project" | "settings";
+
+export type DesktopCommandCapability = {
+  subscribe(listener: (command: DesktopCommand) => void): () => void;
+};
 
 export type SentFileOpenRequest = {
   taskId: string;
@@ -43,8 +75,16 @@ export type FrontendShell = {
   clipboard?: {
     writeText(text: string): Promise<void>;
   };
+  /** Shell-owned appearance; omitted when the embedding host owns theme selection. */
+  appearance?: FrontendShellAppearance;
   /** Supplies a shell-owned logical session when the renderer must not own transport. */
   backendConnection?: () => AppServerSession;
+  /** Native window operations exposed only by the Desktop shell. */
+  desktopWindow?: DesktopWindowCapability;
+  /** Desktop-owned backend OS selection, resolved before App Server startup. */
+  desktopRuntime?: DesktopRuntimeCapability;
+  /** Native menu and keyboard commands routed into the shared Desktop surface. */
+  desktopCommands?: DesktopCommandCapability;
   messages: {
     post: PostHostMessage;
     subscribe(listener: (message: HostToWebviewMessage) => void): () => void;

@@ -73,6 +73,7 @@ describe("Native Session route lifecycle", () => {
       type: "newTask:nativeSessions:error",
       sessionId: "session-1",
       recoverable: false,
+      kind: "notFound",
       message: "This session no longer exists.",
     });
     expect(dispatch).toHaveBeenCalledWith({
@@ -100,6 +101,7 @@ describe("Native Session route lifecycle", () => {
       type: "newTask:nativeSessions:error",
       sessionId: "session-1",
       recoverable: true,
+      kind: "conflict",
       message: "This session is currently in use elsewhere. Close it there, then try again.",
     });
     expect(dispatch).not.toHaveBeenCalledWith({

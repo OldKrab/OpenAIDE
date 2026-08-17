@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -412,7 +412,7 @@ fn durable_replace_json<T: Serialize>(
         faults.check(kind, super::frame::FaultPoint::FileSync)?;
         faults.record_sync();
         file.sync_all()?;
-        fs::rename(&temporary, path)?;
+        durable_replace(&temporary, path)?;
         faults.check(kind, super::frame::FaultPoint::ParentSync)?;
         sync_directory(parent)
     })();
@@ -430,9 +430,70 @@ fn temporary_path(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{name}.{}", uuid::Uuid::new_v4()))
 }
 
+#[cfg(unix)]
 fn sync_directory(path: &Path) -> Result<(), RuntimeError> {
-    File::open(path)?.sync_all()?;
+    std::fs::File::open(path)?.sync_all()?;
     Ok(())
+}
+
+#[cfg(windows)]
+fn sync_directory(_path: &Path) -> Result<(), RuntimeError> {
+    // FlushFileBuffers on each file above persists its data and metadata.
+    // Windows has no portable directory fsync; opening a directory as a File
+    // instead fails with ERROR_ACCESS_DENIED and must not reject the commit.
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn sync_directory(_path: &Path) -> Result<(), RuntimeError> {
+    Err(RuntimeError::Storage(
+        "split Task directory sync is unsupported on this platform".to_string(),
+    ))
+}
+
+#[cfg(unix)]
+fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let destination = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let source = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both owned UTF-16 buffers are NUL terminated and remain alive
+    // through the call. Replacement is required after the initial Task write.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(RuntimeError::from(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn durable_replace(_temporary: &Path, _path: &Path) -> Result<(), RuntimeError> {
+    Err(RuntimeError::Storage(
+        "split Task replacement is unsupported on this platform".to_string(),
+    ))
 }
 
 fn remove_if_present(path: &Path) -> Result<(), RuntimeError> {

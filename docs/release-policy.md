@@ -76,23 +76,27 @@ Before that release:
    notes, creates the explicit tag, and atomically pushes the `main` update and
    tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, then
-   builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages while
+   builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
+   self-contained Windows x64 and macOS Apple Silicon desktop installers while
    normal CI validates the exact version commit. Publication requires both to
    succeed; the release workflow does not repeat the CI suite. Prerelease
-   packages carry the registry's native prerelease metadata. Each runner
+   packages carry the registry's native prerelease metadata. Each VSIX runner
    inspects the packaged files and exercises its bundled App Server through
-   startup and graceful JSON-RPC shutdown before the VSIX can be uploaded.
+   startup and graceful JSON-RPC shutdown before upload. Desktop builds verify
+   that Tauri bundled the exact App Server binary built for that platform.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
-   asset set, publishes the draft, and verifies immutability. This GitHub
-   Release is the canonical release. Every release then reconciles the same
-   downloaded bytes with Open VSX; stable releases also reconcile them with the
-   VS Code Marketplace.
+   asset set, publishes the draft, and verifies immutability. Desktop filenames
+   end in `-unsigned` until Apple notarization and Windows Authenticode signing
+   are configured; users must explicitly approve those preview installers with
+   the operating system. This GitHub Release is the canonical release. Every
+   release then reconciles the same downloaded bytes with Open VSX; stable
+   releases also reconcile them with the VS Code Marketplace.
 7. Confirm that the Release workflow completed successfully. No manual rebuild
    or replacement of its assets is permitted.
 
-The root `package.json` is the release-version source of truth. Package and
-Cargo manifests stamped only during artifact creation stay at `0.0.0` in source
-and must not be updated by hand.
+The root `package.json` is the release-version source of truth. VSIX and Desktop
+package, Cargo, lockfile, and Tauri manifests stamped only during artifact
+creation stay at `0.0.0` in source and must not be updated by hand.
 
 ## Recovery and registry reconciliation
 

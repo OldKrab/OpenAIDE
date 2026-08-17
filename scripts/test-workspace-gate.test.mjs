@@ -9,6 +9,7 @@ const rootPackage = packageJson("package.json");
 const maintainedWorkspaceNames = [
   "@openaide/app-server-client",
   "@openaide/app-shell-contracts",
+  "openaide-desktop-validation",
   "openaide-frontend",
   "openaide-vscode-extension",
   "openaide-web",
@@ -59,6 +60,7 @@ test("default npm check includes every workspace that exposes a check script", (
   assert.deepEqual(checkedWorkspaceNames, [
     "@openaide/app-server-client",
     "@openaide/app-shell-contracts",
+    "openaide-desktop-validation",
     "openaide-frontend",
     "openaide-vscode-extension",
   ]);
@@ -139,12 +141,13 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.doesNotMatch(versionBump, /inputs\.bump|options:\s*\n\s*- patch/);
 });
 
-test("release publishing produces every supported platform VSIX package", () => {
+test("release publishing produces every supported VSIX and desktop package", () => {
   const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
   const artifactBuild = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
   const extensionPackage = packageJson("apps/vscode-extension/package.json");
 
   assert.match(release, /uses: \.\/\.github\/workflows\/build-vsix\.yml/);
+  assert.match(release, /artifacts: all/);
   assert.match(release, /version: \$\{\{ needs\.validate\.outputs\.version \}\}/);
   assert.match(artifactBuild, /target: linux-x64/);
   assert.match(artifactBuild, /target: win32-x64/);
@@ -154,8 +157,21 @@ test("release publishing produces every supported platform VSIX package", () => 
   assert.match(artifactBuild, /npm exec -- vsce package/);
   assert.match(artifactBuild, /--no-dependencies/);
   assert.match(artifactBuild, /cargo build --locked --release/);
+  // The shared App Server job has one command for target-specific builds and
+  // one fallback command for hosts without a Rust target override.
+  assert.equal(occurrences(artifactBuild, "cargo build --locked --release -p openaide-app-server"), 2);
+  assert.match(artifactBuild, /name: app-server-\$\{\{ matrix\.target \}\}/);
+  assert.match(artifactBuild, /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.match(artifactBuild, /needs: \[prepare, app-server\]/);
   assert.match(artifactBuild, /node scripts\/smoke-release-vsix\.mjs/);
-  assert.match(artifactBuild, /node scripts\/set-release-artifact-version\.mjs "\$version"/);
+  assert.match(artifactBuild, /node scripts\/set-release-artifact-version\.mjs "\$\{\{ needs\.prepare\.outputs\.version \}\}"/);
+  assert.match(artifactBuild, /target_triple: x86_64-pc-windows-msvc/);
+  assert.match(artifactBuild, /target_triple: aarch64-apple-darwin/);
+  assert.match(artifactBuild, /--bundles "\$\{\{ matrix\.bundle \}\}"/);
+  assert.match(artifactBuild, /tauri\.release-bundle\.conf\.json/);
+  assert.match(artifactBuild, /openaide-app-server-\$\{\{ matrix\.target_triple \}\}/);
+  assert.match(release, /openaide-desktop-win32-x64-\$RELEASE_VERSION-unsigned\.exe/);
+  assert.match(release, /openaide-desktop-darwin-arm64-\$RELEASE_VERSION-unsigned\.dmg/);
   assert.doesNotMatch(artifactBuild, /extension_version=|--cwd/);
   assert.match(extensionPackage.scripts.build, /esbuild/);
   assert.match(extensionPackage.scripts.build, /--external:vscode/);
@@ -179,11 +195,12 @@ test("release publishing produces every supported platform VSIX package", () => 
   assert.doesNotMatch(release, /openaide-web-assets|docker\/build-push-action|openaide-app-server-linux/);
 });
 
-test("manual VSIX builds upload every platform without publishing a release", () => {
+test("manual artifact builds can select VSIX, desktop, or all without publishing", () => {
   const workflow = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /workflow_call:/);
+  assert.match(workflow, /options: \[all, vsix, desktop\]/);
   assert.match(workflow, /target: linux-x64/);
   assert.match(workflow, /target: win32-x64/);
   assert.match(workflow, /target: darwin-arm64/);
@@ -192,7 +209,8 @@ test("manual VSIX builds upload every platform without publishing a release", ()
   assert.match(workflow, /short_sha="\$\{GITHUB_SHA:0:7\}"/);
   assert.match(workflow, /version="\$\{base_version\}\.g\$\{short_sha\}"/);
   assert.match(workflow, /version="\$\{base_version\}-g\$\{short_sha\}"/);
-  assert.match(workflow, /name: \$\{\{ steps\.version\.outputs\.artifact_name \}\}/);
+  assert.match(workflow, /name: vsix-\$\{\{ matrix\.target \}\}/);
+  assert.match(workflow, /name: desktop-\$\{\{ matrix\.target \}\}/);
   assert.doesNotMatch(workflow, /vsce publish/);
   assert.doesNotMatch(workflow, /action-gh-release|contents: write|push:\s*\n\s*tags:/);
 });

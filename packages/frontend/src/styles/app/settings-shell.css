@@ -23,46 +23,66 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   align-content: start;
-  gap: 14px;
+  gap: 10px;
   overflow-y: auto;
   padding: 14px 10px;
 }
 
+.app-sidebar-frame-with-overlay-header .settings-sidebar {
+  padding-top: 36px;
+}
+
 .settings-sidebar-heading {
   display: grid;
-  gap: 10px;
 }
 
 .settings-back-to-app {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.settings-back-to-app:hover {
+  background: var(--oa-raised);
+}
+
+.settings-mobile-back-to-app {
   width: max-content;
   min-height: 28px;
   border: 0;
   border-radius: var(--oa-radius-sm);
   background: transparent;
-  color: var(--oa-muted);
+  color: var(--oa-text);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
 }
 
-.settings-back-to-app:hover {
-  background: var(--oa-raised);
-  color: var(--oa-text);
-}
+.settings-mobile-back-to-app:hover { background: var(--oa-raised); }
 
 .settings-header {
+  min-height: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 0 6px;
+  gap: 4px;
+  padding: 0 4px;
 }
 
 .settings-header > span {
+  flex: 1 1 auto;
   min-width: 0;
-  display: grid;
-  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .settings-title-button {
@@ -75,18 +95,8 @@
   text-align: left;
 }
 
-.settings-header small {
-  color: var(--oa-muted);
-  font-size: 11px;
-}
-
-.settings-header-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-}
-
-.settings-header-actions button {
+.settings-refresh-button {
+  flex: 0 0 auto;
   width: 28px;
   height: 28px;
   border: 0;
@@ -98,12 +108,12 @@
   padding: 0;
 }
 
-.settings-header-actions button:hover {
+.settings-refresh-button:hover {
   background: var(--oa-raised);
   color: var(--oa-text);
 }
 
-.settings-header-actions button:disabled {
+.settings-refresh-button:disabled {
   opacity: 0.55;
 }
 
@@ -261,6 +271,12 @@
   font-size: 22px;
   font-weight: 650;
   letter-spacing: -0.02em;
+}
+
+.settings-page-heading p {
+  margin: 6px 0 0;
+  color: var(--oa-muted);
+  font-size: 14px;
 }
 
 .settings-content:has(.agent-focused-view) > .settings-page-heading,

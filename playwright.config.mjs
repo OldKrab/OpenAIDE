@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/smoke",
-  testMatch: "task-chat.spec.mjs",
+  testMatch: ["task-chat.spec.mjs", "desktop-new-task.spec.mjs"],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

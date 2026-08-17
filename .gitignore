@@ -3,6 +3,7 @@ dist/
 target/
 *.vsix
 apps/vscode-extension/LICENSE
+apps/desktop-validation/src-tauri/binaries/
 .vscode-test/
 .DS_Store
 .agents/**/.cache/

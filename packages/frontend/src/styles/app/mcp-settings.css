@@ -6,7 +6,7 @@
 
 .mcp-action {
   min-height: 30px;
-  border: 1px solid transparent;
+  border: 1px solid var(--oa-border);
   border-radius: 7px;
   background: var(--oa-raised);
   color: var(--oa-text);
@@ -22,12 +22,9 @@
 }
 
 .mcp-action.primary {
+  border-color: var(--oa-focus);
   background: var(--oa-focus);
   color: white;
-}
-
-.mcp-action.primary:hover {
-  background: color-mix(in oklch, var(--oa-focus) 88%, var(--oa-text));
 }
 
 .mcp-action.danger {
@@ -36,11 +33,48 @@
   color: color-mix(in oklch, var(--oa-danger) 78%, var(--oa-text));
 }
 
-.mcp-action.danger:hover {
-  background: color-mix(in oklch, var(--oa-danger) 18%, transparent);
+.mcp-action.danger.quiet {
+  background: transparent;
 }
 
-.mcp-action.danger.quiet {
+.mcp-library-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  align-items: start;
+  gap: 32px;
+  margin-bottom: 28px;
+}
+
+.mcp-library-intro p {
+  max-width: 610px;
+  margin: 2px 0 0;
+  color: var(--oa-muted);
+  line-height: 1.5;
+}
+
+.mcp-library-heading {
+  min-height: 34px;
+  border-bottom: 1px solid var(--oa-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mcp-library-heading .mcp-action.primary,
+.mcp-editor-section-heading .mcp-action {
+  border-color: transparent;
+  background: transparent;
+  color: var(--oa-focus);
+}
+
+.mcp-library-heading .mcp-action.primary:hover,
+.mcp-editor-section-heading .mcp-action:hover {
+  background: var(--oa-hover);
+}
+
+.mcp-settings-page > .settings-empty {
+  border-width: 0 0 1px;
+  border-radius: 0;
   background: transparent;
 }
 
@@ -49,82 +83,59 @@
   gap: 22px;
 }
 
+.mcp-settings-group {
+  margin-top: 22px;
+}
+
 .mcp-settings-group-heading {
-  width: 100%;
-  min-height: 36px;
-  border: 0;
-  background: transparent;
-  color: var(--oa-text);
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto 18px;
+  min-height: 28px;
+  color: var(--oa-muted);
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 3px 4px;
-  text-align: left;
+  gap: 7px;
+  padding: 0 2px;
 }
 
-.mcp-settings-group-heading > span {
-  min-width: 18px;
-  border-radius: 999px;
-  background: var(--oa-raised);
-  color: var(--oa-muted);
-  padding: 1px 5px;
-  font-size: 10px;
-  text-align: center;
-}
-
-.mcp-settings-group-heading > svg:last-child {
-  color: var(--oa-muted);
-  transform: rotate(-90deg);
-}
-
-.mcp-settings-group-heading > svg:last-child.expanded {
-  transform: none;
+.mcp-settings-group-heading strong {
+  color: var(--oa-text);
 }
 
 .mcp-settings-list {
-  overflow: hidden;
-  border: 1px solid color-mix(in oklch, var(--oa-border) 80%, var(--oa-selected));
-  border-radius: 10px;
-  background: color-mix(in oklch, var(--oa-bg) 90%, var(--oa-panel));
-  box-shadow: 0 1px 2px color-mix(in oklch, var(--oa-text) 3%, transparent);
+  border-top: 1px solid var(--oa-border);
 }
 
 .mcp-settings-row {
   min-width: 0;
-  min-height: 58px;
-  border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 58%, transparent);
+  min-height: 70px;
+  border-bottom: 1px solid var(--oa-border);
   display: flex;
   align-items: center;
-  padding-right: 12px;
-}
-
-.mcp-settings-row:last-child {
-  border-bottom: 0;
+  padding-right: 9px;
 }
 
 .mcp-settings-row-main {
   min-width: 0;
-  min-height: 57px;
+  min-height: 69px;
   flex: 1;
   border: 0;
   background: transparent;
   color: var(--oa-text);
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 76px 76px 14px;
+  grid-template-columns: 40px minmax(0, 1fr) auto 16px;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px 7px 14px;
+  gap: 12px;
+  padding: 8px 7px 8px 2px;
   text-align: left;
 }
 
 .mcp-settings-row-main:hover {
-  background: color-mix(in oklch, var(--oa-selected) 30%, transparent);
+  background: color-mix(in oklch, var(--oa-selected) 25%, transparent);
 }
 
 .mcp-settings-row-copy {
   min-width: 0;
   display: grid;
+  gap: 2px;
 }
 
 .mcp-settings-row-copy strong,
@@ -139,8 +150,20 @@
   color: var(--oa-muted);
 }
 
-.mcp-settings-transport {
-  text-align: right;
+.mcp-settings-transport,
+.mcp-status {
+  font-size: 12px;
+}
+
+.mcp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.mcp-status.invalid {
+  color: color-mix(in oklch, var(--oa-danger) 80%, var(--oa-text));
 }
 
 .mcp-transport-icon {
@@ -157,29 +180,6 @@
   width: 46px;
   height: 46px;
   border-radius: 11px;
-}
-
-.mcp-status {
-  width: fit-content;
-  justify-self: end;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.mcp-status.invalid {
-  background: color-mix(in oklch, var(--oa-danger) 10%, transparent);
-  color: color-mix(in oklch, var(--oa-danger) 74%, var(--oa-text));
-}
-
-.mcp-status.disabled {
-  background: var(--oa-raised);
-  color: var(--oa-muted);
 }
 
 .mcp-switch {
@@ -215,9 +215,9 @@
 }
 
 .mcp-editor {
-  width: min(760px, 100%);
+  width: min(820px, 100%);
   margin-inline: auto;
-  padding-bottom: 24px;
+  padding-bottom: 30px;
 }
 
 .mcp-back {
@@ -229,7 +229,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin: 0 0 22px -6px;
+  margin: 0 0 24px -6px;
   padding: 4px 7px;
 }
 
@@ -239,162 +239,187 @@
 }
 
 .mcp-editor-header {
+  min-height: 58px;
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: 46px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
+}
+
+.mcp-editor-identity {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mcp-editor-header h2,
+.mcp-editor-header p {
+  margin: 0;
 }
 
 .mcp-editor-header h2 {
-  margin: 0;
-  font-size: 18px;
+  font-size: 20px;
 }
 
-.mcp-editor-header p {
-  margin: 2px 0 0;
+.mcp-editor-header p,
+.mcp-editor-header small {
   color: var(--oa-muted);
 }
 
+.mcp-editor-identity > small {
+  color: var(--oa-success);
+}
+
+.mcp-editor-availability {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
 .mcp-editor-section {
-  margin-top: 22px;
+  margin-top: 24px;
 }
 
 .mcp-editor-section > h3,
 .mcp-editor-section-heading h3 {
-  margin: 0 0 8px 3px;
-  font-size: 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.mcp-editor-section > h3 {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
 }
 
 .mcp-editor-section-heading {
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
 }
 
-.mcp-editor-panel {
-  border: 1px solid color-mix(in oklch, var(--oa-border) 82%, var(--oa-selected));
+.mcp-editor-panel,
+.mcp-fields {
+  overflow: hidden;
+  border: 1px solid var(--oa-border);
   border-radius: 10px;
-  background: color-mix(in oklch, var(--oa-bg) 94%, var(--oa-panel));
+  background: color-mix(in oklch, var(--oa-panel) 35%, transparent);
+}
+
+.mcp-editor-row,
+.mcp-config-summary {
+  min-height: 58px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 12px;
-  padding: 16px;
+  grid-template-columns: 32px minmax(120px, .6fr) minmax(0, 1.4fr);
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--oa-border);
+  padding: 7px 13px;
 }
 
-.mcp-form-field {
-  min-width: 0;
-  display: grid;
-  align-content: start;
-  gap: 6px;
+.mcp-editor-row:last-child,
+.mcp-config-summary:last-child {
+  border-bottom: 0;
 }
 
-.mcp-form-field.wide {
-  grid-column: 1 / -1;
-}
-
-.mcp-form-field > span {
+.mcp-editor-row-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: var(--oa-raised);
   color: var(--oa-muted);
-  padding-inline: 2px;
-  font-size: 11px;
-  font-weight: 600;
+  display: grid;
+  place-items: center;
 }
 
-.mcp-form-field input,
-.mcp-field-row > input {
+.mcp-editor-row-action {
   min-width: 0;
-  height: 36px;
-  border: 1px solid var(--oa-border-strong);
-  border-radius: 8px;
-  outline: 0;
-  background: color-mix(in oklch, var(--oa-bg) 96%, var(--oa-panel));
+}
+
+.mcp-editor-row-action > input,
+.mcp-popup > button,
+.mcp-field-row > input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--oa-border);
+  border-radius: 7px;
+  background: var(--oa-bg);
   color: var(--oa-text);
-  box-shadow: 0 1px 2px color-mix(in oklch, var(--oa-text) 3%, transparent);
-  padding: 6px 10px;
+  padding: 6px 9px;
 }
 
-.mcp-form-field input:hover,
-.mcp-field-row > input:hover,
-.mcp-popup > button:hover {
-  border-color: color-mix(in oklch, var(--oa-focus) 38%, var(--oa-border));
-}
-
-.mcp-form-field input:focus-visible,
-.mcp-field-row > input:focus-visible,
-.mcp-popup > button:focus-visible {
+.mcp-editor-row-action > input:focus-visible,
+.mcp-popup > button:focus-visible,
+.mcp-field-row > input:focus-visible {
   border-color: var(--oa-focus);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--oa-focus) 14%, transparent);
+  outline: 1px solid var(--oa-focus);
 }
 
 .mcp-popup {
   position: relative;
-  min-width: 0;
 }
 
 .mcp-popup > button {
-  width: 100%;
-  height: 36px;
-  border: 1px solid var(--oa-border-strong);
-  border-radius: 8px;
-  outline: 0;
-  background: color-mix(in oklch, var(--oa-bg) 96%, var(--oa-panel));
-  color: var(--oa-text);
-  box-shadow: 0 1px 2px color-mix(in oklch, var(--oa-text) 3%, transparent);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 9px 6px 10px;
   text-align: left;
 }
 
 .mcp-popup-menu {
   position: absolute;
-  z-index: 8;
-  inset: calc(100% + 5px) 0 auto;
-  border: 1px solid color-mix(in oklch, var(--oa-border) 82%, var(--oa-focus));
-  border-radius: 9px;
-  background: color-mix(in oklch, var(--oa-bg) 97%, var(--oa-panel));
-  box-shadow: 0 12px 28px color-mix(in oklch, var(--oa-text) 13%, transparent);
-  display: grid;
-  gap: 2px;
-  padding: 4px;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  overflow: hidden;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: 8px;
+  background: var(--oa-panel);
+  box-shadow: 0 8px 28px color-mix(in oklch, black 24%, transparent);
 }
 
 .mcp-popup-menu button {
+  width: 100%;
   min-height: 32px;
   border: 0;
-  border-radius: 6px;
   background: transparent;
   color: var(--oa-text);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 5px 8px;
+  padding: 6px 9px;
   text-align: left;
 }
 
 .mcp-popup-menu button:hover {
-  background: color-mix(in oklch, var(--oa-selected) 58%, transparent);
+  background: var(--oa-hover);
 }
 
-.mcp-fields {
-  overflow: hidden;
-  border: 1px solid color-mix(in oklch, var(--oa-border) 82%, var(--oa-selected));
-  border-radius: 10px;
-  background: color-mix(in oklch, var(--oa-bg) 94%, var(--oa-panel));
+.mcp-config-summary {
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+
+.mcp-config-summary > span:last-child {
+  display: grid;
+}
+
+.mcp-config-summary small,
+.mcp-secret-check,
+.mcp-fields-empty {
+  color: var(--oa-muted);
 }
 
 .mcp-field-row {
-  min-width: 0;
+  min-height: 58px;
   display: grid;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(160px, 1.2fr) auto 28px;
+  grid-template-columns: minmax(100px, .8fr) minmax(140px, 1.2fr) auto 30px;
   align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 58%, transparent);
-  padding: 10px;
+  gap: 9px;
+  border-bottom: 1px solid var(--oa-border);
+  padding: 8px 11px;
 }
 
 .mcp-field-row:last-child {
@@ -402,58 +427,25 @@
 }
 
 .mcp-secret-check {
-  color: var(--oa-muted);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  white-space: nowrap;
 }
 
 .mcp-icon-action {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--oa-muted);
   display: grid;
   place-items: center;
-  padding: 0;
 }
 
 .mcp-icon-action:hover {
-  background: var(--oa-raised);
+  background: var(--oa-hover);
   color: var(--oa-text);
-}
-
-.mcp-fields-empty {
-  min-height: 64px;
-  border: 1px dashed var(--oa-border-strong);
-  border-radius: 10px;
-  color: var(--oa-muted);
-  display: grid;
-  place-items: center;
-  margin: 0;
-}
-
-.mcp-availability {
-  min-height: 58px;
-  border: 1px solid color-mix(in oklch, var(--oa-border) 82%, var(--oa-selected));
-  border-radius: 10px;
-  background: color-mix(in oklch, var(--oa-bg) 94%, var(--oa-panel));
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 12px;
-}
-
-.mcp-availability > span {
-  display: grid;
-}
-
-.mcp-availability small {
-  color: var(--oa-muted);
 }
 
 .mcp-editor-actions {
@@ -461,52 +453,72 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 22px;
+  margin-top: 28px;
 }
 
-.mcp-editor-actions > span {
+.mcp-editor-actions > span,
+.mcp-delete-confirm {
   display: flex;
   align-items: center;
-  gap: 7px;
-}
-
-.mcp-delete-confirm {
-  color: var(--oa-muted);
+  gap: 8px;
 }
 
 @media (max-width: 760px) {
-  .mcp-settings-row {
-    padding-right: 9px;
+  .mcp-library-intro {
+    grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .mcp-settings-row-main {
-    grid-template-columns: 30px minmax(0, 1fr) 70px 14px;
-    padding-left: 10px;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
   }
 
-  .mcp-settings-transport {
+  .mcp-settings-row-main > svg:last-child,
+  .mcp-settings-transport,
+  .mcp-status {
     display: none;
   }
 
-  .mcp-editor-panel {
-    grid-template-columns: minmax(0, 1fr);
+  .mcp-editor-header {
+    grid-template-columns: 46px minmax(0, 1fr);
   }
 
-  .mcp-form-field.wide {
-    grid-column: auto;
+  .mcp-editor-availability {
+    grid-column: 1 / -1;
+    justify-self: end;
+    margin-top: -36px;
+  }
+
+  .mcp-editor-row {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .mcp-editor-row-action {
+    grid-column: 2;
+    width: 100%;
   }
 
   .mcp-field-row {
-    grid-template-columns: minmax(0, 1fr) 28px;
+    grid-template-columns: minmax(0, 1fr) 30px;
   }
 
-  .mcp-field-row > input {
-    grid-column: 1 / -1;
+  .mcp-field-row > input,
+  .mcp-secret-check {
+    grid-column: 1;
+  }
+
+  .mcp-icon-action {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .mcp-editor-actions,
   .mcp-delete-confirm {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .mcp-editor-actions > span {
+    justify-content: flex-end;
   }
 }

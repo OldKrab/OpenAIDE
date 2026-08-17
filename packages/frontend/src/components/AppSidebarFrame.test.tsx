@@ -28,6 +28,7 @@ describe("AppSidebarFrame", () => {
       clientX: 248,
       currentTarget: { setPointerCapture: vi.fn() },
       pointerId: 4,
+      preventDefault: vi.fn(),
     }));
     act(() => separator.props.onPointerMove({ clientX: 356, pointerId: 4 }));
     act(() => separator.props.onPointerUp({
@@ -46,6 +47,31 @@ describe("AppSidebarFrame", () => {
       "openaide.app.sidebar",
       JSON.stringify({ collapsed: false, width: 356 }),
     );
+  });
+
+  it("prevents browser text selection when pointer resizing begins", () => {
+    vi.stubGlobal("window", {
+      localStorage: { getItem: vi.fn(() => null), setItem: vi.fn() },
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AppSidebarFrame sidebar={<nav>Selectable sidebar text</nav>}>
+          <article>Selectable page text</article>
+        </AppSidebarFrame>,
+      );
+    });
+    const preventDefault = vi.fn();
+
+    act(() => tree.root.findByProps({ role: "separator" }).props.onPointerDown({
+      button: 0,
+      clientX: 248,
+      currentTarget: { setPointerCapture: vi.fn() },
+      pointerId: 5,
+      preventDefault,
+    }));
+
+    expect(preventDefault).toHaveBeenCalledOnce();
   });
 
   it("collapses at the left edge and restores the previous width", () => {
@@ -68,6 +94,7 @@ describe("AppSidebarFrame", () => {
       clientX: 248,
       currentTarget: { setPointerCapture: vi.fn() },
       pointerId: 7,
+      preventDefault: vi.fn(),
     }));
     act(() => separator.props.onPointerMove({ clientX: 0, pointerId: 7 }));
     act(() => separator.props.onPointerUp({
@@ -111,6 +138,31 @@ describe("AppSidebarFrame", () => {
 
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(tree.root.findByProps({ className: "app-sidebar-frame sidebar-collapsed" })).toBeTruthy();
+    expect(tree.root.findByProps({ "aria-label": "Show sidebar" })).toBeTruthy();
+  });
+
+  it("keeps shell-owned window controls available when the sidebar collapses", () => {
+    vi.stubGlobal("window", {
+      localStorage: { getItem: vi.fn(() => null), setItem: vi.fn() },
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AppSidebarFrame
+          header={<header aria-label="Desktop window controls">Window controls</header>}
+          sidebar={<nav>Tasks</nav>}
+        >
+          <article>Task</article>
+        </AppSidebarFrame>,
+      );
+    });
+
+    act(() => tree.root.findByProps({ role: "separator" }).props.onKeyDown({
+      key: "Enter",
+      preventDefault: vi.fn(),
+    }));
+
+    expect(tree.root.findByProps({ "aria-label": "Desktop window controls" })).toBeTruthy();
     expect(tree.root.findByProps({ "aria-label": "Show sidebar" })).toBeTruthy();
   });
 });

@@ -1,5 +1,6 @@
 use std::env;
-use std::path::Path;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 
 use agent_client_protocol::AcpAgent;
 
@@ -35,7 +36,7 @@ impl AcpAgentConfig {
     pub(crate) fn codex_npx_fallback() -> Self {
         Self {
             agent_id: "codex".to_string(),
-            command: "npx".to_string(),
+            command: resolved_command_or_name("npx"),
             args: vec!["-y".to_string(), "@openaide/codex-acp@1.0.0".to_string()],
             env: Vec::new(),
             secret_env: Vec::new(),
@@ -43,10 +44,10 @@ impl AcpAgentConfig {
     }
 
     pub fn opencode() -> Self {
-        if command_in_path("opencode") {
+        if let Some(command) = resolve_command_in_path("opencode") {
             Self {
                 agent_id: "opencode".to_string(),
-                command: "opencode".to_string(),
+                command: command.to_string_lossy().into_owned(),
                 args: vec!["acp".to_string()],
                 env: Vec::new(),
                 secret_env: Vec::new(),
@@ -54,7 +55,7 @@ impl AcpAgentConfig {
         } else {
             Self {
                 agent_id: "opencode".to_string(),
-                command: "npx".to_string(),
+                command: resolved_command_or_name("npx"),
                 args: vec![
                     "-y".to_string(),
                     "opencode-ai".to_string(),
@@ -75,12 +76,7 @@ impl AcpAgentConfig {
         self.ensure_command_available()?;
         let mut env = self.env.clone();
         env.extend(self.secret_env_values(host_bridge, secret_resolver)?);
-        let args = env
-            .iter()
-            .map(|(name, value)| format!("{name}={value}"))
-            .chain(std::iter::once(self.command.clone()))
-            .chain(self.args.clone())
-            .collect::<Vec<_>>();
+        let args = process_args(&self.command, &self.args, &env, cfg!(windows));
         let agent = AcpAgent::from_args(args).map_err(super::acp_errors::acp_error)?;
         Ok(match trace {
             Some(trace) => agent.with_debug(move |line, direction| {
@@ -157,10 +153,114 @@ fn legacy_host_secret_env(
 }
 
 fn command_in_path(command: &str) -> bool {
-    let Some(paths) = env::var_os("PATH") else {
-        return false;
+    resolve_command_in_path(command).is_some()
+}
+
+fn resolved_command_or_name(command: &str) -> String {
+    // Unix can execute the command name through PATH. Windows needs the
+    // resolved launcher suffix (usually `.cmd`) so CreateProcess can delegate
+    // it through `cmd.exe` reliably.
+    if !cfg!(windows) {
+        return command.to_string();
+    }
+    resolve_command_in_path(command)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| command.to_string())
+}
+
+fn process_args(
+    command: &str,
+    args: &[String],
+    env: &[(String, String)],
+    windows: bool,
+) -> Vec<String> {
+    let mut process_args = env
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>();
+    if windows && is_windows_batch_file(command) {
+        // CreateProcess cannot execute batch files directly. Disable AutoRun
+        // hooks and delegate only the npm launcher invocation to cmd.exe.
+        process_args.extend(["cmd.exe".to_string(), "/D".to_string(), "/C".to_string()]);
+    }
+    process_args.push(command.to_string());
+    process_args.extend(args.iter().cloned());
+    process_args
+}
+
+fn is_windows_batch_file(command: &str) -> bool {
+    Path::new(command)
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+        })
+}
+
+fn resolve_command_in_path(command: &str) -> Option<PathBuf> {
+    let paths = env::var_os("PATH")?;
+    resolve_command_in_paths(command, env::split_paths(&paths), command_extensions())
+}
+
+fn resolve_command_in_paths<P, E>(
+    command: &str,
+    paths: impl IntoIterator<Item = P>,
+    extensions: impl IntoIterator<Item = E>,
+) -> Option<PathBuf>
+where
+    P: AsRef<Path>,
+    E: AsRef<OsStr>,
+{
+    let extensions = if Path::new(command).extension().is_some() {
+        vec![OsString::new()]
+    } else {
+        extensions
+            .into_iter()
+            .map(|extension| extension.as_ref().to_os_string())
+            .collect::<Vec<_>>()
     };
-    env::split_paths(&paths).any(|path| path.join(command).is_file())
+    paths.into_iter().find_map(|path| {
+        extensions.iter().find_map(|extension| {
+            let mut executable = OsString::from(command);
+            executable.push(extension);
+            let candidate = path.as_ref().join(executable);
+            candidate.is_file().then_some(candidate)
+        })
+    })
+}
+
+#[cfg(windows)]
+fn command_extensions() -> Vec<OsString> {
+    // Windows cannot execute the extensionless POSIX shims installed alongside
+    // npm's native launchers. Prefer formats that CreateProcess or cmd.exe can run.
+    windows_command_extensions(env::var_os("PATHEXT").as_deref())
+}
+
+#[cfg(not(windows))]
+fn command_extensions() -> Vec<OsString> {
+    vec![OsString::new()]
+}
+
+#[cfg(any(windows, test))]
+fn windows_command_extensions(pathext: Option<&OsStr>) -> Vec<OsString> {
+    const DEFAULT: [&str; 4] = [".COM", ".EXE", ".BAT", ".CMD"];
+    let supported = |extension: &str| {
+        DEFAULT
+            .iter()
+            .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    };
+    let mut extensions = pathext
+        .and_then(OsStr::to_str)
+        .into_iter()
+        .flat_map(|value| value.split(';'))
+        .map(str::trim)
+        .filter(|extension| supported(extension))
+        .map(OsString::from)
+        .collect::<Vec<_>>();
+    if extensions.is_empty() {
+        extensions.extend(DEFAULT.into_iter().map(OsString::from));
+    }
+    extensions
 }
 
 fn command_has_path_separator(command: &str) -> bool {

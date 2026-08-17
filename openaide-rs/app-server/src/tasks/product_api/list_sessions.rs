@@ -3,6 +3,7 @@ use openaide_app_server_protocol::agent::{
 };
 use openaide_app_server_protocol::errors::ProtocolError;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
 use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
@@ -57,6 +58,11 @@ impl TaskProductApi {
 
         let api = self.clone();
         std::thread::spawn(move || loop {
+            let started_at = Instant::now();
+            crate::logging::info(
+                "native_session_catalog_refresh_started",
+                serde_json::json!({ "operation": "agent/list_sessions" }),
+            );
             let refresh = api.refresh_native_session_catalogs();
             let mut state = api
                 .native_catalog_refresh
@@ -69,11 +75,24 @@ impl TaskProductApi {
             }
             state.running = false;
             let refresh = match refresh {
-                Ok(()) => openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle,
+                Ok(()) => {
+                    crate::logging::info(
+                        "native_session_catalog_refresh_completed",
+                        serde_json::json!({
+                            "operation": "agent/list_sessions",
+                            "duration_ms": started_at.elapsed().as_millis(),
+                        }),
+                    );
+                    openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle
+                }
                 Err(error) => {
                     crate::logging::warn(
                         "native_session_catalog_refresh_failed",
-                        serde_json::json!({ "error": error.message }),
+                        serde_json::json!({
+                            "operation": "agent/list_sessions",
+                            "duration_ms": started_at.elapsed().as_millis(),
+                            "error": error.message,
+                        }),
                     );
                     openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed {
                         message: error.message,

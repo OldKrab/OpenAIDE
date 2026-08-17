@@ -653,7 +653,7 @@ test("retains an unsent prepared New Task across ordinary navigation", async ({ 
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
-  await page.getByRole("button", { name: "Back to app" }).click();
+  await page.getByRole("button", { name: "Close settings" }).click();
 
   await expect(page.getByLabel("New task")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("keep this draft");

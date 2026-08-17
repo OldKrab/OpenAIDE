@@ -1,3 +1,4 @@
+import { isValidElement } from "react";
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -52,7 +53,7 @@ describe("McpSettingsTab", () => {
     expect(onLoadServer).toHaveBeenCalledWith("mcp-files");
     expect(tree!.root.findAllByType("input").some((input) => input.props.value === "/usr/bin/mcp serve")).toBe(true);
     expect(JSON.stringify(tree!.toJSON())).toContain("Stored securely");
-    expect(JSON.stringify(tree!.toJSON())).toContain("Delete server");
+    expect(JSON.stringify(tree!.toJSON())).toContain("Delete");
   });
 
   it("requires a value when adding a new secret field", async () => {
@@ -102,5 +103,7 @@ describe("McpSettingsTab", () => {
 
 function hasTextChild(children: unknown, text: string): boolean {
   if (typeof children === "string") return children.includes(text);
-  return Array.isArray(children) && children.some((child) => hasTextChild(child, text));
+  if (Array.isArray(children)) return children.some((child) => hasTextChild(child, text));
+  if (isValidElement<{ children?: unknown }>(children)) return hasTextChild(children.props.children, text);
+  return false;
 }

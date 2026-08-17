@@ -42,7 +42,7 @@ export function primaryTaskSurfaceModel(controller: AppController) {
     : undefined;
   const taskLoadingError = openingNativeSession ? nativeRouteError : routedTaskOpenError?.message;
   const taskLoadingErrorKind = openingNativeSession
-    ? nativeRouteError ? "failed" as const : undefined
+    ? nativeRouteError ? adoptionError?.kind ?? "failed" as const : undefined
     : routedTaskOpenError?.kind;
   return {
     openingNativeSession,
@@ -167,7 +167,7 @@ export function AppPrimaryTaskSurface({
         submitShortcut={preferences.composer_submit_shortcut}
         taskInput={primaryTask.taskInput ?? { prompt: "", context: [] }}
         toolDetails={primaryTask.toolDetails}
-        showWorkspaceContext={usesProjectNavigation}
+        showWorkspaceContext={usesProjectNavigation && bootstrap.shell.kind !== "desktop"}
       />
     );
   }

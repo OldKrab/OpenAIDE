@@ -24,6 +24,7 @@ type SidebarProps = {
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
   forkableAgentIds?: ReadonlySet<string>;
+  environmentLabel?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
   onForkNativeSession?: (session: AgentListedSession) => void;
   onForkTask?: (taskId: string) => void;
@@ -76,6 +77,7 @@ export const Sidebar = memo(function Sidebar({
   nativeSessionAgentName,
   nativeSessionProjectId,
   forkableAgentIds = new Set(),
+  environmentLabel,
   onArchiveNativeSession,
   onForkNativeSession,
   onForkTask,
@@ -287,6 +289,7 @@ export const Sidebar = memo(function Sidebar({
                 }
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
                 forkableAgentIds={forkableAgentIds}
+                environmentLabel={environmentLabel}
                 onArchiveNativeSession={onArchiveNativeSession}
                 onArchiveTask={onArchiveTask}
                 onForkNativeSession={onForkNativeSession}

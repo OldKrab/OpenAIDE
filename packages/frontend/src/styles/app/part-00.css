@@ -41,7 +41,9 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-body[data-shell="web"] {
+body[data-shell="web"][data-theme="light"],
+body[data-shell="desktop"][data-theme="light"] {
+  color-scheme: light;
   --oa-bg: oklch(98.3% 0.004 255);
   --oa-panel: oklch(95.8% 0.006 255);
   --oa-raised: oklch(92.8% 0.009 255);
@@ -56,6 +58,11 @@ body[data-shell="web"] {
   --oa-danger: oklch(58% 0.16 28);
   --oa-success: oklch(58% 0.12 148);
   background: var(--oa-bg);
+}
+
+body[data-shell="web"][data-theme="dark"],
+body[data-shell="desktop"][data-theme="dark"] {
+  color-scheme: dark;
 }
 
 button,
@@ -141,7 +148,7 @@ button {
 .sidebar {
   min-width: 0;
   min-height: 0;
-  height: 100vh;
+  height: 100%;
   border-right: 1px solid var(--oa-border-subtle);
   background: var(--oa-panel);
   display: grid;

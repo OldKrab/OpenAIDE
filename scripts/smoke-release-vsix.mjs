@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { assertNoPrereleaseChangelogEntries } from "./update-extension-changelog.mjs";
 
 const REQUIRED_EXTENSION_FILES = [
-  // VSCE normalizes the conventional changelog asset to lowercase in VSIX archives.
+  // VSCE normalizes standard documentation filenames, including the conventional
+  // changelog asset, to lowercase in VSIX archives.
   "changelog.md",
   "LICENSE.txt",
   "dist/extension.js",
