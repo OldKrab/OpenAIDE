@@ -24,6 +24,7 @@ export function datasetBootstrap(): WebviewBootstrap {
     settingsTab: settingsTab(),
     settingsAgentId: document.body.dataset.settingsAgentId || undefined,
     returnToNewTask: document.body.dataset.returnToNewTask === "true",
+    developerSettingsUnlocked: document.body.dataset.developerSettingsUnlocked === "true",
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };

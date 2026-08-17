@@ -58,6 +58,7 @@ const tabs: Array<{
 export function SettingsView({
   appearance = currentFrontendShell()?.appearance,
   desktopNotifications,
+  developerSettingsUnlocked: initialDeveloperSettingsUnlocked = false,
   frameHeader,
   frameHeaderPlacement,
   onAuthenticate,
@@ -90,6 +91,8 @@ export function SettingsView({
 }: {
   appearance?: FrontendShellAppearance;
   desktopNotifications?: DesktopNotificationSettings;
+  /** Shell-persisted unlock state for local diagnostic controls. */
+  developerSettingsUnlocked?: boolean;
   frameHeader?: ReactNode;
   frameHeaderPlacement?: "overlay" | "row";
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
@@ -130,7 +133,7 @@ export function SettingsView({
   const [navigationQuery, setNavigationQuery] = useState("");
   const [mobileIndexOpen, setMobileIndexOpen] = useState(isNarrowSettingsViewport);
   const [developerUnlockClicks, setDeveloperUnlockClicks] = useState(0);
-  const [developerSettingsUnlocked, setDeveloperSettingsUnlocked] = useState(false);
+  const [developerSettingsUnlocked, setDeveloperSettingsUnlocked] = useState(initialDeveloperSettingsUnlocked);
   const normalizedQuery = navigationQuery.trim().toLowerCase();
   const navigationTabs = visibleTabs.filter((tab) => (
     !normalizedQuery || `${tab.group} ${tab.label}`.toLowerCase().includes(normalizedQuery)
