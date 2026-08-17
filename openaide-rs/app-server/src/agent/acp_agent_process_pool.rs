@@ -44,6 +44,7 @@ struct AcpAgentProcessClient {
 }
 
 pub(super) struct AcpAgentProcessSession {
+    process: AcpAgentProcessClient,
     pub(super) terminal_error: Arc<Mutex<Option<String>>>,
     pub(super) terminal_owner: AcpTerminalOwner,
 }
@@ -68,6 +69,7 @@ impl AcpAgentProcessPool {
             match process.open_tx.send(open) {
                 Ok(()) => {
                     return Ok(AcpAgentProcessSession {
+                        process: process.clone(),
                         terminal_error: process.terminal_error.clone(),
                         terminal_owner: process.terminal_registry.owner(owner_id),
                     });
@@ -82,9 +84,14 @@ impl AcpAgentProcessPool {
         let owner_id = open.terminal_owner_id;
         let process = self.launch_process(agent_id, Some(open))?;
         Ok(AcpAgentProcessSession {
+            process: process.clone(),
             terminal_error: process.terminal_error.clone(),
             terminal_owner: process.terminal_registry.owner(owner_id),
         })
+    }
+
+    pub(super) fn stop_session_process(&self, agent_id: &str, session: &AcpAgentProcessSession) {
+        self.stop_process(agent_id, &session.process);
     }
 
     pub(super) fn list_sessions(

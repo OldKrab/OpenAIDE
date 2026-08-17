@@ -233,6 +233,11 @@ impl AcpActiveSessionManager {
                 startup_cancellation.cancel();
                 let _ = process_session.terminal_owner.close();
                 close_starting_session(&close_tx);
+                // A session request that never answers leaves the shared Agent
+                // process unusable for retries. Evict only the process that
+                // handled this request so a concurrent replacement survives.
+                self.processes
+                    .stop_session_process(&agent_id, &process_session);
                 Err(RuntimeError::NotReady(
                     "ACP session start timed out".to_string(),
                 ))
