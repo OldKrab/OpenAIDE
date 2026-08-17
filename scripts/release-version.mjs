@@ -22,10 +22,11 @@ export function validateNextReleaseVersion({ candidate, current, tags = [] }) {
 }
 
 /** Selects the changelog baseline without exposing prereleases in stable release notes. */
-export function selectPreviousReleaseTag({ candidate, tags = [] }) {
+export function selectPreviousReleaseTag({ candidate, tags = [], canonicalTags }) {
   validateProjectVersion(candidate, "Release version");
   const stableRelease = !semver.prerelease(candidate);
-  return tags
+  const baselineTags = canonicalTags ?? tags;
+  return baselineTags
     .filter((tag) => tag.startsWith("v"))
     .filter((tag) => RELEASE_PATTERN.test(tag.slice(1)))
     .filter((tag) => semver.lt(tag.slice(1), candidate))
@@ -76,10 +77,15 @@ function main() {
     return;
   }
   if (mode === "previous-tag" && value) {
-    console.log(selectPreviousReleaseTag({ candidate: value, tags }));
+    const canonicalTags = process.argv.slice(3);
+    console.log(selectPreviousReleaseTag({
+      candidate: value,
+      tags,
+      canonicalTags: canonicalTags.length ? canonicalTags : undefined,
+    }));
     return;
   }
-  throw new Error("Usage: node scripts/release-version.mjs <next VERSION|tag TAG|previous-tag VERSION>");
+  throw new Error("Usage: node scripts/release-version.mjs <next VERSION|tag TAG|previous-tag VERSION [CANONICAL_TAG...]>");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
