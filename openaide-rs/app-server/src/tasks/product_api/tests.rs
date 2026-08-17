@@ -2060,6 +2060,59 @@ fn acquiring_recovers_a_prepared_task_whose_native_session_is_missing() {
 }
 
 #[test]
+fn acquiring_a_stale_prepared_task_republishes_controls_after_replacing_its_missing_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
+    draft.lifecycle = test_new_task_lifecycle();
+    draft.agent_session_id = Some("missing-session".to_string());
+    draft.config_options_catalog = Some(config_catalog("gpt-5"));
+    draft.agent_commands_catalog = Some(command_catalog());
+    assert!(draft.clear_process_local_agent_state());
+    store.write_task(&draft).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        config_catalog: Some(config_catalog("gpt-5.5")),
+        commands_catalog: Some(command_catalog()),
+        resume_session_missing: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    })
+    .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    let stored = store.read_task("task-draft").unwrap();
+    let snapshot = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-draft", 100).unwrap(),
+    )
+    .unwrap();
+    assert!(stored.native_session_data_freshness.is_fresh());
+    assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Ready);
+    assert_eq!(
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
+}
+
+#[test]
 fn send_projects_agent_config_catalog_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

@@ -1,5 +1,6 @@
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ProjectId, TaskId};
+use openaide_app_server_protocol::snapshot::TaskStatus;
 use openaide_app_server_protocol::task::{TaskNavigationSection, TaskNavigationSection::*};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -43,10 +44,23 @@ impl RpcGateway {
             ),
         };
         let pending_requests = self.server_requests.pending_for_task(&task_id);
-        if !pending_requests.is_empty() {
+        let clears_transient_requests = matches!(
+            &update.kind,
+            TaskUpdateKind::Changed(change)
+                if change.changes.task.as_ref().is_some_and(|task| matches!(
+                    task.status,
+                    TaskStatus::Stopping
+                        | TaskStatus::Idle
+                        | TaskStatus::Interrupted
+                        | TaskStatus::Failed
+                        | TaskStatus::Completed
+                ))
+        );
+        if !pending_requests.is_empty() || clears_transient_requests {
             // Permission/question opening precedes the Task mutation that marks
-            // it waiting. Publish broker state through the same ordered Task
-            // stream so live clients do not depend on reverse-RPC delivery.
+            // it waiting, while Task termination closes requests before its durable
+            // status update is published. Project both edges through the same ordered
+            // Task stream so live clients cannot retain stale request controls.
             events.extend(self.publish_task_payload(
                 &task_id,
                 AppServerEventPayload::TaskRequestsUpdated {

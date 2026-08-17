@@ -1738,6 +1738,59 @@ fn opening_task_permission_publishes_pending_request_in_task_state_stream() {
 }
 
 #[test]
+fn stopping_task_publishes_empty_request_set_after_pending_question_is_interrupted() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-1"),
+                },
+            },
+        ),
+        AppServerTime(2),
+    );
+    gateway.server_requests.open(
+        task_question_request("task-1"),
+        Vec::new(),
+        AppServerTime(3),
+    );
+    let opened = gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            1,
+            Vec::new(),
+            Vec::new(),
+            TestNavigationChange::None,
+        ),
+        AppServerTime(4),
+    );
+    assert!(opened.iter().any(|delivery| matches!(
+        &delivery.event.payload,
+        AppServerEventPayload::TaskRequestsUpdated { requests, .. }
+            if requests.iter().any(|request| request.request_id.as_str() == "server-request-1")
+    )));
+    gateway
+        .server_requests
+        .interrupt_task_requests(&TaskId::from("task-1"), AppServerTime(5));
+
+    let update = committed_task_status_update(
+        "task-1",
+        2,
+        openaide_app_server_protocol::snapshot::TaskStatus::Stopping,
+    );
+    let deliveries = gateway.publish_task_update(&update, AppServerTime(6));
+
+    assert!(deliveries.iter().any(|delivery| matches!(
+        delivery.event.payload,
+        AppServerEventPayload::TaskRequestsUpdated { ref requests, .. } if requests.is_empty()
+    )));
+}
+
+#[test]
 fn current_task_subscriber_can_answer_before_server_request_delivery_drains() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.handle_inbound(
@@ -4223,6 +4276,43 @@ fn committed_task_update(
     }
 }
 
+fn committed_task_status_update(
+    task_id: &str,
+    revision: u64,
+    status: openaide_app_server_protocol::snapshot::TaskStatus,
+) -> TaskUpdate {
+    use openaide_app_server_protocol::events::TaskChanges;
+    use openaide_app_server_protocol::snapshot::{TaskLifecycle, TaskSummary};
+
+    TaskUpdate {
+        task_id: task_id.to_string(),
+        revision,
+        kind: TaskUpdateKind::Changed(Box::new(CommittedTaskChange {
+            changes: TaskChanges {
+                task: Some(TaskSummary {
+                    task_id: task_id.into(),
+                    project_id: "project-1".into(),
+                    agent_id: "codex".into(),
+                    lifecycle: TaskLifecycle::Open,
+                    title: None,
+                    status,
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    last_activity: "2026-01-01T00:00:00Z".to_string(),
+                    unread: false,
+                    pinned: false,
+                    attention: None,
+                    has_messages: true,
+                    worktree_id: None,
+                    workspace_available: true,
+                }),
+                ..TaskChanges::default()
+            },
+            tool_details: Vec::new(),
+            navigation: None,
+        })),
+    }
+}
+
 enum TestNavigationChange {
     None,
     Upsert,
@@ -4236,6 +4326,17 @@ fn task_server_request(task_id: &str) -> ServerRequestDraft {
         method: "permission/request".to_string(),
         title: "Permission needed".to_string(),
         params: json!({ "prompt": "Allow?" }),
+    }
+}
+
+fn task_question_request(task_id: &str) -> ServerRequestDraft {
+    ServerRequestDraft {
+        scope: PendingRequestScope::Task {
+            task_id: TaskId::from(task_id),
+        },
+        method: openaide_app_server_protocol::server_requests::QUESTION_REQUEST.to_string(),
+        title: "Question".to_string(),
+        params: json!({ "message": "Choose a test seam.", "fields": [] }),
     }
 }
 
