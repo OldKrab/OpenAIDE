@@ -1,4 +1,5 @@
 ## Bug Fixes
 
-- Restore the VS Code Developer settings unlock after a webview reload.
-- Remember the latest New Task Agent selection as the next default.
+- Recover shared ACP agents when their process exits during session startup.
+- Persist the ACP developer trace setting across App Server restarts.
+- Add metadata-only diagnostics for ACP connection, initialization, requests, and options.
