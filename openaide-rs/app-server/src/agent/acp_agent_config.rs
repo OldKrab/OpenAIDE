@@ -198,9 +198,7 @@ fn is_windows_batch_file(command: &str) -> bool {
 }
 
 fn resolve_command_in_path(command: &str) -> Option<PathBuf> {
-    let Some(paths) = env::var_os("PATH") else {
-        return None;
-    };
+    let paths = env::var_os("PATH")?;
     resolve_command_in_paths(command, env::split_paths(&paths), command_extensions())
 }
 
