@@ -3332,6 +3332,65 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.title).toBe("Second task");
   });
 
+  it("does not replace the routed task with a recovery baseline for another task", async () => {
+    let publishInvalidation: ((event: { reason: "httpSessionExpired" }) => void) | undefined;
+    let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
+    const request = vi.fn((method: string, params: { taskId?: string }) => {
+      if (method === TASK_OPEN && params.taskId === "task_1") {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "First task") });
+      }
+      if (method === TASK_OPEN && params.taskId === "task_2") {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_2", "Second task") });
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleGenerationInvalidated(handler) {
+        publishInvalidation = handler;
+        return () => {
+          publishInvalidation = undefined;
+        };
+      },
+      handleRecoveryBaseline(handler) {
+        publishRecoveryBaseline = handler;
+        return () => {
+          publishRecoveryBaseline = undefined;
+        };
+      },
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_1");
+
+    await act(async () => {
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap("task_2")));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_2");
+
+    await act(async () => {
+      publishInvalidation?.({ reason: "httpSessionExpired" });
+      publishRecoveryBaseline?.({
+        reason: "httpSessionExpired",
+        result: { snapshot: clientSnapshot({ activeTaskTitle: "Stale first task" }) },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_2");
+    expect(latestController?.state.snapshot?.task.title).toBe("Second task");
+  });
+
   it("shows a cached task snapshot immediately when switching back while refreshing it", async () => {
     const task2 = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn((method: string, params: { taskId?: string }) => {

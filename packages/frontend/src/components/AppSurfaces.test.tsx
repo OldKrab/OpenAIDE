@@ -637,6 +637,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("shows task status in the narrow workbench header", () => {
     const controller = webControllerFor("task");
+    controller.bootstrap = { ...controller.bootstrap, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1");
 
     const tree = render(controller);
@@ -648,6 +649,7 @@ describe("AppSurfaces callback wiring", () => {
   it("opens the Task Plan from the narrow workbench header", () => {
     stubMobileWindow();
     const controller = webControllerFor("task");
+    controller.bootstrap = { ...controller.bootstrap, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1");
     controller.state.snapshot.current_plan = {
       entries: [{ content: "Verify layout", priority: "medium", status: "in_progress" }],
@@ -853,6 +855,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("passes active task callbacks to task view", () => {
     const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", true);
 
     render(controller);
@@ -930,6 +933,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("passes archive context and restore action to the task view", () => {
     const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", true);
     controller.state.showArchived = true;
     controller.activeTask = controller.state.snapshot.task;
@@ -947,6 +951,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("does not mark the open task archived just because the sidebar shows archive", () => {
     const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", true);
     controller.state.showArchived = true;
 
@@ -1225,6 +1230,24 @@ describe("AppSurfaces callback wiring", () => {
       undefined,
     );
     expect(surfaceMocks.task).not.toHaveBeenCalled();
+  });
+
+  it("does not keep another task's chat on the current task route", () => {
+    const controller = webControllerFor("task");
+    controller.bootstrap = {
+      ...controller.bootstrap,
+      surface: "task",
+      taskId: "task_routed",
+    };
+    controller.state.activeTaskId = "task_other";
+    controller.state.snapshot = snapshot("task_other");
+    controller.state.snapshot.task.title = "why always 24% of cpu taken on this server. always";
+    controller.activeTask = controller.state.snapshot.task;
+
+    render(controller);
+
+    expect(surfaceMocks.task).not.toHaveBeenCalled();
+    expect(surfaceMocks.taskLoading).toHaveBeenCalled();
   });
 
   it("keeps the Native Session route visible when adoption reports not-found", () => {
