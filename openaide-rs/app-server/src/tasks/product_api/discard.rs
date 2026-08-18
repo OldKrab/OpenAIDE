@@ -19,6 +19,10 @@ impl TaskProductApi {
             .mutations
             .release_prepared_task(client_instance_id, task_id, &now)
             .map_err(protocol_error_from_runtime)?;
+        if disposed.iter().any(|task| task.task_id == task_id) {
+            self.native_sessions
+                .cancel_task_preparation(task_id, "prepared_task_released");
+        }
         // Legacy pre-Send resources must never cross a lease boundary. The client-owned
         // Image design does not create any new resource here.
         self.attachments.discard_resources_for_task(&params.task_id);

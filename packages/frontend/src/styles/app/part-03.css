@@ -298,6 +298,24 @@
   white-space: nowrap;
 }
 
+.activity-step-preview {
+  min-width: 0;
+  max-width: min(42ch, 38vw);
+  overflow: hidden;
+  color: color-mix(in oklch, var(--oa-muted) 78%, var(--oa-text));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--oa-mono-font);
+  font-size: 12px;
+}
+
+.activity-step-preview::before {
+  content: "·";
+  margin-inline: 6px;
+  color: color-mix(in oklch, var(--oa-muted) 70%, var(--oa-text));
+  font-family: var(--oa-chat-font);
+}
+
 .activity-step small {
   color: color-mix(in oklch, var(--oa-muted) 72%, var(--oa-text));
   min-width: 0;

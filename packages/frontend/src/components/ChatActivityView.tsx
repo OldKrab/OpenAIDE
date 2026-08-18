@@ -17,7 +17,8 @@ import {
   type ActivityStepSemanticTitle,
 } from "../state/activityLabels";
 import { hasToolDetails, toolKindClass } from "../state/toolDetailsViewModel";
-import { toolPresentationName } from "../state/toolDetailsShared";
+import { readDetailOutput, toolPresentationName } from "../state/toolDetailsShared";
+import { skillDocumentName } from "../state/skillToolViewModel";
 import { ChatToolDetails } from "./ChatToolDetailsView";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { toolKindIcon } from "./chatToolIcons";
@@ -376,8 +377,13 @@ function presentToolStep(
   step: Extract<ActivityStep, { kind: "tool" }>,
   details: ActivityToolDetails | undefined,
 ): Extract<ActivityStep, { kind: "tool" }> {
-  const name = toolPresentationName(step.name, details);
-  const inputSummary = name === "web_search" && step.name !== "web_search" ? details?.input?.query : step.input_summary;
+  const name = toolPresentationName(step.name, details, step.output_preview);
+  const output = details ? readDetailOutput(details, step.output_preview) : step.output_preview ?? "";
+  const inputSummary = name === "skill"
+    ? skillDocumentName(output)
+    : name === "web_search" && step.name !== "web_search"
+      ? details?.input?.query
+      : step.input_summary;
   return { ...step, name, input_summary: inputSummary, ...(details ? { details } : {}) };
 }
 
@@ -385,12 +391,14 @@ function ActivityStepContent({
   disclosure = false,
   icon,
   label,
+  preview,
   titleClassName,
   tooltip,
 }: {
   disclosure?: boolean;
   icon: ReactNode;
   label: ReactNode;
+  preview?: string;
   titleClassName?: string;
   tooltip?: string;
 }) {
@@ -408,6 +416,7 @@ function ActivityStepContent({
       >
         {label}
       </span>
+      {preview ? <span className="activity-step-preview" title={preview}>{preview}</span> : null}
     </span>
   );
 }

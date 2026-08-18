@@ -342,7 +342,11 @@ pub(super) fn release_prepared_task(
         task.preparation,
         crate::storage::records::TaskPreparationRecord::Failed { .. }
     );
-    if failed || same_key_already_free {
+    let preparation_incomplete = !matches!(
+        task.preparation,
+        crate::storage::records::TaskPreparationRecord::Ready
+    );
+    if preparation_incomplete || same_key_already_free {
         task.tombstoned = true;
     }
     let facts = persist_changed_task(
@@ -362,6 +366,8 @@ pub(super) fn release_prepared_task(
     };
     let release_reason = if failed {
         "preparation_failed"
+    } else if preparation_incomplete {
+        "preparation_incomplete"
     } else if same_key_already_free {
         "duplicate_pool_key"
     } else {

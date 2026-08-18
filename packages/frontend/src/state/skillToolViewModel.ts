@@ -4,6 +4,17 @@ export type SkillDocument = {
   body: string;
 };
 
+/** Reads the stable skill identity even when a live tool preview is truncated before its closing delimiter. */
+export function skillDocumentName(content: string) {
+  const normalized = content.replace(/\r\n?/g, "\n");
+  if (!normalized.startsWith("---\n")) return undefined;
+  const closingDelimiter = normalized.indexOf("\n---\n", 4);
+  const frontmatter = closingDelimiter < 0
+    ? normalized.slice(4)
+    : normalized.slice(4, closingDelimiter);
+  return optionalField("name", frontmatter).name;
+}
+
 export function parseSkillDocument(content: string): SkillDocument {
   const normalized = content.replace(/\r\n?/g, "\n");
   if (!normalized.startsWith("---\n")) return { body: normalized };

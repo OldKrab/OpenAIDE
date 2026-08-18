@@ -62,6 +62,28 @@ describe("activity labels", () => {
     );
   });
 
+  it("uses a read result's frontmatter name when Cursor omits its file metadata", () => {
+    expect(activityStepLabel({
+      kind: "tool",
+      name: "read",
+      status: "completed",
+      input_summary: "Read File",
+      output_preview: String.raw`---
+name: review-agent
+description: Read-only review
+---`,
+    })).toBe("Read review-agent");
+  });
+
+  it("does not mistake a generic Find title for a search query", () => {
+    expect(activityStepLabel({
+      kind: "tool",
+      name: "search",
+      status: "completed",
+      input_summary: "Find",
+    })).toBe("Search");
+  });
+
   it.each([
     "List files in 'tasks'",
     "View Image /tmp/preview.png",

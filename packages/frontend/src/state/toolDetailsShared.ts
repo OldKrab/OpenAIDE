@@ -7,6 +7,7 @@ import type {
   ActivityToolOutput,
   ActivityToolValue,
 } from "@openaide/app-shell-contracts";
+import { skillDocumentName } from "./skillToolViewModel";
 
 export function readDetailPath(details: ActivityToolDetails) {
   return firstToolPath(details)?.path ?? details.input?.path ?? "";
@@ -88,9 +89,11 @@ export function toolKindClass(kind: string) {
   return kind.replace(/[^a-z0-9_-]/gi, "-").toLowerCase() || "other";
 }
 
-/** Preserves legacy activity while selecting a renderer from loaded typed details. */
-export function toolPresentationName(name: string, details?: ActivityToolDetails) {
+/** Selects the specialized renderer even when Cursor omitted the original tool metadata. */
+export function toolPresentationName(name: string, details?: ActivityToolDetails, fallbackPreview?: string) {
   const toolType = firstFieldValue(details?.input?.fields, "type");
   if (name === "search" && toolType?.toLowerCase() === "websearch") return "web_search";
+  const output = details ? readDetailOutput(details, fallbackPreview) : fallbackPreview ?? "";
+  if (name === "read" && skillDocumentName(output)) return "skill";
   return name;
 }

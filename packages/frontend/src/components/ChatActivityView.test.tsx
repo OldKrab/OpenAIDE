@@ -125,6 +125,203 @@ describe("ChatActivityView", () => {
     expect(rendered).toContain("Allow once");
     expect(rendered).toContain("Reject");
   });
+
+  it("does not expose returned read content in the collapsed activity row", () => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_cursor_read",
+      title: "Read File",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [
+        {
+          kind: "tool",
+          tool_call_id: "cursor_read",
+          name: "read",
+          status: "completed",
+          output_preview: "fn main() {}",
+          permission_outcomes: [],
+        },
+      ],
+    };
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+
+    expect(tree.root.findAllByProps({ className: "activity-step-preview" })).toHaveLength(0);
+  });
+
+  it("promotes a Cursor read result's frontmatter name into the rendered title", () => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_cursor_skill_read",
+      title: "Read File",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [
+        {
+          kind: "tool",
+          tool_call_id: "cursor_skill_read",
+          name: "read",
+          status: "completed",
+          output_preview: [
+            "---",
+            "name: code-review",
+            "description: Review changes",
+            "---",
+          ].join("\n"),
+          permission_outcomes: [],
+        },
+      ],
+    };
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+
+    expect(tree.root.findByProps({ className: "activity-step-title" }).children.join("")).toContain(
+      "Activated code-review skill",
+    );
+  });
+
+  it("routes a skill-shaped Cursor read through the skill renderer", () => {
+    const skillDocument = [
+      "---",
+      "name: code-review",
+      "description: Review changes",
+      "---",
+      "",
+      "# Code review",
+      "",
+      "Review the change.",
+    ].join("\n");
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_cursor_skill_renderer",
+      title: "Read File",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [
+        {
+          kind: "tool",
+          tool_call_id: "cursor_skill_renderer",
+          name: "read",
+          status: "completed",
+          output_preview: skillDocument,
+          details: {
+            locations: [],
+            content: [{ kind: "text", text: skillDocument }],
+          },
+          permission_outcomes: [],
+        },
+      ],
+    };
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+    expect(tree.root.findAllByProps({ className: "activity-step-preview" })).toHaveLength(0);
+    const toolTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[1];
+    act(() => toolTrigger.props.onClick());
+
+    expect(tree.root.find(
+      (node) => typeof node.props.className === "string"
+        && node.props.className.includes("skill-tool-details"),
+    )).toBeDefined();
+    expect(tree.root.findAll(
+      (node) => node.type === "div"
+        && typeof node.props.className === "string"
+        && node.props.className.includes("activity-step tool-skill completed"),
+    )).toHaveLength(1);
+  });
+
+  it("keeps loaded read content out of the compact step when the preview is absent", () => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_cursor_read_details",
+      title: "Read File",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [
+        {
+          kind: "tool",
+          tool_call_id: "cursor_read_details",
+          name: "read",
+          status: "completed",
+          details: {
+            locations: [],
+            content: [{ kind: "text", text: "fn main() {}" }],
+          },
+          permission_outcomes: [],
+        },
+      ],
+    };
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+
+    expect(tree.root.findAllByProps({ className: "activity-step-preview" })).toHaveLength(0);
+  });
+
+  it("does not expose command output in the collapsed activity row", () => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_cursor_execute_output",
+      title: "Run command",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [
+        {
+          kind: "tool",
+          tool_call_id: "cursor_execute_output",
+          name: "execute",
+          status: "completed",
+          input_summary: "git diff",
+          output_preview: "Not in allowlist: cat, git diff",
+          permission_outcomes: [{
+            request_id: "permission_1",
+            decision: "approved",
+            option_label: "Allow always",
+            resolved_at: "2026-07-13T00:00:00Z",
+          }],
+        },
+      ],
+    };
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+
+    expect(tree.root.findAllByProps({ className: "activity-step-preview" })).toHaveLength(0);
+    expect(JSON.stringify(tree.toJSON())).toContain("Approved");
+  });
 });
 
 function renderedThoughtRows(tree: ReturnType<typeof create>) {
