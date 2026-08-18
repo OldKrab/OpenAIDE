@@ -8,17 +8,24 @@ export function primaryTaskSurfaceModel(controller: AppController) {
   const { activeTask, bootstrap, view } = controller;
   const { primaryTask } = view;
   const snapshotTaskInput = primaryTask.taskInput;
-  const adoptedEmptyTaskHasDraft = bootstrap.surface === "task"
-    && bootstrap.taskId === primaryTask.snapshot?.task.task_id
-    && hasVisibleTaskDraft(snapshotTaskInput);
+  // Chat belongs to one Task identity. A leftover replica from reconnect or
+  // navigation must not paint another Task's history onto the current route.
+  const routedSnapshot = bootstrap.surface === "task"
+    && bootstrap.taskId
+    && primaryTask.snapshot?.task.task_id === bootstrap.taskId
+    ? primaryTask.snapshot
+    : undefined;
+  const adoptedEmptyTaskHasDraft = Boolean(routedSnapshot) && hasVisibleTaskDraft(snapshotTaskInput);
   // Task preparation can publish an active New Task while the route remains
   // /new-task. Only an explicit Task route may promote that snapshot to TaskView.
-  const activeNoMessageTask = bootstrap.taskId === primaryTask.snapshot?.task.task_id
-    && primaryTask.snapshot?.task.status === "active";
-  const renderableTaskSnapshot = primaryTask.snapshot?.task.has_messages === true
-    || adoptedEmptyTaskHasDraft
-    || activeNoMessageTask
-    ? primaryTask.snapshot
+  const activeNoMessageTask = routedSnapshot?.task.status === "active";
+  const renderableTaskSnapshot = routedSnapshot
+    && (
+      routedSnapshot.task.has_messages === true
+      || adoptedEmptyTaskHasDraft
+      || activeNoMessageTask
+    )
+    ? routedSnapshot
     : undefined;
   const startupConfigOptions = renderableTaskSnapshot?.task.has_messages === false && snapshotTaskInput?.pending
     ? primaryTask.newTask.newTask.pending?.configOptions

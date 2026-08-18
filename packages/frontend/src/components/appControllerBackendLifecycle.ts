@@ -223,8 +223,9 @@ export function useAppControllerBackendLifecycle({
         }
       }
 
+      const currentBootstrap = bootstrapRef.current;
       const ingestion = actionsFromInitialSnapshot(recoveredSnapshot, {
-        includeActiveTask: initialBootstrap.surface === "task" && Boolean(initialBootstrap.taskId),
+        includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
         retainedNewTaskContext: retainedNewTaskContextForInitialization(
           recoveredSnapshot,
           currentNewTaskContext.current,
@@ -232,7 +233,7 @@ export function useAppControllerBackendLifecycle({
       });
       for (const action of ingestion.actions) {
         if (action.type === "settings:preferences") setPreferences(action.preferences);
-        recoveredDispatch(action);
+        recoveredDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
       }
       if (recoveredSnapshot.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.agents));
       setBackendStateGeneration((current) => current + 1);
@@ -312,8 +313,9 @@ export function useAppControllerBackendLifecycle({
             const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
             const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
             initializedDispatch({ type: "appServer:ready" });
+            const currentBootstrap = bootstrapRef.current;
             const ingestion = actionsFromInitialSnapshot(result.snapshot, {
-              includeActiveTask: initialBootstrap.surface === "task",
+              includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
               retainedNewTaskContext: retainedNewTaskContextForInitialization(
                 result.snapshot,
                 currentNewTaskContext.current,
@@ -327,7 +329,7 @@ export function useAppControllerBackendLifecycle({
                 newTaskController.updateSnapshot(action.snapshot);
                 continue;
               }
-              initializedDispatch(action);
+              initializedDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
             }
             if (result.snapshot.agents) {
               setAgents(agentOptionsFromProtocol(result.snapshot.agents));
@@ -521,7 +523,6 @@ export function useAppControllerBackendLifecycle({
     operationOwner,
     replicaEpochRef,
     setBackendConnectionState,
-    snapshot: state.snapshot,
     stateSubscriptionContext,
   });
 
@@ -541,4 +542,12 @@ export function useAppControllerBackendLifecycle({
 
 function errorName(error: unknown) {
   return error instanceof Error && error.name ? error.name : typeof error;
+}
+
+/** Recovery and initialize snapshots may describe a Task that is no longer routed. */
+function routeOwnedSnapshotAction(action: AppAction, bootstrap: WebviewBootstrap): AppAction {
+  if (action.type !== "snapshot") return action;
+  const routedTaskId = bootstrap.surface === "task" ? bootstrap.taskId : undefined;
+  if (!routedTaskId || action.snapshot.task.task_id === routedTaskId) return action;
+  return { ...action, intent: "refresh" };
 }

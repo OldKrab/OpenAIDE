@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject } from "react";
-import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import { AppServerProtocolError, type TaskId } from "@openaide/app-server-client";
 import { requestTaskOpen } from "../intents/taskReadIntents";
 import {
@@ -31,7 +30,6 @@ type TaskRouteLifecycleOptions = {
   operationOwner: AsyncOperationOwner;
   replicaEpochRef: RefObject<number>;
   setBackendConnectionState(state: BackendConnectionState): void;
-  snapshot?: TaskSnapshot;
   stateSubscriptionContext: RefObject<StateSubscriptionMappingContext | undefined>;
 };
 
@@ -51,7 +49,6 @@ export function useTaskRouteLifecycle({
   operationOwner,
   replicaEpochRef,
   setBackendConnectionState,
-  snapshot,
   stateSubscriptionContext,
 }: TaskRouteLifecycleOptions) {
   const [readyTaskSubscriptionKey, setReadyTaskSubscriptionKey] = useState<string | undefined>();
@@ -71,10 +68,11 @@ export function useTaskRouteLifecycle({
   }, []);
 
   useEffect(() => {
-    if (!backendConnection || !backendReady || !backendInitialized.current || !snapshot) return;
+    if (!backendConnection || !backendReady || !backendInitialized.current) return;
     const context = stateSubscriptionContext.current;
     if (!context) return;
-    const taskId = snapshot.task.task_id;
+    if (bootstrap.surface !== "task" || !bootstrap.taskId) return;
+    const taskId = bootstrap.taskId;
     const subscriptionKey = `${backendStateGeneration}:${taskId}`;
     const subscriptionStartedAt = Date.now();
     sendWebviewTelemetry(postHostMessage, "task_state_subscription_started", {
@@ -124,7 +122,7 @@ export function useTaskRouteLifecycle({
       failedSubscriptionBaselines.current.delete(subscriptionKey);
       stop();
     };
-  }, [backendConnection, backendReady, backendStateGeneration, snapshot?.task.task_id]);
+  }, [backendConnection, backendReady, backendStateGeneration, bootstrap.surface, bootstrap.surface === "task" ? bootstrap.taskId : undefined]);
 
   useEffect(() => {
     if (bootstrap.surface !== "task" || !bootstrap.taskId) {
@@ -216,8 +214,8 @@ export function useTaskRouteLifecycle({
     routeOpenSettlement,
   ]);
 
-  const taskSubscriptionKey = snapshot
-    ? `${backendStateGeneration}:${snapshot.task.task_id}`
+  const taskSubscriptionKey = bootstrap.surface === "task" && bootstrap.taskId
+    ? `${backendStateGeneration}:${bootstrap.taskId}`
     : undefined;
   const taskSubscriptionReady = !backendConnection
     || taskSubscriptionKey === undefined
