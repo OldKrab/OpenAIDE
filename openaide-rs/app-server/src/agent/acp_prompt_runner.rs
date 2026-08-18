@@ -75,6 +75,8 @@ pub(super) async fn run_prompt(
         }),
     );
     while cancel_rx.try_recv().is_ok() {}
+    let (preceding_update_drain_tx, mut preceding_update_drain_rx) =
+        tokio::sync::mpsc::unbounded_channel();
     let mut active_prompt = ActivePrompt::start(
         active_session,
         context.current_prompts,
@@ -85,6 +87,7 @@ pub(super) async fn run_prompt(
         sink.clone(),
         session_projection.as_ref(),
         request_guard,
+        Some(preceding_update_drain_tx),
     )?;
 
     let mut cancel_sent = false;
@@ -247,19 +250,18 @@ pub(super) async fn run_prompt(
                 let Some(completion) = completion else {
                     break Err(RuntimeError::NotReady("ACP prompt completion channel stopped".to_string()));
                 };
-                for update in take_preceding_session_updates(active_session).await? {
-                    let catalogs = apply_prompt_session_message(
-                        context.agent_id,
-                        active_prompt.task_id(),
-                        active_session_id.as_str(),
-                        update,
-                        session_projection.clone(),
-                        session_event_sink.clone(),
-                        pending_session_catalogs,
-                    )
-                    .await?;
-                    apply_session_catalogs(catalogs, config_catalog, commands_catalog);
-                }
+                project_preceding_session_updates(
+                    active_session,
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    session_projection.clone(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
+                    config_catalog,
+                    commands_catalog,
+                )
+                .await?;
                 active_prompt.mark_settled(PromptSettlementKind::PromptResponse);
                 settled_by_response = true;
                 let result = completion.finish();
@@ -274,6 +276,21 @@ pub(super) async fn run_prompt(
                     }),
                 );
                 break result;
+            }
+            Some(reply_tx) = preceding_update_drain_rx.recv() => {
+                let result = project_preceding_session_updates(
+                    active_session,
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    session_projection.clone(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
+                    config_catalog,
+                    commands_catalog,
+                )
+                .await;
+                let _ = reply_tx.send(result);
             }
             update = active_session.read_update() => {
                 let update = match update.map_err(acp_error) {
@@ -391,6 +408,34 @@ async fn dispatch_prompt_cancel(
         ),
     }
     result.map(|()| requested_at)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn project_preceding_session_updates(
+    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
+    agent_id: &str,
+    task_id: &str,
+    active_session_id: &str,
+    projection: Option<LivePromptProjection>,
+    session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
+    pending_session_catalogs: &mut PendingSessionCatalogs,
+    config_catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
+) -> Result<(), RuntimeError> {
+    for update in take_preceding_session_updates(active_session).await? {
+        let catalogs = apply_prompt_session_message(
+            agent_id,
+            task_id,
+            active_session_id,
+            update,
+            projection.clone(),
+            session_event_sink.clone(),
+            pending_session_catalogs,
+        )
+        .await?;
+        apply_session_catalogs(catalogs, config_catalog, commands_catalog);
+    }
+    Ok(())
 }
 
 async fn apply_prompt_session_message(

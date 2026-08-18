@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 #[cfg(test)]
 use crate::agent::acp_schema::ToolCallUpdate;
@@ -33,6 +34,11 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::AgentMessageRole;
 use crate::protocol::model::{AgentPlan, AgentPlanEntry, AgentPlanPriority, AgentPlanStatus};
 
+/// Asks the Native Session worker to project queued `session/update`s before a
+/// permission publishes its Tool, so already-received anonymous text is not split.
+pub(super) type PrecedingUpdateDrain =
+    tokio::sync::mpsc::UnboundedSender<tokio::sync::oneshot::Sender<Result<(), RuntimeError>>>;
+
 #[derive(Clone)]
 pub(super) struct LivePromptProjection {
     agent_id: String,
@@ -40,6 +46,7 @@ pub(super) struct LivePromptProjection {
     tool_calls: ToolCallState,
     codex_subagents: CodexSubagentState,
     cancellation: TurnCancellation,
+    preceding_update_drain: Option<PrecedingUpdateDrain>,
 }
 
 impl LivePromptProjection {
@@ -70,7 +77,13 @@ impl LivePromptProjection {
                 .map(|projection| projection.codex_subagents.clone())
                 .unwrap_or_default(),
             cancellation,
+            preceding_update_drain: None,
         }
+    }
+
+    pub(super) fn with_preceding_update_drain(mut self, drain: PrecedingUpdateDrain) -> Self {
+        self.preceding_update_drain = Some(drain);
+        self
     }
 
     pub(super) fn cancellation(&self) -> TurnCancellation {
@@ -104,6 +117,7 @@ impl LivePromptProjection {
         self,
         request: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse, RuntimeError> {
+        self.drain_preceding_session_updates().await?;
         let (tool_call, status_changed) =
             merge_tool_call_update_with_status_change(&self.tool_calls, request.tool_call.clone());
         // ACP permission requests carry the authoritative tool-call update. Publish it
@@ -145,6 +159,43 @@ impl LivePromptProjection {
                 RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
             }
         })
+    }
+
+    async fn drain_preceding_session_updates(&self) -> Result<(), RuntimeError> {
+        let Some(drain) = self.preceding_update_drain.as_ref() else {
+            return Ok(());
+        };
+        let started = Instant::now();
+        logging::info(
+            "acp_permission_preceding_updates_drain_start",
+            json!({
+                "agent_id": self.agent_id.as_str(),
+            }),
+        );
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        if drain.send(reply_tx).is_err() {
+            logging::info(
+                "acp_permission_preceding_updates_drain_end",
+                json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "outcome": "closed",
+                    "duration_ms": started.elapsed().as_millis(),
+                }),
+            );
+            return Ok(());
+        }
+        let result = reply_rx.await.map_err(|_| {
+            RuntimeError::NotReady("ACP preceding-update drain dropped".to_string())
+        })?;
+        logging::info(
+            "acp_permission_preceding_updates_drain_end",
+            json!({
+                "agent_id": self.agent_id.as_str(),
+                "outcome": if result.is_ok() { "ok" } else { "error" },
+                "duration_ms": started.elapsed().as_millis(),
+            }),
+        );
+        result
     }
 
     pub(super) fn emit(&self, update: SessionUpdate) -> Result<(), RuntimeError> {
