@@ -296,14 +296,17 @@ body[data-shell="web"] .sidebar {
 }
 
 .project-folder-dialog {
-  width: min(620px, calc(100vw - 32px));
-  max-height: min(620px, calc(100vh - 32px));
-  overflow: auto;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 32px));
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 4px;
   border: 1px solid var(--oa-border-subtle);
   border-radius: var(--oa-radius-lg);
   background: var(--oa-panel);
   box-shadow: 0 20px 54px color-mix(in oklch, var(--oa-text) 22%, transparent);
-  padding: 12px;
+  padding: 14px 14px 12px;
 }
 
 .project-folder-dialog > header {
@@ -354,6 +357,257 @@ body[data-shell="web"] .sidebar {
 .project-folder-submitting {
   pointer-events: none;
   opacity: .56;
+}
+
+.project-folder-explorer {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.project-folder-explorer-pane {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 2px minmax(0, 1fr);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 86%, var(--oa-bg));
+  overflow: hidden;
+}
+
+.project-folder-explorer-toolbar {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--oa-border-subtle);
+}
+
+.project-folder-explorer-toolbar button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.project-folder-explorer-toolbar button:hover:not(:disabled),
+.project-folder-explorer-toolbar button[aria-pressed="true"] {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.project-folder-explorer-toolbar button:disabled {
+  opacity: 0.35;
+}
+
+.project-folder-explorer-crumbs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: auto hidden;
+  gap: 2px;
+  padding-inline: 4px;
+  font-size: 12px;
+}
+
+.project-folder-explorer-crumbs > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.project-folder-explorer-crumbs > span > span {
+  color: var(--oa-muted);
+  padding-inline: 2px;
+}
+
+.project-folder-explorer-crumbs button {
+  width: auto;
+  height: 26px;
+  padding: 0 6px;
+  color: var(--oa-muted);
+  font-weight: 500;
+}
+
+.project-folder-explorer-crumbs button.current {
+  color: var(--oa-text);
+  font-weight: 650;
+}
+
+.project-folder-explorer-path-form {
+  min-width: 0;
+}
+
+.project-folder-explorer-path-form input {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  padding: 4px 8px;
+  font-family: var(--oa-mono-font);
+  font-size: 12px;
+}
+
+.project-folder-explorer-progress-slot {
+  height: 2px;
+  background: transparent;
+}
+
+.project-folder-explorer-progress {
+  height: 2px;
+  transform-origin: left;
+  background: color-mix(in oklch, var(--oa-focus) 72%, var(--oa-border));
+  animation: project-folder-explorer-indeterminate 900ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes project-folder-explorer-indeterminate {
+  0% { transform: scaleX(0.12) translateX(0); }
+  50% { transform: scaleX(0.55) translateX(80%); }
+  100% { transform: scaleX(0.12) translateX(0); }
+}
+
+.project-folder-explorer-list {
+  min-height: 220px;
+  max-height: min(340px, 46vh);
+  overflow: auto;
+  padding: 4px;
+}
+
+.project-folder-explorer-row {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.project-folder-explorer-row svg:last-child {
+  color: var(--oa-muted);
+}
+
+.project-folder-explorer-row:hover,
+.project-folder-explorer-row:focus-visible {
+  background: var(--oa-raised);
+}
+
+.project-folder-explorer-status {
+  margin: 18px 10px;
+  color: var(--oa-muted);
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.project-folder-explorer-status button {
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.project-folder-explorer-notice {
+  margin: 0 2px;
+  color: var(--oa-danger);
+  font-size: 12px;
+}
+
+.project-folder-explorer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.project-folder-explorer-name {
+  min-width: 0;
+  margin: 0;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.project-folder-explorer-name button,
+.project-folder-explorer-name input {
+  min-width: 0;
+  max-width: 28ch;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  padding: 1px 2px;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-folder-explorer-name button:hover,
+.project-folder-explorer-name input:hover,
+.project-folder-explorer-name input:focus {
+  background: var(--oa-raised);
+  outline: none;
+}
+
+.project-folder-explorer-add {
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-text);
+  color: var(--oa-bg);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-folder-explorer-add:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.project-folder-explorer-add:disabled {
+  opacity: 0.38;
+}
+
+@media (max-width: 640px) {
+  .project-folder-backdrop {
+    padding: 12px;
+  }
+
+  .project-folder-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .project-folder-explorer-footer {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 
 .project-remove-backdrop {

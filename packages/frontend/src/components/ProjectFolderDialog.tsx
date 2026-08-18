@@ -30,7 +30,10 @@ export function ProjectFolderDialog({
     }}>
       <section aria-label="Add Project" aria-modal="true" className="project-folder-dialog" role="dialog">
         <header>
-          <span><strong>Add Project</strong><small>Choose a folder to add to OpenAIDE.</small></span>
+          <span>
+            <strong>Add Project</strong>
+            <small>Browse to the Project folder, or edit the path directly.</small>
+          </span>
           <button aria-label="Close Add Project" disabled={submitting} onClick={onClose} type="button"><X size={15} /></button>
         </header>
         {error ? <p className="project-folder-error" role="alert">{error}</p> : null}

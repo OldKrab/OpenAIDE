@@ -409,65 +409,6 @@
   opacity: 0.42;
 }
 
-.new-workspace-picker,
-.new-workspace-picker-status {
-  display: grid;
-  gap: 2px;
-  padding: 7px 6px;
-  border-top: 1px solid color-mix(in oklch, var(--oa-border) 72%, transparent);
-}
-
-.new-workspace-picker-title {
-  min-width: 0;
-  color: var(--oa-muted);
-  font-size: 11px;
-  font-weight: 500;
-  overflow: hidden;
-  padding: 3px 7px 5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.new-workspace-picker-row,
-.new-workspace-picker-status button {
-  min-width: 0;
-  min-height: 34px;
-  border: 0;
-  border-radius: var(--oa-radius-sm);
-  background: transparent;
-  color: var(--oa-text);
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
-  text-align: left;
-}
-
-.new-workspace-picker-row span,
-.new-workspace-picker-status span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.new-workspace-picker-row:hover,
-.new-workspace-picker-row:focus-visible,
-.new-workspace-picker-status button:hover,
-.new-workspace-picker-status button:focus-visible {
-  background: var(--oa-raised);
-}
-
-.new-workspace-picker-row.choose {
-  color: var(--oa-focus);
-}
-
-.new-workspace-picker-status {
-  color: var(--oa-muted);
-  font-size: 12px;
-}
-
 .new-task-context-controls .composer-pill {
   min-height: 30px;
   border: 0;

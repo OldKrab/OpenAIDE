@@ -135,7 +135,10 @@ describe("AppSurfaces callback wiring", () => {
     controller.bootstrap = { surface: "navigation", shell: WEB_SHELL };
     controller.callbacks.newTask.workspaceBrowser = {
       ownerKey: "project-browser",
-      listDirectory: vi.fn(),
+      listDirectory: vi.fn(async () => ({
+        directory: { label: "Computer", path: "/", parentPath: null },
+        entries: [{ label: "home", path: "/home" }],
+      })),
       listRoots: vi.fn(async () => [{ label: "Computer", path: "/" }]),
     };
     const tree = render(controller);
