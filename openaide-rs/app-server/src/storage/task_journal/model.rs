@@ -140,13 +140,62 @@ impl TaskWrite {
         text: impl Into<String>,
         local_history_updated_at: impl Into<String>,
     ) -> Self {
+        Self::stream_append_text_with_metadata(
+            task_id,
+            identity,
+            text,
+            local_history_updated_at,
+            None,
+        )
+    }
+
+    /// Admits streamed Agent text and lets one physical batch advance the
+    /// Task revision once. The caller does not wait for disk; the commit
+    /// dispatcher publishes the coalesced Chat delta after durability.
+    pub(crate) fn stream_append_text_with_task_update(
+        task_id: impl Into<String>,
+        identity: impl Into<String>,
+        text: impl Into<String>,
+        local_history_updated_at: impl Into<String>,
+        task_updated_at: impl Into<String>,
+    ) -> Self {
+        Self::stream_append_text_with_metadata(
+            task_id,
+            identity,
+            text,
+            local_history_updated_at,
+            Some(task_updated_at.into()),
+        )
+    }
+
+    /// Seals earlier Agent-text writes without consuming streamed Tool output.
+    /// A following structured Tool mutation can therefore retain ownership of
+    /// its same-revision terminal delta.
+    pub(crate) fn barrier_streamed_text(task_id: impl Into<String>) -> Self {
         Self {
             task_id: task_id.into(),
-            boundary: CommitBoundary::Stream,
+            boundary: CommitBoundary::TextBarrier,
+            operations: Vec::new(),
+            artifacts: Vec::new(),
+            compaction: CompactionMode::None,
+        }
+    }
+
+    fn stream_append_text_with_metadata(
+        task_id: impl Into<String>,
+        identity: impl Into<String>,
+        text: impl Into<String>,
+        local_history_updated_at: impl Into<String>,
+        task_updated_at: Option<String>,
+    ) -> Self {
+        Self {
+            task_id: task_id.into(),
+            boundary: CommitBoundary::TextStream,
             operations: vec![TaskOperation::AppendText {
                 identity: identity.into(),
                 text: text.into(),
                 local_history_updated_at: local_history_updated_at.into(),
+                task_updated_at,
             }],
             artifacts: Vec::new(),
             compaction: CompactionMode::None,
@@ -229,6 +278,8 @@ impl TaskWrite {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommitBoundary {
     Stream,
+    TextStream,
+    TextBarrier,
     Barrier,
 }
 
@@ -248,6 +299,10 @@ pub(crate) enum TaskOperation {
         identity: String,
         text: String,
         local_history_updated_at: String,
+        /// Present only for live Agent text. It is used to derive the single
+        /// Task metadata update for a coalesced stream batch.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_updated_at: Option<String>,
     },
     AppendMessage {
         message: Box<StoredMessage>,
@@ -375,11 +430,26 @@ pub struct ToolArtifactProjection {
 
 /// Exact durable result emitted after the journal sync completes.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedChatTextAppend {
+    pub message_id: String,
+    pub text: String,
+}
+
+/// Exact durable result emitted after the journal sync completes.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedTaskBatch {
     pub task_id: String,
     pub journal_sequence: u64,
+    /// Revision after this physical batch. Stream text advances it once per
+    /// coalesced batch instead of once per ACP chunk.
+    pub task_revision: u64,
     /// True only when the durable batch changes the public Task snapshot.
     pub task_snapshot_changed: bool,
+    /// Streamed Chat deltas whose durability is complete and may be published.
+    pub chat_text_appends: Vec<CommittedChatTextAppend>,
+    /// Number of admitted Agent-text writes represented by this physical batch.
+    /// The mutation layer uses it to acknowledge a text-only barrier.
+    pub streamed_text_write_count: usize,
     /// Artifacts whose structured details were replaced by this batch. The
     /// synchronous Task publisher owns their complete same-revision delta.
     pub replaced_artifact_ids: Vec<String>,

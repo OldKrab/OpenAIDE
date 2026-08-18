@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
@@ -12,18 +12,20 @@ use crate::storage::records::TaskRecord;
 use super::artifact;
 use super::frame;
 use super::model::{
-    ArtifactOperation, CommittedTaskBatch, CompactionMode, JournalFrame, TaskJournalQueueMetrics,
-    TaskOperation, TaskProjection, TaskStorageFailure, TaskStorageFatalFailure, TaskWrite,
-    ToolArtifactProjection,
+    ArtifactOperation, CommittedChatTextAppend, CommittedTaskBatch, CompactionMode, JournalFrame,
+    TaskJournalQueueMetrics, TaskOperation, TaskProjection, TaskStorageFailure,
+    TaskStorageFatalFailure, TaskWrite, ToolArtifactProjection,
 };
 use super::projection::{apply_operations, validate_operations};
 use super::scheduler::{QueuedWrite, Scheduler};
+use reduce::reduce_batch;
 mod admission;
 mod compaction;
 pub(super) mod failure;
 mod maintenance;
 mod purge;
 mod recovery;
+mod reduce;
 mod reset;
 mod semantic_noops;
 mod usage;
@@ -377,6 +379,19 @@ fn commit_batch(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    let streamed_text_write_count = batch
+        .iter()
+        .flat_map(|queued| queued.write.operations.iter())
+        .filter(|operation| {
+            matches!(
+                operation,
+                TaskOperation::AppendText {
+                    task_updated_at: Some(_),
+                    ..
+                }
+            )
+        })
+        .count();
     let mut reduced = reduce_batch(batch);
     let compaction = compaction::requested_compaction(batch);
     recovery::ensure_task_loaded(
@@ -401,6 +416,45 @@ fn commit_batch(
     {
         require_available(current_task.as_ref(), task_id)?;
         return Ok(None);
+    }
+    let streamed_task_updated_at = reduced.task_operations.iter().rev().find_map(|operation| {
+        let TaskOperation::AppendText {
+            task_updated_at: Some(updated_at),
+            ..
+        } = operation
+        else {
+            return None;
+        };
+        Some(updated_at.clone())
+    });
+    if let Some(updated_at) = streamed_task_updated_at {
+        let Some(current_projection) = (match current_task.as_ref() {
+            Some(RecoveredTask::Available { projection, .. }) => Some(projection.as_ref()),
+            Some(RecoveredTask::Unavailable { error }) => {
+                return Err(RuntimeError::Storage(error.clone()))
+            }
+            None => return Err(RuntimeError::TaskNotFound(task_id.to_string())),
+        }) else {
+            unreachable!("available Task projection was matched above");
+        };
+        let mut task = current_projection.task.clone();
+        task.task_version = task
+            .task_version
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::Storage("Task version overflow".to_string()))?;
+        task.revision = task
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::Storage("Task revision overflow".to_string()))?;
+        task.updated_at = updated_at;
+        // The AppendText reducer advances message_history_version after this
+        // task operation is applied, keeping the Task and Chat clocks aligned.
+        reduced.task_operations.insert(
+            0,
+            TaskOperation::ReplaceTask {
+                task: Box::new(task),
+            },
+        );
     }
     let task_snapshot_changed = reduced.task_operations.iter().any(|operation| {
         matches!(
@@ -528,6 +582,12 @@ fn commit_batch(
     let next_task = next_state
         .remove(task_id)
         .expect("Task reducer must publish its target");
+    let next_projection = match &next_task {
+        RecoveredTask::Available { projection, .. } => projection.as_ref(),
+        RecoveredTask::Unavailable { error } => return Err(RuntimeError::Storage(error.clone())),
+    };
+    let task_revision = next_projection.task.revision;
+    let chat_text_appends = committed_chat_text_appends(&frame.operations, next_projection)?;
     let mut artifact_changes = Vec::new();
     for (artifact_id, committed_head, operations) in planned_artifacts {
         let mut artifact_heads = artifact_heads
@@ -588,10 +648,50 @@ fn commit_batch(
     Ok(Some(CommittedTaskBatch {
         task_id: task_id.to_string(),
         journal_sequence: sequence,
+        task_revision,
         task_snapshot_changed,
+        chat_text_appends,
+        streamed_text_write_count,
         replaced_artifact_ids,
         artifact_changes,
     }))
+}
+
+fn committed_chat_text_appends(
+    operations: &[TaskOperation],
+    projection: &TaskProjection,
+) -> Result<Vec<CommittedChatTextAppend>, RuntimeError> {
+    operations
+        .iter()
+        .filter_map(|operation| {
+            let TaskOperation::AppendText {
+                identity,
+                text,
+                task_updated_at: Some(_),
+                ..
+            } = operation
+            else {
+                return None;
+            };
+            Some((identity, text))
+        })
+        .map(|(identity, text)| {
+            let message_id = projection
+                .messages
+                .iter()
+                .find(|stored| stored.chat.identity == *identity)
+                .map(|stored| stored.chat.message_id.clone())
+                .ok_or_else(|| {
+                    RuntimeError::Internal(
+                        "Committed streamed Chat change is missing from its projection".to_string(),
+                    )
+                })?;
+            Ok(CommittedChatTextAppend {
+                message_id,
+                text: text.clone(),
+            })
+        })
+        .collect()
 }
 
 fn quarantine_or_abort(tasks_root: &Path, task_id: &str) {
@@ -638,108 +738,6 @@ fn freeze_shared_task(
     )
 }
 
-struct ReducedBatch {
-    task_operations: Vec<TaskOperation>,
-    artifacts: BTreeMap<String, Vec<ArtifactOperation>>,
-}
-
-fn reduce_batch(batch: &[QueuedWrite]) -> ReducedBatch {
-    let mut task_operations = Vec::new();
-    let mut artifacts = BTreeMap::<String, Vec<ArtifactOperation>>::new();
-    for queued in batch {
-        for operation in &queued.write.operations {
-            match operation {
-                TaskOperation::AppendText {
-                    identity,
-                    text,
-                    local_history_updated_at,
-                } => match task_operations.last_mut() {
-                    Some(TaskOperation::AppendText {
-                        identity: existing_identity,
-                        text: existing_text,
-                        local_history_updated_at: existing_updated_at,
-                    }) if existing_identity == identity => {
-                        existing_text.push_str(text);
-                        existing_updated_at.clone_from(local_history_updated_at);
-                    }
-                    _ => task_operations.push(TaskOperation::AppendText {
-                        identity: identity.clone(),
-                        text: text.clone(),
-                        local_history_updated_at: local_history_updated_at.clone(),
-                    }),
-                },
-                TaskOperation::Create { projection } => {
-                    task_operations.push(TaskOperation::Create {
-                        projection: projection.clone(),
-                    })
-                }
-                TaskOperation::ReplaceTask { task } => {
-                    task_operations.push(TaskOperation::ReplaceTask { task: task.clone() })
-                }
-                TaskOperation::ReplaceProjection { projection } => {
-                    task_operations.push(TaskOperation::ReplaceProjection {
-                        projection: projection.clone(),
-                    })
-                }
-                TaskOperation::AppendMessage { message } => {
-                    task_operations.push(TaskOperation::AppendMessage {
-                        message: message.clone(),
-                    })
-                }
-                TaskOperation::UpsertMessage { message } => {
-                    task_operations.push(TaskOperation::UpsertMessage {
-                        message: message.clone(),
-                    })
-                }
-                TaskOperation::ReplaceMessages {
-                    messages,
-                    message_meta,
-                } => task_operations.push(TaskOperation::ReplaceMessages {
-                    messages: messages.clone(),
-                    message_meta: message_meta.clone(),
-                }),
-                TaskOperation::ReplaceMessageMeta { message_meta } => {
-                    task_operations.push(TaskOperation::ReplaceMessageMeta {
-                        message_meta: message_meta.clone(),
-                    })
-                }
-                TaskOperation::CommitArtifact { .. } => {
-                    unreachable!("artifact commit references are worker-owned")
-                }
-            }
-        }
-        for write in &queued.write.artifacts {
-            match &write.operation {
-                ArtifactOperation::ReplaceDetails { details } => {
-                    artifacts
-                        .entry(write.artifact_id.clone())
-                        .or_default()
-                        .push(ArtifactOperation::ReplaceDetails {
-                            details: details.clone(),
-                        });
-                }
-                ArtifactOperation::AppendTerminal { terminal_id, data } => {
-                    if data.is_empty() {
-                        continue;
-                    }
-                    let operations = artifacts.entry(write.artifact_id.clone()).or_default();
-                    match operations.last_mut() {
-                        Some(ArtifactOperation::AppendTerminal {
-                            terminal_id: existing_terminal_id,
-                            data: existing_data,
-                        }) if existing_terminal_id == terminal_id => existing_data.push_str(data),
-                        _ => operations.push(write.operation.clone()),
-                    }
-                }
-            }
-        }
-    }
-    ReducedBatch {
-        task_operations,
-        artifacts,
-    }
-}
-
 fn resolve_batch(batch: Vec<QueuedWrite>, result: Result<CommittedTaskBatch, RuntimeError>) {
     for reply in batch.into_iter().map(|queued| queued.reply) {
         let response = match &result {
@@ -757,10 +755,11 @@ fn current_commit(
     let state = projections
         .read()
         .expect("Task journal projections poisoned");
-    let sequence = match state.get(task_id) {
+    let (sequence, task_revision) = match state.get(task_id) {
         Some(RecoveredTask::Available {
-            journal_sequence, ..
-        }) => *journal_sequence,
+            journal_sequence,
+            projection,
+        }) => (*journal_sequence, projection.task.revision),
         Some(RecoveredTask::Unavailable { error }) => {
             return Err(RuntimeError::Storage(error.clone()))
         }
@@ -769,7 +768,10 @@ fn current_commit(
     Ok(CommittedTaskBatch {
         task_id: task_id.to_string(),
         journal_sequence: sequence,
+        task_revision,
         task_snapshot_changed: false,
+        chat_text_appends: Vec::new(),
+        streamed_text_write_count: 0,
         replaced_artifact_ids: Vec::new(),
         artifact_changes: Vec::new(),
     })

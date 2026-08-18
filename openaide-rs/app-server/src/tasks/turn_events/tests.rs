@@ -1003,6 +1003,12 @@ fn native_session_update_is_persisted_after_prompt_completion() {
 
     sink.session_update(sourced_agent_text_event(" after", "agent-message-1"))
         .unwrap();
+    store
+        .task_journal()
+        .submit(crate::storage::task_journal::TaskWrite::barrier("task_1"))
+        .unwrap()
+        .wait()
+        .unwrap();
 
     let messages = store.read_messages("task_1").unwrap();
     let message = messages
@@ -1616,6 +1622,122 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
 }
 
 #[test]
+fn synchronous_task_change_waits_for_streamed_agent_text_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store,
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.session_update(agent_text_event("first")).unwrap();
+    assert_eq!(notifications.recv().unwrap().revision, 1);
+
+    sink.session_update(agent_text_event(" second")).unwrap();
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("Updated title".to_string()),
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+
+    let streamed = notifications.recv().unwrap();
+    assert_eq!(streamed.revision, 2);
+    assert!(matches!(
+        streamed.kind,
+        TaskUpdateKind::Changed(change)
+            if matches!(change.changes.chat.as_slice(),
+                [TaskChatChange::AppendText { text, .. }] if text == " second")
+    ));
+    let metadata = notifications.recv().unwrap();
+    assert_eq!(metadata.revision, 3);
+    assert!(matches!(
+        metadata.kind,
+        TaskUpdateKind::Changed(change) if change.changes.task.is_some()
+    ));
+}
+
+#[test]
+fn agent_text_chunks_batch_durable_writes_without_losing_ordered_chat_updates() {
+    const CHUNK_COUNT: usize = 128;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_streaming")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_streaming".to_string(),
+        "turn_1".to_string(),
+        ServerRequestRuntime::new(),
+        TurnCancellation::new(),
+    );
+
+    sink.emit(agent_text_event("start")).unwrap();
+    notifications
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("initial Agent message is published");
+    let syncs_before_chunks = store.task_journal().durability_sync_calls();
+
+    for _ in 0..CHUNK_COUNT {
+        sink.emit(agent_text_event("x")).unwrap();
+    }
+
+    // A real workflow barrier flushes all admitted stream deltas before a
+    // subsequent lifecycle mutation or prompt settlement reads the projection.
+    store
+        .task_journal()
+        .submit(crate::storage::task_journal::TaskWrite::barrier(
+            "task_streaming",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let messages = store.read_messages("task_streaming").unwrap();
+    let expected = format!("start{}", "x".repeat(CHUNK_COUNT));
+    assert_eq!(
+        agent_message_text(&messages[0].chat.message),
+        Some(expected.as_str())
+    );
+    let task = store.read_task("task_streaming").unwrap();
+    assert!(
+        task.revision > 1,
+        "streamed Chat must advance Task revision"
+    );
+
+    let syncs_for_chunks = store.task_journal().durability_sync_calls() - syncs_before_chunks;
+    assert!(
+        syncs_for_chunks < CHUNK_COUNT as u64,
+        "streamed chunks performed {syncs_for_chunks} durability syncs"
+    );
+
+    let mut latest_revision = 1;
+    while latest_revision < task.revision {
+        let update = notifications
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("durable streamed Chat update is published");
+        latest_revision = latest_revision.max(update.revision);
+    }
+    assert_eq!(latest_revision, task.revision);
+}
+
+#[test]
 fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
@@ -1789,6 +1911,12 @@ fn interleaved_source_message_ids_update_their_original_agent_messages() {
         sink.emit(sourced_agent_text_event(text, source_message_id))
             .unwrap();
     }
+    store
+        .task_journal()
+        .submit(crate::storage::task_journal::TaskWrite::barrier("task_1"))
+        .unwrap()
+        .wait()
+        .unwrap();
 
     let messages = store.read_messages("task_1").unwrap();
     let agent_texts = messages
