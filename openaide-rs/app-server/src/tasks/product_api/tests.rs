@@ -486,6 +486,102 @@ fn released_prepared_task_is_reused_by_another_client() {
 }
 
 #[test]
+fn releasing_preparing_task_cancels_agent_start_and_next_acquire_becomes_ready() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_start: AtomicBool::new(true),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = ClientInstanceId::from("client-a");
+    let params = TaskAcquireParams {
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    };
+    let first = api.acquire_for_client(&client, params.clone()).unwrap();
+    wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
+
+    api.release_for_client(
+        &client,
+        TaskReleaseParams {
+            task_id: first.task.task_id.clone(),
+        },
+    )
+    .unwrap();
+    wait_until(|| agent.start_cancellations.load(Ordering::SeqCst) == 1);
+    agent.block_start.store(false, Ordering::SeqCst);
+
+    let second = api.acquire_for_client(&client, params).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(second.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert_ne!(first.task.task_id, second.task.task_id);
+    assert!(
+        store
+            .read_task(first.task.task_id.as_str())
+            .unwrap()
+            .tombstoned
+    );
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn preparation_that_starts_after_release_does_not_contact_the_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = ClientInstanceId::from("client-a");
+    let mut stale = task_record("task-stale-preparation", "/tmp/openaide-unit-workspace/app");
+    stale.lifecycle = TaskLifecycle::Prepared {
+        lease: Some(client.clone()),
+    };
+    stale.preparation = TaskPreparationRecord::Preparing;
+    store.write_task(&stale).unwrap();
+
+    api.release_for_client(
+        &client,
+        TaskReleaseParams {
+            task_id: stale.task_id.clone().into(),
+        },
+    )
+    .unwrap();
+    api.native_sessions.prepare_task(&stale).unwrap();
+
+    assert!(store.read_task(&stale.task_id).unwrap().tombstoned);
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn restart_clears_prepared_task_lease_and_preserves_the_task_for_reuse() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -8563,6 +8659,12 @@ fn release_keeps_one_free_prepared_task_for_reuse() {
         workspace_root: None,
     })
     .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
 
     api.release_for_test(TaskReleaseParams {
         task_id: "task-draft".into(),
@@ -8979,6 +9081,7 @@ fn append_running_turn(store: &Store, task_id: &str, turn_id: &str) {
 #[derive(Default)]
 struct RecordingAgent {
     starts: AtomicUsize,
+    start_cancellations: AtomicUsize,
     loads: AtomicUsize,
     resumes: AtomicUsize,
     prompts: AtomicUsize,
@@ -9260,6 +9363,12 @@ impl AgentRuntime for RecordingAgent {
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
         while self.block_start.load(Ordering::SeqCst) {
+            if request.cancellation.is_cancelled() {
+                self.start_cancellations.fetch_add(1, Ordering::SeqCst);
+                return Err(RuntimeError::NotReady(
+                    "ACP session start cancelled".to_string(),
+                ));
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
         if self.fail_start {
