@@ -161,8 +161,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopEnvironmentLabel = desktopRuntimeEnvironment?.kind === "wsl"
     ? `WSL · ${desktopRuntimeEnvironment.distro}`
     : desktopRuntimeEnvironment ? "Windows" : undefined;
-  const finishAddingProject = async (folder: { path: string }) => {
-    const project = await controller.intents.projects.add(folder.path);
+  const finishAddingProject = async (folder: { path: string; label: string }) => {
+    let project = await controller.intents.projects.add(folder.path);
+    const label = folder.label.trim();
+    if (label && label !== project.label) {
+      project = await controller.intents.projects.rename(project.projectId, label);
+    }
     setProjectFolderDialogOpen(false);
     controller.intents.newTask.selectProject({
       projectId: project.projectId,

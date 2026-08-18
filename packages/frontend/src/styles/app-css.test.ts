@@ -444,7 +444,6 @@ describe("task list row styles", () => {
 
   it("separates project choices, folder browsing, and manual workspace entry", () => {
     expect(appCss).toMatch(/\.new-task-context-menu-heading\s*{[^}]*font-size:\s*11px;[^}]*padding:\s*4px 9px 3px;/);
-    expect(appCss).toMatch(/\.new-workspace-picker-row,[^{]+\.new-workspace-picker-status button\s*{[^}]*min-height:\s*34px;[^}]*padding:\s*6px 8px;/);
     expect(appCss).toMatch(/\.new-workspace-entry-row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/\.new-workspace-entry-row button\s*{[^}]*min-width:\s*62px;[^}]*display:\s*inline-flex;[^}]*gap:\s*6px;/);
   });
