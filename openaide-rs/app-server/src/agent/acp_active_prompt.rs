@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_trace::AcpTraceSession;
-use crate::agent::acp_update_projection::LivePromptProjection;
+use crate::agent::acp_update_projection::{LivePromptProjection, PrecedingUpdateDrain};
 use crate::agent::attached_native_session::PromptRequestGuard;
 use crate::agent::events::{AgentEvent, AgentTurnUsage};
 use crate::agent::prompt_content::{build_prompt_content_with_policy, PromptContentPolicy};
@@ -45,17 +45,21 @@ impl ActivePrompt {
         sink: Arc<dyn AgentEventSink>,
         session_projection: Option<&LivePromptProjection>,
         request_guard: PromptRequestGuard,
+        preceding_update_drain: Option<PrecedingUpdateDrain>,
     ) -> Result<Self, RuntimeError> {
         let projection_slot =
             CurrentPromptSlot::new(current_prompts, &active_session.session_id().to_string());
         let cancellation = prompt.cancellation.clone();
         let task_id = prompt.task_id.clone();
-        let projection = LivePromptProjection::for_prompt(
+        let mut projection = LivePromptProjection::for_prompt(
             agent_id,
             sink.clone(),
             cancellation.clone(),
             session_projection,
         );
+        if let Some(drain) = preceding_update_drain {
+            projection = projection.with_preceding_update_drain(drain);
+        }
         projection_slot.activate(projection.clone());
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
         let settlement = Arc::new(PromptSettlementState::default());
