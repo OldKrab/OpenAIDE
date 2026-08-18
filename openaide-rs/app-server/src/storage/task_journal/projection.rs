@@ -175,6 +175,7 @@ pub(super) fn apply_operations(
                 identity,
                 text,
                 local_history_updated_at,
+                ..
             } => {
                 let projection = available_projection_mut(state, task_id)?;
                 append_text(&mut projection.messages, &identity, &text)?;

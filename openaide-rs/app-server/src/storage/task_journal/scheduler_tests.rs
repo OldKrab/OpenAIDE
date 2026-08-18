@@ -269,6 +269,46 @@ fn barrier_seals_earlier_same_task_stream_writes_in_one_ordered_batch() {
 }
 
 #[test]
+fn text_barrier_leaves_streamed_tool_output_for_a_later_structured_barrier() {
+    let scheduler = Scheduler::new();
+    let (terminal_reply, _terminal_receipt) = mpsc::channel();
+    scheduler
+        .admit(
+            TaskWrite::stream_append_terminal("task", "artifact", "terminal", "before"),
+            terminal_reply,
+        )
+        .expect("admit terminal stream");
+    let (text_reply, _text_receipt) = mpsc::channel();
+    scheduler
+        .admit(
+            TaskWrite::stream_append_text("task", "message", "text", "now"),
+            text_reply,
+        )
+        .expect("admit text stream");
+    let (barrier_reply, _barrier_receipt) = mpsc::channel();
+    scheduler
+        .admit(TaskWrite::barrier_streamed_text("task"), barrier_reply)
+        .expect("admit text barrier");
+
+    let NextWork::Batch { writes, .. } = scheduler.next() else {
+        panic!("expected text barrier batch");
+    };
+    assert_eq!(
+        writes
+            .iter()
+            .map(|queued| queued.write.boundary)
+            .collect::<Vec<_>>(),
+        vec![CommitBoundary::TextStream, CommitBoundary::TextBarrier]
+    );
+
+    let NextWork::Batch { writes, .. } = scheduler.next() else {
+        panic!("expected terminal stream batch");
+    };
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0].write.boundary, CommitBoundary::Stream);
+}
+
+#[test]
 fn round_robin_fairness_repeats_across_multiple_batches() {
     let scheduler = Scheduler::new();
     for task_id in ["one", "two", "three"] {

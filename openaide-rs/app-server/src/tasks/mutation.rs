@@ -18,8 +18,11 @@ use crate::tasks::runtime_state::RuntimeState;
 
 mod commit;
 mod create_validation;
+mod stream_text;
 
 use create_validation::TaskCreationValidationContext;
+pub(crate) use stream_text::AgentMessageTextStreamOutcome;
+use stream_text::PendingStreamText;
 
 #[derive(Clone)]
 pub(crate) struct TaskMutations {
@@ -27,6 +30,7 @@ pub(crate) struct TaskMutations {
     store_update_lock: Arc<Mutex<()>>,
     runtime_state: Arc<Mutex<RuntimeState>>,
     notifier: TaskUpdateNotifier,
+    pending_stream_text: Arc<PendingStreamText>,
 }
 
 #[derive(Debug, Clone)]
@@ -517,8 +521,37 @@ impl TaskMutations {
         runtime_state: Arc<Mutex<RuntimeState>>,
         notifier: TaskUpdateNotifier,
     ) -> Self {
+        let pending_stream_text = Arc::new(PendingStreamText::default());
+        let pending_failure_text = pending_stream_text.clone();
+        let failures = store.task_journal().subscribe_failures();
+        std::thread::Builder::new()
+            .name("openaide-stream-text-failure".to_string())
+            .spawn(move || {
+                while let Ok(failure) = failures.recv() {
+                    pending_failure_text.fail(&failure.task_id);
+                }
+            })
+            .expect("failed to start streamed text failure monitor");
         let publication_notifier = notifier.clone();
+        let publication_pending_text = pending_stream_text.clone();
         store.set_task_commit_handler(Arc::new(move |committed| {
+            if !committed.chat_text_appends.is_empty() {
+                let chat = committed
+                    .chat_text_appends
+                    .into_iter()
+                    .map(|append| {
+                        openaide_app_server_protocol::events::TaskChatChange::AppendText {
+                            message_id: append.message_id.into(),
+                            text: append.text,
+                        }
+                    })
+                    .collect();
+                publication_notifier.streamed_chat_changed(
+                    &committed.task_id,
+                    committed.task_revision,
+                    chat,
+                );
+            }
             for change in committed.artifact_changes {
                 // A structured replacement and its same-revision terminal
                 // bytes must remain one atomic synchronous Tool delta. Other
@@ -536,12 +569,15 @@ impl TaskMutations {
                     );
                 }
             }
+            publication_pending_text
+                .complete(&committed.task_id, committed.streamed_text_write_count);
         }));
         Self {
             store,
             store_update_lock,
             runtime_state,
             notifier,
+            pending_stream_text,
         }
     }
 

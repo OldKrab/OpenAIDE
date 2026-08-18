@@ -77,6 +77,7 @@ pub(super) fn journal_operations(
                 identity: stored.chat.identity.clone(),
                 text: text.clone(),
                 local_history_updated_at: projection.message_meta.local_history_updated_at.clone(),
+                task_updated_at: None,
             });
         }
     }

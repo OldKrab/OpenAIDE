@@ -324,6 +324,22 @@ impl TaskSessionEventSink {
             crate::protocol::model::AgentMessagePart::Text { text } => Some(text.len()),
             _ => None,
         };
+        if let crate::protocol::model::AgentMessagePart::Text { text } = &part {
+            match self.mutations.stream_agent_message_text(
+                &self.task_id,
+                &self.session_id,
+                role,
+                &message_id,
+                text,
+                now,
+            )? {
+                crate::tasks::mutation::AgentMessageTextStreamOutcome::Admitted
+                | crate::tasks::mutation::AgentMessageTextStreamOutcome::IgnoredStaleSession => {
+                    return Ok(())
+                }
+                crate::tasks::mutation::AgentMessageTextStreamOutcome::NeedsMessageCommit => {}
+            }
+        }
         let message = NormalizedMessage::AgentMessage {
             id: message_id,
             role,

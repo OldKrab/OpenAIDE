@@ -92,6 +92,26 @@ impl TaskUpdateNotifier {
         });
     }
 
+    pub(crate) fn streamed_chat_changed(
+        &self,
+        task_id: &str,
+        revision: u64,
+        chat: Vec<openaide_app_server_protocol::events::TaskChatChange>,
+    ) {
+        self.task_changed(
+            task_id,
+            revision,
+            CommittedTaskChange {
+                changes: TaskChanges {
+                    chat,
+                    ..Default::default()
+                },
+                tool_details: Vec::new(),
+                navigation: None,
+            },
+        );
+    }
+
     pub(crate) fn history_sync_updated(
         &self,
         task_id: &str,
