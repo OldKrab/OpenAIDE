@@ -637,7 +637,15 @@ describe("AppSurfaces callback wiring", () => {
 
   it("shows task status in the narrow workbench header", () => {
     const controller = webControllerFor("task");
-    controller.bootstrap = { ...controller.bootstrap, taskId: "task_1" };
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_1",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
     controller.state.snapshot = snapshot("task_1");
 
     const tree = render(controller);
@@ -649,7 +657,15 @@ describe("AppSurfaces callback wiring", () => {
   it("opens the Task Plan from the narrow workbench header", () => {
     stubMobileWindow();
     const controller = webControllerFor("task");
-    controller.bootstrap = { ...controller.bootstrap, taskId: "task_1" };
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_1",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
     controller.state.snapshot = snapshot("task_1");
     controller.state.snapshot.current_plan = {
       entries: [{ content: "Verify layout", priority: "medium", status: "in_progress" }],
@@ -1235,9 +1251,13 @@ describe("AppSurfaces callback wiring", () => {
   it("does not keep another task's chat on the current task route", () => {
     const controller = webControllerFor("task");
     controller.bootstrap = {
-      ...controller.bootstrap,
       surface: "task",
+      shell: WEB_SHELL,
       taskId: "task_routed",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
     };
     controller.state.activeTaskId = "task_other";
     controller.state.snapshot = snapshot("task_other");
