@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.5 - 2026-08-18
+
+### Bug Fixes
+
+- Batch streamed Agent text durability so long responses remain responsive.
+- Preserve ordered live Chat updates while coalescing streamed text writes.
+- Keep prepared Tasks aligned with the current Agent configuration at startup.
+- Render Cursor ACP tool activity with the correct structured details.
+
 ## 0.2.4 - 2026-08-17
 
 ### Bug Fixes
