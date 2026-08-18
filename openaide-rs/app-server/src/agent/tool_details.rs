@@ -12,6 +12,7 @@ use crate::protocol::model::{
     ActivityToolContent, ActivityToolDetails, ActivityToolLocation, ToolPresentation,
     ToolPresentationKind,
 };
+use serde_json::Value;
 
 pub(crate) fn tool_call_event(tool_call: &ToolCall) -> AgentEvent {
     let (kind, input_summary) = tool_presentation(tool_call);
@@ -29,7 +30,7 @@ pub(crate) fn tool_call_event(tool_call: &ToolCall) -> AgentEvent {
         status: tool_status(tool_call.status),
         presentation,
         input_summary,
-        output_preview: tool_content_preview(&tool_call.content),
+        output_preview: tool_output_preview(tool_call),
         details: tool_details(tool_call),
     })
 }
@@ -120,6 +121,63 @@ fn tool_content_preview(content: &[ToolCallContent]) -> Option<String> {
         ToolCallContent::Terminal(_) => None,
         _ => Some("Tool call updated.".to_string()),
     })
+}
+
+/// Cursor returns visible read/search/command results in `rawOutput` instead
+/// of ACP's typed `content` list. Preserve typed content as the primary source
+/// and project only the known scalar result shapes into the compact summary.
+fn tool_output_preview(tool_call: &ToolCall) -> Option<String> {
+    tool_content_preview(&tool_call.content)
+        .or_else(|| raw_output_preview(tool_call.raw_output.as_ref()))
+}
+
+fn raw_output_preview(raw_output: Option<&Value>) -> Option<String> {
+    let raw_output = raw_output?;
+    if let Some(text) = raw_output.as_str().filter(|text| !text.is_empty()) {
+        return Some(truncate_preview(text.to_string()));
+    }
+    let object = raw_output.as_object()?;
+
+    for key in [
+        "content",
+        "stdout",
+        "formattedOutput",
+        "formatted_output",
+        "aggregatedOutput",
+        "aggregated_output",
+        "stderr",
+    ] {
+        if let Some(text) = object
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(truncate_preview(text.to_string()));
+        }
+    }
+
+    for (key, singular, plural) in [
+        ("totalMatches", "match", "matches"),
+        ("totalFiles", "file", "files"),
+    ] {
+        let Some(count) = object.get(key).and_then(Value::as_u64) else {
+            continue;
+        };
+        let label = if count == 1 { singular } else { plural };
+        let suffix = object
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .filter(|truncated| *truncated)
+            .map(|_| " (truncated)")
+            .unwrap_or_default();
+        return Some(format!("{count} {label}{suffix}"));
+    }
+
+    object
+        .get("exitCode")
+        .or_else(|| object.get("exit_code"))
+        .and_then(Value::as_i64)
+        .map(|exit_code| format!("exit code {exit_code}"))
 }
 
 fn tool_details(tool_call: &ToolCall) -> Option<Box<ActivityToolDetails>> {

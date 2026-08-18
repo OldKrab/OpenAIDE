@@ -1722,6 +1722,49 @@ fn tool_call_update_keeps_partial_fields_from_existing_call() {
 }
 
 #[test]
+fn tool_call_update_preserves_cursor_input_summary_when_output_arrives() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("cursor", sink, crate::agent::TurnCancellation::new());
+
+    projection
+        .emit(SessionUpdate::ToolCall(
+            ToolCall::new("cursor_read", "Read File")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::InProgress)
+                .raw_input(serde_json::json!({ "path": "/workspace/src/main.rs" })),
+        ))
+        .unwrap();
+    projection
+        .emit(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "cursor_read",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .raw_output(serde_json::json!({ "content": "fn main() {}" })),
+        )))
+        .unwrap();
+
+    let events = capture.events();
+    assert_eq!(events.len(), 2);
+    match &events[1] {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("main.rs"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("fn main() {}"));
+            assert_eq!(
+                tool_call
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.input.as_ref())
+                    .and_then(|input| input.path.as_deref()),
+                Some("/workspace/src/main.rs")
+            );
+        }
+        other => panic!("expected tool call event, got {other:?}"),
+    }
+}
+
+#[test]
 fn every_running_tool_output_update_reaches_the_session_sink() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();
@@ -2308,6 +2351,50 @@ fn tool_call_preview_reads_inputs_from_a_structured_tool_envelope() {
             );
         }
         other => panic!("expected tool call event, got {other:?}"),
+    }
+}
+
+#[test]
+fn tool_call_preview_reads_cursor_raw_output() {
+    let read = tool_call_event(
+        &ToolCall::new("cursor_read", "Read File")
+            .kind(ToolKind::Read)
+            .raw_input(serde_json::json!({ "path": "/workspace/src/main.rs" }))
+            .raw_output(serde_json::json!({ "content": "fn main() {}" })),
+    );
+    let search = tool_call_event(
+        &ToolCall::new("cursor_search", "Find")
+            .kind(ToolKind::Search)
+            .raw_input(serde_json::json!({ "pattern": "ToolCall", "path": "/workspace/src" }))
+            .raw_output(serde_json::json!({ "totalMatches": 3, "truncated": false })),
+    );
+    let command = tool_call_event(
+        &ToolCall::new("cursor_command", "Run command")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "command": "printf ok" }))
+            .raw_output(serde_json::json!({ "exitCode": 0, "stdout": "ok" })),
+    );
+
+    match read {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("main.rs"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("fn main() {}"));
+        }
+        other => panic!("expected read tool call event, got {other:?}"),
+    }
+    match search {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("ToolCall"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("3 matches"));
+        }
+        other => panic!("expected search tool call event, got {other:?}"),
+    }
+    match command {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("printf ok"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("ok"));
+        }
+        other => panic!("expected command tool call event, got {other:?}"),
     }
 }
 

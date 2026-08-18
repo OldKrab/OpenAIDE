@@ -21,13 +21,20 @@ const APP_SERVER_PROTOCOL_MODE: &str = "app-server-protocol";
 const APP_SERVER_HANDOFF_MODE: &str = "app-server-handoff";
 const SHELL_CONTROL_STDIO_MODE: &str = "shell-control-stdio";
 const RUNTIME_ROOT_ENV: &str = "OPENAIDE_RUNTIME_ROOT";
+const BUILD_COMMIT: &str = env!("OPENAIDE_BUILD_COMMIT");
 
 fn main() {
     let storage_root = env::var_os("OPENAIDE_STORAGE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(default_storage_root);
     openaide_app_server::logging::init_file_logger(&storage_root);
-    openaide_app_server::logging::info("app_server_starting", serde_json::json!({}));
+    openaide_app_server::logging::info(
+        "app_server_starting",
+        serde_json::json!({
+            "app_version": env!("CARGO_PKG_VERSION"),
+            "build_commit": BUILD_COMMIT,
+        }),
+    );
 
     match protocol_mode().as_deref() {
         Ok(APP_SERVER_PROTOCOL_MODE) => {
