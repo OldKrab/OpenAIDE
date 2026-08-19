@@ -683,6 +683,65 @@ fn steering_end_turn_makes_the_task_idle_when_primary_never_returns() {
     api.shutdown().expect("shutdown task runtime");
 }
 
+#[test]
+fn steering_keeps_task_active_when_primary_is_cancelled() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) =
+        task_chat_fixture(&temp, "steering_primary_cancelled")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "start primary work"))
+        .expect("send primary prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Active && task.active_turn_id.is_some())
+            .unwrap_or(false)
+    });
+    api.send(send_params(&task_id, "redirect the work"))
+        .expect("send steering prompt");
+
+    wait_until(|| {
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Primary prompt superseded")
+    });
+    assert_eq!(
+        store
+            .read_task(task_id.as_str())
+            .expect("read active task")
+            .status,
+        TaskStatus::Active,
+        "primary cancellation must not settle an accepted steering turn"
+    );
+
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    api.shutdown().expect("shutdown task runtime");
+}
+
 fn task_chat_fixture(
     temp: &tempfile::TempDir,
     mode: &str,
@@ -869,6 +928,7 @@ fn task_chat_agent_script() -> &'static str {
     r#"import json
 import os
 import sys
+import time
 
 mode = os.environ.get("OPENAIDE_TASK_CHAT_MODE", "message_ids")
 session_id = "task-chat-session"
@@ -991,6 +1051,17 @@ for line in sys.stdin:
         prompt_count += 1
         if mode == "steering_end_turn" and prompt_count == 1:
             pending_primary_id = message.get("id")
+            continue
+        if mode == "steering_primary_cancelled" and prompt_count == 1:
+            pending_primary_id = message.get("id")
+            continue
+        if mode == "steering_primary_cancelled" and prompt_count == 2:
+            respond({"id": pending_primary_id}, {"stopReason": "cancelled"})
+            pending_primary_id = None
+            time.sleep(0.2)
+            update_chunk("agent_message_chunk", "Primary prompt superseded", "superseded")
+            time.sleep(0.5)
+            respond(message, {"stopReason": "end_turn"})
             continue
         if mode == "content_blocks":
             update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U=", "uri": "memory://diagram.png"}, "content-image")

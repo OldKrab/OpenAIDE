@@ -95,6 +95,8 @@ pub(super) async fn run_prompt(
     let mut settled_by_response = false;
     let result = loop {
         if active_prompt.cancellation().is_cancelled() && !cancel_sent {
+            // A session cancel can arrive without cancelling the prompt token.
+            active_prompt.mark_cancel_requested();
             match dispatch_prompt_cancel(
                 active_session,
                 context.trace.as_ref(),
@@ -112,6 +114,9 @@ pub(super) async fn run_prompt(
         }
         tokio::select! {
             Some(()) = cancel_rx.recv(), if !cancel_sent => {
+                // Keep primary `cancelled` terminal for explicit session cancellation,
+                // even when a steer was admitted first.
+                active_prompt.mark_cancel_requested();
                 match dispatch_prompt_cancel(
                     active_session,
                     context.trace.as_ref(),

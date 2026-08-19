@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc as tokio_mpsc;
 
+use crate::agent::acp_active_prompt::PromptSettlementState;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwner;
 use crate::agent::acp_schema::InitializeResponse;
 use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
@@ -522,6 +523,7 @@ struct PromptLifecycle {
 struct PromptGeneration {
     id: u64,
     cancellation: TurnCancellation,
+    settlement: Arc<PromptSettlementState>,
     accepting_steering: bool,
     outstanding_requests: usize,
 }
@@ -536,9 +538,11 @@ impl PromptLifecycle {
             match active.as_ref() {
                 None => {
                     let generation_id = self.next_generation_id.fetch_add(1, Ordering::Relaxed) + 1;
+                    let settlement = Arc::new(PromptSettlementState::default());
                     *active = Some(PromptGeneration {
                         id: generation_id,
                         cancellation: cancellation.clone(),
+                        settlement: settlement.clone(),
                         accepting_steering: true,
                         outstanding_requests: 1,
                     });
@@ -550,11 +554,14 @@ impl PromptLifecycle {
                         request: PromptRequestGuard {
                             lifecycle: self.clone(),
                             generation_id,
+                            settlement,
                         },
                     }));
                 }
                 Some(current)
-                    if !current.accepting_steering || current.cancellation.is_cancelled() =>
+                    if !current.accepting_steering
+                        || current.cancellation.is_cancelled()
+                        || current.settlement.kind().is_some() =>
                 {
                     let (next_active, _) = self
                         .settled
@@ -578,16 +585,22 @@ impl PromptLifecycle {
         let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
         let Some(generation) = active
             .as_mut()
-            .filter(|generation| generation.accepting_steering)
+            .filter(|generation| {
+                generation.accepting_steering && generation.settlement.kind().is_none()
+            })
         else {
             return Err(RuntimeError::NotReady(
                 "ACP session has no active prompt to steer".to_string(),
             ));
         };
+        // Record admission before enqueueing the command: the primary response
+        // can race with steering dispatch on the shared ACP connection.
+        generation.settlement.accept_steering();
         generation.outstanding_requests += 1;
         Ok(PromptRequestGuard {
             lifecycle: self.clone(),
             generation_id: generation.id,
+            settlement: generation.settlement.clone(),
         })
     }
 
@@ -647,6 +660,13 @@ impl Drop for PromptSettlementGuard {
 pub(super) struct PromptRequestGuard {
     lifecycle: Arc<PromptLifecycle>,
     generation_id: u64,
+    settlement: Arc<PromptSettlementState>,
+}
+
+impl PromptRequestGuard {
+    pub(super) fn settlement_state(&self) -> Arc<PromptSettlementState> {
+        self.settlement.clone()
+    }
 }
 
 impl Drop for PromptRequestGuard {
