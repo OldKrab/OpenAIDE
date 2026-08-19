@@ -20,6 +20,7 @@ pub(crate) mod acp_host_terminal_cleanup;
 pub(crate) mod acp_host_terminal_ownership;
 pub(crate) mod acp_live_prompt_projection;
 pub(crate) mod acp_message_identity;
+mod acp_process_diagnostics;
 pub(crate) mod acp_prompt_runner;
 pub(crate) mod acp_replay_projection;
 pub(crate) mod acp_response_boundary;
