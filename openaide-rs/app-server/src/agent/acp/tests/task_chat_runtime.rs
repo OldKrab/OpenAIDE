@@ -78,6 +78,107 @@ fn live_acp_message_ids_create_separate_chat_messages() {
 }
 
 #[test]
+fn user_message_splits_anonymous_agent_text() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) =
+        task_chat_fixture(&temp, "anonymous_across_user_boundary")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    for prompt in ["first prompt", "second prompt"] {
+        api.send(send_params(&task_id, prompt))
+            .expect("send prompt");
+        wait_until(|| {
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.status == TaskStatus::Inactive)
+                .unwrap_or(false)
+        });
+    }
+
+    assert_eq!(
+        logical_text_messages(&store, &task_id),
+        [
+            ("user", "first prompt".to_string()),
+            ("agent", "Answer 1".to_string()),
+            ("user", "second prompt".to_string()),
+            ("agent", "Answer 2".to_string()),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn steering_message_splits_anonymous_agent_text() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) =
+        task_chat_fixture(&temp, "anonymous_steering_boundary")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "start primary work"))
+        .expect("send primary prompt");
+    wait_until(|| {
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Answer 1")
+    });
+    api.send(send_params(&task_id, "redirect the work"))
+        .expect("send steering prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+
+    assert_eq!(
+        logical_text_messages(&store, &task_id),
+        [
+            ("user", "start primary work".to_string()),
+            ("agent", "Answer 1".to_string()),
+            ("user", "redirect the work".to_string()),
+            ("agent", "Answer 2".to_string()),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn permission_does_not_split_already_received_anonymous_agent_text() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let server_requests = ServerRequestRuntime::new();
@@ -1048,6 +1149,13 @@ for line in sys.stdin:
         respond(message, {"configOptions": []})
     elif method == "session/prompt":
         prompt_count += 1
+        if mode == "anonymous_steering_boundary":
+            update_chunk("agent_message_chunk", f"Answer {prompt_count}", None)
+            if prompt_count == 1:
+                pending_primary_id = message.get("id")
+                continue
+            respond(message, {"stopReason": "end_turn"})
+            continue
         if mode == "steering_end_turn" and prompt_count == 1:
             pending_primary_id = message.get("id")
             continue
@@ -1102,6 +1210,8 @@ for line in sys.stdin:
             update_chunk("agent_message_chunk", "Visible before thought", message_id)
             update_chunk("agent_thought_chunk", "Private thought", message_id)
             update_chunk("agent_message_chunk", "Visible after thought", message_id)
+        elif mode == "anonymous_across_user_boundary":
+            update_chunk("agent_message_chunk", f"Answer {prompt_count}", None)
         elif mode == "anonymous_permission_burst":
             for token in [
                 "Setting", " `", "approval", "Mode", "`",
