@@ -10,6 +10,6 @@
   },
   "dependencies": {
     "@openaide/app-server-client": "*",
-    "vite": "^8.2.0"
+    "vite": "^8.2.1"
   }
 }
