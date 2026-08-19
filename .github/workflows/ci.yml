@@ -73,7 +73,10 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: npm ci
-      - run: npx playwright install --with-deps chrome
+      # The GitHub-hosted image already supplies Chrome and its system dependencies.
+      # Keep mirror-dependent apt provisioning off the PR critical path.
+      - run: google-chrome --version
+      - run: npx playwright install ffmpeg
       - run: npm run test:smoke
       - name: Upload smoke-test diagnostics
         if: failure()
