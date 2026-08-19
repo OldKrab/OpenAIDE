@@ -409,6 +409,16 @@ impl RpcGateway {
         events
     }
 
+    pub(crate) fn publish_background_agent_status_update(
+        &mut self,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        match self.snapshots.agent_collection_snapshot() {
+            Ok(agents) => self.publish_agent_collection_update(agents, now),
+            Err(_) => Vec::new(),
+        }
+    }
+
     fn dispose_prepared_tasks_after_agent_mutation(&self, agent_id: &str, operation: &str) {
         // The catalog mutation is already durable and authoritative. Cleanup
         // failure must not turn that committed user action into an RPC error;

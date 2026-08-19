@@ -198,6 +198,13 @@ impl SharedRpcGateway {
             .publish_background_worktree_repository_update(repository, now)
     }
 
+    pub fn publish_agent_status_update(&self, now: AppServerTime) -> Vec<GatewayEventDelivery> {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .publish_background_agent_status_update(now)
+    }
+
     pub fn publish_committed_task_update_for_connection(
         &self,
         connection_id: &ConnectionId,

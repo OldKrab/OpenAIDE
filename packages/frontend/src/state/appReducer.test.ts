@@ -111,6 +111,23 @@ describe("app reducer composer state", () => {
     expect(state.settings.agentDetails?.map((agent) => agent.id)).toEqual(["codex", "custom.agent"]);
   });
 
+  it("updates loaded Agent Settings status from a live Agent collection", () => {
+    let state = createInitialState();
+    const agents = settingsAgents(["codex"]);
+
+    state = appReducer(state, {
+      type: "settings:agentDetailsResult",
+      generatedAt: "now",
+      agents,
+    });
+    state = appReducer(state, {
+      type: "settings:agentCollection",
+      agents: [{ agentId: "codex", status: "connected" }],
+    });
+
+    expect(state.settings.agentDetails?.[0]).toMatchObject({ id: "codex", status: "connected" });
+  });
+
   it("reconciles Agent mutations into Backend Agent Settings details", () => {
     let state = createInitialState();
     const codex = settingsAgents(["codex"])[0];

@@ -57,6 +57,7 @@ pub(crate) mod registry_catalog;
 pub(crate) mod registry_handle;
 mod runtime;
 pub(crate) mod status_cache;
+pub(crate) mod status_recording_runtime;
 pub(crate) mod tool_details;
 pub(crate) mod tool_details_io;
 mod tool_details_sanitizer;

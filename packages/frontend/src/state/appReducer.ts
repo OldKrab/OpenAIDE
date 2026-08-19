@@ -169,6 +169,7 @@ type AppActionPayload =
   | { type: "settings:start" }
   | { type: "settings:sections"; tabs: SettingsTabId[] }
   | { type: "settings:agentDetailsResult"; generatedAt: string; agents: AgentSettingsRecord[] }
+  | { type: "settings:agentCollection"; agents: Array<{ agentId: string; status: AgentSettingsRecord["status"]; setupReason?: "nodeJsRequired" }> }
   | { type: "settings:mcpServersStart" }
   | { type: "settings:mcpServersResult"; generatedAt: string; availability: SettingsProjectionAvailability; servers: McpServerSettingsRecord[] }
   | { type: "settings:mcpServersError"; message: string }
