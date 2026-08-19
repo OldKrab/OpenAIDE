@@ -46,7 +46,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/check-release-main-ci.mjs
 
-      - name: Validate release inputs
+      - name: Validate release version and resolve changelog baseline
         id: release-inputs
         env:
           RELEASE_VERSION: ${{ inputs.version }}
@@ -55,8 +55,6 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/release-version.mjs next "$RELEASE_VERSION"
-          notes_path="$RUNNER_TEMP/release-notes.md"
-          cp release-notes.md "$notes_path"
 
           mapfile -t canonical_tags < <(
             gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
@@ -66,16 +64,28 @@ jobs:
           if ((${#canonical_tags[@]} > 0)); then
             previous_tag="$(node scripts/release-version.mjs previous-tag "$RELEASE_VERSION" "${canonical_tags[@]}")"
           fi
-          source_changed=true
-          if [[ -n "$previous_tag" ]] && git diff --quiet "$previous_tag..HEAD" -- release-notes.md; then
-            source_changed=false
-          fi
-          node scripts/validate-release-notes.mjs \
-            "$RELEASE_VERSION" \
-            "$notes_path" \
-            "$previous_tag" \
-            "$source_changed"
           echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes for the exact release commit
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes_path="$RUNNER_TEMP/release-notes.md"
+          request=(
+            --method POST
+            "repos/$GITHUB_REPOSITORY/releases/generate-notes"
+            -f "tag_name=v$RELEASE_VERSION"
+            -f "target_commitish=$(git rev-parse HEAD)"
+          )
+          previous_tag="${{ steps.release-inputs.outputs.previous_tag }}"
+          if [[ -n "$previous_tag" ]]; then
+            request+=(-f "previous_tag_name=$previous_tag")
+          fi
+          gh api "${request[@]}" --jq .body > "$notes_path"
+          node scripts/validate-release-notes.mjs "$RELEASE_VERSION" "$notes_path"
 
       - name: Configure git
         run: |
@@ -88,17 +98,9 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          # Stable notes cover changes since the previous stable release; prerelease
-          # tags are intentionally not exposed in stable release notes.
-          previous_tag="${{ steps.release-inputs.outputs.previous_tag }}"
           notes_path="$RUNNER_TEMP/release-notes.md"
 
-          cp release-notes.md "$notes_path"
           node scripts/update-extension-changelog.mjs "$RELEASE_VERSION" "$notes_path"
-          if [[ -n "$previous_tag" ]]; then
-            printf '\n## Changelog\n\n**Full Changelog**: %s/%s/compare/%s...v%s\n' \
-              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous_tag" "$RELEASE_VERSION" >> "$notes_path"
-          fi
 
           npm version "$RELEASE_VERSION" --allow-same-version=false --no-git-tag-version
           git add package.json package-lock.json apps/vscode-extension/CHANGELOG.md

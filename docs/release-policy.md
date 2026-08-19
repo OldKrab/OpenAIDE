@@ -54,34 +54,24 @@ Before that release:
 
 1. Confirm that `main` contains exactly the changes to release. Choose a new
    OpenAIDE version without a `v` prefix, such as `0.0.2-beta.1` or `0.0.2`.
-2. Replace the checked-in next-release template in `release-notes.md` with
-   concise user-facing Markdown. Make that change in a reviewed PR after the
-   previous canonical release; do not reuse an old release summary. Prefer
-   sections such as `## Features`, `## Bug Fixes`, and `## Chores`, and describe
-   user impact. Do not add a changelog section because the workflow appends it.
-   Version Bump requires the submitted notes to exactly match the checked-in
-   file, rejects the template marker, rejects notes identical to any existing
-   extension changelog entry, and rejects an unchanged notes file since the
-   previous canonical release. These notes become the GitHub Release body for
-   every release, but only stable releases add them to the extension changelog.
-   Alpha, beta, and release-candidate versions never create extension changelog
-   entries. Stable release notes compare against the previous canonical
-   immutable release and never name prereleases.
-3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
+2. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh
    gh workflow run version-bump.yml --ref main \
      -f version=0.0.2-beta.1
    ```
 
-4. `Version Bump` is serialized and cannot be cancelled in progress. It checks
+3. `Version Bump` is serialized and cannot be cancelled in progress. It checks
    that the exact checked-out `main` commit has a completed successful CI push
-   run, validates the monotonic version and release notes before making any
-   commit, resolves the changelog baseline from canonical immutable releases,
-   updates the root package and lockfile, updates the extension changelog for
-   stable releases, commits the release notes, creates the explicit tag, and
-   atomically pushes the `main` update and tag.
-5. The tag starts `Release`. It rejects tags not reachable from `main`, then
+   run, validates the monotonic version, and resolves the changelog baseline
+   from canonical immutable releases. GitHub generates one release-note body
+   for the exact `main` commit and baseline. The workflow validates and uses
+   those same generated notes for the version commit, every GitHub Release, and
+   the stable extension changelog; prereleases do not add changelog entries.
+   It then updates the root package and lockfile, creates the explicit tag, and
+   atomically pushes the `main` update and tag. Release notes are not prepared,
+   reviewed, or stored in a separate source file.
+4. The tag starts `Release`. It rejects tags not reachable from `main`, then
    builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
    self-contained Windows x64 and macOS Apple Silicon desktop installers while
    normal CI validates the exact version commit. Publication requires both to
@@ -90,14 +80,14 @@ Before that release:
    inspects the packaged files and exercises its bundled App Server through
    startup and graceful JSON-RPC shutdown before upload. Desktop builds verify
    that Tauri bundled the exact App Server binary built for that platform.
-6. The workflow creates a draft GitHub Release, attaches the complete verified
+5. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. Desktop filenames
    end in `-unsigned` until Apple notarization and Windows Authenticode signing
    are configured; users must explicitly approve those preview installers with
    the operating system. This GitHub Release is the canonical release. Every
    release then reconciles the same downloaded bytes with Open VSX; stable
    releases also reconcile them with the VS Code Marketplace.
-7. Confirm that the Release workflow completed successfully. No manual rebuild
+6. Confirm that the Release workflow completed successfully. No manual rebuild
    or replacement of its assets is permitted.
 
 The root `package.json` is the release-version source of truth. VSIX and Desktop

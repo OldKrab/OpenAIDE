@@ -131,14 +131,15 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.match(versionBump, /npm version "\$RELEASE_VERSION".*--no-git-tag-version/);
   assert.match(versionBump, /git commit --file "\$notes_path"/);
   assert.match(versionBump, /git tag --annotate "v\$RELEASE_VERSION"/);
-  assert.match(versionBump, /## Changelog/);
   assert.match(versionBump, /node scripts\/check-release-main-ci\.mjs/);
   assert.match(versionBump, /node scripts\/release-version\.mjs next "\$RELEASE_VERSION"/);
+  assert.match(versionBump, /releases\/generate-notes/);
+  assert.match(versionBump, /target_commitish=\$\(git rev-parse HEAD\)/);
+  assert.match(versionBump, /previous_tag_name=\$previous_tag/);
   assert.match(versionBump, /node scripts\/validate-release-notes\.mjs/);
-  assert.match(versionBump, /cp release-notes\.md "\$notes_path"/);
-  assert.match(versionBump, /git diff --quiet .*release-notes\.md/);
   assert.match(versionBump, /releases\?per_page=100/);
   assert.doesNotMatch(versionBump, /inputs\.release_notes/);
+  assert.doesNotMatch(versionBump, /cp release-notes\.md|git diff --quiet .*release-notes\.md/);
   assert.match(versionBump, /node scripts\/update-extension-changelog\.mjs "\$RELEASE_VERSION" "\$notes_path"/);
   assert.match(versionBump, /git add package\.json package-lock\.json apps\/vscode-extension\/CHANGELOG\.md/);
   assert.match(versionBump, /git push --atomic origin "HEAD:refs\/heads\/main" "refs\/tags\/v\$RELEASE_VERSION"/);
