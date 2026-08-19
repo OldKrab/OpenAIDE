@@ -557,7 +557,10 @@ pub struct TaskRecord {
     pub updated_at: String,
     pub last_activity: String,
     /// User-owned Task policy. Missing values from older records preserve the safe default.
-    #[serde(default, skip_serializing_if = "TaskPermissionPolicy::is_ask_every_time")]
+    #[serde(
+        default,
+        skip_serializing_if = "TaskPermissionPolicy::is_ask_every_time"
+    )]
     pub permission_policy: TaskPermissionPolicy,
     /// Bounded accepted text recall kept separate from replaceable Native Session Chat.
     #[serde(default, skip_serializing_if = "ComposerHistory::is_empty")]
