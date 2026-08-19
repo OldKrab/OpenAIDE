@@ -241,9 +241,9 @@ impl TaskSessionEventSink {
             .finish_anonymous(TextChannel::Thought);
     }
 
-    /// Sourced messages need no inferred lifetime. Only anonymous ACP chunks need
-    /// a boundary when another content kind is observed.
-    fn finish_anonymous_text_routes(&self) {
+    /// Sourced messages need no inferred lifetime. Anonymous ACP chunks must also
+    /// stop at accepted User messages, which are persisted outside session/update.
+    pub(super) fn finish_anonymous_text_routes(&self) {
         self.text_chunk_routes.finish_all_anonymous();
     }
 

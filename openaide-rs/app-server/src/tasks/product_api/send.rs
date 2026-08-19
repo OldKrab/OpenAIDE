@@ -220,6 +220,7 @@ impl TaskProductApi {
                 return Err(conflict_error("Task is already running"));
             }
         };
+        self.native_sessions.user_message_accepted(&task_id);
         // Handles remain retryable until the user message is durably accepted.
         let attachments = attachment_reservation.commit_with(attachments);
         if promoted_new_task {
@@ -355,6 +356,7 @@ impl TaskProductApi {
                 return Err(conflict_error("Task is no longer accepting steering"));
             }
         };
+        self.native_sessions.user_message_accepted(&task_id);
         // Handles remain retryable until the steering message is durably accepted.
         let attachments = attachment_reservation.commit_with(attachments);
         let snapshot = crate::tasks::snapshot::build_snapshot(&self.store, &task_id, 100)

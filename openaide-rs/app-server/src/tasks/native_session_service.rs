@@ -81,6 +81,20 @@ impl NativeSessionService {
             .contains_key(task_id)
     }
 
+    /// Ends legacy anonymous Agent and Thought messages at the durable User-message
+    /// boundary. ACP chunks with a source message id retain their stable identity.
+    pub(crate) fn user_message_accepted(&self, task_id: &str) {
+        let sink = self
+            .subscriptions
+            .lock()
+            .expect("native session subscriptions poisoned")
+            .get(task_id)
+            .map(|subscription| subscription.sink.clone());
+        if let Some(sink) = sink {
+            sink.finish_anonymous_text_routes();
+        }
+    }
+
     fn prepare_task_inner(
         &self,
         task: &TaskRecord,
