@@ -117,6 +117,8 @@ export type FrontendShell = {
   sentFiles?: SentFileInteraction;
   /** Browser-profile notification integration; omitted by non-Web shells. */
   taskNotifications?: WebTaskNotificationManager;
+  /** Opens Agent File References in the Task Panel File Viewer. Omitted by VS Code. */
+  fileViewer?: true;
 };
 
 let installedShell: FrontendShell | undefined;

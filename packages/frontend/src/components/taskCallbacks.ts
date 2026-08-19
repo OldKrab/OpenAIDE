@@ -112,6 +112,7 @@ export function createTaskCallbacks({
       state.snapshot,
     ),
     fileBrowser: createTaskFileBrowserCallbacks(backendConnection, dispatch, state, attachmentResources),
+    fileViewer: backendConnection?.request ? { request: backendConnection.request } : undefined,
     loadComposerHistory: () => {
       const taskId = state.snapshot?.task.task_id;
       if (!taskId) return Promise.resolve([]);

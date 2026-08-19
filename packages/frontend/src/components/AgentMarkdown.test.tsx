@@ -7,6 +7,7 @@ const postHostMessage = vi.hoisted(() => vi.fn());
 vi.mock("../services/hostBridge", () => ({ postHostMessage }));
 
 import { AgentMarkdown } from "./AgentMarkdown";
+import { AgentFileOpenContext } from "./agentFileOpen";
 
 describe("AgentMarkdown", () => {
   afterEach(() => {
@@ -84,6 +85,74 @@ describe("AgentMarkdown", () => {
       type: "tool.openPath",
       payload: { line: 42, path: "C:/Users/example/project/src/main.ts" },
     });
+  });
+
+  it("opens path-like inline code as an Agent File Reference", () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<AgentMarkdown text={"Start with `deploy/local-web.sh` then run it."} />);
+    });
+    const code = tree!.root.findByProps({ role: "link" });
+
+    act(() => {
+      code.props.onClick({ preventDefault: vi.fn() });
+    });
+
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "tool.openPath",
+      payload: { path: "deploy/local-web.sh", line: undefined },
+    });
+  });
+
+  it("leaves dotted identifiers that are not file paths as ordinary inline code", () => {
+    const html = renderToStaticMarkup(<AgentMarkdown text={"Use `.com` domains."} />);
+    expect(html).toContain("<code>.com</code>");
+    expect(html).not.toContain("agent-file-ref");
+  });
+
+  it("does not turn protocol method names into Agent File References", () => {
+    const html = renderToStaticMarkup(
+      <AgentMarkdown text={"Call `fileViewer/open` or `tool.openPath` after the user clicks."} />,
+    );
+    expect(html).toContain("<code>fileViewer/open</code>");
+    expect(html).toContain("<code>tool.openPath</code>");
+    expect(html).not.toContain("agent-file-ref");
+  });
+
+  it("opens a File Viewer path through Chat context instead of the App Shell", () => {
+    const openFile = vi.fn();
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentFileOpenContext.Provider value={openFile}>
+          <AgentMarkdown text={"See `tool_details.rs:134`."} />
+        </AgentFileOpenContext.Provider>,
+      );
+    });
+
+    act(() => {
+      tree!.root.findByProps({ role: "link" }).props.onClick({ preventDefault: vi.fn() });
+    });
+
+    expect(openFile).toHaveBeenCalledWith("tool_details.rs", 134);
+    expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("resolves relative File Tab markdown hrefs without sending a raw path", () => {
+    const onOpenRelativeHref = vi.fn();
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentMarkdown onOpenRelativeHref={onOpenRelativeHref} text={"See [notes](../notes.md#L12)."} />,
+      );
+    });
+
+    act(() => {
+      tree!.root.findByType("a").props.onClick({ preventDefault: vi.fn() });
+    });
+
+    expect(onOpenRelativeHref).toHaveBeenCalledWith("../notes.md#L12");
+    expect(postHostMessage).not.toHaveBeenCalled();
   });
 
   it("does not render unsafe javascript links", () => {

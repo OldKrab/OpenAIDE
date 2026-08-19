@@ -83,6 +83,10 @@ id_type!(
     "string & { readonly __openaideBrand: \"FileBrowserRootId\" }"
 );
 id_type!(
+    FileViewerHandleId,
+    "string & { readonly __openaideBrand: \"FileViewerHandleId\" }"
+);
+id_type!(
     MessageId,
     "string & { readonly __openaideBrand: \"MessageId\" }"
 );

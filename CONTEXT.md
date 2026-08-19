@@ -56,6 +56,10 @@ _Avoid_: Image, Attachment, persisted SVG
 A general file explicitly linked to one unsent message through **Attach files**. It is distinct from an Image and from an `@file` mention.
 _Avoid_: Upload when the App Shell references an original local path, treating `@file` text as attached content
 
+**Agent File Reference**:
+A user-activated path-like location in Agent output — a markdown file link, path-like inline code, or an expanded tool path — that Web and Desktop may open in the File Viewer. Relative paths resolve on App Server against the Task Workspace; an absolute path the user clicked may be outside the current Project. The reference does not open or disclose file contents by itself.
+_Avoid_: Treating Agent output as an automatic file read, markdown-link-only Chat open, workspace-only path
+
 **Chat**:
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
 _Avoid_: Log-style names
@@ -71,6 +75,10 @@ _Avoid_: Using Approval Required as the domain name for a Permission Request
 **Quote**:
 An editable `>`-prefixed quotation inserted into the Composer from selected visible text in one User or Agent message. It is ordinary User text and carries no durable relationship to its source.
 _Avoid_: Reply, Reply Reference, source metadata
+
+**File Quote**:
+An editable `>`-prefixed quotation inserted into the Composer from a selected File Viewer line, including that file's display path, line location, and captured line text as ordinary User text.
+_Avoid_: Persisted Comment, review thread, live line anchor
 
 **Queued Message**:
 A user-authored instruction accepted for later automatic or manual delivery. It remains distinct from Chat until delivery begins.
@@ -149,8 +157,20 @@ A lightweight OpenAIDE record for a user work area, such as a folder, workspace,
 _Avoid_: Git remote or shell-specific workspace identity as the primary identity
 
 **Task Page**:
-The main user-facing page for one Task's Chat, composer, permissions, and folded activity.
+The main user-facing page for one Task's Chat, composer, permissions, folded activity, and Task Panel.
 _Avoid_: Squeezing the main work surface into Task Navigation
+
+**Task Panel**:
+The Task Page column beside Chat for inspectable surfaces. File Viewer is the v1 occupant; later surfaces can use the same column without becoming a separate Task Page.
+_Avoid_: Files panel as the column name, treating File Viewer as that column's only possible occupant, a second Task Page
+
+**File Viewer**:
+A read-only surface in the Task Panel that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface. On a wide Task Page it shares the page with Chat and Composer; on a narrow Task Page the Task Panel occupies the page until Chat is restored.
+_Avoid_: Treating a browser download or file-manager reveal as the File Viewer, live editor, global editor pane, naming the Task Panel after files
+
+**File Tab**:
+A File Viewer entry for one selected file, retaining that file's visible location within the Task Page while other files may be opened in neighboring tabs.
+_Avoid_: Global editor tab, independent Task surface
 
 **Settings**:
 The global user-facing area for reusable configuration across Tasks and Worktree Management. It includes Agents, MCP Servers, Skills, application preferences, and Worktrees, but does not own Project records or Task lifecycle management.

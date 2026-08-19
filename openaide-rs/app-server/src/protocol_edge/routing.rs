@@ -19,6 +19,7 @@ use openaide_app_server_protocol::methods::{
     TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND, TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE,
     TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION, TASK_RESTORE, TASK_SEARCH_FILES,
     TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW,
+    FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE,
     WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
     WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
     WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
@@ -302,6 +303,16 @@ impl RpcGateway {
             TASK_CLOSE_PLAN => self.handle_task_close_plan(connection_id, id, params, meta),
             TASK_TOOL_IMAGE_PREVIEW => {
                 self.handle_task_tool_image_preview(connection_id, id, params, meta)
+            }
+            FILE_VIEWER_OPEN => self.handle_file_viewer_open(connection_id, id, params, meta),
+            FILE_VIEWER_OPEN_FROM_HANDLE => {
+                self.handle_file_viewer_open_from_handle(connection_id, id, params, meta)
+            }
+            FILE_VIEWER_REFRESH => {
+                self.handle_file_viewer_refresh(connection_id, id, params, meta)
+            }
+            FILE_VIEWER_RELEASE => {
+                self.handle_file_viewer_release(connection_id, id, params, meta)
             }
             TASK_RELEASE => self.handle_task_release(connection_id, id, params, meta, now),
             TASK_ARCHIVE => self.handle_task_archive(connection_id, id, params, meta, now),

@@ -71,6 +71,10 @@ pub const TASK_SET_TITLE: &str = "task/setTitle";
 pub const TASK_SET_PINNED: &str = "task/setPinned";
 pub const TASK_CLOSE_PLAN: &str = "task/closePlan";
 pub const TASK_TOOL_IMAGE_PREVIEW: &str = "task/toolImagePreview";
+pub const FILE_VIEWER_OPEN: &str = "fileViewer/open";
+pub const FILE_VIEWER_OPEN_FROM_HANDLE: &str = "fileViewer/openFromHandle";
+pub const FILE_VIEWER_REFRESH: &str = "fileViewer/refresh";
+pub const FILE_VIEWER_RELEASE: &str = "fileViewer/release";
 pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
 pub const TASK_RELOAD_NATIVE_SESSION: &str = "task/reloadNativeSession";
@@ -161,6 +165,10 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_SET_PINNED,
     TASK_CLOSE_PLAN,
     TASK_TOOL_IMAGE_PREVIEW,
+    FILE_VIEWER_OPEN,
+    FILE_VIEWER_OPEN_FROM_HANDLE,
+    FILE_VIEWER_REFRESH,
+    FILE_VIEWER_RELEASE,
     TASK_CANCEL,
     TASK_OPEN,
     TASK_MARK_READ,

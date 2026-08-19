@@ -177,6 +177,18 @@
   text-decoration: underline;
 }
 
+.agent-file-ref {
+  color: var(--oa-focus);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.agent-file-ref:hover,
+.agent-file-ref:focus-visible {
+  text-decoration-style: solid;
+}
+
 .agent-markdown-image-link {
   width: min(320px, 100%);
   border: 1px solid var(--oa-border);

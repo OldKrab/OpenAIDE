@@ -25,6 +25,10 @@ use crate::client::{
     ClientProbeResult, InitializeParams, InitializeResult,
 };
 use crate::diagnostics::{RuntimeDiagnosticsParams, RuntimeDiagnosticsResult};
+use crate::file_viewer::{
+    FileViewerOpenFromHandleParams, FileViewerOpenParams, FileViewerRefreshParams,
+    FileViewerReleaseParams, FileViewerReleaseResult, FileViewerSnapshot,
+};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
 use crate::project::{
     ProjectAddParams, ProjectAddResult, ProjectRefreshParams, ProjectRefreshResult,
@@ -564,6 +568,30 @@ protocol_method!(
     TASK_TOOL_IMAGE_PREVIEW,
     TaskToolImagePreviewParams,
     TaskToolImagePreviewResult
+);
+protocol_method!(
+    FileViewerOpen,
+    FILE_VIEWER_OPEN,
+    FileViewerOpenParams,
+    FileViewerSnapshot
+);
+protocol_method!(
+    FileViewerOpenFromHandle,
+    FILE_VIEWER_OPEN_FROM_HANDLE,
+    FileViewerOpenFromHandleParams,
+    FileViewerSnapshot
+);
+protocol_method!(
+    FileViewerRefresh,
+    FILE_VIEWER_REFRESH,
+    FileViewerRefreshParams,
+    FileViewerSnapshot
+);
+protocol_method!(
+    FileViewerRelease,
+    FILE_VIEWER_RELEASE,
+    FileViewerReleaseParams,
+    FileViewerReleaseResult
 );
 protocol_method!(TaskCancel, TASK_CANCEL, TaskCancelParams, TaskCancelResult);
 protocol_method!(

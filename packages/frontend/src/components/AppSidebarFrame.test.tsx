@@ -31,6 +31,11 @@ describe("AppSidebarFrame", () => {
       preventDefault: vi.fn(),
     }));
     act(() => separator.props.onPointerMove({ clientX: 356, pointerId: 4 }));
+
+    expect(tree.root.findByProps({ className: "app-sidebar-frame" })
+      .props.style["--app-sidebar-width"]).toBe("248px");
+    expect(setItem).not.toHaveBeenCalled();
+
     act(() => separator.props.onPointerUp({
       currentTarget: { releasePointerCapture: vi.fn() },
       pointerId: 4,

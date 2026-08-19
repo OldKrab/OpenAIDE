@@ -138,6 +138,7 @@ export function createWebAppShell(): FrontendShell {
       openExternal: (url) => window.open(url, "_blank", "noopener,noreferrer"),
       reload: () => window.location.reload(),
     },
+    fileViewer: true,
     taskNotifications,
   };
 }

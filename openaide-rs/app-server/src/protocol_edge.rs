@@ -8,6 +8,7 @@ mod agent_handlers;
 mod attachment_handlers;
 mod client_handlers;
 mod diagnostics_handlers;
+mod file_viewer_handlers;
 pub mod local_http;
 mod messages;
 mod project_handlers;
@@ -67,6 +68,7 @@ pub struct RpcGateway {
     pub(crate) server_requests: ServerRequestRuntime,
     pub(crate) pending_event_deliveries: Vec<GatewayEventDelivery>,
     pub(crate) shell_file_reveals: ShellFileRevealRegistry,
+    pub(crate) file_viewer: crate::file_viewer::FileViewerRegistry,
     pub(crate) snapshots: SnapshotBuilder,
     pub(crate) task_snapshots: Arc<dyn TaskSnapshotSource>,
     project_roots: ConfiguredProjectRoots,
@@ -183,6 +185,7 @@ impl RpcGateway {
             server_requests,
             pending_event_deliveries: Vec::new(),
             shell_file_reveals,
+            file_viewer: crate::file_viewer::FileViewerRegistry::new(),
             snapshots,
             task_snapshots,
             project_roots,

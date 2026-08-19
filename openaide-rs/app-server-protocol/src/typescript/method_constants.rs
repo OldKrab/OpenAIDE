@@ -19,6 +19,7 @@ use crate::methods::{
     TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND, TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE,
     TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION, TASK_RESTORE, TASK_SEARCH_FILES,
     TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW,
+    FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE,
     WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
     WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
     WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
@@ -319,6 +320,22 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const TASK_TOOL_IMAGE_PREVIEW = {:?} as const;\n",
         TASK_TOOL_IMAGE_PREVIEW
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_OPEN = {:?} as const;\n",
+        FILE_VIEWER_OPEN
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_OPEN_FROM_HANDLE = {:?} as const;\n",
+        FILE_VIEWER_OPEN_FROM_HANDLE
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_REFRESH = {:?} as const;\n",
+        FILE_VIEWER_REFRESH
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_RELEASE = {:?} as const;\n",
+        FILE_VIEWER_RELEASE
     ));
     output.push_str(&format!(
         "export const TASK_CANCEL = {:?} as const;\n",
