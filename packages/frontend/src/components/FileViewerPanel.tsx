@@ -1,12 +1,12 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { Copy, FileCode2, FileText, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, Reply, X } from "lucide-react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowLeft, Copy, FileCode2, FileText, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, Reply, X } from "lucide-react";
 import type { FileViewerError, FileViewerSnapshot } from "@openaide/app-server-client";
 import type { FileViewerTab } from "./useTaskFileViewer";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { copyText } from "./clipboard";
 import { ImagePreviewViewport } from "./ImagePreviewViewport";
 import { highlightFileViewerLines } from "./fileViewerHighlight";
-import { setLayoutResizing } from "./layoutResize";
+import { applyTaskPanelRatio, setLayoutResizing } from "./layoutResize";
 
 export function FileViewerPanel({
   collapsed,
@@ -16,6 +16,7 @@ export function FileViewerPanel({
   onRefresh,
   onSelect,
   onSplitRatio,
+  onToggleCollapsed,
   splitRatio,
   tab,
   tabs,
@@ -27,6 +28,7 @@ export function FileViewerPanel({
   onRefresh: (handle: string) => void;
   onSelect: (handle: string) => void;
   onSplitRatio: (ratio: number) => void;
+  onToggleCollapsed?: () => void;
   splitRatio: number;
   tab?: FileViewerTab;
   tabs: FileViewerTab[];
@@ -36,8 +38,9 @@ export function FileViewerPanel({
     pointerId: number;
     startRatio: number;
     startX: number;
+    stack: HTMLElement;
     width: number;
-    workbench: HTMLElement;
+    workbench?: HTMLElement;
   } | undefined>(undefined);
   const ratioRef = useRef(splitRatio);
   ratioRef.current = splitRatio;
@@ -45,19 +48,22 @@ export function FileViewerPanel({
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
-    const workbench = event.currentTarget.closest(".task-workbench");
-    if (!(workbench instanceof HTMLElement)) return;
-    const width = workbench.getBoundingClientRect().width;
+    const stack = event.currentTarget.closest(".task-work-stack");
+    if (!(stack instanceof HTMLElement)) return;
+    const workbench = stack.querySelector(".task-workbench");
+    const width = stack.getBoundingClientRect().width;
     if (width <= 0) return;
-    workbench.dataset.resizing = "true";
-    setLayoutResizing(workbench.closest(".task-work-stack"), true);
+    if (workbench instanceof HTMLElement) workbench.dataset.resizing = "true";
+    stack.dataset.resizing = "true";
+    setLayoutResizing(stack, true);
     dragRef.current = {
       latest: ratioRef.current,
       pointerId: event.pointerId,
       startRatio: ratioRef.current,
       startX: event.clientX,
+      stack,
       width,
-      workbench,
+      workbench: workbench instanceof HTMLElement ? workbench : undefined,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -66,14 +72,15 @@ export function FileViewerPanel({
     if (!drag || drag.pointerId !== event.pointerId) return;
     const next = Math.min(0.72, Math.max(0.28, drag.startRatio - (event.clientX - drag.startX) / drag.width));
     drag.latest = next;
-    drag.workbench.style.setProperty("--task-panel-ratio", String(next));
+    applyTaskPanelRatio(drag.stack, next);
   };
   const finishResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.currentTarget.releasePointerCapture(event.pointerId);
-    delete drag.workbench.dataset.resizing;
-    setLayoutResizing(drag.workbench.closest(".task-work-stack"), false);
+    delete drag.workbench?.dataset.resizing;
+    delete drag.stack.dataset.resizing;
+    setLayoutResizing(drag.stack, false);
     dragRef.current = undefined;
     onSplitRatio(drag.latest);
   };
@@ -81,10 +88,14 @@ export function FileViewerPanel({
   useLayoutEffect(() => {
     const drag = dragRef.current;
     if (!drag) return;
-    drag.workbench.style.setProperty("--task-panel-ratio", String(drag.latest));
-    drag.workbench.dataset.resizing = "true";
-    setLayoutResizing(drag.workbench.closest(".task-work-stack"), true);
+    applyTaskPanelRatio(drag.stack, drag.latest);
+    if (drag.workbench) drag.workbench.dataset.resizing = "true";
+    drag.stack.dataset.resizing = "true";
+    setLayoutResizing(drag.stack, true);
   });
+
+  const [rawByHandle, setRawByHandle] = useState<Record<string, boolean>>({});
+  const markdownRaw = Boolean(tab?.kind === "markdown" && tab.text && rawByHandle[tab.handle]);
 
   if (tabs.length === 0) return null;
   return (
@@ -101,6 +112,19 @@ export function FileViewerPanel({
           role="separator"
           tabIndex={collapsed ? -1 : 0}
         />
+        <div className="file-viewer-chrome">
+        {onToggleCollapsed && !collapsed ? (
+          <button
+            aria-label="Back to Chat"
+            className="file-viewer-back-to-chat"
+            onClick={onToggleCollapsed}
+            title="Back to Chat"
+            type="button"
+          >
+            <ArrowLeft aria-hidden="true" size={16} />
+            Chat
+          </button>
+        ) : null}
         <div className="file-viewer-tabs" role="tablist" aria-label="File Tabs">
           {tabs.map((item) => (
             <div className="file-viewer-tab" data-selected={item.handle === tab?.handle} key={item.handle}>
@@ -115,10 +139,23 @@ export function FileViewerPanel({
           ))}
         </div>
         {tab ? (
+          <FileViewerChromeActions
+            onRefresh={() => onRefresh(tab.handle)}
+            tab={tab}
+          />
+        ) : null}
+        </div>
+        {tab ? (
           <ViewerBody
+            markdownRaw={markdownRaw}
             onClose={onClose}
             onOpenFromHandle={onOpenFromHandle}
-            onQuote={onQuote}
+            onQuote={(text) => {
+              onQuote(text);
+              // Phone File Viewer covers Composer; return to Chat so the Quote is visible.
+              if (!collapsed && onToggleCollapsed && narrowTaskPage()) onToggleCollapsed();
+            }}
+            onRawChange={(raw) => setRawByHandle((current) => ({ ...current, [tab.handle]: raw }))}
             onRefresh={onRefresh}
             tab={tab}
           />
@@ -151,39 +188,91 @@ export function TaskPanelToggle({
   );
 }
 
-function ViewerBody({
-  onClose,
-  onOpenFromHandle,
-  onQuote,
+function FileViewerChromeActions({
   onRefresh,
   tab,
 }: {
+  onRefresh: () => void;
+  tab: FileViewerTab;
+}) {
+  return (
+    <div className="file-viewer-chrome-actions">
+      <button
+        aria-label="Copy path"
+        className="file-viewer-icon-btn"
+        onClick={() => {
+          void copyText(tab.displayPath);
+        }}
+        title="Copy path"
+        type="button"
+      >
+        <Copy size={13} />
+      </button>
+      <button aria-label="Refresh snapshot" className="file-viewer-icon-btn" disabled={tab.kind === "pending"} onClick={onRefresh} title="Refresh" type="button">
+        <RefreshCw size={13} />
+      </button>
+    </div>
+  );
+}
+
+function MarkdownViewMode({
+  markdownRaw,
+  onRawChange,
+}: {
+  markdownRaw: boolean;
+  onRawChange: (raw: boolean) => void;
+}) {
+  return (
+    <div className="file-viewer-view-mode" role="group" aria-label="Markdown view">
+      <button
+        aria-label="Show Markdown preview"
+        aria-pressed={!markdownRaw}
+        className="file-viewer-header-action"
+        onClick={() => onRawChange(false)}
+        type="button"
+      >
+        Preview
+      </button>
+      <button
+        aria-label="Show raw Markdown"
+        aria-pressed={markdownRaw}
+        className="file-viewer-header-action"
+        onClick={() => onRawChange(true)}
+        type="button"
+      >
+        Raw
+      </button>
+    </div>
+  );
+}
+
+function ViewerBody({
+  markdownRaw,
+  onClose,
+  onOpenFromHandle,
+  onQuote,
+  onRawChange,
+  onRefresh,
+  tab,
+}: {
+  markdownRaw: boolean;
   onClose: (handle: string) => void;
   onOpenFromHandle: (handle: string, href: string) => void;
   onQuote: (text: string) => void;
+  onRawChange: (raw: boolean) => void;
   onRefresh: (handle: string) => void;
   tab: FileViewerTab;
 }) {
+  const sourceTab = tab.kind === "markdown"
+    ? { ...tab, language: tab.language ?? "md" }
+    : tab;
   return (
     <div className="file-viewer-frame">
       <div className="file-viewer-header">
         <span className="file-viewer-path" title={tab.displayPath}>{tab.displayPath}</span>
-        <div className="file-viewer-header-actions">
-          <button
-            aria-label="Copy path"
-            className="file-viewer-icon-btn"
-            onClick={() => {
-              void copyText(tab.displayPath);
-            }}
-            title="Copy path"
-            type="button"
-          >
-            <Copy size={13} />
-          </button>
-          <button aria-label="Refresh snapshot" className="file-viewer-icon-btn" disabled={tab.kind === "pending"} onClick={() => onRefresh(tab.handle)} title="Refresh" type="button">
-            <RefreshCw size={13} />
-          </button>
-        </div>
+        {tab.kind === "markdown" && tab.text ? (
+          <MarkdownViewMode markdownRaw={markdownRaw} onRawChange={onRawChange} />
+        ) : null}
       </div>
       <div className="file-viewer-body">
         {tab.kind === "pending" ? (
@@ -193,7 +282,7 @@ function ViewerBody({
           </div>
         ) : null}
         {tab.truncated ? <p className="file-viewer-truncated">Showing the first 1 MiB. Refresh still uses that bound.</p> : null}
-        {tab.kind === "markdown" && tab.text ? (
+        {tab.kind === "markdown" && tab.text && !markdownRaw ? (
           <div className="file-viewer-markdown">
             <AgentMarkdown
               onOpenRelativeHref={(href) => onOpenFromHandle(tab.handle, href)}
@@ -207,8 +296,8 @@ function ViewerBody({
             <ImagePreviewViewport image={{ label: tab.preview.label, url: tab.preview.dataUrl }} />
           </div>
         ) : null}
-        {(tab.kind === "source") && tab.text ? (
-          <SourceView onQuote={onQuote} tab={tab} />
+        {((tab.kind === "source" || markdownRaw) && tab.text) ? (
+          <SourceView onQuote={onQuote} tab={sourceTab} />
         ) : null}
         {tab.kind === "error" ? (
           <div className="file-viewer-fallback" data-kind="error" role="alert">
@@ -283,9 +372,14 @@ function QuoteLineButton({
       title="Quote line"
       type="button"
     >
-      <Reply size={11} />
+      <Reply aria-hidden="true" size={11} />
     </button>
   );
+}
+
+function narrowTaskPage() {
+  return typeof globalThis.matchMedia === "function"
+    && globalThis.matchMedia("(max-width: 760px)").matches;
 }
 
 function tabIcon(tab: FileViewerTab) {

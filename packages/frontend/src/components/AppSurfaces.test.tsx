@@ -678,7 +678,7 @@ describe("AppSurfaces callback wiring", () => {
     const tree = render(controller);
     act(() => tree.root.findByProps({ "aria-label": "Open Plan" }).props.onClick());
 
-    expect(tree.root.findByProps({ "aria-label": "Close Plan" }).props["aria-expanded"]).toBe(true);
+    expect(tree.root.findByProps({ "aria-label": "Hide Plan" }).props["aria-expanded"]).toBe(true);
     expect(latestMockProps<{ planDrawerOpen?: boolean }>(surfaceMocks.task)?.planDrawerOpen).toBe(true);
   });
 

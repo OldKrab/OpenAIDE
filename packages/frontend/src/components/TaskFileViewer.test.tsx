@@ -141,6 +141,46 @@ describe("Task File Viewer", () => {
     expect(onQuote).toHaveBeenCalledWith("deploy/local-web.sh:2\nquoted line");
   });
 
+  it("returns to Chat after quoting a line on a narrow Task Page", () => {
+    const matchMedia = vi.fn((query: string) => ({
+      matches: query.includes("max-width: 760px"),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    vi.stubGlobal("matchMedia", matchMedia);
+    const onQuote = vi.fn();
+    const onToggleCollapsed = vi.fn();
+    let tree: ReturnType<typeof create>;
+    try {
+      act(() => {
+        tree = create(
+          <FileViewerPanel
+            collapsed={false}
+            onClose={vi.fn()}
+            onOpenFromHandle={vi.fn()}
+            onQuote={onQuote}
+            onRefresh={vi.fn()}
+            onSelect={vi.fn()}
+            onSplitRatio={vi.fn()}
+            onToggleCollapsed={onToggleCollapsed}
+            splitRatio={0.45}
+            tab={sourceSnapshot("quoted line")}
+            tabs={[sourceSnapshot("quoted line")]}
+          />,
+        );
+      });
+
+      act(() => {
+        tree!.root.findByProps({ "aria-label": "Quote line 1" }).props.onClick();
+      });
+
+      expect(onQuote).toHaveBeenCalledWith("deploy/local-web.sh:1\nquoted line");
+      expect(onToggleCollapsed).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("highlights rust source from the snapshot language", () => {
     let tree: ReturnType<typeof create>;
     act(() => {
@@ -163,6 +203,72 @@ describe("Task File Viewer", () => {
     expect(tree!.root.findAllByType("span").some((node) => (
       node.children.includes("fn") && typeof node.props.className === "string" && node.props.className.length > 0
     ))).toBe(true);
+  });
+
+  it("shows Markdown as preview and switches that File Tab to raw source", () => {
+    const tab = markdownSnapshot("# Heading\n\nUse **bold** text.");
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <FileViewerPanel
+          collapsed={false}
+          onClose={vi.fn()}
+          onOpenFromHandle={vi.fn()}
+          onQuote={vi.fn()}
+          onRefresh={vi.fn()}
+          onSelect={vi.fn()}
+          onSplitRatio={vi.fn()}
+          splitRatio={0.45}
+          tab={tab}
+          tabs={[tab]}
+        />,
+      );
+    });
+
+    const preview = JSON.stringify(tree!.toJSON());
+    expect(preview).toContain("Heading");
+    expect(preview).toContain("bold");
+    expect(preview).not.toContain("**bold**");
+    expect(tree!.root.findAllByProps({ "aria-label": "Quote line 1" })).toHaveLength(0);
+
+    act(() => {
+      tree!.root.findByProps({ "aria-label": "Show raw Markdown" }).props.onClick();
+    });
+
+    const raw = JSON.stringify(tree!.toJSON());
+    expect(raw).toContain("**bold**");
+    expect(tree!.root.findByProps({ "aria-label": "Quote line 3" })).toBeTruthy();
+
+    act(() => {
+      tree!.root.findByProps({ "aria-label": "Show Markdown preview" }).props.onClick();
+    });
+    expect(JSON.stringify(tree!.toJSON())).not.toContain("**bold**");
+  });
+
+  it("returns to Chat from the File Viewer chrome", () => {
+    const tab = sourceSnapshot("ok\n");
+    const onToggleCollapsed = vi.fn();
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <FileViewerPanel
+          collapsed={false}
+          onClose={vi.fn()}
+          onOpenFromHandle={vi.fn()}
+          onQuote={vi.fn()}
+          onRefresh={vi.fn()}
+          onSelect={vi.fn()}
+          onSplitRatio={vi.fn()}
+          onToggleCollapsed={onToggleCollapsed}
+          splitRatio={0.45}
+          tab={tab}
+          tabs={[tab]}
+        />,
+      );
+    });
+
+    act(() => tree!.root.findByProps({ "aria-label": "Back to Chat" }).props.onClick());
+    expect(onToggleCollapsed).toHaveBeenCalledOnce();
   });
 });
 
@@ -195,6 +301,18 @@ function FileViewerHarness({
       />
     </div>
   );
+}
+
+function markdownSnapshot(text: string): FileViewerSnapshot {
+  return {
+    handle: "handle-md" as FileViewerSnapshot["handle"],
+    displayPath: "docs/notes.md",
+    basename: "notes.md",
+    kind: "markdown",
+    language: "md",
+    text,
+    truncated: false,
+  };
 }
 
 function sourceSnapshot(text: string, extra: Partial<FileViewerSnapshot> = {}): FileViewerSnapshot {
