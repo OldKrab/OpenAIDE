@@ -10,25 +10,14 @@ export function assertReleaseNotes({
   candidate,
   notes,
   changelog,
-  previousTag = "",
-  sourceChangedSincePrevious = true,
 }) {
   validateProjectVersion(candidate, "Release version");
   const normalizedNotes = normalizeNotes(notes);
   if (!normalizedNotes) {
     throw new Error("Release notes must contain user-facing Markdown");
   }
-  if (normalizedNotes.includes("OPENAIDE_RELEASE_NOTES_TEMPLATE")) {
-    throw new Error("replace the release-notes.md template before dispatching a release");
-  }
   if (!/^##\s+\S+/m.test(normalizedNotes) || !/^\s*[-*]\s+\S+/m.test(normalizedNotes)) {
     throw new Error("Release notes must contain Markdown sections and bullet-point user impact");
-  }
-  if (/^##\s+Changelog\b/im.test(normalizedNotes)) {
-    throw new Error("Release notes must not contain a Changelog section; Version Bump adds it");
-  }
-  if (previousTag && !sourceChangedSincePrevious) {
-    throw new Error(`release-notes.md must change after ${previousTag}`);
   }
 
   for (const entry of changelogEntries(changelog)) {
@@ -63,10 +52,10 @@ function changelogEntries(changelog) {
 }
 
 function main() {
-  const [candidate, notesPath, previousTag = "", sourceChanged = "true"] = process.argv.slice(2);
+  const [candidate, notesPath] = process.argv.slice(2);
   if (!candidate || !notesPath) {
     throw new Error(
-      "Usage: node scripts/validate-release-notes.mjs <version> <notes-path> [previous-tag] [source-changed]",
+      "Usage: node scripts/validate-release-notes.mjs <version> <notes-path>",
     );
   }
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -75,8 +64,6 @@ function main() {
     candidate,
     notes: readFileSync(notesPath, "utf8"),
     changelog,
-    previousTag,
-    sourceChangedSincePrevious: sourceChanged !== "false",
   });
   console.log(`Validated release notes for ${candidate}.`);
 }

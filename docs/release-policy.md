@@ -54,32 +54,24 @@ Before that release:
 
 1. Confirm that `main` contains exactly the changes to release. Choose a new
    OpenAIDE version without a `v` prefix, such as `0.0.2-beta.1` or `0.0.2`.
-2. Replace the checked-in next-release template in `release-notes.md` with
-   concise user-facing Markdown. Make that change in a reviewed PR after the
-   previous canonical release; do not reuse an old release summary. Prefer
-   sections such as `## Features`, `## Bug Fixes`, and `## Chores`, and describe
-   user impact. Do not add a changelog section because the workflow appends it.
-   Version Bump requires the submitted notes to exactly match the checked-in
-   file, rejects the template marker, rejects notes identical to any existing
-   extension changelog entry, and rejects an unchanged notes file since the
-   previous canonical release. These notes become the GitHub Release body for
-   every release, but only stable releases add them to the extension changelog.
-   Alpha, beta, and release-candidate versions never create extension changelog
-   entries. Stable release notes compare against the previous canonical
-   immutable release and never name prereleases.
+2. Have the release agent inspect the changes since the previous canonical
+   release and generate concise, user-facing Markdown for this release. Pass
+   the final notes directly to `Version Bump`; they are not prepared, reviewed,
+   or committed as a separate repository file.
 3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh
    gh workflow run version-bump.yml --ref main \
-     -f version=0.0.2-beta.1
+     -f version=0.0.2-beta.1 \
+     -f release_notes="$RELEASE_NOTES"
    ```
 
 4. `Version Bump` is serialized and cannot be cancelled in progress. It checks
    that the exact checked-out `main` commit has a completed successful CI push
-   run, validates the monotonic version and release notes before making any
-   commit, resolves the changelog baseline from canonical immutable releases,
-   updates the root package and lockfile, updates the extension changelog for
-   stable releases, commits the release notes, creates the explicit tag, and
+   run and validates the monotonic version and generated release notes. The
+   workflow uses those exact notes for the version commit, every GitHub Release,
+   and the stable extension changelog; prereleases do not add changelog entries.
+   It then updates the root package and lockfile, creates the explicit tag, and
    atomically pushes the `main` update and tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, then
    builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
