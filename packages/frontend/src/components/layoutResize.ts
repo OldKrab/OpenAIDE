@@ -1,7 +1,7 @@
 /** Live layout resize updates CSS vars without React; Chat wrap still follows the column. */
 
 export function setLayoutResizing(root: ParentNode | null | undefined, resizing: boolean) {
-  if (!(root instanceof HTMLElement)) return;
+  if (typeof HTMLElement === "undefined" || !(root instanceof HTMLElement)) return;
   if (resizing) root.dataset.resizing = "true";
   else delete root.dataset.resizing;
 }
