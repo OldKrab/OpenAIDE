@@ -35,8 +35,8 @@ use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentConfigOptionCurrentValue, LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot,
-    TaskPreparationSnapshot, TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
-    TaskTitleSource as ProtocolTaskTitleSource,
+    TaskPermissionPolicy, TaskPreparationSnapshot, TaskSendCapabilityState,
+    TaskStatus as ProtocolTaskStatus, TaskTitleSource as ProtocolTaskTitleSource,
 };
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
@@ -46,7 +46,8 @@ use openaide_app_server_protocol::task::{
     TaskCancelParams, TaskClosePlanParams, TaskMarkReadParams, TaskOpenParams,
     TaskQueueAppendParams, TaskQueueMoveParams, TaskQueueRemoveParams, TaskQueueSendSelection,
     TaskQueueTakeParams, TaskReleaseParams, TaskReloadNativeSessionParams, TaskSendParams,
-    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
+    TaskSetConfigOptionParams, TaskSetPermissionPolicyParams, TaskSetPinnedParams,
+    TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -1930,6 +1931,49 @@ fn set_pinned_persists_without_advancing_task_activity_and_is_idempotent() {
         store.read_task("task-pinned").unwrap().revision,
         committed_revision
     );
+}
+
+#[test]
+fn permission_policy_is_task_scoped_durable_and_does_not_advance_activity() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = task_record("task-policy", "/tmp/openaide-policy-workspace/app");
+    let last_activity = record.last_activity.clone();
+    store.write_task(&record).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = crate::attachment_runtime::AttachmentOwner::test_client_instance_id();
+
+    let changed = api
+        .set_task_permission_policy(
+            &client,
+            TaskSetPermissionPolicyParams {
+                task_id: "task-policy".into(),
+                policy: TaskPermissionPolicy::AutoApprove,
+            },
+        )
+        .unwrap();
+    assert_eq!(changed.permission_policy, TaskPermissionPolicy::AutoApprove);
+    let stored = store.read_task("task-policy").unwrap();
+    assert_eq!(stored.permission_policy, TaskPermissionPolicy::AutoApprove);
+    assert_eq!(stored.last_activity, last_activity);
+    let revision = stored.revision;
+
+    api.set_task_permission_policy(
+        &client,
+        TaskSetPermissionPolicyParams {
+            task_id: "task-policy".into(),
+            policy: TaskPermissionPolicy::AutoApprove,
+        },
+    )
+    .unwrap();
+    assert_eq!(store.read_task("task-policy").unwrap().revision, revision);
 }
 
 #[test]
@@ -8940,6 +8984,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "codex".to_string(),

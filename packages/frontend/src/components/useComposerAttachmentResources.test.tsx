@@ -230,6 +230,7 @@ function memoryStorage(): Storage {
 function taskSnapshot(taskId: string): NonNullable<AppState["snapshot"]> {
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: taskId,
       title: "Task",

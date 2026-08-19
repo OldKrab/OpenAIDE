@@ -283,6 +283,7 @@ fn task_record(task_id: &str, workspace: &str, activity: String) -> TaskRecord {
         created_at: activity.clone(),
         updated_at: activity.clone(),
         last_activity: activity,
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "codex".to_string(),

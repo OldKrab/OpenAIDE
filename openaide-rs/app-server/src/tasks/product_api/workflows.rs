@@ -11,7 +11,8 @@ use openaide_app_server_protocol::task::{
     TaskClosePlanParams, TaskLifecycleChanged, TaskQueueAppendParams, TaskQueueMoveParams,
     TaskQueueRemoveParams, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
     TaskRestoreParams, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams,
+    TaskSetConfigOptionParams, TaskSetPermissionPolicyParams, TaskSetPinnedParams,
+    TaskSetTitleParams,
 };
 
 pub(crate) trait TaskAcquireWorkflow: Send + Sync {
@@ -150,6 +151,12 @@ pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
 }
 
 pub(crate) trait TaskMetadataWorkflow: Send + Sync {
+    fn set_permission_policy_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskSetPermissionPolicyParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
+
     fn set_title_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

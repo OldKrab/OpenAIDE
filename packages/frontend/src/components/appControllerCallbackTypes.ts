@@ -123,6 +123,7 @@ export type TaskCallbacks = {
   ) => void;
   respondToQuestion: (requestId: string, response: ElicitationResponse) => void;
   sendPrompt: (prompt?: string) => void;
+  setPermissionPolicy: (policy: import("@openaide/app-shell-contracts").TaskPermissionPolicy) => Promise<void>;
   selectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   /** Same attached App Server session as other Task intents. */
   fileViewer?: Pick<BackendConnection, "request">;

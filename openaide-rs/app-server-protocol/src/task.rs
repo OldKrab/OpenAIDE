@@ -8,7 +8,8 @@ use crate::ids::{
 };
 use crate::snapshot::AgentConfigOptionCurrentValue;
 use crate::snapshot::{
-    ChatItem, TaskAgentConfigSnapshot, TaskLifecycle, TaskSnapshot, TaskSummary,
+    ChatItem, TaskAgentConfigSnapshot, TaskLifecycle, TaskPermissionPolicy, TaskSnapshot,
+    TaskSummary,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -272,6 +273,20 @@ pub struct TaskSetConfigOptionParams {
 pub struct TaskSetConfigOptionResult {
     /// Complete Agent-owned Configuration Option state confirmed by the mutation.
     pub agent_config: TaskAgentConfigSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSetPermissionPolicyParams {
+    pub task_id: TaskId,
+    pub policy: TaskPermissionPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSetPermissionPolicyResult {
+    /// Complete confirmed Task state so the header can settle without waiting for a replica tick.
+    pub task: TaskSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

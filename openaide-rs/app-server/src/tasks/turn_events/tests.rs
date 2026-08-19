@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
     AgentContextUsage, AgentEvent, AgentPermissionOption, AgentPermissionOptionKind,
-    AgentPermissionRequest, AgentSubagent, AgentTerminalAppend, AgentToolCall, AgentToolCallRef,
-    AgentToolCallStatus, AgentToolUpdate, AgentTurnUsage, AgentUsageCost,
+    AgentPermissionOutcome, AgentPermissionRequest, AgentSubagent, AgentTerminalAppend,
+    AgentToolCall, AgentToolCallRef, AgentToolCallStatus, AgentToolUpdate, AgentTurnUsage,
+    AgentUsageCost,
 };
 use crate::agent::{
     AgentEventSink, AgentMetadataField, AgentPromptOutcome, AgentSessionEventSink,
@@ -695,6 +696,97 @@ fn permission_is_transient_until_the_server_request_resolves() {
                             && outcome.option_id.as_deref() == Some("allow")
                             && outcome.option_label.as_deref() == Some("Allow"))
             )
+    ));
+}
+
+#[test]
+fn auto_approve_policy_resolves_an_allow_once_permission_without_waiting() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    let mut task = running_task("task_1");
+    task.permission_policy =
+        openaide_app_server_protocol::snapshot::TaskPermissionPolicy::AutoApprove;
+    store.write_task(&task).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    );
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
+    let mut request = permission_request("permission_1");
+    request.options.insert(
+        0,
+        AgentPermissionOption {
+            option_id: "allow_always".to_string(),
+            name: "Always allow".to_string(),
+            kind: AgentPermissionOptionKind::AllowAlways,
+        },
+    );
+
+    let outcome = sink.request_permission(request).unwrap();
+
+    assert!(matches!(
+        outcome,
+        AgentPermissionOutcome::Selected { option_id } if option_id == "allow"
+    ));
+    assert_eq!(server_requests.pending_count(), 0);
+    assert_eq!(
+        store.read_task("task_1").unwrap().status,
+        TaskStatus::Active
+    );
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::Activity { steps, .. }
+            if matches!(
+                steps.as_slice(),
+                [crate::protocol::model::ActivityStep::Tool { permission_outcomes, .. }]
+                    if matches!(permission_outcomes.as_slice(), [outcome]
+                        if outcome.decision == crate::protocol::model::ToolPermissionDecision::Approved
+                            && outcome.option_id.as_deref() == Some("allow"))
+            )
+    ));
+}
+
+#[test]
+fn auto_approve_policy_leaves_requests_without_allow_once_for_manual_decision() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    register_permission_responder(&server_requests, "task_1");
+    let mut task = running_task("task_1");
+    task.permission_policy =
+        openaide_app_server_protocol::snapshot::TaskPermissionPolicy::AutoApprove;
+    store.write_task(&task).unwrap();
+    let sink = Arc::new(TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    ));
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
+    let mut request = permission_request("permission_1");
+    request.options[0] = AgentPermissionOption {
+        option_id: "allow_always".to_string(),
+        name: "Always allow".to_string(),
+        kind: AgentPermissionOptionKind::AllowAlways,
+    };
+
+    let worker = std::thread::spawn({
+        let sink = Arc::clone(&sink);
+        move || sink.request_permission(request)
+    });
+    while server_requests.pending_count() == 0 {
+        std::thread::yield_now();
+    }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
+    answer_permission(&server_requests, "task_1", "allow_always");
+
+    assert!(matches!(
+        worker.join().unwrap().unwrap(),
+        AgentPermissionOutcome::Selected { option_id } if option_id == "allow_always"
     ));
 }
 
@@ -2181,6 +2273,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         created_at: "1".to_string(),
         updated_at: "1".to_string(),
         last_activity: "1".to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_name: "Codex".to_string(),

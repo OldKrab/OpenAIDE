@@ -3928,6 +3928,7 @@ function settlePromises() {
 function snapshot(taskId: string): TaskSnapshot {
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: taskId,
       title: "Task",
@@ -3988,6 +3989,7 @@ function protocolTaskSnapshot(
   return {
     task: protocolTaskSummary(taskId, title),
     lifecycle,
+    permissionPolicy: "askEveryTime",
     revision: 2,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },

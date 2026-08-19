@@ -207,6 +207,7 @@ impl TaskProductApi {
             created_at: now.to_string(),
             updated_at: now.to_string(),
             last_activity: last_activity.to_string(),
+            permission_policy: Default::default(),
             composer_history: Default::default(),
             message_queue: Default::default(),
             agent_name: self

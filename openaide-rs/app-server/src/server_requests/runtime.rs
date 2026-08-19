@@ -154,6 +154,46 @@ impl ServerRequestRuntime {
         }
     }
 
+    /// Resolves a freshly opened permission request from an explicit Task policy.
+    ///
+    /// The caller has already established that the selected option is ACP `allow_once`.
+    /// Keeping this resolution inside the runtime prevents an auto policy from looking like a
+    /// client response or acquiring Agent-owned persistent permission state.
+    pub fn auto_approve_permission(
+        &self,
+        request_id: &RequestId,
+        option_id: &str,
+        now: AppServerTime,
+    ) -> bool {
+        let mut inner = self.inner.lock().expect("server request runtime poisoned");
+        if !waiter_allows_option(&inner, request_id, option_id) {
+            return false;
+        }
+        if inner
+            .broker
+            .resolve_request_without_responder(request_id, now)
+            .is_none()
+        {
+            return false;
+        }
+        let accepted = set_permission_outcome(
+            &mut inner.permission_waiters,
+            request_id,
+            option_id.to_string(),
+        );
+        if accepted {
+            logging::info(
+                "server_permission_auto_approved",
+                json!({
+                    "server_request_id": request_id.as_str(),
+                    "option_kind": "allow_once",
+                }),
+            );
+            self.changed.notify_all();
+        }
+        accepted
+    }
+
     pub fn handle_response(
         &self,
         responder: ClientInstanceId,

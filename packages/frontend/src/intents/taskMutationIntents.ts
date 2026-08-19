@@ -8,6 +8,7 @@ import {
   TASK_QUEUE_TAKE,
   TASK_RELOAD_NATIVE_SESSION,
   TASK_SEND,
+  TASK_SET_PERMISSION_POLICY,
   type BackendConnection,
   type ClientInstanceId,
   type ClientMutationId,
@@ -16,7 +17,7 @@ import {
   type TaskId,
   type QueuedMessageId,
 } from "@openaide/app-server-client";
-import type { TaskSnapshot } from "@openaide/app-shell-contracts";
+import type { TaskPermissionPolicy, TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
 import {
   appServerAttachment,
@@ -77,6 +78,42 @@ export function cancelTaskIntent(
         message: taskMutationErrorMessage(error, "Unable to stop task."),
       });
     });
+}
+
+/** Persists a Task-owned preference and reconciles from the confirmed full Task snapshot. */
+export async function setTaskPermissionPolicyIntent(
+  dependencies: TaskMutationIntentDependencies,
+  snapshot: TaskSnapshot | undefined,
+  policy: TaskPermissionPolicy,
+): Promise<void> {
+  if (!snapshot) return;
+  const taskId = snapshot.task.task_id;
+  const request = dependencies.backendConnection?.request;
+  if (!request) {
+    dependencies.dispatch({
+      type: "taskInput:error",
+      taskId,
+      message: "App Server connection unavailable.",
+    });
+    return;
+  }
+  try {
+    const result = await request(TASK_SET_PERMISSION_POLICY, {
+      taskId: taskId as TaskId,
+      policy: policy === "auto_approve" ? "autoApprove" : "askEveryTime",
+    });
+    dependencies.dispatch({
+      type: "snapshot",
+      snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
+      intent: "refresh",
+    });
+  } catch (error) {
+    dependencies.dispatch({
+      type: "taskInput:error",
+      taskId,
+      message: taskMutationErrorMessage(error, "Unable to update permission handling."),
+    });
+  }
 }
 
 /** Requests one user-approved full Native Session replay. This mutation is never retried. */

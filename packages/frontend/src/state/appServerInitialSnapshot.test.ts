@@ -157,6 +157,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     activeTask: {
       task: taskSummary(),
       lifecycle: "open",
+      permissionPolicy: "askEveryTime",
       revision: 2,
       preparation: { kind: "ready" },
       agentConfig: { state: "ready", options: [] },

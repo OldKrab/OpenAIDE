@@ -150,6 +150,7 @@ export function TaskView({
   onSendQueueMessageNow,
   onRestoreTask,
   onSendPrompt,
+  onPermissionPolicyChange,
   onSelectConfigOption,
   permissionResponses,
   planDrawerOpen = false,
@@ -199,6 +200,7 @@ export function TaskView({
   onSendQueueMessageNow?: (queuedMessageId: string) => void;
   onRestoreTask?: (taskId: string) => void;
   onSendPrompt: (prompt?: string) => void;
+  onPermissionPolicyChange?: (policy: import("@openaide/app-shell-contracts").TaskPermissionPolicy) => Promise<void>;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   permissionResponses: AppState["permissionResponses"];
   planDrawerOpen?: boolean;
@@ -430,6 +432,9 @@ export function TaskView({
           agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
           status={snapshot.task.status}
           title={activeTask?.title ?? snapshot.task.title}
+          permissionPolicy={snapshot.permission_policy}
+          onPermissionPolicyChange={onPermissionPolicyChange}
+          permissionPolicyDisabled={archived || !backendReady}
           workspaceRoot={snapshot.task.workspace_root}
           worktreeName={snapshot.task.worktree_name}
           gitRef={snapshot.task.git_ref}

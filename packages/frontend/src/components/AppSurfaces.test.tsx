@@ -655,6 +655,7 @@ describe("AppSurfaces callback wiring", () => {
     const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
 
     expect(header.findByType("small").children.join("")).toBe("Ready · OpenAIDE");
+    expect(header.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
   });
 
   it("opens the Task Plan from the narrow workbench header", () => {
@@ -1520,6 +1521,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         respondToQuestion: vi.fn(),
         selectConfigOption: vi.fn(),
         sendPrompt: vi.fn(),
+        setPermissionPolicy: vi.fn(async () => undefined),
       },
     },
     intents: {
@@ -1653,6 +1655,7 @@ function stubMobileWindow() {
 function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
   return {
     lifecycle: hasMessages ? "open" : "prepared",
+    permission_policy: "ask_every_time",
     chat: {
       has_before: false,
       has_messages: hasMessages,

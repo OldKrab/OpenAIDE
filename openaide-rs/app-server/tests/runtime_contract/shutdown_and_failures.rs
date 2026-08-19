@@ -160,6 +160,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             created_at: "1".to_string(),
             updated_at: "1".to_string(),
             last_activity: "1".to_string(),
+            permission_policy: Default::default(),
             composer_history: Default::default(),
             message_queue: Default::default(),
             agent_name: "Codex".to_string(),

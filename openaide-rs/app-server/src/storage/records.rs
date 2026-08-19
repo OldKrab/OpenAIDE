@@ -1,4 +1,4 @@
-use openaide_app_server_protocol::ids::ClientInstanceId;
+use openaide_app_server_protocol::{ids::ClientInstanceId, snapshot::TaskPermissionPolicy};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
@@ -556,6 +556,12 @@ pub struct TaskRecord {
     pub created_at: String,
     pub updated_at: String,
     pub last_activity: String,
+    /// User-owned Task policy. Missing values from older records preserve the safe default.
+    #[serde(
+        default,
+        skip_serializing_if = "TaskPermissionPolicy::is_ask_every_time"
+    )]
+    pub permission_policy: TaskPermissionPolicy,
     /// Bounded accepted text recall kept separate from replaceable Native Session Chat.
     #[serde(default, skip_serializing_if = "ComposerHistory::is_empty")]
     pub composer_history: ComposerHistory,
@@ -642,6 +648,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             updated_at: String,
             last_activity: String,
             #[serde(default)]
+            permission_policy: TaskPermissionPolicy,
+            #[serde(default)]
             composer_history: ComposerHistory,
             #[serde(default)]
             message_queue: TaskMessageQueueRecord,
@@ -709,6 +717,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             created_at: stored.created_at,
             updated_at: stored.updated_at,
             last_activity: stored.last_activity,
+            permission_policy: stored.permission_policy,
             composer_history: stored.composer_history,
             message_queue: stored.message_queue,
             agent_id: stored.agent_id,

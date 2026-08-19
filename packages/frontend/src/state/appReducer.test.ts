@@ -2432,6 +2432,7 @@ function snapshot(taskId: string, items: ChatMessage[] = [], revision = 1): Task
   const task = taskSummary(taskId);
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: { ...task, task_version: revision, message_history_version: revision },
     chat: {
       task_id: taskId,

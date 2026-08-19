@@ -100,11 +100,11 @@ use crate::snapshot::{
     TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason, TaskContextUsage,
     TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueuePauseSnapshot,
     TaskMessageQueueSnapshot, TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState,
-    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
-    TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
-    TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
-    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage,
-    TaskUsageCost, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
+    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationAction, TaskPreparationSnapshot,
+    TaskPreparationStep, TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker,
+    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
+    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
+    TaskTurnUsage, TaskUsageCost, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
     ToolPresentationActionSnapshot, ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
@@ -131,8 +131,9 @@ use crate::task::{
     TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
     TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
     TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
-    TaskSetTitleResult, TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
+    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
     TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
 use crate::workspace::{
@@ -424,6 +425,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskQueueMoveResult>(output, config);
     push_decl::<TaskSetConfigOptionParams>(output, config);
     push_decl::<TaskSetConfigOptionResult>(output, config);
+    push_decl::<TaskSetPermissionPolicyParams>(output, config);
+    push_decl::<TaskSetPermissionPolicyResult>(output, config);
     push_decl::<TaskSetTitleParams>(output, config);
     push_decl::<TaskTitleSelection>(output, config);
     push_decl::<TaskSetTitleResult>(output, config);
@@ -523,6 +526,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskTitleSource>(output, config);
     push_decl::<TaskStatus>(output, config);
     push_decl::<TaskLifecycle>(output, config);
+    push_decl::<TaskPermissionPolicy>(output, config);
     push_decl::<TaskSnapshot>(output, config);
     push_decl::<TaskMessageQueueSnapshot>(output, config);
     push_decl::<TaskMessageQueuePauseSnapshot>(output, config);

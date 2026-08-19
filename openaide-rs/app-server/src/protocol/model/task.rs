@@ -81,6 +81,7 @@ pub struct TaskSummary {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    pub permission_policy: openaide_app_server_protocol::snapshot::TaskPermissionPolicy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<String>,
     pub lifecycle: TaskLifecycle,

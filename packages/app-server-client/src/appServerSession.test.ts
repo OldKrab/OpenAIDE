@@ -163,6 +163,7 @@ function taskSubscription(cursor: string, revision: number): StateSubscribeResul
         task: taskSummary(),
         lifecycle: "open",
         revision,
+        permissionPolicy: "askEveryTime",
         preparation: { kind: "ready" },
         agentConfig: { state: "ready", options: [] },
         agentCommands: { state: "ready", commands: [] },

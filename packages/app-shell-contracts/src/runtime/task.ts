@@ -34,9 +34,13 @@ export type TaskAttentionEvent = {
   occurred_at: string;
 };
 
+/** User-owned handling for future permission requests in one Task. */
+export type TaskPermissionPolicy = "ask_every_time" | "auto_approve";
+
 export type TaskSnapshot = {
   lifecycle: "prepared" | "open" | "archived";
   task: TaskSummary;
+  permission_policy: TaskPermissionPolicy;
   /** App Server-authored start of the active turn; absent when no turn is running. */
   active_turn_started_at?: string;
   chat: MessagePage;

@@ -35,6 +35,7 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
         usage
     });
     TaskSnapshot {
+        permission_policy: task.permission_policy,
         active_turn_started_at: task.active_turn_started_at.clone(),
         settings_summary: SettingsSummary {
             agent_id: task.agent_id.clone(),

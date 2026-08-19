@@ -603,6 +603,7 @@ function taskSnapshot(id: string, revision: number): TaskSnapshot {
     task: taskSummary(id),
     lifecycle: "open",
     revision,
+    permissionPolicy: "askEveryTime",
     preparation: { kind: "ready" },
     agentConfig: { state: "ready", options: [] },
     agentCommands: { state: "ready", commands: [] },

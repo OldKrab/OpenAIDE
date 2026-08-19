@@ -325,6 +325,7 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     task.status = projected_status;
     Ok(TaskSnapshot {
         task,
+        permission_policy: snapshot.permission_policy,
         active_turn_started_at: snapshot.active_turn_started_at,
         lifecycle,
         revision: snapshot.revision,

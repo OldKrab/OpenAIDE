@@ -358,6 +358,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 worktree_id: None,
                 workspace_available: true,
             },
+            permission_policy: Default::default(),
             active_turn_started_at: None,
             lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
             revision: 7,

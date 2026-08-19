@@ -220,6 +220,7 @@ function taskSnapshot(): TaskSnapshot {
   const message = chatMessage(1);
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: "task-1",
       title: "Task",

@@ -151,6 +151,7 @@ export function AppPrimaryTaskSurface({
         onOpenProjectSettings={workspaceRecovery?.openProjectSettings}
         onSubscribeToolDetail={callbacks.task.subscribeToolDetail}
         onPermissionRespond={callbacks.task.respondToPermission}
+        onPermissionPolicyChange={callbacks.task.setPermissionPolicy}
         onQuestionRespond={callbacks.task.respondToQuestion}
         onReconnectProject={workspaceRecovery?.reconnectProject}
         onRetryConnection={retryTaskOpen}

@@ -96,6 +96,7 @@ fn main() {
 
     let snapshot = TaskSnapshot {
         task: task.clone(),
+        permission_policy: Default::default(),
         active_turn_started_at: None,
         lifecycle: openaide_app_server::storage::records::TaskLifecycle::Open,
         chat: chat.clone(),
