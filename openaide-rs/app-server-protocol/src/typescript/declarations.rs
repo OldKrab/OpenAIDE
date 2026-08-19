@@ -37,10 +37,6 @@ use crate::diagnostics::{
     ActiveTaskDiagnosticsResult, DiagnosticsRedaction, RuntimeDiagnosticsParams,
     RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus, TaskDiagnosticsResult,
 };
-use crate::file_viewer::{
-    FileViewerError, FileViewerKind, FileViewerOpenFromHandleParams, FileViewerOpenParams,
-    FileViewerRefreshParams, FileViewerReleaseParams, FileViewerReleaseResult, FileViewerSnapshot,
-};
 use crate::envelopes::{
     ClientRequestEnvelope, ErrorEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta,
     ServerRequestEnvelope,
@@ -49,11 +45,16 @@ use crate::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
 use crate::events::{
     AppServerEvent, AppServerEventPayload, EventScope, TaskChanges, TaskChatChange, ToolDetailDelta,
 };
+use crate::file_viewer::{
+    FileViewerError, FileViewerKind, FileViewerOpenFromHandleParams, FileViewerOpenParams,
+    FileViewerRefreshParams, FileViewerReleaseParams, FileViewerReleaseResult, FileViewerSnapshot,
+};
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
-    FileBrowserRootId, FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId, ServerId, StateRootId,
-    TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId, WorktreeRepositoryId,
+    FileBrowserRootId, FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId,
+    ServerId, StateRootId, TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId,
+    WorktreeRepositoryId,
 };
 use crate::project::{
     ProjectAddParams, ProjectAddResult, ProjectRefreshParams, ProjectRefreshResult,

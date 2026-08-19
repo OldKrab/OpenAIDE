@@ -1,5 +1,5 @@
-use crate::protocol::model::{IsolationKind, TaskStatus};
 use super::ProtocolEdgeStdioDispatcher;
+use crate::protocol::model::{IsolationKind, TaskStatus};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 use crate::storage_runtime::StateRoot;
@@ -108,5 +108,8 @@ fn file_viewer_open_returns_a_snapshot_handle_through_protocol() {
     assert_eq!(snapshot["kind"], "markdown");
     assert_eq!(snapshot["basename"], "README.md");
     assert_eq!(snapshot["text"], "# Hello\n");
-    assert!(snapshot["handle"].as_str().unwrap().starts_with("file-viewer-"));
+    assert!(snapshot["handle"]
+        .as_str()
+        .unwrap()
+        .starts_with("file-viewer-"));
 }

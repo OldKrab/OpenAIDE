@@ -38,10 +38,10 @@ impl RpcGateway {
                 "has_line": params.line.is_some(),
             }),
         );
-        let workspace_root = match self.task_snapshots.workspace_root_for_client(
-            &client.client_instance_id,
-            &params.task_id,
-        ) {
+        let workspace_root = match self
+            .task_snapshots
+            .workspace_root_for_client(&client.client_instance_id, &params.task_id)
+        {
             Ok(workspace_root) => workspace_root,
             Err(error) => {
                 logging::info(
@@ -91,7 +91,10 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for File Viewer");
-        logging::info("file_viewer_open_from_handle_started", serde_json::json!({}));
+        logging::info(
+            "file_viewer_open_from_handle_started",
+            serde_json::json!({}),
+        );
         let snapshot = self.file_viewer.open_from_handle(
             &client.client_instance_id,
             &params.handle,

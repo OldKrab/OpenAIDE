@@ -142,7 +142,11 @@ fn missing_handle_snapshot(handle: &FileViewerHandleId) -> FileViewerSnapshot {
     }
 }
 
-fn read_snapshot(handle: FileViewerHandleId, path: PathBuf, line: Option<u32>) -> FileViewerSnapshot {
+fn read_snapshot(
+    handle: FileViewerHandleId,
+    path: PathBuf,
+    line: Option<u32>,
+) -> FileViewerSnapshot {
     let display_path = path.to_string_lossy().into_owned();
     let basename = path
         .file_name()
@@ -336,7 +340,10 @@ fn fragment_line(href: &str) -> Option<u32> {
 
 fn is_markdown_name(path: &Path) -> bool {
     matches!(
-        path.extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase).as_deref(),
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
         Some("md" | "markdown" | "mdown")
     )
 }

@@ -31,12 +31,7 @@ fn open_keeps_a_failed_tab_with_classified_error() {
     let dir = tempfile::TempDir::new().unwrap();
     let registry = FileViewerRegistry::new();
 
-    let snapshot = registry.open(
-        &client(),
-        dir.path().to_str().unwrap(),
-        "missing.env",
-        None,
-    );
+    let snapshot = registry.open(&client(), dir.path().to_str().unwrap(), "missing.env", None);
 
     assert_eq!(snapshot.kind, FileViewerKind::Error);
     assert_eq!(snapshot.error, Some(FileViewerError::NotFound));
