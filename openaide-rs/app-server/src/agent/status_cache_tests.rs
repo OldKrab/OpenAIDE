@@ -45,6 +45,19 @@ fn failed_probe_records_user_visible_status() {
 }
 
 #[test]
+fn successful_session_records_connected_without_replacing_authenticating() {
+    let cache = AgentStatusCache::default();
+    cache.record_connected("codex");
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Connected);
+
+    cache
+        .begin_authentication("codex", "browser-login", false)
+        .unwrap();
+    cache.record_connected("codex");
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Authenticating);
+}
+
+#[test]
 fn missing_probe_capability_records_unsupported_status() {
     let cache = AgentStatusCache::default();
 

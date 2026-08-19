@@ -266,6 +266,19 @@ describe("AgentSettingsTab interactions", () => {
     expect(onRetry).toHaveBeenCalledWith("codex");
   });
 
+  it("does not present idle disconnected as a broken Agent in the catalog", () => {
+    const view = renderAgentSettings({
+      agents: [
+        builtInAgent("codex", { enabled: true, status: "disconnected" }),
+        builtInAgent("opencode", { enabled: false, status: "disabled" }),
+      ],
+      openFirst: false,
+    });
+
+    expect(textContent(view.root)).not.toContain("disconnected");
+    expect(textContent(view.root)).toContain("Off");
+  });
+
   it("offers recovery when the selected Agent requires setup", () => {
     const onRetry = vi.fn(async () => true);
     const view = renderAgentSettings({

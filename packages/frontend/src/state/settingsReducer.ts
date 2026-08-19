@@ -14,6 +14,7 @@ type SettingsAction =
   | { type: "settings:start" }
   | { type: "settings:sections"; tabs: SettingsTabId[] }
   | { type: "settings:agentDetailsResult"; generatedAt: string; agents: AgentSettingsRecord[] }
+  | { type: "settings:agentCollection"; agents: Array<{ agentId: string; status: AgentSettingsRecord["status"]; setupReason?: "nodeJsRequired" }> }
   | { type: "settings:mcpServersStart" }
   | { type: "settings:mcpServersResult"; generatedAt: string; availability: SettingsProjectionAvailability; servers: McpServerSettingsRecord[] }
   | { type: "settings:mcpServersError"; message: string }
@@ -56,6 +57,22 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
           agentDetails: action.agents,
           agentDetailsGeneratedAt: action.generatedAt,
           error: undefined,
+        },
+      };
+    case "settings:agentCollection":
+      return {
+        ...state,
+        settings: {
+          ...state.settings,
+          agentDetails: state.settings.agentDetails?.map((agent) => {
+            const update = action.agents.find((candidate) => candidate.agentId === agent.id);
+            if (!update || !agent.enabled) return agent;
+            return {
+              ...agent,
+              status: update.status,
+              setup_reason: update.setupReason,
+            };
+          }),
         },
       };
     case "settings:mcpServersStart":

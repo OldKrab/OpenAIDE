@@ -103,11 +103,13 @@ function AgentGroup({
 }
 
 function AgentStatus({ agent }: { agent: AgentSettingsRecord }) {
+  const copy = statusCopy(agent.status);
+  if (!copy) return null;
   const attention = agent.status === "auth_required" || agent.status === "failed" || agent.status === "setup_required";
   return (
     <span className={`agent-library-state ${agent.status}`}>
       {attention ? <CircleAlert size={13} /> : <i />}
-      {statusCopy(agent.status)}
+      {copy}
     </span>
   );
 }
@@ -120,6 +122,10 @@ function statusCopy(status: AgentSettingsRecord["status"]) {
     case "disabled": return "Off";
     case "connected": return "Connected";
     case "ready": return "Ready";
+    case "disconnected":
+    case "unprobed":
+    case "launching":
+      return null;
     default: return status.replaceAll("_", " ");
   }
 }

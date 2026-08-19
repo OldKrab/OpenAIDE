@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::agent::acp::AcpAgentRuntime;
 use crate::agent::catalog_store::AgentCatalogStore;
+use crate::agent::status_cache::AgentStatusUpdateReceiver;
 use crate::agent::{registry_handle::AgentRegistryHandle, AgentRuntime};
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::projects::ConfiguredProjectRoots;
@@ -16,6 +17,8 @@ use crate::storage_runtime::StateRoot;
 use crate::task_events::{TaskUpdate, TaskUpdateReceiver};
 use crate::worktree_events::WorktreeUpdateReceiver;
 
+#[cfg(test)]
+mod agent_settings_status_tests;
 mod factory;
 #[cfg(test)]
 mod tests;
@@ -41,6 +44,7 @@ pub struct ProtocolEdgeStdioDispatcher {
     next_tick: u64,
     task_updates: Option<TaskUpdateReceiver>,
     worktree_updates: Option<WorktreeUpdateReceiver>,
+    agent_status_updates: Option<AgentStatusUpdateReceiver>,
     host_bridge: HostBridge,
     host_requests: Option<mpsc::Receiver<HostRequest>>,
     storage_fatal_events:
@@ -139,6 +143,7 @@ impl ProtocolEdgeStdioDispatcher {
             next_tick: 1,
             task_updates: Some(output.task_updates),
             worktree_updates: Some(output.worktree_updates),
+            agent_status_updates: Some(output.agent_status_updates),
             host_bridge,
             host_requests,
             storage_fatal_events: Some(output.storage_fatal_events),
@@ -153,6 +158,10 @@ impl ProtocolEdgeStdioDispatcher {
         self.worktree_updates.take()
     }
 
+    pub fn take_agent_status_updates(&mut self) -> Option<AgentStatusUpdateReceiver> {
+        self.agent_status_updates.take()
+    }
+
     pub fn handle_worktree_update(
         &mut self,
         repository: openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot,
@@ -161,6 +170,15 @@ impl ProtocolEdgeStdioDispatcher {
         let events = self
             .gateway
             .publish_worktree_repository_update(repository, now);
+        event_wire_messages(self.connection_id.clone(), events)
+            .into_iter()
+            .map(serialize_message)
+            .collect()
+    }
+
+    pub fn handle_agent_status_update(&mut self) -> Vec<String> {
+        let now = self.next_time();
+        let events = self.gateway.publish_agent_status_update(now);
         event_wire_messages(self.connection_id.clone(), events)
             .into_iter()
             .map(serialize_message)

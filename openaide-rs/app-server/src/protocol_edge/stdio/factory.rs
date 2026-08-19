@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 use crate::agent::{
     catalog_store::AgentCatalogStore, product_api::AgentProductApi,
-    registry_handle::AgentRegistryHandle, status_cache::AgentStatusCache, AgentRuntime,
+    registry_handle::AgentRegistryHandle, status_cache::AgentStatusCache,
+    status_recording_runtime::AgentStatusRecordingRuntime, AgentRuntime,
 };
 use crate::app_lifecycle::AppLifecycle;
 use crate::client_lifecycle::{ClientHub, ClientLivenessPolicy};
@@ -33,6 +34,7 @@ pub(super) struct GatewayFactoryOutput {
     pub gateway: RpcGateway,
     pub task_updates: TaskUpdateReceiver,
     pub worktree_updates: WorktreeUpdateReceiver,
+    pub agent_status_updates: crate::agent::status_cache::AgentStatusUpdateReceiver,
     pub storage_fatal_events:
         std::sync::mpsc::Receiver<crate::storage::task_journal::TaskStorageFatalFailure>,
     #[cfg(test)]
@@ -70,7 +72,8 @@ pub(super) fn gateway(
     let skills_settings = Arc::new(SkillsSettingsService::with_project_roots(
         configured_projects.clone(),
     ));
-    let agent_statuses = AgentStatusCache::default();
+    let (agent_statuses, agent_status_updates) = AgentStatusCache::channel();
+    let agent_runtime = AgentStatusRecordingRuntime::wrap(agent_runtime, agent_statuses.clone());
     let agent_snapshots = AgentRegistrySnapshotSource::with_status_cache(
         agent_registry.clone(),
         agent_statuses.clone(),
@@ -180,6 +183,7 @@ pub(super) fn gateway(
         gateway,
         task_updates,
         worktree_updates,
+        agent_status_updates,
         storage_fatal_events,
         #[cfg(test)]
         attachment_runtime,

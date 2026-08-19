@@ -225,6 +225,12 @@ impl SnapshotBuilder {
         self.projects.snapshot()
     }
 
+    pub(crate) fn agent_collection_snapshot(
+        &self,
+    ) -> Result<AgentCollectionSnapshot, ProtocolError> {
+        self.agents.snapshot()
+    }
+
     pub(crate) fn task_navigation_snapshot(
         &self,
         section: openaide_app_server_protocol::task::TaskNavigationSection,
