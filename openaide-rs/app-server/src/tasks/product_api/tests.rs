@@ -5929,6 +5929,73 @@ fn automatic_queue_delivery_preserves_inline_image_attachments() {
 }
 
 #[test]
+fn automatic_queue_delivery_accepts_a_managed_web_upload_outside_the_workspace() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let upload_directory = temp.path().join("openaide/uploads/task-queue-upload");
+    std::fs::create_dir_all(&upload_directory).unwrap();
+    let upload_path = upload_directory.join("profile.json.gz");
+    std::fs::write(&upload_path, b"profile bytes").unwrap();
+    store
+        .write_task(&task_record(
+            "task-queue-upload",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let task_id = TaskId::from("task-queue-upload");
+    let attachment = api
+        .create_uploaded_file_reference(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            &task_id,
+            upload_path.to_string_lossy().into_owned(),
+            "profile.json.gz".to_string(),
+        )
+        .unwrap();
+
+    api.send(send_params("task-queue-upload", "first turn"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-upload").unwrap().status == TaskStatus::Active);
+    api.queue_append_for_test(TaskQueueAppendParams {
+        task_id,
+        message: ComposerMessage {
+            text: Some("inspect profile".into()),
+            attachments: vec![attachment.handle_id],
+            ..Default::default()
+        },
+    })
+    .unwrap();
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) >= 2);
+    let prompt_attachments = agent.prompt_attachments.lock().unwrap();
+    assert_eq!(
+        prompt_attachments[1][0].path.as_deref(),
+        Some(upload_path.to_string_lossy().as_ref())
+    );
+    assert!(store
+        .read_task("task-queue-upload")
+        .unwrap()
+        .message_queue
+        .items
+        .is_empty());
+}
+
+#[test]
 fn unsuccessful_turn_completion_keeps_the_queue_intact() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();

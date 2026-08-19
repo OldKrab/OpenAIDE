@@ -109,7 +109,7 @@ impl TaskProductApi {
             if queued.text != prompt_text {
                 return Err(conflict_error("Queued Message changed"));
             }
-            attachments = self.resolved_queued_attachments(&existing_task, queued)?;
+            attachments = self.resolved_queued_attachments(queued)?;
         }
         if prompt_text.is_empty() && attachments.is_empty() {
             return Err(validation_error("message.text", "Message text is required"));
