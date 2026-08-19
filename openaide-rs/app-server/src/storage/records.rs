@@ -1,4 +1,4 @@
-use openaide_app_server_protocol::ids::ClientInstanceId;
+use openaide_app_server_protocol::{ids::ClientInstanceId, snapshot::TaskPermissionPolicy};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
@@ -557,8 +557,8 @@ pub struct TaskRecord {
     pub updated_at: String,
     pub last_activity: String,
     /// User-owned Task policy. Missing values from older records preserve the safe default.
-    #[serde(default, skip_serializing_if = "is_ask_every_time_permission_policy")]
-    pub permission_policy: openaide_app_server_protocol::snapshot::TaskPermissionPolicy,
+    #[serde(default, skip_serializing_if = "TaskPermissionPolicy::is_ask_every_time")]
+    pub permission_policy: TaskPermissionPolicy,
     /// Bounded accepted text recall kept separate from replaceable Native Session Chat.
     #[serde(default, skip_serializing_if = "ComposerHistory::is_empty")]
     pub composer_history: ComposerHistory,
@@ -645,7 +645,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             updated_at: String,
             last_activity: String,
             #[serde(default)]
-            permission_policy: openaide_app_server_protocol::snapshot::TaskPermissionPolicy,
+            permission_policy: TaskPermissionPolicy,
             #[serde(default)]
             composer_history: ComposerHistory,
             #[serde(default)]
@@ -743,15 +743,6 @@ impl<'de> Deserialize<'de> for TaskRecord {
             preparation: stored.preparation,
         })
     }
-}
-
-fn is_ask_every_time_permission_policy(
-    policy: &openaide_app_server_protocol::snapshot::TaskPermissionPolicy,
-) -> bool {
-    matches!(
-        policy,
-        openaide_app_server_protocol::snapshot::TaskPermissionPolicy::AskEveryTime
-    )
 }
 
 impl TaskRecord {

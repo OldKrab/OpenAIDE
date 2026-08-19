@@ -181,6 +181,12 @@ pub enum TaskPermissionPolicy {
     AutoApprove,
 }
 
+impl TaskPermissionPolicy {
+    pub fn is_ask_every_time(&self) -> bool {
+        matches!(self, Self::AskEveryTime)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {

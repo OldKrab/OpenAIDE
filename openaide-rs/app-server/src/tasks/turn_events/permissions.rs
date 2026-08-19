@@ -54,7 +54,18 @@ impl TaskEventSink {
         );
 
         if let Some(option_id) = allow_once_option_id(&request) {
-            if self.auto_approve_permission_if_enabled(&server_request_id, option_id)? {
+            let auto_approved =
+                match self.auto_approve_permission_if_enabled(&server_request_id, option_id) {
+                    Ok(auto_approved) => auto_approved,
+                    Err(error) => {
+                        self.server_requests.interrupt_request(
+                            &server_request_id,
+                            crate::client_lifecycle::AppServerTime(0),
+                        );
+                        return Err(error);
+                    }
+                };
+            if auto_approved {
                 logging::info(
                     "task_permission_auto_approval_started",
                     json!({
