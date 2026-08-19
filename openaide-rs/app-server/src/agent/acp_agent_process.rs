@@ -11,6 +11,7 @@ use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
+use crate::agent::acp_process_diagnostics::acp_connection_terminal_diagnostics;
 use crate::agent::acp_schema::{AuthenticateRequest, CloseSessionRequest, ForkSessionRequest};
 use crate::agent::acp_session_capabilities::{
     validate_auth_method, validate_session_fork_capabilities,
@@ -163,6 +164,8 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     let session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap =
         Arc::default();
     let session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap = Arc::default();
+    let diagnostic_current_prompts = current_prompts.clone();
+    let diagnostic_active_session_ids = active_session_ids.clone();
     let elicitation_cancellations: crate::agent::acp_host_capabilities::AcpElicitationCancellationMap =
         Arc::default();
     let first_started_tx = first_open.as_ref().map(|open| open.started_tx.clone());
@@ -331,19 +334,40 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
             Ok(())
         },
     );
-    let result = tokio::select! {
-        result = connection => result.map_err(acp_error),
-        _ = shutdown_rx.changed() => Ok(()),
+    let (result, selected_shutdown) = tokio::select! {
+        result = connection => (result.map_err(acp_error), false),
+        _ = shutdown_rx.changed() => (Ok(()), true),
     };
+    // Shutdown and transport completion can become ready in the same scheduler turn. The
+    // authoritative control signal wins even when `select!` observes the connection first.
+    let requested_shutdown = selected_shutdown || *shutdown_rx.borrow();
+    let active_session_count = diagnostic_active_session_ids
+        .lock()
+        .expect("ACP active session registry poisoned")
+        .len();
+    let active_prompt_count = diagnostic_current_prompts
+        .lock()
+        .expect("ACP current prompt registry poisoned")
+        .len();
+    let terminal = acp_connection_terminal_diagnostics(
+        &result,
+        requested_shutdown,
+        active_session_count,
+        active_prompt_count,
+    );
     match &result {
         Ok(()) => logging::info(
             "acp_agent_connection_completed",
             serde_json::json!({
                 "agent_id": agent_id,
                 "duration_ms": connection_started_at.elapsed().as_millis(),
-                "outcome_kind": "closed",
+                "outcome_kind": terminal.outcome_kind,
                 "operation": initial_operation,
                 "task_id": initial_task_id,
+                "exit_code": terminal.exit_code,
+                "exit_signal": terminal.exit_signal,
+                "active_session_count": terminal.active_session_count,
+                "active_prompt_count": terminal.active_prompt_count,
             }),
         ),
         Err(_) => logging::warn(
@@ -352,8 +376,13 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 "agent_id": agent_id,
                 "duration_ms": connection_started_at.elapsed().as_millis(),
                 "error_kind": "transport_error",
+                "outcome_kind": terminal.outcome_kind,
                 "operation": initial_operation,
                 "task_id": initial_task_id,
+                "exit_code": terminal.exit_code,
+                "exit_signal": terminal.exit_signal,
+                "active_session_count": terminal.active_session_count,
+                "active_prompt_count": terminal.active_prompt_count,
             }),
         ),
     }

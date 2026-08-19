@@ -647,7 +647,11 @@ for line in sys.stdin:
         if log_details:
             log("prompt:" + json.dumps(message.get("params", {}), sort_keys=True))
         prompt_request_count += 1
-        if prompt_mode == "host_terminal_wait_for_cancel":
+        if prompt_mode.startswith("exit_on_prompt:"):
+            sys.exit(int(prompt_mode.split(":", 1)[1]))
+        elif prompt_mode.startswith("signal_on_prompt:"):
+            os.kill(os.getpid(), int(prompt_mode.split(":", 1)[1]))
+        elif prompt_mode == "host_terminal_wait_for_cancel":
             pending_prompt_ids.append(message.get("id"))
             request_terminal("prompt-terminal-create-1")
             request_terminal("prompt-terminal-create-2")
@@ -3511,6 +3515,7 @@ fn active_session_start_timeout_reports_stable_error() {
 
 #[test]
 fn session_start_retry_launches_a_fresh_process_after_timeout() {
+    let diagnostic_logs = crate::logging::capture_test_logs();
     let temp = tempfile::TempDir::new().expect("temp dir");
     if !python3_available() {
         return;
@@ -3561,6 +3566,22 @@ fn session_start_retry_launches_a_fresh_process_after_timeout() {
         timeout.to_string(),
         "runtime not ready: ACP session start timed out"
     );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let terminal = loop {
+        if let Some(entry) = diagnostic_logs.snapshot().into_iter().find(|entry| {
+            entry["event"] == "acp_agent_connection_completed"
+                && entry["fields"]["outcome_kind"] == "requested_shutdown"
+        }) {
+            break entry;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing requested ACP shutdown diagnostic"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(terminal["fields"]["exit_code"], serde_json::Value::Null);
+    assert_eq!(terminal["fields"]["exit_signal"], serde_json::Value::Null);
 
     let retried = manager
         .start_session(start_request("task-after-timeout", cwd_string()))
@@ -3627,6 +3648,90 @@ fn session_start_retries_after_agent_process_ends_during_open() {
             .count(),
         2,
     );
+}
+
+fn active_prompt_process_termination(
+    prompt_mode: &str,
+    expected_exit_code: Option<i64>,
+    expected_exit_signal: Option<i64>,
+) -> Option<serde_json::Value> {
+    let diagnostic_logs = crate::logging::capture_test_logs();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let task_id = format!("task-process-termination-{}", prompt_mode.replace(':', "-"));
+    let (runtime, _) = fixture_runtime_with_prompt_mode(&temp, "exiting-session", prompt_mode)?;
+    let session = runtime
+        .start_session(start_request(&task_id, cwd_string()))
+        .expect("start session");
+
+    runtime
+        .prompt(
+            AgentPrompt {
+                agent_id: "codex".to_string(),
+                task_id: task_id.clone(),
+                session_id: session.session_id,
+                text: "trigger fixture exit".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(CapturingEventSink::default()),
+        )
+        .expect_err("process exit must interrupt the prompt");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut observed = Vec::new();
+    let terminal = loop {
+        observed.extend(diagnostic_logs.snapshot());
+        if let Some(entry) = observed
+            .iter()
+            .find(|entry| {
+                let terminal_event = entry["event"] == "acp_agent_connection_completed"
+                    || entry["event"] == "acp_agent_connection_failed";
+                let expected_termination = expected_exit_code
+                    .is_some_and(|status| entry["fields"]["exit_code"] == status)
+                    || expected_exit_signal
+                        .is_some_and(|signal| entry["fields"]["exit_signal"] == signal);
+                terminal_event && expected_termination
+            })
+            .cloned()
+        {
+            break entry;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing ACP terminal diagnostic for {task_id}; observed {observed:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    Some(terminal)
+}
+
+#[test]
+fn active_prompt_process_exit_records_safe_terminal_diagnostics() {
+    let Some(terminal) = active_prompt_process_termination("exit_on_prompt:23", Some(23), None)
+    else {
+        return;
+    };
+
+    assert_eq!(terminal["fields"]["outcome_kind"], "process_exit");
+    assert_eq!(terminal["fields"]["exit_code"], 23);
+    assert_eq!(terminal["fields"]["exit_signal"], serde_json::Value::Null);
+    assert_eq!(terminal["fields"]["active_session_count"], 1);
+    assert_eq!(terminal["fields"]["active_prompt_count"], 1);
+    assert!(terminal["fields"].get("stderr").is_none());
+    assert!(terminal["fields"].get("error").is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn active_prompt_process_signal_records_numeric_signal() {
+    let Some(terminal) = active_prompt_process_termination("signal_on_prompt:15", None, Some(15))
+    else {
+        return;
+    };
+
+    assert_eq!(terminal["fields"]["outcome_kind"], "process_exit");
+    assert_eq!(terminal["fields"]["exit_code"], serde_json::Value::Null);
+    assert_eq!(terminal["fields"]["exit_signal"], 15);
 }
 
 #[test]

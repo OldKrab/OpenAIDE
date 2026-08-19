@@ -378,7 +378,6 @@ impl AcpAgentProcessPool {
                         "error": error.to_string(),
                     }),
                 );
-                eprintln!("OpenAIDE ACP agent process ended: {error}");
             }
         });
         drop(open_tx);
