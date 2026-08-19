@@ -109,6 +109,8 @@ export type AppController = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
   agents?: AgentOption[];
+  /** Shared request boundary used by UI workflows that are not App Shell capabilities. */
+  backendConnection?: AppControllerBackendConnection;
   backendReady: boolean;
   backendConnectionState: BackendConnectionState;
   bootstrap: WebviewBootstrap;
@@ -408,6 +410,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
   return {
     ...renderState,
     activeTask: decoratedActiveTask,
+    backendConnection,
     visibleTasks: decoratedVisibleTasks,
     taskNotifications: {
       stateRootId: state.appServerStateRootId,

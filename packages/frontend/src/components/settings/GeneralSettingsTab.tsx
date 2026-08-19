@@ -23,8 +23,10 @@ import { currentFrontendShell } from "../../services/frontendShell";
 import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
 import { PopupDialog } from "../Popup";
 import { DesktopRuntimeSettings } from "./DesktopRuntimeSettings";
+import { SupportExportButton } from "../SupportExportDialog";
 
 export function GeneralSettingsTab({
+  backendConnection,
   developerSettingsUnlocked = false,
   desktopNotifications,
   appearance,
@@ -35,6 +37,7 @@ export function GeneralSettingsTab({
   preferences,
   runtimeSettings,
 }: {
+  backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   developerSettingsUnlocked?: boolean;
   desktopNotifications?: DesktopNotificationSettings;
   appearance?: FrontendShellAppearance;
@@ -140,6 +143,12 @@ export function GeneralSettingsTab({
           </div>
         </GeneralSection>
       ) : null}
+
+      <GeneralSection description="Create a local troubleshooting bundle for a bug report." label="Support">
+        <div className="general-preference-surface">
+          <GeneralPreferenceRow action={<SupportExportButton connection={backendConnection} />} detail="Choose standard diagnostics, Agent sessions, and raw traces." icon={<Bug size={17} />} label="Diagnostics" />
+        </div>
+      </GeneralSection>
 
       {onResetTaskHistory ? (
         <GeneralSection description="Manage history stored on this device." label="Local data">

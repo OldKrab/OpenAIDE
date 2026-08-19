@@ -32,23 +32,22 @@ Default logs must not contain prompts, user or agent message text, command text,
 
 Sensitive field names are fully redacted. Do not rely on pattern replacement inside free-form values. When an error matters, log a stable `error_kind`, `stage`, or protocol code and keep the original error in the user-facing or typed error path.
 
-ACP traces are an explicitly enabled diagnostic artifact and may contain protocol payloads. They must be routed to the owning Native Session or Task, clearly marked sensitive, excluded from ordinary logs, and handled by support export redaction.
+ACP traces are an explicitly enabled diagnostic artifact and may contain protocol payloads. They must be routed to the owning Native Session or Task, clearly marked sensitive, excluded from ordinary logs, and included in Support Export only after the user explicitly selects the associated session or an unbound failed trace.
 
 ## Support Export
 
-The VS Code Support Export is the user-shareable diagnostic boundary. It writes
-one ZIP with the allowlisted runtime snapshot, minimal platform/version facts,
-and the newest complete records from the last 24 hours of Extension and App
-Server logs, capped at 2 MB per source. Missing or malformed sources are noted
-without preventing a partial export.
+Support Export is the shared user-controlled diagnostic boundary across App Shells. It writes one ZIP from App Server-owned sources. The standard selection contains the allowlisted runtime snapshot and newest safe records from available App Server and shell logs, capped at 2 MB per source. Missing or malformed sources are noted without preventing a partial export.
 
 Export processing applies a second strict allowlist instead of copying local
 logs directly. Custom Agent identifiers are replaced with export-local tokens;
 arbitrary fields and error text are discarded; known failures may receive a
 controlled product-authored summary. Prompts, Chat, file contents and paths,
 terminal output, environment variables, secrets, raw protocol payloads, and ACP
-traces are never included. The command saves locally and only opens a GitHub
-issue after explicit user action; it does not upload diagnostics itself.
+traces are excluded from the standard selection.
+
+The sensitive selection is explicit and never remembered. Users choose Tasks and source kinds. A selected Task may contribute a materialized OpenAIDE Chat document, every retained ACP trace bound to its Native Session, and an Agent-native transcript when a product-owned provider implementation can resolve it. Failed traces that never acquired a Native Session remain separately selectable by Task. Active JSONL sources are copied only through their last complete record and the manifest marks partial, unavailable, or truncated sources. Referenced workspace files and attachment contents are never copied implicitly.
+
+The picker warns that raw artifacts may contain prompts, responses, paths, tool output, and secrets. App Server builds the bundle and returns only a client-bound opaque handle. The App Shell saves or downloads it locally, then opens GitHub's upload-enabled issue form; OpenAIDE does not upload the bundle itself.
 
 ## Levels
 

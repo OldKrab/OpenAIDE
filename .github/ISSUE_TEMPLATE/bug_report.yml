@@ -5,7 +5,7 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Do not include credentials, private workspace contents, or unredacted diagnostics.
+      value: Diagnostics exports can contain raw prompts, responses, paths, tool output, and secrets. Review the ZIP before uploading it.
   - type: input
     id: version
     attributes:
@@ -41,5 +41,6 @@ body:
   - type: textarea
     id: diagnostics
     attributes:
-      label: Redacted diagnostics
-      description: Attach only diagnostics you have reviewed and intentionally chosen to share.
+      label: Diagnostics bundle
+      description: Drag the reviewed ZIP into this field, or use the attachment button. Upload only artifacts you intentionally chose to share.
+      placeholder: Attach the openaide-support ZIP here.

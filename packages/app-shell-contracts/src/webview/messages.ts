@@ -58,6 +58,7 @@ export type WebviewToHostMessage =
   | { type: "shell.openExternal"; payload: { url: string } }
   | { type: "shell.reload" }
   | { type: "shell.clipboard.writeText"; payload: { requestId: string; text: string } }
+  | { type: "supportExport.save"; payload: { requestId: string; fileHandleId: string; label: string; clientInstanceId: string } }
   | { type: "attachment.pickFiles"; payload: { requestId: string; taskId: string } }
   | { type: "project.pickFolder"; payload: { requestId: string } }
   | { type: "worktree.openFolder"; payload: { repository_id: string; worktree_id: string } }
@@ -71,6 +72,7 @@ export type HostToWebviewMessage =
   | { type: "attachment.pickFiles.result"; payload: { requestId: string; attachments?: Array<{ handleId: string; label: string }>; error?: string } }
   | { type: "project.pickFolder.result"; payload: { requestId: string; folder?: { path: string; label: string }; error?: string } }
   | { type: "shell.clipboard.writeText.result"; payload: { requestId: string; ok: boolean; error?: string } }
+  | { type: "supportExport.save.result"; payload: { requestId: string; ok: boolean; error?: string } }
   | { type: "surface.workspaceChanged"; payload: { project_ids: string[] } }
   | { type: "surface.newTaskChanged"; payload: { project_id?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }

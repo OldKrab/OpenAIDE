@@ -13,6 +13,7 @@ import {
 import { VSCODE_SHELL } from "../src/webview/types";
 import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
 import type { PreSendAttachment } from "@openaide/app-server-client";
+import { clientInstanceIdForBootstrap } from "../../../packages/frontend/src/services/backendInitialization";
 
 declare global {
   interface Window {
@@ -28,6 +29,11 @@ export function createVsCodeShell(): FrontendShell {
   let nextFileRequest = 1;
   let nextProjectRequest = 1;
   let nextClipboardRequest = 1;
+  let nextSupportExportRequest = 1;
+  const pendingSupportExportRequests = new Map<string, {
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }>();
   const pendingClipboardRequests = new Map<string, {
     resolve: () => void;
     reject: (error: Error) => void;
@@ -41,6 +47,14 @@ export function createVsCodeShell(): FrontendShell {
     reject: (error: Error) => void;
   }>();
   if (typeof window.addEventListener === "function") {
+    window.addEventListener("message", (event: MessageEvent<HostToWebviewMessage>) => {
+      if (event.data?.type !== "supportExport.save.result") return;
+      const pending = pendingSupportExportRequests.get(event.data.payload.requestId);
+      if (!pending) return;
+      pendingSupportExportRequests.delete(event.data.payload.requestId);
+      if (!event.data.payload.ok) pending.reject(new Error(event.data.payload.error ?? "Unable to save support export."));
+      else pending.resolve();
+    });
     window.addEventListener("message", (event: MessageEvent<HostToWebviewMessage>) => {
       if (event.data?.type !== "shell.clipboard.writeText.result") return;
       const pending = pendingClipboardRequests.get(event.data.payload.requestId);
@@ -98,6 +112,24 @@ export function createVsCodeShell(): FrontendShell {
           taskId: taskId as TaskId,
           messageId,
           attachmentIndex,
+        });
+      },
+    },
+    supportExports: {
+      save({ fileHandleId, label }) {
+        if (!vscode) return Promise.reject(new Error("VS Code save dialog unavailable."));
+        const requestId = `support-export-save-${nextSupportExportRequest++}`;
+        return new Promise((resolve, reject) => {
+          pendingSupportExportRequests.set(requestId, { resolve, reject });
+          vscode.postMessage({
+            type: "supportExport.save",
+            payload: {
+              requestId,
+              fileHandleId,
+              label,
+              clientInstanceId: clientInstanceIdForBootstrap(initialBootstrap),
+            },
+          });
         });
       },
     },

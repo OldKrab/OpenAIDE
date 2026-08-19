@@ -1,4 +1,5 @@
 import * as nodePath from "node:path";
+import { homedir } from "node:os";
 import * as vscode from "vscode";
 import {
   SECRET_READ,
@@ -8,6 +9,7 @@ import {
   SHELL_SHOW_NOTIFICATION,
   WORKTREE_RESOLVE_FOLDER,
   type SecretReadParams,
+  type ClientInstanceId,
   type ShellNotificationAction,
   type ShellNotificationLevel,
   type ShellRevealFileParams,
@@ -75,6 +77,31 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
       await context.post({
         type: "shell.clipboard.writeText.result",
         payload: { requestId: message.payload.requestId, ok: false, error: "Unable to copy text." },
+      });
+    }
+    return true;
+  }
+  if (message.type === "supportExport.save") {
+    const { requestId, fileHandleId, label, clientInstanceId } = message.payload;
+    try {
+      const target = await context.runtime.appServerRequest(SHELL_RESOLVE_FILE_REVEAL, {
+        originatingClientInstanceId: clientInstanceId as ClientInstanceId,
+        fileHandleId,
+      });
+      if (!nodePath.isAbsolute(target.path)) throw new Error("Support export path is invalid.");
+      const destination = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(nodePath.join(homedir(), label)),
+        filters: { "ZIP archive": ["zip"] },
+        saveLabel: "Save Support Bundle",
+        title: "Export OpenAIDE Support Diagnostics",
+      });
+      if (!destination) throw new Error("Save canceled.");
+      await vscode.workspace.fs.copy(vscode.Uri.file(target.path), destination, { overwrite: true });
+      await context.post({ type: "supportExport.save.result", payload: { requestId, ok: true } });
+    } catch (error) {
+      await context.post({
+        type: "supportExport.save.result",
+        payload: { requestId, ok: false, error: error instanceof Error ? error.message : "Unable to save support export." },
       });
     }
     return true;

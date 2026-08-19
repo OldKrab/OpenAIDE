@@ -11,6 +11,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
+use crate::shell_file_handles::ShellFileRevealTarget;
 use crate::task_events::TaskUpdate;
 use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
@@ -24,6 +25,17 @@ pub struct SharedRpcGateway {
 }
 
 impl SharedRpcGateway {
+    pub(crate) fn consume_file_handle(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        file_handle_id: &str,
+    ) -> Option<ShellFileRevealTarget> {
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        gateway.client_hub.client_by_instance(client_instance_id)?;
+        gateway
+            .shell_file_reveals
+            .consume_for_client(client_instance_id, file_handle_id)
+    }
     pub fn new(gateway: RpcGateway) -> Self {
         Self {
             gateway: Arc::new(Mutex::new(gateway)),

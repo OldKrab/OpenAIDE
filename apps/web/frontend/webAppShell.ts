@@ -94,6 +94,18 @@ export function createWebAppShell(): FrontendShell {
         link.click();
       },
     },
+    supportExports: {
+      async save({ fileHandleId, label }) {
+        const search = new URLSearchParams({
+          clientInstanceId: clientInstanceIdForBootstrap(bootstrap()),
+          fileHandleId,
+        });
+        const link = document.createElement("a");
+        link.href = `/__openaide-app-server/download?${search}`;
+        link.download = label;
+        link.click();
+      },
+    },
     files: {
       kind: "webUpload",
       upload: (taskId, file, onProgress, signal) =>

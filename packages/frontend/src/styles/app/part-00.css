@@ -72,7 +72,11 @@ input {
 }
 
 button {
+  appearance: none;
+  border: 0;
+  background: transparent;
   color: var(--oa-text);
+  padding: 0;
 }
 
 /* Semantic controls share one cursor contract across every App Shell. */
