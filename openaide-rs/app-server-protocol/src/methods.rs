@@ -24,7 +24,10 @@ use crate::client::{
     ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeParams,
     ClientProbeResult, InitializeParams, InitializeResult,
 };
-use crate::diagnostics::{RuntimeDiagnosticsParams, RuntimeDiagnosticsResult};
+use crate::diagnostics::{
+    RuntimeDiagnosticsParams, RuntimeDiagnosticsResult, SupportExportCreateParams,
+    SupportExportCreateResult, SupportExportListParams, SupportExportListResult,
+};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
 use crate::file_viewer::{
     FileViewerOpenFromHandleParams, FileViewerOpenParams, FileViewerRefreshParams,
@@ -176,6 +179,18 @@ protocol_method!(
     DIAGNOSTICS_GET_RUNTIME,
     RuntimeDiagnosticsParams,
     RuntimeDiagnosticsResult
+);
+protocol_method!(
+    DiagnosticsListSupportExport,
+    DIAGNOSTICS_LIST_SUPPORT_EXPORT,
+    SupportExportListParams,
+    SupportExportListResult
+);
+protocol_method!(
+    DiagnosticsCreateSupportExport,
+    DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
+    SupportExportCreateParams,
+    SupportExportCreateResult
 );
 protocol_method!(
     SupportRecoverStuckSessions,

@@ -281,6 +281,17 @@ fn handle_file_download(
     request: LocalHttpRequest,
 ) -> Result<(), LocalHttpProbeListenerError> {
     let target = request.target.as_str();
+    if let Some(file_handle_id) = query_value(target, "fileHandleId") {
+        let resolved = match handler.resolve_file_handle(
+            request.authorization.as_deref(),
+            query_value(target, "clientInstanceId").as_deref(),
+            Some(&file_handle_id),
+        ) {
+            Ok(resolved) => resolved,
+            Err(response) => return write_http_response(stream, &response),
+        };
+        return write_file_download(stream, &resolved.path, &resolved.label);
+    }
     let attachment_index =
         query_value(target, "attachmentIndex").and_then(|value| value.parse().ok());
     let resolved = match handler.resolve_sent_file(

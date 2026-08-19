@@ -189,8 +189,8 @@ An explicit, irreversible Settings action that deletes all OpenAIDE Tasks, Chat,
 _Avoid_: Clear data, repair, reset OpenAIDE
 
 **Support Export**:
-A hidden command that writes redacted troubleshooting data for bug reports.
-_Avoid_: Visible troubleshooting area in first-iteration Settings
+A shared Task- or Settings-launched flow that writes a user-selected troubleshooting bundle. Standard diagnostics remain redacted by default; explicitly selected session history, ACP traces, and Agent-native transcripts are raw sensitive artifacts shown behind a clear warning.
+_Avoid_: Automatic uploads, silently including sensitive artifacts, exposing storage paths
 
 **MCP Server**:
 A settings-managed tool or resource server configuration that compatible Agents can receive for Task work.
@@ -351,7 +351,7 @@ _Avoid_: Treating every unread update or status change as an alert
 - **Settings** contains Agents, MCP Servers, Skills, application preferences, and **Worktree Management**.
 - **Settings** presents global and **Project-scoped configuration** for all Projects on the relevant resource page.
 - **Worktree Management** groups worktrees by Project for navigation. Projects that share a **Worktree Repository** may present the same inventory in more than one group, but mutations and operation state still belong to that one authoritative repository.
-- **Support Export** is available through a hidden command, not visible Settings UI in the first iteration.
+- **Support Export** is available from Settings and Task context in every App Shell; shell commands may open the same shared flow.
 - **MCP Servers** are configured in **Settings** and made available to compatible **Agents** for Task work.
 - **Skills** are managed in **Settings** and are not automatically injected into Agent prompts in the first iteration.
 - A **Task** is handled by one **Agent**.
@@ -460,6 +460,6 @@ _Avoid_: Treating every unread update or status change as an alert
 - "last client" was ambiguous between a Task subscriber and an App Shell client; resolved: losing Task subscribers does not stop a **Running Task**, but losing all **App Shell** clients lets **App Server** shut down.
 - "side panel" was used ambiguously; resolved: **Task Navigation** is the sidebar, while **Task Page** is the main work surface.
 - Settings was discussed through MCP task selection and Worktree management; resolved: **Settings** owns reusable configuration across Tasks plus aggregated **Worktree Management**, but not Project records or Task lifecycle management.
-- Diagnostics was unclear user-facing language; resolved: use hidden **Support Export** for first iteration, not visible Settings troubleshooting UI.
+- Diagnostics was unclear user-facing language; resolved: **Support Export** is the visible shared troubleshooting flow, while ordinary logs remain local implementation detail.
 - MCP selection was discussed as per-Agent or per-Task; resolved: enabled **MCP Servers** apply to compatible **Agents** in the first iteration.
 - Skills were discussed as editable or toggleable Settings records; resolved: the first iteration discovers and inspects **Skill** files read-only, with no enable state or automatic Task injection.

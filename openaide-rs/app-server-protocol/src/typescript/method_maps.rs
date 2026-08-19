@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
+        " | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -16,6 +16,8 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeParams;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;\n");
     output.push_str("  [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsParams;\n");
+    output.push_str("  [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListParams;\n");
+    output.push_str("  [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateParams;\n");
     output.push_str("  [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsParams;\n");
     output.push_str("  [AGENT_PROBE]: AgentProbeParams;\n");
     output.push_str("  [AGENT_AUTHENTICATE]: AgentAuthenticateParams;\n");
@@ -114,6 +116,8 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeResult;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;\n");
     output.push_str("  [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsResult;\n");
+    output.push_str("  [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListResult;\n");
+    output.push_str("  [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateResult;\n");
     output.push_str("  [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsResult;\n");
     output.push_str("  [AGENT_PROBE]: AgentProbeResult;\n");
     output.push_str("  [AGENT_AUTHENTICATE]: AgentAuthenticateResult;\n");

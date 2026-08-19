@@ -36,15 +36,16 @@ affected Task.
 
 ## Reporting a problem
 
-Run **OpenAIDE: Export Support Diagnostics** from the Command Palette. The
-command saves a public-safe ZIP containing the current runtime snapshot,
-minimal version/platform metadata, and up to 24 hours (2 MB per source) of
-strictly allowlisted Extension and App Server log records. It then offers to
-open the repository's GitHub Bug Report form, where you can attach the ZIP.
+Run **OpenAIDE: Export Support Diagnostics** from the Command Palette or use
+**Export diagnostics** from a Task or Settings. The shared picker can save a
+public-safe runtime/log bundle or add explicitly selected OpenAIDE session
+history, associated ACP traces, and available Agent-native transcripts. It
+then opens the repository's GitHub Bug Report form, where you can attach the ZIP.
 
-The bundle excludes prompts, Chat, file contents and paths, terminal output,
-environment variables, secrets, raw errors, and raw protocol payloads. Review
-the saved bundle before attaching it to a public issue.
+Sensitive sources are unchecked for generic exports and carry a warning because
+they may contain prompts, responses, paths, tool output, and secrets. Referenced
+workspace and attachment files are not copied. Review the saved bundle before
+attaching it to a public issue.
 
 For source builds, contribution instructions, security reporting, and license
 details, see the [OpenAIDE repository](https://github.com/OldKrab/OpenAIDE).

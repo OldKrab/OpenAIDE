@@ -44,7 +44,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  registerCommands(context, taskEditors, runtimeProcess, runtime);
+  registerCommands(context, taskEditors, runtime);
 
   // Activation owns registration only. App Server consumers share the same
   // in-flight connection attempt and settle independently in the background so

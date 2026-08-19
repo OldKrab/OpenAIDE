@@ -115,6 +115,10 @@ export type FrontendShell = {
   files?: FrontendFileAcquisition;
   /** Opens a durable sent file using the host-native interaction. */
   sentFiles?: SentFileInteraction;
+  /** Saves an App Server-owned export through a client-bound opaque handle. */
+  supportExports?: {
+    save(request: { fileHandleId: string; label: string }): Promise<void>;
+  };
   /** Browser-profile notification integration; omitted by non-Web shells. */
   taskNotifications?: WebTaskNotificationManager;
   /** Opens Agent File References in the Task Panel File Viewer. Omitted by VS Code. */

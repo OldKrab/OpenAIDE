@@ -57,6 +57,7 @@ const tabs: Array<{
 
 export function SettingsView({
   appearance = currentFrontendShell()?.appearance,
+  backendConnection,
   desktopNotifications,
   developerSettingsUnlocked: initialDeveloperSettingsUnlocked = false,
   frameHeader,
@@ -90,6 +91,7 @@ export function SettingsView({
   worktreeRepositories = {},
 }: {
   appearance?: FrontendShellAppearance;
+  backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   desktopNotifications?: DesktopNotificationSettings;
   /** Shell-persisted unlock state for local diagnostic controls. */
   developerSettingsUnlocked?: boolean;
@@ -326,6 +328,7 @@ export function SettingsView({
         ) : (
           <SettingsTabContent
             appearance={appearance}
+            backendConnection={backendConnection}
             desktopNotifications={desktopNotifications}
             agents={state.agentDetails ?? []}
             authPending={state.loading}
@@ -375,6 +378,7 @@ function isNarrowSettingsViewport() {
 
 function SettingsTabContent({
   appearance,
+  backendConnection,
   desktopNotifications,
   onAuthenticate,
   onCreateCustomAgent,
@@ -409,6 +413,7 @@ function SettingsTabContent({
   worktreeRepositories,
 }: {
   appearance?: FrontendShellAppearance;
+  backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   desktopNotifications?: DesktopNotificationSettings;
   authPending: boolean;
   agents: AgentSettingsRecord[];
@@ -469,6 +474,7 @@ function SettingsTabContent({
       {tab === "common" ? (
         <GeneralSettingsTab
           appearance={appearance}
+          backendConnection={backendConnection}
           developerSettingsUnlocked={developerSettingsUnlocked}
           desktopNotifications={desktopNotifications}
           onSetAcpTrace={onSetAcpTrace}

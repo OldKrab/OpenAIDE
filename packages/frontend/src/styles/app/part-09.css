@@ -623,16 +623,16 @@
 
 .general-reset-history {
   min-height: 32px;
-  border: 1px solid color-mix(in oklch, var(--oa-danger) 46%, var(--oa-border));
+  border: 0;
   border-radius: 7px;
-  background: transparent;
+  background: color-mix(in oklch, var(--oa-danger) 7%, transparent);
   color: var(--oa-danger);
   padding: 5px 11px;
   font-weight: 550;
 }
 
 .general-reset-history:hover {
-  background: color-mix(in oklch, var(--oa-danger) 8%, transparent);
+  background: color-mix(in oklch, var(--oa-danger) 12%, transparent);
 }
 
 @media (max-width: 760px) {

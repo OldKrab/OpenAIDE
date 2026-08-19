@@ -35,7 +35,10 @@ use crate::client::{
 };
 use crate::diagnostics::{
     ActiveTaskDiagnosticsResult, DiagnosticsRedaction, RuntimeDiagnosticsParams,
-    RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus, TaskDiagnosticsResult,
+    RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus, SupportArtifactAvailability,
+    SupportExportCreateParams, SupportExportCreateResult, SupportExportListParams,
+    SupportExportListResult, SupportExportSession, SupportExportSessionSelection,
+    SupportExportTrace, TaskDiagnosticsResult,
 };
 use crate::envelopes::{
     ClientRequestEnvelope, ErrorEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta,
@@ -221,6 +224,14 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskDiagnosticsResult>(output, config);
     push_decl::<ActiveTaskDiagnosticsResult>(output, config);
     push_decl::<DiagnosticsRedaction>(output, config);
+    push_decl::<SupportExportListParams>(output, config);
+    push_decl::<SupportArtifactAvailability>(output, config);
+    push_decl::<SupportExportSession>(output, config);
+    push_decl::<SupportExportTrace>(output, config);
+    push_decl::<SupportExportListResult>(output, config);
+    push_decl::<SupportExportSessionSelection>(output, config);
+    push_decl::<SupportExportCreateParams>(output, config);
+    push_decl::<SupportExportCreateResult>(output, config);
 
     push_decl::<AgentProbeParams>(output, config);
     push_decl::<AgentProbeResult>(output, config);

@@ -146,6 +146,30 @@ impl LocalHttpAppHandler {
         Ok(client_instance_id)
     }
 
+    pub(crate) fn resolve_file_handle(
+        &self,
+        authorization: Option<&str>,
+        client_instance_id: Option<&str>,
+        file_handle_id: Option<&str>,
+    ) -> Result<crate::shell_file_handles::ShellFileRevealTarget, LocalHttpResponse> {
+        match auth_status(authorization, &self.probe.auth_token) {
+            AuthStatus::Authorized => {}
+            AuthStatus::Missing => return Err(empty_response(401)),
+            AuthStatus::Invalid => return Err(empty_response(403)),
+        }
+        let client_instance_id = client_instance_id
+            .filter(|value| !value.is_empty())
+            .map(ClientInstanceId::from)
+            .ok_or_else(|| empty_response(400))?;
+        let file_handle_id = file_handle_id
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| empty_response(400))?;
+        self.probe
+            .gateway
+            .consume_file_handle(&client_instance_id, file_handle_id)
+            .ok_or_else(|| empty_response(404))
+    }
+
     pub(crate) fn resolve_sent_file(
         &self,
         authorization: Option<&str>,

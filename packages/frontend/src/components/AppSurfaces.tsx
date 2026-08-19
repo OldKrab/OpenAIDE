@@ -397,6 +397,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   if (bootstrap.surface === "settings") {
     return (
       <SettingsView
+        backendConnection={controller.backendConnection}
         developerSettingsUnlocked={bootstrap.developerSettingsUnlocked}
         desktopNotifications={taskNotifications?.settings}
         frameHeader={desktopSettingsTitleBar}
