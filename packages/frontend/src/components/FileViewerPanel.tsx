@@ -263,9 +263,6 @@ function ViewerBody({
   onRefresh: (handle: string) => void;
   tab: FileViewerTab;
 }) {
-  const sourceTab = tab.kind === "markdown"
-    ? { ...tab, language: tab.language ?? "md" }
-    : tab;
   return (
     <div className="file-viewer-frame">
       <div className="file-viewer-header">
@@ -296,8 +293,11 @@ function ViewerBody({
             <ImagePreviewViewport image={{ label: tab.preview.label, url: tab.preview.dataUrl }} />
           </div>
         ) : null}
-        {((tab.kind === "source" || markdownRaw) && tab.text) ? (
-          <SourceView onQuote={onQuote} tab={sourceTab} />
+        {tab.kind === "source" && tab.text ? (
+          <SourceView onQuote={onQuote} tab={tab} />
+        ) : null}
+        {tab.kind === "markdown" && markdownRaw && tab.text ? (
+          <SourceView onQuote={onQuote} tab={{ ...tab, language: tab.language ?? "md" }} />
         ) : null}
         {tab.kind === "error" ? (
           <div className="file-viewer-fallback" data-kind="error" role="alert">
