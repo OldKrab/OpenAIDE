@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
+        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -80,6 +80,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_QUEUE_TAKE]: TaskQueueTakeParams;\n");
     output.push_str("  [TASK_QUEUE_MOVE]: TaskQueueMoveParams;\n");
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;\n");
+    output.push_str("  [TASK_SET_PERMISSION_POLICY]: TaskSetPermissionPolicyParams;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleParams;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedParams;\n");
     output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanParams;\n");
@@ -177,6 +178,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_QUEUE_TAKE]: TaskQueueTakeResult;\n");
     output.push_str("  [TASK_QUEUE_MOVE]: TaskQueueMoveResult;\n");
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;\n");
+    output.push_str("  [TASK_SET_PERMISSION_POLICY]: TaskSetPermissionPolicyResult;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleResult;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedResult;\n");
     output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanResult;\n");
@@ -369,6 +371,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("export type TaskQueueMoveResponse = ResponseEnvelope<TaskQueueMoveResult>;\n");
     output.push_str(
         "export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionResult>;\n",
+    );
+    output.push_str(
+        "export type TaskSetPermissionPolicyResponse = ResponseEnvelope<TaskSetPermissionPolicyResult>;\n",
     );
     output.push_str("export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;\n");
     output.push_str("export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;\n");

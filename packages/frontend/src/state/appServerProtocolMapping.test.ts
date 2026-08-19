@@ -236,8 +236,17 @@ describe("App Server Protocol state mapping", () => {
       }),
     ]);
     expect(snapshot.send_capability).toEqual({ state: "ready" });
+    expect(snapshot.permission_policy).toBe("ask_every_time");
     expect(mapping.warnings).toEqual([]);
     expect(mapping.requiresNativeSurface).toBe(false);
+  });
+
+  it("maps the Task-owned auto-approve policy", () => {
+    const snapshot = mapProtocolTaskSnapshot(protocolSnapshot({
+      permissionPolicy: "autoApprove",
+    })).snapshot;
+
+    expect(snapshot.permission_policy).toBe("auto_approve");
   });
 
   it("preserves unchanged Chat row identity across focused text updates", () => {
@@ -1159,6 +1168,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
   return {
     task: protocolSummary({ status: "preparing" }),
     lifecycle: "open",
+    permissionPolicy: "askEveryTime",
     revision: 7,
     preparation: { kind: "ready" },
     agentConfig: {

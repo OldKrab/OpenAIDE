@@ -61,6 +61,7 @@ pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;
 mod set_config_option;
+mod set_permission_policy;
 mod set_pinned;
 mod set_title;
 mod support_recovery;
@@ -668,6 +669,14 @@ impl TaskArchiveWorkflow for TaskProductApi {
 }
 
 impl TaskMetadataWorkflow for TaskProductApi {
+    fn set_permission_policy_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskSetPermissionPolicyParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.set_task_permission_policy(client_instance_id, params)
+    }
+
     fn set_title_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

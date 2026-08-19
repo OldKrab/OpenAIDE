@@ -3896,6 +3896,22 @@ impl TaskSetConfigOptionWorkflow for RejectingTaskSetConfigOption {
 struct RejectingTaskSetTitle;
 
 impl TaskMetadataWorkflow for RejectingTaskSetTitle {
+    fn set_permission_policy_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskSetPermissionPolicyParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "task permission handling unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
     fn set_title_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
@@ -4115,6 +4131,7 @@ fn client_new_task_record(
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "codex".to_string(),

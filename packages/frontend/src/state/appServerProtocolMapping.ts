@@ -162,6 +162,9 @@ function mapProtocolTaskSnapshotWithCache(
   return {
     snapshot: {
       lifecycle: snapshot.lifecycle,
+      permission_policy: snapshot.permissionPolicy === "autoApprove"
+        ? "auto_approve"
+        : "ask_every_time",
       task: taskWithCapabilityStatus(task, snapshot),
       chat: {
         task_id: task.task_id,

@@ -1277,6 +1277,7 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
 function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
   return {
     lifecycle: hasMessages ? "open" : "prepared",
+    permission_policy: "ask_every_time",
     task: {
       task_id: taskId,
       title: "New task",

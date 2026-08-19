@@ -51,6 +51,7 @@ impl TaskProductApi {
             created_at: now.clone(),
             updated_at: now.clone(),
             last_activity: now,
+            permission_policy: Default::default(),
             composer_history: Default::default(),
             message_queue: Default::default(),
             agent_name: self

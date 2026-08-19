@@ -67,6 +67,7 @@ pub const TASK_QUEUE_TAKE: &str = "task/queueTake";
 pub const TASK_QUEUE_MOVE: &str = "task/queueMove";
 pub const TASK_SEND: &str = "task/send";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
+pub const TASK_SET_PERMISSION_POLICY: &str = "task/setPermissionPolicy";
 pub const TASK_SET_TITLE: &str = "task/setTitle";
 pub const TASK_SET_PINNED: &str = "task/setPinned";
 pub const TASK_CLOSE_PLAN: &str = "task/closePlan";
@@ -161,6 +162,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_QUEUE_MOVE,
     TASK_SEND,
     TASK_SET_CONFIG_OPTION,
+    TASK_SET_PERMISSION_POLICY,
     TASK_SET_TITLE,
     TASK_SET_PINNED,
     TASK_CLOSE_PLAN,

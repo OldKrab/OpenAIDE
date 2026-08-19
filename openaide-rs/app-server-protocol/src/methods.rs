@@ -67,8 +67,9 @@ use crate::task::{
     TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
     TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
     TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
-    TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
+    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -550,6 +551,12 @@ protocol_method!(
     TASK_SET_CONFIG_OPTION,
     TaskSetConfigOptionParams,
     TaskSetConfigOptionResult
+);
+protocol_method!(
+    TaskSetPermissionPolicy,
+    TASK_SET_PERMISSION_POLICY,
+    TaskSetPermissionPolicyParams,
+    TaskSetPermissionPolicyResult
 );
 protocol_method!(
     TaskSetTitle,

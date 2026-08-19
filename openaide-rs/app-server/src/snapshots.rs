@@ -429,6 +429,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             worktree_id: None,
             workspace_available: false,
         },
+        permission_policy: Default::default(),
         active_turn_started_at: None,
         lifecycle: TaskLifecycle::Open,
         revision: 0,

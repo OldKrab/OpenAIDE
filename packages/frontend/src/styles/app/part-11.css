@@ -47,8 +47,13 @@ body[data-input-modality="pointer"] button:focus-visible {
     padding: 7px 10px;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar[data-has-plan="true"] {
+  body[data-shell="web"] .mobile-workbench-bar[data-has-plan="true"],
+  body[data-shell="web"] .mobile-workbench-bar[data-has-permission-policy="true"] {
     grid-template-columns: 44px minmax(0, 1fr) 44px;
+  }
+
+  body[data-shell="web"] .mobile-workbench-bar[data-has-plan="true"][data-has-permission-policy="true"] {
+    grid-template-columns: 44px minmax(0, 1fr) 44px 44px;
   }
 
   body[data-shell="web"] .mobile-workbench-bar button {
@@ -66,6 +71,10 @@ body[data-input-modality="pointer"] button:focus-visible {
 
   body[data-shell="web"] .mobile-workbench-bar button:hover {
     background: var(--oa-raised);
+  }
+
+  body[data-shell="web"] .mobile-workbench-bar .task-permission-policy-trigger > span {
+    display: none;
   }
 
   body[data-shell="web"] .mobile-workbench-bar span {

@@ -3766,6 +3766,7 @@ function webSettingsBootstrap(settingsTab?: "agents" | "mcp" | "skills" | "commo
 function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title = "Task"): TaskSnapshot {
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: taskId,
       title,
@@ -3891,6 +3892,7 @@ function protocolTaskSnapshot(
   return {
     task: protocolTaskSummary(taskId, title, status, hasMessages),
     lifecycle: hasMessages ? "open" : "prepared",
+    permissionPolicy: "askEveryTime",
     revision: 1,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },

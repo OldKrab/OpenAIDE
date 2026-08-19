@@ -1,6 +1,7 @@
 import { Circle, CircleAlert, CircleCheck, CircleX, FolderRoot, GitBranch, LoaderCircle } from "lucide-react";
-import type { TaskStatus } from "@openaide/app-shell-contracts";
+import type { TaskPermissionPolicy, TaskStatus } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
+import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { workspaceLabel } from "./taskSurfaceHelpers";
 
 const STATUS_PRESENTATION = {
@@ -22,6 +23,9 @@ export function TaskHeader({
   status,
   statusLabel,
   title,
+  permissionPolicy,
+  onPermissionPolicyChange,
+  permissionPolicyDisabled = false,
   workspaceRoot,
   showWorkspaceContext = true,
   worktreeName,
@@ -32,6 +36,9 @@ export function TaskHeader({
   status: TaskStatus;
   statusLabel?: string;
   title: string;
+  permissionPolicy?: TaskPermissionPolicy;
+  onPermissionPolicyChange?: (policy: TaskPermissionPolicy) => Promise<void>;
+  permissionPolicyDisabled?: boolean;
   workspaceRoot: string;
   showWorkspaceContext?: boolean;
   worktreeName?: string;
@@ -60,7 +67,13 @@ export function TaskHeader({
           </span>
         </span>
       </span>
-      {showWorkspaceContext && (worktreeName || projectLabel) ? <span className="task-header-workspace" title={[workspaceRoot, gitRef].filter(Boolean).join("\n")}>
+      {permissionPolicy && onPermissionPolicyChange ? (
+        <TaskPermissionPolicyControl
+          disabled={permissionPolicyDisabled}
+          onChange={onPermissionPolicyChange}
+          policy={permissionPolicy}
+        />
+      ) : showWorkspaceContext && (worktreeName || projectLabel) ? <span className="task-header-workspace" title={[workspaceRoot, gitRef].filter(Boolean).join("\n")}>
         {worktreeName ? <GitBranch size={12} /> : <FolderRoot size={12} />}
         {worktreeName ?? "Project root"}
       </span> : null}

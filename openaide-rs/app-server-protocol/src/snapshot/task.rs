@@ -169,10 +169,25 @@ pub enum TaskLifecycle {
     Archived,
 }
 
+/// User-owned handling for future ACP permission requests in this Task.
+///
+/// `AutoApprove` deliberately selects only an Agent-provided `allowOnce` option. It never
+/// changes Agent-owned persistent permission configuration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskPermissionPolicy {
+    #[default]
+    AskEveryTime,
+    AutoApprove,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    /// Durable user preference that applies to future Task permission requests.
+    #[serde(default)]
+    pub permission_policy: TaskPermissionPolicy,
     /// App Server-authored start of the active turn; absent when no turn is running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<String>,

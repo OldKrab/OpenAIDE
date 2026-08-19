@@ -31,6 +31,7 @@ import {
   closeTaskPlanIntent,
   removeTaskQueueMessageIntent,
   reloadNativeSessionIntent,
+  setTaskPermissionPolicyIntent,
   moveTaskQueueMessageIntent,
   takeTaskQueueMessageIntent,
   sendTaskQueueMessageNowIntent,
@@ -310,6 +311,18 @@ export function createTaskCallbacks({
         input,
       );
     },
+    setPermissionPolicy: (policy) => setTaskPermissionPolicyIntent(
+      {
+        backendConnection,
+        clientInstanceId,
+        createSnapshotRequestId,
+        dispatch,
+        postHostMessage,
+        stateRootId: state.appServerStateRootId,
+      },
+      state.snapshot,
+      policy,
+    ),
     selectConfigOption: (configId, value) => {
       if (!state.snapshot) return;
       const taskId = state.snapshot.task.task_id;

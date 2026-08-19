@@ -5,6 +5,7 @@ import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceMo
 import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
+import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
@@ -66,6 +67,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
+  const mobilePermissionTask = isWebWorkbench ? taskSurfaceModel.renderableTaskSnapshot : undefined;
+  const hasMobilePermissionPolicy = Boolean(mobilePermissionTask);
   const taskRecoveryActions = createAgentRecoveryActions(controller);
   const settingsRecoveryActions = {
     ...taskRecoveryActions,
@@ -105,7 +108,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         );
       }
     : undefined;
-  const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
+  const { openingNativeSession, renderableTaskArchived, renderableTaskSnapshot } = taskSurfaceModel;
   const routedTaskProjectId = bootstrap.surface === "task"
     ? (renderableTaskSnapshot && renderableTaskSnapshot.task.task_id === bootstrap.taskId
         ? renderableTaskSnapshot.task.project_id
@@ -513,7 +516,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       >
          {projectFolderDialog}
          {projectRemoveDialog}
-        <header className="mobile-workbench-bar" data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}>
+        <header
+          className="mobile-workbench-bar"
+          data-has-permission-policy={hasMobilePermissionPolicy || undefined}
+          data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}
+        >
           <button
             aria-expanded={mobileNavigationOpen}
             aria-label={mobileNavigationOpen ? "Close task navigation" : "Open task navigation"}
@@ -534,6 +541,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             <strong>{mobileTitle}</strong>
             <small>{mobileSubtitle}</small>
           </span>
+          {mobilePermissionTask ? (
+            <TaskPermissionPolicyControl
+              disabled={renderableTaskArchived || !backendReady}
+              onChange={callbacks.task.setPermissionPolicy}
+              policy={mobilePermissionTask.permission_policy}
+            />
+          ) : null}
           {renderableTaskSnapshot?.current_plan ? (
             <button
               aria-expanded={planDrawerOpen}
