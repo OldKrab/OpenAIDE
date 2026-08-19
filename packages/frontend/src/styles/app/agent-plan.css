@@ -10,6 +10,15 @@
   border: 1px solid color-mix(in oklch, var(--oa-border) 58%, transparent);
   border-radius: var(--oa-radius-md);
   background: color-mix(in oklch, var(--oa-panel) 58%, var(--oa-bg));
+  animation: agent-plan-appear 420ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.agent-plan[data-entered] {
+  animation: none;
+}
+
+.agent-plan[data-entered] .agent-plan-entries > li {
+  animation: none;
 }
 
 .agent-plan-heading,
@@ -34,13 +43,18 @@
   padding: 6px 9px;
 }
 
-.agent-plan-close {
-  width: 28px;
-  height: 28px;
+.agent-plan-actions {
   grid-column: 2;
   grid-row: 2;
   align-self: center;
   margin-inline-end: 3px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.agent-plan-action {
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: var(--oa-radius-sm);
   background: transparent;
@@ -49,16 +63,17 @@
   place-items: center;
 }
 
-.agent-plan-close:hover {
+.agent-plan-action:hover,
+.agent-plan-action:focus-visible {
   background: color-mix(in oklch, var(--oa-raised) 74%, transparent);
   color: var(--oa-text);
 }
 
-.agent-plan-close:disabled {
+.agent-plan-action:disabled {
   opacity: .5;
 }
 
-.agent-plan-close:focus-visible {
+.agent-plan-action:focus-visible {
   outline: 1px solid var(--oa-focus);
   outline-offset: 1px;
 }
@@ -182,6 +197,8 @@
   font-size: 13px;
   line-height: 1.35;
   list-style: none;
+  animation: agent-plan-entry-appear 280ms cubic-bezier(.16, 1, .3, 1) both;
+  animation-delay: calc(70ms + (var(--agent-plan-entry, 0) * 45ms));
 }
 
 .agent-plan-entries > li[data-status="completed"] {
@@ -328,6 +345,34 @@
   transform-origin: center;
 }
 
+@keyframes agent-plan-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes agent-plan-column-appear {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+@keyframes agent-plan-entry-appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes agent-plan-chip-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(.96);
+  }
+}
+
 @keyframes agent-plan-breathe {
   0%, 100% { opacity: .62; transform: scale(.86); }
   48% { opacity: 1; transform: scale(1); }
@@ -346,6 +391,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .agent-plan,
+  .agent-plan-entries > li,
+  .task-plan-drawer-trigger,
+  .task-plan-appear-chip {
+    animation: none;
+  }
+
   .agent-plan-status[data-status="in_progress"][data-animated="true"] > i {
     animation: none;
   }

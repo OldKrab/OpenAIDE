@@ -145,6 +145,25 @@ async function runPrompt(message) {
   const prompt = { id: message.id, cancelled: false };
   session.activePrompts.set(String(message.id), prompt);
 
+  if (text.includes("smoke:file-viewer-layout")) {
+    update(sessionId, {
+      sessionUpdate: "plan",
+      entries: [
+        { content: "Open the workspace README", priority: "high", status: "completed" },
+        { content: "Inspect File Viewer layout", priority: "medium", status: "in_progress" },
+        { content: "Return to Chat", priority: "low", status: "pending" },
+      ],
+    });
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Open [README.md](README.md) to inspect the file.",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:hold")) {
     textUpdate(sessionId, "agent_message_chunk", "Waiting for steering", `agent-${promptNumber}`);
     return;

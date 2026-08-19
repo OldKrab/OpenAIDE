@@ -552,7 +552,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           {renderableTaskSnapshot?.current_plan ? (
             <button
               aria-expanded={planDrawerOpen}
-              aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
+              aria-label={planDrawerOpen ? "Hide Plan" : "Open Plan"}
+              className="task-plan-appear-chip"
               onClick={() => {
                 closeMobileNavigation({ restoreFocus: false });
                 setPlanDrawerOpen((open) => !open);

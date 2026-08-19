@@ -339,6 +339,10 @@ export function TaskView({
       setReloadError(undefined);
     }
   }, [snapshot.history_sync.state]);
+  const seenPlanForTask = useRef({
+    hasPlan: Boolean(snapshot.current_plan),
+    taskId: snapshot.task.task_id,
+  });
   useEffect(() => {
     if (!snapshot.current_plan) {
       resetAgentPlanDisclosure(snapshot.task.task_id);
@@ -346,6 +350,17 @@ export function TaskView({
       resetAgentPlanDisclosure(`${snapshot.task.task_id}:drawer`);
     }
   }, [snapshot.current_plan, snapshot.task.task_id]);
+  useEffect(() => {
+    const seen = seenPlanForTask.current;
+    const hasPlan = Boolean(snapshot.current_plan);
+    if (seen.taskId !== snapshot.task.task_id) {
+      seen.taskId = snapshot.task.task_id;
+      seen.hasPlan = hasPlan;
+      return;
+    }
+    if (hasPlan && !seen.hasPlan) onPlanDrawerOpenChange?.(true);
+    seen.hasPlan = hasPlan;
+  }, [onPlanDrawerOpenChange, snapshot.current_plan, snapshot.task.task_id]);
   const timelineStatusLabel = taskWorkingStatusLabel(
     chatItems,
     snapshot.task.status,
@@ -425,7 +440,14 @@ export function TaskView({
   };
 
   const taskSurface = (
-    <section className="task-surface task-work-stack" aria-label="Task chat">
+    <section
+      aria-label="Task chat"
+      className="task-surface task-work-stack"
+      data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
+      style={fileViewer.visible
+        ? { ["--task-panel-ratio" as string]: String(fileViewer.splitRatio) }
+        : undefined}
+    >
       <div className="task-work-stack-header">
         <TaskHeader
           agentId={snapshot.task.agent_id}
@@ -444,7 +466,7 @@ export function TaskView({
           {snapshot.current_plan ? (
             <button
               aria-expanded={planDrawerOpen}
-              aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
+              aria-label={planDrawerOpen ? "Hide Plan" : "Open Plan"}
               className="task-plan-drawer-trigger"
               onClick={() => onPlanDrawerOpenChange?.(!planDrawerOpen)}
               type="button"
@@ -457,30 +479,27 @@ export function TaskView({
           <TaskPanelToggle
             collapsed={fileViewer.collapsed}
             onToggle={() => fileViewer.setCollapsed(!fileViewer.collapsed)}
-            visible={fileViewer.visible}
+            visible={fileViewer.visible && fileViewer.collapsed}
           />
         </div>
       </div>
       <div
         className="task-workbench"
         data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
-        style={fileViewer.visible
-          ? { ["--task-panel-ratio" as string]: String(fileViewer.splitRatio) }
-          : undefined}
       >
+        <div className="chat-column task-conversation">
         {snapshot.current_plan ? (
           <aside aria-label="Current plan" className="task-plan-column">
             <AgentPlanView
               defaultOpen
               key={`column:${snapshot.task.task_id}`}
-              onClose={onClosePlan}
+              onDismiss={onClosePlan}
               plan={snapshot.current_plan}
               taskId={`${snapshot.task.task_id}:column`}
               taskStatus={snapshot.task.status}
             />
           </aside>
         ) : null}
-        <div className="chat-column task-conversation">
         <TaskChatTimeline
           archived={archived}
           canRestoreTask={onRestoreTask !== undefined}
@@ -602,19 +621,20 @@ export function TaskView({
           </ComposerWithContextUsage>
         )}
         </div>
-        <FileViewerPanel
-          collapsed={fileViewer.collapsed}
-          onClose={fileViewer.closeTab}
-          onOpenFromHandle={fileViewer.openFromHandle}
-          onQuote={quoteAvailable ? requestQuote : () => undefined}
-          onRefresh={(handle) => void fileViewer.refresh(handle)}
-          onSelect={fileViewer.selectTab}
-          onSplitRatio={fileViewer.setSplitRatio}
-          splitRatio={fileViewer.splitRatio}
-          tab={fileViewer.activeTab}
-          tabs={fileViewer.tabs}
-        />
       </div>
+      <FileViewerPanel
+        collapsed={fileViewer.collapsed}
+        onClose={fileViewer.closeTab}
+        onOpenFromHandle={fileViewer.openFromHandle}
+        onQuote={quoteAvailable ? requestQuote : () => undefined}
+        onRefresh={(handle) => void fileViewer.refresh(handle)}
+        onSelect={fileViewer.selectTab}
+        onSplitRatio={fileViewer.setSplitRatio}
+        onToggleCollapsed={() => fileViewer.setCollapsed(!fileViewer.collapsed)}
+        splitRatio={fileViewer.splitRatio}
+        tab={fileViewer.activeTab}
+        tabs={fileViewer.tabs}
+      />
       {snapshot.current_plan ? (
         <>
           <div
@@ -632,10 +652,8 @@ export function TaskView({
             <AgentPlanView
               collapsible={false}
               key={`drawer:${snapshot.task.task_id}`}
-              onClose={() => {
-                onPlanDrawerOpenChange?.(false);
-                return onClosePlan?.();
-              }}
+              onDismiss={onClosePlan}
+              onHide={() => onPlanDrawerOpenChange?.(false)}
               plan={snapshot.current_plan}
               taskId={`${snapshot.task.task_id}:drawer`}
               taskStatus={snapshot.task.status}
