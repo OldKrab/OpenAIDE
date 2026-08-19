@@ -3,7 +3,7 @@
 //! One primary request owns Task lifecycle while additional prompt requests may
 //! steer the same work. The first current `end_turn` settles the shared prompt set.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -51,6 +51,7 @@ impl ActivePrompt {
             CurrentPromptSlot::new(current_prompts, &active_session.session_id().to_string());
         let cancellation = prompt.cancellation.clone();
         let task_id = prompt.task_id.clone();
+        let settlement = request_guard.settlement_state();
         let mut projection = LivePromptProjection::for_prompt(
             agent_id,
             sink.clone(),
@@ -62,7 +63,6 @@ impl ActivePrompt {
         }
         projection_slot.activate(projection.clone());
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
-        let settlement = Arc::new(PromptSettlementState::default());
         send_prompt_request(
             active_session,
             prompt,
@@ -98,6 +98,10 @@ impl ActivePrompt {
         self.settlement.settle(kind);
     }
 
+    pub(super) fn mark_cancel_requested(&self) {
+        self.settlement.request_cancellation();
+    }
+
     pub(super) fn cancellation(&self) -> &TurnCancellation {
         &self.cancellation
     }
@@ -129,8 +133,14 @@ impl PromptSettlementKind {
 }
 
 #[derive(Default)]
-struct PromptSettlementState {
+pub(super) struct PromptSettlementState {
     kind: AtomicU8,
+    // Some Agents answer the primary request with `cancelled` when steering
+    // replaces it. That response must not settle the shared prompt set.
+    steering_accepted: AtomicBool,
+    // Session cancellation is delivered independently of the primary prompt's
+    // cancellation token, so it must override the steering handoff.
+    cancel_requested: AtomicBool,
 }
 
 impl PromptSettlementState {
@@ -140,7 +150,15 @@ impl PromptSettlementState {
             .compare_exchange(0, kind as u8, Ordering::AcqRel, Ordering::Acquire);
     }
 
-    fn kind(&self) -> Option<PromptSettlementKind> {
+    pub(super) fn accept_steering(&self) {
+        self.steering_accepted.store(true, Ordering::Release);
+    }
+
+    pub(super) fn request_cancellation(&self) {
+        self.cancel_requested.store(true, Ordering::Release);
+    }
+
+    pub(super) fn kind(&self) -> Option<PromptSettlementKind> {
         match self.kind.load(Ordering::Acquire) {
             value if value == PromptSettlementKind::PromptResponse as u8 => {
                 Some(PromptSettlementKind::PromptResponse)
@@ -150,6 +168,14 @@ impl PromptSettlementState {
             }
             _ => None,
         }
+    }
+
+    fn steering_accepted(&self) -> bool {
+        self.steering_accepted.load(Ordering::Acquire)
+    }
+
+    fn cancel_requested(&self) -> bool {
+        self.cancel_requested.load(Ordering::Acquire)
     }
 }
 
@@ -226,6 +252,7 @@ fn send_prompt_request(
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
+    let cancellation = prompt.cancellation.clone();
     let content = build_prompt_content_with_policy(prompt.text, prompt.attachments, content_policy)
         .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
     let request =
@@ -262,14 +289,23 @@ fn send_prompt_request(
                 }
                 Err(error) => Err(acp_error(error)),
             };
-            if let Some(settlement_kind) = settlement.kind() {
+            let superseded_by_steering = matches!(&result, Ok(AgentPromptOutcome::Cancelled))
+                && settlement.steering_accepted()
+                && !cancellation.is_cancelled()
+                && !settlement.cancel_requested();
+            if settlement.kind().is_some() || superseded_by_steering {
                 crate::logging::info(
                     "acp_prompt_result_stale",
                     serde_json::json!({
                         "task_id": task_id,
                         "active_session_id": session_id,
                         "prompt_kind": "primary",
-                        "settlement_kind": settlement_kind.label(),
+                        "settlement_kind": settlement.kind().map(PromptSettlementKind::label),
+                        "stale_reason": if superseded_by_steering {
+                            "superseded_by_steering"
+                        } else {
+                            "already_settled"
+                        },
                         "result_status": if result.is_ok() { "stop_reason" } else { "error" },
                         "duration_ms": prompt_started_at.elapsed().as_millis(),
                     }),
