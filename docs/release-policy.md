@@ -54,24 +54,26 @@ Before that release:
 
 1. Confirm that `main` contains exactly the changes to release. Choose a new
    OpenAIDE version without a `v` prefix, such as `0.0.2-beta.1` or `0.0.2`.
-2. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
+2. Have the release agent inspect the changes since the previous canonical
+   release and generate concise, user-facing Markdown for this release. Pass
+   the final notes directly to `Version Bump`; they are not prepared, reviewed,
+   or committed as a separate repository file.
+3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh
    gh workflow run version-bump.yml --ref main \
-     -f version=0.0.2-beta.1
+     -f version=0.0.2-beta.1 \
+     -f release_notes="$RELEASE_NOTES"
    ```
 
-3. `Version Bump` is serialized and cannot be cancelled in progress. It checks
+4. `Version Bump` is serialized and cannot be cancelled in progress. It checks
    that the exact checked-out `main` commit has a completed successful CI push
-   run, validates the monotonic version, and resolves the changelog baseline
-   from canonical immutable releases. GitHub generates one release-note body
-   for the exact `main` commit and baseline. The workflow validates and uses
-   those same generated notes for the version commit, every GitHub Release, and
-   the stable extension changelog; prereleases do not add changelog entries.
+   run and validates the monotonic version and generated release notes. The
+   workflow uses those exact notes for the version commit, every GitHub Release,
+   and the stable extension changelog; prereleases do not add changelog entries.
    It then updates the root package and lockfile, creates the explicit tag, and
-   atomically pushes the `main` update and tag. Release notes are not prepared,
-   reviewed, or stored in a separate source file.
-4. The tag starts `Release`. It rejects tags not reachable from `main`, then
+   atomically pushes the `main` update and tag.
+5. The tag starts `Release`. It rejects tags not reachable from `main`, then
    builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
    self-contained Windows x64 and macOS Apple Silicon desktop installers while
    normal CI validates the exact version commit. Publication requires both to
@@ -80,14 +82,14 @@ Before that release:
    inspects the packaged files and exercises its bundled App Server through
    startup and graceful JSON-RPC shutdown before upload. Desktop builds verify
    that Tauri bundled the exact App Server binary built for that platform.
-5. The workflow creates a draft GitHub Release, attaches the complete verified
+6. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. Desktop filenames
    end in `-unsigned` until Apple notarization and Windows Authenticode signing
    are configured; users must explicitly approve those preview installers with
    the operating system. This GitHub Release is the canonical release. Every
    release then reconciles the same downloaded bytes with Open VSX; stable
    releases also reconcile them with the VS Code Marketplace.
-6. Confirm that the Release workflow completed successfully. No manual rebuild
+7. Confirm that the Release workflow completed successfully. No manual rebuild
    or replacement of its assets is permitted.
 
 The root `package.json` is the release-version source of truth. VSIX and Desktop

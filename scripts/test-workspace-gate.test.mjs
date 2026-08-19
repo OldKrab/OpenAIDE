@@ -124,6 +124,7 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.match(versionBump, /workflow_dispatch:/);
   assert.match(versionBump, /version:/);
   assert.match(versionBump, /type: string/);
+  assert.match(versionBump, /release_notes:[\s\S]*Generated Markdown for this release[\s\S]*required: true/);
   assert.match(versionBump, /concurrency:[\s\S]*cancel-in-progress: false/);
   assert.match(versionBump, /actions\/create-github-app-token@[0-9a-f]{40}/);
   assert.match(versionBump, /client-id: \$\{\{ secrets\.RELEASE_APP_CLIENT_ID \}\}/);
@@ -133,13 +134,10 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.match(versionBump, /git tag --annotate "v\$RELEASE_VERSION"/);
   assert.match(versionBump, /node scripts\/check-release-main-ci\.mjs/);
   assert.match(versionBump, /node scripts\/release-version\.mjs next "\$RELEASE_VERSION"/);
-  assert.match(versionBump, /releases\/generate-notes/);
-  assert.match(versionBump, /target_commitish=\$\(git rev-parse HEAD\)/);
-  assert.match(versionBump, /previous_tag_name=\$previous_tag/);
+  assert.match(versionBump, /RELEASE_NOTES: \$\{\{ inputs\.release_notes \}\}/);
+  assert.match(versionBump, /printf '%s\\n' "\$RELEASE_NOTES" > "\$notes_path"/);
   assert.match(versionBump, /node scripts\/validate-release-notes\.mjs/);
-  assert.match(versionBump, /releases\?per_page=100/);
-  assert.doesNotMatch(versionBump, /inputs\.release_notes/);
-  assert.doesNotMatch(versionBump, /cp release-notes\.md|git diff --quiet .*release-notes\.md/);
+  assert.doesNotMatch(versionBump, /releases\/generate-notes|cp release-notes\.md|git diff --quiet .*release-notes\.md/);
   assert.match(versionBump, /node scripts\/update-extension-changelog\.mjs "\$RELEASE_VERSION" "\$notes_path"/);
   assert.match(versionBump, /git add package\.json package-lock\.json apps\/vscode-extension\/CHANGELOG\.md/);
   assert.match(versionBump, /git push --atomic origin "HEAD:refs\/heads\/main" "refs\/tags\/v\$RELEASE_VERSION"/);

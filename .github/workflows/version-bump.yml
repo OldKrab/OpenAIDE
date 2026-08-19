@@ -7,6 +7,10 @@ on:
         description: "Exact OpenAIDE version without v (for example 0.0.2-beta.1)"
         type: string
         required: true
+      release_notes:
+        description: "Generated Markdown for this release"
+        type: string
+        required: true
 
 permissions:
   actions: read
@@ -46,45 +50,16 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/check-release-main-ci.mjs
 
-      - name: Validate release version and resolve changelog baseline
-        id: release-inputs
+      - name: Validate release inputs
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
         shell: bash
         run: |
           set -euo pipefail
           node scripts/release-version.mjs next "$RELEASE_VERSION"
-
-          mapfile -t canonical_tags < <(
-            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq '.[] | select(.draft == false and .immutable == true) | .tag_name'
-          )
-          previous_tag=""
-          if ((${#canonical_tags[@]} > 0)); then
-            previous_tag="$(node scripts/release-version.mjs previous-tag "$RELEASE_VERSION" "${canonical_tags[@]}")"
-          fi
-          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
-
-      - name: Generate release notes for the exact release commit
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
           notes_path="$RUNNER_TEMP/release-notes.md"
-          request=(
-            --method POST
-            "repos/$GITHUB_REPOSITORY/releases/generate-notes"
-            -f "tag_name=v$RELEASE_VERSION"
-            -f "target_commitish=$(git rev-parse HEAD)"
-          )
-          previous_tag="${{ steps.release-inputs.outputs.previous_tag }}"
-          if [[ -n "$previous_tag" ]]; then
-            request+=(-f "previous_tag_name=$previous_tag")
-          fi
-          gh api "${request[@]}" --jq .body > "$notes_path"
+          printf '%s\n' "$RELEASE_NOTES" > "$notes_path"
           node scripts/validate-release-notes.mjs "$RELEASE_VERSION" "$notes_path"
 
       - name: Configure git
