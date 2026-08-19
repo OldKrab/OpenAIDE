@@ -5987,14 +5987,12 @@ fn automatic_queue_delivery_accepts_a_managed_web_upload_outside_the_workspace()
         prompt_attachments[1][0].path.as_deref(),
         Some(upload_path.to_string_lossy().as_ref())
     );
-    assert!(
-        store
-            .read_task("task-queue-upload")
-            .unwrap()
-            .message_queue
-            .items
-            .is_empty()
-    );
+    assert!(store
+        .read_task("task-queue-upload")
+        .unwrap()
+        .message_queue
+        .items
+        .is_empty());
 }
 
 #[test]
