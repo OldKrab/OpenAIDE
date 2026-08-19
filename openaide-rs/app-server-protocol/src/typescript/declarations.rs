@@ -45,11 +45,16 @@ use crate::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
 use crate::events::{
     AppServerEvent, AppServerEventPayload, EventScope, TaskChanges, TaskChatChange, ToolDetailDelta,
 };
+use crate::file_viewer::{
+    FileViewerError, FileViewerKind, FileViewerOpenFromHandleParams, FileViewerOpenParams,
+    FileViewerRefreshParams, FileViewerReleaseParams, FileViewerReleaseResult, FileViewerSnapshot,
+};
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
-    FileBrowserRootId, MessageId, ProjectId, QueuedMessageId, RequestId, ServerId, StateRootId,
-    TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId, WorktreeRepositoryId,
+    FileBrowserRootId, FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId,
+    ServerId, StateRootId, TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId,
+    WorktreeRepositoryId,
 };
 use crate::project::{
     ProjectAddParams, ProjectAddResult, ProjectRefreshParams, ProjectRefreshResult,
@@ -158,6 +163,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<EventCursor>(output, config);
     push_decl::<FileBrowserEntryId>(output, config);
     push_decl::<FileBrowserRootId>(output, config);
+    push_decl::<FileViewerHandleId>(output, config);
     push_decl::<MessageId>(output, config);
     push_decl::<ProjectId>(output, config);
     push_decl::<QueuedMessageId>(output, config);
@@ -427,6 +433,14 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskClosePlanResult>(output, config);
     push_decl::<TaskToolImagePreviewParams>(output, config);
     push_decl::<TaskToolImagePreviewResult>(output, config);
+    push_decl::<FileViewerOpenParams>(output, config);
+    push_decl::<FileViewerOpenFromHandleParams>(output, config);
+    push_decl::<FileViewerRefreshParams>(output, config);
+    push_decl::<FileViewerReleaseParams>(output, config);
+    push_decl::<FileViewerReleaseResult>(output, config);
+    push_decl::<FileViewerSnapshot>(output, config);
+    push_decl::<FileViewerKind>(output, config);
+    push_decl::<FileViewerError>(output, config);
     push_decl::<ToolImagePreview>(output, config);
     push_decl::<TaskCancelParams>(output, config);
     push_decl::<TaskCancelResult>(output, config);

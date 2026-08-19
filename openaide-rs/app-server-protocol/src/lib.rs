@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod envelopes;
 pub mod errors;
 pub mod events;
+pub mod file_viewer;
 pub mod ids;
 pub mod methods;
 pub mod project;

@@ -13,6 +13,7 @@ import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
 import { useLiveMessagePresentation } from "./useLiveMessagePresentation";
 import { currentFrontendShell } from "../services/frontendShell";
+import { useAgentFileOpen } from "./agentFileOpen";
 import { ClosedPlanView, CompletedPlanView } from "./AgentPlan";
 import { presentThoughtMarkdown } from "./thoughtPresentation";
 
@@ -56,6 +57,7 @@ export const ChatRow = memo(function ChatRow({
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
   const referenceRootRef = useRef<HTMLDivElement | null>(null);
+  useAgentFileOpen();
   const body = message.message;
   if (body.kind === "user") {
     const hasText = body.text.trim().length > 0;

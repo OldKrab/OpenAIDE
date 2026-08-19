@@ -35,4 +35,5 @@
 @import "./app/worktrees.css";
 @import "./app/agent-recovery.css";
 @import "./app/workspace-setup.css";
+@import "./app/task-file-viewer.css";
 @import "./app/popup.css";

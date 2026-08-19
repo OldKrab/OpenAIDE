@@ -1565,8 +1565,13 @@ describe("ChatRow", () => {
       payload: { line: 12, path: "/workspace/notes.md" },
     });
 
-    const button = ToolPath({ line: 12, path: "/workspace/notes.md" });
-    button.props.onClick({ preventDefault: vi.fn(), stopPropagation: vi.fn() });
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ToolPath line={12} path="/workspace/notes.md" />);
+    });
+    act(() => {
+      tree!.root.findByType("button").props.onClick({ preventDefault: vi.fn(), stopPropagation: vi.fn() });
+    });
     expect(posted).toEqual([{ type: "tool.openPath", payload: { line: 12, path: "/workspace/notes.md" } }]);
   });
 

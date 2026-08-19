@@ -214,6 +214,7 @@ export function createDesktopValidationShell(
       openExternal: (url) => { void openUrl(url); },
       reload: () => window.location.reload(),
     },
+    fileViewer: true,
   };
 }
 

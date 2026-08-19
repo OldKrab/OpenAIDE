@@ -124,6 +124,8 @@ export type TaskCallbacks = {
   respondToQuestion: (requestId: string, response: ElicitationResponse) => void;
   sendPrompt: (prompt?: string) => void;
   selectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
+  /** Same attached App Server session as other Task intents. */
+  fileViewer?: Pick<BackendConnection, "request">;
 };
 
 export type TaskFileBrowserCallbacks = {

@@ -6,7 +6,8 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
-    DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
+    DIAGNOSTICS_GET_RUNTIME, FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH,
+    FILE_VIEWER_RELEASE, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
     MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_FORK,
     NATIVE_SESSION_RESTORE, PENDING_REQUEST_RESOLVE, PROJECT_ADD, PROJECT_REFRESH, PROJECT_REMOVE,
     PROJECT_RENAME, SETTINGS_GET_AGENT_DETAILS, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
@@ -303,6 +304,12 @@ impl RpcGateway {
             TASK_TOOL_IMAGE_PREVIEW => {
                 self.handle_task_tool_image_preview(connection_id, id, params, meta)
             }
+            FILE_VIEWER_OPEN => self.handle_file_viewer_open(connection_id, id, params, meta),
+            FILE_VIEWER_OPEN_FROM_HANDLE => {
+                self.handle_file_viewer_open_from_handle(connection_id, id, params, meta)
+            }
+            FILE_VIEWER_REFRESH => self.handle_file_viewer_refresh(connection_id, id, params, meta),
+            FILE_VIEWER_RELEASE => self.handle_file_viewer_release(connection_id, id, params, meta),
             TASK_RELEASE => self.handle_task_release(connection_id, id, params, meta, now),
             TASK_ARCHIVE => self.handle_task_archive(connection_id, id, params, meta, now),
             TASK_RESTORE => self.handle_task_restore(connection_id, id, params, meta),

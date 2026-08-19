@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
+        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -84,6 +84,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedParams;\n");
     output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanParams;\n");
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewParams;\n");
+    output.push_str("  [FILE_VIEWER_OPEN]: FileViewerOpenParams;\n");
+    output.push_str("  [FILE_VIEWER_OPEN_FROM_HANDLE]: FileViewerOpenFromHandleParams;\n");
+    output.push_str("  [FILE_VIEWER_REFRESH]: FileViewerRefreshParams;\n");
+    output.push_str("  [FILE_VIEWER_RELEASE]: FileViewerReleaseParams;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelParams;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenParams;\n");
     output.push_str("  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionParams;\n");
@@ -177,6 +181,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedResult;\n");
     output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanResult;\n");
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewResult;\n");
+    output.push_str("  [FILE_VIEWER_OPEN]: FileViewerSnapshot;\n");
+    output.push_str("  [FILE_VIEWER_OPEN_FROM_HANDLE]: FileViewerSnapshot;\n");
+    output.push_str("  [FILE_VIEWER_REFRESH]: FileViewerSnapshot;\n");
+    output.push_str("  [FILE_VIEWER_RELEASE]: FileViewerReleaseResult;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelResult;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenResult;\n");
     output.push_str("  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionResult;\n");

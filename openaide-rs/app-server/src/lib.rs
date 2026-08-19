@@ -7,6 +7,7 @@ pub(crate) mod attachment_runtime;
 pub(crate) mod chat_history;
 pub mod client_lifecycle;
 pub mod diagnostics;
+pub mod file_viewer;
 pub mod logging;
 pub(crate) mod media;
 pub(crate) mod native_sessions;

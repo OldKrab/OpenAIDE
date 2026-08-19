@@ -137,6 +137,7 @@ export function AppPrimaryTaskSurface({
         chatPageState={primaryTask.chatPageState}
         backendReady={backendReady}
         fileBrowser={callbacks.task.fileBrowser}
+        fileViewer={callbacks.task.fileViewer}
         intents={intents.task}
         onCancel={renderableTaskSnapshot.task.has_messages || renderableTaskSnapshot.task.status === "active"
           ? callbacks.task.cancel

@@ -8,7 +8,7 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "@openaide/app-shell-contracts";
-import type { ToolImagePreview } from "@openaide/app-server-client";
+import type { BackendConnection, ToolImagePreview } from "@openaide/app-server-client";
 import { renderedChat } from "../state/chatPaging";
 import type {
   AppState,
@@ -33,12 +33,16 @@ import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
+import { AgentFileOpenContext } from "./agentFileOpen";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
+import { FileViewerPanel, TaskPanelToggle } from "./FileViewerPanel";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
 import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
 import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
 import { TaskSessionReloadNotice } from "./TaskSessionReloadNotice";
+import { currentFrontendShell } from "../services/frontendShell";
+import { useTaskFileViewer } from "./useTaskFileViewer";
 
 export {
   scrollTopAfterPrependedContent,
@@ -125,6 +129,7 @@ export function TaskView({
   onClosePlan,
   onAddToQueue,
   fileBrowser,
+  fileViewer: fileViewerConnection,
   onLoadChatPage,
   onLoadComposerHistory,
   onLoadToolImagePreview,
@@ -170,6 +175,7 @@ export function TaskView({
   onClosePlan?: () => Promise<void>;
   onAddToQueue?: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
+  fileViewer?: Pick<BackendConnection, "request">;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadComposerHistory?: () => Promise<string[]>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
@@ -208,6 +214,15 @@ export function TaskView({
 }) {
   const quoteRequestSequence = useRef(0);
   const [quoteRequest, setQuoteRequest] = useState<{ id: number; taskId: string; text: string }>();
+  const fileViewerEnabled = currentFrontendShell()?.fileViewer === true && fileViewerConnection !== undefined;
+  const fileViewer = useTaskFileViewer({
+    connection: fileViewerEnabled ? fileViewerConnection : undefined,
+    enabled: fileViewerEnabled,
+    taskId: snapshot.task.task_id,
+  });
+  const openAgentFile = useCallback((path: string, line?: number) => {
+    void fileViewer.openPath(path, line);
+  }, [fileViewer.openPath]);
   const queueOverlayRef = useCallback((node: HTMLDivElement | null) => (
     node ? installTaskQueueOverlayClearance(node) : undefined
   ), []);
@@ -407,7 +422,7 @@ export function TaskView({
     onSendPrompt(prompt);
   };
 
-  return (
+  const taskSurface = (
     <section className="task-surface task-work-stack" aria-label="Task chat">
       <div className="task-work-stack-header">
         <TaskHeader
@@ -420,21 +435,34 @@ export function TaskView({
           gitRef={snapshot.task.git_ref}
           showWorkspaceContext={showWorkspaceContext}
         />
-        {snapshot.current_plan ? (
-          <button
-            aria-expanded={planDrawerOpen}
-            aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
-            className="task-plan-drawer-trigger"
-            onClick={() => onPlanDrawerOpenChange?.(!planDrawerOpen)}
-            type="button"
-          >
-            <ListTodo aria-hidden="true" size={14} />
-            <span>Plan</span>
-            <small>{completedPlanSteps}/{snapshot.current_plan.entries.length}</small>
-          </button>
-        ) : null}
+        <div className="task-work-stack-header-actions">
+          {snapshot.current_plan ? (
+            <button
+              aria-expanded={planDrawerOpen}
+              aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
+              className="task-plan-drawer-trigger"
+              onClick={() => onPlanDrawerOpenChange?.(!planDrawerOpen)}
+              type="button"
+            >
+              <ListTodo aria-hidden="true" size={14} />
+              <span>Plan</span>
+              <small>{completedPlanSteps}/{snapshot.current_plan.entries.length}</small>
+            </button>
+          ) : null}
+          <TaskPanelToggle
+            collapsed={fileViewer.collapsed}
+            onToggle={() => fileViewer.setCollapsed(!fileViewer.collapsed)}
+            visible={fileViewer.visible}
+          />
+        </div>
       </div>
-      <div className="task-workbench">
+      <div
+        className="task-workbench"
+        data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
+        style={fileViewer.visible
+          ? { ["--task-panel-ratio" as string]: String(fileViewer.splitRatio) }
+          : undefined}
+      >
         {snapshot.current_plan ? (
           <aside aria-label="Current plan" className="task-plan-column">
             <AgentPlanView
@@ -569,6 +597,18 @@ export function TaskView({
           </ComposerWithContextUsage>
         )}
         </div>
+        <FileViewerPanel
+          collapsed={fileViewer.collapsed}
+          onClose={fileViewer.closeTab}
+          onOpenFromHandle={fileViewer.openFromHandle}
+          onQuote={quoteAvailable ? requestQuote : () => undefined}
+          onRefresh={(handle) => void fileViewer.refresh(handle)}
+          onSelect={fileViewer.selectTab}
+          onSplitRatio={fileViewer.setSplitRatio}
+          splitRatio={fileViewer.splitRatio}
+          tab={fileViewer.activeTab}
+          tabs={fileViewer.tabs}
+        />
       </div>
       {snapshot.current_plan ? (
         <>
@@ -599,6 +639,13 @@ export function TaskView({
         </>
       ) : null}
     </section>
+  );
+
+  if (!fileViewerEnabled) return taskSurface;
+  return (
+    <AgentFileOpenContext.Provider value={openAgentFile}>
+      {taskSurface}
+    </AgentFileOpenContext.Provider>
   );
 }
 

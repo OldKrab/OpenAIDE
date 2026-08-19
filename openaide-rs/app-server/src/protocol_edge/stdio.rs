@@ -21,6 +21,8 @@ use crate::worktree_events::WorktreeUpdateReceiver;
 mod agent_settings_status_tests;
 mod factory;
 #[cfg(test)]
+mod file_viewer_tests;
+#[cfg(test)]
 mod tests;
 pub(crate) mod wire;
 

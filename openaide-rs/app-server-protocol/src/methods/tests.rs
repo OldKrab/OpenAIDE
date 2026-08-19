@@ -91,3 +91,14 @@ fn task_methods_use_task_namespace() {
     assert_eq!(TaskArchive::METHOD, "task/archive");
     assert_eq!(TaskRestore::METHOD, "task/restore");
 }
+
+#[test]
+fn file_viewer_methods_use_file_viewer_namespace() {
+    assert_eq!(FileViewerOpen::METHOD, "fileViewer/open");
+    assert_eq!(
+        FileViewerOpenFromHandle::METHOD,
+        "fileViewer/openFromHandle"
+    );
+    assert_eq!(FileViewerRefresh::METHOD, "fileViewer/refresh");
+    assert_eq!(FileViewerRelease::METHOD, "fileViewer/release");
+}

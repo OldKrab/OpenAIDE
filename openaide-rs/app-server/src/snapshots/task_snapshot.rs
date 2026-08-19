@@ -87,6 +87,21 @@ pub trait TaskSnapshotSource: Send + Sync {
     ) -> Result<Option<ToolImagePreview>, ProtocolError> {
         Ok(None)
     }
+
+    /// Resolves the Task Workspace for a File Viewer open without exposing a client path authority.
+    fn workspace_root_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<String, ProtocolError> {
+        let _ = (client_instance_id, task_id);
+        Err(ProtocolError {
+            code: ProtocolErrorCode::NotFound,
+            message: "File Viewer is unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
 }
 
 /// Supplies process-local history reconciliation state for otherwise durable Task snapshots.
@@ -224,6 +239,20 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             .read_tool_artifact(task_id.as_str(), artifact_id)
             .map_err(task_snapshot_error)?;
         Ok(tool_image_preview::load_tool_image_preview(&task, &details))
+    }
+
+    fn workspace_root_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<String, ProtocolError> {
+        let task = self
+            .store
+            .read_task(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(task_snapshot_error)?;
+        Ok(task.workspace_root)
     }
 }
 

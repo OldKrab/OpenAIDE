@@ -154,6 +154,7 @@ impl RpcGateway {
             );
         }
         self.remove_expired_client_workspace_roots(client_instance_id, now);
+        self.file_viewer.release_client(client_instance_id);
         crate::logging::info(
             "client_detach_completed",
             serde_json::json!({ "client_instance_id": client_instance_id }),
