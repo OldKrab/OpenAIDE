@@ -67,6 +67,7 @@ mod set_title;
 mod support_recovery;
 mod workflows;
 
+pub(crate) use queue::queued_attachment_paths_are_available;
 pub(crate) use workflows::*;
 
 #[derive(Clone)]
