@@ -525,7 +525,7 @@ fn add_native_transcript(
     active: bool,
 ) {
     if path.extension().and_then(|value| value.to_str()) == Some("zst") {
-        match fs::File::open(path).and_then(|file| zstd::stream::decode_all(file)) {
+        match fs::File::open(path).and_then(zstd::stream::decode_all) {
             Ok(mut bytes) => {
                 let complete_len = bytes
                     .iter()
