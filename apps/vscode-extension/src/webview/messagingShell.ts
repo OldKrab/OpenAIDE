@@ -9,7 +9,6 @@ import {
   SHELL_SHOW_NOTIFICATION,
   WORKTREE_RESOLVE_FOLDER,
   type SecretReadParams,
-  type ClientInstanceId,
   type ShellNotificationAction,
   type ShellNotificationLevel,
   type ShellRevealFileParams,
@@ -82,12 +81,9 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     return true;
   }
   if (message.type === "supportExport.save") {
-    const { requestId, fileHandleId, label, clientInstanceId } = message.payload;
+    const { requestId, fileHandleId, label } = message.payload;
     try {
-      const target = await context.runtime.appServerRequest(SHELL_RESOLVE_FILE_REVEAL, {
-        originatingClientInstanceId: clientInstanceId as ClientInstanceId,
-        fileHandleId,
-      });
+      const target = await context.runtime.resolveOwnAppServerFileReveal(fileHandleId);
       if (!nodePath.isAbsolute(target.path)) throw new Error("Support export path is invalid.");
       const destination = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.file(nodePath.join(homedir(), label)),

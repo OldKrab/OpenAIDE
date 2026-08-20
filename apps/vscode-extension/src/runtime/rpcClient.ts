@@ -66,6 +66,10 @@ export class RuntimeClient implements vscode.Disposable {
     return this.appServerHostClient.request(method, params, meta);
   }
 
+  async resolveOwnAppServerFileReveal(fileHandleId: string) {
+    return this.appServerHostClient.resolveOwnFileReveal(fileHandleId);
+  }
+
   async syncWorkspaceRoots(roots: ClientWorkspaceRoot[]) {
     await this.appServerHostClient.syncWorkspaceRoots(roots);
   }
