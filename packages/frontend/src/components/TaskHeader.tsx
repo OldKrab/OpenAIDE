@@ -26,6 +26,7 @@ export function TaskHeader({
   permissionPolicy,
   onPermissionPolicyChange,
   permissionPolicyDisabled = false,
+  permissionPolicyDisabledReason,
   workspaceRoot,
   showWorkspaceContext = true,
   worktreeName,
@@ -39,6 +40,7 @@ export function TaskHeader({
   permissionPolicy?: TaskPermissionPolicy;
   onPermissionPolicyChange?: (policy: TaskPermissionPolicy) => Promise<void>;
   permissionPolicyDisabled?: boolean;
+  permissionPolicyDisabledReason?: string;
   workspaceRoot: string;
   showWorkspaceContext?: boolean;
   worktreeName?: string;
@@ -70,6 +72,7 @@ export function TaskHeader({
       {permissionPolicy && onPermissionPolicyChange ? (
         <TaskPermissionPolicyControl
           disabled={permissionPolicyDisabled}
+          disabledReason={permissionPolicyDisabledReason}
           onChange={onPermissionPolicyChange}
           policy={permissionPolicy}
         />

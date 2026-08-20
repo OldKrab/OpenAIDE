@@ -1460,6 +1460,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
     agents: [],
     backendConnectionState: { status: "connecting" },
     backendReady: false,
+    taskMutationReady: false,
     bootstrap: surface === "invalid" ? { surface } : { surface, shell: VSCODE_SHELL },
     callbacks: {
       navigation: {

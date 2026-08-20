@@ -103,7 +103,17 @@ export function AppPrimaryTaskSurface({
   planDrawerOpen,
   workspaceRecovery,
 }: AppPrimaryTaskSurfaceProps) {
-  const { activeTask, agents, backendReady, bootstrap, callbacks, intents, preferences, view } = controller;
+  const {
+    activeTask,
+    agents,
+    backendReady,
+    bootstrap,
+    callbacks,
+    intents,
+    preferences,
+    taskMutationReady,
+    view,
+  } = controller;
   const { primaryTask } = view;
   const {
     openingNativeSession,
@@ -136,6 +146,7 @@ export function AppPrimaryTaskSurface({
         backendConnectionState={controller.backendConnectionState}
         chatPageState={primaryTask.chatPageState}
         backendReady={backendReady}
+        taskMutationReady={taskMutationReady}
         fileBrowser={callbacks.task.fileBrowser}
         fileViewer={callbacks.task.fileViewer}
         intents={intents.task}

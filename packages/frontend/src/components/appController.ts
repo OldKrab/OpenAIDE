@@ -65,6 +65,7 @@ export type AppControllerTestHarness = {
   activeNavigationTaskId?: string;
   agents?: AgentOption[];
   backendReady: boolean;
+  taskMutationReady: boolean;
   backendConnectionState: BackendConnectionState;
   bootstrap: WebviewBootstrap;
   callbacks: AppControllerCallbacks;
@@ -112,6 +113,8 @@ export type AppController = {
   /** Shared request boundary used by UI workflows that are not App Shell capabilities. */
   backendConnection?: AppControllerBackendConnection;
   backendReady: boolean;
+  /** Active-Task mutations remain available when only unrelated global replicas are recovering. */
+  taskMutationReady: boolean;
   backendConnectionState: BackendConnectionState;
   bootstrap: WebviewBootstrap;
   callbacks: AppControllerCallbacks;
@@ -197,6 +200,7 @@ function useAppControllerCore({
     operationOwner,
     replicaEpoch,
     retryTaskOpen,
+    taskMutationReady,
   } = useAppControllerBackendLifecycle({
     asyncOperations,
     backendConnection: backendConnectionRef,
@@ -310,6 +314,7 @@ function useAppControllerCore({
     retryNativeSessionOpen,
     retryTaskOpen,
     state,
+    taskMutationReady,
     visibleTasks,
   };
 }

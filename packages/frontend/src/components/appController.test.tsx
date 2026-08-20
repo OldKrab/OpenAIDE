@@ -1437,6 +1437,7 @@ describe("app controller mounted lifecycle", () => {
       }),
     });
     expect(latestController?.backendReady).toBe(false);
+    expect(latestController?.taskMutationReady).toBe(false);
 
     act(() => {
       latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "Keep this draft" });
@@ -1450,6 +1451,7 @@ describe("app controller mounted lifecycle", () => {
     expect(taskSubscriptionAttempts).toBe(2);
     expect(latestController?.backendConnectionState).toEqual({ status: "ready" });
     expect(latestController?.backendReady).toBe(true);
+    expect(latestController?.taskMutationReady).toBe(true);
     expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "webview.telemetry",
@@ -1459,6 +1461,80 @@ describe("app controller mounted lifecycle", () => {
       }),
     });
     expect(JSON.stringify(postHostMessage.mock.calls)).not.toContain("NetworkError when attempting to fetch resource.");
+  });
+
+  it("keeps active Task mutations available while an unrelated Projects baseline recovers", async () => {
+    const eventListeners: Array<(event: AppServerEvent) => void> = [];
+    const replacementProjects = deferredValue<ReturnType<typeof nonTaskSubscriptionSnapshot>>();
+    let projectSubscriptionAttempts = 0;
+    const request = vi.fn((
+      method: string,
+      params?: { scope?: { kind: string; taskId?: string } },
+    ) => {
+      if (method === TASK_OPEN) {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Task") });
+      }
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (method !== STATE_SUBSCRIBE) throw new Error(method);
+      if (params?.scope?.kind === "task") {
+        return Promise.resolve(taskSubscriptionSnapshot("cursor_task"));
+      }
+      if (params?.scope?.kind === "projects") {
+        projectSubscriptionAttempts += 1;
+        if (projectSubscriptionAttempts === 2) return replacementProjects.promise;
+        return Promise.resolve(nonTaskSubscriptionSnapshot(params.scope, "cursor_projects"));
+      }
+      return Promise.resolve(nonTaskSubscriptionSnapshot(params?.scope));
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: (_method, listener) => {
+        eventListeners.push(listener);
+        return () => undefined;
+      },
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.backendReady).toBe(true);
+    expect(latestController?.taskMutationReady).toBe(true);
+
+    await act(async () => {
+      const event: AppServerEvent = {
+        subscription: { kind: "projects" },
+        previousCursor: "cursor_missing" as never,
+        cursor: "cursor_projects_gap" as never,
+        scope: { kind: "stateRoot", stateRootId: "state_root_1" as never },
+        payload: {
+          kind: "projectCollectionUpdated",
+          projects: { projects: [] },
+        },
+      };
+      for (const listener of eventListeners) listener(event);
+      await Promise.resolve();
+    });
+
+    expect(projectSubscriptionAttempts).toBe(2);
+    expect(latestController?.backendReady).toBe(false);
+    expect(latestController?.taskMutationReady).toBe(true);
+
+    await act(async () => {
+      replacementProjects.resolve(nonTaskSubscriptionSnapshot(
+        { kind: "projects" },
+        "cursor_projects_recovered",
+      ));
+      await replacementProjects.promise;
+      await Promise.resolve();
+    });
+    expect(latestController?.backendReady).toBe(true);
+    expect(latestController?.taskMutationReady).toBe(true);
   });
 
   it("opens a task once when navigation changes to its route", async () => {

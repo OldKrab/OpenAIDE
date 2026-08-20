@@ -121,6 +121,7 @@ export function useAppControllerBackendLifecycle({
     dispatch,
   );
   const [backendReady, setBackendReady] = useState(false);
+  const [backendSessionReady, setBackendSessionReady] = useState(false);
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>({
     status: "connecting",
   });
@@ -252,31 +253,35 @@ export function useAppControllerBackendLifecycle({
         ...(next.status === "unavailable" ? { error_name: errorName(next.error) } : {}),
       });
       if (next.status === "recovering") {
+        setBackendSessionReady(false);
         setBackendReady(false);
         setBackendConnectionState({
           status: "reconnecting",
           message: "Connection interrupted. Reconnecting automatically.",
         });
       } else if (next.status === "unavailable") {
+        setBackendSessionReady(false);
         setBackendReady(false);
         setBackendConnectionState({
           status: "unavailable",
           message: next.error instanceof Error ? next.error.message : "Unable to restore App Server session.",
         });
-      } else if (
-        next.status === "ready"
-        && backendInitialized.current
-        && pendingGlobalSubscriptionBaselines.current.size === 0
-        && failedSubscriptionBaselines.current.size === 0
-      ) {
-        setBackendReady(true);
-        setBackendConnectionState({ status: "ready" });
+      } else if (next.status === "ready" && backendInitialized.current) {
+        setBackendSessionReady(true);
+        if (
+          pendingGlobalSubscriptionBaselines.current.size === 0
+          && failedSubscriptionBaselines.current.size === 0
+        ) {
+          setBackendReady(true);
+          setBackendConnectionState({ status: "ready" });
+        }
       }
     });
     const stopSubscriptions: Array<() => void> = [];
     setBackendStateGeneration((generation) => generation + 1);
     backendInitialized.current = false;
     setBackendInitializationReady(false);
+    setBackendSessionReady(false);
     failedSubscriptionBaselines.current.clear();
     pendingGlobalSubscriptionBaselines.current.clear();
     setBackendReady(false);
@@ -393,6 +398,7 @@ export function useAppControllerBackendLifecycle({
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;
             setBackendInitializationReady(true);
+            setBackendSessionReady(true);
             sendWebviewTelemetry(postHostMessage, "app_server_initialize_completed", {
               surface: initialBootstrap.surface,
               task_id: initialBootstrap.taskId,
@@ -414,6 +420,7 @@ export function useAppControllerBackendLifecycle({
             });
             backendInitialized.current = false;
             setBackendInitializationReady(false);
+            setBackendSessionReady(false);
             setBackendReady(false);
             const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
             setBackendConnectionState({ status: "unavailable", message });
@@ -452,6 +459,7 @@ export function useAppControllerBackendLifecycle({
       active = false;
       backendInitialized.current = false;
       setBackendInitializationReady(false);
+      setBackendSessionReady(false);
       failedSubscriptionBaselines.current.clear();
       pendingGlobalSubscriptionBaselines.current.clear();
       setBackendReady(false);
@@ -532,6 +540,7 @@ export function useAppControllerBackendLifecycle({
     backendInitializationReady,
     backendConnectionState,
     backendReady: backendReady && taskRouteLifecycle.ready,
+    taskMutationReady: backendSessionReady && taskRouteLifecycle.ready,
     bootstrap,
     createSnapshotRequestId,
     operationOwner,

@@ -19,7 +19,17 @@ import { currentFrontendShell } from "../services/frontendShell";
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
   const taskNotifications = useWebTaskNotifications(controller);
-  const { activeNavigationTaskId, activeTask, backendReady, bootstrap, callbacks, preferences, view, visibleTasks } = controller;
+  const {
+    activeNavigationTaskId,
+    activeTask,
+    backendReady,
+    bootstrap,
+    callbacks,
+    preferences,
+    taskMutationReady,
+    view,
+    visibleTasks,
+  } = controller;
   const { appServerError, navigation, settings } = view;
   const forkableAgentIds = useMemo(
     () => new Set((controller.agents ?? [])
@@ -544,7 +554,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           </span>
           {mobilePermissionTask ? (
             <TaskPermissionPolicyControl
-              disabled={renderableTaskArchived || !backendReady}
+              disabled={renderableTaskArchived || !taskMutationReady}
+              disabledReason={renderableTaskArchived
+                ? "Archived Tasks are read-only."
+                : !taskMutationReady
+                  ? "Permission handling is unavailable until this Task is connected."
+                  : undefined}
               onChange={callbacks.task.setPermissionPolicy}
               policy={mobilePermissionTask.permission_policy}
             />

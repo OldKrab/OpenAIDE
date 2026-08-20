@@ -490,6 +490,50 @@ describe("TaskView timeline presentation", () => {
     expect(configControl.props.disabled).toBe(true);
   });
 
+  it("keeps permission handling available during unrelated Backend recovery", async () => {
+    const { TaskView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshotWithAuthoritativeTail(true))}
+          backendReady={false}
+          taskMutationReady
+          onPermissionPolicyChange={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    const permissionControl = tree.root.findByProps({
+      "aria-label": "Permission handling: Ask every time",
+    });
+    expect(permissionControl.props.disabled).toBe(false);
+  });
+
+  it("explains when permission handling is unavailable for the active Task", async () => {
+    const { TaskView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshotWithAuthoritativeTail(true))}
+          taskMutationReady={false}
+          onPermissionPolicyChange={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    const permissionControl = tree.root.findByProps({
+      "aria-label": "Permission handling: Ask every time",
+    });
+    expect(permissionControl.props.disabled).toBe(true);
+    expect(permissionControl.props.title).toBe(
+      "Permission handling is unavailable until this Task is connected.",
+    );
+  });
+
   it("locks Configuration Options until the correlated change settles", async () => {
     const { TaskView } = await import("./TaskView");
     const snapshot = snapshotWithAuthoritativeTail(true);
