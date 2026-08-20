@@ -167,10 +167,12 @@ function useAppControllerCore({
   const currentNewTaskContext = useRef({
     projectId: state.newTask.selection.projectId,
     agentId: state.newTask.selection.agentId || undefined,
+    workspaceRootsSeededProject: state.newTask.workspaceRootsSeededProject,
   });
   currentNewTaskContext.current = {
     projectId: state.newTask.selection.projectId,
     agentId: state.newTask.selection.agentId || undefined,
+    workspaceRootsSeededProject: state.newTask.workspaceRootsSeededProject,
   };
   const pendingPreparedNewTask = useRef<PendingNewTaskPreparation | undefined>(undefined);
   const newTaskController = useMemo(() => new NewTaskController(), []);

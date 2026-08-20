@@ -27,7 +27,7 @@ import { agentOptionsFromProtocol } from "../state/appServerAgents";
 import { actionsFromInitialSnapshot } from "../state/appServerInitialSnapshot";
 import {
   retainedNewTaskContextForInitialization,
-  type NewTaskContextIds,
+  type LiveNewTaskContext,
 } from "../state/newTaskSelectionDefaults";
 import {
   bindAppServerReplicaEpoch,
@@ -79,7 +79,7 @@ type BackendLifecycleOptions = {
   asyncOperations: AsyncOperationOwner;
   backendConnection?: AppControllerBackendConnection;
   currentAgentId: RefObject<string>;
-  currentNewTaskContext: RefObject<NewTaskContextIds>;
+  currentNewTaskContext: RefObject<LiveNewTaskContext>;
   dispatch: Dispatch<AppAction>;
   initialBootstrap: WebviewBootstrap;
   newTaskController: NewTaskController;

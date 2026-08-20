@@ -192,6 +192,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: selectionWithProject(state.newTask.selection, action.project),
+          workspaceRootsSeededProject: undefined,
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -207,6 +208,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             projectId: action.projectId,
             workspaceLabel: project?.label ?? state.newTask.selection.workspaceLabel,
           },
+          workspaceRootsSeededProject: undefined,
           configOptions: sameProject ? state.newTask.configOptions : undefined,
           configOptionsLoading: sameProject ? state.newTask.configOptionsLoading : false,
           configOptionsError: sameProject ? state.newTask.configOptionsError : undefined,
@@ -346,6 +348,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: selectionWithWorkspace(state.newTask.selection, action.workspace),
+          workspaceRootsSeededProject: undefined,
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -361,6 +364,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           workspaceRoot: action.path,
           isolation: action.worktreeId ? "git_worktree" : "local",
         },
+        workspaceRootsSeededProject: undefined,
         configOptions: undefined,
         configOptionsLoading: false,
         configOptionsError: undefined,

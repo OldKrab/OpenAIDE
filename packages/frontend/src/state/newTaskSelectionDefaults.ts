@@ -13,6 +13,10 @@ export type NewTaskContextIds = {
   agentId?: string;
 };
 
+export type LiveNewTaskContext = NewTaskContextIds & {
+  workspaceRootsSeededProject?: boolean;
+};
+
 type SelectionStorage = Pick<Storage, "getItem" | "setItem">;
 
 export type RetainedPreparedTaskLease = {
@@ -78,14 +82,14 @@ export function readRetainedNewTaskContext(
 /** Merges live selections over reload-retained choices for initialize reconciliation. */
 export function retainedNewTaskContextForInitialization(
   snapshot: ClientSnapshot,
-  live: NewTaskContextIds,
+  live: LiveNewTaskContext,
 ): NewTaskContextIds {
   const stored = readRetainedNewTaskContext(
     snapshot.stateRoot.stateRootId,
     snapshot.client.clientInstanceId,
   );
   return {
-    projectId: live.projectId ?? stored?.projectId,
+    projectId: live.workspaceRootsSeededProject ? stored?.projectId : live.projectId ?? stored?.projectId,
     agentId: live.agentId ?? stored?.agentId,
   };
 }

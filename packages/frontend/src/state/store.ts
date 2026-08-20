@@ -70,6 +70,8 @@ export type NewTaskState = {
     configOptions?: ConfigOptionsCatalog;
   };
   selection: ComposerSelection;
+  /** Allows authoritative initialization to replace only the shell's automatic workspace seed. */
+  workspaceRootsSeededProject?: boolean;
   configOptions?: ConfigOptionsCatalog;
   configOptionsLoading?: boolean;
   configOptionsError?: string;

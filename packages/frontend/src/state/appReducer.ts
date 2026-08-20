@@ -16,6 +16,7 @@ import type {
   TaskSummary,
   ActivityToolDetails,
 } from "@openaide/app-shell-contracts";
+import { projectIdForWorkspaceRoot } from "@openaide/app-shell-contracts";
 import {
   selectionWithProject,
   selectionWithWorkspace,
@@ -501,7 +502,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
     case "taskChat:liveText":
       return applyTaskLiveTextPresentation(state, action.taskId, action);
     case "projects": {
-      const currentProject = state.newTask.selection.projectId
+      const currentProject = !state.newTask.workspaceRootsSeededProject && state.newTask.selection.projectId
         ? action.projects.find((project) => project.projectId === state.newTask.selection.projectId)
         : undefined;
       const selected = currentProject ?? selectedProject(action.projects, action.initialProjectId);
@@ -517,7 +518,12 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       return {
         ...state,
         projects: action.projects,
-        newTask: { ...state.newTask, error: undefined, selection },
+        newTask: {
+          ...state.newTask,
+          error: undefined,
+          selection,
+          workspaceRootsSeededProject: undefined,
+        },
       };
     }
     case "worktreeRepository":
@@ -530,11 +536,30 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       };
     case "workspace:roots": {
       const firstRoot = action.roots[0];
-      const selection =
-        state.newTask.selection.workspaceRoot || !firstRoot
-          ? state.newTask.selection
-          : selectionWithWorkspace(state.newTask.selection, firstRoot);
-      return { ...state, workspaceRoots: action.roots, workspaceRootsLoaded: true, newTask: { ...state.newTask, selection } };
+      const firstRootProjectId = firstRoot?.projectId
+        ?? (firstRoot ? projectIdForWorkspaceRoot(firstRoot.path) : undefined);
+      const fillsSelectedWorkspace = !state.newTask.selection.workspaceRoot
+        && firstRoot !== undefined
+        && (
+          !state.newTask.selection.projectId
+          || state.newTask.selection.projectId === firstRootProjectId
+        );
+      const seedsProject = fillsSelectedWorkspace && !state.newTask.selection.projectId;
+      const selection = fillsSelectedWorkspace && firstRoot
+        ? selectionWithWorkspace(state.newTask.selection, firstRoot)
+        : state.newTask.selection;
+      return {
+        ...state,
+        workspaceRoots: action.roots,
+        workspaceRootsLoaded: true,
+        newTask: {
+          ...state.newTask,
+          selection,
+          workspaceRootsSeededProject: seedsProject
+            ? true
+            : state.newTask.workspaceRootsSeededProject,
+        },
+      };
     }
     case "search:set":
       return { ...state, searchQuery: action.query };
