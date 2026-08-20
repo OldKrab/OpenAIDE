@@ -3,6 +3,7 @@ import {
   ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
   CLIENT_CAPABILITIES_CHANGED,
   CLIENT_DETACH,
+  SHELL_RESOLVE_FILE_REVEAL,
   createReliableLocalHttpBackendConnection,
   isAppServerSessionViewMessage,
   reliableHttpErrorDiagnosticFields,
@@ -83,6 +84,14 @@ export class AppServerHostClient {
     await this.flushWorkspaceRoots();
     const connection = await this.ensureInitialized();
     return connection.request(method, params, meta);
+  }
+
+  /** Resolves a handle registered by a request from this logical host client. */
+  async resolveOwnFileReveal(fileHandleId: string) {
+    return this.request(SHELL_RESOLVE_FILE_REVEAL, {
+      originatingClientInstanceId: this.clientInstanceId,
+      fileHandleId,
+    });
   }
 
   async syncWorkspaceRoots(roots: ClientWorkspaceRoot[]): Promise<void> {

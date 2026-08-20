@@ -73,10 +73,12 @@ vi.mock("vscode", () => ({
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
     showOpenDialog: vi.fn(),
+    showSaveDialog: vi.fn(),
     showTextDocument: vi.fn(),
     showWarningMessage: vi.fn(),
   },
   workspace: {
+    fs: { copy: vi.fn() },
     openTextDocument: vi.fn(),
     workspaceFolders: [{ uri: { fsPath: "/workspace/app" } }],
   },
@@ -92,6 +94,7 @@ describe("webview messaging composer routes", () => {
     vi.mocked(vscode.window.showTextDocument).mockClear();
     vi.mocked(vscode.window.showInformationMessage).mockClear();
     vi.mocked(vscode.window.showOpenDialog).mockReset();
+    vi.mocked(vscode.window.showSaveDialog).mockReset();
     vi.mocked(vscode.window.showWarningMessage).mockClear();
     vi.mocked(vscode.window.showErrorMessage).mockClear();
     workspaceMocks.firstWorkspaceRoot.mockReturnValue("/workspace/fallback");
@@ -818,6 +821,40 @@ describe("webview messaging composer routes", () => {
         requestId: "pick-1",
         attachments: [{ handleId: "attachment-1", label: "large-model.bin" }],
       },
+    }]);
+  });
+
+  it("resolves a support export as the extension host client that created it", async () => {
+    vi.mocked(vscode.window.showSaveDialog).mockResolvedValue({ fsPath: "/tmp/saved-support.zip" } as vscode.Uri);
+    const runtime = {
+      appServerRequest: vi.fn(),
+      resolveOwnAppServerFileReveal: vi.fn().mockResolvedValue({
+        path: "/tmp/generated-support.zip",
+        label: "openaide-support.zip",
+      }),
+    };
+    const posted: unknown[] = [];
+
+    await handleWebviewMessage({
+      type: "supportExport.save",
+      payload: {
+        requestId: "export-1",
+        fileHandleId: "file-reveal-1",
+        label: "openaide-support.zip",
+        clientInstanceId: "webview-client-which-did-not-create-the-handle",
+      },
+    }, context(runtime, posted));
+
+    expect(runtime.resolveOwnAppServerFileReveal).toHaveBeenCalledWith("file-reveal-1");
+    expect(runtime.appServerRequest).not.toHaveBeenCalled();
+    expect(vscode.workspace.fs.copy).toHaveBeenCalledWith(
+      { fsPath: "/tmp/generated-support.zip" },
+      { fsPath: "/tmp/saved-support.zip" },
+      { overwrite: true },
+    );
+    expect(posted).toEqual([{
+      type: "supportExport.save.result",
+      payload: { requestId: "export-1", ok: true },
     }]);
   });
 });
