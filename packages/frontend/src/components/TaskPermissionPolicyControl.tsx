@@ -17,10 +17,12 @@ const POLICY_COPY: Record<TaskPermissionPolicy, { label: string; description: st
 /** Compact Task-header control, intentionally separate from Agent-provided configuration. */
 export function TaskPermissionPolicyControl({
   disabled = false,
+  disabledReason,
   onChange,
   policy,
 }: {
   disabled?: boolean;
+  disabledReason?: string;
   onChange: (policy: TaskPermissionPolicy) => Promise<void>;
   policy: TaskPermissionPolicy;
 }) {
@@ -53,7 +55,7 @@ export function TaskPermissionPolicyControl({
           className="task-permission-policy-trigger"
           data-enabled={autoApprove || undefined}
           disabled={disabled || pending}
-          title={triggerLabel}
+          title={disabled && disabledReason ? disabledReason : triggerLabel}
           type="button"
         >
           {autoApprove ? <ShieldCheck aria-hidden="true" size={15} /> : <ShieldQuestion aria-hidden="true" size={15} />}

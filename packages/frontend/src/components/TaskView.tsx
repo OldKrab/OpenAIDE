@@ -123,6 +123,7 @@ export function TaskView({
   archived = false,
   backendConnectionState,
   backendReady,
+  taskMutationReady = backendReady,
   chatPageState,
   intents,
   onCancel,
@@ -170,6 +171,7 @@ export function TaskView({
   archived?: boolean;
   backendConnectionState?: BackendConnectionState;
   backendReady: boolean;
+  taskMutationReady?: boolean;
   chatPageState: AppState["chatPages"][string] | undefined;
   intents: TaskViewIntents;
   onCancel: () => void;
@@ -456,7 +458,12 @@ export function TaskView({
           title={activeTask?.title ?? snapshot.task.title}
           permissionPolicy={snapshot.permission_policy}
           onPermissionPolicyChange={onPermissionPolicyChange}
-          permissionPolicyDisabled={archived || !backendReady}
+          permissionPolicyDisabled={archived || !taskMutationReady}
+          permissionPolicyDisabledReason={archived
+            ? "Archived Tasks are read-only."
+            : !taskMutationReady
+              ? "Permission handling is unavailable until this Task is connected."
+              : undefined}
           workspaceRoot={snapshot.task.workspace_root}
           worktreeName={snapshot.task.worktree_name}
           gitRef={snapshot.task.git_ref}
