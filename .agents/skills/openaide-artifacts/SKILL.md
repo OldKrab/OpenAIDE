@@ -24,6 +24,8 @@ Use `--root <path>` or `OPENAIDE_ARTIFACT_ROOT=<path>` when the app storage root
 
 ## Workflow
 
+Before inspecting local roots, establish evidence that the affected OpenAIDE instance runs in the current environment. A shared repository/workspace or a screenshot alone is not that evidence. If the user is reporting a different or remote machine, ask for artifacts from that instance instead of treating local state as relevant.
+
 1. Locate artifact roots with `roots`.
 2. For App Server/setup bugs, start with `failures`, then `logs runtime --grep <agent-or-error>` or `logs extension --grep <action>`.
 3. For custom Agent bugs, run `agents` to compare persisted `openaide.agents` with what the UI shows.
@@ -54,6 +56,7 @@ Use `--root <path>` or `OPENAIDE_ARTIFACT_ROOT=<path>` when the app storage root
 
 ## Rules
 
+- Do not enumerate or inspect artifacts on this computer without evidence that they belong to the affected OpenAIDE instance.
 - Default commands are read-only.
 - Do not inspect generic VS Code logs unless the user explicitly widens scope.
 - Do not inspect `~/.codex/sessions` for this skill; those are Codex artifacts, not OpenAIDE app artifacts.

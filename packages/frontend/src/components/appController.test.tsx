@@ -801,6 +801,46 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
+  it("uses the App Server New Task default when VS Code workspace roots arrive first", async () => {
+    const firstProjectId = projectIdForWorkspaceRoot("/workspace/first");
+    const defaultProjectId = projectIdForWorkspaceRoot("/workspace/default");
+    bootstrap = {
+      ...vscodeNewTaskBootstrap(),
+      projectIds: [firstProjectId, defaultProjectId],
+    };
+    const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
+    initializedSnapshot.newTaskDefaults.projectId = defaultProjectId as never;
+    initializedSnapshot.projects = {
+      projects: [
+        { projectId: firstProjectId as never, label: "First", workspaceRoot: "/workspace/first", available: true },
+        { projectId: defaultProjectId as never, label: "Default", workspaceRoot: "/workspace/default", available: true },
+      ],
+    };
+    const initialize = deferredInitialize();
+    backendConnection = {
+      initialize: vi.fn(() => initialize.promise),
+      request: vi.fn(() => new Promise(() => undefined)) as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+    });
+    act(() => {
+      listeners.forEach((listener) => listener({
+        type: "workspace.roots.result",
+        payload: { roots: [{ path: "/workspace/first", label: "First" }] },
+      }));
+    });
+    await act(async () => {
+      initialize.resolve({ snapshot: initializedSnapshot });
+      await initialize.promise;
+      await Promise.resolve();
+    });
+
+    expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe(defaultProjectId);
+  });
+
   it("persists a user-selected New Task Agent as the next default", async () => {
     bootstrap = vscodeNewTaskBootstrap("project_1");
     const initializedSnapshot = clientSnapshot({
