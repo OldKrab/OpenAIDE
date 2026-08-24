@@ -832,6 +832,15 @@ describe("app controller mounted lifecycle", () => {
         payload: { roots: [{ path: "/workspace/first", label: "First" }] },
       }));
     });
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "webview.telemetry",
+      payload: expect.objectContaining({
+        event: "new_task_workspace_project_seeded",
+        project_id: firstProjectId,
+        selection_source: "workspace_roots",
+        workspace_roots_seeded: true,
+      }),
+    });
     await act(async () => {
       initialize.resolve({ snapshot: initializedSnapshot });
       await initialize.promise;
@@ -839,6 +848,18 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe(defaultProjectId);
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "webview.telemetry",
+      payload: expect.objectContaining({
+        event: "new_task_initial_project_selected",
+        project_id: defaultProjectId,
+        selection_source: "app_server_default",
+        client_identity_source: "shell",
+        shell_project_present: false,
+        retained_project_present: false,
+        default_project_valid: true,
+      }),
+    });
   });
 
   it("persists a user-selected New Task Agent as the next default", async () => {
@@ -3834,6 +3855,7 @@ function vscodeNewTaskBootstrap(projectId?: string) {
     surface: "task" as const,
     shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
     projectId,
+    clientInstanceId: "vscode-new-task-client" as never,
     projectIds: ["project_1", "project_2"],
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },

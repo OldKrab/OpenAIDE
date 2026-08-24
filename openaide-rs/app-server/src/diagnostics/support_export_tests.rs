@@ -2,7 +2,49 @@ use std::fs;
 
 use serde_json::json;
 
-use super::{complete_jsonl_tail, complete_prefix, trace_identity};
+use super::{complete_jsonl_tail, complete_prefix, safe_log_snapshot, trace_identity};
+
+#[test]
+fn safe_log_snapshot_keeps_selection_evidence_and_removes_sensitive_fields() {
+    let directory = tempfile::TempDir::new().expect("temporary directory");
+    let path = directory.path().join("app-server.jsonl");
+    fs::write(
+        &path,
+        json!({
+            "timestamp": 42,
+            "scope": "vscode-extension",
+            "level": "info",
+            "event": "new_task_initial_project_selected",
+            "fields": {
+                "project_id": "project-safe",
+                "selection_source": "app_server_default",
+                "extension_version": "0.3.0-gabcdef0",
+                "shell_project_present": false,
+                "retained_project_present": true,
+                "default_project_valid": true,
+                "duration_ms": 12,
+                "workspace_root": "/private/workspace",
+                "error_message": "contains private text"
+            }
+        })
+        .to_string()
+            + "\n",
+    )
+    .expect("write fixture");
+
+    let snapshot =
+        String::from_utf8(safe_log_snapshot(&path).expect("safe snapshot")).expect("utf8 snapshot");
+    let value: serde_json::Value = serde_json::from_str(snapshot.trim()).expect("log record");
+
+    assert_eq!(value["fields"]["project_id"], "project-safe");
+    assert_eq!(value["fields"]["selection_source"], "app_server_default");
+    assert_eq!(value["fields"]["extension_version"], "0.3.0-gabcdef0");
+    assert_eq!(value["fields"]["retained_project_present"], true);
+    assert_eq!(value["fields"]["default_project_valid"], true);
+    assert_eq!(value["fields"]["duration_ms"], 12);
+    assert!(value["fields"].get("workspace_root").is_none());
+    assert!(value["fields"].get("error_message").is_none());
+}
 
 #[test]
 fn complete_prefix_excludes_a_live_partial_record() {

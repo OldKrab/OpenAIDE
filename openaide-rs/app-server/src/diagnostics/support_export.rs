@@ -17,11 +17,12 @@ use crate::protocol::model::TaskStatus;
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 
+mod safe_logs;
 mod zip;
 
+use self::safe_logs::safe_log_snapshot;
 use self::zip::write_stored_zip;
 
-const MAX_SAFE_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_ACP_TRACE_EXPORT_BYTES: u64 = 2 * 1024 * 1024;
 const SUPPORT_EXPORT_RETENTION_SECS: u64 = 60 * 60;
 
@@ -645,58 +646,6 @@ fn last_complete_jsonl_offset(file: &mut fs::File, file_len: u64) -> std::io::Re
         }
     }
     Ok(0)
-}
-
-fn safe_log_snapshot(path: &Path) -> std::io::Result<Vec<u8>> {
-    let metadata = fs::metadata(path)?;
-    let start = metadata.len().saturating_sub(MAX_SAFE_LOG_BYTES);
-    let mut file = fs::File::open(path)?;
-    use std::io::Seek;
-    file.seek(std::io::SeekFrom::Start(start))?;
-    let mut text = String::new();
-    file.read_to_string(&mut text)?;
-    if start > 0 {
-        text = text
-            .split_once('\n')
-            .map(|(_, tail)| tail.to_string())
-            .unwrap_or_default();
-    }
-    let mut output = String::new();
-    for line in text.lines() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        let Some(object) = value.as_object() else {
-            continue;
-        };
-        let Some(event) = object
-            .get("event")
-            .and_then(Value::as_str)
-            .filter(|value| safe_token(value))
-        else {
-            continue;
-        };
-        let scope = object
-            .get("scope")
-            .and_then(Value::as_str)
-            .filter(|value| safe_token(value))
-            .unwrap_or("openaide");
-        let level = object
-            .get("level")
-            .and_then(Value::as_str)
-            .filter(|value| matches!(*value, "info" | "warn" | "error"))
-            .unwrap_or("info");
-        let timestamp = object
-            .get("timestamp")
-            .or_else(|| object.get("timestamp_ms"))
-            .cloned()
-            .unwrap_or(Value::Null);
-        output.push_str(&serde_json::to_string(
-            &json!({ "timestamp": timestamp, "scope": scope, "level": level, "event": event }),
-        )?);
-        output.push('\n');
-    }
-    Ok(output.into_bytes())
 }
 
 fn acp_trace_enabled(store: &Store) -> bool {

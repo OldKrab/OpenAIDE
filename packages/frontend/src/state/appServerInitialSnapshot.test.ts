@@ -42,6 +42,16 @@ describe("App Server initial snapshot ingestion", () => {
       actions: [{ type: "newTask:agent", agentId: "codex", agentLabel: "Codex" }],
       warnings: [],
       requiresNativeSurface: false,
+      newTaskProjectSelection: {
+        projectId: undefined,
+        source: "none",
+        shellProjectPresent: false,
+        shellProjectValid: false,
+        retainedProjectPresent: false,
+        retainedProjectValid: false,
+        defaultProjectPresent: false,
+        defaultProjectValid: false,
+      },
     });
   });
 

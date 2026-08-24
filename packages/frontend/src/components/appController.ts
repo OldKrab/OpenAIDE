@@ -58,6 +58,7 @@ import type { TaskViewIntents } from "./TaskView";
 import { mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
 import { useNativeSessionRouteLifecycle } from "./useNativeSessionRouteLifecycle";
 import { initialTaskNavigationRowsPerProject } from "../state/taskNavigationPolicy";
+import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 
 /** Internal workflow assembly exposed only to the controller lifecycle tests. */
 export type AppControllerTestHarness = {
@@ -289,6 +290,20 @@ function useAppControllerCore({
     state: callbackState,
   });
   const automaticAuthRetry = useRef<string | undefined>(undefined);
+  const loggedWorkspaceSeededProject = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const projectId = state.newTask.workspaceRootsSeededProject
+      ? state.newTask.selection.projectId
+      : undefined;
+    if (!projectId || loggedWorkspaceSeededProject.current === projectId) return;
+    loggedWorkspaceSeededProject.current = projectId;
+    sendWebviewTelemetry(postHostMessage, "new_task_workspace_project_seeded", {
+      surface: bootstrap.surface,
+      project_id: projectId,
+      selection_source: "workspace_roots",
+      workspace_roots_seeded: true,
+    });
+  }, [bootstrap.surface, state.newTask.selection.projectId, state.newTask.workspaceRootsSeededProject]);
   useEffect(() => {
     const preparation = newTaskSnapshot?.preparation;
     const selectedAgent = agents?.find((agent) => agent.id === state.newTask.selection.agentId);
