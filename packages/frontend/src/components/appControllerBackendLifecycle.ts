@@ -404,6 +404,19 @@ export function useAppControllerBackendLifecycle({
               task_id: initialBootstrap.taskId,
               duration_ms: Date.now() - initializeStartedAt,
             });
+            const projectSelection = ingestion.newTaskProjectSelection;
+            sendWebviewTelemetry(postHostMessage, "new_task_initial_project_selected", {
+              surface: initialBootstrap.surface,
+              project_id: projectSelection.projectId,
+              selection_source: projectSelection.source,
+              client_identity_source: initialBootstrap.clientInstanceId ? "shell" : "web_storage",
+              shell_project_present: projectSelection.shellProjectPresent,
+              shell_project_valid: projectSelection.shellProjectValid,
+              retained_project_present: projectSelection.retainedProjectPresent,
+              retained_project_valid: projectSelection.retainedProjectValid,
+              default_project_present: projectSelection.defaultProjectPresent,
+              default_project_valid: projectSelection.defaultProjectValid,
+            });
             const globalBaselinesReady = pendingGlobalSubscriptionBaselines.current.size === 0;
             setBackendReady(globalBaselinesReady);
             if (failedSubscriptionBaselines.current.size === 0 && globalBaselinesReady) {

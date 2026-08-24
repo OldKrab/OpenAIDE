@@ -13,6 +13,17 @@ export type NewTaskContextIds = {
   agentId?: string;
 };
 
+export type InitialNewTaskProjectSelection = {
+  projectId?: string;
+  source: "shell" | "retained" | "app_server_default" | "fallback" | "none";
+  shellProjectPresent: boolean;
+  shellProjectValid: boolean;
+  retainedProjectPresent: boolean;
+  retainedProjectValid: boolean;
+  defaultProjectPresent: boolean;
+  defaultProjectValid: boolean;
+};
+
 export type LiveNewTaskContext = NewTaskContextIds & {
   workspaceRootsSeededProject?: boolean;
 };
@@ -37,31 +48,67 @@ export function selectInitialNewTaskContext({
   projects: ProjectOption[];
   agents: AgentSummary[];
 }): NewTaskContextIds {
-  const allProjectIds = projects.map((project) => project.projectId);
-  const availableProjectIds = projects
-    .filter((project) => project.available !== false)
-    .map((project) => project.projectId);
-  const explicitProjectId = shellProjectId !== undefined && allProjectIds.includes(shellProjectId)
-    ? shellProjectId
-    : undefined;
-  const rememberedProjectId = firstValid(
-    availableProjectIds,
-    retained?.projectId,
-    defaults.projectId ?? undefined,
-  );
+  const project = selectInitialNewTaskProject({ retained, shellProjectId, defaults, projects });
   return {
-    // An explicit route can point at an unavailable Project for recovery. A
-    // remembered fallback must remain inside the currently usable catalog.
-    projectId: explicitProjectId
-      ?? rememberedProjectId
-      ?? (availableProjectIds.length > 0
-        ? availableProjectIds[0]
-        : firstValid(allProjectIds, retained?.projectId)),
+    projectId: project.projectId,
     agentId: firstValid(
       agents.map((agent) => agent.agentId),
       retained?.agentId,
       defaults.agentId ?? undefined,
     ),
+  };
+}
+
+/** Selects a Project and returns metadata-only evidence suitable for diagnostics. */
+export function selectInitialNewTaskProject({
+  retained,
+  shellProjectId,
+  defaults,
+  projects,
+}: {
+  retained?: NewTaskContextIds;
+  shellProjectId?: string;
+  defaults: NewTaskDefaultsSnapshot;
+  projects: ProjectOption[];
+}): InitialNewTaskProjectSelection {
+  const allProjectIds = projects.map((project) => project.projectId);
+  const availableProjectIds = projects
+    .filter((project) => project.available !== false)
+    .map((project) => project.projectId);
+  const retainedProjectId = retained?.projectId;
+  const defaultProjectId = defaults.projectId ?? undefined;
+  const shellProjectValid = shellProjectId !== undefined && allProjectIds.includes(shellProjectId);
+  const retainedProjectValid = retainedProjectId !== undefined
+    && (availableProjectIds.includes(retainedProjectId)
+      || (availableProjectIds.length === 0 && allProjectIds.includes(retainedProjectId)));
+  const defaultProjectValid = defaultProjectId !== undefined
+    && availableProjectIds.includes(defaultProjectId);
+
+  let projectId: string | undefined;
+  let source: InitialNewTaskProjectSelection["source"] = "none";
+  if (shellProjectValid) {
+    projectId = shellProjectId;
+    source = "shell";
+  } else if (retainedProjectValid) {
+    projectId = retainedProjectId;
+    source = "retained";
+  } else if (defaultProjectValid) {
+    projectId = defaultProjectId;
+    source = "app_server_default";
+  } else if (availableProjectIds.length > 0) {
+    projectId = availableProjectIds[0];
+    source = "fallback";
+  }
+
+  return {
+    projectId,
+    source,
+    shellProjectPresent: shellProjectId !== undefined,
+    shellProjectValid,
+    retainedProjectPresent: retainedProjectId !== undefined,
+    retainedProjectValid,
+    defaultProjectPresent: defaultProjectId !== undefined,
+    defaultProjectValid,
   };
 }
 

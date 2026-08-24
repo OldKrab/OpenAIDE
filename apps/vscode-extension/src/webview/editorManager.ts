@@ -199,12 +199,20 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         this.releaseFocusedPanel(panel);
       }
     });
-    const viewId = `panel-${randomUUID()}`;
+    // VS Code owns the webview lifecycle identity. A fresh panel must not
+    // inherit another panel's sessionStorage-backed New Task selection.
+    const clientInstanceId = randomUUID();
+    const viewId = `panel-${clientInstanceId}`;
+    this.logger.info("VS Code webview client created", {
+      surface: bootstrap.surface,
+      client_identity_source: "shell",
+      extension_version: extensionVersion(this.context),
+    });
     const detachAppServerView = this.runtime.attachAppServerView(viewId, (message) => {
       void panel.webview.postMessage(message);
     });
     panel.onDidDispose(detachAppServerView);
-    this.renderPanel(panel, this.bootstrap(bootstrap));
+    this.renderPanel(panel, this.bootstrap({ ...bootstrap, clientInstanceId }));
     panel.webview.onDidReceiveMessage((message) => {
       if (isAppServerSessionViewMessage(message)) {
         void this.runtime.handleAppServerViewMessage(viewId, message);
@@ -312,6 +320,11 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       developerSettingsUnlocked: developerSettingsVisible(this.context.globalState),
     };
   }
+}
+
+function extensionVersion(context: vscode.ExtensionContext) {
+  const version = context.extension.packageJSON.version as unknown;
+  return typeof version === "string" ? version : "unknown";
 }
 
 /** Keeps the native VS Code tab navigable while the Task retains its complete title. */

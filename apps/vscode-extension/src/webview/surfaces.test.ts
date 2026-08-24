@@ -72,7 +72,8 @@ describe("VS Code webview surfaces", () => {
 
   it("boots the activity sidebar as navigation only", () => {
     const view = createViewMock();
-    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), logger(), surfaces());
+    const viewLogger = logger();
+    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), viewLogger, surfaces());
 
     provider.resolveWebviewView(view as never);
 
@@ -84,6 +85,11 @@ describe("VS Code webview surfaces", () => {
     expect(view.webview.html).toContain('data-composer-submit-shortcut="enter"');
     expect(view.webview.html).not.toContain('data-surface="task"');
     expect(view.webview.html).not.toContain('data-surface="settings"');
+    expect(viewLogger.info).toHaveBeenCalledWith("VS Code webview client created", {
+      surface: "navigation",
+      client_identity_source: "shell",
+      extension_version: "0.3.0-test",
+    });
   });
 
   it("does not let disposal of a replaced navigation view detach its replacement", () => {
@@ -99,6 +105,10 @@ describe("VS Code webview surfaces", () => {
 
     provider.resolveWebviewView(first as never);
     provider.resolveWebviewView(second as never);
+    expect(htmlDataAttribute(first.webview.html, "client-instance-id")).not.toBe("");
+    expect(htmlDataAttribute(second.webview.html, "client-instance-id")).not.toBe(
+      htmlDataAttribute(first.webview.html, "client-instance-id"),
+    );
     triggerViewDispose(first);
 
     expect(firstStop).toHaveBeenCalledOnce();
@@ -261,7 +271,6 @@ describe("VS Code webview surfaces", () => {
 
     expect(broker.attachAppServerView).toHaveBeenCalledTimes(2);
     for (const panel of vscodeMocks.panels) {
-      expect(panel.webview.html).not.toContain("data-client-instance-id");
       expect(panel.webview.html).not.toContain("data-app-server-connection");
       expect(panel.webview.html).not.toContain("authToken");
     }
@@ -407,11 +416,44 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledTimes(2);
   });
 
+  it("gives each New Task panel a distinct shell-owned client identity", () => {
+    const panelLogger = logger();
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), panelLogger);
+
+    manager.openNewTask();
+    const firstPanel = vscodeMocks.panels[0];
+    const firstClientId = htmlDataAttribute(firstPanel.webview.html, "client-instance-id");
+    triggerLastMessageHandler(firstPanel, {
+      type: "surface.openTask",
+      payload: { task_id: "created_task", title: "Created task" },
+    });
+    manager.openNewTask();
+    const secondClientId = htmlDataAttribute(
+      vscodeMocks.panels[1].webview.html,
+      "client-instance-id",
+    );
+
+    expect(firstClientId).not.toBe("");
+    expect(secondClientId).not.toBe("");
+    expect(secondClientId).not.toBe(firstClientId);
+    expect(htmlDataAttribute(firstPanel.webview.html, "client-instance-id")).toBe(firstClientId);
+    expect(panelLogger.info).toHaveBeenCalledWith("VS Code webview client created", {
+      surface: "task",
+      client_identity_source: "shell",
+      extension_version: "0.3.0-test",
+    });
+  });
+
 });
+
+function htmlDataAttribute(html: string, name: string) {
+  return html.match(new RegExp(`data-${name}="([^"]*)"`))?.[1] ?? "";
+}
 
 function context() {
   return {
     extensionUri: { fsPath: "/extension" },
+    extension: { packageJSON: { version: "0.3.0-test" } },
   } as never;
 }
 
