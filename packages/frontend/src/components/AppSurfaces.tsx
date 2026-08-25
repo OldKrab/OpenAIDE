@@ -361,6 +361,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           forkableAgentIds={forkableAgentIds}
           environmentLabel={desktopEnvironmentLabel}
           onArchiveTask={callbacks.navigation.archiveTask}
+          onArchiveOlderTasks={callbacks.navigation.archiveOlderTasks}
           onAddProject={addProject}
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onForkNativeSession={callbacks.navigation.forkNativeSession}
@@ -380,6 +381,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
+          onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
+          onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={() => callbacks.navigation.openSettings()}
           onToggleArchived={callbacks.navigation.toggleArchived}
@@ -482,6 +485,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onForkTask={callbacks.navigation.forkTask}
         onAddProject={addProject}
         onArchiveTask={callbacks.navigation.archiveTask}
+        onArchiveOlderTasks={callbacks.navigation.archiveOlderTasks}
         onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
         onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
         onRemoveProject={(project) => { closeMobileNavigation({ restoreFocus: false }); prepareProjectRemoval(project); }}
@@ -496,6 +500,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onSetTaskPinned={callbacks.navigation.setTaskPinned}
         onSetTaskTitle={callbacks.navigation.setTaskTitle}
         onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
+        onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
+        onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
         onSearchChange={callbacks.navigation.changeSearch}
         onSettings={closeAfter(() => callbacks.navigation.openSettings())}
         onToggleArchived={callbacks.navigation.toggleArchived}

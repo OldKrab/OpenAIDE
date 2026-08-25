@@ -102,6 +102,7 @@ export function mapProtocolTaskNavigation(
       project_id: entry.session.projectId,
       cwd: entry.session.workspaceRoot,
       title: entry.session.title ?? undefined,
+      pinned: entry.session.pinned,
       last_activity: entry.session.lastActivity ?? undefined,
     }];
   });

@@ -7,6 +7,7 @@ pub(in crate::tasks::mutation) fn purge_task_if_retention_expired(
     now_millis: i128,
     cutoff_millis: i128,
     process_protected: bool,
+    before_purge: impl FnOnce(&crate::storage::records::TaskRecord) -> Result<(), RuntimeError>,
 ) -> Result<bool, RuntimeError> {
     let guard = target.lock();
     let mut task = target.store.read_task(task_id)?;
@@ -33,6 +34,10 @@ pub(in crate::tasks::mutation) fn purge_task_if_retention_expired(
     ) {
         return Ok(false);
     }
+
+    // Persist any cross-store visibility intent before the Task tombstone. A crash
+    // must not delete the Task first and let its Agent session reappear in Navigation.
+    before_purge(&task)?;
 
     let original = task.clone();
     task.tombstoned = true;

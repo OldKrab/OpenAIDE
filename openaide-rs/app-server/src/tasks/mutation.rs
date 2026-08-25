@@ -617,6 +617,7 @@ impl TaskMutations {
         now_millis: i128,
         cutoff_millis: i128,
         process_protected: bool,
+        before_purge: impl FnOnce(&TaskRecord) -> Result<(), RuntimeError>,
     ) -> Result<bool, RuntimeError> {
         commit::purge_task_if_retention_expired(
             self,
@@ -624,6 +625,7 @@ impl TaskMutations {
             now_millis,
             cutoff_millis,
             process_protected,
+            before_purge,
         )
     }
 

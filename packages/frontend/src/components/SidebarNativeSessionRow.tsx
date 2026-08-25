@@ -1,4 +1,4 @@
-import { AlertCircle, Archive, ArrowLeft, Check, ExternalLink, GitFork, Info, MoreHorizontal, RotateCcw } from "lucide-react";
+import { AlertCircle, Archive, ArrowLeft, Check, GitFork, Info, ListFilter, MoreHorizontal, Pencil, Pin, RotateCcw, X } from "lucide-react";
 import { useRef, useState } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
@@ -6,6 +6,11 @@ import { PopupMenu } from "./Popup";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { nativeSessionTitle, relativeTime } from "./taskSurfaceHelpers";
 import { AgentHistoryPreviewDetails, useSidebarTaskPreview } from "./SidebarTaskPreview";
+import {
+  SidebarArchiveOlderMenu,
+  type ArchiveOlderTasksAction,
+  useArchiveOlderMenu,
+} from "./SidebarArchiveOlderMenu";
 
 export function SidebarNativeSessionRow({
   archived,
@@ -15,9 +20,12 @@ export function SidebarNativeSessionRow({
   nativeSessionAgentName,
   nativeSessionsAdoptingSessionId,
   onArchiveNativeSession,
+  onArchiveOlderNativeSessions,
   onForkNativeSession,
   onOpenNativeSession,
   onRestoreNativeSession,
+  onSetNativeSessionPinned,
+  onSetNativeSessionTitle,
   session,
 }: {
   archived: boolean;
@@ -27,13 +35,22 @@ export function SidebarNativeSessionRow({
   nativeSessionAgentName: string;
   nativeSessionsAdoptingSessionId?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
+  onArchiveOlderNativeSessions?: ArchiveOlderTasksAction;
   onForkNativeSession?: (session: AgentListedSession) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onRestoreNativeSession: (session: AgentListedSession) => void;
+  onSetNativeSessionPinned?: (session: AgentListedSession, pinned: boolean) => Promise<void>;
+  onSetNativeSessionTitle?: (session: AgentListedSession, title: string) => Promise<void>;
   session: AgentListedSession;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(nativeSessionTitle(session));
+  const [titleError, setTitleError] = useState<string>();
+  const [titleSaving, setTitleSaving] = useState(false);
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinError, setPinError] = useState<string>();
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const adopting = nativeSessionsAdoptingSessionId === session.session_id;
@@ -42,6 +59,14 @@ export function SidebarNativeSessionRow({
   const forkPending = forkMutation?.state === "pending";
   const lifecyclePending = pending && !forkPending;
   const title = nativeSessionTitle(session);
+  const archiveOlder = useArchiveOlderMenu({
+    cutoff: {
+      kind: "nativeSession",
+      agentId: (session.agent_id ?? nativeSessionAgentId) as import("@openaide/app-server-client").AgentId,
+      nativeSessionId: session.session_id,
+    },
+    onArchiveOlderTasks: onArchiveOlderNativeSessions,
+  });
   const timestamp = session.last_activity ?? session.updated_at;
   const age = timestamp ? relativeTime(timestamp) : "";
 
@@ -60,9 +85,44 @@ export function SidebarNativeSessionRow({
     preview?.dismiss();
     onArchiveNativeSession(session);
   };
+  const beginRename = () => {
+    closeMenu();
+    setTitleDraft(title);
+    setTitleError(undefined);
+    setEditingTitle(true);
+  };
+  const saveTitle = async () => {
+    if (!onSetNativeSessionTitle || titleSaving) return;
+    setTitleSaving(true);
+    setTitleError(undefined);
+    try {
+      await onSetNativeSessionTitle(session, titleDraft);
+      setEditingTitle(false);
+    } catch (error) {
+      setTitleError(error instanceof Error ? error.message : "Unable to rename task.");
+    } finally {
+      setTitleSaving(false);
+    }
+  };
+  const setPinned = async () => {
+    if (!onSetNativeSessionPinned || pinSaving) return;
+    closeMenu();
+    setPinSaving(true);
+    setPinError(undefined);
+    try {
+      await onSetNativeSessionPinned(session, !session.pinned);
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : `Unable to ${session.pinned ? "unpin" : "pin"} task.`);
+    } finally {
+      setPinSaving(false);
+    }
+  };
   const changeMenuOpen = (open: boolean) => {
     if (open) preview?.dismiss();
-    else setDetailsOpen(false);
+    else {
+      setDetailsOpen(false);
+      archiveOlder.reset();
+    }
     setMenuOpen(open);
   };
 
@@ -71,13 +131,32 @@ export function SidebarNativeSessionRow({
       className="task-row external-session-row"
       data-archived-native-session={archived || undefined}
       data-menu-open={menuOpen || undefined}
-      onFocus={() => rowRef.current && preview?.enter(previewContent(), rowRef.current, true)}
       onPointerEnter={() => rowRef.current && preview?.enter(previewContent(), rowRef.current)}
       onPointerLeave={(event) => preview?.leave(event.relatedTarget)}
       ref={rowRef}
       role="listitem"
     >
-      {archived ? (
+      {editingTitle ? (
+        <form className="task-rename-form" onSubmit={(event) => { event.preventDefault(); void saveTitle(); }}>
+          <input
+            aria-label={`Rename ${title}`}
+            autoFocus
+            disabled={titleSaving}
+            maxLength={200}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                if (!titleSaving) setEditingTitle(false);
+              }
+            }}
+            value={titleDraft}
+          />
+          <button aria-label="Save task title" disabled={titleSaving} type="submit"><Check size={13} /></button>
+          <button aria-label="Cancel task rename" disabled={titleSaving} onClick={() => setEditingTitle(false)} type="button"><X size={13} /></button>
+          {titleError ? <small role="alert">{titleError}</small> : null}
+        </form>
+      ) : archived ? (
         <div className="task-open" aria-label={`Archived Native Session: ${title}`}>
           <SessionContent />
         </div>
@@ -86,6 +165,7 @@ export function SidebarNativeSessionRow({
           aria-label={`Open ${title}`}
           className="task-open"
           disabled={adopting || lifecyclePending}
+          onFocus={() => rowRef.current && preview?.enter(previewContent(), rowRef.current, true)}
           onClick={openSession}
           type="button"
         >
@@ -105,18 +185,7 @@ export function SidebarNativeSessionRow({
           >
             {lifecyclePending ? <span className="task-state-spinner" /> : <RotateCcw size={13} />}
           </button>
-        ) : <>
-          <button
-            aria-label={`Open ${title}`}
-            className="task-row-action external-session-open-action"
-            disabled={adopting || lifecyclePending}
-            onClick={openSession}
-            title={adopting ? "Opening task" : "Open task"}
-            type="button"
-          >
-            <ExternalLink size={13} />
-          </button>
-          <span className="external-session-details-actions">
+        ) : <span className="external-session-details-actions">
             <PopupMenu
               className="task-row-menu"
               label={`Task actions for ${title}`}
@@ -135,14 +204,28 @@ export function SidebarNativeSessionRow({
                 </button>
               )}
             >
-              {detailsOpen ? <>
+              {archiveOlder.state.kind !== "idle" ? (
+                <SidebarArchiveOlderMenu
+                  onApply={() => void archiveOlder.apply()}
+                  onBack={archiveOlder.reset}
+                  state={archiveOlder.state}
+                  title={title}
+                />
+              ) : detailsOpen ? <>
                 <button onClick={() => setDetailsOpen(false)} type="button" role="menuitem"><ArrowLeft size={13} />Task actions</button>
                 <div className="task-row-details">
                   <AgentHistoryPreviewDetails content={previewContent()} explainSource={false} />
                 </div>
               </> : <>
                 <button className="task-row-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
-                <button onClick={openSession} type="button" role="menuitem"><ExternalLink size={13} />Open task</button>
+                {onSetNativeSessionTitle ? (
+                  <button onClick={beginRename} type="button" role="menuitem"><Pencil size={13} />Rename task</button>
+                ) : null}
+                {onSetNativeSessionPinned ? (
+                  <button disabled={pinSaving} onClick={() => void setPinned()} type="button" role="menuitem">
+                    <Pin size={13} />{session.pinned ? "Unpin task" : "Pin task"}
+                  </button>
+                ) : null}
                 {canFork && onForkNativeSession ? (
                   <button
                     disabled={forkPending}
@@ -157,12 +240,25 @@ export function SidebarNativeSessionRow({
                     <GitFork size={13} />{forkPending ? "Forking…" : "Fork session"}
                   </button>
                 ) : null}
-                <button onClick={archiveSession} type="button" role="menuitem"><Archive size={13} />Archive</button>
+                <button onClick={archiveSession} type="button" role="menuitem"><Archive size={13} />Archive task</button>
+                {onArchiveOlderNativeSessions ? <>
+                  <span className="task-row-menu-separator" role="separator" />
+                  <button
+                    onClick={() => {
+                      setDetailsOpen(false);
+                      preview?.dismiss();
+                      void archiveOlder.begin();
+                    }}
+                    type="button"
+                    role="menuitem"
+                  ><ListFilter size={13} />Archive older tasks…</button>
+                </> : null}
               </>}
             </PopupMenu>
-          </span>
-        </>}
+          </span>}
       </SidebarRowActionSlot>
+      {!editingTitle && titleError ? <small className="task-title-error" role="alert">{titleError}</small> : null}
+      {pinError ? <small className="task-pin-error" role="alert">{pinError}</small> : null}
     </div>
   );
 
@@ -212,6 +308,10 @@ export function SidebarNativeSessionRow({
             <span aria-label="Opening task" className="task-trailing-indicator" role="img" title="Opening task">
               <span className="task-state-spinner" />
             </span>
+          ) : session.pinned ? (
+            <span aria-label="Pinned" className="task-pin-marker" role="img" title="Pinned"><Pin size={12} /></span>
+          ) : pinSaving ? (
+            <span aria-label="Pinning task" className="task-trailing-indicator task-pin-pending" role="img"><span className="task-state-spinner" /></span>
           ) : age ? (
             <span className="task-meta-age" title={`Last activity: ${timestamp}`}>
               {age}

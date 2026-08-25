@@ -92,6 +92,7 @@ export type AgentListedSession = {
   project_id?: string;
   cwd: string;
   title?: string;
+  pinned?: boolean;
   last_activity?: string;
   updated_at?: string;
 };

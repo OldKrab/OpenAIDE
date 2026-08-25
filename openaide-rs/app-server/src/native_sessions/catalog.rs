@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::errors::RuntimeError;
 use crate::storage::{atomic, Store};
 
-const CATALOG_VERSION: u32 = 3;
+const CATALOG_VERSION: u32 = 4;
 
 /// Stable Agent-scoped identity for one Agent-owned conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -45,6 +45,11 @@ pub(crate) struct NativeSessionCatalogEntry {
     /// Client-owned display fallback for lifecycle responses that carry no Agent title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) local_fallback_title: Option<String>,
+    /// OpenAIDE-owned presentation metadata is independent of Agent discovery updates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) user_title: Option<String>,
+    #[serde(default)]
+    pub(crate) pinned: bool,
 }
 
 /// Durable Native Session listing observations. ACP cursors and refresh generations stay in memory.
@@ -135,6 +140,8 @@ impl NativeSessionCatalog {
                 workspace_root: workspace_root.to_string(),
                 observation,
                 local_fallback_title: None,
+                user_title: None,
+                pinned: false,
             });
         }
         atomic::write_json(&catalog_path(&self.store), &*state)
@@ -169,6 +176,8 @@ impl NativeSessionCatalog {
                 last_activity: Some(crate::time::now_string()),
             },
             local_fallback_title: Some(local_fallback_title),
+            user_title: None,
+            pinned: false,
         });
         candidate.version = CATALOG_VERSION;
         atomic::write_json(&catalog_path(&self.store), &candidate)?;
@@ -273,9 +282,100 @@ impl NativeSessionCatalog {
         self.set_archived(reference, true)
     }
 
+    /// Durably archives one cleanup selection with a single catalog commit.
+    /// Results align with `references`; `false` means discovery no longer owns that identity.
+    pub(crate) fn archive_many(
+        &self,
+        references: &[NativeSessionRef],
+    ) -> Result<Vec<bool>, RuntimeError> {
+        let mut state = self.state.lock().expect("native session catalog poisoned");
+        let known_references = state
+            .entries
+            .iter()
+            .map(|entry| entry.observation.reference.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let results = references
+            .iter()
+            .map(|reference| known_references.contains(reference))
+            .collect::<Vec<_>>();
+        if !references
+            .iter()
+            .zip(results.iter())
+            .any(|(reference, known)| *known && !state.archived.contains(reference))
+        {
+            return Ok(results);
+        }
+
+        // Persist the complete selection before replacing memory. Navigation must
+        // never expose a partly archived batch or state that restart cannot recover.
+        let mut candidate = state.clone();
+        candidate.version = CATALOG_VERSION;
+        for (reference, known) in references.iter().zip(results.iter()) {
+            if !known {
+                continue;
+            }
+            candidate.archived.insert(reference.clone());
+            if let Some(entry) = candidate
+                .entries
+                .iter_mut()
+                .find(|entry| &entry.observation.reference == reference)
+            {
+                entry.pinned = false;
+            }
+        }
+        atomic::write_json(&catalog_path(&self.store), &candidate)?;
+        *state = candidate;
+        Ok(results)
+    }
+
+    /// Records cleanup intent even when discovery has not observed the Agent identity yet.
+    pub(crate) fn archive_task_identity(
+        &self,
+        reference: &NativeSessionRef,
+    ) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().expect("native session catalog poisoned");
+        if state.archived.contains(reference) {
+            return Ok(());
+        }
+        let mut candidate = state.clone();
+        candidate.version = CATALOG_VERSION;
+        candidate.archived.insert(reference.clone());
+        atomic::write_json(&catalog_path(&self.store), &candidate)?;
+        *state = candidate;
+        Ok(())
+    }
+
     /// Durably returns a catalog entry to active discovery without loading it.
     pub(crate) fn restore(&self, reference: &NativeSessionRef) -> Result<bool, RuntimeError> {
         self.set_archived(reference, false)
+    }
+
+    /// Persists OpenAIDE-owned presentation metadata without mutating the Agent session.
+    pub(crate) fn set_metadata(
+        &self,
+        reference: &NativeSessionRef,
+        user_title: Option<String>,
+        pinned: Option<bool>,
+    ) -> Result<bool, RuntimeError> {
+        let mut state = self.state.lock().expect("native session catalog poisoned");
+        let Some(index) = state
+            .entries
+            .iter()
+            .position(|entry| &entry.observation.reference == reference)
+        else {
+            return Ok(false);
+        };
+        let mut candidate = state.clone();
+        candidate.version = CATALOG_VERSION;
+        if let Some(user_title) = user_title {
+            candidate.entries[index].user_title = Some(user_title);
+        }
+        if let Some(pinned) = pinned {
+            candidate.entries[index].pinned = pinned;
+        }
+        atomic::write_json(&catalog_path(&self.store), &candidate)?;
+        *state = candidate;
+        Ok(true)
     }
 
     fn set_archived(
@@ -301,6 +401,13 @@ impl NativeSessionCatalog {
         candidate.version = CATALOG_VERSION;
         if archived {
             candidate.archived.insert(reference.clone());
+            if let Some(entry) = candidate
+                .entries
+                .iter_mut()
+                .find(|entry| &entry.observation.reference == reference)
+            {
+                entry.pinned = false;
+            }
         } else {
             candidate.archived.remove(reference);
         }

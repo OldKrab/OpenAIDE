@@ -338,7 +338,7 @@ body[data-shell="web"] .task-list {
   text-align: left;
 }
 
-.project-task-more:hover {
+.project-task-more:hover:not(:disabled) {
   background: var(--oa-raised);
 }
 

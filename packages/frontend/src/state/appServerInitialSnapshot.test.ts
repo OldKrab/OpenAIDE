@@ -159,6 +159,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
             projectId: "project-1" as ProjectId,
             workspaceRoot: "/workspace/Project",
             title: "Cached Native Session",
+            pinned: false,
           },
         },
         ],

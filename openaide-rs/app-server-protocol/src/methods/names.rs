@@ -88,10 +88,13 @@ pub const TASK_LIST: &str = "task/list";
 pub const TASK_NAVIGATION_REFRESH: &str = "taskNavigation/refresh";
 pub const TASK_NAVIGATION_LOAD_MORE: &str = "taskNavigation/loadMore";
 pub const NATIVE_SESSION_ARCHIVE: &str = "nativeSession/archive";
+pub const NATIVE_SESSION_SET_TITLE: &str = "nativeSession/setTitle";
+pub const NATIVE_SESSION_SET_PINNED: &str = "nativeSession/setPinned";
 pub const NATIVE_SESSION_RESTORE: &str = "nativeSession/restore";
 pub const NATIVE_SESSION_FORK: &str = "nativeSession/fork";
 pub const TASK_RELEASE: &str = "task/release";
 pub const TASK_ARCHIVE: &str = "task/archive";
+pub const TASK_ARCHIVE_OLDER: &str = "task/archiveOlder";
 pub const TASK_RESTORE: &str = "task/restore";
 
 pub const CLIENT_METHODS: &[&str] = &[
@@ -184,9 +187,12 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_NAVIGATION_REFRESH,
     TASK_NAVIGATION_LOAD_MORE,
     NATIVE_SESSION_ARCHIVE,
+    NATIVE_SESSION_SET_TITLE,
+    NATIVE_SESSION_SET_PINNED,
     NATIVE_SESSION_RESTORE,
     NATIVE_SESSION_FORK,
     TASK_RELEASE,
     TASK_ARCHIVE,
+    TASK_ARCHIVE_OLDER,
     TASK_RESTORE,
 ];

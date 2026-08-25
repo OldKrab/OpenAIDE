@@ -1,7 +1,7 @@
 use crate::protocol::model::TaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 
-pub(crate) const DEFAULT_TASK_RETENTION_MILLIS: i128 = 3 * 24 * 60 * 60 * 1_000;
+pub(crate) const DEFAULT_TASK_RETENTION_MILLIS: i128 = 7 * 24 * 60 * 60 * 1_000;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct TaskStorageMaintenanceReport {

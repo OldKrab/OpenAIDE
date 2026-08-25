@@ -9,9 +9,10 @@ use openaide_app_server_protocol::support::{
 };
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionForkParams, NativeSessionRestoreParams,
-    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
-    TaskClosePlanParams, TaskLifecycleChanged, TaskRestoreParams, TaskSendParams,
-    TaskSetPinnedParams, TaskSetTitleParams,
+    NativeSessionSetPinnedParams, NativeSessionSetTitleParams, TaskAcquireParams,
+    TaskAdoptNativeSessionParams, TaskArchiveOlderParams, TaskArchiveOlderResult,
+    TaskArchiveParams, TaskCancelParams, TaskClosePlanParams, TaskLifecycleChanged,
+    TaskRestoreParams, TaskSendParams, TaskSetPinnedParams, TaskSetTitleParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -51,6 +52,7 @@ mod list_sessions;
 mod native_session_archive;
 mod native_session_discovery;
 mod native_session_fork;
+mod native_session_metadata;
 mod open;
 mod prepare;
 mod queue;
@@ -646,6 +648,14 @@ impl TaskArchiveWorkflow for TaskProductApi {
         self.restore_task(client_instance_id, params)
     }
 
+    fn archive_older_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskArchiveOlderParams,
+    ) -> Result<TaskArchiveOlderResult, ProtocolError> {
+        self.archive_older_tasks(client_instance_id, params)
+    }
+
     fn archive_native_session(
         &self,
         params: NativeSessionArchiveParams,
@@ -658,6 +668,28 @@ impl TaskArchiveWorkflow for TaskProductApi {
         params: NativeSessionRestoreParams,
     ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
         self.set_native_session_archived(params.agent_id.as_str(), &params.native_session_id, false)
+    }
+
+    fn set_native_session_title(
+        &self,
+        params: NativeSessionSetTitleParams,
+    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
+        self.set_native_session_title(
+            params.agent_id.as_str(),
+            &params.native_session_id,
+            params.title,
+        )
+    }
+
+    fn set_native_session_pinned(
+        &self,
+        params: NativeSessionSetPinnedParams,
+    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
+        self.set_native_session_pinned(
+            params.agent_id.as_str(),
+            &params.native_session_id,
+            params.pinned,
+        )
     }
 
     fn fork_native_session_for_client(

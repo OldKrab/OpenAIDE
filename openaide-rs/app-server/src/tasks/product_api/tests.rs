@@ -3415,6 +3415,57 @@ fn project_load_stops_after_the_requested_navigation_window() {
 }
 
 #[test]
+fn exhausted_project_load_more_does_not_restart_agent_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace_root = temp.path().join("exhausted-project");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let project = configured_projects
+        .add_project(&workspace_root.to_string_lossy())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(BoundedGlobalSessionAgent {
+        requested_cursors: Mutex::new(Vec::new()),
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects,
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 100);
+    wait_until(|| {
+        !api.native_session_catalog()
+            .project_refreshing(project.project_id.as_str())
+    });
+    let calls_after_exhaustion = agent.requested_cursors().len();
+    assert!(!api
+        .native_session_catalog()
+        .project_has_more(project.project_id.as_str()));
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 110);
+    wait_until(|| {
+        !api.native_session_catalog()
+            .project_refreshing(project.project_id.as_str())
+    });
+
+    assert_eq!(agent.requested_cursors().len(), calls_after_exhaustion);
+}
+
+#[test]
 fn background_native_catalog_refresh_does_not_replace_owned_task_title() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

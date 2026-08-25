@@ -78,6 +78,8 @@ pub struct NativeSessionSummary {
     pub worktree_id: Option<WorktreeId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_activity: Option<String>,
 }
