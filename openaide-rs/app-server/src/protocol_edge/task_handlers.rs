@@ -21,6 +21,7 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 
 use super::{responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, RpcGateway};
 
+mod archive_older;
 mod publication;
 
 impl RpcGateway {
@@ -748,49 +749,6 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<TaskArchiveResult>(connection_id, id, meta, TaskArchiveResult { change })
-    }
-
-    pub(super) fn handle_task_archive_older(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-        now: AppServerTime,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<
-            openaide_app_server_protocol::task::TaskArchiveOlderParams,
-        >(params)
-        {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error))
-            }
-        };
-        let preview = params.preview;
-        let client = self
-            .client_hub
-            .context_for_connection(&connection_id)
-            .expect("routing requires an initialized client for bulk task archive");
-        let result = match self
-            .task_archive
-            .archive_older_for_client(&client.client_instance_id, params)
-        {
-            Ok(result) => result,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        let events = if preview {
-            Vec::new()
-        } else {
-            self.publish_project_entries_replaced(&result.project_id, now)
-        };
-        self.result_with_events::<openaide_app_server_protocol::task::TaskArchiveOlderResult>(
-            connection_id,
-            id,
-            meta,
-            result,
-            events,
-        )
     }
 
     pub(super) fn handle_task_restore(
