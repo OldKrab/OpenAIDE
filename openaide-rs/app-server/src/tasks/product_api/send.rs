@@ -229,13 +229,39 @@ impl TaskProductApi {
                 project_id: Some(project.project_id),
                 agent_id: Some(committed_task.agent_id.clone().into()),
             };
+            let defaults_write_started_at = Instant::now();
+            crate::logging::info(
+                "new_task_defaults_promotion_started",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "project_id": defaults.project_id.as_ref().map(|id| id.as_str()),
+                    "agent_id": defaults.agent_id.as_ref().map(|id| id.as_str()),
+                }),
+            );
             // Defaults are auxiliary initialization state. A preference write failure must not
             // invalidate a user message that is already durably accepted.
-            if let Err(error) = self.store.write_new_task_defaults(&defaults) {
-                crate::logging::error(
-                    "new_task_defaults_write_failed",
-                    serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
-                );
+            match self.store.write_new_task_defaults(&defaults) {
+                Ok(()) => crate::logging::info(
+                    "new_task_defaults_promotion_completed",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "project_id": defaults.project_id.as_ref().map(|id| id.as_str()),
+                        "agent_id": defaults.agent_id.as_ref().map(|id| id.as_str()),
+                        "outcome": "updated",
+                        "duration_ms": defaults_write_started_at.elapsed().as_millis(),
+                    }),
+                ),
+                Err(error) => crate::logging::error(
+                    "new_task_defaults_promotion_failed",
+                    serde_json::json!({
+                        "task_id": task_id.as_str(),
+                        "project_id": defaults.project_id.as_ref().map(|id| id.as_str()),
+                        "agent_id": defaults.agent_id.as_ref().map(|id| id.as_str()),
+                        "outcome": "error",
+                        "duration_ms": defaults_write_started_at.elapsed().as_millis(),
+                        "error": error.to_string(),
+                    }),
+                ),
             }
         }
         let committed_send =

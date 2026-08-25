@@ -17,6 +17,9 @@ fn safe_log_snapshot_keeps_selection_evidence_and_removes_sensitive_fields() {
             "event": "new_task_initial_project_selected",
             "fields": {
                 "project_id": "project-safe",
+                "agent_id": "codex",
+                "task_id": "task-safe",
+                "outcome": "updated",
                 "selection_source": "app_server_default",
                 "extension_version": "0.3.0-gabcdef0",
                 "shell_project_present": false,
@@ -37,6 +40,9 @@ fn safe_log_snapshot_keeps_selection_evidence_and_removes_sensitive_fields() {
     let value: serde_json::Value = serde_json::from_str(snapshot.trim()).expect("log record");
 
     assert_eq!(value["fields"]["project_id"], "project-safe");
+    assert_eq!(value["fields"]["agent_id"], "codex");
+    assert_eq!(value["fields"]["task_id"], "task-safe");
+    assert_eq!(value["fields"]["outcome"], "updated");
     assert_eq!(value["fields"]["selection_source"], "app_server_default");
     assert_eq!(value["fields"]["extension_version"], "0.3.0-gabcdef0");
     assert_eq!(value["fields"]["retained_project_present"], true);
