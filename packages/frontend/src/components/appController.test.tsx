@@ -758,7 +758,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.selection.projectId).toBe("project_2");
   });
 
-  it("keeps a user-selected VS Code New Task Project after applying the route hint", async () => {
+  it("keeps VS Code New Task Project changes client-local until Send", async () => {
     bootstrap = vscodeNewTaskBootstrap("project_1");
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
     initializedSnapshot.newTaskDefaults.projectId = "project_2" as never;
@@ -781,9 +781,6 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_1");
-    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
-      projectId: "project_1",
-    });
 
     await act(async () => {
       latestPublicController?.intents.newTask.selectProject({
@@ -796,12 +793,10 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_2");
-    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
-      projectId: "project_2",
-    });
+    expect(request.mock.calls.filter(([method]) => method === SETTINGS_UPDATE_NEW_TASK_DEFAULTS)).toEqual([]);
   });
 
-  it("uses the App Server New Task default when VS Code workspace roots arrive first", async () => {
+  it("acquires only the App Server default when VS Code workspace roots arrive first", async () => {
     const firstProjectId = projectIdForWorkspaceRoot("/workspace/first");
     const defaultProjectId = projectIdForWorkspaceRoot("/workspace/default");
     bootstrap = {
@@ -817,9 +812,30 @@ describe("app controller mounted lifecycle", () => {
       ],
     };
     const initialize = deferredInitialize();
+    const request = vi.fn(async (
+      method: string,
+      params?: { projectId?: string; scope?: { kind: string } },
+    ) => {
+      if (method === STATE_SUBSCRIBE) {
+        const baseline = nonTaskSubscriptionSnapshot(params?.scope);
+        if (params?.scope?.kind !== "projects") return baseline;
+        return {
+          ...baseline,
+          snapshot: { kind: "projects" as const, projects: initializedSnapshot.projects },
+        };
+      }
+      if (method === TASK_ACQUIRE) {
+        const task = protocolTaskSnapshot("task_new", "New task", { hasMessages: false });
+        task.task.projectId = params?.projectId as never;
+        return { task: { ...task, lifecycle: "prepared" as const } };
+      }
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      throw new Error(method);
+    });
     backendConnection = {
       initialize: vi.fn(() => initialize.promise),
-      request: vi.fn(() => new Promise(() => undefined)) as unknown as BackendConnection["request"],
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
 
@@ -845,9 +861,18 @@ describe("app controller mounted lifecycle", () => {
       initialize.resolve({ snapshot: initializedSnapshot });
       await initialize.promise;
       await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe(defaultProjectId);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toEqual([
+      [TASK_ACQUIRE, {
+        projectId: defaultProjectId,
+        agentId: "codex",
+        workspaceRoot: "/workspace/default",
+      }],
+    ]);
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "webview.telemetry",
       payload: expect.objectContaining({
@@ -862,7 +887,7 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
-  it("persists a user-selected New Task Agent as the next default", async () => {
+  it("keeps a user-selected New Task Agent client-local until Send", async () => {
     bootstrap = vscodeNewTaskBootstrap("project_1");
     const initializedSnapshot = clientSnapshot({
       includeActiveTask: false,
@@ -889,9 +914,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
-      agentId: "opencode",
-    });
+    expect(request.mock.calls.filter(([method]) => method === SETTINGS_UPDATE_NEW_TASK_DEFAULTS)).toEqual([]);
   });
 
   it("loads only the initial visible rows after adding a Project", async () => {
