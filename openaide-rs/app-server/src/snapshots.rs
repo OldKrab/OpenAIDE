@@ -26,7 +26,9 @@ mod worktree_repository;
 
 pub use agent_collection::{AgentCollectionSnapshotSource, AgentRegistrySnapshotSource};
 pub use project_collection::{ProjectCollectionSnapshotSource, ProjectCollectionStore};
-pub(crate) use task_navigation::{project_task_lifecycle, project_task_summary};
+pub(crate) use task_navigation::{
+    native_session_summary, project_task_lifecycle, project_task_summary,
+};
 pub use task_navigation::{TaskNavigationSnapshotSource, TaskNavigationStore};
 pub use task_snapshot::{TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore};
 pub use worktree_repository::WorktreeRepositorySnapshotSource;

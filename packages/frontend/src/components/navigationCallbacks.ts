@@ -9,8 +9,11 @@ import {
   NATIVE_SESSION_ARCHIVE,
   NATIVE_SESSION_FORK,
   NATIVE_SESSION_RESTORE,
+  NATIVE_SESSION_SET_PINNED,
+  NATIVE_SESSION_SET_TITLE,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
+  TASK_ARCHIVE_OLDER,
   TASK_SET_PINNED,
   TASK_SET_TITLE,
   type AgentId,
@@ -60,6 +63,13 @@ export function createNavigationCallbacks({
   return {
     archiveNativeSession: (session) => {
       mutateNativeSessionArchive("archive", session);
+    },
+    archiveOlderTasks: async (cutoff, preview) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      return backendConnection.request(TASK_ARCHIVE_OLDER, {
+        cutoff,
+        preview,
+      });
     },
     archiveTask: (taskId) => {
       const archivedTask = state.tasks.find((task) => task.task_id === taskId);
@@ -204,6 +214,24 @@ export function createNavigationCallbacks({
     },
     restoreNativeSession: (session) => {
       mutateNativeSessionArchive("restore", session);
+    },
+    setNativeSessionTitle: async (session, title) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      const agentId = session.agent_id ?? state.newTask.selection.agentId;
+      await backendConnection.request(NATIVE_SESSION_SET_TITLE, {
+        agentId: agentId as AgentId,
+        nativeSessionId: session.session_id,
+        title,
+      });
+    },
+    setNativeSessionPinned: async (session, pinned) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      const agentId = session.agent_id ?? state.newTask.selection.agentId;
+      await backendConnection.request(NATIVE_SESSION_SET_PINNED, {
+        agentId: agentId as AgentId,
+        nativeSessionId: session.session_id,
+        pinned,
+      });
     },
     toggleArchived: () => {
       const showArchived = !state.showArchived;

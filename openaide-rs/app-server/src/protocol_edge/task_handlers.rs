@@ -21,6 +21,7 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 
 use super::{responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, RpcGateway};
 
+mod archive_older;
 mod publication;
 
 impl RpcGateway {

@@ -129,10 +129,17 @@ impl TaskProductApi {
         let mut session_start =
             TaskSessionStartGuard::new(&self.agent_gateway, loaded.session.clone());
         let title = catalog_entry
-            .observation
-            .title
+            .user_title
             .clone()
-            .and_then(|title| TaskTitle::new(title, TaskTitleSource::Agent));
+            .and_then(|title| TaskTitle::new(title, TaskTitleSource::User))
+            .or_else(|| {
+                catalog_entry
+                    .observation
+                    .title
+                    .clone()
+                    .or(catalog_entry.local_fallback_title.clone())
+                    .and_then(|title| TaskTitle::new(title, TaskTitleSource::Agent))
+            });
         let session_id = session_start.session_id().to_string();
 
         let persist_result = self.persist_adopted_session_task(
@@ -148,6 +155,7 @@ impl TaskProductApi {
             &now,
             &last_activity,
             title,
+            catalog_entry.pinned,
             &session_id,
             loaded,
         );
@@ -189,6 +197,7 @@ impl TaskProductApi {
         now: &str,
         last_activity: &str,
         title: Option<TaskTitle>,
+        pinned: bool,
         session_id: &str,
         loaded: AgentLoadedSession,
     ) -> Result<StoredTaskSnapshot, RuntimeError> {
@@ -202,7 +211,7 @@ impl TaskProductApi {
             task_version: 1,
             message_history_version: 0,
             unread: false,
-            pinned: false,
+            pinned,
             attention: None,
             created_at: now.to_string(),
             updated_at: now.to_string(),

@@ -1,6 +1,7 @@
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
+import type { TaskArchiveOlderCutoff, TaskArchiveOlderResult } from "@openaide/app-server-client";
 import type { NativeSessionsState } from "../state/store";
 import { Sidebar } from "./Sidebar";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
@@ -66,6 +67,44 @@ describe("sidebarViewModel", () => {
 });
 
 describe("SidebarTaskRow", () => {
+  it("previews and confirms Project cleanup in the originating Task menu", async () => {
+    const cutoff = task({ task_id: "task_cutoff", title: "Cutoff task" });
+    const cutoffReference = {
+      kind: "task",
+      taskId: "task_cutoff",
+    } as TaskArchiveOlderCutoff;
+    const preview = archiveOlderResult(cutoffReference, ["older_1", "older_2"]);
+    const completed = {
+      ...preview,
+      archivedTaskIds: preview.eligibleTaskIds,
+    };
+    const onArchiveOlderTasks = vi.fn()
+      .mockResolvedValueOnce(preview)
+      .mockResolvedValueOnce(completed);
+    const tree = render(
+      <SidebarTaskRow
+        onArchiveOlderTasks={onArchiveOlderTasks}
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        showArchived={false}
+        task={cutoff}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Cutoff task" }).props.onClick());
+    await act(async () => buttonWithText(tree, "Archive older tasks…").props.onClick());
+
+    expect(onArchiveOlderTasks).toHaveBeenCalledWith(cutoffReference, true);
+    expect(elementTexts(tree, "strong")).toContain("Archive 2 older tasks?");
+    expect(elementTexts(tree, "p")).toContain("Only tasks before “Cutoff task” in this project will move to Archive.");
+
+    await act(async () => tree.root.findByProps({ className: "archive-older-confirm" }).props.onClick());
+
+    expect(onArchiveOlderTasks).toHaveBeenLastCalledWith(cutoffReference, false);
+    expect(elementTexts(tree, "strong")).toContain("2 tasks archived");
+  });
+
   it("offers session fork only when the Task Agent advertises support", () => {
     const onForkTask = vi.fn();
     const source = task({ task_id: "task_1", title: "Source task" });
@@ -617,7 +656,7 @@ describe("SidebarNativeSessionRow", () => {
     expect(tree.root.findAllByProps({ className: "state-mark external-session-mark active" })).toHaveLength(0);
   });
 
-  it("opens listed task history without session-facing copy", () => {
+  it("uses row click to open listed history and keeps Open task out of its action menu", () => {
     const session = nativeSession({ session_id: "session_1", title: "Existing session" });
     const onOpenNativeSession = vi.fn();
     const tree = render(
@@ -633,8 +672,8 @@ describe("SidebarNativeSessionRow", () => {
 
     const buttons = tree.root.findAllByType("button");
     expect(buttons[0].props.disabled).toBe(false);
-    expect(buttons[1].props.title).toBe("Open task");
-    expect(buttons[2].props.title).toBe("Task actions");
+    expect(buttons[1].props.title).toBe("Task actions");
+    expect(buttons.some((button) => button.props.title === "Open task")).toBe(false);
     expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"]).toBe("Agent: Codex");
     expect(tree.root.findByProps({ className: "task-meta-age" })).toBeDefined();
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
@@ -642,6 +681,71 @@ describe("SidebarNativeSessionRow", () => {
     act(() => buttons[0].props.onClick());
 
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);
+
+    act(() => buttons[1].props.onClick());
+    const menuLabels = tree.root.findAllByProps({ role: "menuitem" })
+      .map((button) => button.children.join(""));
+    expect(menuLabels).not.toContain("Open task");
+    expect(menuLabels.some((label) => label.endsWith("Archive task"))).toBe(true);
+  });
+
+  it("renames and pins listed history with the same row actions as an adopted Task", async () => {
+    const session = nativeSession({ session_id: "session_1", title: "Existing session", pinned: false });
+    const onSetNativeSessionPinned = vi.fn(async () => undefined);
+    const onSetNativeSessionTitle = vi.fn(async () => undefined);
+    const tree = render(
+      <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
+        nativeSessionAgentId="codex"
+        nativeSessionAgentName="Codex"
+        onSetNativeSessionPinned={onSetNativeSessionPinned}
+        onSetNativeSessionTitle={onSetNativeSessionTitle}
+        session={session}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+    expect(tree.root.findAllByProps({ role: "menuitem" }).map((item) => item.children.at(-1)))
+      .toEqual(["Task details", "Rename task", "Pin task", "Archive task"]);
+
+    act(() => buttonWithText(tree, "Rename task").props.onClick());
+    act(() => tree.root.findByProps({ "aria-label": "Rename Existing session" }).props.onChange({ target: { value: "Renamed session" } }));
+    await act(async () => tree.root.findByProps({ className: "task-rename-form" }).props.onSubmit({ preventDefault: vi.fn() }));
+    expect(onSetNativeSessionTitle).toHaveBeenCalledWith(session, "Renamed session");
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+    await act(async () => buttonWithText(tree, "Pin task").props.onClick());
+    expect(onSetNativeSessionPinned).toHaveBeenCalledWith(session, true);
+  });
+
+  it("uses a Native Session as the in-menu Project cleanup cutoff", async () => {
+    const session = nativeSession({ agent_id: "codex", session_id: "session_1", title: "Existing session" });
+    const cutoff = {
+      kind: "nativeSession",
+      agentId: "codex",
+      nativeSessionId: "session_1",
+    } as TaskArchiveOlderCutoff;
+    const onArchiveOlderNativeSessions = vi.fn().mockResolvedValue(
+      archiveOlderResult(cutoff, ["older_1"]),
+    );
+    const tree = render(
+      <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
+        nativeSessionAgentId="codex"
+        nativeSessionAgentName="Codex"
+        onArchiveOlderNativeSessions={onArchiveOlderNativeSessions}
+        session={session}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+    await act(async () => buttonWithText(tree, "Archive older tasks…").props.onClick());
+
+    expect(onArchiveOlderNativeSessions).toHaveBeenCalledWith(cutoff, true);
+    expect(elementTexts(tree, "strong")).toContain("Archive 1 older task?");
+    expect(elementTexts(tree, "p")).toContain("Only tasks before “Existing session” in this project will move to Archive.");
   });
 
   it("shows complete Task details for listed Agent history", () => {
@@ -751,6 +855,47 @@ describe("SidebarNativeSessionRow", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows the Native Session preview only when its primary action receives focus", () => {
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
+    } as HTMLElement;
+    try {
+      const tree = render(
+        <SidebarTaskPreviewProvider>
+          <SidebarNativeSessionRow
+            {...nativeSessionRowCallbacks()}
+            archived={false}
+            nativeSessionAgentId="codex"
+            nativeSessionAgentName="Codex"
+            session={nativeSession({ title: "Existing session" })}
+          />
+        </SidebarTaskPreviewProvider>,
+        { createNodeMock: (element) => (element.props as { className?: string }).className === "task-row external-session-row" ? rowNode : null },
+      );
+      const row = tree.root.findByProps({ className: "task-row external-session-row" });
+      const actions = tree.root.findByProps({ "aria-label": "Task actions for Existing session" });
+      const open = tree.root.findByProps({ "aria-label": "Open Existing session" });
+
+      act(() => row.props.onFocus?.({ target: actions }));
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+
+      act(() => open.props.onFocus?.());
+
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("disables listed session actions while adoption is pending", () => {
     const tree = render(
       <SidebarNativeSessionRow
@@ -764,7 +909,7 @@ describe("SidebarNativeSessionRow", () => {
       />,
     );
 
-    expect(tree.root.findAllByType("button").map((button) => button.props.disabled)).toEqual([true, true, true]);
+    expect(tree.root.findAllByType("button").map((button) => button.props.disabled)).toEqual([true, true]);
     expect(tree.root.findAllByType("button")[1].props.title).toBe("Opening task");
     expect(tree.root.findByProps({ className: "task-trailing-indicator" }).props["aria-label"]).toBe("Opening task");
   });
@@ -785,7 +930,7 @@ describe("SidebarNativeSessionRow", () => {
     );
 
     const buttons = tree.root.findAllByType("button");
-    expect(buttons.map((button) => button.props.disabled)).toEqual([false, false, false]);
+    expect(buttons.map((button) => button.props.disabled)).toEqual([false, false]);
 
     act(() => buttons[0].props.onClick());
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);
@@ -1963,26 +2108,38 @@ describe("Sidebar", () => {
     expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 17);
   });
 
-  it("shows a loading status only on the Project being discovered", () => {
-    const tree = render(
+  it("keeps Load more stable during discovery and removes it when the Project is exhausted", () => {
+    const sidebar = (state: NativeSessionsState) => (
       <Sidebar
         {...sidebarCallbacks()}
         groupByProject={true}
-        nativeSessions={nativeSessions({ loadingProjectIds: ["project_2"] })}
+        nativeSessions={state}
         projects={[
           { projectId: "project_1", label: "Ready" },
           { projectId: "project_2", label: "Added" },
         ]}
         showArchived={false}
         tasks={[]}
-      />,
+      />
     );
+    const tree = render(sidebar(nativeSessions({
+      hasMoreProjectIds: ["project_2"],
+      loadingProjectIds: ["project_2"],
+    })));
 
     const ready = tree.root.findByProps({ "aria-label": "Ready" });
     const added = tree.root.findByProps({ "aria-label": "Added" });
     expect(ready.findAllByProps({ className: "project-task-group-counts" })).toHaveLength(0);
     expect(added.findByProps({ className: "project-task-group-counts" }).children.join(""))
       .toBe("Loading…");
+    const loadMore = added.findByProps({ className: "project-task-more" });
+    expect(loadMore.children.join("")).toBe("Load more");
+    expect(loadMore.props.disabled).toBe(true);
+
+    act(() => tree.update(sidebar(nativeSessions())));
+
+    expect(tree.root.findByProps({ "aria-label": "Added" })
+      .findAllByProps({ className: "project-task-more" })).toHaveLength(0);
   });
 
   it("reveals exactly the numeric task count when a prefetched page arrives", () => {
@@ -2060,6 +2217,10 @@ function textContent(tree: ReturnType<typeof render>) {
     .join(" ");
 }
 
+function elementTexts(tree: ReturnType<typeof render>, type: React.ElementType) {
+  return tree.root.findAllByType(type).map((element) => element.children.join(""));
+}
+
 function buttonWithText(tree: ReturnType<typeof render>, label: string) {
   const button = tree.root.findAllByType("button")
     .find((candidate) => candidate.children.some((child) => child === label));
@@ -2131,5 +2292,21 @@ function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
     updated_at: "2026-05-22T00:00:00.000Z",
     workspace_root: "/workspace",
     ...overrides,
+  };
+}
+
+function archiveOlderResult(
+  cutoff: TaskArchiveOlderCutoff,
+  eligibleTaskIds: string[],
+): TaskArchiveOlderResult {
+  return {
+    archivedNativeSessions: [],
+    archivedTaskIds: [],
+    cutoff,
+    eligibleNativeSessions: [],
+    eligibleTaskIds: eligibleTaskIds as TaskArchiveOlderResult["eligibleTaskIds"],
+    projectId: "project_1" as TaskArchiveOlderResult["projectId"],
+    protected: [],
+    protectedNativeSessions: [],
   };
 }

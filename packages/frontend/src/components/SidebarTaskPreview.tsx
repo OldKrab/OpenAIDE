@@ -69,9 +69,11 @@ const Context = createContext<PreviewContext | undefined>(undefined);
 export function SidebarTaskPreviewProvider({
   children,
   coordinator,
+  disabled = false,
 }: {
   children: ReactNode;
   coordinator?: SidebarPreviewCoordinator;
+  disabled?: boolean;
 }) {
   const [preview, setPreview] = useState<Preview>();
   const previewRef = useRef<HTMLDivElement>(null);
@@ -90,6 +92,7 @@ export function SidebarTaskPreviewProvider({
   }, [owner, previewCoordinator]);
 
   const enter = (content: SidebarPreviewContent, row: HTMLElement, immediate = false) => {
+    if (disabled) return;
     // VS Code navigation cannot place a rich preview beside its webview, so
     // details remain an explicit row action instead of obscuring the Task list.
     if (typeof document !== "undefined"
@@ -123,6 +126,10 @@ export function SidebarTaskPreviewProvider({
     setPreview(undefined);
     previewCoordinator.closed(owner);
   };
+
+  useEffect(() => {
+    if (disabled) dismiss();
+  }, [disabled]);
 
   useEffect(() => {
     if (!preview) return;

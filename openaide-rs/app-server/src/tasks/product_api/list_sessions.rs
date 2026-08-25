@@ -2,6 +2,7 @@ use openaide_app_server_protocol::agent::{
     AgentListSessionsParams, AgentListSessionsResult, AgentListedSession,
 };
 use openaide_app_server_protocol::errors::ProtocolError;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -20,8 +21,30 @@ pub(super) struct NativeCatalogRefreshCoordinator {
 
 #[derive(Default)]
 struct NativeCatalogRefreshState {
+    exhausted_project_ids: HashSet<String>,
     running: bool,
     trailing_run_requested: bool,
+}
+
+impl NativeCatalogRefreshCoordinator {
+    fn project_is_exhausted(&self, project_id: &str) -> bool {
+        self.state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .exhausted_project_ids
+            .contains(project_id)
+    }
+
+    pub(super) fn mark_projects_exhausted<'a>(
+        &self,
+        project_ids: impl IntoIterator<Item = &'a String>,
+    ) {
+        self.state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .exhausted_project_ids
+            .extend(project_ids.into_iter().cloned());
+    }
 }
 
 impl TaskProductApi {
@@ -110,6 +133,31 @@ impl TaskProductApi {
         project_id: openaide_app_server_protocol::ids::ProjectId,
         target_row_count: usize,
     ) {
+        // An exhaustive scan is authoritative until the next ordinary refresh. Archive and
+        // Restore only reclassify cached entries, so repeating Agent pagination cannot reveal
+        // another row and is particularly expensive for large histories.
+        if self
+            .native_catalog_refresh
+            .project_is_exhausted(project_id.as_str())
+        {
+            crate::logging::info(
+                "native_session_project_catalog_refresh_skipped",
+                serde_json::json!({
+                    "operation": "agent/list_sessions/project",
+                    "project_id": project_id.as_str(),
+                    "reason": "history_exhausted",
+                    "target_row_count": target_row_count,
+                }),
+            );
+            if self
+                .native_catalog
+                .set_project_has_more(project_id.as_str(), false)
+            {
+                self.task_notifier
+                    .navigation_project_entries_changed(project_id.as_str().to_string());
+            }
+            return;
+        }
         if self
             .native_catalog
             .set_project_refreshing(project_id.as_str(), true)
@@ -119,7 +167,16 @@ impl TaskProductApi {
         }
         let api = self.clone();
         std::thread::spawn(move || {
-            if let Err(error) = api.refresh_native_session_project_trees(
+            let started_at = Instant::now();
+            crate::logging::info(
+                "native_session_project_catalog_refresh_started",
+                serde_json::json!({
+                    "operation": "agent/list_sessions/project",
+                    "project_id": project_id.as_str(),
+                    "target_row_count": target_row_count,
+                }),
+            );
+            let outcome = if let Err(error) = api.refresh_native_session_project_trees(
                 Some(project_id.as_str()),
                 Some(target_row_count),
             ) {
@@ -130,11 +187,24 @@ impl TaskProductApi {
                         "error": error.message,
                     }),
                 );
-            }
+                "failed"
+            } else {
+                "completed"
+            };
             api.native_catalog
                 .set_project_refreshing(project_id.as_str(), false);
             api.task_notifier
                 .navigation_project_entries_changed(project_id.as_str().to_string());
+            crate::logging::info(
+                "native_session_project_catalog_refresh_completed",
+                serde_json::json!({
+                    "operation": "agent/list_sessions/project",
+                    "project_id": project_id.as_str(),
+                    "target_row_count": target_row_count,
+                    "outcome": outcome,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            );
         });
     }
 

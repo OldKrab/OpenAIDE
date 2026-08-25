@@ -170,6 +170,10 @@ impl TaskProductApi {
             }
         }
 
+        if !stopped_with_more {
+            self.native_catalog_refresh
+                .mark_projects_exhausted(selected_project_ids.iter());
+        }
         for project_id in selected_project_ids {
             if self
                 .native_catalog

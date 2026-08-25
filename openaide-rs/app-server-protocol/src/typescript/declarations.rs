@@ -121,12 +121,15 @@ use crate::task::{
     ComposerHistoryResult, ComposerHistoryScope, ComposerImage, ComposerMessage,
     NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionForkParams,
     NativeSessionForkResult, NativeSessionForkSource, NativeSessionRestoreParams,
-    NativeSessionRestoreResult, TakenQueuedMessage, TaskAcquireInWorktreeParams,
-    TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
-    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
-    TaskClosePlanParams, TaskClosePlanResult, TaskLifecycleChanged, TaskListLifecycle,
-    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    NativeSessionRestoreResult, NativeSessionSetPinnedParams, NativeSessionSetPinnedResult,
+    NativeSessionSetTitleParams, NativeSessionSetTitleResult, TakenQueuedMessage,
+    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveOlderCutoff,
+    TaskArchiveOlderParams, TaskArchiveOlderProtectedNativeSession,
+    TaskArchiveOlderProtectedReason, TaskArchiveOlderProtectedTask, TaskArchiveOlderResult,
+    TaskArchiveParams, TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
+    TaskChatPageResult, TaskClosePlanParams, TaskClosePlanResult, TaskLifecycleChanged,
+    TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
     TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
     TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
     TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
@@ -488,6 +491,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskNavigationLoadMoreResult>(output, config);
     push_decl::<NativeSessionArchiveParams>(output, config);
     push_decl::<NativeSessionArchiveResult>(output, config);
+    push_decl::<NativeSessionSetTitleParams>(output, config);
+    push_decl::<NativeSessionSetTitleResult>(output, config);
+    push_decl::<NativeSessionSetPinnedParams>(output, config);
+    push_decl::<NativeSessionSetPinnedResult>(output, config);
     push_decl::<NativeSessionRestoreParams>(output, config);
     push_decl::<NativeSessionRestoreResult>(output, config);
     push_decl::<NativeSessionForkSource>(output, config);
@@ -497,6 +504,12 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskReleaseResult>(output, config);
     push_decl::<TaskArchiveParams>(output, config);
     push_decl::<TaskArchiveResult>(output, config);
+    push_decl::<TaskArchiveOlderParams>(output, config);
+    push_decl::<TaskArchiveOlderCutoff>(output, config);
+    push_decl::<TaskArchiveOlderProtectedNativeSession>(output, config);
+    push_decl::<TaskArchiveOlderProtectedReason>(output, config);
+    push_decl::<TaskArchiveOlderProtectedTask>(output, config);
+    push_decl::<TaskArchiveOlderResult>(output, config);
     push_decl::<TaskRestoreParams>(output, config);
     push_decl::<TaskRestoreResult>(output, config);
     push_decl::<TaskLifecycleChanged>(output, config);

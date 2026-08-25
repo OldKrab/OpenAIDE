@@ -1,6 +1,7 @@
 import { memo, useRef, useState } from "react";
 import { Archive, ArrowLeft, FolderPlus, Plus, RefreshCcw, Search, Settings, X } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
+import type { TaskArchiveOlderCutoff, TaskArchiveOlderResult } from "@openaide/app-server-client";
 import type { ProjectOption } from "../state/composerOptions";
 import { taskForkMutationKey, type AppState } from "../state/store";
 import {
@@ -44,7 +45,10 @@ type SidebarProps = {
   onOpenTask: (taskId: string) => void;
   onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
   onArchiveTask: (taskId: string) => void;
+  onArchiveOlderTasks?: (cutoff: TaskArchiveOlderCutoff, preview: boolean) => Promise<TaskArchiveOlderResult>;
   onRestoreNativeSession: (session: AgentListedSession) => void;
+  onSetNativeSessionPinned?: (session: AgentListedSession, pinned: boolean) => Promise<void>;
+  onSetNativeSessionTitle?: (session: AgentListedSession, title: string) => Promise<void>;
   onRestoreTask: (taskId: string) => void;
   onSetTaskPinned?: (taskId: string, pinned: boolean) => Promise<void>;
   onSetTaskTitle?: (
@@ -92,7 +96,10 @@ export const Sidebar = memo(function Sidebar({
   onOpenTask,
   onRecoverNativeSessions,
   onArchiveTask,
+  onArchiveOlderTasks,
   onRestoreNativeSession,
+  onSetNativeSessionPinned,
+  onSetNativeSessionTitle,
   onRestoreTask,
   onSetTaskPinned,
   onSetTaskTitle,
@@ -291,7 +298,9 @@ export const Sidebar = memo(function Sidebar({
                 forkableAgentIds={forkableAgentIds}
                 environmentLabel={environmentLabel}
                 onArchiveNativeSession={onArchiveNativeSession}
+                onArchiveOlderNativeSessions={onArchiveOlderTasks}
                 onArchiveTask={onArchiveTask}
+                onArchiveOlderTasks={onArchiveOlderTasks}
                 onForkNativeSession={onForkNativeSession}
                 onForkTask={onForkTask}
                 onLoadMore={(visibleIncrement) =>
@@ -317,6 +326,8 @@ export const Sidebar = memo(function Sidebar({
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}
                 onRestoreNativeSession={onRestoreNativeSession}
+                onSetNativeSessionPinned={onSetNativeSessionPinned}
+                onSetNativeSessionTitle={onSetNativeSessionTitle}
                 onRestoreTask={onRestoreTask}
                 onSetTaskPinned={onSetTaskPinned}
                 onSetTaskTitle={onSetTaskTitle}
@@ -347,6 +358,7 @@ export const Sidebar = memo(function Sidebar({
                   canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
                   forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
                   onArchiveTask={onArchiveTask}
+                  onArchiveOlderTasks={onArchiveOlderTasks}
                   onForkTask={onForkTask}
                   onOpenTask={onOpenTask}
                   onRestoreTask={onRestoreTask}
@@ -367,9 +379,12 @@ export const Sidebar = memo(function Sidebar({
                   nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                   nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                   onArchiveNativeSession={onArchiveNativeSession}
+                  onArchiveOlderNativeSessions={onArchiveOlderTasks}
                   onForkNativeSession={onForkNativeSession}
                   onOpenNativeSession={onOpenNativeSession}
                   onRestoreNativeSession={onRestoreNativeSession}
+                  onSetNativeSessionPinned={onSetNativeSessionPinned}
+                  onSetNativeSessionTitle={onSetNativeSessionTitle}
                   session={row.session}
                 />
               ),

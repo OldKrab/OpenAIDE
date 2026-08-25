@@ -7,6 +7,7 @@ import {
   GitBranch,
   GitFork,
   Info,
+  ListFilter,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -21,12 +22,18 @@ import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { relativeTime } from "./taskSurfaceHelpers";
 import { TaskPreviewDetails, taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
 import type { NativeSessionMutationState } from "../state/store";
+import {
+  SidebarArchiveOlderMenu,
+  type ArchiveOlderTasksAction,
+  useArchiveOlderMenu,
+} from "./SidebarArchiveOlderMenu";
 
 export function SidebarTaskRow({
   activeTaskId,
   canFork = false,
   forkMutation,
   onArchiveTask,
+  onArchiveOlderTasks,
   onForkTask,
   onOpenTask,
   onRestoreTask,
@@ -39,6 +46,7 @@ export function SidebarTaskRow({
   canFork?: boolean;
   forkMutation?: NativeSessionMutationState;
   onArchiveTask: (taskId: string) => void;
+  onArchiveOlderTasks?: ArchiveOlderTasksAction;
   onForkTask?: (taskId: string) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
@@ -61,6 +69,10 @@ export function SidebarTaskRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const title = task.title || "Untitled task";
+  const archiveOlder = useArchiveOlderMenu({
+    cutoff: { kind: "task", taskId: task.task_id as import("@openaide/app-server-client").TaskId },
+    onArchiveOlderTasks,
+  });
   const actionLabel = showArchived ? "Restore task" : "Archive task";
   const forkPending = forkMutation?.action === "fork" && forkMutation.state === "pending";
   const openTask = () => {
@@ -139,6 +151,7 @@ export function SidebarTaskRow({
       preview?.dismiss();
     } else {
       setDetailsOpen(false);
+      archiveOlder.reset();
     }
     setMenuOpen(open);
   };
@@ -224,7 +237,14 @@ export function SidebarTaskRow({
             </button>
           )}
         >
-          {detailsOpen ? <>
+          {archiveOlder.state.kind !== "idle" ? (
+            <SidebarArchiveOlderMenu
+              onApply={() => void archiveOlder.apply()}
+              onBack={archiveOlder.reset}
+              state={archiveOlder.state}
+              title={title}
+            />
+          ) : detailsOpen ? <>
             <button onClick={() => setDetailsOpen(false)} type="button" role="menuitem"><ArrowLeft size={13} />Task actions</button>
             <div className="task-row-details">
               <TaskPreviewDetails content={taskPreviewContent(task)} />
@@ -260,6 +280,20 @@ export function SidebarTaskRow({
               {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
               {actionLabel}
             </button>
+            {onArchiveOlderTasks && !showArchived ? <>
+              <span className="task-row-menu-separator" role="separator" />
+              <button
+                onClick={() => {
+                  setDetailsOpen(false);
+                  preview?.dismiss();
+                  void archiveOlder.begin();
+                }}
+                type="button"
+                role="menuitem"
+              >
+                <ListFilter size={13} />Archive older tasks…
+              </button>
+            </> : null}
           </>}
         </PopupMenu>
       </SidebarRowActionSlot>

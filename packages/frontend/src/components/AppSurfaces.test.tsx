@@ -1465,6 +1465,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
     callbacks: {
       navigation: {
         archiveNativeSession: vi.fn(),
+        archiveOlderTasks: vi.fn(),
         archiveTask: vi.fn(),
         forkNativeSession: vi.fn(),
         forkTask: vi.fn(),
@@ -1476,6 +1477,8 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         retryAgent: vi.fn(async () => true),
         openTask: vi.fn(),
       restoreNativeSession: vi.fn(),
+      setNativeSessionPinned: vi.fn(),
+      setNativeSessionTitle: vi.fn(),
       restoreTask: vi.fn(),
       setTaskPinned: vi.fn(),
       setTaskTitle: vi.fn(),

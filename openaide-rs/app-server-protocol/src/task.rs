@@ -652,6 +652,34 @@ pub struct NativeSessionArchiveResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct NativeSessionSetTitleParams {
+    pub agent_id: AgentId,
+    pub native_session_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionSetTitleResult {
+    pub session: crate::snapshot::NativeSessionSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionSetPinnedParams {
+    pub agent_id: AgentId,
+    pub native_session_id: String,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionSetPinnedResult {
+    pub session: crate::snapshot::NativeSessionSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct NativeSessionRestoreParams {
     pub agent_id: AgentId,
     pub native_session_id: String,
@@ -686,6 +714,68 @@ pub struct TaskArchiveParams {
 #[serde(rename_all = "camelCase")]
 pub struct TaskArchiveResult {
     pub change: TaskLifecycleChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskArchiveOlderParams {
+    pub cutoff: TaskArchiveOlderCutoff,
+    #[serde(default)]
+    pub preview: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskArchiveOlderResult {
+    pub project_id: ProjectId,
+    pub cutoff: TaskArchiveOlderCutoff,
+    pub eligible_task_ids: Vec<TaskId>,
+    pub eligible_native_sessions: Vec<crate::snapshot::NativeSessionReference>,
+    pub protected: Vec<TaskArchiveOlderProtectedTask>,
+    pub protected_native_sessions: Vec<TaskArchiveOlderProtectedNativeSession>,
+    pub archived_task_ids: Vec<TaskId>,
+    pub archived_native_sessions: Vec<crate::snapshot::NativeSessionReference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TaskArchiveOlderCutoff {
+    Task {
+        task_id: TaskId,
+    },
+    NativeSession {
+        agent_id: AgentId,
+        native_session_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskArchiveOlderProtectedTask {
+    pub task_id: TaskId,
+    pub reason: TaskArchiveOlderProtectedReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskArchiveOlderProtectedNativeSession {
+    pub reference: crate::snapshot::NativeSessionReference,
+    pub reason: TaskArchiveOlderProtectedReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskArchiveOlderProtectedReason {
+    Pinned,
+    Active,
+    Queued,
+    PendingRequest,
+    OpenElsewhere,
+    Changed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

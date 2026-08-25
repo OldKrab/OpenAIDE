@@ -58,21 +58,23 @@ use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessi
 use crate::task::{
     ComposerHistoryParams, ComposerHistoryResult, NativeSessionArchiveParams,
     NativeSessionArchiveResult, NativeSessionForkParams, NativeSessionForkResult,
-    NativeSessionRestoreParams, NativeSessionRestoreResult, TaskAcquireInWorktreeParams,
-    TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
-    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
-    TaskClosePlanParams, TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult,
-    TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
-    TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult,
-    TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
-    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
-    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    NativeSessionRestoreParams, NativeSessionRestoreResult, NativeSessionSetPinnedParams,
+    NativeSessionSetPinnedResult, NativeSessionSetTitleParams, NativeSessionSetTitleResult,
+    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveOlderParams,
+    TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
+    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
+    TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
+    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
+    TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
+    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
+    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -519,6 +521,18 @@ protocol_method!(
     NativeSessionArchiveResult
 );
 protocol_method!(
+    NativeSessionSetTitle,
+    NATIVE_SESSION_SET_TITLE,
+    NativeSessionSetTitleParams,
+    NativeSessionSetTitleResult
+);
+protocol_method!(
+    NativeSessionSetPinned,
+    NATIVE_SESSION_SET_PINNED,
+    NativeSessionSetPinnedParams,
+    NativeSessionSetPinnedResult
+);
+protocol_method!(
     NativeSessionRestore,
     NATIVE_SESSION_RESTORE,
     NativeSessionRestoreParams,
@@ -659,6 +673,12 @@ protocol_method!(
     TASK_ARCHIVE,
     TaskArchiveParams,
     TaskArchiveResult
+);
+protocol_method!(
+    TaskArchiveOlder,
+    TASK_ARCHIVE_OLDER,
+    TaskArchiveOlderParams,
+    TaskArchiveOlderResult
 );
 protocol_method!(
     TaskRestore,

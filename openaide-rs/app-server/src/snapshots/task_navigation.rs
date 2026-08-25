@@ -176,7 +176,7 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                         == matches!(section, TaskNavigationSection::Archive)
                 })
             {
-                let project_id = ProjectId::from(entry.project_id);
+                let project_id = ProjectId::from(entry.project_id.clone());
                 let project_label =
                     ProjectIdentity::from_workspace_root(&entry.workspace_root).label;
                 groups
@@ -184,17 +184,7 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                     .or_insert_with(|| empty_group(project_id.clone(), project_label))
                     .entries
                     .push(TaskNavigationEntry::NativeSession {
-                        session: NativeSessionSummary {
-                            reference: NativeSessionReference {
-                                agent_id: AgentId::from(entry.observation.reference.agent_id),
-                                session_id: entry.observation.reference.session_id,
-                            },
-                            project_id,
-                            workspace_root: entry.workspace_root,
-                            worktree_id: None,
-                            title: entry.observation.title.or(entry.local_fallback_title),
-                            last_activity: entry.observation.last_activity,
-                        },
+                        session: native_session_summary(entry, project_id),
                     });
             }
         }
@@ -271,7 +261,31 @@ fn project_selected_str(project_ids: Option<&[ProjectId]>, project_id: &str) -> 
 }
 
 fn navigation_pinned(entry: &TaskNavigationEntry) -> bool {
-    matches!(entry, TaskNavigationEntry::Task { task } if task.pinned)
+    match entry {
+        TaskNavigationEntry::Task { task } => task.pinned,
+        TaskNavigationEntry::NativeSession { session } => session.pinned,
+    }
+}
+
+pub(crate) fn native_session_summary(
+    entry: crate::native_sessions::catalog::NativeSessionCatalogEntry,
+    project_id: ProjectId,
+) -> NativeSessionSummary {
+    NativeSessionSummary {
+        reference: NativeSessionReference {
+            agent_id: AgentId::from(entry.observation.reference.agent_id),
+            session_id: entry.observation.reference.session_id,
+        },
+        project_id,
+        workspace_root: entry.workspace_root,
+        worktree_id: None,
+        title: entry
+            .user_title
+            .or(entry.observation.title)
+            .or(entry.local_fallback_title),
+        pinned: entry.pinned,
+        last_activity: entry.observation.last_activity,
+    }
 }
 
 fn navigation_active(entry: &TaskNavigationEntry) -> bool {
