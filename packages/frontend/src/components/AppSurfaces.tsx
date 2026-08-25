@@ -370,7 +370,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onManageWorktrees={manageWorktrees}
           onRemoveProject={prepareProjectRemoval}
           onRenameProject={async (projectId, label) => { await controller.intents.projects.rename(projectId, label); }}
-          onNewTask={callbacks.navigation.openNewTask}
+          onNewTask={(projectId) => {
+            // A native shell opens New Task in a fresh webview client, so carry
+            // this client's retained selection across that shell boundary.
+            const handoffProjectId = projectId ?? navigation.newTaskSelection.projectId;
+            callbacks.navigation.openNewTask(handoffProjectId);
+          }}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
           onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
           onOpenTask={callbacks.navigation.openTask}

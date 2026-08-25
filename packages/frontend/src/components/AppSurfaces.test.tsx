@@ -92,7 +92,7 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({
         onArchiveTask: controller.callbacks.navigation.archiveTask,
         onLoadNativeSessions: controller.callbacks.navigation.loadNativeSessions,
-        onNewTask: controller.callbacks.navigation.openNewTask,
+        onNewTask: expect.any(Function),
         onOpenNativeSession: controller.callbacks.navigation.openNativeSession,
         onOpenTask: controller.callbacks.navigation.openTask,
         onRestoreTask: controller.callbacks.navigation.restoreTask,
@@ -102,6 +102,18 @@ describe("AppSurfaces callback wiring", () => {
       }),
       undefined,
     );
+  });
+
+  it("hands the retained Project to a fresh VS Code New Task surface", () => {
+    const controller = controllerFor("navigation");
+    controller.state.newTask.selection.projectId = "project-codearts";
+
+    render(controller);
+    const sidebarProps = latestMockProps<{ onNewTask: (projectId?: string) => void }>(surfaceMocks.sidebar);
+
+    act(() => sidebarProps?.onNewTask());
+
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project-codearts");
   });
 
   it("passes shell-provided workspace recovery to Task Navigation", () => {
