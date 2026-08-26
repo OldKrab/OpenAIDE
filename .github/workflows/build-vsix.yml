@@ -195,12 +195,12 @@ jobs:
       - name: Restore App Server executable permission
         if: runner.os != 'Windows'
         run: chmod +x "app-server/${{ matrix.binary }}"
+      - run: npm run build:frontend
       - name: Test VS Code New Task Project handoff
         if: matrix.target == 'linux-x64'
         run: |
           npm test --workspace openaide-frontend -- --run src/components/AppSurfaces.test.tsx
           npm test --workspace openaide-vscode-extension -- --run src/webview/messaging.test.ts src/webview/surfaces.test.ts
-      - run: npm run build:frontend
       - name: Add extension license
         shell: bash
         run: cp LICENSE apps/vscode-extension/LICENSE
