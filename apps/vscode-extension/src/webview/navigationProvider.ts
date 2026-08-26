@@ -80,6 +80,7 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         runtimeProcess: this.runtimeProcess,
         post: (payload) => view.webview.postMessage(payload),
         logger: this.logger,
+        surface: "navigation",
         developerSettingsStore: this.context.globalState,
         agentSecretStore: this.context.secrets,
         surfaces: this.surfaces,
