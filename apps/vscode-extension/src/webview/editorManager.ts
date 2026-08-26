@@ -8,6 +8,7 @@ import { renderWebviewHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import {
   VSCODE_SHELL,
+  type SurfaceKind,
   type TaskFocusSource,
   type WebviewBootstrap,
   type WebviewHost,
@@ -46,8 +47,9 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     const effectiveProjectId = projectId ?? retainedProjectId;
     if (projectId) this.retainNewTaskProject(projectId);
     this.logger.info("VS Code New Task Project resolved", {
-      project_source: projectId ? "explicit" : retainedProjectId ? "shell_retained" : "app_server_default",
+      project_id: effectiveProjectId,
       project_present: effectiveProjectId !== undefined,
+      selection_source: projectId ? "explicit" : retainedProjectId ? "shell_retained" : "app_server_default",
     });
     if (this.newTaskPanel) {
       this.newTaskPanel.reveal(vscode.ViewColumn.Active);
@@ -82,10 +84,38 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   }
 
   /** Shell-owned handoff for New Task selections made in independent webviews. */
-  retainNewTaskProject(projectId: string) {
+  retainNewTaskProject(projectId: string, surface?: SurfaceKind) {
     if (!projectId) return;
     this.retainedNewTaskProjectId = projectId;
-    void this.context.workspaceState.update(RETAINED_NEW_TASK_PROJECT_KEY, projectId);
+    const startedAt = Date.now();
+    this.logger.info("VS Code New Task Project retention started", {
+      project_id: projectId,
+      surface,
+    });
+    try {
+      void Promise.resolve(this.context.workspaceState.update(RETAINED_NEW_TASK_PROJECT_KEY, projectId))
+        .then(() => this.logger.info("VS Code New Task Project retention completed", {
+          duration_ms: Date.now() - startedAt,
+          outcome: "updated",
+          project_id: projectId,
+          surface,
+        }))
+        .catch(() => this.logger.warn("VS Code New Task Project retention completed", {
+          duration_ms: Date.now() - startedAt,
+          error_kind: "workspace_state_update_failed",
+          outcome: "failed",
+          project_id: projectId,
+          surface,
+        }));
+    } catch {
+      this.logger.warn("VS Code New Task Project retention completed", {
+        duration_ms: Date.now() - startedAt,
+        error_kind: "workspace_state_update_failed",
+        outcome: "failed",
+        project_id: projectId,
+        surface,
+      });
+    }
   }
 
   openNativeSession(agentId: string, nativeSessionId: string, projectId?: string) {
@@ -241,6 +271,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         runtimeProcess: this.runtimeProcess,
         post: (payload) => panel.webview.postMessage(payload),
         logger: this.logger,
+        surface: bootstrap.surface,
         developerSettingsStore: this.context.globalState,
         agentSecretStore: this.context.secrets,
         adoptTask: (taskId, taskTitle, agentId) => this.adoptTaskPanel(panel, taskId, taskTitle, agentId),

@@ -26,7 +26,7 @@ import { handleAgentSecretTransaction } from "./messagingSecrets";
 
 export async function routeSurfaceCommand(message: WebviewToHostMessage, context: MessageContext) {
   if (message.type === "surface.retainNewTaskProject") {
-    context.surfaces?.retainNewTaskProject(message.payload.project_id);
+    context.surfaces?.retainNewTaskProject(message.payload.project_id, context.surface);
     return true;
   }
   if (message.type === "surface.openNewTask") {

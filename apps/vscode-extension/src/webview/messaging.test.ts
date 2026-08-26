@@ -721,7 +721,7 @@ describe("webview messaging composer routes", () => {
 
     await handleWebviewMessage(
       { type: "surface.retainNewTaskProject", payload: { project_id: "project_1" } },
-      context({}, posted, surfaces),
+      context({}, posted, surfaces, undefined, undefined, { surface: "task" }),
     );
     await handleWebviewMessage({ type: "surface.openNewTask" }, context({}, posted, surfaces));
     await handleWebviewMessage(
@@ -745,7 +745,7 @@ describe("webview messaging composer routes", () => {
       context({}, posted, surfaces),
     );
 
-    expect(surfaces.retainNewTaskProject).toHaveBeenCalledWith("project_1");
+    expect(surfaces.retainNewTaskProject).toHaveBeenCalledWith("project_1", "task");
     expect(surfaces.openNewTask).toHaveBeenCalledTimes(2);
     expect(surfaces.openNewTask).toHaveBeenCalledWith("project_1");
     expect(surfaces.openSettings).toHaveBeenCalledTimes(1);

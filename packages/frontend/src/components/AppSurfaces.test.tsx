@@ -104,7 +104,7 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
-  it("hands the retained Project to a fresh VS Code New Task surface", () => {
+  it("opens the global VS Code New Task action without overriding the shell-retained Project", () => {
     const controller = controllerFor("navigation");
     controller.state.newTask.selection.projectId = "project-codearts";
 
@@ -113,7 +113,19 @@ describe("AppSurfaces callback wiring", () => {
 
     act(() => sidebarProps?.onNewTask());
 
-    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project-codearts");
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith(undefined);
+  });
+
+  it("keeps a Project-scoped VS Code New Task action explicit", () => {
+    const controller = controllerFor("navigation");
+    controller.state.newTask.selection.projectId = "project-codearts";
+
+    render(controller);
+    const sidebarProps = latestMockProps<{ onNewTask: (projectId?: string) => void }>(surfaceMocks.sidebar);
+
+    act(() => sidebarProps?.onNewTask("project-agent-kernel"));
+
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project-agent-kernel");
   });
 
   it("passes shell-provided workspace recovery to Task Navigation", () => {
