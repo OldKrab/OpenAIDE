@@ -19,6 +19,7 @@ import { developerSettingsVisible } from "../settings/snapshot";
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
 const MAX_TASK_PANEL_TITLE_LENGTH = 50;
+const RETAINED_NEW_TASK_PROJECT_KEY = "openaide.retainedNewTaskProjectId";
 
 export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFocusSource {
   private readonly taskPanels = new Map<string, vscode.WebviewPanel>();
@@ -29,25 +30,35 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   private settingsPanel: vscode.WebviewPanel | undefined;
   private newTaskPanel: vscode.WebviewPanel | undefined;
   private readonly nativeSessionPanels = new Map<string, vscode.WebviewPanel>();
+  private retainedNewTaskProjectId: string | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly runtime: RuntimeClient,
     private readonly runtimeProcess: RuntimeProcess,
     private readonly logger: ExtensionLogger,
-  ) {}
+  ) {
+    this.retainedNewTaskProjectId = context.workspaceState.get<string>(RETAINED_NEW_TASK_PROJECT_KEY);
+  }
 
   openNewTask(projectId?: string) {
+    const retainedProjectId = this.retainedNewTaskProjectId;
+    const effectiveProjectId = projectId ?? retainedProjectId;
+    if (projectId) this.retainNewTaskProject(projectId);
+    this.logger.info("VS Code New Task Project resolved", {
+      project_source: projectId ? "explicit" : retainedProjectId ? "shell_retained" : "app_server_default",
+      project_present: effectiveProjectId !== undefined,
+    });
     if (this.newTaskPanel) {
       this.newTaskPanel.reveal(vscode.ViewColumn.Active);
       this.focusPanel(this.newTaskPanel);
-      if (projectId !== undefined) {
+      if (effectiveProjectId !== undefined) {
         const current = this.panelBootstraps.get(this.newTaskPanel);
         if (current && current.surface === "task" && !current.taskId) {
-          this.panelBootstraps.set(this.newTaskPanel, { ...current, projectId });
+          this.panelBootstraps.set(this.newTaskPanel, { ...current, projectId: effectiveProjectId });
           void this.newTaskPanel.webview.postMessage({
             type: "surface.newTaskChanged",
-            payload: { project_id: projectId },
+            payload: { project_id: effectiveProjectId },
           });
         }
       }
@@ -57,7 +68,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       surface: "task",
       // An omitted Project lets the retained/App Server New Task default win.
       // Sidebar Project actions still pass an explicit hint.
-      projectId,
+      projectId: effectiveProjectId,
     });
     panel.iconPath = newTaskTabIcon(this.context);
     this.newTaskPanel = panel;
@@ -68,6 +79,13 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         this.newTaskPanel = undefined;
       }
     });
+  }
+
+  /** Shell-owned handoff for New Task selections made in independent webviews. */
+  retainNewTaskProject(projectId: string) {
+    if (!projectId) return;
+    this.retainedNewTaskProjectId = projectId;
+    void this.context.workspaceState.update(RETAINED_NEW_TASK_PROJECT_KEY, projectId);
   }
 
   openNativeSession(agentId: string, nativeSessionId: string, projectId?: string) {

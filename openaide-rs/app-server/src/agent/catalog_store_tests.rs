@@ -84,6 +84,24 @@ fn save_custom_replaces_existing_custom_agent_by_id() {
 }
 
 #[test]
+fn save_custom_rejects_builtin_agent_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = AgentCatalogStore::new(Store::open(dir.path().to_path_buf()).unwrap());
+
+    let error = store
+        .save_custom(catalog_record(json!({
+            "id": CODEX_AGENT_ID,
+            "label": "Codex",
+            "source_kind": "custom",
+            "transport": "stdio",
+            "command": "codex-acp"
+        })))
+        .unwrap_err();
+
+    assert!(matches!(error, RuntimeError::InvalidParams(field) if field == "agent.id"));
+}
+
+#[test]
 fn unsupported_catalog_schema_is_a_storage_error() {
     let dir = tempfile::tempdir().unwrap();
     let store = AgentCatalogStore::new(Store::open(dir.path().to_path_buf()).unwrap());

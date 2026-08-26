@@ -91,6 +91,8 @@ export type FrontendShell = {
   };
   navigation: {
     openNewTask(projectId?: string): void;
+    /** Lets an embedding shell carry the selected Project across renderer instances. */
+    retainNewTaskProject?(projectId: string): void;
     openNativeSession(agentId: string, nativeSessionId: string, projectId?: string): void;
     openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId): void;
     openTask(taskId: string, title?: string, agentId?: string): void;

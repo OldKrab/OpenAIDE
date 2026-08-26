@@ -10,6 +10,7 @@ export const VSCODE_SHELL = {
 
 export type WebviewHost = {
   openNewTask: (projectId?: string) => void;
+  retainNewTaskProject: (projectId: string) => void;
   openNativeSession: (agentId: string, nativeSessionId: string, projectId?: string) => void;
   openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: WebviewBootstrap["settingsTab"]) => void;
   openTask: (taskId: string, title?: string, agentId?: string) => void;

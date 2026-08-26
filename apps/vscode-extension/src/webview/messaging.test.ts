@@ -711,6 +711,7 @@ describe("webview messaging composer routes", () => {
     const calls: string[] = [];
     const surfaces = {
       openNewTask: vi.fn(),
+      retainNewTaskProject: vi.fn(),
       openNativeSession: vi.fn(),
       openSettings: vi.fn(),
       openTask: vi.fn(() => calls.push("open")),
@@ -718,6 +719,10 @@ describe("webview messaging composer routes", () => {
     };
     const adoptTask = vi.fn(() => calls.push("adopt"));
 
+    await handleWebviewMessage(
+      { type: "surface.retainNewTaskProject", payload: { project_id: "project_1" } },
+      context({}, posted, surfaces),
+    );
     await handleWebviewMessage({ type: "surface.openNewTask" }, context({}, posted, surfaces));
     await handleWebviewMessage(
       { type: "surface.openNewTask", payload: { project_id: "project_1" } },
@@ -740,6 +745,7 @@ describe("webview messaging composer routes", () => {
       context({}, posted, surfaces),
     );
 
+    expect(surfaces.retainNewTaskProject).toHaveBeenCalledWith("project_1");
     expect(surfaces.openNewTask).toHaveBeenCalledTimes(2);
     expect(surfaces.openNewTask).toHaveBeenCalledWith("project_1");
     expect(surfaces.openSettings).toHaveBeenCalledTimes(1);

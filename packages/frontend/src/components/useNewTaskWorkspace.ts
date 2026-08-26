@@ -7,6 +7,7 @@ import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
+import { retainNewTaskProject } from "../services/hostBridge";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
 import type { AppControllerBackendConnection } from "./appControllerBackendLifecycle";
 import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
@@ -79,6 +80,9 @@ export function useNewTaskWorkspace({
       projectId: state.newTask.selection.projectId,
       agentId: state.newTask.selection.agentId || undefined,
     });
+    if (state.newTask.selection.projectId) {
+      retainNewTaskProject(state.newTask.selection.projectId);
+    }
   }, [
     clientInstanceId,
     state.appServerStateRootId,

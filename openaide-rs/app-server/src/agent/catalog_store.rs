@@ -54,6 +54,7 @@ impl AgentCatalogStore {
             return Err(RuntimeError::InvalidParams("agent.source_kind".to_string()));
         }
         let id = record.id()?;
+        reject_reserved_custom_id(&id)?;
         let mut records = self.load_records()?;
         if let Some(existing) = records
             .iter_mut()
@@ -109,6 +110,7 @@ impl AgentCatalogStore {
             return Err(RuntimeError::InvalidParams("agent.source_kind".to_string()));
         }
         let replacement_id = replacement.id()?;
+        reject_reserved_custom_id(&replacement_id)?;
         let mut records = self.load_records()?;
         let source = records
             .iter()
@@ -198,6 +200,13 @@ impl AgentCatalogStore {
     fn catalog_path(&self) -> std::path::PathBuf {
         self.store.agents_dir().join(CATALOG_FILE_NAME)
     }
+}
+
+fn reject_reserved_custom_id(agent_id: &str) -> Result<(), RuntimeError> {
+    if crate::agent::registry_builtin::is_built_in_id(agent_id) {
+        return Err(RuntimeError::InvalidParams("agent.id".to_string()));
+    }
+    Ok(())
 }
 
 fn reject_duplicate_custom_setup(

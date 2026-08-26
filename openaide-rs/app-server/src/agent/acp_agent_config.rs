@@ -101,6 +101,17 @@ impl AcpAgentConfig {
         }
     }
 
+    pub(crate) fn diagnostic_launcher_kind(&self) -> &'static str {
+        let command_name = Path::new(&self.command).file_stem().and_then(OsStr::to_str);
+        if command_name.is_some_and(|name| name.eq_ignore_ascii_case("npx"))
+            && self.args == ["-y", "@openaide/codex-acp@1.0.0"]
+        {
+            "pinned_npx_package"
+        } else {
+            "configured_command"
+        }
+    }
+
     fn secret_env_values(
         &self,
         host_bridge: &HostBridge,

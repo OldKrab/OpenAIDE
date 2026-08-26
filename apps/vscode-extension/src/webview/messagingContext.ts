@@ -15,6 +15,7 @@ export type MessageContext = {
   adoptTask?: (taskId: string, title?: string, agentId?: string) => void;
   surfaces?: {
     openNewTask: (projectId?: string) => void;
+    retainNewTaskProject: (projectId: string) => void;
     openNativeSession: (agentId: string, nativeSessionId: string, projectId?: string) => void;
     openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: import("@openaide/app-shell-contracts").SettingsTabId) => void;
     openTask: (taskId: string, title?: string, agentId?: string) => void;

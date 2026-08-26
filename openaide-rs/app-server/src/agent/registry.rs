@@ -123,6 +123,12 @@ impl AgentRegistry {
         let mut seen = std::collections::HashSet::new();
         for record in records {
             let id = registry_catalog::record_id(&record)?;
+            // Older catalogs could persist a Custom Agent under a reserved
+            // built-in id. Preserve the product-controlled built-in launch
+            // policy instead of allowing that legacy record to shadow it.
+            if record.is_custom() && registry_builtin::is_built_in_id(&id) {
+                continue;
+            }
             if !seen.insert(id.clone()) {
                 return Err(RuntimeError::InvalidParams("agents.id".to_string()));
             }
