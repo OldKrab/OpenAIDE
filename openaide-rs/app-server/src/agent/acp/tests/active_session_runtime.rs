@@ -640,7 +640,11 @@ for line in sys.stdin:
         if session_id == "idle-session":
             notify_title("Title after idle resume")
     elif method == "session/list":
+        if prompt_mode == "pending_prompt_and_slow_list":
+            time.sleep(0.2)
         respond(message, {"sessions": []})
+        if prompt_mode == "pending_prompt_and_slow_list" and pending_prompt_ids:
+            respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
     elif method == "authenticate":
         respond(message, {})
     elif method == "session/prompt":
@@ -655,7 +659,7 @@ for line in sys.stdin:
             pending_prompt_ids.append(message.get("id"))
             request_terminal("prompt-terminal-create-1")
             request_terminal("prompt-terminal-create-2")
-        elif prompt_mode == "wait_for_cancel" or (
+        elif prompt_mode in ("wait_for_cancel", "pending_prompt_and_slow_list") or (
             prompt_mode == "delay_first_cancel_response" and prompt_request_count == 1
         ):
             pending_prompt_ids.append(message.get("id"))
@@ -1176,6 +1180,67 @@ fn listing_sessions_reuses_the_active_agent_process() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/list", "session/close"]
+    );
+}
+
+#[test]
+fn session_listing_timeout_does_not_disconnect_active_prompt() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
+        &temp,
+        "active-during-list-timeout",
+        "pending_prompt_and_slow_list",
+    ) else {
+        return;
+    };
+    let runtime = Arc::new(runtime.with_list_timeout(Duration::from_millis(50)));
+    let session = runtime
+        .start_session(start_request("task-active-during-list", cwd_string()))
+        .expect("start session");
+    let prompt_handle = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = session.session_id.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-active-during-list".to_string(),
+                    session_id,
+                    text: "keep working".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+    wait_for_method(&log_path, "session/prompt");
+
+    let error = runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: Some(cwd_string()),
+            cursor: None,
+        })
+        .expect_err("slow listing should reach its deadline");
+    assert_eq!(
+        error.to_string(),
+        "runtime not ready: ACP session listing timed out"
+    );
+    assert_eq!(
+        prompt_handle.join().expect("prompt thread").unwrap(),
+        AgentPromptOutcome::EndTurn
+    );
+    runtime
+        .close_session(&session.key())
+        .expect("close active session");
+    assert_eq!(
+        read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| method.as_str() == "initialize")
+            .count(),
+        1,
+        "listing failure must not replace the live Agent process"
     );
 }
 

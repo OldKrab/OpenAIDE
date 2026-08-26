@@ -142,6 +142,7 @@ pub(super) enum AcpAgentProcessControl {
 pub(super) struct AcpAgentProcessList {
     pub(super) request: AgentListSessionsRequest,
     pub(super) preferred_auth_method_id: Option<String>,
+    pub(super) timeout: std::time::Duration,
     pub(super) reply_tx: mpsc::Sender<Result<AgentListSessionsResult, RuntimeError>>,
 }
 
@@ -307,12 +308,23 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     }
                     list = list_rx.recv() => {
                         let Some(list) = list else { break };
-                        let result = list_sessions_on_shared_process(
-                            &connection,
-                            &initialize,
-                            list.request,
-                            list.preferred_auth_method_id.as_deref(),
-                        ).await;
+                        // Discovery is best-effort background work. Bound only its ACP request;
+                        // active Native Session attachments continue on the shared connection.
+                        let result = tokio::time::timeout(
+                            list.timeout,
+                            list_sessions_on_shared_process(
+                                &connection,
+                                &initialize,
+                                list.request,
+                                list.preferred_auth_method_id.as_deref(),
+                            ),
+                        )
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(RuntimeError::NotReady(
+                                "ACP session listing timed out".to_string(),
+                            ))
+                        });
                         let _ = list.reply_tx.send(result);
                     }
                     control = control_rx.recv() => {
