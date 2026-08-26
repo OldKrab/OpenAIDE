@@ -69,6 +69,11 @@ impl AcpActiveSessionManager {
         self.session_idle_timeout = session_idle_timeout;
     }
 
+    #[cfg(test)]
+    pub(super) fn with_list_timeout(&mut self, timeout: Duration) {
+        self.processes.with_list_timeout(timeout);
+    }
+
     pub(super) fn start_session(
         &self,
         request: AgentSessionStart,

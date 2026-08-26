@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -19,11 +20,15 @@ use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
 
+const DEFAULT_LIST_TIMEOUT: Duration = Duration::from_secs(30);
+const LIST_REPLY_TIMEOUT_GRACE: Duration = Duration::from_secs(1);
+
 pub(super) struct AcpAgentProcessPool {
     registry: AgentRegistryHandle,
     host_bridge: HostBridge,
     processes: Mutex<HashMap<String, AcpAgentProcessClient>>,
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
+    list_timeout: Duration,
 }
 
 #[derive(Clone)]
@@ -56,7 +61,13 @@ impl AcpAgentProcessPool {
             host_bridge,
             processes: Mutex::new(HashMap::new()),
             auth_environments: Mutex::new(HashMap::new()),
+            list_timeout: DEFAULT_LIST_TIMEOUT,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_list_timeout(&mut self, timeout: Duration) {
+        self.list_timeout = timeout;
     }
 
     pub(super) fn open_session(
@@ -106,6 +117,7 @@ impl AcpAgentProcessPool {
             let sent = process.list_tx.send(AcpAgentProcessList {
                 request: request.clone(),
                 preferred_auth_method_id: preferred_auth_method_id.clone(),
+                timeout: self.list_timeout,
                 reply_tx,
             });
             if sent.is_err() {
@@ -126,7 +138,8 @@ impl AcpAgentProcessPool {
                     "ACP agent process ended before session listing".to_string(),
                 ));
             }
-            match reply_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            match reply_rx.recv_timeout(self.list_timeout.saturating_add(LIST_REPLY_TIMEOUT_GRACE))
+            {
                 Ok(result) => return result,
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     self.remove_process_if_current(&agent_id, &process);
@@ -147,7 +160,8 @@ impl AcpAgentProcessPool {
                     ));
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    self.stop_process(&agent_id, &process);
+                    // The async ACP request owns the listing deadline. This receiver is only a
+                    // worker watchdog and must never terminate a process with live attachments.
                     return Err(RuntimeError::NotReady(
                         "ACP session listing timed out".to_string(),
                     ));
