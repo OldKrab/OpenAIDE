@@ -13,6 +13,7 @@ fn built_in_codex_uses_the_product_pinned_adapter() {
     assert_eq!(config.agent_id, "codex");
     assert_eq!(config.command, "npx");
     assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.0.0"]);
+    assert_eq!(config.diagnostic_launcher_kind(), "pinned_npx_package");
 }
 
 #[test]

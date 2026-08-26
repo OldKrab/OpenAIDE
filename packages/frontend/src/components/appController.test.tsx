@@ -43,6 +43,7 @@ import {
 } from "./appController";
 
 const postHostMessage = vi.fn();
+const retainNewTaskProject = vi.fn();
 const replaceSettingsTabRoute = vi.fn();
 const listeners: Array<(message: HostToWebviewMessage) => void> = [];
 const webRouteListeners: Array<(nextBootstrap: TestBootstrap) => void> = [];
@@ -90,6 +91,7 @@ vi.mock("../services/hostBridge", () => ({
   openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
     ? { type: "surface.openNewTask", payload: { project_id: projectId } }
     : { type: "surface.openNewTask" }),
+  retainNewTaskProject: (projectId: string) => retainNewTaskProject(projectId),
   openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
   openTaskSurface: (taskId: string, title?: string) => postHostMessage({
     type: "surface.openTask",
@@ -137,6 +139,7 @@ describe("app controller mounted lifecycle", () => {
     });
     vi.stubGlobal("sessionStorage", memoryStorage());
     postHostMessage.mockClear();
+    retainNewTaskProject.mockClear();
     replaceSettingsTabRoute.mockClear();
     listeners.length = 0;
     webRouteListeners.length = 0;
@@ -2493,6 +2496,7 @@ describe("app controller mounted lifecycle", () => {
       task_id: "task_project_2",
       project_id: "project_2",
     });
+    expect(retainNewTaskProject).toHaveBeenLastCalledWith("project_2");
     expect(latestController?.state.newTask.error).toBeUndefined();
   });
 

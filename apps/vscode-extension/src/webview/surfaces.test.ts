@@ -208,6 +208,15 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-api"');
   });
 
+  it("uses the Project retained by one New Task panel for the native New Task command", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.retainNewTaskProject("project-api");
+    manager.openNewTask();
+
+    expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-api"');
+  });
+
   it("updates an existing New Task tab when a Project-scoped action is opened", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
@@ -451,9 +460,14 @@ function htmlDataAttribute(html: string, name: string) {
 }
 
 function context() {
+  const workspaceState = new Map<string, unknown>();
   return {
     extensionUri: { fsPath: "/extension" },
     extension: { packageJSON: { version: "0.3.0-test" } },
+    workspaceState: {
+      get: <T>(key: string) => workspaceState.get(key) as T | undefined,
+      update: async (key: string, value: unknown) => { workspaceState.set(key, value); },
+    },
   } as never;
 }
 
@@ -491,6 +505,7 @@ function surfaces() {
     currentFocusedTaskId: vi.fn(() => undefined),
     onDidChangeFocusedTask: vi.fn(() => ({ dispose: vi.fn() })),
     openNewTask: vi.fn(),
+    retainNewTaskProject: vi.fn(),
     openSettings: vi.fn(),
     openTask: vi.fn(),
   };

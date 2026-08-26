@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,11 +9,25 @@ if (!binaryPath || !workspaceRoot) {
 }
 
 const stateParent = await mkdtemp(path.join(os.tmpdir(), "openaide-codex-acp-smoke-"));
+const stateRoot = path.join(stateParent, "state");
+await mkdir(path.join(stateRoot, "agents"), { recursive: true });
+// Releases must recover catalogs written before built-in ids were reserved.
+// The missing command makes any accidental Custom-Agent shadowing fail here.
+await writeFile(path.join(stateRoot, "agents", "catalog.json"), JSON.stringify({
+  schemaVersion: 1,
+  records: [{
+    id: "codex",
+    label: "Codex",
+    source_kind: "custom",
+    transport: "stdio",
+    command: "missing-global-codex-acp",
+  }],
+}));
 const child = spawn(path.resolve(binaryPath), [], {
   env: {
     ...process.env,
     OPENAIDE_APP_SERVER_PROTOCOL: "app-server-protocol",
-    OPENAIDE_STORAGE_ROOT: path.join(stateParent, "state"),
+    OPENAIDE_STORAGE_ROOT: stateRoot,
   },
   stdio: "pipe",
   windowsHide: true,

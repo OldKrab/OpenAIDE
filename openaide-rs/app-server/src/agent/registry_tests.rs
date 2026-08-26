@@ -149,3 +149,22 @@ fn registry_overlay_starts_with_builtins_and_applies_stored_overrides() {
     assert!(registry.require(OPENCODE_AGENT_ID).is_ok());
     assert!(registry.require("custom-agent").is_ok());
 }
+
+#[test]
+fn registry_overlay_does_not_let_legacy_custom_records_replace_builtin_codex() {
+    let registry = AgentRegistry::from_catalog_overlay(vec![catalog_record(json!({
+        "id": CODEX_AGENT_ID,
+        "label": CODEX_AGENT_LABEL,
+        "source_kind": "custom",
+        "transport": "stdio",
+        "command": "codex-acp"
+    }))])
+    .unwrap();
+
+    let codex = registry.require(CODEX_AGENT_ID).unwrap();
+    let config = registry.require_acp_config(CODEX_AGENT_ID).unwrap();
+
+    assert_eq!(codex.source_kind, AgentSourceKind::BuiltIn);
+    assert_ne!(config.command, "codex-acp");
+    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.0.0"]);
+}

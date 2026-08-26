@@ -228,6 +228,14 @@ jobs:
             "${{ needs.prepare.outputs.version }}" \
             "${{ matrix.target }}" \
             "${{ matrix.binary }}"
+      - name: Smoke-test packaged Linux Codex ACP fallback
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          extraction_root="$RUNNER_TEMP/openaide-vsix-${{ matrix.target }}"
+          node scripts/smoke-packaged-codex-acp.mjs \
+            "$extraction_root/extension/dist/app-server/${{ matrix.binary }}" \
+            "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vsix-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}

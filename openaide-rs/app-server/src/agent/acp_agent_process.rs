@@ -172,6 +172,25 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     if let Some(open) = &first_open {
         terminal_registry.begin_open(open.terminal_owner_id);
     }
+    let agent_id = config.agent_id.clone();
+    let initial_operation = first_open
+        .as_ref()
+        .map(|open| open.request.operation_name().to_string());
+    let initial_task_id = first_open
+        .as_ref()
+        .map(|open| open.request.task_id().to_string());
+    let has_initial_session = first_open.is_some();
+    let launcher_kind = config.diagnostic_launcher_kind();
+    logging::info(
+        "acp_agent_launch_selected",
+        serde_json::json!({
+            "agent_id": agent_id,
+            "has_initial_session": has_initial_session,
+            "launcher_kind": launcher_kind,
+            "operation": initial_operation,
+            "task_id": initial_task_id,
+        }),
+    );
     let agent = match config.to_acp_agent(
         first_open.as_ref().and_then(|open| open.trace.clone()),
         &host_bridge,
@@ -199,20 +218,13 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     };
     let connection_terminal_registry = terminal_registry.clone();
 
-    let agent_id = config.agent_id.clone();
-    let initial_operation = first_open
-        .as_ref()
-        .map(|open| open.request.operation_name().to_string());
-    let initial_task_id = first_open
-        .as_ref()
-        .map(|open| open.request.task_id().to_string());
-    let has_initial_session = first_open.is_some();
     let connection_started_at = Instant::now();
     logging::info(
         "acp_agent_connection_started",
         serde_json::json!({
             "agent_id": agent_id,
             "has_initial_session": has_initial_session,
+            "launcher_kind": launcher_kind,
             "operation": initial_operation,
             "task_id": initial_task_id,
         }),
