@@ -11,8 +11,9 @@ use serde::Deserialize;
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
 };
-use crate::agent::acp_host_capabilities::AcpHostCapabilityHandlers;
+use crate::agent::acp_host_capabilities::{AcpHostCapabilityContext, AcpHostCapabilityHandlers};
 use crate::agent::acp_host_terminal_ownership::AcpHostTerminalRegistry;
+use crate::agent::acp_native_subagents::{AcpNativeSubagentRouter, RoutedSessionNotification};
 use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
 use crate::agent::acp_tool_call_projection::tool_status_name;
 use crate::agent::acp_trace::AcpTraceSession;
@@ -28,6 +29,7 @@ pub(super) struct AcpSessionConnectionContext {
     pub(super) session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap,
     pub(super) elicitation_cancellations:
         crate::agent::acp_host_capabilities::AcpElicitationCancellationMap,
+    pub(super) native_subagents: AcpNativeSubagentRouter,
 }
 
 pub(super) async fn connect_acp_session_client<R, AgentTransport>(
@@ -39,17 +41,19 @@ where
     AgentTransport: ConnectTo<Client>,
 {
     let notification_session_traces = context.session_traces.clone();
-    let host_capabilities = AcpHostCapabilityHandlers::new(
-        context.host_bridge,
-        context.trace.clone(),
-        context.current_prompts,
-        context.terminal_registry,
-        context.session_event_sinks,
-        context.session_traces,
-        context.elicitation_cancellations,
-    );
+    let host_capabilities = AcpHostCapabilityHandlers::new(AcpHostCapabilityContext {
+        host_bridge: context.host_bridge,
+        trace: context.trace.clone(),
+        current_prompts: context.current_prompts,
+        terminal_registry: context.terminal_registry,
+        session_event_sinks: context.session_event_sinks,
+        session_traces: context.session_traces,
+        elicitation_cancellations: context.elicitation_cancellations,
+        native_subagents: context.native_subagents.clone(),
+    });
     let notification_trace = context.trace;
     let notification_load_replay = context.load_replay;
+    let notification_native_subagents = context.native_subagents;
 
     // ACP request callbacks run inside the shared connection's dispatch loop. Every host wait
     // must be spawned so one session cannot block updates and responses for every other session.
@@ -80,15 +84,30 @@ where
         )
         .on_receive_notification(
             async move |notification: SessionNotification, cx| {
-                match handle_session_update_notification(
-                    notification,
+                if handle_session_update_notification(
+                    notification.clone(),
                     &notification_trace,
                     &notification_session_traces,
                     &notification_load_replay,
-                ) {
-                    Some(notification) => Ok(unhandled_session_update(notification, cx)),
-                    None => Ok(Handled::Yes),
+                )
+                .is_none()
+                {
+                    return Ok(Handled::Yes);
                 }
+                let notification = match notification_native_subagents.route(notification) {
+                    Ok(RoutedSessionNotification::Root(notification)) => *notification,
+                    Ok(RoutedSessionNotification::Handled) => return Ok(Handled::Yes),
+                    Err(error) => {
+                        crate::logging::warn(
+                            "acp_subagent_update_rejected",
+                            serde_json::json!({
+                                "error_kind": error.code(),
+                            }),
+                        );
+                        return Ok(Handled::Yes);
+                    }
+                };
+                Ok(unhandled_session_update(notification, cx))
             },
             agent_client_protocol::on_receive_notification!(),
         )
@@ -96,8 +115,11 @@ where
             {
                 let host_capabilities = host_capabilities.clone();
                 async move |request: RawElicitationCreateRequest, responder, connection| {
-                    let request_id: WireRequestId = serde_json::from_value(responder.id())
-                        .map_err(|_| agent_client_protocol::Error::invalid_request())?;
+                    let request_id: WireRequestId = serde_json::from_value(
+                        serde_json::to_value(responder.id())
+                            .map_err(|_| agent_client_protocol::Error::invalid_request())?,
+                    )
+                    .map_err(|_| agent_client_protocol::Error::invalid_request())?;
                     let request = match ElicitationCreateRequest::parse_message(
                         "elicitation/create",
                         &request.0,
@@ -347,11 +369,23 @@ fn handle_session_update_notification(
     let mut active = load_replay
         .lock()
         .expect("ACP load replay capture lock poisoned");
-    if let Some(capture) = active.get_mut(&notification.session_id.to_string()) {
-        if notification.session_id == capture.session_id {
-            capture.updates.push(notification.update);
-            return None;
+    let outer_session_id = notification.session_id.to_string();
+    if let Some(capture) = active.values_mut().find(|capture| {
+        capture.session_id == notification.session_id
+            || capture.subagent_session_ids.contains(&outer_session_id)
+    }) {
+        match notification.update {
+            SessionUpdate::SubagentSpawned(spawned) => {
+                capture
+                    .subagent_session_ids
+                    .insert(spawned.subagent_session_id.to_string());
+            }
+            SessionUpdate::SubagentStateUpdate(_)
+                if notification.session_id == capture.session_id => {}
+            update if notification.session_id == capture.session_id => capture.updates.push(update),
+            _ => {}
         }
+        return None;
     }
     Some(notification)
 }

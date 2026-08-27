@@ -3,6 +3,7 @@ import { TaskLoadingView, TaskView } from "./TaskView";
 import type { AppController } from "./appController";
 import { openRecoveryUrl, reloadRecoveryShell } from "../services/hostBridge";
 import type { AgentRecoveryActions } from "./AgentRecovery";
+import type { DesktopWindowCapability } from "../services/frontendShell";
 
 export function primaryTaskSurfaceModel(controller: AppController) {
   const { activeTask, bootstrap, view } = controller;
@@ -76,6 +77,7 @@ function hasVisibleTaskDraft(input: AppController["view"]["primaryTask"]["taskIn
 
 type AppPrimaryTaskSurfaceProps = {
   controller: AppController;
+  desktopWindow?: DesktopWindowCapability;
   focusRequestKey: number;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
   projects?: AppController["view"]["navigation"]["projects"];
@@ -93,6 +95,7 @@ type AppPrimaryTaskSurfaceProps = {
 
 export function AppPrimaryTaskSurface({
   controller,
+  desktopWindow,
   focusRequestKey,
   model,
   projects,
@@ -144,7 +147,9 @@ export function AppPrimaryTaskSurface({
         agentRecoveryActions={recoveryActions}
         archived={renderableTaskArchived}
         backendConnectionState={controller.backendConnectionState}
+        subagentConnection={controller.backendConnection}
         chatPageState={primaryTask.chatPageState}
+        desktopWindow={desktopWindow}
         backendReady={backendReady}
         taskMutationReady={taskMutationReady}
         fileBrowser={callbacks.task.fileBrowser}

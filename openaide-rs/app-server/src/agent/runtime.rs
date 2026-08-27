@@ -456,6 +456,36 @@ pub trait AgentSessionEventSink: Send + Sync {
         Ok(())
     }
 
+    fn subagent_spawned(
+        &self,
+        _event: crate::agent::events::AgentNativeSubagentSpawned,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn subagent_session_update(
+        &self,
+        _native_session_id: &str,
+        _event: AgentEvent,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn subagent_state_changed(
+        &self,
+        _event: crate::agent::events::AgentNativeSubagentStateUpdate,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn request_subagent_permission(
+        &self,
+        _native_session_id: &str,
+        _request: AgentPermissionRequest,
+    ) -> Result<AgentPermissionOutcome, RuntimeError> {
+        Ok(AgentPermissionOutcome::Cancelled)
+    }
+
     /// Presents an Agent-owned session question, including while no prompt turn is active.
     fn request_question(
         &self,

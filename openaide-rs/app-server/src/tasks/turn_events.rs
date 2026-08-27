@@ -21,6 +21,7 @@ use crate::time::now_string;
 use self::commands::{update_task_commands, CommandsUpdateTarget};
 use self::config::{update_task_config_options, ConfigUpdateTarget};
 use self::text_chunks::{TextChannel, TextChunkRoutes};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -99,6 +100,7 @@ pub(crate) struct TaskSessionEventSink {
     native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     server_requests: ServerRequestRuntime,
     text_chunk_routes: TextChunkRoutes,
+    subagent_text_chunk_routes: Mutex<HashMap<String, TextChunkRoutes>>,
     emission_lock: Mutex<()>,
 }
 
@@ -116,6 +118,7 @@ impl TaskSessionEventSink {
             native_catalog: None,
             server_requests,
             text_chunk_routes: TextChunkRoutes::new(session_id),
+            subagent_text_chunk_routes: Mutex::default(),
             emission_lock: Mutex::new(()),
         }
     }

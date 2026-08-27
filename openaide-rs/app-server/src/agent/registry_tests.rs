@@ -166,5 +166,5 @@ fn registry_overlay_does_not_let_legacy_custom_records_replace_builtin_codex() {
 
     assert_eq!(codex.source_kind, AgentSourceKind::BuiltIn);
     assert_ne!(config.command, "codex-acp");
-    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.0.0"]);
+    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.1.0"]);
 }

@@ -30,6 +30,12 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
         && normalizedProjectIds(left.projectIds) === normalizedProjectIds(right.projectIds);
     case "task":
       return right.kind === "task" && left.taskId === right.taskId;
+    case "subagentCatalog":
+      return right.kind === "subagentCatalog" && left.taskId === right.taskId;
+    case "subagentHistory":
+      return right.kind === "subagentHistory"
+        && left.taskId === right.taskId
+        && left.subagentId === right.subagentId;
     case "toolDetail":
       return right.kind === "toolDetail"
         && left.taskId === right.taskId
@@ -62,7 +68,12 @@ function eventScopeMatchesSubscriptionScope(
   eventScope: EventScope,
   context: SubscriptionIngestionContext,
 ): SubscriptionEventMatch {
-  if (scope.kind === "task" || scope.kind === "toolDetail") {
+  if (
+    scope.kind === "task"
+    || scope.kind === "subagentCatalog"
+    || scope.kind === "subagentHistory"
+    || scope.kind === "toolDetail"
+  ) {
     return eventScope.kind === "task" && eventScope.taskId === scope.taskId
       ? { kind: "match" }
       : { kind: "subscriptionMismatch" };
@@ -109,6 +120,13 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         payload.kind === "taskRequestsUpdated" ||
         payload.kind === "requestUpdated"
       );
+    case "subagentCatalog":
+      return payload.kind === "subagentCatalogUpdated"
+        && payload.catalog.taskId === scope.taskId;
+    case "subagentHistory":
+      return payload.kind === "subagentHistoryUpdated"
+        && payload.history.taskId === scope.taskId
+        && payload.history.subagentId === scope.subagentId;
     case "toolDetail":
       return (payload.kind === "toolDetailUpdated" || payload.kind === "toolDetailChanged")
         && payload.taskId === scope.taskId

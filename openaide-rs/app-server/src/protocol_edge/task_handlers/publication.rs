@@ -42,6 +42,20 @@ impl RpcGateway {
                 deltas.clone(),
                 now,
             ),
+            TaskUpdateKind::SubagentCatalogChanged { catalog } => self.publish_task_payload(
+                &task_id,
+                AppServerEventPayload::SubagentCatalogUpdated {
+                    catalog: catalog.clone(),
+                },
+                now,
+            ),
+            TaskUpdateKind::SubagentHistoryChanged { history } => self.publish_task_payload(
+                &task_id,
+                AppServerEventPayload::SubagentHistoryUpdated {
+                    history: history.clone(),
+                },
+                now,
+            ),
         };
         let pending_requests = self.server_requests.pending_for_task(&task_id);
         let clears_transient_requests = matches!(

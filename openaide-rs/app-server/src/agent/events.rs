@@ -42,6 +42,45 @@ pub struct AgentSubagent {
     pub status: ActivityStatus,
 }
 
+/// Provider-neutral lifecycle announcement for a negotiated ACP child session.
+/// Native session identifiers remain inside the Agent/App Server boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentSpawned {
+    pub parent_native_session_id: String,
+    pub native_session_id: String,
+    pub name: String,
+    pub delegated_task: String,
+    pub capabilities: AgentNativeSubagentCapabilities,
+    pub details: Vec<AgentNativeSubagentDetail>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentNativeSubagentCapabilities {
+    pub cancel: bool,
+    pub close: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentDetail {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentNativeSubagentState {
+    Completed,
+    Failed,
+    Cancelled,
+    Disconnected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentStateUpdate {
+    pub parent_native_session_id: String,
+    pub native_session_id: String,
+    pub state: AgentNativeSubagentState,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentContextUsage {
     pub used_tokens: u64,
@@ -121,6 +160,9 @@ pub struct AgentPermissionRequest {
     pub scope: Option<String>,
     pub risk: Option<String>,
     pub tool_call: AgentToolCallRef,
+    /// Present only when a task-wide request originated from a native child session.
+    /// This stays inside the Agent/App Server boundary and routes durable attribution.
+    pub subagent_native_session_id: Option<String>,
     pub options: Vec<AgentPermissionOption>,
 }
 

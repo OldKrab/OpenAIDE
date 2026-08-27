@@ -216,6 +216,7 @@ fn permission_request(request_id: &str) -> AgentPermissionRequest {
             title: "Tool".to_string(),
             kind: Some("edit".to_string()),
         },
+        subagent_native_session_id: None,
         options: vec![
             AgentPermissionOption {
                 option_id: "allow".to_string(),

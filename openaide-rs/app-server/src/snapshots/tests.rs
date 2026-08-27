@@ -382,6 +382,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
             context_usage: None,
             current_plan: None,
             message_queue: Default::default(),
+            subagents: Default::default(),
             chat: ChatSnapshot {
                 items: Vec::new(),
                 has_more_before: false,

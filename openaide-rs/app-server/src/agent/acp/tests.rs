@@ -6,10 +6,10 @@ use crate::agent::acp_host::{
 };
 use crate::agent::acp_runtime_threading::close_in_parallel;
 use crate::agent::acp_schema::{
-    AgentCapabilities, AudioContent, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
-    AuthMethodTerminal, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
-    AvailableCommandInput, AvailableCommandsUpdate, BlobResourceContents, ContentBlock,
-    ContentChunk, CreateTerminalRequest, CreateTerminalResponse, Diff, EmbeddedResource,
+    AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthMethodTerminal,
+    AuthenticateRequest, AuthenticateResponse, AvailableCommand, AvailableCommandInput,
+    AvailableCommandsUpdate, BlobResourceContents, ContentBlock, ContentChunk,
+    CreateTerminalRequest, CreateTerminalResponse, Diff, EmbeddedResource,
     EmbeddedResourceResource, ImageContent, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     McpCapabilities, NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
@@ -781,19 +781,13 @@ fn probe_result_normalizes_initialize_without_raw_payloads() {
 }
 
 #[test]
-fn validate_auth_method_accepts_every_acp_v1_method_type() {
+fn validate_auth_method_accepts_every_current_acp_v1_method_type() {
     let initialize = InitializeResponse::new(ProtocolVersion::V1).auth_methods(vec![
         AuthMethod::Agent(AuthMethodAgent::new("codex-login", "Codex login")),
-        AuthMethod::EnvVar(AuthMethodEnvVar::new(
-            "api-key",
-            "API key",
-            vec![AuthEnvVar::new("API_KEY")],
-        )),
         AuthMethod::Terminal(AuthMethodTerminal::new("terminal-login", "Terminal login")),
     ]);
 
     validate_auth_method(&initialize, "codex-login").unwrap();
-    validate_auth_method(&initialize, "api-key").unwrap();
     validate_auth_method(&initialize, "terminal-login").unwrap();
     assert!(matches!(
         validate_auth_method(&initialize, "missing").unwrap_err(),
@@ -965,6 +959,7 @@ fn replay_projects_each_recorded_codex_subagent_tool_with_agent_owned_copy() {
             && matches!(
                 steps.as_slice(),
                 [crate::protocol::model::ActivityStep::Subagent {
+                    subagent_id: None,
                     thread_id: Some(thread_id),
                     activity: Some(activity),
                     ..
@@ -983,6 +978,7 @@ fn replay_projects_each_recorded_codex_subagent_tool_with_agent_owned_copy() {
             && matches!(
                 steps.as_slice(),
                 [crate::protocol::model::ActivityStep::Subagent {
+                    subagent_id: None,
                     activity: Some(activity),
                     ..
                 }] if activity == "interacted"

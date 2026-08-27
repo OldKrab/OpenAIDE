@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::task::AgentPlanEntrySnapshot;
-use crate::ids::{AttachmentId, MessageId, RequestId, TurnId};
+use crate::ids::{AttachmentId, MessageId, RequestId, SubagentId, TurnId};
 use crate::server_requests::{QuestionField, QuestionValue};
 use crate::task::ToolDetailSnapshot;
 use std::collections::BTreeMap;
@@ -229,6 +229,8 @@ pub enum ActivityStepSnapshot {
         output_preview: Option<String>,
     },
     Subagent {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<SubagentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -204,20 +204,16 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     else if (command === "settings") callbacks.navigation.openSettings();
     else if (command === "open-project") addProject?.();
   }), [addProject, callbacks.navigation, frontendShell]);
-  const desktopTaskSnapshot = renderableTaskSnapshot?.task.has_messages
-    ? renderableTaskSnapshot
-    : undefined;
+  const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
   const desktopTitleBar = desktopWindow
-    ? <DesktopTitleBar window={desktopWindow} />
+    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
     : undefined;
   const desktopSettingsTitleBar = desktopWindow ? (
     <DesktopTitleBar window={desktopWindow} />
   ) : undefined;
-  // Empty desktop chrome overlays New Task so platform controls remain available
-  // without consuming a blank row from the working surface.
-  const desktopTitleBarPlacement = desktopWindow && !desktopTaskSnapshot
-    ? "overlay"
-    : "row";
+  // Desktop chrome overlays product content so native controls never consume a
+  // separate blank row. Active Tasks provide the draggable product header.
+  const desktopTitleBarPlacement = desktopWindow ? "overlay" : "row";
   const desktopSettingsTitleBarPlacement = desktopWindow?.platform === "macos"
     ? "overlay"
     : "row";
@@ -520,6 +516,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <AppSidebarFrame
         className={[
           "app-shell web-workbench-shell",
+          desktopTaskHeaderIntegrated ? "desktop-task-title-bar" : undefined,
           mobileNavigationOpen ? "mobile-navigation-open" : undefined,
           mobileNavigation.dragging ? "mobile-navigation-dragging" : undefined,
         ].filter(Boolean).join(" ")}
@@ -605,6 +602,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           ) : (
             <AppPrimaryTaskSurface
               controller={controller}
+              desktopWindow={desktopWindow}
               focusRequestKey={newTaskFocusRequestKey}
               model={taskSurfaceModel}
               projects={navigationProjects}

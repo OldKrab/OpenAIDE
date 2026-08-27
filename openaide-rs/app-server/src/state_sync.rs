@@ -332,7 +332,12 @@ fn event_matches_subscription(
             state_root_id: event_state_root,
         } => {
             event_state_root == state_root_id
-                && !matches!(subscription_scope, SubscriptionScope::Task { .. })
+                && !matches!(
+                    subscription_scope,
+                    SubscriptionScope::Task { .. }
+                        | SubscriptionScope::SubagentCatalog { .. }
+                        | SubscriptionScope::SubagentHistory { .. }
+                )
         }
         EventScope::Client {
             state_root_id: event_state_root,
@@ -340,7 +345,12 @@ fn event_matches_subscription(
         } => {
             event_state_root == state_root_id
                 && client_instance_id == &subscription.client_instance_id
-                && !matches!(subscription_scope, SubscriptionScope::Task { .. })
+                && !matches!(
+                    subscription_scope,
+                    SubscriptionScope::Task { .. }
+                        | SubscriptionScope::SubagentCatalog { .. }
+                        | SubscriptionScope::SubagentHistory { .. }
+                )
         }
         EventScope::Task {
             state_root_id: event_state_root,
@@ -351,6 +361,8 @@ fn event_matches_subscription(
                     subscription_scope,
                     SubscriptionScope::Task { task_id: subscribed }
                         | SubscriptionScope::ToolDetail { task_id: subscribed, .. }
+                        | SubscriptionScope::SubagentCatalog { task_id: subscribed }
+                        | SubscriptionScope::SubagentHistory { task_id: subscribed, .. }
                         if subscribed == task_id
                 )
         }
@@ -440,6 +452,19 @@ fn payload_matches_subscription(
                 | AppServerEventPayload::TaskHistorySyncUpdated { .. }
                 | AppServerEventPayload::TaskRequestsUpdated { .. }
                 | AppServerEventPayload::RequestUpdated { .. }
+        ),
+        SubscriptionScope::SubagentCatalog { task_id } => matches!(
+            payload,
+            AppServerEventPayload::SubagentCatalogUpdated { catalog }
+                if &catalog.task_id == task_id
+        ),
+        SubscriptionScope::SubagentHistory {
+            task_id,
+            subagent_id,
+        } => matches!(
+            payload,
+            AppServerEventPayload::SubagentHistoryUpdated { history }
+                if &history.task_id == task_id && &history.subagent_id == subagent_id
         ),
         SubscriptionScope::ToolDetail {
             task_id,

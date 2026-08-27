@@ -41,6 +41,7 @@ type TaskChatTimelineProps = {
   liveTextPresentation?: TaskLiveTextPresentation;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  onOpenSubagent?: (subagentId: string) => void;
   onPermissionRespond: (requestId: string, optionId: string) => void;
   onQuestionRespond: (requestId: string, response: ElicitationResponse) => void;
   onQuote?: (text: string) => void;
@@ -68,6 +69,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   liveTextPresentation,
   onLoadChatPage,
   onLoadToolImagePreview,
+  onOpenSubagent,
   onPermissionRespond,
   onQuestionRespond,
   onQuote,
@@ -164,6 +166,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                     )}
                     message={row.message}
                     onLoadToolImagePreview={onLoadToolImagePreview}
+                    onOpenSubagent={onOpenSubagent}
                     onPermissionRespond={onPermissionRespond}
                     onQuestionRespond={onQuestionRespond}
                     onSubscribeToolDetail={onSubscribeToolDetail}

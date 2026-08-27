@@ -275,6 +275,23 @@ impl SnapshotProvider for SnapshotBuilder {
                     .task_snapshots
                     .open_for_client(&ctx.client_instance_id, task_id)?,
             },
+            SubscriptionScope::SubagentCatalog { task_id } => {
+                SubscriptionSnapshot::SubagentCatalog {
+                    catalog: self
+                        .task_snapshots
+                        .subagent_catalog_for_client(&ctx.client_instance_id, task_id)?,
+                }
+            }
+            SubscriptionScope::SubagentHistory {
+                task_id,
+                subagent_id,
+            } => SubscriptionSnapshot::SubagentHistory {
+                history: self.task_snapshots.subagent_history_for_client(
+                    &ctx.client_instance_id,
+                    task_id,
+                    subagent_id,
+                )?,
+            },
             SubscriptionScope::ToolDetail {
                 task_id,
                 artifact_id,
@@ -468,6 +485,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
         },
         input_capabilities: None,
         context_usage: None,
+        subagents: Default::default(),
         current_plan: None,
         message_queue: Default::default(),
         chat: ChatSnapshot {

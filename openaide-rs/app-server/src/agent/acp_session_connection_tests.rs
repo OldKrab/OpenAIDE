@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -9,9 +9,9 @@ use crate::agent::acp_schema::{
     ContentBlock, ContentChunk, CreateTerminalRequest, KillTerminalRequest, LoadSessionRequest,
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
     PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionUpdate, TerminalOutputRequest,
-    TextContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
-    WriteTextFileRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, SessionUpdate, SubagentSessionCapabilities,
+    SubagentSpawnedUpdate, TerminalOutputRequest, TextContent, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{Client, UntypedMessage};
 use serde::{Deserialize, Serialize};
@@ -373,15 +373,22 @@ fn connection_context_with_trace(
     terminal_registry
         .owner(owner_id)
         .activate_session("session_1");
+    let session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap =
+        Arc::default();
+    let native_subagents = crate::agent::acp_native_subagents::AcpNativeSubagentRouter::new(
+        "test-agent",
+        session_event_sinks.clone(),
+    );
     AcpSessionConnectionContext {
         host_bridge,
         trace,
         current_prompts: Arc::default(),
         load_replay,
         terminal_registry,
-        session_event_sinks: Arc::default(),
+        session_event_sinks,
         session_traces: Arc::default(),
         elicitation_cancellations: Arc::default(),
+        native_subagents,
     }
 }
 
@@ -451,6 +458,7 @@ fn connection_captures_matching_load_replay_updates() {
         LoadReplayCapture {
             session_id: "session_1".into(),
             updates: Vec::new(),
+            subagent_session_ids: HashSet::new(),
         },
     )])));
     let replay = load_replay.clone();
@@ -486,12 +494,54 @@ fn connection_captures_matching_load_replay_updates() {
 }
 
 #[test]
+fn load_replay_isolates_native_child_streams_from_the_main_projection() {
+    let load_replay = Arc::new(Mutex::new(HashMap::from([(
+        "session_1".to_string(),
+        LoadReplayCapture {
+            session_id: "session_1".into(),
+            updates: Vec::new(),
+            subagent_session_ids: HashSet::new(),
+        },
+    )])));
+    let traces = Arc::new(Mutex::new(HashMap::new()));
+
+    let spawned = SessionNotification::new(
+        "session_1",
+        SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
+            "child_1",
+            "Explorer",
+            "Inspect",
+            SubagentSessionCapabilities::default(),
+        )),
+    );
+    assert!(handle_session_update_notification(spawned, &None, &traces, &load_replay).is_none());
+    let child_chunk = SessionNotification::new(
+        "child_1",
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            "child output",
+        )))),
+    );
+    assert!(
+        handle_session_update_notification(child_chunk, &None, &traces, &load_replay).is_none()
+    );
+
+    let capture = load_replay.lock().unwrap();
+    let capture = capture.get("session_1").unwrap();
+    assert!(capture.subagent_session_ids.contains("child_1"));
+    assert!(
+        capture.updates.is_empty(),
+        "child history must not flatten into Main Agent replay"
+    );
+}
+
+#[test]
 fn pending_permission_does_not_block_updates_for_other_sessions() {
     let load_replay = Arc::new(Mutex::new(HashMap::from([(
         "streaming_session".to_string(),
         LoadReplayCapture {
             session_id: "streaming_session".into(),
             updates: Vec::new(),
+            subagent_session_ids: HashSet::new(),
         },
     )])));
     let replay = load_replay.clone();

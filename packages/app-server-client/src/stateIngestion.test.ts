@@ -611,6 +611,7 @@ function taskSnapshot(id: string, revision: number): TaskSnapshot {
     messageQueue: { revision: 0, items: [] },
     chat: { items: [], hasMoreBefore: false, hasMessages: false },
     historySync: { state: "idle", generation: 0 },
+    subagents: { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
     pendingRequests: [],
   };
 }

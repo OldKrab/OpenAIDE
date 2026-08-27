@@ -316,6 +316,7 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             output_preview: output_preview.clone(),
         },
         ActivityStep::Subagent {
+            subagent_id,
             tool_call_id,
             title,
             thread_id,
@@ -326,6 +327,7 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             status,
             events,
         } => ActivityStepSnapshot::Subagent {
+            subagent_id: subagent_id.clone().map(Into::into),
             tool_call_id: tool_call_id.clone(),
             title: title.clone(),
             thread_id: thread_id.clone(),

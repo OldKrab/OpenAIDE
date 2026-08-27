@@ -6,9 +6,9 @@ use crate::agent::acp_schema::{
     ElicitationCapabilities, ElicitationFormCapabilities, FileSystemCapabilities,
     InitializeRequest, KillTerminalRequest, KillTerminalResponse, ProtocolVersion,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    SessionConfigOptionsCapabilities, TerminalOutputRequest, TerminalOutputResponse,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    SessionConfigOptionsCapabilities, SubagentCapabilities, TerminalOutputRequest,
+    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 
 use crate::agent::acp_trace::AcpTraceSession;
@@ -22,6 +22,13 @@ mod tests;
 const HOST_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) fn initialize_request(host_bridge: &HostBridge) -> InitializeRequest {
+    initialize_request_with_subagents(host_bridge, native_subagents_enabled())
+}
+
+fn initialize_request_with_subagents(
+    host_bridge: &HostBridge,
+    native_subagents: bool,
+) -> InitializeRequest {
     let mut meta = serde_json::Map::new();
     meta.insert(
         "parameterizedModelPicker".to_string(),
@@ -35,6 +42,11 @@ pub(crate) fn initialize_request(host_bridge: &HostBridge) -> InitializeRequest 
             SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
         ))
         .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
+    let capabilities = if native_subagents {
+        capabilities.subagents(SubagentCapabilities::new())
+    } else {
+        capabilities
+    };
     if !host_bridge.is_enabled() {
         return InitializeRequest::new(ProtocolVersion::V1).client_capabilities(capabilities);
     }
@@ -47,6 +59,14 @@ pub(crate) fn initialize_request(host_bridge: &HostBridge) -> InitializeRequest 
                 .write_text_file(true))
             .terminal(true),
     )
+}
+
+/// Internal rollback boundary for the draft capability. It is deliberately not
+/// a user preference and is evaluated only when a new ACP connection initializes.
+pub(crate) fn native_subagents_enabled() -> bool {
+    std::env::var("OPENAIDE_ACP_NATIVE_SUBAGENTS")
+        .ok()
+        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true"))
 }
 
 pub(crate) async fn read_text_file_from_host(

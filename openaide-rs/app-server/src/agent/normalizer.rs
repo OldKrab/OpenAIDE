@@ -83,6 +83,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     created_at: created_at.to_string(),
                     collapsed: true,
                     steps: vec![ActivityStep::Subagent {
+                        subagent_id: None,
                         tool_call_id: Some(subagent.tool_call_id),
                         title: Some(subagent.title),
                         thread_id: Some(subagent.thread_id),

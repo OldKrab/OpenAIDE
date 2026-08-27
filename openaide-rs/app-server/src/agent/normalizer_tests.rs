@@ -44,6 +44,7 @@ fn subagent_tool_preserves_agent_title_and_protocol_details() {
             && matches!(
                 steps.as_slice(),
                 [ActivityStep::Subagent {
+                    subagent_id: None,
                     tool_call_id,
                     title,
                     thread_id,

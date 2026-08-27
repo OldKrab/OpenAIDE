@@ -1,12 +1,16 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, TaskListCursor};
 use openaide_app_server_protocol::snapshot::{
-    ChatSnapshot, TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
+    ChatSnapshot, SubagentCapabilitiesSnapshot, SubagentCatalogEntrySnapshot,
+    SubagentCatalogSnapshot, SubagentDetailSnapshot, SubagentHistoryAvailability,
+    SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus, TaskHistorySyncSnapshot,
+    TaskSnapshot, TaskSummary,
 };
 use openaide_app_server_protocol::task::{TaskListLifecycle, ToolDetailSnapshot, ToolImagePreview};
 use std::sync::Arc;
 
 use crate::chat_history::ChatHistoryPolicy;
+use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::MessagePage;
 use crate::protocol::model::TaskSnapshot as StoredTaskSnapshot;
 use crate::storage::records::TaskRecord;
@@ -77,6 +81,33 @@ pub trait TaskSnapshotSource: Send + Sync {
         task_id: &TaskId,
         artifact_id: &str,
     ) -> Result<ToolDetailSnapshot, ProtocolError>;
+
+    fn subagent_catalog_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+    ) -> Result<SubagentCatalogSnapshot, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::NotFound,
+            message: "Subagent catalog is unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
+    fn subagent_history_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _subagent_id: &openaide_app_server_protocol::ids::SubagentId,
+    ) -> Result<SubagentHistorySnapshot, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::NotFound,
+            message: "Subagent history is unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
 
     /// Resolves an image from server-owned Tool detail paths without accepting a client path.
     fn tool_image_preview_for_client(
@@ -222,6 +253,110 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         })
     }
 
+    fn subagent_catalog_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<SubagentCatalogSnapshot, ProtocolError> {
+        let task = self
+            .store
+            .read_task(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(task_snapshot_error)?;
+        project_subagent_catalog(
+            task_id.clone(),
+            self.store.subagent_catalog(task_id.as_str()),
+        )
+    }
+
+    fn subagent_history_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        subagent_id: &openaide_app_server_protocol::ids::SubagentId,
+    ) -> Result<SubagentHistorySnapshot, ProtocolError> {
+        let task = self
+            .store
+            .read_task(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(task_snapshot_error)?;
+        let catalog = self
+            .store
+            .subagent_catalog(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        let Some(record) = catalog
+            .entries
+            .iter()
+            .find(|entry| entry.subagent_id == subagent_id.as_str())
+        else {
+            return Err(ProtocolError {
+                code: ProtocolErrorCode::NotFound,
+                message: "Subagent is unavailable".to_string(),
+                recoverable: false,
+                target: None,
+            });
+        };
+        let history = self
+            .store
+            .subagent_history(task_id.as_str(), subagent_id.as_str());
+        Ok(match history {
+            Ok(history) => {
+                let tail_limit = self.tail_limit;
+                let start = history.messages.len().saturating_sub(tail_limit);
+                let retained = &history.messages[start..];
+                SubagentHistorySnapshot {
+                    task_id: task_id.clone(),
+                    subagent_id: subagent_id.clone(),
+                    revision: history.revision,
+                    availability: if history.messages.is_empty()
+                        && matches!(
+                            record.status,
+                            crate::storage::subagents::SubagentStatusRecord::WaitingForActivity
+                        ) {
+                        SubagentHistoryAvailability::WaitingForActivity
+                    } else {
+                        SubagentHistoryAvailability::Available
+                    },
+                    chat: ChatSnapshot {
+                        items: retained
+                            .iter()
+                            .map(|stored| project_chat_item(&stored.chat))
+                            .collect(),
+                        has_more_before: start > 0,
+                        has_messages: !history.messages.is_empty(),
+                        start_cursor: retained
+                            .first()
+                            .map(|stored| stored.chat.cursor.clone().into()),
+                        end_cursor: retained
+                            .last()
+                            .map(|stored| stored.chat.cursor.clone().into()),
+                    },
+                    current_plan: history.current_plan.map(project_agent_plan),
+                    start_cursor: retained
+                        .first()
+                        .map(|stored| stored.chat.cursor.clone().into()),
+                }
+            }
+            Err(_) => SubagentHistorySnapshot {
+                task_id: task_id.clone(),
+                subagent_id: subagent_id.clone(),
+                revision: record.history_revision,
+                availability: SubagentHistoryAvailability::Unavailable,
+                chat: ChatSnapshot {
+                    items: Vec::new(),
+                    has_more_before: false,
+                    has_messages: false,
+                    start_cursor: None,
+                    end_cursor: None,
+                },
+                current_plan: None,
+                start_cursor: None,
+            },
+        })
+    }
+
     fn tool_image_preview_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -280,7 +415,9 @@ impl TaskSnapshotStore {
         let snapshot = build_snapshot(&self.store, task_id.as_str(), self.tail_limit)
             .map_err(task_snapshot_error)?;
         let history_sync = self.history_sync.history_sync_snapshot(task_id.as_str());
-        project_stored_task_snapshot_with_history_sync(snapshot, history_sync)
+        let mut projected = project_stored_task_snapshot_with_history_sync(snapshot, history_sync)?;
+        projected.subagents = subagent_overview(&self.store, task_id.as_str());
+        Ok(projected)
     }
 }
 
@@ -390,6 +527,7 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
                 )
                 .collect(),
         },
+        subagents: SubagentOverviewSnapshot::default(),
         chat: project_chat_page(snapshot.chat),
         history_sync,
         pending_requests: Vec::new(),
@@ -397,7 +535,93 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     })
 }
 
-pub(super) fn project_agent_plan(
+pub(crate) fn project_subagent_catalog(
+    task_id: TaskId,
+    catalog: Result<crate::storage::subagents::SubagentCatalogProjection, RuntimeError>,
+) -> Result<SubagentCatalogSnapshot, ProtocolError> {
+    let catalog = catalog.map_err(task_snapshot_error)?;
+    Ok(SubagentCatalogSnapshot {
+        task_id,
+        revision: catalog.revision,
+        entries: catalog
+            .entries
+            .into_iter()
+            .map(|entry| SubagentCatalogEntrySnapshot {
+                subagent_id: entry.subagent_id.into(),
+                parent_subagent_id: entry.parent_subagent_id.map(Into::into),
+                name: entry.name,
+                delegated_task: entry.delegated_task,
+                status: project_subagent_status(entry.status),
+                capabilities: SubagentCapabilitiesSnapshot {
+                    cancel: entry.capabilities.cancel,
+                    close: entry.capabilities.close,
+                },
+                spawned_order: entry.spawned_order,
+                history_revision: entry.history_revision,
+                history_available: entry.history_available,
+                details: entry
+                    .details
+                    .into_iter()
+                    .map(|detail| SubagentDetailSnapshot {
+                        label: detail.label,
+                        value: detail.value,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        has_more: false,
+    })
+}
+
+fn project_subagent_status(
+    status: crate::storage::subagents::SubagentStatusRecord,
+) -> SubagentStatus {
+    use crate::storage::subagents::SubagentStatusRecord as Stored;
+    match status {
+        Stored::WaitingForActivity => SubagentStatus::WaitingForActivity,
+        Stored::Running => SubagentStatus::Running,
+        Stored::Completed => SubagentStatus::Completed,
+        Stored::Failed => SubagentStatus::Failed,
+        Stored::Cancelled => SubagentStatus::Cancelled,
+        Stored::Disconnected => SubagentStatus::Disconnected,
+    }
+}
+
+pub(crate) fn subagent_overview(store: &Store, task_id: &str) -> SubagentOverviewSnapshot {
+    match store.subagent_catalog(task_id) {
+        Ok(catalog) => SubagentOverviewSnapshot {
+            total_count: catalog.entries.len() as u64,
+            running_count: catalog
+                .entries
+                .iter()
+                .filter(|entry| {
+                    matches!(
+                        entry.status,
+                        crate::storage::subagents::SubagentStatusRecord::WaitingForActivity
+                            | crate::storage::subagents::SubagentStatusRecord::Running
+                    )
+                })
+                .count() as u64,
+            attention_count: catalog
+                .entries
+                .iter()
+                .filter(|entry| {
+                    matches!(
+                        entry.status,
+                        crate::storage::subagents::SubagentStatusRecord::Failed
+                    ) || !entry.history_available
+                })
+                .count() as u64,
+            available: true,
+        },
+        Err(_) => SubagentOverviewSnapshot {
+            available: false,
+            ..Default::default()
+        },
+    }
+}
+
+pub(crate) fn project_agent_plan(
     plan: crate::protocol::model::AgentPlan,
 ) -> openaide_app_server_protocol::snapshot::AgentPlanSnapshot {
     use crate::protocol::model::{AgentPlanPriority, AgentPlanStatus};

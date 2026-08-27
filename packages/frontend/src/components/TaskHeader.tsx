@@ -3,6 +3,8 @@ import type { TaskPermissionPolicy, TaskStatus } from "@openaide/app-shell-contr
 import { AgentIcon } from "./AgentIcon";
 import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { workspaceLabel } from "./taskSurfaceHelpers";
+import type { DesktopWindowCapability } from "../services/frontendShell";
+import { desktopDragRegionProps } from "./DesktopTitleBar";
 
 const STATUS_PRESENTATION = {
   active: { label: "Running", Icon: LoaderCircle },
@@ -20,6 +22,7 @@ export function taskStatusLabel(status: TaskStatus) {
 export function TaskHeader({
   agentId,
   agentName,
+  desktopWindow,
   status,
   statusLabel,
   title,
@@ -34,6 +37,7 @@ export function TaskHeader({
 }: {
   agentId: string;
   agentName: string;
+  desktopWindow?: DesktopWindowCapability;
   status: TaskStatus;
   statusLabel?: string;
   title: string;
@@ -50,8 +54,13 @@ export function TaskHeader({
   const visibleStatusLabel = statusLabel ?? statusPresentation.label;
   const StatusIcon = statusPresentation.Icon;
   const projectLabel = workspaceRoot.trim() ? workspaceLabel(workspaceRoot) : undefined;
+  const dragRegionProps = desktopWindow ? desktopDragRegionProps(desktopWindow) : undefined;
   return (
-    <header className="task-header">
+    <header
+      className="task-header"
+      data-desktop-window={desktopWindow?.platform}
+      {...dragRegionProps}
+    >
       <span className="task-header-title">
         <strong title={title}>{title}</strong>
         <span className="task-header-meta">

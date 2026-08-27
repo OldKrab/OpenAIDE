@@ -1248,6 +1248,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
       ],
     },
     ...overrides,
+    subagents: overrides.subagents ?? { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
     messageQueue: overrides.messageQueue ?? { revision: 0, items: [] },
   };
 }

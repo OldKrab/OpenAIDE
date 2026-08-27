@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -31,6 +31,9 @@ use crate::protocol::model::{
 pub(super) struct LoadReplayCapture {
     pub(super) session_id: SessionId,
     pub(super) updates: Vec<SessionUpdate>,
+    /// Native child streams are isolated from the main replay projection. OpenAIDE's
+    /// durable child histories remain authoritative until atomic child replay exists.
+    pub(super) subagent_session_ids: HashSet<String>,
 }
 
 pub(super) type LoadReplayCaptures = Arc<Mutex<HashMap<String, LoadReplayCapture>>>;
@@ -104,6 +107,7 @@ pub(super) async fn load_active_session(
             LoadReplayCapture {
                 session_id: session_id.clone(),
                 updates: Vec::new(),
+                subagent_session_ids: HashSet::new(),
             },
         );
     }

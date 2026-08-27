@@ -585,6 +585,20 @@ impl TaskMutations {
         &self.store
     }
 
+    pub(crate) fn publish_subagent_catalog(
+        &self,
+        catalog: openaide_app_server_protocol::snapshot::SubagentCatalogSnapshot,
+    ) {
+        self.notifier.subagent_catalog_changed(catalog);
+    }
+
+    pub(crate) fn publish_subagent_history(
+        &self,
+        history: openaide_app_server_protocol::snapshot::SubagentHistorySnapshot,
+    ) {
+        self.notifier.subagent_history_changed(history);
+    }
+
     pub(crate) fn lock(&self) -> MutexGuard<'_, ()> {
         self.store_update_lock
             .lock()
