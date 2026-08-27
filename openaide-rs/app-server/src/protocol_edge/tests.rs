@@ -895,6 +895,33 @@ fn background_native_catalog_refresh_request_is_delegated() {
 }
 
 #[test]
+fn repeated_task_navigation_subscription_does_not_restart_catalog_discovery() {
+    let workflow = Arc::new(RecordingCatalogRefresh::default());
+    let mut gateway = gateway_with_agent_session_listing(workflow.clone());
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let params = StateSubscribeParams {
+        scope: SubscriptionScope::TaskNavigation {
+            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            project_ids: None,
+        },
+    };
+
+    response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request("2", STATE_SUBSCRIBE, params.clone()),
+        AppServerTime(2),
+    ));
+    response_value(gateway.handle_inbound(
+        connection_id,
+        request("3", STATE_SUBSCRIBE, params),
+        AppServerTime(3),
+    ));
+
+    assert_eq!(workflow.requests.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn agent_authenticate_returns_typed_result() {
     let mut gateway = gateway_with_agent_authenticate(Arc::new(AuthenticatingAgent));
     let connection_id = ConnectionId::new("conn-1");

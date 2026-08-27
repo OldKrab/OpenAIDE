@@ -363,18 +363,22 @@ impl RpcGateway {
                 responses::not_initialized(STATE_SUBSCRIBE.to_string()),
             );
         };
-        let mut result = match self
-            .state_stream
-            .subscribe(&ctx, params.scope, &self.snapshots, now)
-        {
+        let (mut result, subscription_added) = match self.state_stream.subscribe_with_membership(
+            &ctx,
+            params.scope,
+            &self.snapshots,
+            now,
+        ) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.add_pending_to_subscription_snapshot(&mut result.snapshot);
-        if matches!(
-            &result.scope,
-            openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation { .. }
-        ) {
+        if subscription_added
+            && matches!(
+                &result.scope,
+                openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation { .. }
+            )
+        {
             // The baseline is durable and immediate; discovery then refreshes it asynchronously.
             self.agent_list_sessions
                 .request_native_session_catalog_refresh();
