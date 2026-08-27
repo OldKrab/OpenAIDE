@@ -335,8 +335,9 @@ describe("NewTaskView", () => {
       />,
     );
 
-    expect(buttonWithText(tree, "Loading").props.disabled).toBe(true);
-    expect(textContent(tree)).toContain("Loading workspaces.");
+    expect(buttonWithText(tree, "Loading workspaces…").props.disabled).toBe(true);
+    expect(textContent(tree).match(/Loading workspaces/g)).toHaveLength(1);
+    expect(textContent(tree)).not.toContain("Preparing task");
   });
 
 
@@ -462,6 +463,8 @@ describe("NewTaskView", () => {
     );
 
     expect(textContent(tree)).toContain("Workspace unavailable");
+    expect(textContent(tree)).not.toContain("Choose another workspace to keep this draft");
+    expect(buttonWithText(tree, "Choose workspace")).toBeDefined();
     expect(editorHtml(tree)).toBe("Keep this draft");
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });
@@ -498,6 +501,123 @@ describe("NewTaskView", () => {
     act(() => send.props.onClick());
 
     expect(onSubmitTask).not.toHaveBeenCalled();
+  });
+
+  it("reserves the Composer options slot while Agent options load", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptionsLoading = true;
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    const status = tree.root.findByProps({ className: "composer-options-status" });
+    expect(status.children).toContain("Loading options…");
+    expect(status.parent?.props.className).toContain("composer-adaptive-options");
+    expect(textContent(tree)).not.toContain("Preparing Codex options");
+    expect(textContent(tree)).not.toContain("Preparing task");
+  });
+
+  it("keeps Agent option failure and Retry in the options slot", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    const retry = vi.fn(async () => true);
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptions = {
+      agent_id: "codex",
+      error: "Backend detail",
+      options: [],
+      status: "failed",
+    };
+
+    const tree = render(
+      <NewTaskView
+        agentRecoveryActions={{
+          onOpenAgentSettings: vi.fn(),
+          onOpenExternal: vi.fn(),
+          onRetry: retry,
+        }}
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    const status = tree.root.findByProps({ className: "composer-options-status error" });
+    expect(status.children).toContain("Couldn’t load options");
+    expect(status.parent?.props.className).toContain("composer-adaptive-options");
+    expect(textContent(tree)).not.toContain("Preparing task");
+    act(() => status.findByType("button").props.onClick());
+    expect(retry).toHaveBeenCalledWith("codex");
+    expect(textContent(tree)).not.toContain("Backend detail");
+  });
+
+  it("keeps a failed task start beside Send and retries with the preserved draft", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    const onSubmitTask = vi.fn();
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.newTask.prompt = "Keep this draft";
+    state.newTask.error = "Couldn’t start task";
+    state.newTask.errorRetryable = true;
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onRetryPreparation={() => onSubmitTask({ context: [], prompt: state.newTask.prompt })}
+        onSubmitTask={onSubmitTask}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    const status = tree.root.findByProps({ className: "composer-footer-status error" });
+    expect(status.parent?.props.className).toBe("composer-footer");
+    act(() => status.findByType("button").props.onClick());
+    expect(onSubmitTask).toHaveBeenCalledWith({ context: [], prompt: "Keep this draft" });
+    expect(editorHtml(tree)).toBe("Keep this draft");
+  });
+
+  it("does not turn a local attachment error into a task retry", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.newTask.error = "Unable to attach image";
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    const status = tree.root.findByProps({ className: "composer-footer-status error" });
+    expect(status.findAllByType("button")).toHaveLength(0);
   });
 
   it("keeps settled Agent controls visible while a replacement Prepared Task catches up", () => {

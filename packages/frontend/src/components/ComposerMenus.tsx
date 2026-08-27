@@ -38,6 +38,7 @@ type ComposerControlsProps = {
   onUnsupportedImageAttachment?: (message?: string) => void;
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
+  onRetryConfigOptions?: () => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   openMenu?: ComposerMenu;
   selectAndClose: (select: () => void) => void;
@@ -45,6 +46,7 @@ type ComposerControlsProps = {
   setOpenMenu: Dispatch<SetStateAction<ComposerMenu | undefined>>;
   showAgentSelector?: boolean;
   showIsolationSelector?: boolean;
+  showSlowConfigUpdate?: boolean;
   toggleMenu: (menu: ComposerMenu) => void;
 };
 
@@ -62,6 +64,7 @@ export function ComposerControls({
   onUnsupportedImageAttachment,
   onSelectAgent,
   onSelectConfigOption,
+  onRetryConfigOptions,
   onSelectIsolation,
   openMenu,
   selectAndClose,
@@ -69,6 +72,7 @@ export function ComposerControls({
   setOpenMenu,
   showAgentSelector = true,
   showIsolationSelector = true,
+  showSlowConfigUpdate = false,
   toggleMenu,
 }: ComposerControlsProps) {
   const controlsLocked = disabled || agentLocked;
@@ -210,7 +214,7 @@ export function ComposerControls({
           trigger={(popupTrigger) => (
             <IconButton
               ariaLabel="Add context"
-              disabled={disabled || (!fileBrowser?.attachFiles && !imageAttachmentsAllowed)}
+              disabled={disabled || (!fileBrowser?.attachFiles && (!imageAttachmentsAllowed || !fileBrowser?.attachImage))}
               icon={<Plus size={14} />}
               popupTrigger={popupTrigger}
               pressed={openMenu === "add"}
@@ -297,12 +301,14 @@ export function ComposerControls({
         controlsLocked={controlsLocked}
         disabled={disabled}
         onSelectConfigOption={onSelectConfigOption}
+        onRetryConfigOptions={onRetryConfigOptions}
         onSelectIsolation={onSelectIsolation}
         openMenu={openMenu}
         selectAndClose={selectAndClose}
         selection={selection}
         setOpenMenu={setOpenMenu}
         showIsolationSelector={showIsolationSelector}
+        showSlowConfigUpdate={showSlowConfigUpdate}
         toggleMenu={toggleMenu}
       />
     </div>

@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStop, ListPlus, LoaderCircle } from "lucide-react";
+import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
@@ -62,6 +62,8 @@ type ComposerProps = {
   onRemoveAttachment: (attachmentId: string) => void;
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
+  onRetryConfigOptions?: () => void;
+  onRetryError?: () => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   onSubmit: (prompt: string) => void;
   prompt: string;
@@ -96,6 +98,8 @@ export function Composer({
   onRemoveAttachment,
   onSelectAgent,
   onSelectConfigOption,
+  onRetryConfigOptions,
+  onRetryError,
   onSelectIsolation,
   onSubmit,
   prompt,
@@ -277,6 +281,9 @@ export function Composer({
 
   const showStopAction = Boolean(onCancel && (!hasDraftContent || !canSubmit));
   const showSendAction = !onCancel || (hasDraftContent && canSubmit);
+  const blockedStatus = !canSubmit && availability.submissionBlockedMessage
+    ? composerBlockedStatus(availability.submissionBlockedMessage)
+    : undefined;
 
   const submitDraft = () => {
     const draft = draftRef.current;
@@ -358,8 +365,10 @@ export function Composer({
       }}
     >
       <ComposerAttachments
+        agentLabel={selection.agentLabel}
         attachments={attachments}
         disabled={disabled}
+        imageAttachmentsAllowed={imageAttachmentsAllowed}
         onRemoveAttachment={onRemoveAttachment}
         onRevealAttachment={onRevealAttachment}
         uploads={fileUploads}
@@ -544,18 +553,6 @@ export function Composer({
         />
       ) : null}
       {filePicker ? <FileMentionPicker id={`${completionId}-files`} onSelect={selectFileMention} state={filePicker} /> : null}
-      {error ? <p className="inline-error">{error}</p> : null}
-      {hasDraftContent && !canSubmit && availability.submissionBlockedMessage ? (
-        <p aria-live="polite" className="inline-status composer-submission-blocker">
-          {availability.submissionBlockedMessage}
-        </p>
-      ) : null}
-      {showSlowConfigUpdate && configMutationId ? (
-        <p aria-live="polite" className="inline-status composer-config-update-status">
-          <LoaderCircle aria-hidden="true" className="composer-config-pending" size={13} />
-          <span>Agent is still updating options…</span>
-        </p>
-      ) : null}
       <div className="composer-footer">
         <ComposerControls
           agentLocked={agentLocked}
@@ -571,6 +568,7 @@ export function Composer({
           onUnsupportedImageAttachment={onUnsupportedImageAttachment}
           onSelectAgent={onSelectAgent}
           onSelectConfigOption={selectConfigOption}
+          onRetryConfigOptions={onRetryConfigOptions}
           onSelectIsolation={onSelectIsolation}
           openMenu={openMenu}
           setOpenMenu={setOpenMenu}
@@ -579,11 +577,31 @@ export function Composer({
           toggleMenu={toggleMenu}
           showAgentSelector={showAgentSelector}
           showIsolationSelector={showIsolationSelector}
+          showSlowConfigUpdate={showSlowConfigUpdate && configMutationId !== undefined}
         />
+        {error ? (
+          <span aria-live="assertive" className="composer-footer-status error" role="alert">
+            <CircleAlert aria-hidden="true" size={13} />
+            {error}
+            {onRetryError ? <button onClick={onRetryError} type="button">Retry</button> : null}
+          </span>
+        ) : blockedStatus?.placement === "footer" ? (
+          <span aria-live="polite" className="composer-footer-status" role="status">
+            <LoaderCircle aria-hidden="true" size={13} />
+            <strong>{blockedStatus.label}</strong>
+            {blockedStatus.secondary ? <small>{blockedStatus.secondary}</small> : null}
+          </span>
+        ) : null}
         <div className="composer-actions">
+          {blockedStatus?.placement === "action" ? (
+            <span aria-live="polite" className="composer-action-status" role="status">
+              <LoaderCircle aria-hidden="true" size={13} /> {blockedStatus.label}
+            </span>
+          ) : null}
           {availability.submitting ? (
             <span aria-label={availability.submitPendingLabel} className="composer-submit-pending">
               <LoaderCircle size={14} aria-hidden="true" />
+              <span>Sending…</span>
             </span>
           ) : null}
           {showStopAction && onCancel ? (
@@ -617,4 +635,22 @@ export function Composer({
 
 function configValueEquals(left: ConfigOptionCurrentValue, right: ConfigOptionCurrentValue) {
   return left.type === right.type && left.value === right.value;
+}
+
+function composerBlockedStatus(message: string) {
+  const normalized = message.trim().replace(/[.]$/, "");
+  if (normalized === "Moving queued message to Composer") {
+    return { label: "Moving…", placement: "action" as const };
+  }
+  if (normalized.startsWith("Reconnecting")) {
+    return { label: "Reconnecting", placement: "footer" as const, secondary: "Draft saved" };
+  }
+  if (normalized === "Connecting to App Server") {
+    return { label: "Connecting…", placement: "footer" as const, secondary: "Draft saved" };
+  }
+  if (normalized === "Preparing task") {
+    return { label: "Preparing task…", placement: "footer" as const };
+  }
+  // Context and attachment blockers render at their owning boundary.
+  return undefined;
 }

@@ -166,6 +166,7 @@ export function AppPrimaryTaskSurface({
         onQuestionRespond={callbacks.task.respondToQuestion}
         onReconnectProject={workspaceRecovery?.reconnectProject}
         onRetryConnection={retryTaskOpen}
+        onRetryConfigOptions={controller.retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
         onRemoveQueueMessage={callbacks.task.removeQueueMessage}
@@ -219,6 +220,7 @@ export function AppPrimaryTaskSurface({
       onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onRemoveProject={onRemoveProject}
+      onRetryPreparation={() => callbacks.newTask.submit()}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={canSelectNewTaskProject ? "selectable" : "fixed"}

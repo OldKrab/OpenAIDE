@@ -58,25 +58,26 @@ export function composerAvailability({
     };
   }
   if (!contextReady) {
-    return unavailable(contextPlaceholder);
+    return unavailable(contextPlaceholder, allowEditingWhileSendBlocked);
   }
   if (connectionStatus !== "ready") {
-    const canEdit = allowEditingWhileSendBlocked
-      && (connectionStatus === "reconnecting" || connectionStatus === "unavailable");
+    const canEdit = allowEditingWhileSendBlocked;
     return {
-      ...unavailable(canEdit ? "Reconnecting. Draft is saved here." : "Connecting to App Server."),
-      canEdit,
+      ...unavailable(
+        connectionStatus === "reconnecting" || connectionStatus === "unavailable"
+          ? "Reconnecting. Draft is saved here."
+          : "Connecting to App Server.",
+        canEdit,
+      ),
     };
   }
   if (sendCapability?.state !== "ready") {
-    return {
-      ...unavailable(
-        blockedPlaceholder
-          ?? sendCapability?.blockers?.[0]?.message
-          ?? "Preparing task.",
-      ),
-      canEdit: allowEditingWhileSendBlocked,
-    };
+    return unavailable(
+      blockedPlaceholder
+        ?? sendCapability?.blockers?.[0]?.message
+        ?? "Preparing task.",
+      allowEditingWhileSendBlocked,
+    );
   }
 
   return {
@@ -89,12 +90,12 @@ export function composerAvailability({
     submitPendingLabel,
   };
 
-  function unavailable(placeholder: string): ComposerAvailability {
+  function unavailable(message: string, canEdit = false): ComposerAvailability {
     return {
-      canEdit: false,
+      canEdit,
       submissionAllowed: false,
-      submissionBlockedMessage: placeholder,
-      placeholder,
+      submissionBlockedMessage: message,
+      placeholder: canEdit ? readyPlaceholder : message,
       submitting: false,
       submitActionLabel,
       submitPendingLabel,

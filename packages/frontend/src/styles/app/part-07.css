@@ -257,6 +257,54 @@
   margin: 0;
 }
 
-.composer-config-update-status {
+.composer-footer-status {
+  min-width: 0;
+  max-width: min(360px, 46%);
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  color: var(--oa-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.composer-footer-status strong {
+  color: color-mix(in oklch, var(--oa-text) 88%, var(--oa-muted));
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.composer-footer-status small {
+  color: var(--oa-muted);
+  font-size: 10px;
+}
+
+.composer-action-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--oa-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.composer-footer-status:not(.error) > svg,
+.composer-action-status > svg {
+  animation: oa-spin 0.9s linear infinite;
+}
+
+.composer-footer-status.error,
+.composer-footer-status.error svg {
+  color: var(--oa-danger);
+}
+
+.composer-footer-status button {
+  min-height: 22px;
+  border: 1px solid color-mix(in oklch, var(--oa-border-strong) 70%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--oa-text);
+  padding: 2px 7px;
+  font: inherit;
+  cursor: pointer;
 }

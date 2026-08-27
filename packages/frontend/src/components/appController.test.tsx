@@ -1739,6 +1739,47 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new");
   });
 
+  it("reports options loading while Prepared Task acquisition is pending", async () => {
+    const acquired = deferredValue<{ task: ProtocolTaskSnapshot }>();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_ACQUIRE) return acquired.promise;
+      return Promise.reject(new Error(method));
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request).toHaveBeenCalledWith(TASK_ACQUIRE, {
+      projectId: "project_1",
+      agentId: "codex",
+    });
+    expect(latestPublicController?.view.primaryTask.newTask.newTask.configOptionsLoading).toBe(true);
+
+    await act(async () => {
+      acquired.resolve({
+        task: {
+          ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
+          lifecycle: "prepared",
+        },
+      });
+      await acquired.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestPublicController?.view.primaryTask.newTask.newTask.configOptionsLoading).toBe(false);
+  });
+
   it("keeps the hidden New Task subscription current while an existing Task is visible", async () => {
     const loadingTask = {
       ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),

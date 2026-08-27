@@ -118,6 +118,11 @@
     height: 36px;
   }
 
+  .composer-submit-pending {
+    width: auto;
+    padding-inline: 6px;
+  }
+
   .new-task-context-controls .composer-pill {
     min-height: 30px;
   }

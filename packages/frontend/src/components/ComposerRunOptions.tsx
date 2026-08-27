@@ -1,4 +1,4 @@
-import { Brain, ChevronLeft, ChevronRight, Code2, Cpu, LoaderCircle, Shield, SlidersHorizontal } from "lucide-react";
+import { Brain, ChevronLeft, ChevronRight, CircleAlert, Code2, Cpu, LoaderCircle, Shield, SlidersHorizontal } from "lucide-react";
 import type { ConfigOption, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { isolationOptions, type ComposerSelection } from "../state/composerOptions";
@@ -19,12 +19,14 @@ type ComposerRunOptionsProps = {
   controlsLocked: boolean;
   disabled: boolean;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
+  onRetryConfigOptions?: () => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   openMenu?: ComposerMenu;
   selectAndClose: (select: () => void) => void;
   selection: ComposerSelection;
   setOpenMenu: Dispatch<SetStateAction<ComposerMenu | undefined>>;
   showIsolationSelector: boolean;
+  showSlowConfigUpdate: boolean;
   toggleMenu: (menu: ComposerMenu) => void;
 };
 
@@ -35,19 +37,22 @@ export function ComposerRunOptions({
   controlsLocked,
   disabled,
   onSelectConfigOption,
+  onRetryConfigOptions,
   onSelectIsolation,
   openMenu,
   selectAndClose,
   selection,
   setOpenMenu,
   showIsolationSelector,
+  showSlowConfigUpdate,
   toggleMenu,
 }: ComposerRunOptionsProps) {
   const [optionHoverActive, setOptionHoverActive] = useState(false);
   const options = configOptions?.options ?? [];
   const pendingChange = configOptions?.pending_change;
   const catalogLoading = configOptions?.status === "loading";
-  const catalogUnavailable = catalogLoading || configOptions?.status === "stale";
+  const catalogFailed = configOptions?.status === "failed";
+  const catalogUnavailable = catalogLoading || catalogFailed || configOptions?.status === "stale";
   const controls: RunControl[] = [
     ...options.map((option): RunControl => ({ kind: "config", option })),
     ...(showIsolationSelector ? [{ kind: "isolation" } satisfies RunControl] : []),
@@ -70,11 +75,16 @@ export function ComposerRunOptions({
       <div className="composer-adaptive-options is-unavailable">
         <span
           aria-busy={catalogLoading || undefined}
-          className="composer-options-unavailable"
-          role="status"
+          className={`composer-options-status${catalogFailed ? " error" : ""}`}
+          role={catalogFailed ? "alert" : "status"}
         >
-          {catalogLoading ? <LoaderCircle aria-hidden size={12} /> : null}
-          {catalogLoading ? "Refreshing options…" : "Options need refresh"}
+          {catalogLoading ? <LoaderCircle aria-hidden size={12} /> : catalogFailed ? <CircleAlert aria-hidden size={12} /> : null}
+          {catalogLoading ? "Loading options…" : catalogFailed ? "Couldn’t load options" : "Options unavailable"}
+          {onRetryConfigOptions && (catalogFailed || configOptions?.status === "stale") ? (
+            <button onClick={onRetryConfigOptions} type="button">
+              {catalogFailed ? "Retry" : "Reload options"}
+            </button>
+          ) : null}
         </span>
       </div>
     );
@@ -104,6 +114,7 @@ export function ComposerRunOptions({
           pendingChange={pendingChange}
           selectAndClose={selectAndClose}
           selection={selection}
+          showSlowConfigUpdate={showSlowConfigUpdate}
           toggleMenu={toggleMenu}
         />
       ))}
@@ -202,6 +213,7 @@ function DirectRunControl({
   pendingChange,
   selectAndClose,
   selection,
+  showSlowConfigUpdate,
   toggleMenu,
 }: {
   configLocked: boolean;
@@ -216,6 +228,7 @@ function DirectRunControl({
   pendingChange?: NonNullable<ConfigOptionsCatalog["pending_change"]>;
   selectAndClose: (select: () => void) => void;
   selection: ComposerSelection;
+  showSlowConfigUpdate: boolean;
   toggleMenu: (menu: ComposerMenu) => void;
 }) {
   const infoId = useId();
@@ -248,6 +261,9 @@ function DirectRunControl({
     description: control.option.description,
     label: control.option.label.trim() || controlLabel(control),
   } : undefined;
+  const saving = control.kind === "config"
+    && showSlowConfigUpdate
+    && pendingChange?.option_id === control.option.id;
   if (control.kind === "config" && control.option.kind === "boolean") {
     return (
       <div className="composer-option-anchor composer-config-control-anchor" {...hoverOwnerProps}>
@@ -268,6 +284,7 @@ function DirectRunControl({
           id={infoId}
           label={control.option.label.trim() || controlLabel(control)}
         />
+        {saving ? <span aria-live="polite" className="composer-option-save-status">Saving…</span> : null}
       </div>
     );
   }
@@ -322,6 +339,7 @@ function DirectRunControl({
           label={optionInfo.label}
         />
       ) : null}
+      {saving ? <span aria-live="polite" className="composer-option-save-status">Saving…</span> : null}
     </div>
   );
 }

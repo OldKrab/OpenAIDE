@@ -634,16 +634,12 @@ describe("TaskView timeline presentation", () => {
     expect(JSON.stringify(tree.toJSON())).not.toContain("Reconnecting to App Server.");
     const editor = tree.root.findByProps({ role: "textbox", "aria-label": "Message" });
     expect(editor.props.contentEditable).toBe("plaintext-only");
-    expect(editor.props["aria-placeholder"]).toBe("Reconnecting. Draft is saved here.");
+    expect(editor.props["aria-placeholder"]).toBe("Send follow-up");
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-
     const rendered = JSON.stringify(tree.toJSON());
-    expect(rendered).toContain("Reconnecting to App Server.");
-    expect(rendered).toContain("App Server is temporarily unavailable.");
+    expect(rendered).toContain("Reconnecting");
+    expect(rendered).toContain("Draft saved");
+    expect(rendered).not.toContain("Reconnecting to App Server.");
     expect(rendered).not.toContain("Connection closed.");
   });
 
@@ -699,7 +695,10 @@ describe("TaskView timeline presentation", () => {
       );
     });
 
-    expect(JSON.stringify(tree.toJSON())).toContain("This Agent does not accept images.");
+    const imageStatus = tree.root.findByProps({ className: "context-token-status error" });
+    expect(imageStatus.children.filter((child) => typeof child === "string").join("")).toBe(
+      "Images aren’t supported by Codex",
+    );
     expect(tree.root.findByProps({ "aria-label": "Add context" }).props.disabled).toBe(true);
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });

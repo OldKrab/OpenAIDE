@@ -189,6 +189,18 @@
   opacity: 0.5;
 }
 
+.composer-image-attachment > .context-token-status {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  left: 4px;
+  max-width: none;
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-panel) 94%, transparent);
+  padding: 4px 6px;
+  white-space: normal;
+}
+
 .composer-image-open:focus-visible,
 .composer-image-remove:focus-visible {
   outline: 1px solid var(--oa-focus);
@@ -224,11 +236,35 @@
 .context-token-status {
   min-width: 0;
   max-width: min(22ch, 42vw);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   white-space: nowrap;
   color: color-mix(in oklch, var(--oa-muted) 78%, var(--oa-text));
   font-size: 11px;
+}
+
+.context-token-status > svg {
+  flex: 0 0 auto;
+}
+
+.context-token-status:not(.error):not(.success) > svg {
+  animation: oa-spin 0.9s linear infinite;
+}
+
+.context-token-status.success,
+.context-token-status.success > svg {
+  color: var(--oa-success);
+}
+
+.context-token-status button {
+  min-height: 20px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--oa-text);
+  padding: 1px 4px;
+  font-size: 10px;
 }
 
 .context-token-status.error {

@@ -1,4 +1,4 @@
-import { FolderOpen, FolderPlus, FolderRoot, FolderX, GitBranch } from "lucide-react";
+import { CircleAlert, FolderOpen, FolderPlus, FolderRoot, FolderX, GitBranch, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import type { AppPreferencesRecord, ConfigOptionCurrentValue } from "@openaide/app-shell-contracts";
 import {
@@ -71,6 +71,7 @@ export function NewTaskView({
   onLoadComposerHistory,
   onManageWorktrees,
   onRemoveProject,
+  onRetryPreparation,
   submitShortcut,
   fileBrowser,
   focusRequestKey,
@@ -88,6 +89,7 @@ export function NewTaskView({
   onLoadComposerHistory?: () => Promise<string[]>;
   onManageWorktrees?: (projectId: string) => void;
   onRemoveProject?: (projectId: string) => void;
+  onRetryPreparation?: () => void;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -137,12 +139,25 @@ export function NewTaskView({
     : state.newTask.configOptions;
   const configOptionsLoading = state.newTask.configOptionsLoading
     && !configOptionsSettled(currentConfigOptions);
-  const composerConfigOptions = currentConfigOptions && (
-    currentConfigOptions.options.length > 0 || currentConfigOptions.status === "empty"
-  ) ? currentConfigOptions : undefined;
   const composerConfigOptionsError = currentConfigOptions?.status === "failed"
     ? currentConfigOptions.error
     : preparedTaskId ? undefined : state.newTask.configOptionsError;
+  const composerConfigOptions = currentConfigOptions && (
+    currentConfigOptions.options.length > 0 || currentConfigOptions.status !== "ready"
+  ) ? currentConfigOptions : configOptionsLoading
+    ? {
+        agent_id: state.newTask.selection.agentId,
+        options: [],
+        status: "loading" as const,
+      }
+    : composerConfigOptionsError
+      ? {
+          agent_id: state.newTask.selection.agentId,
+          error: composerConfigOptionsError,
+          options: [],
+          status: "failed" as const,
+        }
+      : undefined;
   const preparedTaskAttachments = state.preparedTaskInput?.context ?? [];
   const composerAttachments = state.newTask.submitting
     ? state.newTask.pending?.context ?? []
@@ -159,15 +174,10 @@ export function NewTaskView({
   const fixedProjectContext = projectContextMode === "fixed";
   const openingNativeSession = state.newTask.nativeSessions.adoptingSessionId !== undefined;
   const projectSelectorLabel = selectedProject?.label
-    ?? (state.newTask.selection.projectId ? state.newTask.selection.workspaceLabel : loadingProjects ? "Loading" : "Choose workspace");
+    ?? (state.newTask.selection.projectId ? state.newTask.selection.workspaceLabel : loadingProjects ? "Loading workspaces…" : "Choose workspace");
   const needsWorkspace = state.workspaceRootsLoaded && state.projects.length === 0 && state.newTask.selection.workspaceRoot.trim().length === 0;
   const projectUnavailable = selectedProject?.available === false;
   const waitStatus = newTaskStatusLabel({
-    agentLabel: state.newTask.selection.agentLabel,
-    configOptionsError: composerConfigOptionsError,
-    configOptionsLoading,
-    configOptionsReady: configOptionsSettled(currentConfigOptions),
-    needsWorkspace,
     openingNativeSession,
     submitting: state.newTask.submitting,
   });
@@ -179,8 +189,8 @@ export function NewTaskView({
   const attachmentsReady = appServerComposerImages(imageAttachments) !== undefined
     && appServerAttachmentHandles(resourceAttachments) !== undefined
     && (imageAttachments.length === 0 || imageAttachmentsAllowed);
-  const availability = composerAvailability({
-    allowEditingWhileSendBlocked: false,
+  const baseAvailability = composerAvailability({
+    allowEditingWhileSendBlocked: true,
     attachmentsReady,
     attachmentsBlockedMessage: imageAttachments.length > 0 && !imageAttachmentsAllowed
       ? "This Agent does not accept images."
@@ -198,6 +208,14 @@ export function NewTaskView({
     submitPendingLabel: "Task starting",
     submitting: state.newTask.submitting,
   });
+  const contextOwnsBlocker = loadingProjects || !state.workspaceRootsLoaded || needsProject || needsWorkspace
+    || projectUnavailable || worktreeUnavailable || worktreeLoading
+    || configOptionsLoading || composerConfigOptionsError !== undefined;
+  // Context and option blockers already render beside the control that resolves
+  // them. Keep Send disabled without repeating a generic preparation label.
+  const availability = contextOwnsBlocker
+    ? { ...baseAvailability, submissionBlockedMessage: undefined }
+    : baseAvailability;
   const canSubmit = composerCanSubmit(availability, composerPrompt, composerAttachments.length);
   const composerFocusKey = `${focusRequestKey ?? 0}:${canSubmit ? "ready" : "waiting"}`;
   const composerFileBrowser = needsProject || needsWorkspace || projectUnavailable
@@ -232,7 +250,7 @@ export function NewTaskView({
       configLocked={configOptionsLoading || !configOptionsMutable(currentConfigOptions)}
       configOptions={composerConfigOptions}
       commandCatalog={preparedTaskId ? state.snapshot?.agent_commands : undefined}
-      error={undefined}
+      error={state.newTask.error}
       fileBrowser={composerFileBrowser}
       imageAttachmentsAllowed={imageAttachmentsAllowed}
       historyScopeKey={state.newTask.selection.projectId
@@ -248,6 +266,10 @@ export function NewTaskView({
         intents.selectAgent(agentId, agentChoices.find((agent) => agent.id === agentId)?.label);
       }}
       onSelectConfigOption={onSelectConfigOption}
+      onRetryConfigOptions={composerConfigOptionsError && selectedAgent && agentRecoveryActions
+        ? () => { void agentRecoveryActions.onRetry(selectedAgent.id); }
+        : undefined}
+      onRetryError={state.newTask.error && state.newTask.errorRetryable ? onRetryPreparation : undefined}
       onSelectIsolation={intents.selectIsolation}
       onSubmit={submit}
       prompt={composerPrompt}
@@ -395,7 +417,19 @@ export function NewTaskView({
                 ))}
             </PopupMenu>
           </div>
+          {fixedProjectContext && !state.workspaceRootsLoaded ? (
+            <span className="new-task-context-progress" role="status">
+              <LoaderCircle aria-hidden="true" size={13} /> Loading workspace…
+            </span>
+          ) : null}
         </div>
+        {worktreeUnavailable ? (
+          <div className="new-task-context-status" role="status">
+            <CircleAlert aria-hidden="true" size={14} />
+            <strong>Workspace unavailable</strong>
+            <button onClick={() => setOpenContextMenu("workspace")} type="button">Choose workspace</button>
+          </div>
+        ) : null}
         {projectUnavailable && selectedProject ? <div className="project-unavailable-notice" role="status">
           <FolderX size={17} />
           <span><strong>Project folder unavailable</strong><small>{selectedProject.workspaceRoot}</small></span>
@@ -426,16 +460,10 @@ export function NewTaskView({
             <span>{waitStatus}</span>
           </div>
         ) : null}
-        {fixedProjectContext && !state.workspaceRootsLoaded ? <p className="inline-hint">Loading workspace.</p> : null}
         {fixedProjectContext && state.workspaceRootsLoaded && (needsProject || needsWorkspace) ? (
           <p className="inline-hint">Open a folder in VS Code to start a task.</p>
         ) : null}
-        {!fixedProjectContext && needsProject ? <p className="inline-hint">{loadingProjects ? "Loading workspaces." : "Choose or enter a workspace to start a task."}</p> : null}
         {!fixedProjectContext && needsWorkspace ? <p className="inline-hint">Enter a workspace path to start a task.</p> : null}
-        {projectUnavailable ? <p className="inline-hint error">This Project folder is unavailable. Restore it before starting a task.</p> : null}
-        {worktreeUnavailable ? <p className="inline-hint error">Workspace unavailable. Choose another workspace to keep this draft.</p> : null}
-        {composerConfigOptionsError ? <p className="inline-error">{composerConfigOptionsError}</p> : null}
-        {state.newTask.error ? <p className="inline-error">{state.newTask.error}</p> : null}
       </div>
     </section>
   );
