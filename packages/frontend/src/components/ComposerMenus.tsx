@@ -26,6 +26,7 @@ type WebFileUploadItem = {
 
 type ComposerControlsProps = {
   agentLocked: boolean;
+  configChangeLabel?: string;
   agents?: AgentOption[];
   configLocked: boolean;
   configOptions?: ConfigOptionsCatalog;
@@ -46,12 +47,12 @@ type ComposerControlsProps = {
   setOpenMenu: Dispatch<SetStateAction<ComposerMenu | undefined>>;
   showAgentSelector?: boolean;
   showIsolationSelector?: boolean;
-  showSlowConfigUpdate?: boolean;
   toggleMenu: (menu: ComposerMenu) => void;
 };
 
 export function ComposerControls({
   agentLocked,
+  configChangeLabel,
   agents = agentOptions,
   configLocked,
   configOptions,
@@ -72,7 +73,6 @@ export function ComposerControls({
   setOpenMenu,
   showAgentSelector = true,
   showIsolationSelector = true,
-  showSlowConfigUpdate = false,
   toggleMenu,
 }: ComposerControlsProps) {
   const controlsLocked = disabled || agentLocked;
@@ -296,6 +296,7 @@ export function ComposerControls({
         </div>
       ) : null}
       <ComposerRunOptions
+        configChangeLabel={configChangeLabel}
         configLocked={configControlsLocked}
         configOptions={configOptions}
         controlsLocked={controlsLocked}
@@ -308,7 +309,6 @@ export function ComposerControls({
         selection={selection}
         setOpenMenu={setOpenMenu}
         showIsolationSelector={showIsolationSelector}
-        showSlowConfigUpdate={showSlowConfigUpdate}
         toggleMenu={toggleMenu}
       />
     </div>

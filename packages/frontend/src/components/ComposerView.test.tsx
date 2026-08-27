@@ -682,7 +682,7 @@ describe("Composer view behavior", () => {
     expect(compactAnchor.findByType("span").props.className).toContain("locked");
   });
 
-  it("shows the requested option as pending before explaining a slow Agent update", () => {
+  it("keeps option controls stable while explaining a slow Agent change", () => {
     vi.useFakeTimers();
     const renderer = renderComposer({
       configLocked: true,
@@ -701,6 +701,14 @@ describe("Composer view behavior", () => {
             { id: "off", label: "Off" },
             { id: "on", label: "On" },
           ],
+        }, {
+          kind: "select", current_value: { type: "id", value: "balanced" },
+          id: "effort",
+          label: "Effort",
+          values: [
+            { id: "balanced", label: "Balanced" },
+            { id: "high", label: "High" },
+          ],
         }],
         status: "ready",
       },
@@ -710,15 +718,35 @@ describe("Composer view behavior", () => {
     const pendingControl = renderer.root.findByProps({ "aria-label": "On, updating Agent option" });
     expect(text(pendingControl)).toBe("On");
     expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(1);
-    expect(text(renderer.root)).not.toContain("Saving…");
+    expect(text(renderer.root)).not.toContain("Changing Fast mode…");
+    const lockedSibling = renderer.root.findAllByProps({ "aria-disabled": true })
+      .find((node) => text(node) === "Balanced");
+    expect(lockedSibling?.props.title).toBe("Wait for the current option to finish changing");
+
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(text(renderer.root)).toContain("Asking Codex to change Fast mode…");
+
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(text(renderer.root)).toContain("Codex is taking its time with Fast mode…");
 
     act(() => {
       vi.advanceTimersByTime(5_000);
     });
+    expect(text(renderer.root)).toContain("Still waiting on Codex. We did pass the message along…");
 
-    const saving = renderer.root.findByProps({ className: "composer-option-save-status" });
-    expect(text(saving)).toBe("Saving…");
-    expect(saving.parent?.props.className).toContain("composer-config-control-anchor");
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(text(renderer.root)).toContain("Codex hasn’t changed Fast mode yet. Suspicious…");
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(text(renderer.root)).toContain("Codex hasn’t changed Fast mode yet. Suspicious…");
+    expect(text(renderer.root)).not.toContain("Saving");
     vi.useRealTimers();
   });
 
