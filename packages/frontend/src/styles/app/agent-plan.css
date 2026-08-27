@@ -178,6 +178,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   display: grid;
+  grid-auto-rows: max-content;
   gap: 2px;
   margin: 0;
   padding: 7px 6px 2px;

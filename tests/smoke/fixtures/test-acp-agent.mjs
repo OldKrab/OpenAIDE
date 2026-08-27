@@ -164,6 +164,29 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:long-plan-layout")) {
+    update(sessionId, {
+      sessionUpdate: "plan",
+      entries: [
+        { content: "Establish the overall objective, boundaries, assumptions, and desired result for this demonstration task before beginning the work.", priority: "medium", status: "in_progress" },
+        { content: "Gather the basic information and context needed to understand the demonstration task while distinguishing confirmed facts from assumptions.", priority: "medium", status: "pending" },
+        { content: "Identify the expected dependencies, possible blockers, and decision points that could affect the order of work or require later validation.", priority: "medium", status: "pending" },
+        { content: "Break the task into a simple sequence of steps, verify those steps remain feasible, and record meaningful progress as each step changes.", priority: "medium", status: "pending" },
+        { content: "Perform the planned activities in sequence while keeping the remaining steps accurate when new information changes the original assumptions.", priority: "medium", status: "pending" },
+        { content: "Review the completed work by checking whether the result satisfies the original objective and whether any important part remains unfinished.", priority: "medium", status: "pending" },
+        { content: "Summarize the outcome of the demonstration, including what was completed, what was verified, and what limitations or follow-up actions remain.", priority: "medium", status: "pending" },
+      ],
+    });
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Long Plan rendered",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:hold")) {
     textUpdate(sessionId, "agent_message_chunk", "Waiting for steering", `agent-${promptNumber}`);
     return;
