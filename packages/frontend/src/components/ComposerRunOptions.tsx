@@ -14,6 +14,7 @@ type RunControl =
   | { kind: "isolation" };
 
 type ComposerRunOptionsProps = {
+  configChangeLabel?: string;
   configLocked: boolean;
   configOptions?: ConfigOptionsCatalog;
   controlsLocked: boolean;
@@ -26,12 +27,12 @@ type ComposerRunOptionsProps = {
   selection: ComposerSelection;
   setOpenMenu: Dispatch<SetStateAction<ComposerMenu | undefined>>;
   showIsolationSelector: boolean;
-  showSlowConfigUpdate: boolean;
   toggleMenu: (menu: ComposerMenu) => void;
 };
 
 /** Renders the Agent-owned controls directly until their trailing suffix no longer fits. */
 export function ComposerRunOptions({
+  configChangeLabel,
   configLocked,
   configOptions,
   controlsLocked,
@@ -44,7 +45,6 @@ export function ComposerRunOptions({
   selection,
   setOpenMenu,
   showIsolationSelector,
-  showSlowConfigUpdate,
   toggleMenu,
 }: ComposerRunOptionsProps) {
   const [optionHoverActive, setOptionHoverActive] = useState(false);
@@ -101,6 +101,7 @@ export function ComposerRunOptions({
     >
       {visibleControls.map((control) => (
         <DirectRunControl
+          configChangeLabel={configChangeLabel}
           configLocked={configLocked}
           control={control}
           controlsLocked={controlsLocked}
@@ -114,7 +115,6 @@ export function ComposerRunOptions({
           pendingChange={pendingChange}
           selectAndClose={selectAndClose}
           selection={selection}
-          showSlowConfigUpdate={showSlowConfigUpdate}
           toggleMenu={toggleMenu}
         />
       ))}
@@ -201,6 +201,7 @@ export function ComposerRunOptions({
 }
 
 function DirectRunControl({
+  configChangeLabel,
   configLocked,
   control,
   controlsLocked,
@@ -213,9 +214,9 @@ function DirectRunControl({
   pendingChange,
   selectAndClose,
   selection,
-  showSlowConfigUpdate,
   toggleMenu,
 }: {
+  configChangeLabel?: string;
   configLocked: boolean;
   control: RunControl;
   controlsLocked: boolean;
@@ -228,7 +229,6 @@ function DirectRunControl({
   pendingChange?: NonNullable<ConfigOptionsCatalog["pending_change"]>;
   selectAndClose: (select: () => void) => void;
   selection: ComposerSelection;
-  showSlowConfigUpdate: boolean;
   toggleMenu: (menu: ComposerMenu) => void;
 }) {
   const infoId = useId();
@@ -261,16 +261,22 @@ function DirectRunControl({
     description: control.option.description,
     label: control.option.label.trim() || controlLabel(control),
   } : undefined;
-  const saving = control.kind === "config"
-    && showSlowConfigUpdate
+  const mutationTarget = control.kind === "config"
     && pendingChange?.option_id === control.option.id;
+  const mutationSibling = control.kind === "config" && pendingChange && !mutationTarget;
   if (control.kind === "config" && control.option.kind === "boolean") {
     return (
-      <div className="composer-option-anchor composer-config-control-anchor" {...hoverOwnerProps}>
+      <div
+        className={`composer-option-anchor composer-config-control-anchor${mutationTarget ? " is-mutation-target" : mutationSibling ? " is-mutation-locked" : ""}`}
+        {...hoverOwnerProps}
+      >
         <BooleanConfigControl
           compact
           describedBy={infoId}
           disabled={configLocked}
+          lockedTitle={mutationTarget
+            ? "Changing Agent option"
+            : mutationSibling ? "Wait for the current option to finish changing" : undefined}
           onToggle={() => onSelectConfigOption?.(
             control.option.id,
             { type: "boolean", value: !displayedBooleanValue(control.option, pendingChange) },
@@ -280,11 +286,15 @@ function DirectRunControl({
         />
         <OptionInfoTooltip
           description={control.option.description}
-          hidden={openMenu !== undefined}
+          hidden={openMenu !== undefined || pendingChange !== undefined}
           id={infoId}
           label={control.option.label.trim() || controlLabel(control)}
         />
-        {saving ? <span aria-live="polite" className="composer-option-save-status">Saving…</span> : null}
+        {mutationTarget && configChangeLabel ? (
+          <span aria-live="polite" className="composer-option-change-status" role="status">
+            {configChangeLabel}
+          </span>
+        ) : null}
       </div>
     );
   }
@@ -293,7 +303,7 @@ function DirectRunControl({
   const pending = control.kind === "config" && pendingChange?.option_id === control.option.id;
   return (
     <div
-      className={`composer-option-anchor ${control.kind === "config" ? "composer-config-control-anchor" : "composer-isolation-control-anchor"}`}
+      className={`composer-option-anchor ${control.kind === "config" ? `composer-config-control-anchor${mutationTarget ? " is-mutation-target" : mutationSibling ? " is-mutation-locked" : ""}` : "composer-isolation-control-anchor"}`}
       {...hoverOwnerProps}
     >
       {menu ? (
@@ -313,6 +323,9 @@ function DirectRunControl({
               icon={control.kind === "config" ? undefined : controlIcon(control)}
               label={controlDirectLabel(control, pending ? pendingChange?.requested_value : undefined, selection)}
               locked={locked}
+              lockedTitle={pending
+                ? "Changing Agent option"
+                : mutationSibling ? "Wait for the current option to finish changing" : undefined}
               menuOpen={openMenu === menu}
               pending={pending}
               popupTrigger={popupTrigger}
@@ -334,12 +347,16 @@ function DirectRunControl({
       {optionInfo ? (
         <OptionInfoTooltip
           description={optionInfo.description}
-          hidden={openMenu !== undefined}
+          hidden={openMenu !== undefined || pendingChange !== undefined}
           id={infoId}
           label={optionInfo.label}
         />
       ) : null}
-      {saving ? <span aria-live="polite" className="composer-option-save-status">Saving…</span> : null}
+      {mutationTarget && configChangeLabel ? (
+        <span aria-live="polite" className="composer-option-change-status" role="status">
+          {configChangeLabel}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -585,6 +602,7 @@ function BooleanConfigControl({
   compact,
   describedBy,
   disabled,
+  lockedTitle,
   onToggle,
   option,
   pendingValue,
@@ -592,6 +610,7 @@ function BooleanConfigControl({
   compact: boolean;
   describedBy?: string;
   disabled: boolean;
+  lockedTitle?: string;
   onToggle: () => void;
   option: ConfigOption;
   pendingValue?: boolean;
@@ -607,6 +626,7 @@ function BooleanConfigControl({
       aria-label={`${option.label}: ${displayedValue ? "On" : "Off"}${pending ? ", updating Agent option" : ""}`}
       className={`${compact ? "composer-boolean-control" : "composer-overflow-boolean-control"}${pending ? " pending" : ""}`}
       disabled={disabled}
+      title={lockedTitle}
       onClick={onToggle}
       role="switch"
       type="button"

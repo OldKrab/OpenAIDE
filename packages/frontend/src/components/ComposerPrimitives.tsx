@@ -9,6 +9,7 @@ export const Selector = forwardRef<HTMLButtonElement, {
   icon?: ReactNode;
   label: string;
   locked: boolean;
+  lockedTitle?: string;
   menuOpen: boolean;
   onClick?: () => void;
   pending?: boolean;
@@ -20,6 +21,7 @@ export const Selector = forwardRef<HTMLButtonElement, {
   icon,
   label,
   locked,
+  lockedTitle,
   menuOpen,
   onClick,
   pending = false,
@@ -34,7 +36,7 @@ export const Selector = forwardRef<HTMLButtonElement, {
         aria-describedby={describedBy}
         aria-label={pending ? `${label}, updating Agent option` : undefined}
         className={`${classes} locked${pending ? " pending" : ""}`}
-        title={pending ? "Updating Agent option" : "Locked after task start"}
+        title={lockedTitle ?? (pending ? "Changing Agent option" : "Locked after task start")}
       >
         {icon}
         <span className="composer-pill-label">{label}</span>

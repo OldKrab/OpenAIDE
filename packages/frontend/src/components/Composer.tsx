@@ -132,7 +132,20 @@ export function Composer({
     ? { ...configOptions, pending_change: presentedConfigChange }
     : configOptions;
   const configMutationId = presentedConfigChange?.mutation_id;
-  const [showSlowConfigUpdate, setShowSlowConfigUpdate] = useState(false);
+  const [configChangeStage, setConfigChangeStage] = useState<{ index: number; mutationId: string }>();
+  const configChangeStatus = configMutationId && configChangeStage?.mutationId === configMutationId
+    ? configChangeStage.index
+    : undefined;
+  const changingConfigOption = presentedConfigChange
+    ? presentedConfigOptions?.options.find((option) => option.id === presentedConfigChange.option_id)
+    : undefined;
+  const configChangeLabel = changingConfigOption && configChangeStatus !== undefined
+    ? slowConfigChangeLabel(
+        selection.agentLabel,
+        changingConfigOption.label.trim() || changingConfigOption.id,
+        configChangeStatus,
+      )
+    : undefined;
   const [filePicker, setFilePicker] = useFileMentionPicker(fileBrowser, fileMentionToken);
   const completionListboxId = filePicker
     ? `${completionId}-files`
@@ -158,10 +171,17 @@ export function Composer({
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
 
   useEffect(() => {
-    setShowSlowConfigUpdate(false);
-    if (!configMutationId) return undefined;
-    const timer = globalThis.setTimeout(() => setShowSlowConfigUpdate(true), 5_000);
-    return () => globalThis.clearTimeout(timer);
+    if (!configMutationId) {
+      setConfigChangeStage(undefined);
+      return undefined;
+    }
+    setConfigChangeStage(undefined);
+    const timers = CONFIG_CHANGE_STATUS_STAGES.map((stage, index) => (
+      globalThis.setTimeout(() => {
+        setConfigChangeStage({ index, mutationId: configMutationId });
+      }, stage.afterMs)
+    ));
+    return () => timers.forEach((timer) => globalThis.clearTimeout(timer));
   }, [configMutationId]);
 
   useEffect(() => {
@@ -558,6 +578,7 @@ export function Composer({
           agentLocked={agentLocked}
           agents={agents}
           configLocked={configLocked || optimisticConfigChange !== undefined}
+          configChangeLabel={configChangeLabel}
           configOptions={presentedConfigOptions}
           disabled={disabled}
           fileBrowser={fileBrowser}
@@ -577,7 +598,6 @@ export function Composer({
           toggleMenu={toggleMenu}
           showAgentSelector={showAgentSelector}
           showIsolationSelector={showIsolationSelector}
-          showSlowConfigUpdate={showSlowConfigUpdate && configMutationId !== undefined}
         />
         {error ? (
           <span aria-live="assertive" className="composer-footer-status error" role="alert">
@@ -633,9 +653,23 @@ export function Composer({
   );
 }
 
+function slowConfigChangeLabel(agentLabel: string, optionLabel: string, stage: number) {
+  if (stage === 0) return `Asking ${agentLabel} to change ${optionLabel}…`;
+  if (stage === 1) return `${agentLabel} is taking its time with ${optionLabel}…`;
+  if (stage === 2) return `Still waiting on ${agentLabel}. We did pass the message along…`;
+  return `${agentLabel} hasn’t changed ${optionLabel} yet. Suspicious…`;
+}
+
 function configValueEquals(left: ConfigOptionCurrentValue, right: ConfigOptionCurrentValue) {
   return left.type === right.type && left.value === right.value;
 }
+
+const CONFIG_CHANGE_STATUS_STAGES = [
+  { afterMs: 2_000 },
+  { afterMs: 5_000 },
+  { afterMs: 10_000 },
+  { afterMs: 15_000 },
+] as const;
 
 function composerBlockedStatus(message: string) {
   const normalized = message.trim().replace(/[.]$/, "");
