@@ -12,6 +12,7 @@ import type {
   SettingsProjectionAvailability,
   SettingsTabId,
   SkillSettingsRecord,
+  TaskPermissionPolicy,
   TaskSnapshot,
   TaskSummary,
   ActivityToolDetails,
@@ -82,6 +83,7 @@ type AppActionPayload =
       snapshot: TaskSnapshot;
       intent: SnapshotIntent;
       liveText?: { messageId: string; channel: "agent" | "thought"; eventCursor: string };
+      confirmedPermissionPolicy?: TaskPermissionPolicy;
     }
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
   | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventCursor: string }
@@ -453,13 +455,23 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       if (replicaEpoch < state.appServerReplicaEpoch) return state;
       if (action.intent === "refresh" && state.activeTaskId !== action.snapshot.task.task_id) {
         return settleTaskLiveTextPresentation(
-          reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch),
+          reconcileBackgroundTaskSnapshot(
+            state,
+            action.snapshot,
+            replicaEpoch,
+            action.confirmedPermissionPolicy,
+          ),
           action.snapshot.task.task_id,
           action.snapshot.task.status,
         );
       }
       const taskId = action.snapshot.task.task_id;
-      const reconciliation = reconcileTaskSnapshotDependents(state, action.snapshot, replicaEpoch);
+      const reconciliation = reconcileTaskSnapshotDependents(
+        state,
+        action.snapshot,
+        replicaEpoch,
+        action.confirmedPermissionPolicy,
+      );
       if (reconciliation.state === state) {
         const nextState = settleTaskLiveTextPresentation(state, taskId, action.snapshot.task.status);
         return action.liveText && taskAcceptsLiveText(action.snapshot.task.status)

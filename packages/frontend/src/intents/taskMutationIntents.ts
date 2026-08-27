@@ -102,10 +102,12 @@ export async function setTaskPermissionPolicyIntent(
       taskId: taskId as TaskId,
       policy: policy === "auto_approve" ? "autoApprove" : "askEveryTime",
     });
+    const resultSnapshot = mapProtocolTaskSnapshot(result.task).snapshot;
     dependencies.dispatch({
       type: "snapshot",
-      snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
+      snapshot: resultSnapshot,
       intent: "refresh",
+      confirmedPermissionPolicy: resultSnapshot.permission_policy,
     });
   } catch (error) {
     dependencies.dispatch({

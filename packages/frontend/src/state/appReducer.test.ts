@@ -1059,6 +1059,55 @@ describe("app reducer composer state", () => {
     expect(state.taskInputs.task_1.pending).toBeUndefined();
   });
 
+  it("applies a confirmed permission policy without rolling back newer Task state", () => {
+    const visibleMessage = userMessage("user_1", "Keep current Chat");
+    let state = appReducer(createInitialState(), {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [visibleMessage], 5),
+    });
+    const mutationResponse = snapshot("task_1", [], 4);
+    mutationResponse.permission_policy = "auto_approve";
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: mutationResponse,
+      confirmedPermissionPolicy: mutationResponse.permission_policy,
+    });
+
+    expect(state.snapshot?.permission_policy).toBe("auto_approve");
+    expect(state.snapshot?.revision).toBe(5);
+    expect(state.snapshot?.chat.items).toEqual([visibleMessage]);
+    expect(state.taskSnapshots.task_1.permission_policy).toBe("auto_approve");
+  });
+
+  it("retains a confirmed permission policy when the user navigates away before its response", () => {
+    let state = appReducer(createInitialState(), {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [userMessage("user_1", "Current")], 5),
+    });
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_2", [], 1),
+    });
+    const mutationResponse = snapshot("task_1", [], 4);
+    mutationResponse.permission_policy = "auto_approve";
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: mutationResponse,
+      confirmedPermissionPolicy: mutationResponse.permission_policy,
+    });
+
+    expect(state.activeTaskId).toBe("task_2");
+    expect(state.taskSnapshots.task_1.permission_policy).toBe("auto_approve");
+    expect(state.taskSnapshots.task_1.revision).toBe(5);
+  });
+
   it("accepts a newer queue revision from a globally older mutation response", () => {
     let state = createInitialState();
     state = { ...state, activeTaskId: "task_1" };
