@@ -177,7 +177,7 @@ pub(super) fn write_file_download(
         .collect::<String>();
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{safe_label}\"\r\nCache-Control: no-store\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{safe_label}\"\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
     )?;
     std::io::copy(&mut file, stream)?;
     Ok(())

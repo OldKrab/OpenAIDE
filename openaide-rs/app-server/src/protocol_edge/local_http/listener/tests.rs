@@ -345,6 +345,41 @@ fn chunk_upload_route_preserves_session_headers_and_binary_body() {
 }
 
 #[test]
+fn file_download_allows_the_desktop_webview_origin_to_read_the_response() {
+    let directory = tempfile::tempdir().unwrap();
+    let download = directory.path().join("support.zip");
+    std::fs::write(&download, b"diagnostics").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        handle_stream_with_routes(
+            &mut stream,
+            |_request| panic!("download must not enter JSON-RPC handling"),
+            |_stream, _request| panic!("download must not enter event-stream handling"),
+            |_stream, _request| panic!("download must not enter session polling"),
+            |_stream, _request| panic!("download must not enter file upload handling"),
+            |stream, request| {
+                assert!(request.target.starts_with("/download?"));
+                write_file_download(stream, &download, "openaide-support.zip")
+            },
+        )
+        .unwrap();
+    });
+
+    let response = send(
+        addr,
+        "GET /download?fileHandleId=export-1 HTTP/1.1\r\nOrigin: http://tauri.localhost\r\nAuthorization: Bearer token\r\n\r\n",
+    );
+    server.join().unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("Access-Control-Allow-Origin: *\r\n"));
+    assert!(response.ends_with("diagnostics"));
+}
+
+#[test]
 fn non_post_returns_405_without_delegating() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
