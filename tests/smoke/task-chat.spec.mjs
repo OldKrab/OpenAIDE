@@ -86,6 +86,30 @@ test("keeps the New Task form stable across constrained editor heights", async (
   expect(await surface.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 });
 
+test("keeps wrapped Plan entries readable at desktop and narrow widths", async ({ page }) => {
+  await page.setViewportSize({ width: 1_180, height: 700 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:long-plan-layout");
+  await expect(page.getByText("Long Plan rendered", { exact: true })).toBeVisible();
+
+  const planTrigger = page.locator(".task-plan-drawer-trigger");
+  await expect(planTrigger).toBeVisible();
+  if (await planTrigger.getAttribute("aria-expanded") !== "true") await planTrigger.click();
+  const desktopPlan = page.locator(".task-plan-drawer[data-open='true'] .agent-plan");
+  await expect(desktopPlan).toBeVisible();
+  expectPlanEntriesReadable(await planEntryLayout(desktopPlan));
+
+  await page.setViewportSize({ width: 1_800, height: 900 });
+  const widePlan = page.locator(".task-plan-column .agent-plan");
+  await expect(widePlan).toBeVisible();
+  expectPlanEntriesReadable(await planEntryLayout(widePlan));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrowPlan = page.locator(".task-plan-drawer[data-open='true'] .agent-plan");
+  await expect(narrowPlan).toBeVisible();
+  expectPlanEntriesReadable(await planEntryLayout(narrowPlan));
+});
+
 test("creates a New Task, sends once, streams Chat, tools, and Agent title", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");
@@ -898,6 +922,29 @@ async function maximumVirtualRowOverlapDuring(page, action) {
     window.__openaideVirtualRowOverlap.active = false;
     return window.__openaideVirtualRowOverlap.maximum;
   });
+}
+
+async function planEntryLayout(plan) {
+  return plan.locator(".agent-plan-entries").evaluate((list) => {
+    const bounds = [...list.querySelectorAll(".agent-plan-entry-content")]
+      .map((element) => element.getBoundingClientRect());
+    return {
+      clientHeight: list.clientHeight,
+      clientWidth: list.clientWidth,
+      maximumOverlap: bounds.slice(0, -1).reduce(
+        (maximum, current, index) => Math.max(maximum, current.bottom - bounds[index + 1].top),
+        0,
+      ),
+      scrollHeight: list.scrollHeight,
+      scrollWidth: list.scrollWidth,
+    };
+  });
+}
+
+function expectPlanEntriesReadable(layout) {
+  expect(layout.maximumOverlap).toBeLessThanOrEqual(0.5);
+  expect(layout.scrollWidth).toBe(layout.clientWidth);
+  expect(layout.scrollHeight).toBeGreaterThan(layout.clientHeight);
 }
 
 async function openPreparedNewTask(page) {
