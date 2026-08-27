@@ -3,8 +3,9 @@ use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::TaskSetConfigOptionParams;
 use std::time::Instant;
 
-use crate::agent::AgentSessionSetConfigOptionRequest;
+use crate::agent::{AgentSessionKey, AgentSessionSetConfigOptionRequest};
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionKind};
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::tasks::config_options::{
     apply_task_config_mutation_result, begin_task_config_mutation, clear_task_config_mutation,
     TaskConfigMutationToken,
@@ -104,7 +105,7 @@ impl TaskProductApi {
         let now = now_string();
         let config_id = params.config_id.into_string();
         let client_mutation_id = params.client_mutation_id.into_string();
-        let expected_session_id = task.agent_session_id.clone();
+        let mut expected_session_id = task.agent_session_id.clone();
         let Some(session_id) = expected_session_id.clone() else {
             return Err(protocol_error_from_runtime(
                 crate::protocol::errors::RuntimeError::NotReady(
@@ -156,7 +157,7 @@ impl TaskProductApi {
         let live_result = match first_attempt {
             Err(error) if inactive_session_can_recover(&error) => {
                 recovery_attempted = true;
-                let session = self.native_sessions.ensure_active_for_interaction(&task);
+                let session = self.recover_config_session(&task);
                 session.and_then(|session| {
                     let recovered_task = self.store.read_task(task_id)?;
                     if !mutation.token.is_current_for(&recovered_task) {
@@ -166,6 +167,7 @@ impl TaskProductApi {
                         ));
                     }
                     mutation.rebase(&recovered_task);
+                    expected_session_id = Some(session.session_id().to_string());
                     self.agent_gateway.set_session_config_option(
                         AgentSessionSetConfigOptionRequest {
                             agent_id: session.agent_id().to_string(),
@@ -236,6 +238,74 @@ impl TaskProductApi {
             }),
         );
         Ok(snapshot)
+    }
+
+    /// A leased Prepared Task may replace a confirmed-missing empty Native Session only through
+    /// preparation. Re-enter that lifecycle so the binding invariant stays strict everywhere else.
+    fn recover_config_session(
+        &self,
+        task: &TaskRecord,
+    ) -> Result<AgentSessionKey, crate::protocol::errors::RuntimeError> {
+        if !matches!(task.lifecycle, TaskLifecycle::Prepared { .. }) {
+            return self.native_sessions.ensure_active_for_interaction(task);
+        }
+
+        let expected_session_id = task.agent_session_id.clone();
+        let now = now_string();
+        let transition = self.mutations.commit_existing_task(
+            &task.task_id,
+            crate::tasks::mutation::TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().tombstoned
+                    || ctx.task().agent_session_id != expected_session_id
+                    || ctx.task().lifecycle != task.lifecycle
+                    || !matches!(ctx.task().preparation, TaskPreparationRecord::Ready)
+                {
+                    return Ok(TaskMutationResult::Rejected);
+                }
+                let task = ctx.task_mut();
+                task.preparation = TaskPreparationRecord::Preparing;
+                task.updated_at = now;
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        if !matches!(
+            transition.outcome,
+            crate::tasks::mutation::TaskCommitOutcome::Committed(_)
+        ) {
+            return Err(crate::protocol::errors::RuntimeError::NotReady(
+                "Prepared Task changed during Native Session recovery".to_string(),
+            ));
+        }
+
+        let preparing = self.store.read_task(&task.task_id)?;
+        if let Err(error) = self.native_sessions.prepare_task(&preparing) {
+            if let Err(persist_error) = self.persist_preparation_failure(&task.task_id, &error) {
+                crate::logging::error(
+                    "task_config_option_recovery_failure_persist_failed",
+                    serde_json::json!({
+                        "task_id": task.task_id,
+                        "error_code": persist_error.code(),
+                        "error_reason": persist_error.reason(),
+                    }),
+                );
+            }
+            return Err(error);
+        }
+        let recovered = self.store.read_task(&task.task_id)?;
+        if recovered.lifecycle != task.lifecycle
+            || !matches!(recovered.preparation, TaskPreparationRecord::Ready)
+        {
+            return Err(crate::protocol::errors::RuntimeError::NotReady(
+                "Prepared Task changed during Native Session recovery".to_string(),
+            ));
+        }
+        let session_id = recovered.agent_session_id.ok_or_else(|| {
+            crate::protocol::errors::RuntimeError::NotReady(
+                "Prepared Task has no Native Session after recovery".to_string(),
+            )
+        })?;
+        Ok(AgentSessionKey::new(recovered.agent_id, session_id))
     }
 
     fn retire_stale_prepared_tasks(&self, agent_id: &str, source_task_id: &str) {

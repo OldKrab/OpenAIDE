@@ -35,7 +35,7 @@ impl TaskProductApi {
         });
     }
 
-    fn persist_preparation_failure(
+    pub(super) fn persist_preparation_failure(
         &self,
         task_id: &str,
         error: &RuntimeError,
