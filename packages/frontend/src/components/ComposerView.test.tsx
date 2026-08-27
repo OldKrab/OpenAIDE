@@ -107,6 +107,7 @@ describe("Composer view behavior", () => {
   });
 
   it("shows feedback after revealing an attachment", async () => {
+    vi.useFakeTimers();
     const onRevealAttachment = vi.fn(async () => undefined);
     const renderer = renderComposer({
       attachments: [attachment("attachment_1", "notes.md", "attachment-handle-1")],
@@ -116,7 +117,12 @@ describe("Composer view behavior", () => {
     await clickAsync(buttonByLabel(renderer.root, "Reveal notes.md"));
 
     expect(onRevealAttachment).toHaveBeenCalledWith("attachment_1");
-    expect(text(renderer.root)).toContain("Reveal requested.");
+    expect(text(renderer.root)).toContain("Opened");
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(text(renderer.root)).not.toContain("Opened");
+    vi.useRealTimers();
   });
 
   it("shows a recoverable error when attachment reveal fails", async () => {
@@ -130,7 +136,8 @@ describe("Composer view behavior", () => {
 
     await clickAsync(buttonByLabel(renderer.root, "Reveal notes.md"));
 
-    expect(text(renderer.root)).toContain("Unable to reveal notes.md.");
+    expect(text(renderer.root)).toContain("Couldn’t open file");
+    expect(buttonByLabel(renderer.root, "Retry opening notes.md")).toBeDefined();
   });
 
   it("renders a single image as prominent media before the editor", () => {
@@ -248,6 +255,10 @@ describe("Composer view behavior", () => {
 
   it("blocks image selection and explains why a populated draft cannot send", () => {
     const renderer = renderComposer({
+      attachments: [{
+        ...attachment("image_1", "screenshot.png"),
+        validation_error: "Images are unsupported.",
+      }],
       imageAttachmentsAllowed: false,
       prompt: "what about now?",
       submissionAllowed: false,
@@ -255,10 +266,22 @@ describe("Composer view behavior", () => {
     });
 
     expect(buttonByLabel(renderer.root, "Add context").props.disabled).toBe(true);
-    const blocker = renderer.root.find((node) => node.props.className?.includes("composer-submission-blocker"));
+    const blocker = renderer.root.findByProps({ className: "context-token-status error" });
     expect(text(blocker)).toBe(
-      "This Agent does not accept images.",
+      "Images aren’t supported by Codex",
     );
+  });
+
+  it("keeps attachment preparation status on the attachment", () => {
+    const renderer = renderComposer({
+      attachments: [attachment("file_1", "architecture.pdf")],
+      submissionAllowed: false,
+      submissionBlockedMessage: "Attached context is not ready to send.",
+    });
+
+    const status = renderer.root.findByProps({ className: "context-token-status" });
+    expect(text(status)).toBe("Preparing…");
+    expect(renderer.root.findAllByProps({ className: "composer-footer-status" })).toHaveLength(0);
   });
 
   it("uploads every selected image through the App Server attachment callback", async () => {
@@ -687,13 +710,15 @@ describe("Composer view behavior", () => {
     const pendingControl = renderer.root.findByProps({ "aria-label": "On, updating Agent option" });
     expect(text(pendingControl)).toBe("On");
     expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(1);
-    expect(text(renderer.root)).not.toContain("Agent is still updating options");
+    expect(text(renderer.root)).not.toContain("Saving…");
 
     act(() => {
       vi.advanceTimersByTime(5_000);
     });
 
-    expect(text(renderer.root)).toContain("Agent is still updating options");
+    const saving = renderer.root.findByProps({ className: "composer-option-save-status" });
+    expect(text(saving)).toBe("Saving…");
+    expect(saving.parent?.props.className).toContain("composer-config-control-anchor");
     vi.useRealTimers();
   });
 
@@ -822,17 +847,21 @@ describe("Composer view behavior", () => {
       configOptions: { ...configOptions(), status: "loading" },
       showIsolationSelector: false,
     });
-    expect(text(loading.root)).toContain("Refreshing options…");
+    expect(text(loading.root)).toContain("Loading options…");
     expect(loading.root.findAllByProps({ role: "status", "aria-busy": true })).toHaveLength(1);
     expect(configControlButtonsByText(loading.root, "Balanced")).toHaveLength(0);
     expect(loading.root.findAllByProps({ className: "composer-adaptive-options is-unavailable" })).toHaveLength(1);
 
+    const reloadOptions = vi.fn();
     const stale = renderComposer({
       configLocked: true,
       configOptions: { ...configOptions(), status: "stale" },
+      onRetryConfigOptions: reloadOptions,
       showIsolationSelector: false,
     });
-    expect(text(stale.root)).toContain("Options need refresh");
+    expect(text(stale.root)).toContain("Options unavailable");
+    click(buttonByText(stale.root, "Reload options"));
+    expect(reloadOptions).toHaveBeenCalledOnce();
     expect(stale.root.findAllByProps({ role: "status", "aria-busy": true })).toHaveLength(0);
     expect(configControlButtonsByText(stale.root, "Balanced")).toHaveLength(0);
   });
@@ -1732,9 +1761,9 @@ describe("Composer view behavior", () => {
   it("renders composer-level errors", () => {
     const renderer = renderComposer({ error: "Reselect attachments from the file browser before sending." });
 
-    expect(renderer.root.findByProps({ className: "inline-error" }).children).toEqual([
-      "Reselect attachments from the file browser before sending.",
-    ]);
+    const error = renderer.root.findByProps({ className: "composer-footer-status error" });
+    expect(text(error)).toBe("Reselect attachments from the file browser before sending.");
+    expect(error.parent?.props.className).toBe("composer-footer");
   });
 
   it("opens slash command picker with fuzzy results and inserts the selected command", () => {
@@ -1987,6 +2016,7 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       onRemoveAttachment={overrides.onRemoveAttachment ?? vi.fn()}
       onSelectAgent={overrides.onSelectAgent ?? vi.fn()}
       onSelectConfigOption={overrides.onSelectConfigOption ?? vi.fn()}
+      onRetryConfigOptions={overrides.onRetryConfigOptions}
       onSelectIsolation={overrides.onSelectIsolation ?? vi.fn()}
       onSubmit={overrides.onSubmit ?? vi.fn()}
       prompt={overrides.prompt ?? ""}
@@ -2022,6 +2052,7 @@ type ComposerTestProps = {
   onRemoveAttachment: (attachmentId: string) => void;
   onSelectAgent: (agentId: string) => void;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
+  onRetryConfigOptions: () => void;
   onSelectIsolation: (isolation: ComposerSelection["isolation"]) => void;
   onSubmit: (prompt: string) => void;
   placeholder: string;

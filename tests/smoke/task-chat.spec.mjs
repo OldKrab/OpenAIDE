@@ -589,15 +589,16 @@ test("recovers an open Task composer once after client liveness expires", async 
   const editor = page.getByRole("textbox", { name: "Message" });
   await expect(page.getByLabel("Task status: Ready")).toBeVisible();
   await editor.fill("draft survives recovery");
-  await startComposerPlaceholderTrace(page);
+  await startComposerConnectionTrace(page);
   const stopExpiryFault = await reportClientLivenessExpiredOnNextHeartbeat(page);
   try {
-    const transitions = await waitForComposerPlaceholderRecovery(page);
+    const transitions = await waitForComposerConnectionRecovery(page);
     expect(transitions).toEqual([
-      "Send follow-up",
-      "Reconnecting. Draft is saved here.",
-      "Send follow-up",
+      "ready",
+      "reconnecting",
+      "ready",
     ]);
+    await expect(editor).toHaveAttribute("data-placeholder", "Send follow-up");
     await expect(editor).toHaveText("draft survives recovery");
   } finally {
     await stopExpiryFault();
@@ -945,33 +946,26 @@ function composerText(element) {
   return element.innerText.endsWith("\n") ? element.innerText.slice(0, -1) : element.innerText;
 }
 
-async function startComposerPlaceholderTrace(page) {
+async function startComposerConnectionTrace(page) {
   await page.evaluate(() => {
-    const expected = [
-      "Send follow-up",
-      "Reconnecting. Draft is saved here.",
-      "Send follow-up",
-    ];
+    const expected = ["ready", "reconnecting", "ready"];
     const transitions = [];
     const sample = () => {
-      const editor = document.querySelector('[role="textbox"][aria-label="Message"]');
-      const value = editor instanceof HTMLElement
-        ? editor.getAttribute("data-placeholder") ?? "missing"
-        : "missing";
+      const status = document.querySelector(".composer-footer-status");
+      const value = status?.textContent?.includes("Reconnecting") ? "reconnecting" : "ready";
       if (transitions.at(-1) !== value) transitions.push(value);
       const completed = expected.every((item, index) => transitions[index] === item);
       if (completed) {
         observer.disconnect();
-        window.__openaideComposerPlaceholderTrace.completed = true;
+        window.__openaideComposerConnectionTrace.completed = true;
       }
     };
     const observer = new MutationObserver(sample);
-    window.__openaideComposerPlaceholderTrace = { completed: false, transitions };
+    window.__openaideComposerConnectionTrace = { completed: false, transitions };
     sample();
-    if (!window.__openaideComposerPlaceholderTrace.completed) {
+    if (!window.__openaideComposerConnectionTrace.completed) {
       observer.observe(document.body, {
         attributes: true,
-        attributeFilter: ["data-placeholder"],
         childList: true,
         subtree: true,
       });
@@ -979,9 +973,9 @@ async function startComposerPlaceholderTrace(page) {
   });
 }
 
-async function waitForComposerPlaceholderRecovery(page) {
-  await page.waitForFunction(() => window.__openaideComposerPlaceholderTrace?.completed === true);
-  return page.evaluate(() => window.__openaideComposerPlaceholderTrace?.transitions ?? []);
+async function waitForComposerConnectionRecovery(page) {
+  await page.waitForFunction(() => window.__openaideComposerConnectionTrace?.completed === true);
+  return page.evaluate(() => window.__openaideComposerConnectionTrace?.transitions ?? []);
 }
 
 async function reportClientLivenessExpiredOnNextHeartbeat(page) {

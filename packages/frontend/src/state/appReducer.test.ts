@@ -1211,6 +1211,7 @@ describe("app reducer composer state", () => {
     expect(state.newTask.prompt).toBe("Build the thing");
     expect(state.newTask.pending).toBeUndefined();
     expect(state.newTask.error).toBe("Send failed");
+    expect(state.newTask.errorRetryable).toBe(true);
   });
 
   it("invalidates a submitted New Task attachment through the root reducer", () => {

@@ -53,7 +53,6 @@ export {
 } from "./taskChatPresentation";
 export { chatRowKey, formatElapsedDuration } from "./TaskChatTimeline";
 
-const RECONNECT_NOTICE_DELAY_MS = 1_000;
 
 export type TaskViewIntents = {
   changePrompt: (prompt: string) => void;
@@ -141,6 +140,7 @@ export function TaskView({
   onQuestionRespond,
   onReconnectProject,
   onRetryConnection,
+  onRetryConfigOptions,
   onRevealAttachment,
   onRemoveAttachment,
   onRemoveQueueMessage,
@@ -192,6 +192,7 @@ export function TaskView({
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
   onReconnectProject?: (projectId: string) => void;
   onRetryConnection?: () => void;
+  onRetryConfigOptions?: () => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
   onRemoveQueueMessage?: (queuedMessageId: string) => void;
@@ -307,19 +308,7 @@ export function TaskView({
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
   const [reloadPending, setReloadPending] = useState(false);
   const [reloadError, setReloadError] = useState<string>();
-  const [showReconnectNotice, setShowReconnectNotice] = useState(false);
   const announcedHistoryUpdate = useRef<string | undefined>(undefined);
-  const reconnecting = backendConnectionState?.status === "reconnecting";
-  useEffect(() => {
-    if (!reconnecting) {
-      setShowReconnectNotice(false);
-      return undefined;
-    }
-    // Page unloads and brief stream replacement are normal. Keep Send blocked
-    // immediately, but do not turn a sub-second resynchronization into an error.
-    const timer = window.setTimeout(() => setShowReconnectNotice(true), RECONNECT_NOTICE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [reconnecting]);
   useEffect(() => {
     if (snapshot.history_sync.state !== "updated") {
       setShowHistoryUpdated(false);
@@ -532,14 +521,10 @@ export function TaskView({
           timelineStatusLabel={timelineStatusLabel}
           workingStartedAt={workingStartedAt}
         />
-        {(reconnecting && showReconnectNotice) || backendConnectionState?.status === "unavailable" ? (
+        {backendConnectionState?.status === "unavailable" ? (
           <div className="task-connection-notice" role="status" aria-live="polite">
-            <span>
-              {reconnecting
-                ? "Reconnecting to App Server."
-                : "Unable to refresh task."}
-            </span>
-            <small>{reconnecting ? "App Server is temporarily unavailable." : backendConnectionState.message}</small>
+            <span>Unable to refresh task.</span>
+            <small>{backendConnectionState.message}</small>
             {backendConnectionState.status === "unavailable" && onRetryConnection ? (
               <button type="button" onClick={onRetryConnection}>Retry</button>
             ) : null}
@@ -615,6 +600,7 @@ export function TaskView({
               onUnsupportedImageAttachment={intents.reportAttachmentError}
               onRevealAttachment={onRevealAttachment}
               onRemoveAttachment={onRemoveAttachment}
+              onRetryConfigOptions={onRetryConfigOptions}
               onSelectConfigOption={onSelectConfigOption}
               onSubmit={submit}
               prompt={taskInput.prompt}

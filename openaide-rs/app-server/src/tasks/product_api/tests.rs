@@ -7952,6 +7952,51 @@ fn set_config_option_recovers_an_inactive_native_session_before_agent_io() {
 }
 
 #[test]
+fn prepared_task_option_change_recovers_when_native_session_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-prepared",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_session_missing: true,
+        config_requires_active_session: true,
+        config_catalog: Some(config_catalog("gpt-5")),
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let mut task = store.read_task("task-prepared").unwrap();
+    task.lifecycle = test_new_task_lifecycle();
+    task.agent_session_id = Some("missing-session".to_string());
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    store.write_task(&task).unwrap();
+
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
+            task_id: "task-prepared".into(),
+            config_id: "model".into(),
+            value: protocol_config_id("gpt-5.5"),
+            client_mutation_id: "mutation-after-session-loss".into(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
+}
+
+#[test]
 fn config_recovery_loads_when_the_agent_does_not_support_resume() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -9542,6 +9587,7 @@ impl AgentRuntime for RecordingAgent {
                 "ACP session start cancelled".to_string(),
             ));
         }
+        self.active_after_load.store(true, Ordering::SeqCst);
         let session = AgentSession::new(request.agent_id, "recorded-session");
         Ok(match &self.config_catalog {
             Some(catalog) => session.with_config_options(catalog),

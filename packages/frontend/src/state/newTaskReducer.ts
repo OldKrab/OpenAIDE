@@ -73,6 +73,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           },
           submitting: true,
           error: undefined,
+          errorRetryable: undefined,
         },
       };
     }
@@ -86,6 +87,8 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: action.message,
+          errorRetryable: state.newTask.pending !== undefined,
+          configOptionsLoading: false,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
       };
@@ -99,6 +102,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: undefined,
+          errorRetryable: undefined,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
       };
@@ -117,6 +121,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: action.message,
+          errorRetryable: false,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
         taskInputs: {
@@ -139,17 +144,22 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: undefined,
+          errorRetryable: undefined,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
       };
     case "newTask:prepared": {
-      return state;
+      return {
+        ...state,
+        newTask: { ...state.newTask, configOptionsLoading: false },
+      };
     }
     case "newTask:replaced": {
       const staleInput = state.taskInputs[action.staleTaskId];
       const { [action.staleTaskId]: _staleInput, ...taskInputs } = state.taskInputs;
       return {
         ...state,
+        newTask: { ...state.newTask, configOptionsLoading: false },
         taskInputs: staleInput
           ? { ...taskInputs, [action.taskId]: staleInput }
           : taskInputs,
@@ -320,6 +330,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           ...state.newTask,
           submitting: true,
           error: undefined,
+          errorRetryable: undefined,
           nativeSessions: {
             ...state.newTask.nativeSessions,
             adoptingSessionId: action.sessionId,
@@ -399,7 +410,7 @@ function replacePreparedDraftOnContextChange(
   }
   // Preparation errors belong to the Project/Agent/worktree combination that
   // produced them; carrying one into a new context makes valid choices look broken.
-  nextNewTask = { ...nextNewTask, error: undefined };
+  nextNewTask = { ...nextNewTask, error: undefined, errorRetryable: undefined };
   const preparedTaskId = newTaskId;
   if (!preparedTaskId) return { ...state, newTask: nextNewTask };
   const preparedInput = state.taskInputs[preparedTaskId];

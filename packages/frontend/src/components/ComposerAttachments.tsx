@@ -1,5 +1,5 @@
-import { CircleAlert, ExternalLink, FolderOpen, X } from "lucide-react";
-import { useState } from "react";
+import { Check, CircleAlert, ExternalLink, FolderOpen, LoaderCircle, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment } from "../state/composerOptions";
 import {
   attachmentImageLayout,
@@ -23,20 +23,48 @@ export type ComposerFileUpload = {
 };
 
 export function ComposerAttachments({
+  agentLabel,
   attachments,
   disabled,
+  imageAttachmentsAllowed,
   onRemoveAttachment,
   onRevealAttachment,
   uploads = [],
 }: {
+  agentLabel: string;
   attachments: ComposerAttachment[];
   disabled: boolean;
+  imageAttachmentsAllowed: boolean;
   onRemoveAttachment: (attachmentId: string) => void;
   onRevealAttachment?: (attachmentId: string) => Promise<void> | void;
   uploads?: ComposerFileUpload[];
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
   const [revealFeedback, setRevealFeedback] = useState<Record<string, "pending" | "requested" | "failed">>({});
+  const revealFeedbackTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => () => {
+    for (const timer of revealFeedbackTimers.current.values()) clearTimeout(timer);
+    revealFeedbackTimers.current.clear();
+  }, []);
+  const reveal = async (attachment: ComposerAttachment) => {
+    if (!onRevealAttachment) return;
+    clearTimeout(revealFeedbackTimers.current.get(attachment.local_id));
+    setRevealFeedback((current) => ({ ...current, [attachment.local_id]: "pending" }));
+    try {
+      await onRevealAttachment(attachment.local_id);
+      setRevealFeedback((current) => ({ ...current, [attachment.local_id]: "requested" }));
+      revealFeedbackTimers.current.set(attachment.local_id, setTimeout(() => {
+        setRevealFeedback((current) => {
+          const next = { ...current };
+          delete next[attachment.local_id];
+          return next;
+        });
+        revealFeedbackTimers.current.delete(attachment.local_id);
+      }, 2_000));
+    } catch {
+      setRevealFeedback((current) => ({ ...current, [attachment.local_id]: "failed" }));
+    }
+  };
   if (attachments.length === 0 && uploads.length === 0) return null;
   const attachmentItems = attachments.map((attachment) => ({
     attachment,
@@ -69,6 +97,11 @@ export function ComposerAttachments({
               >
                 <X size={13} />
               </button>
+              {!imageAttachmentsAllowed ? (
+                <span className="context-token-status error">
+                  <CircleAlert aria-hidden="true" size={11} />Images aren’t supported by {agentLabel}
+                </span>
+              ) : null}
             </span>
           ) : (
             <span
@@ -87,28 +120,30 @@ export function ComposerAttachments({
                   aria-label={`Reveal ${attachment.label}`}
                   className="composer-file-reveal"
                   disabled={disabled || revealFeedback[attachment.local_id] === "pending"}
-                  onClick={async () => {
-                    setRevealFeedback((current) => ({ ...current, [attachment.local_id]: "pending" }));
-                    try {
-                      await onRevealAttachment(attachment.local_id);
-                      setRevealFeedback((current) => ({ ...current, [attachment.local_id]: "requested" }));
-                    } catch {
-                      setRevealFeedback((current) => ({ ...current, [attachment.local_id]: "failed" }));
-                    }
-                  }}
+                  onClick={() => void reveal(attachment)}
                   type="button"
                 >
                   <ExternalLink size={11} />
                 </button>
               ) : null}
               {revealFeedback[attachment.local_id] === "pending" ? (
-                <span className="context-token-status">Revealing...</span>
+                <span className="context-token-status"><LoaderCircle aria-hidden="true" size={11} />Opening…</span>
               ) : revealFeedback[attachment.local_id] === "requested" ? (
-                <span className="context-token-status">Reveal requested.</span>
+                <span className="context-token-status success"><Check aria-hidden="true" size={11} />Opened</span>
               ) : revealFeedback[attachment.local_id] === "failed" ? (
-                <span className="context-token-status error">Unable to reveal {attachment.label}.</span>
+                <span className="context-token-status error">
+                  <CircleAlert aria-hidden="true" size={11} />Couldn’t open file
+                  <button aria-label={`Retry opening ${attachment.label}`} onClick={() => void reveal(attachment)} type="button">Retry</button>
+                </span>
               ) : attachment.validation_error ? (
-                <span className="context-token-status error">Reselect attachment.</span>
+                <span className="context-token-status error">
+                  <CircleAlert aria-hidden="true" size={11} />
+                  {attachment.validation_error.toLowerCase().includes("image")
+                    ? `Images aren’t supported by ${agentLabel}`
+                    : "File expired · Choose again"}
+                </span>
+              ) : !attachment.app_server_handle_id ? (
+                <span className="context-token-status"><LoaderCircle aria-hidden="true" size={11} />Preparing…</span>
               ) : null}
               <button
                 aria-label={`Remove ${attachment.label}`}

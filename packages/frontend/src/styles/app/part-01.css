@@ -299,6 +299,50 @@
   padding: 0;
 }
 
+.new-task-context-progress,
+.new-task-context-status {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.new-task-context-progress svg {
+  animation: oa-spin 0.9s linear infinite;
+}
+
+.new-task-context-status {
+  width: min(660px, 100%);
+  min-height: 36px;
+  border: 1px solid color-mix(in oklch, var(--oa-warning) 24%, var(--oa-border));
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--oa-warning) 4%, var(--oa-panel));
+  padding: 6px 8px;
+}
+
+.new-task-context-status > svg {
+  color: var(--oa-warning);
+}
+
+.new-task-context-status strong {
+  color: var(--oa-text);
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.new-task-context-status button {
+  min-height: 24px;
+  margin-left: auto;
+  border: 1px solid color-mix(in oklch, var(--oa-border-strong) 70%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--oa-text);
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
 .new-task-context-word {
   color: color-mix(in oklch, var(--oa-muted) 90%, var(--oa-text));
   font-size: 13.5px;

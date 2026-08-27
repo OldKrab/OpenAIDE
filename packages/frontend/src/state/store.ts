@@ -77,6 +77,8 @@ export type NewTaskState = {
   configOptionsError?: string;
   nativeSessions: NativeSessionsState;
   error?: string;
+  /** True only when the error followed an accepted first-send attempt. */
+  errorRetryable?: boolean;
 };
 
 export type TaskComposerInput = {
