@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveReleaseArtifactMatrices } from "./resolve-release-artifact-matrices.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rootPackage = packageJson("package.json");
@@ -153,9 +154,6 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(release, /uses: \.\/\.github\/workflows\/build-vsix\.yml/);
   assert.match(release, /artifacts: all/);
   assert.match(release, /version: \$\{\{ needs\.validate\.outputs\.version \}\}/);
-  assert.match(artifactBuild, /["']?target["']?:["']?linux-x64/);
-  assert.match(artifactBuild, /["']?target["']?:["']?win32-x64/);
-  assert.match(artifactBuild, /["']?target["']?:["']?darwin-arm64/);
   assert.match(artifactBuild, /cp LICENSE apps\/vscode-extension\/LICENSE/);
   assert.match(artifactBuild, /cd apps\/vscode-extension/);
   assert.match(artifactBuild, /npm exec -- vsce package/);
@@ -171,8 +169,6 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(artifactBuild, /needs: \[prepare, app-server\]/);
   assert.match(artifactBuild, /node scripts\/smoke-release-vsix\.mjs/);
   assert.match(artifactBuild, /node scripts\/set-release-artifact-version\.mjs "\$\{\{ needs\.prepare\.outputs\.version \}\}"/);
-  assert.match(artifactBuild, /target_triple: x86_64-pc-windows-msvc/);
-  assert.match(artifactBuild, /target_triple: aarch64-apple-darwin/);
   assert.match(artifactBuild, /--bundles "\$\{\{ matrix\.bundle \}\}"/);
   assert.match(artifactBuild, /tauri\.release-bundle\.conf\.json/);
   assert.match(artifactBuild, /openaide-app-server-\$\{\{ matrix\.target_triple \}\}/);
@@ -211,9 +207,6 @@ test("manual artifact builds can select VSIX, desktop, or all without publishing
   assert.match(workflow, /options: \[all, linux-x64, win32-x64, darwin-arm64\]/);
   assert.match(workflow, /vsix_matrix: \$\{\{ steps\.build\.outputs\.vsix_matrix \}\}/);
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.prepare\.outputs\.vsix_matrix\) \}\}/);
-  assert.match(workflow, /["']?target["']?:["']?linux-x64/);
-  assert.match(workflow, /["']?target["']?:["']?win32-x64/);
-  assert.match(workflow, /["']?target["']?:["']?darwin-arm64/);
   assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/);
   assert.match(workflow, /npm exec -- vsce package/);
   assert.match(workflow, /short_sha="\$\{GITHUB_SHA:0:7\}"/);
@@ -225,10 +218,37 @@ test("manual artifact builds can select VSIX, desktop, or all without publishing
   assert.doesNotMatch(workflow, /action-gh-release|contents: write|push:\s*\n\s*tags:/);
 });
 
+test("artifact builds select only the requested package targets and required servers", () => {
+  const windows = resolveReleaseArtifactMatrices({
+    artifacts: "all",
+    vsixTarget: "win32-x64",
+    desktopTarget: "win32-x64",
+  });
+  assert.deepEqual(windows.vsix_matrix.include.map(({ target }) => target), ["win32-x64"]);
+  assert.deepEqual(windows.desktop_matrix.include.map(({ target }) => target), ["win32-x64"]);
+  assert.deepEqual(windows.server_matrix.include.map(({ target }) => target), ["win32-x64", "linux-x64-musl"]);
+
+  const fullRelease = resolveReleaseArtifactMatrices({
+    artifacts: "all",
+    vsixTarget: "all",
+    desktopTarget: "all",
+  });
+  assert.deepEqual(fullRelease.vsix_matrix.include.map(({ target }) => target), vsixTargets());
+  assert.deepEqual(fullRelease.desktop_matrix.include.map(({ target }) => target), ["win32-x64", "darwin-arm64"]);
+  assert.deepEqual(fullRelease.server_matrix.include.map(({ target }) => target), [
+    ...vsixTargets(),
+    "linux-x64-musl",
+  ]);
+});
+
 function packageJson(relativePath) {
   return JSON.parse(readFileSync(path.join(repoRoot, relativePath), "utf8"));
 }
 
 function occurrences(value, search) {
   return value.split(search).length - 1;
+}
+
+function vsixTargets() {
+  return ["linux-x64", "win32-x64", "darwin-arm64"];
 }

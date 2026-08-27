@@ -19,6 +19,12 @@ on:
         options: [all, linux-x64, win32-x64, darwin-arm64]
         default: all
         required: true
+      desktop_target:
+        description: Desktop platform to build
+        type: choice
+        options: [all, win32-x64, darwin-arm64]
+        default: all
+        required: true
   workflow_call:
     inputs:
       artifacts:
@@ -35,6 +41,11 @@ on:
         type: string
         default: all
         required: false
+      desktop_target:
+        description: Desktop platform to build (all, win32-x64, or darwin-arm64)
+        type: string
+        default: all
+        required: false
 
 permissions:
   contents: read
@@ -45,6 +56,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       artifact_suffix: ${{ steps.build.outputs.artifact_suffix }}
+      desktop_matrix: ${{ steps.build.outputs.desktop_matrix }}
       server_matrix: ${{ steps.build.outputs.server_matrix }}
       vsix_matrix: ${{ steps.build.outputs.vsix_matrix }}
       version: ${{ steps.build.outputs.version }}
@@ -60,40 +72,8 @@ jobs:
           ARTIFACT_SELECTION: ${{ inputs.artifacts }}
           REQUESTED_VERSION: ${{ inputs.version }}
           VSIX_TARGET: ${{ inputs.vsix_target }}
+          DESKTOP_TARGET: ${{ inputs.desktop_target }}
         run: |
-          case "$ARTIFACT_SELECTION" in
-            all|vsix|desktop) ;;
-            *) echo "artifacts must be all, vsix, or desktop" >&2; exit 1 ;;
-          esac
-
-          case "$VSIX_TARGET" in
-            all)
-              vsix_matrix='{"include":[{"os":"ubuntu-24.04","target":"linux-x64","binary":"openaide-app-server"},{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"}]}'
-              ;;
-            linux-x64)
-              vsix_matrix='{"include":[{"os":"ubuntu-24.04","target":"linux-x64","binary":"openaide-app-server"}]}'
-              ;;
-            win32-x64)
-              vsix_matrix='{"include":[{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"}]}'
-              ;;
-            darwin-arm64)
-              vsix_matrix='{"include":[{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"}]}'
-              ;;
-            *) echo "vsix_target must be all, linux-x64, win32-x64, or darwin-arm64" >&2; exit 1 ;;
-          esac
-
-          case "$ARTIFACT_SELECTION" in
-            desktop)
-              server_matrix='{"include":[{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"},{"os":"ubuntu-24.04","target":"linux-x64-musl","binary":"openaide-app-server","rust_target":"x86_64-unknown-linux-musl"}]}'
-              ;;
-            vsix)
-              server_matrix="$vsix_matrix"
-              ;;
-            all)
-              server_matrix='{"include":[{"os":"ubuntu-24.04","target":"linux-x64","binary":"openaide-app-server"},{"os":"windows-2025","target":"win32-x64","binary":"openaide-app-server.exe"},{"os":"macos-15","target":"darwin-arm64","binary":"openaide-app-server"},{"os":"ubuntu-24.04","target":"linux-x64-musl","binary":"openaide-app-server","rust_target":"x86_64-unknown-linux-musl"}]}'
-              ;;
-          esac
-
           if [[ -n "$REQUESTED_VERSION" ]]; then
             version="$REQUESTED_VERSION"
             artifact_suffix=""
@@ -111,9 +91,11 @@ jobs:
           {
             echo "version=$version"
             echo "artifact_suffix=$artifact_suffix"
-            echo "server_matrix=$server_matrix"
-            echo "vsix_matrix=$vsix_matrix"
           } >> "$GITHUB_OUTPUT"
+          node scripts/resolve-release-artifact-matrices.mjs \
+            "$ARTIFACT_SELECTION" \
+            "$VSIX_TARGET" \
+            "$DESKTOP_TARGET" >> "$GITHUB_OUTPUT"
 
   app-server:
     name: Build ${{ matrix.target }} App Server
@@ -254,24 +236,7 @@ jobs:
     needs: [prepare, app-server]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-2025
-            target: win32-x64
-            target_triple: x86_64-pc-windows-msvc
-            binary: openaide-app-server.exe
-            sidecar_extension: .exe
-            bundle: nsis
-            bundle_directory: nsis
-            extension: exe
-          - os: macos-15
-            target: darwin-arm64
-            target_triple: aarch64-apple-darwin
-            binary: openaide-app-server
-            sidecar_extension: ""
-            bundle: dmg
-            bundle_directory: dmg
-            extension: dmg
+      matrix: ${{ fromJSON(needs.prepare.outputs.desktop_matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
