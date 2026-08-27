@@ -2444,6 +2444,23 @@ fn authenticated_transport_activity_refreshes_client_liveness() {
 }
 
 #[test]
+fn completed_request_refreshes_liveness_after_a_stale_request_start() {
+    let gateway = SharedRpcGateway::new(initialized_gateway("client-1", "conn-1"));
+
+    response_value(gateway.handle_inbound_completed_at(
+        ConnectionId::new("conn-1"),
+        request("heartbeat", CLIENT_HEARTBEAT, json!({})),
+        AppServerTime(2),
+        AppServerTime(20),
+    ));
+
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(25))
+        .is_empty());
+    assert!(gateway.connection_is_initialized(&ConnectionId::new("conn-1")));
+}
+
+#[test]
 fn inactive_expiry_interrupts_client_scoped_requests() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.open_server_request(client_server_request("client-1"), AppServerTime(2));
