@@ -153,6 +153,9 @@ function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
     dragRef.current = undefined;
     setLayoutResizing(frameRef.current, false);
     if (drag.liveWidth <= COLLAPSE_THRESHOLD) {
+      // React still considers the remembered width current, so restore the
+      // CSS variable after the imperative drag before hiding the column.
+      applySidebarWidth(frameRef.current, drag.startWidth);
       update({ collapsed: true, width: drag.startWidth });
       return;
     }

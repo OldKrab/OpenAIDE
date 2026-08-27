@@ -42,6 +42,7 @@
 
 .app-sidebar-frame.sidebar-collapsed .desktop-title-bar-sidebar {
   border-right-color: transparent;
+  background: transparent;
 }
 
 .desktop-title-bar-content {
