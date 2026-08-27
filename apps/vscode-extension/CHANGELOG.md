@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.0 - 2026-08-27
+
+### Features
+
+- Preview and archive older Project Tasks in bulk while protecting pinned, active, queued, pending-request, and open-elsewhere Tasks.
+- Rename and pin unadopted Native Sessions, preserving that metadata when they become Tasks.
+
+### Bug Fixes
+
+- Preserve the selected Project across VS Code New Task panels without letting stale panels overwrite the App Server default.
+- Keep the built-in Codex launcher available when legacy Custom Agent data uses its reserved identifier.
+- Recover Prepared Task sessions before changing Agent options, with immediate loading, failure, attachment, and retry feedback in Composer.
+- Preserve first-send attachments when workspace paths resolve to the same canonical Project.
+- Keep the built-in Codex launcher available when legacy Custom Agent data uses its reserved identifier.
+- Preserve first-send attachments when workspace paths resolve to the same canonical Project.
+- Keep active Native Sessions attached when ACP session discovery times out.
+- Keep Task permission controls available while unrelated global state recovers.
+- Save Support Export bundles correctly from VS Code.
+- Prevent wrapped Agent Plan entries from overlapping.
+
+### Chores
+
+- Allow manual artifact builds to target one VSIX platform while release builds continue to cover every platform.
+- Strengthen Linux VSIX packaging gates and the bundled Codex startup smoke test.
+
+**Full Changelog**: https://github.com/OldKrab/OpenAIDE/compare/v0.3.0...v0.4.0
+
 ## 0.3.0 - 2026-08-19
 
 ### Features
