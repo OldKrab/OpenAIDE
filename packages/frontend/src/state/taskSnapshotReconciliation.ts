@@ -1,4 +1,4 @@
-import type { TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
+import type { TaskPermissionPolicy, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import { retainSnapshotWindow } from "./chatPageMerge";
 import type { AppState } from "./store";
 import { configOptionsCatalogKey, configOptionsSettled } from "./configOptionState";
@@ -7,8 +7,14 @@ export function reconcileBackgroundTaskSnapshot(
   state: AppState,
   incoming: TaskSnapshot,
   replicaEpoch: number,
+  confirmedPermissionPolicy?: TaskPermissionPolicy,
 ): AppState {
-  const reconciliation = reconcileTaskSnapshotDependents(state, incoming, replicaEpoch);
+  const reconciliation = reconcileTaskSnapshotDependents(
+    state,
+    incoming,
+    replicaEpoch,
+    confirmedPermissionPolicy,
+  );
   if (reconciliation.state === state) return state;
   const { snapshot: reconciled } = reconciliation;
   // Navigation snapshots own membership. A late task/open or mutation response
@@ -35,12 +41,19 @@ export function reconcileTaskSnapshotDependents(
   state: AppState,
   incoming: TaskSnapshot,
   replicaEpoch: number,
+  confirmedPermissionPolicy?: TaskPermissionPolicy,
 ): { state: AppState; snapshot: TaskSnapshot } {
   const taskId = incoming.task.task_id;
   const previousSnapshot = state.taskSnapshots[taskId];
   const previousReplicaEpoch = state.taskSnapshotReplicaEpochs[taskId];
   const current = previousReplicaEpoch === replicaEpoch ? previousSnapshot : undefined;
-  const snapshot = reconcileTaskSnapshot(current, incoming);
+  const reconciled = reconcileTaskSnapshot(current, incoming);
+  // Mutation responses and state events travel independently. Preserve newer Task
+  // state while applying the policy value the App Server just acknowledged.
+  const snapshot = confirmedPermissionPolicy !== undefined
+    && reconciled.permission_policy !== confirmedPermissionPolicy
+    ? { ...reconciled, permission_policy: confirmedPermissionPolicy }
+    : reconciled;
   if (snapshot === current) return { state, snapshot };
 
   const activePermissionIds = activeRequestIds(snapshot, "permission");
