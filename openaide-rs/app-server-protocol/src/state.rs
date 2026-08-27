@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::client::SettingsSection;
-use crate::ids::{EventCursor, ProjectId, TaskId, WorktreeRepositoryId};
+use crate::ids::{EventCursor, ProjectId, SubagentId, TaskId, WorktreeRepositoryId};
 use crate::snapshot::{
-    AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, TaskNavigationSnapshot,
-    TaskSnapshot,
+    AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, SubagentCatalogSnapshot,
+    SubagentHistorySnapshot, TaskNavigationSnapshot, TaskSnapshot,
 };
 use crate::task::TaskNavigationSection;
 use crate::task::ToolDetailSnapshot;
@@ -59,6 +59,13 @@ pub enum SubscriptionScope {
     Task {
         task_id: TaskId,
     },
+    SubagentCatalog {
+        task_id: TaskId,
+    },
+    SubagentHistory {
+        task_id: TaskId,
+        subagent_id: SubagentId,
+    },
     ToolDetail {
         task_id: TaskId,
         artifact_id: String,
@@ -92,6 +99,12 @@ pub enum SubscriptionSnapshot {
     },
     Task {
         task: TaskSnapshot,
+    },
+    SubagentCatalog {
+        catalog: SubagentCatalogSnapshot,
+    },
+    SubagentHistory {
+        history: SubagentHistorySnapshot,
     },
     ToolDetail {
         task_id: TaskId,

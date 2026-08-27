@@ -322,6 +322,7 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
   if (step.kind === "subagent") {
     return {
       kind: "subagent",
+      subagent_id: step.subagentId ?? undefined,
       name: step.name,
       path: step.path,
       status: activityStatusFromProtocol(step.status),

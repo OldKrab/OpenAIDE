@@ -30,6 +30,7 @@ env_override_names=(
   OPENAIDE_WEB_SMOKE_CLEANUP
   OPENAIDE_ACP_TRACE
   OPENAIDE_ACP_TRACE_DIR
+  OPENAIDE_ACP_NATIVE_SUBAGENTS
 )
 
 for name in "${env_override_names[@]}"; do
@@ -401,6 +402,7 @@ start_systemd_server() {
     --setenv "OPENAIDE_PROJECT_ROOTS=$project_roots" \
     --setenv "OPENAIDE_WEB_PROJECT_ROOTS=$project_roots" \
     --setenv "OPENAIDE_WEB_STATIC_ROOT=$static_root" \
+    --setenv "OPENAIDE_ACP_NATIVE_SUBAGENTS=${OPENAIDE_ACP_NATIVE_SUBAGENTS:-}" \
     "${systemd_trace_env_args[@]}" \
     "$npm_bin" run web:dev >/dev/null
   echo "$static_root" > "$static_root_file"

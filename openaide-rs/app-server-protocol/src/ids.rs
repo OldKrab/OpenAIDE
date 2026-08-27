@@ -108,6 +108,10 @@ id_type!(
 );
 id_type!(TaskId, "string & { readonly __openaideBrand: \"TaskId\" }");
 id_type!(
+    SubagentId,
+    "string & { readonly __openaideBrand: \"SubagentId\" }"
+);
+id_type!(
     QueuedMessageId,
     "string & { readonly __openaideBrand: \"QueuedMessageId\" }"
 );

@@ -1336,6 +1336,8 @@ fn mixed_tool_update_publishes_one_atomic_detail_delta() {
                 TaskUpdateKind::Changed(change) => Some(change),
                 TaskUpdateKind::ToolDetailChanged { .. } => None,
                 TaskUpdateKind::HistorySync(_)
+                | TaskUpdateKind::SubagentCatalogChanged { .. }
+                | TaskUpdateKind::SubagentHistoryChanged { .. }
                 | TaskUpdateKind::NavigationProjectEntriesChanged { .. }
                 | TaskUpdateKind::NavigationRefreshStateChanged { .. } => None,
             }
@@ -2213,6 +2215,7 @@ fn permission_request(request_id: &str) -> AgentPermissionRequest {
             title: "Tool".to_string(),
             kind: Some("edit".to_string()),
         },
+        subagent_native_session_id: None,
         options: vec![
             AgentPermissionOption {
                 option_id: "allow".to_string(),

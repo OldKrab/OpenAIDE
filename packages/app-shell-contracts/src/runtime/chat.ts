@@ -51,6 +51,7 @@ export type ActivityStep =
   | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string }
   | {
       kind: "subagent";
+      subagent_id?: string;
       name: string;
       path: string[];
       status: ActivityStatus;

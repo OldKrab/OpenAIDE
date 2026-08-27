@@ -37,6 +37,10 @@
   padding-inline-end: 10px;
 }
 
+.task-work-stack[data-desktop-window="windows"] .task-work-stack-header-actions {
+  padding-inline-end: 148px;
+}
+
 .task-support-export-trigger {
   background: transparent;
   border: 0;

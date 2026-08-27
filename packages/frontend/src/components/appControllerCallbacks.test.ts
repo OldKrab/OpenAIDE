@@ -4068,6 +4068,7 @@ function protocolTaskSnapshot(
     sendCapability: { state: "ready" as const },
     messageQueue: { revision: 0, items: [] },
     historySync: { state: "idle", generation: 0 },
+    subagents: { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
     chat: { items: [], hasMoreBefore: false, hasMessages: true },
   };
 }

@@ -6,6 +6,7 @@ use crate::task::TaskNavigationSection;
 
 use super::chat::{ChatSnapshot, RecoverySnapshot};
 use super::pending_request::PendingRequestSnapshot;
+use super::subagent::SubagentOverviewSnapshot;
 
 mod agent;
 mod preparation;
@@ -213,6 +214,8 @@ pub struct TaskSnapshot {
     pub current_plan: Option<AgentPlanSnapshot>,
     #[serde(default)]
     pub message_queue: TaskMessageQueueSnapshot,
+    #[serde(default)]
+    pub subagents: SubagentOverviewSnapshot,
     pub chat: ChatSnapshot,
     pub history_sync: TaskHistorySyncSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

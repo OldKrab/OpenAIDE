@@ -176,6 +176,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
       sendCapability: { state: "ready" },
       messageQueue: { revision: 0, items: [] },
       historySync: { state: "idle", generation: 0 },
+      subagents: { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
       chat: { items: [], hasMoreBefore: false, hasMessages: true },
     },
     ...overrides,

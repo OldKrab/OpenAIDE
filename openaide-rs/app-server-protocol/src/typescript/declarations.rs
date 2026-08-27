@@ -56,8 +56,8 @@ use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
     FileBrowserRootId, FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId,
-    ServerId, StateRootId, TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId,
-    WorktreeRepositoryId,
+    ServerId, StateRootId, SubagentId, TaskId, TaskListCursor, TurnId, WorktreeId,
+    WorktreeOperationId, WorktreeRepositoryId,
 };
 use crate::project::{
     ProjectAddParams, ProjectAddResult, ProjectRefreshParams, ProjectRefreshResult,
@@ -99,16 +99,19 @@ use crate::snapshot::{
     PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
     QuestionMessageAction, QuestionMessageState, QueuedMessageAttachmentSnapshot,
     QueuedMessageSnapshot, RecoveryAction, RecoverySnapshot, ServerCapabilities, ServerSnapshot,
-    SettingsSnapshot, StateRootSnapshot, SubagentActivitySnapshot, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason, TaskContextUsage,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueuePauseSnapshot,
-    TaskMessageQueueSnapshot, TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState,
-    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationAction, TaskPreparationSnapshot,
-    TaskPreparationStep, TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker,
-    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
-    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
-    TaskTurnUsage, TaskUsageCost, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
-    ToolPresentationActionSnapshot, ToolPresentationSnapshot, ToolSearchTargetSnapshot,
+    SettingsSnapshot, StateRootSnapshot, SubagentActivitySnapshot, SubagentCapabilitiesSnapshot,
+    SubagentCatalogEntrySnapshot, SubagentCatalogSnapshot, SubagentDetailSnapshot,
+    SubagentHistoryAvailability, SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
+    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
+    TaskMessageQueuePauseSnapshot, TaskMessageQueueSnapshot, TaskNavigationEntry,
+    TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPermissionPolicy,
+    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
+    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
+    ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -177,6 +180,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<RequestId>(output, config);
     push_decl::<ServerId>(output, config);
     push_decl::<StateRootId>(output, config);
+    push_decl::<SubagentId>(output, config);
     push_decl::<TaskId>(output, config);
     push_decl::<TaskListCursor>(output, config);
     push_decl::<TurnId>(output, config);
@@ -220,6 +224,14 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<StateUnsubscribeResult>(output, config);
     push_decl::<SubscriptionScope>(output, config);
     push_decl::<SubscriptionSnapshot>(output, config);
+    push_decl::<SubagentOverviewSnapshot>(output, config);
+    push_decl::<SubagentStatus>(output, config);
+    push_decl::<SubagentCapabilitiesSnapshot>(output, config);
+    push_decl::<SubagentDetailSnapshot>(output, config);
+    push_decl::<SubagentCatalogEntrySnapshot>(output, config);
+    push_decl::<SubagentCatalogSnapshot>(output, config);
+    push_decl::<SubagentHistoryAvailability>(output, config);
+    push_decl::<SubagentHistorySnapshot>(output, config);
 
     push_decl::<RuntimeDiagnosticsParams>(output, config);
     push_decl::<RuntimeDiagnosticsResult>(output, config);

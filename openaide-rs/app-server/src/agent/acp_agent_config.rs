@@ -37,7 +37,7 @@ impl AcpAgentConfig {
         Self {
             agent_id: "codex".to_string(),
             command: resolved_command_or_name("npx"),
-            args: vec!["-y".to_string(), "@openaide/codex-acp@1.0.0".to_string()],
+            args: vec!["-y".to_string(), "@openaide/codex-acp@1.1.0".to_string()],
             env: Vec::new(),
             secret_env: Vec::new(),
         }
@@ -104,7 +104,7 @@ impl AcpAgentConfig {
     pub(crate) fn diagnostic_launcher_kind(&self) -> &'static str {
         let command_name = Path::new(&self.command).file_stem().and_then(OsStr::to_str);
         if command_name.is_some_and(|name| name.eq_ignore_ascii_case("npx"))
-            && self.args == ["-y", "@openaide/codex-acp@1.0.0"]
+            && self.args == ["-y", "@openaide/codex-acp@1.1.0"]
         {
             "pinned_npx_package"
         } else {

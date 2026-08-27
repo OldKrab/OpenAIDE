@@ -79,7 +79,7 @@ pub(super) async fn run(
                 };
                 let connection = active_session.connection();
                 close_active_session(
-                    &connection,
+                    connection,
                     active_session.session_id().clone(),
                     supports_session_close,
                     trace.as_ref(),
@@ -138,7 +138,7 @@ pub(super) async fn run(
                         let connection = active_session.connection();
                         let runner = AcpSessionRunner::new(
                             &request_agent_id,
-                            &connection,
+                            connection,
                             initialize.clone(),
                             auth_method_id.as_deref(),
                             trace.as_ref(),
@@ -249,7 +249,7 @@ pub(super) async fn run(
                     AcpSessionCommand::Delete { reply_tx } => {
                         let connection = active_session.connection();
                         let result = delete_active_session(
-                            &connection,
+                            connection,
                             active_session.session_id().clone(),
                             supports_session_delete,
                             trace.as_ref(),
@@ -314,7 +314,7 @@ pub(super) async fn run(
                 if tokio::time::timeout(
                     IDLE_SESSION_CLOSE_TIMEOUT,
                     close_active_session(
-                        &connection,
+                        connection,
                         idle_session_id.clone(),
                         supports_session_close,
                         trace.as_ref(),
@@ -428,7 +428,7 @@ async fn handle_session_config_command(
                     "queue_wait_ms": queued_at.elapsed().as_millis(),
                 }),
             );
-            let connection = active_session.connection();
+            let connection = active_session.connection().clone();
             let mut response = match set_task_config_option_after_prior_updates(
                 &connection,
                 active_session,

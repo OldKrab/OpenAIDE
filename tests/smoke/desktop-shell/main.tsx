@@ -6,6 +6,9 @@ import { createWebAppShell } from "../../../apps/web/frontend/webAppShell";
 document.body.dataset.shell = "desktop";
 
 const webShell = createWebAppShell();
+const desktopPlatform = new URLSearchParams(window.location.search).get("desktop-platform") === "windows"
+  ? "windows"
+  : "macos";
 const asDesktopBootstrap = (bootstrap: WebviewBootstrap): WebviewBootstrap => bootstrap.surface === "invalid"
   ? bootstrap
   : { ...bootstrap, shell: { kind: "desktop", navigationMode: "project" } };
@@ -14,9 +17,10 @@ const desktopShell: FrontendShell = {
   ...webShell,
   bootstrap: () => asDesktopBootstrap(webShell.bootstrap()),
   desktopWindow: {
-    platform: "macos",
+    platform: desktopPlatform,
     close: () => undefined,
     minimize: () => undefined,
+    startDragging: () => undefined,
     toggleMaximize: () => undefined,
   },
   navigation: {

@@ -4,9 +4,8 @@ version = 4
 
 [[package]]
 name = "agent-client-protocol"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d386d6a58f4dbe0ebfa98e915caa54005dabdefd419de3d4678b28cd5752444"
+version = "2.0.0"
+source = "git+https://github.com/OldKrab/rust-sdk?rev=fca6e7168b79961bd12464761f23f0054a8772b8#fca6e7168b79961bd12464761f23f0054a8772b8"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
@@ -28,19 +27,17 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97b94934d118a69e921d14e94d4af5b3076563318c52662c89a0ecb3f139e1da"
+version = "2.0.0"
+source = "git+https://github.com/OldKrab/rust-sdk?rev=fca6e7168b79961bd12464761f23f0054a8772b8#fca6e7168b79961bd12464761f23f0054a8772b8"
 dependencies = [
  "quote",
- "syn 2.0.117",
+ "syn 3.0.0",
 ]
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06679e1542356341f4550ccfb16338b64f37f6af70de2105446ef6fbb078234c"
+version = "1.7.0"
+source = "git+https://github.com/agentclientprotocol/agent-client-protocol?rev=2fc02e6105baf2a27cc3981a4f46a851fd946d69#2fc02e6105baf2a27cc3981a4f46a851fd946d69"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -392,7 +389,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1092,7 +1089,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1352,7 +1349,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1675,7 +1672,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

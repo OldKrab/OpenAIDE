@@ -243,6 +243,29 @@ describe("AppSurfaces callback wiring", () => {
     expect(tree.root.findByProps({ "aria-label": "Window controls" })).toBeDefined();
   });
 
+  it("uses the task header as the Windows title bar instead of adding a product-title row", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: DESKTOP_SHELL, taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1");
+    const desktopWindow = {
+      platform: "windows" as const,
+      close: vi.fn(async () => undefined),
+      minimize: vi.fn(async () => undefined),
+      startDragging: vi.fn(async () => undefined),
+      toggleMaximize: vi.fn(async () => undefined),
+    };
+    frontendShellMocks.current = { desktopWindow };
+
+    const tree = render(controller);
+    const frame = tree.root.find((node) => typeof node.props.className === "string"
+      && node.props.className.split(" ").includes("app-sidebar-frame"));
+
+    expect(frame.props.className).toContain("app-sidebar-frame-with-overlay-header");
+    expect(frame.props.className).toContain("desktop-task-title-bar");
+    expect(tree.root.findAllByProps({ className: "desktop-title-bar-label" })).toHaveLength(0);
+    expect(latestMockProps<{ desktopWindow?: unknown }>(surfaceMocks.task)?.desktopWindow).toBe(desktopWindow);
+  });
+
   it("limits VS Code New Task Project choices to opened workspace Projects", () => {
     const controller = controllerFor("task");
     controller.bootstrap = {

@@ -204,6 +204,22 @@ _Avoid_: Automatically injected prompt content in the first iteration
 A user-selectable external ACP worker that performs Task work.
 _Avoid_: Adapter, provider, raw runtime process, non-ACP protocol selector
 
+**Main Agent**:
+The user-addressable Agent role bound directly to a Task. Its Chat accepts User messages, and its work may create top-level Subagents.
+_Avoid_: Root Agent, Primary Agent, treating it as a second Agent selection
+
+**Subagent**:
+An Agent-created restricted child of a Task with its own inspectable history and, optionally, nested Subagents. It is not a Task and does not appear in Task Navigation.
+_Avoid_: Child Task, background Task, treating delegated activity as an independent Task
+
+**Subagent Identity**:
+The stable App Server-owned identity of one Subagent instance within a Task. It is independent of the Subagent's display name, hierarchy path, and Agent-owned Native Session identity.
+_Avoid_: Subagent name, ACP child session id, hierarchy path
+
+**Subagent History**:
+The Task-owned durable projection of one Subagent's messages, reasoning, and activity using the same presentation language as Chat. It is observational and has no Composer unless the Subagent explicitly supports user input.
+_Avoid_: Subagent Chat, child Task Chat, raw ACP stream
+
 **Agent Plan**:
 The Agent's current non-empty ordered strategy for a Task. An Agent Plan has no independent identity; each new snapshot supersedes the current snapshot until every entry is complete, while an empty snapshot clears it.
 _Avoid_: OpenAIDE workflow, Tool activity, one plan per prompt

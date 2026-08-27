@@ -44,6 +44,63 @@ test("keeps Desktop New Task controls in the workspace without a title strip", a
   await expect(page.getByRole("button", { name: "Balanced", exact: true })).toBeVisible();
 });
 
+test("merges an active Task header into Windows chrome", async ({ page }) => {
+  await page.setViewportSize({ width: 993, height: 640 });
+  await page.goto(`${harness.baseUrl}/new-task?desktop-platform=windows`);
+
+  const context = page.getByLabel("Task start context");
+  const currentAgent = context.locator(".new-task-context-anchor-agent > button");
+  if ((await currentAgent.textContent())?.trim() !== "OpenAIDE Test Agent") {
+    await currentAgent.click();
+    await page.getByRole("menu", { name: "Agent" })
+      .getByRole("menuitemradio", { name: /OpenAIDE Test Agent/ })
+      .click({ force: true });
+  }
+  await page.getByRole("textbox", { name: "Message" }).fill("smoke:basic");
+  await page.getByLabel("Send message").click();
+
+  await expect(page.getByLabel("Task chat")).toBeVisible();
+  await expect(page.locator(".task-header-title > strong")).toHaveText("Smoke task");
+  await expect(page.locator(".desktop-title-bar-integrated")).toBeVisible();
+  await expect(page.locator(".desktop-title-bar-label")).toHaveCount(0);
+  await expect(page.getByLabel("Window controls", { exact: true })).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const chrome = document.querySelector(".desktop-title-bar-integrated");
+    const taskHeader = document.querySelector(".task-work-stack-header");
+    const actions = document.querySelector(".task-work-stack-header-actions");
+    const controls = document.querySelector(".desktop-caption-buttons");
+    if (!chrome || !taskHeader || !actions || !controls) throw new Error("Merged Desktop Task header is incomplete.");
+    const chromeRect = chrome.getBoundingClientRect();
+    const taskRect = taskHeader.getBoundingClientRect();
+    const controlsRect = controls.getBoundingClientRect();
+    const productControlRight = Math.max(
+      ...Array.from(taskHeader.querySelectorAll("button"), (button) => button.getBoundingClientRect().right),
+      0,
+    );
+    return {
+      chromeTop: chromeRect.top,
+      chromeHeight: chromeRect.height,
+      taskTop: taskRect.top,
+      taskHeight: taskRect.height,
+      productControlRight,
+      controlsLeft: controlsRect.left,
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    };
+  });
+  expect(layout.taskTop).toBeCloseTo(layout.chromeTop, 0);
+  expect(layout.taskHeight).toBeCloseTo(layout.chromeHeight, 0);
+  expect(layout.productControlRight).toBeLessThanOrEqual(layout.controlsLeft);
+  expect(layout.scrollWidth).toBe(layout.clientWidth);
+
+  await page.setViewportSize({ width: 800, height: 640 });
+  await expect(page.locator(".task-header-title > strong")).toHaveText("Smoke task");
+  await expect(page.getByLabel("Window controls", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(await page.evaluate(() => document.documentElement.clientWidth));
+});
+
 test("explains when a Native Session is already open in another window", async ({ page }) => {
   await page.setViewportSize({ width: 1_440, height: 900 });
   await page.goto(`${harness.baseUrl}/new-task`);

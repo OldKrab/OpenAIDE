@@ -14,8 +14,32 @@
   background: transparent;
 }
 
+.desktop-task-title-bar.app-sidebar-frame-with-overlay-header .sidebar {
+  padding-top: 45px;
+}
+
+.desktop-task-title-bar .app-sidebar-frame-overlay-header {
+  height: 45px;
+}
+
+.app-sidebar-frame-overlay-header .desktop-title-bar-integrated {
+  height: 45px;
+}
+
+.desktop-title-bar-integrated .desktop-title-bar-content {
+  pointer-events: none;
+}
+
+.desktop-title-bar-integrated .desktop-caption-buttons {
+  pointer-events: auto;
+}
+
 .app-sidebar-frame-overlay-header .desktop-caption-buttons button {
   height: 32px;
+}
+
+.app-sidebar-frame-overlay-header .desktop-title-bar-integrated .desktop-caption-buttons button {
+  height: 45px;
 }
 
 .desktop-title-bar-sidebar {

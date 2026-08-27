@@ -202,6 +202,10 @@ function actionsFromSubscriptionSnapshot(
         artifactId: snapshot.artifactId,
         details: mapProtocolToolDetail(snapshot.details),
       }];
+    case "subagentCatalog":
+    case "subagentHistory":
+      // Focused Task inspection owns these independently ordered replicas.
+      return [];
     case "worktreeRepository":
       return [{ type: "worktreeRepository", repository: snapshot.repository }];
   }

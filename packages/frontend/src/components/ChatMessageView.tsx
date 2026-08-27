@@ -22,6 +22,7 @@ export { firstToolPath } from "../state/toolDetailsViewModel";
 export const ChatRow = memo(function ChatRow({
   message,
   onLoadToolImagePreview,
+  onOpenSubagent,
   onSubscribeToolDetail,
   onPermissionRespond,
   onQuestionRespond,
@@ -39,6 +40,7 @@ export const ChatRow = memo(function ChatRow({
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  onOpenSubagent?: (subagentId: string) => void;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   onPermissionRespond: (
     requestId: string,
@@ -96,6 +98,7 @@ export const ChatRow = memo(function ChatRow({
       <ChatActivityView
         activity={body}
         onLoadToolImagePreview={onLoadToolImagePreview}
+        onOpenSubagent={onOpenSubagent}
         onSubscribeToolDetail={onSubscribeToolDetail}
         taskId={taskId}
         toolDetails={toolDetails}

@@ -236,6 +236,7 @@ fn pre_upgrade_subagent_activity_without_events_still_opens() {
                     created_at: "2026-07-28T00:00:00Z".to_string(),
                     collapsed: true,
                     steps: vec![crate::protocol::model::ActivityStep::Subagent {
+                        subagent_id: None,
                         tool_call_id: None,
                         title: None,
                         thread_id: None,
@@ -280,6 +281,7 @@ fn pre_upgrade_subagent_activity_without_events_still_opens() {
     assert!(matches!(
         &steps[0],
         crate::protocol::model::ActivityStep::Subagent {
+            subagent_id: None,
             events,
             ..
         } if events == &[crate::protocol::model::SubagentActivity::Delegated]

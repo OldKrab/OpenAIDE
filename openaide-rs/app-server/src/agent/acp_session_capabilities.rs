@@ -63,7 +63,7 @@ pub(super) fn validate_auth_method(
         .find(|method| method.id().0.as_ref() == method_id)
         .ok_or_else(|| RuntimeError::InvalidParams("method_id".to_string()))?;
     match method {
-        AuthMethod::Agent(_) | AuthMethod::EnvVar(_) | AuthMethod::Terminal(_) => Ok(()),
+        AuthMethod::Agent(_) | AuthMethod::Terminal(_) => Ok(()),
         _ => Err(RuntimeError::CapabilityMissing(format!(
             "auth method {} is not supported",
             auth_method_kind(method)

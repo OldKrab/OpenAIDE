@@ -148,7 +148,7 @@ pub(super) async fn run_prompt(
                 }
                 let connection = active_session.connection();
                 close_active_session(
-                    &connection,
+                    connection,
                     active_session.session_id().clone(),
                     context.supports_session_close,
                     context.trace.as_ref(),
@@ -225,7 +225,7 @@ pub(super) async fn run_prompt(
                     AcpSessionCommand::Delete { reply_tx } => {
                         let connection = active_session.connection();
                         let result = delete_active_session(
-                            &connection,
+                            connection,
                             active_session.session_id().clone(),
                             context.supports_session_delete,
                             context.trace.as_ref(),
@@ -517,7 +517,7 @@ async fn handle_prompt_config_command(
                     "queue_wait_ms": queued_at.elapsed().as_millis(),
                 }),
             );
-            let connection = active_session.connection();
+            let connection = active_session.connection().clone();
             let mut response = match set_task_config_option_after_prior_updates(
                 &connection,
                 active_session,

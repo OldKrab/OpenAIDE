@@ -27,12 +27,14 @@ import { presentThoughtMarkdown } from "./thoughtPresentation";
 export function ChatActivityView({
   activity,
   onLoadToolImagePreview,
+  onOpenSubagent,
   onSubscribeToolDetail,
   taskId,
   toolDetails,
 }: {
   activity: Extract<NormalizedMessage, { kind: "activity" }>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  onOpenSubagent?: (subagentId: string) => void;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
@@ -76,6 +78,7 @@ export function ChatActivityView({
               key={activityStepIdentity(step) ?? index}
               legacyToolName={activity.steps.length === 1 ? activity.title : undefined}
               onLoadToolImagePreview={onLoadToolImagePreview}
+              onOpenSubagent={onOpenSubagent}
               onSubscribeToolDetail={onSubscribeToolDetail}
               step={step}
               taskId={taskId}
@@ -95,6 +98,7 @@ function thoughtCountLabel(count: number) {
 export function ActivityStepRow({
   legacyToolName,
   onLoadToolImagePreview,
+  onOpenSubagent,
   onSubscribeToolDetail,
   step,
   taskId,
@@ -102,6 +106,7 @@ export function ActivityStepRow({
 }: {
   legacyToolName?: string;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  onOpenSubagent?: (subagentId: string) => void;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   step: ActivityStep;
   taskId: string;
@@ -156,6 +161,23 @@ export function ActivityStepRow({
     const hasProtocolDetails = Boolean(
       displayStep.title && displayStep.thread_id && displayStep.raw_path && displayStep.activity,
     );
+    if (displayStep.subagent_id && onOpenSubagent) {
+      return (
+        <button
+          className={`${className} subagent-history-link`}
+          onClick={() => onOpenSubagent(displayStep.subagent_id!)}
+          type="button"
+        >
+          <ActivityStepContent
+            icon={activityStepIcon(displayStep, legacyToolName)}
+            label={title}
+            tooltip={`Open ${label} history`}
+          />
+          {metadata}
+          <ChevronRight aria-hidden="true" size={13} />
+        </button>
+      );
+    }
     return (
       <AnimatedDisclosure
         className={className}

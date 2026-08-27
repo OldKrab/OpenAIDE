@@ -1,11 +1,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-#[cfg(test)]
-use crate::agent::acp_schema::ToolCallUpdate;
 use crate::agent::acp_schema::{
     PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall, ToolCallUpdate,
 };
 use serde_json::json;
 
@@ -103,6 +101,13 @@ impl LivePromptProjection {
         )
     }
 
+    pub(super) fn for_native_subagent(
+        agent_id: impl Into<String>,
+        sink: Arc<dyn AgentEventSink>,
+    ) -> Self {
+        Self::for_prompt(agent_id, sink, TurnCancellation::new(), None)
+    }
+
     #[cfg(test)]
     pub(super) fn remember_tool_call(&self, tool_call: ToolCall) {
         remember_tool_call(&self.tool_calls, tool_call);
@@ -117,14 +122,46 @@ impl LivePromptProjection {
         self,
         request: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse, RuntimeError> {
+        self.permission_response_inner(request, true, None).await
+    }
+
+    /// Child-session permission requests project their authoritative Tool call into
+    /// child history first, then use the root prompt only for the task-wide request.
+    pub(super) async fn permission_response_without_tool_projection(
+        self,
+        request: RequestPermissionRequest,
+        subagent_native_session_id: String,
+    ) -> Result<RequestPermissionResponse, RuntimeError> {
+        self.permission_response_inner(request, false, Some(subagent_native_session_id))
+            .await
+    }
+
+    pub(super) fn publish_permission_tool(
+        &self,
+        update: ToolCallUpdate,
+    ) -> Result<(), RuntimeError> {
+        let (tool_call, status_changed) =
+            merge_tool_call_update_with_status_change(&self.tool_calls, update);
+        self.publish_tool_call(&tool_call, status_changed)
+    }
+
+    async fn permission_response_inner(
+        self,
+        request: RequestPermissionRequest,
+        publish_tool: bool,
+        subagent_native_session_id: Option<String>,
+    ) -> Result<RequestPermissionResponse, RuntimeError> {
         self.drain_preceding_session_updates().await?;
         let (tool_call, status_changed) =
             merge_tool_call_update_with_status_change(&self.tool_calls, request.tool_call.clone());
         // ACP permission requests carry the authoritative tool-call update. Publish it
         // before waiting so Chat shows the activity beside the transient request even
         // when the Agent did not send a separate tool-call notification first.
-        self.publish_tool_call(&tool_call, status_changed)?;
-        let permission = permission_request_from_acp(request, &tool_call);
+        if publish_tool {
+            self.publish_tool_call(&tool_call, status_changed)?;
+        }
+        let permission =
+            permission_request_from_acp(request, &tool_call, subagent_native_session_id);
         logging::info(
             "acp_permission_bridge_wait_start",
             json!({
@@ -399,6 +436,7 @@ fn agent_permission_outcome_name(outcome: &AgentPermissionOutcome) -> &'static s
 fn permission_request_from_acp(
     request: RequestPermissionRequest,
     tool_call: &ToolCall,
+    subagent_native_session_id: Option<String>,
 ) -> AgentPermissionRequest {
     let tool_call_id = tool_call.tool_call_id.to_string();
     let title = tool_call.title.clone();
@@ -413,6 +451,7 @@ fn permission_request_from_acp(
             title,
             kind: Some(tool_kind_name(tool_call.kind)),
         },
+        subagent_native_session_id,
         options: request
             .options
             .into_iter()

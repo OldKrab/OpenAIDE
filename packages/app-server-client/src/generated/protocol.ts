@@ -166,6 +166,8 @@ export type ServerId = string & { readonly __openaideBrand: "ServerId" };
 
 export type StateRootId = string & { readonly __openaideBrand: "StateRootId" };
 
+export type SubagentId = string & { readonly __openaideBrand: "SubagentId" };
+
 export type TaskId = string & { readonly __openaideBrand: "TaskId" };
 
 export type TaskListCursor = string & { readonly __openaideBrand: "TaskListCursor" };
@@ -258,9 +260,25 @@ export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
 export type StateUnsubscribeResult = { scope: SubscriptionScope, };
 
-export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", section: TaskNavigationSection, projectIds?: Array<ProjectId> | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, };
+export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", section: TaskNavigationSection, projectIds?: Array<ProjectId> | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "subagentCatalog", taskId: TaskId, } | { "kind": "subagentHistory", taskId: TaskId, subagentId: SubagentId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, };
 
-export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, };
+export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "subagentCatalog", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistory", history: SubagentHistorySnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, };
+
+export type SubagentOverviewSnapshot = { totalCount: number, runningCount: number, attentionCount: number, available?: boolean, };
+
+export type SubagentStatus = "waitingForActivity" | "running" | "completed" | "failed" | "cancelled" | "disconnected";
+
+export type SubagentCapabilitiesSnapshot = { cancel?: boolean, close?: boolean, };
+
+export type SubagentDetailSnapshot = { label: string, value: string, };
+
+export type SubagentCatalogEntrySnapshot = { subagentId: SubagentId, parentSubagentId?: SubagentId | null, name: string, delegatedTask: string, status: SubagentStatus, capabilities: SubagentCapabilitiesSnapshot, spawnedOrder: number, historyRevision: number, historyAvailable?: boolean, details?: Array<SubagentDetailSnapshot>, };
+
+export type SubagentCatalogSnapshot = { taskId: TaskId, revision: number, entries: Array<SubagentCatalogEntrySnapshot>, hasMore?: boolean, };
+
+export type SubagentHistoryAvailability = "available" | "waitingForActivity" | "unavailable";
+
+export type SubagentHistorySnapshot = { taskId: TaskId, subagentId: SubagentId, revision: number, availability: SubagentHistoryAvailability, chat: ChatSnapshot, currentPlan?: AgentPlanSnapshot | null, startCursor?: MessageId | null, };
 
 export type RuntimeDiagnosticsParams = Record<symbol, never>;
 
@@ -920,7 +938,7 @@ subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCurso
 
 export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskUpdated", projectId: ProjectId, task: TaskSummary, } | { "kind": "projectEntriesReplaced", section: TaskNavigationSection, projectId: ProjectId, taskCount: number, entries: Array<TaskNavigationEntry>, hasMore: boolean, loading: boolean, } | { "kind": "refreshStateChanged", refresh: TaskNavigationRefreshState, } | { "kind": "navigationReplaced", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, };
+export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskUpdated", projectId: ProjectId, task: TaskSummary, } | { "kind": "projectEntriesReplaced", section: TaskNavigationSection, projectId: ProjectId, taskCount: number, entries: Array<TaskNavigationEntry>, hasMore: boolean, loading: boolean, } | { "kind": "refreshStateChanged", refresh: TaskNavigationRefreshState, } | { "kind": "navigationReplaced", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryUpdated", history: SubagentHistorySnapshot, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, };
 
 export type ToolDetailDelta = { "kind": "replaceDetails", details: ToolDetailSnapshot, } | { "kind": "appendTerminal", terminalId: string, data: string, };
 
@@ -1020,7 +1038,7 @@ permissionPolicy: TaskPermissionPolicy,
 /**
  * App Server-authored start of the active turn; absent when no turn is running.
  */
-activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, currentPlan?: AgentPlanSnapshot | null, messageQueue: TaskMessageQueueSnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, currentPlan?: AgentPlanSnapshot | null, messageQueue: TaskMessageQueueSnapshot, subagents: SubagentOverviewSnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
 
 export type TaskMessageQueueSnapshot = { revision: number, pause?: TaskMessageQueuePauseSnapshot | null, items?: Array<QueuedMessageSnapshot>, };
 
@@ -1106,7 +1124,7 @@ export type QuestionMessageAction = "submit" | "cancel";
 
 export type ActivityStatus = "running" | "completed" | "interrupted" | "failed";
 
-export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, presentation?: ToolPresentationSnapshot | null, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, } | { "kind": "subagent", toolCallId?: string | null, title?: string | null, threadId?: string | null, rawPath?: string | null, activity?: string | null, name: string, path: Array<string>, status: ActivityStatus, events: Array<SubagentActivitySnapshot>, };
+export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, presentation?: ToolPresentationSnapshot | null, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, } | { "kind": "subagent", subagentId?: SubagentId | null, toolCallId?: string | null, title?: string | null, threadId?: string | null, rawPath?: string | null, activity?: string | null, name: string, path: Array<string>, status: ActivityStatus, events: Array<SubagentActivitySnapshot>, };
 
 export type SubagentActivitySnapshot = "delegated" | "interacted" | "running" | "completed" | "failed" | "stopped";
 

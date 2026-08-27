@@ -25,6 +25,18 @@ describe("DesktopTitleBar", () => {
     expect(windowControls.toggleMaximize).toHaveBeenCalledOnce();
   });
 
+  it("leaves the integrated task row to identify the current task", () => {
+    const windowControls = controls("windows");
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<DesktopTitleBar integrated window={windowControls} />);
+    });
+
+    expect(tree.root.findAllByProps({ className: "desktop-title-bar-label" })).toHaveLength(0);
+    expect(tree.root.findByType("header").props.className).toContain("desktop-title-bar-integrated");
+    expect(tree.root.findByProps({ "aria-label": "Window controls" })).toBeTruthy();
+  });
+
   it("leaves commands and caption buttons to native macOS chrome", () => {
     const windowControls = controls("macos");
     let tree!: ReturnType<typeof create>;

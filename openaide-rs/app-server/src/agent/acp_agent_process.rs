@@ -164,6 +164,10 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     let active_session_ids: Arc<Mutex<HashSet<String>>> = Arc::default();
     let session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap =
         Arc::default();
+    let native_subagents = crate::agent::acp_native_subagents::AcpNativeSubagentRouter::new(
+        config.agent_id.clone(),
+        session_event_sinks.clone(),
+    );
     let session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap = Arc::default();
     let diagnostic_current_prompts = current_prompts.clone();
     let diagnostic_active_session_ids = active_session_ids.clone();
@@ -216,6 +220,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         session_event_sinks: session_event_sinks.clone(),
         session_traces: session_traces.clone(),
         elicitation_cancellations,
+        native_subagents: native_subagents.clone(),
     };
     let connection_terminal_registry = terminal_registry.clone();
 
@@ -241,6 +246,23 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 first_open.as_ref(),
             )
             .await?;
+            let client_enabled = crate::agent::acp_host::native_subagents_enabled();
+            let agent_advertised = initialize
+                .agent_capabilities
+                .session_capabilities
+                .subagents
+                .is_some();
+            let negotiated = client_enabled && agent_advertised;
+            native_subagents.set_negotiated(negotiated);
+            crate::logging::info(
+                "acp_native_subagents_negotiated",
+                serde_json::json!({
+                    "agent_id": config.agent_id,
+                    "client_enabled": client_enabled,
+                    "agent_advertised": agent_advertised,
+                    "negotiated": negotiated,
+                }),
+            );
             if let Some(first_open) = first_open {
                 open_on_shared_process(
                     &connection,
