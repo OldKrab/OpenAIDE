@@ -61,10 +61,11 @@ impl CodexAcpInstaller for RecordingInstaller {
         .expect("write managed package manifest");
         fs::write(package_root.join("dist/index.js"), "#!/usr/bin/env node\n")
             .expect("write managed package entrypoint");
-        let bin_root = destination.join("node_modules/.bin");
-        fs::create_dir_all(&bin_root).expect("create managed package launchers");
-        fs::write(bin_root.join("codex-acp.cmd"), "@echo off\r\n")
-            .expect("write managed Windows package launcher");
+        let codex_root = destination
+            .join("node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin");
+        fs::create_dir_all(&codex_root).expect("create managed native Codex fixture");
+        fs::write(codex_root.join("codex.exe"), "native Codex fixture")
+            .expect("write managed native Codex fixture");
         Ok(())
     }
 }
@@ -151,7 +152,7 @@ fn explicit_codex_launch_installs_the_locked_integration_once_and_reuses_it() {
 }
 
 #[test]
-fn windows_launch_uses_the_managed_batch_entrypoint() {
+fn windows_launch_uses_the_managed_native_codex_binary() {
     let storage = TempDir::new().expect("temporary storage root");
     let provisioner = CodexAcpProvisioner::with_installer_for_platform(
         storage.path().to_path_buf(),
@@ -163,20 +164,24 @@ fn windows_launch_uses_the_managed_batch_entrypoint() {
         .prepare(AcpAgentConfig::codex())
         .expect("managed Windows Codex launch");
 
-    let command = std::path::Path::new(&launch.config.command);
+    let expected_codex = storage
+        .path()
+        .join("agent-runtimes/codex-acp")
+        .join(CODEX_ACP_VERSION)
+        .join("node_modules/@openai/codex-win32-x64")
+        .join("vendor/x86_64-pc-windows-msvc/bin/codex.exe");
     assert_eq!(
-        command.file_name().and_then(std::ffi::OsStr::to_str),
-        Some("codex-acp.cmd")
+        launch
+            .config
+            .env
+            .iter()
+            .find(|(name, _)| name == "CODEX_PATH")
+            .map(|(_, value)| value.as_str()),
+        Some(expected_codex.to_string_lossy().as_ref()),
     );
-    assert_eq!(
-        command
-            .parent()
-            .and_then(std::path::Path::file_name)
-            .and_then(std::ffi::OsStr::to_str),
-        Some(".bin"),
-    );
-    assert!(launch.config.args.is_empty());
-    assert!(command.is_file());
+    assert_eq!(launch.config.args.len(), 1);
+    assert!(launch.config.args[0].ends_with("node_modules/@openaide/codex-acp/dist/index.js"));
+    assert!(!launch.config.command.ends_with(".cmd"));
 }
 
 #[test]
