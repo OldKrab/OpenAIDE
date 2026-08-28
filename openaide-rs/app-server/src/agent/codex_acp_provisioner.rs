@@ -229,10 +229,10 @@ impl CodexAcpProvisioner {
         let entrypoint = package_root(version_root).join("dist/index.js");
         let mut config = config;
         config.command = resolved_command_or_name("node");
-        // Backslashes in an absolute Windows script argument can be consumed
-        // while the ACP SDK constructs the child command line, leaving Node a
-        // drive-relative `C:` entrypoint. Node accepts forward slashes on
-        // Windows, so keep this process boundary unambiguous.
+        // Rust may preserve Windows' `\\?\` verbatim prefix after the managed
+        // installation is published. Node interprets the slash-normalized
+        // `//?/C:/...` form as a drive-relative `C:` entrypoint, so hand this
+        // process boundary an ordinary Node-compatible Windows path.
         config.args = vec![process_path_argument(&entrypoint, self.windows)];
         if self.windows {
             // The @openai/codex Node launcher can terminate when nested under
@@ -347,7 +347,15 @@ fn windows_codex_binary(version_root: &Path) -> PathBuf {
 fn process_path_argument(path: &Path, windows: bool) -> String {
     let value = path.to_string_lossy();
     if windows {
-        value.replace('\\', "/")
+        let normalized = value.replace('\\', "/");
+        if let Some(path) = normalized.strip_prefix("//?/UNC/") {
+            format!("//{path}")
+        } else {
+            normalized
+                .strip_prefix("//?/")
+                .unwrap_or(&normalized)
+                .to_string()
+        }
     } else {
         value.into_owned()
     }

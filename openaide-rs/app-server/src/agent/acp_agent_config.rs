@@ -80,17 +80,7 @@ impl AcpAgentConfig {
         let mut env = self.env.clone();
         env.extend(self.secret_env_values(host_bridge, secret_resolver)?);
         let args = process_args(&self.command, &self.args, &env, cfg!(windows));
-        if std::env::var_os("OPENAIDE_DEBUG_WINDOWS_CODEX_LAUNCH").is_some() {
-            eprintln!("[DEBUG-a4f2] process_args={args:?}");
-        }
         let agent = AcpAgent::from_args(args).map_err(super::acp_errors::acp_error)?;
-        let agent = if std::env::var_os("OPENAIDE_DEBUG_WINDOWS_CODEX_LAUNCH").is_some() {
-            agent.with_debug(|line, direction| {
-                eprintln!("[DEBUG-a4f2] {direction:?}: {line}");
-            })
-        } else {
-            agent
-        };
         Ok(match trace {
             Some(trace) => agent.with_debug(move |line, direction| {
                 trace.record_line(line, direction);

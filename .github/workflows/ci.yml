@@ -81,8 +81,6 @@ jobs:
       - name: Build the App Server boundary
         run: cargo build --locked -p openaide-app-server
       - name: Smoke-test App Server managed Codex launch
-        env:
-          OPENAIDE_DEBUG_WINDOWS_CODEX_LAUNCH: "1"
         run: >-
           node scripts/smoke-packaged-codex-acp.mjs
           target/debug/openaide-app-server.exe

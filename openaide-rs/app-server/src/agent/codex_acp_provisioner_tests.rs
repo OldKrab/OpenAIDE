@@ -186,11 +186,19 @@ fn windows_launch_uses_the_managed_native_codex_binary() {
 
 #[test]
 fn windows_process_paths_are_unambiguous_to_node() {
-    let path = std::path::Path::new(r"C:\Users\runneradmin\agent-runtimes\codex-acp\dist\index.js");
+    let path =
+        std::path::Path::new(r"\\?\C:\Users\runneradmin\agent-runtimes\codex-acp\dist\index.js");
 
     assert_eq!(
         process_path_argument(path, true),
         "C:/Users/runneradmin/agent-runtimes/codex-acp/dist/index.js"
+    );
+    assert_eq!(
+        process_path_argument(
+            std::path::Path::new(r"\\?\UNC\server\share\codex-acp\dist\index.js"),
+            true,
+        ),
+        "//server/share/codex-acp/dist/index.js"
     );
 }
 
