@@ -1054,6 +1054,20 @@ describe("app controller callbacks", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("requests deeper Project discovery for the Load more target", async () => {
+    const request = vi.fn(async () => ({ accepted: true }));
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+    }).navigation.loadNativeSessions(undefined, "project_1", 30);
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith("taskNavigation/loadMore", {
+      projectId: "project_1",
+      targetRowCount: 30,
+    });
+  });
+
   it("routes legacy history-page requests through the Task Navigation coordinator", async () => {
     const request = vi.fn(async () => ({ accepted: true }));
 
