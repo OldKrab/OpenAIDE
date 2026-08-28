@@ -20,16 +20,20 @@
 
 .desktop-task-title-bar .app-sidebar-frame-overlay-header {
   height: 45px;
+  /* The real Task header owns center controls and native drag handling. */
+  pointer-events: none;
 }
 
 .app-sidebar-frame-overlay-header .desktop-title-bar-integrated {
   height: 45px;
 }
 
-.desktop-title-bar-integrated .desktop-title-bar-content {
+.desktop-title-bar-integrated {
   pointer-events: none;
 }
 
+.desktop-title-bar-integrated .desktop-title-bar-sidebar,
+.desktop-title-bar-integrated .desktop-title-bar-native-end,
 .desktop-title-bar-integrated .desktop-caption-buttons {
   pointer-events: auto;
 }
