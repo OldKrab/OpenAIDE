@@ -65,6 +65,18 @@ test("merges an active Task header into Windows chrome", async ({ page }) => {
   await expect(page.locator(".desktop-title-bar-label")).toHaveCount(0);
   await expect(page.getByLabel("Window controls", { exact: true })).toBeVisible();
 
+  const taskTitle = page.locator(".task-header-title > strong");
+  expect(await taskTitle.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    return Boolean(hit?.closest(".task-header"));
+  })).toBe(true);
+
+  const permissionPolicy = page.getByRole("button", { name: /Permission handling:/ });
+  await permissionPolicy.click();
+  await expect(page.getByRole("menu", { name: "Permission handling" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
   const layout = await page.evaluate(() => {
     const chrome = document.querySelector(".desktop-title-bar-integrated");
     const taskHeader = document.querySelector(".task-work-stack-header");
