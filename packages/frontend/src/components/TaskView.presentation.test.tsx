@@ -522,6 +522,36 @@ describe("TaskView timeline presentation", () => {
     expect(configControl.props.disabled).toBe(true);
   });
 
+  it("shows managed integration activity while a saved Codex Task restores its options", async () => {
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.agent_config = {
+      agent_id: "codex",
+      status: "loading",
+      options: [],
+    };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshot)}
+          agents={[{
+            id: "codex",
+            label: "Codex",
+            description: "Codex Agent",
+            icon: "openai",
+            status: "installing",
+          }]}
+        />,
+      );
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Installing the Codex integration…");
+    expect(rendered).not.toContain("Loading options…");
+  });
+
   it("keeps permission handling available during unrelated Backend recovery", async () => {
     const { TaskView } = await import("./TaskView");
     let tree!: ReactTestRenderer;

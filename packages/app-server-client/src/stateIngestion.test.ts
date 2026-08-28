@@ -18,6 +18,41 @@ import { applySubscriptionEvent, createSubscriptionIngestionState } from "./stat
 const rootId = "root-1" as StateRootId;
 
 describe("scope-local state ingestion", () => {
+  it("applies live Agent collection status updates", () => {
+    const state = createSubscriptionIngestionState({
+      scope: { kind: "agents" },
+      cursor: "cursor-1" as EventCursor,
+      snapshot: {
+        kind: "agents",
+        agents: { agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "disconnected" }] },
+      },
+    }, {
+      stateRootId: rootId,
+      clientInstanceId: "client-1" as never,
+    });
+    const result = applySubscriptionEvent(state, {
+      subscription: { kind: "agents" },
+      previousCursor: "cursor-1" as EventCursor,
+      cursor: "cursor-2" as EventCursor,
+      scope: { kind: "stateRoot", stateRootId: rootId },
+      payload: {
+        kind: "agentCollectionUpdated",
+        agents: { agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "installing" }] },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "applied",
+      snapshotChanged: true,
+      state: {
+        snapshot: {
+          kind: "agents",
+          agents: { agents: [{ agentId: "codex", status: "installing" }] },
+        },
+      },
+    });
+  });
+
   it("applies one atomic Task patch at the exact next Task revision", () => {
     const state = taskState("task-1", 4);
     const item = chatItem("agent-1", "Hello");

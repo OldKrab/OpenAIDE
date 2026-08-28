@@ -474,15 +474,39 @@ impl RpcGateway {
         &mut self,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        // Provisioning completion is an Agent Status transition. Reuse the
+        // Provisioning activity is an Agent Status transition. Reuse the
         // coalesced discovery owner so session history appears without a
         // frontend-authored retry or a prompt replay.
         self.agent_list_sessions
             .request_native_session_catalog_refresh();
-        match self.snapshots.agent_collection_snapshot() {
-            Ok(agents) => self.publish_agent_collection_update(agents, now),
+        let events = match self.snapshots.agent_collection_snapshot() {
+            Ok(agents) => {
+                let installing_agent_count = agents
+                    .agents
+                    .iter()
+                    .filter(|agent| {
+                        agent.status
+                            == openaide_app_server_protocol::snapshot::AgentStatus::Installing
+                    })
+                    .count();
+                let events = self.publish_agent_collection_update(agents, now);
+                if installing_agent_count > 0 {
+                    crate::logging::info(
+                        "agent_installation_status_published",
+                        serde_json::json!({
+                            "installing_agent_count": installing_agent_count,
+                            "event_count": events.len(),
+                        }),
+                    );
+                }
+                events
+            }
             Err(_) => Vec::new(),
-        }
+        };
+        // Local HTTP clients drain background publications on their next poll;
+        // stdio callers also receive this returned copy for immediate delivery.
+        self.pending_event_deliveries.extend(events.clone());
+        events
     }
 
     fn dispose_prepared_tasks_after_agent_mutation(&self, agent_id: &str, operation: &str) {

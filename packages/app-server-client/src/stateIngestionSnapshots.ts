@@ -28,6 +28,9 @@ export function updateSubscriptionSnapshot(
         ? changed({ kind: "projects", projects: payload.projects })
         : unchanged(snapshot);
     case "agents":
+      return payload.kind === "agentCollectionUpdated"
+        ? changed({ kind: "agents", agents: payload.agents })
+        : unchanged(snapshot);
     case "settings":
       return unchanged(snapshot);
     case "taskNavigation":
