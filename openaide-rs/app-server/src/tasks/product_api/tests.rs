@@ -3159,8 +3159,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
     let workspace_root = temp.path().join("project-with-agent-history");
-    let session_workspace = workspace_root.join("nested-workspace");
-    std::fs::create_dir_all(&session_workspace).unwrap();
+    std::fs::create_dir_all(&workspace_root).unwrap();
     let configured_projects = ConfiguredProjectRoots::default();
     configured_projects
         .enable_persistence(store.clone())
@@ -3172,7 +3171,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-existing".to_string(),
-            cwd: session_workspace.to_string_lossy().to_string(),
+            cwd: workspace_root.to_string_lossy().to_string(),
             title: Some("Existing Agent session".to_string()),
             last_activity: Some("2026-08-01T00:00:00Z".to_string()),
             updated_at: Some("2026-08-01T00:00:00Z".to_string()),
@@ -3206,7 +3205,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
 }
 
 #[test]
-fn full_native_catalog_refresh_discovers_sessions_in_nested_project_folders() {
+fn full_native_catalog_refresh_discovers_sessions_in_known_task_workspaces() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
     let project_root = temp.path().join("project");
@@ -3219,6 +3218,9 @@ fn full_native_catalog_refresh_discovers_sessions_in_nested_project_folders() {
     let project = configured_projects
         .add_project(&project_root.to_string_lossy())
         .unwrap();
+    let mut task = task_record("task-in-nested-workspace", &session_root.to_string_lossy());
+    task.project_root = Some(project_root.to_string_lossy().to_string());
+    store.write_task(&task).unwrap();
     let resolver = StorageProjectResolver::new_with_configured_roots(
         store.clone(),
         configured_projects.clone(),
@@ -3399,19 +3401,85 @@ fn project_load_stops_after_the_requested_navigation_window() {
         !api.native_session_catalog()
             .project_refreshing(project.project_id.as_str())
     });
-    assert_eq!(
-        agent.requested_cursors(),
-        vec![None, Some("page-2".to_string())]
-    );
+    for agent_id in ["codex", "opencode"] {
+        assert_eq!(
+            agent.requested_cursors_for(agent_id),
+            vec![None, Some("page-2".to_string())]
+        );
+    }
     assert_eq!(
         api.native_session_catalog()
             .project(project.project_id.as_str())
             .len(),
-        10
+        20
     );
     assert!(api
         .native_session_catalog()
         .project_has_more(project.project_id.as_str()));
+}
+
+#[test]
+fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace_root = temp.path().join("bounded-navigation-project");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let project = configured_projects
+        .add_project(&workspace_root.to_string_lossy())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(BoundedGlobalSessionAgent {
+        requested_cursors: Mutex::new(Vec::new()),
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects,
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_refresh();
+    wait_until(|| !api.native_session_catalog().refreshing());
+
+    for agent_id in ["codex", "opencode"] {
+        assert_eq!(
+            agent.requested_cursors_for(agent_id),
+            vec![
+                None,
+                Some("page-2".to_string()),
+                Some("page-3".to_string()),
+                Some("page-4".to_string()),
+            ]
+        );
+    }
+    assert!(api
+        .native_session_catalog()
+        .project_has_more(project.project_id.as_str()));
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 30);
+    wait_until(|| {
+        !api.native_session_catalog()
+            .project_refreshing(project.project_id.as_str())
+    });
+
+    for agent_id in ["codex", "opencode"] {
+        assert!(agent
+            .requested_cursors_for(agent_id)
+            .iter()
+            .any(|cursor| cursor.as_deref() == Some("page-5")));
+    }
 }
 
 #[test]
@@ -9827,13 +9895,28 @@ struct ArchivedFirstPageAgent {
 }
 
 struct BoundedGlobalSessionAgent {
-    requested_cursors: Mutex<Vec<Option<String>>>,
+    requested_cursors: Mutex<Vec<(String, Option<String>)>>,
     workspace_root: String,
 }
 
 impl BoundedGlobalSessionAgent {
     fn requested_cursors(&self) -> Vec<Option<String>> {
-        self.requested_cursors.lock().unwrap().clone()
+        self.requested_cursors
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, cursor)| cursor.clone())
+            .collect()
+    }
+
+    fn requested_cursors_for(&self, agent_id: &str) -> Vec<Option<String>> {
+        self.requested_cursors
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(requested_agent_id, _)| requested_agent_id == agent_id)
+            .map(|(_, cursor)| cursor.clone())
+            .collect()
     }
 }
 
@@ -9845,12 +9928,14 @@ impl AgentRuntime for BoundedGlobalSessionAgent {
         self.requested_cursors
             .lock()
             .unwrap()
-            .push(request.cursor.clone());
+            .push((request.agent_id.clone(), request.cursor.clone()));
         let page = match request.cursor.as_deref() {
             None => 0,
             Some("page-2") => 1,
             Some("page-3") => 2,
-            _ => 3,
+            Some("page-4") => 3,
+            Some("page-5") => 4,
+            _ => 5,
         };
         let sessions = (0..5)
             .map(|index| AgentListedSession {
@@ -9865,6 +9950,8 @@ impl AgentRuntime for BoundedGlobalSessionAgent {
             0 => Some("page-2".to_string()),
             1 => Some("page-3".to_string()),
             2 => Some("page-4".to_string()),
+            3 => Some("page-5".to_string()),
+            4 => Some("page-6".to_string()),
             _ => None,
         };
         Ok(AgentListSessionsResult {

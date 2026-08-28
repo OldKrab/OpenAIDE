@@ -27,6 +27,14 @@ struct NativeCatalogRefreshState {
 }
 
 impl NativeCatalogRefreshCoordinator {
+    fn begin_ordinary_refresh(&self) {
+        self.state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .exhausted_project_ids
+            .clear();
+    }
+
     fn project_is_exhausted(&self, project_id: &str) -> bool {
         self.state
             .lock()
@@ -61,6 +69,7 @@ impl TaskProductApi {
 
     /// Coalesces catalog work while preserving one trailing refresh requested during a run.
     pub(crate) fn request_native_session_catalog_refresh(&self) {
+        self.native_catalog_refresh.begin_ordinary_refresh();
         {
             let mut state = self
                 .native_catalog_refresh
@@ -216,7 +225,10 @@ impl TaskProductApi {
         &self,
         project_filter: Option<&str>,
     ) -> Result<(), ProtocolError> {
-        self.refresh_native_session_project_trees(project_filter, None)
+        self.refresh_native_session_project_trees(
+            project_filter,
+            Some(Self::initial_native_session_row_target()),
+        )
     }
 
     /// Advances owned Task activity and records possible external changes without replacing

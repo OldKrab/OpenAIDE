@@ -1,19 +1,25 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::Instant;
 
 use openaide_app_server_protocol::errors::ProtocolError;
 
 use crate::agent::AgentListSessionsRequest;
+use crate::native_sessions::catalog::NativeSessionRef;
 use crate::projects::ProjectIdentity;
 
 use super::session_cursor::OpaqueSessionCursor;
 use super::{protocol_error_from_runtime, TaskProductApi};
 
+/// Bounds passive refresh work while covering the largest initial per-Project window.
+const INITIAL_NATIVE_SESSION_ROW_TARGET: usize = 20;
+
 impl TaskProductApi {
-    /// Discovers sessions for an added Project, including nested working folders.
+    /// Discovers a bounded window for every known Project workspace and enabled Agent.
     ///
-    /// ACP's cwd filter is exact, so Project-tree discovery requests the global
-    /// catalog and assigns every session to its most specific visible Project.
+    /// ACP's cwd filter is exact, so roots, available worktrees, and historical Task
+    /// workspaces are independent discovery contexts. This avoids making a sparse Project
+    /// paginate through another Project's entire Agent history.
     pub(super) fn refresh_native_session_project_trees(
         &self,
         project_filter: Option<&str>,
@@ -24,19 +30,21 @@ impl TaskProductApi {
             .store
             .list_all_task_records_strict()
             .map_err(protocol_error_from_runtime)?;
-        let mut workspace_owners = projects
+        let mut project_workspaces = projects
             .iter()
-            .map(|project| ProjectWorkspaceOwner {
-                project_id: project.project_id.as_str().to_string(),
-                workspace_root: project.workspace_root.clone(),
+            .map(|project| {
+                (
+                    project.project_id.as_str().to_string(),
+                    project.workspace_root.clone(),
+                )
             })
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
         for project in &projects {
             if let Ok(Some(repository)) = self
                 .worktrees
                 .refresh_project(Path::new(&project.workspace_root))
             {
-                workspace_owners.extend(
+                project_workspaces.extend(
                     repository
                         .repository
                         .worktrees
@@ -46,9 +54,8 @@ impl TaskProductApi {
                                 && worktree.availability
                                     == openaide_app_server_protocol::worktree::WorktreeAvailability::Available
                         })
-                        .map(|worktree| ProjectWorkspaceOwner {
-                            project_id: project.project_id.as_str().to_string(),
-                            workspace_root: worktree.path,
+                        .map(|worktree| {
+                            (project.project_id.as_str().to_string(), worktree.path)
                         }),
                 );
             }
@@ -62,14 +69,14 @@ impl TaskProductApi {
             if self.configured_projects.is_removed(&project.project_id) {
                 continue;
             }
-            workspace_owners.push(ProjectWorkspaceOwner {
-                project_id: project.project_id.as_str().to_string(),
-                workspace_root: project.workspace_root,
-            });
-            workspace_owners.push(ProjectWorkspaceOwner {
-                project_id: project.project_id.as_str().to_string(),
-                workspace_root: task.workspace_root.clone(),
-            });
+            project_workspaces.insert((
+                project.project_id.as_str().to_string(),
+                project.workspace_root,
+            ));
+            project_workspaces.insert((
+                project.project_id.as_str().to_string(),
+                task.workspace_root.clone(),
+            ));
         }
         let mut selected_project_ids = projects
             .iter()
@@ -79,105 +86,92 @@ impl TaskProductApi {
             .map(|project| project.project_id.as_str().to_string())
             .collect::<HashSet<_>>();
         selected_project_ids.extend(
-            workspace_owners
+            project_workspaces
                 .iter()
-                .filter(|owner| project_filter.is_none_or(|filter| owner.project_id == filter))
-                .map(|owner| owner.project_id.clone()),
+                .filter(|(project_id, _)| project_filter.is_none_or(|filter| project_id == filter))
+                .map(|(project_id, _)| project_id.clone()),
         );
         if project_filter.is_some_and(|project_id| !selected_project_ids.contains(project_id)) {
             return Err(super::internal_error(
                 "Project disappeared during session discovery",
             ));
         }
-        let mut discovered_counts = HashMap::<String, usize>::new();
-        let mut stopped_with_more = false;
         let agents = self.agent_registry.summaries();
-
-        for (agent_index, agent) in agents.iter().enumerate() {
-            let mut cursor = OpaqueSessionCursor::new(None);
-            let mut seen_session_ids = std::collections::HashSet::new();
-            let mut sessions_by_workspace = HashMap::<(String, String), Vec<_>>::new();
-            loop {
-                let result = self
-                    .agent_gateway
-                    .list_sessions(AgentListSessionsRequest {
-                        agent_id: agent.id.clone(),
-                        cwd: None,
-                        cursor: cursor.current(),
+        let target_row_count = target_row_count.unwrap_or(INITIAL_NATIVE_SESSION_ROW_TARGET);
+        let selected_workspaces = project_workspaces
+            .iter()
+            .filter(|(project_id, _)| project_filter.is_none_or(|filter| project_id == filter))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut outcomes = Vec::with_capacity(agents.len() * selected_workspaces.len());
+        let mut first_error = None;
+        let agent_results = std::thread::scope(|scope| {
+            agents
+                .iter()
+                .map(|agent| {
+                    scope.spawn(|| {
+                        let mut agent_outcomes = Vec::with_capacity(selected_workspaces.len());
+                        let mut agent_error = None;
+                        for (project_id, workspace_root) in &selected_workspaces {
+                            match self.refresh_native_session_context(
+                                &agent.id,
+                                project_id,
+                                workspace_root,
+                                target_row_count,
+                                &task_records,
+                            ) {
+                                Ok(outcome) => agent_outcomes.push(outcome),
+                                Err(error) => {
+                                    agent_error.get_or_insert(error);
+                                }
+                            }
+                        }
+                        (agent_outcomes, agent_error)
                     })
-                    .map_err(protocol_error_from_runtime)?;
-                let mut new_identity_count = 0_usize;
-                let mut page_by_workspace = HashMap::<(String, String), Vec<_>>::new();
-                for session in result.sessions {
-                    if !seen_session_ids.insert(session.session_id.clone()) {
-                        continue;
-                    }
-                    new_identity_count = new_identity_count.saturating_add(1);
-                    if let Some(owner) =
-                        owning_project(&workspace_owners, &session.cwd).filter(|owner| {
-                            project_filter.is_none_or(|filter| owner.project_id == filter)
-                        })
-                    {
-                        page_by_workspace
-                            .entry((owner.project_id.clone(), session.cwd.clone()))
-                            .or_default()
-                            .push(session);
+                })
+                .map(|worker| worker.join())
+                .collect::<Vec<_>>()
+        });
+        for result in agent_results {
+            match result {
+                Ok((agent_outcomes, agent_error)) => {
+                    outcomes.extend(agent_outcomes);
+                    if let Some(error) = agent_error {
+                        first_error.get_or_insert(error);
                     }
                 }
-                for ((project_id, workspace_root), sessions) in page_by_workspace {
-                    discovered_counts
-                        .entry(project_id.clone())
-                        .and_modify(|count| *count = count.saturating_add(sessions.len()))
-                        .or_insert(sessions.len());
-                    self.record_native_catalog_page(
-                        &project_id,
-                        &agent.id,
-                        &workspace_root,
-                        &sessions,
-                    )?;
-                    sessions_by_workspace
-                        .entry((project_id, workspace_root))
-                        .or_default()
-                        .extend(sessions);
+                Err(_) => {
+                    first_error.get_or_insert_with(|| {
+                        super::internal_error("Native Session refresh worker panicked")
+                    });
                 }
-                let next_cursor = cursor.advance(result.next_cursor);
-                if new_identity_count == 0 {
-                    break;
-                }
-                if target_row_count.is_some_and(|target| {
-                    selected_project_ids.iter().all(|project_id| {
-                        self.active_navigation_row_count(project_id, &task_records) >= target
-                    })
-                }) {
-                    stopped_with_more = next_cursor.is_some() || agent_index + 1 < agents.len();
-                    break;
-                }
-                if next_cursor.is_none() {
-                    break;
-                }
-            }
-
-            for ((_project_id, workspace_root), sessions) in sessions_by_workspace {
-                self.reconcile_native_session_activity(
-                    &agent.id,
-                    &workspace_root,
-                    &sessions,
-                    &task_records,
-                )?;
-            }
-            if stopped_with_more {
-                break;
             }
         }
-
-        if !stopped_with_more {
-            self.native_catalog_refresh
-                .mark_projects_exhausted(selected_project_ids.iter());
+        if let Some(error) = first_error {
+            return Err(error);
         }
+
+        let mut discovered_counts = HashMap::<String, usize>::new();
+        let mut projects_with_more = HashSet::<String>::new();
+        for outcome in outcomes {
+            discovered_counts
+                .entry(outcome.project_id.clone())
+                .and_modify(|count| *count = count.saturating_add(outcome.discovered_count))
+                .or_insert(outcome.discovered_count);
+            if outcome.has_more {
+                projects_with_more.insert(outcome.project_id);
+            }
+        }
+        self.native_catalog_refresh.mark_projects_exhausted(
+            selected_project_ids
+                .iter()
+                .filter(|project_id| !projects_with_more.contains(*project_id)),
+        );
         for project_id in selected_project_ids {
+            let has_more = projects_with_more.contains(&project_id);
             if self
                 .native_catalog
-                .set_project_has_more(&project_id, stopped_with_more)
+                .set_project_has_more(&project_id, has_more)
             {
                 self.task_notifier
                     .navigation_project_entries_changed(project_id.clone());
@@ -193,73 +187,124 @@ impl TaskProductApi {
         Ok(())
     }
 
-    fn active_navigation_row_count(
+    fn refresh_native_session_context(
         &self,
+        agent_id: &str,
         project_id: &str,
+        workspace_root: &str,
+        target_row_count: usize,
         task_records: &[crate::storage::records::TaskRecord],
-    ) -> usize {
-        let enabled_agents = self
-            .agent_registry
-            .summaries()
-            .into_iter()
-            .map(|agent| agent.id)
-            .collect::<HashSet<_>>();
-        let owned = task_records
+    ) -> Result<NativeSessionContextRefresh, ProtocolError> {
+        let started_at = Instant::now();
+        crate::logging::info(
+            "native_session_context_refresh_started",
+            serde_json::json!({
+                "operation": "agent/list_sessions/context",
+                "agent_id": agent_id,
+                "project_id": project_id,
+                "target_row_count": target_row_count,
+            }),
+        );
+        let owned_sessions = task_records
             .iter()
             .filter_map(|task| {
                 task.agent_session_id
                     .as_ref()
-                    .map(|session_id| (task.agent_id.clone(), session_id.clone()))
+                    .map(|session_id| (task.agent_id.as_str(), session_id.as_str()))
             })
             .collect::<HashSet<_>>();
-        let task_count = task_records
-            .iter()
-            .filter(|task| {
-                !task.tombstoned
-                    && task.lifecycle.is_open()
-                    && enabled_agents.contains(&task.agent_id)
-                    && ProjectIdentity::from_workspace_root(
-                        task.project_root.as_deref().unwrap_or(&task.workspace_root),
-                    )
-                    .project_id
-                    .as_str()
-                        == project_id
-            })
-            .count();
-        let session_count = self
-            .native_catalog
-            .entries()
-            .into_iter()
-            .filter(|entry| entry.project_id == project_id)
-            .filter(|entry| enabled_agents.contains(&entry.observation.reference.agent_id))
-            .filter(|entry| {
-                !owned.contains(&(
-                    entry.observation.reference.agent_id.clone(),
-                    entry.observation.reference.session_id.clone(),
-                ))
-            })
-            .filter(|entry| {
-                !self
-                    .native_catalog
-                    .is_archived(&entry.observation.reference)
-            })
-            .count();
-        task_count + session_count
+        let mut cursor = OpaqueSessionCursor::new(None);
+        let mut seen_session_ids = HashSet::new();
+        let mut visible_session_ids = HashSet::new();
+        let mut page_count = 0_usize;
+        let mut has_more = false;
+        loop {
+            let result = match self.agent_gateway.list_sessions(AgentListSessionsRequest {
+                agent_id: agent_id.to_string(),
+                cwd: Some(workspace_root.to_string()),
+                cursor: cursor.current(),
+            }) {
+                Ok(result) => result,
+                Err(error) => {
+                    crate::logging::warn(
+                        "native_session_context_refresh_failed",
+                        serde_json::json!({
+                            "operation": "agent/list_sessions/context",
+                            "agent_id": agent_id,
+                            "project_id": project_id,
+                            "duration_ms": started_at.elapsed().as_millis(),
+                            "page_count": page_count,
+                            "error_kind": error.code(),
+                        }),
+                    );
+                    return Err(protocol_error_from_runtime(error));
+                }
+            };
+            page_count = page_count.saturating_add(1);
+            let mut new_identity_count = 0_usize;
+            for session in &result.sessions {
+                if !seen_session_ids.insert(session.session_id.clone()) {
+                    continue;
+                }
+                new_identity_count = new_identity_count.saturating_add(1);
+                let reference = NativeSessionRef::new(agent_id, &session.session_id);
+                if !owned_sessions.contains(&(agent_id, session.session_id.as_str()))
+                    && !self.native_catalog.is_archived(&reference)
+                {
+                    visible_session_ids.insert(session.session_id.clone());
+                }
+            }
+            self.record_native_catalog_page(
+                project_id,
+                agent_id,
+                workspace_root,
+                &result.sessions,
+            )?;
+            self.reconcile_native_session_activity(
+                agent_id,
+                workspace_root,
+                &result.sessions,
+                task_records,
+            )?;
+            let next_cursor = cursor.advance(result.next_cursor);
+            if new_identity_count == 0 {
+                break;
+            }
+            if visible_session_ids.len() >= target_row_count {
+                has_more = next_cursor.is_some();
+                break;
+            }
+            if next_cursor.is_none() {
+                break;
+            }
+        }
+        crate::logging::info(
+            "native_session_context_refresh_completed",
+            serde_json::json!({
+                "operation": "agent/list_sessions/context",
+                "agent_id": agent_id,
+                "project_id": project_id,
+                "duration_ms": started_at.elapsed().as_millis(),
+                "page_count": page_count,
+                "observed_session_count": seen_session_ids.len(),
+                "visible_session_count": visible_session_ids.len(),
+                "has_more": has_more,
+            }),
+        );
+        Ok(NativeSessionContextRefresh {
+            project_id: project_id.to_string(),
+            discovered_count: seen_session_ids.len(),
+            has_more,
+        })
+    }
+
+    pub(super) fn initial_native_session_row_target() -> usize {
+        INITIAL_NATIVE_SESSION_ROW_TARGET
     }
 }
 
-struct ProjectWorkspaceOwner {
+struct NativeSessionContextRefresh {
     project_id: String,
-    workspace_root: String,
-}
-
-fn owning_project<'a>(
-    projects: &'a [ProjectWorkspaceOwner],
-    workspace_root: &str,
-) -> Option<&'a ProjectWorkspaceOwner> {
-    let workspace_root = Path::new(workspace_root);
-    projects
-        .iter()
-        .filter(|project| workspace_root.starts_with(Path::new(&project.workspace_root)))
-        .max_by_key(|project| Path::new(&project.workspace_root).components().count())
+    discovered_count: usize,
+    has_more: bool,
 }
