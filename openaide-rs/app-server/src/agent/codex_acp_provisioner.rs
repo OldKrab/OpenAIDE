@@ -229,16 +229,18 @@ impl CodexAcpProvisioner {
         let entrypoint = package_root(version_root).join("dist/index.js");
         let mut config = config;
         config.command = resolved_command_or_name("node");
-        config.args = vec![entrypoint.to_string_lossy().into_owned()];
+        // Rust may preserve Windows' `\\?\` verbatim prefix after the managed
+        // installation is published. Node interprets the slash-normalized
+        // `//?/C:/...` form as a drive-relative `C:` entrypoint, so hand this
+        // process boundary an ordinary Node-compatible Windows path.
+        config.args = vec![process_path_argument(&entrypoint, self.windows)];
         if self.windows {
             // The @openai/codex Node launcher can terminate when nested under
             // codex-acp on Windows. Use its pinned native binary directly.
             config.env.retain(|(name, _)| name != "CODEX_PATH");
             config.env.push((
                 "CODEX_PATH".to_string(),
-                windows_codex_binary(version_root)
-                    .to_string_lossy()
-                    .into_owned(),
+                process_path_argument(&windows_codex_binary(version_root), true),
             ));
         }
         Ok(PreparedCodexAcpLaunch {
@@ -340,6 +342,23 @@ fn windows_codex_binary(version_root: &Path) -> PathBuf {
     version_root
         .join("node_modules/@openai/codex-win32-x64")
         .join("vendor/x86_64-pc-windows-msvc/bin/codex.exe")
+}
+
+fn process_path_argument(path: &Path, windows: bool) -> String {
+    let value = path.to_string_lossy();
+    if windows {
+        let normalized = value.replace('\\', "/");
+        if let Some(path) = normalized.strip_prefix("//?/UNC/") {
+            format!("//{path}")
+        } else {
+            normalized
+                .strip_prefix("//?/")
+                .unwrap_or(&normalized)
+                .to_string()
+        }
+    } else {
+        value.into_owned()
+    }
 }
 
 fn validate_platform_runtime(version_root: &Path, windows: bool) -> Result<(), RuntimeError> {
