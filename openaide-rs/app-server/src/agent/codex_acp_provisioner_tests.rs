@@ -61,6 +61,10 @@ impl CodexAcpInstaller for RecordingInstaller {
         .expect("write managed package manifest");
         fs::write(package_root.join("dist/index.js"), "#!/usr/bin/env node\n")
             .expect("write managed package entrypoint");
+        let bin_root = destination.join("node_modules/.bin");
+        fs::create_dir_all(&bin_root).expect("create managed package launchers");
+        fs::write(bin_root.join("codex-acp.cmd"), "@echo off\r\n")
+            .expect("write managed Windows package launcher");
         Ok(())
     }
 }
@@ -144,6 +148,35 @@ fn explicit_codex_launch_installs_the_locked_integration_once_and_reuses_it() {
         .args
         .iter()
         .any(|argument| argument.contains("agentclientprotocol")));
+}
+
+#[test]
+fn windows_launch_uses_the_managed_batch_entrypoint() {
+    let storage = TempDir::new().expect("temporary storage root");
+    let provisioner = CodexAcpProvisioner::with_installer_for_platform(
+        storage.path().to_path_buf(),
+        Arc::new(RecordingInstaller::default()),
+        true,
+    );
+
+    let launch = provisioner
+        .prepare(AcpAgentConfig::codex())
+        .expect("managed Windows Codex launch");
+
+    let command = std::path::Path::new(&launch.config.command);
+    assert_eq!(
+        command.file_name().and_then(std::ffi::OsStr::to_str),
+        Some("codex-acp.cmd")
+    );
+    assert_eq!(
+        command
+            .parent()
+            .and_then(std::path::Path::file_name)
+            .and_then(std::ffi::OsStr::to_str),
+        Some(".bin"),
+    );
+    assert!(launch.config.args.is_empty());
+    assert!(command.is_file());
 }
 
 #[test]
