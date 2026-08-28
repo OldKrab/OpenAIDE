@@ -23,6 +23,7 @@ fn explicit_codex_launch_times_out_while_another_process_owns_provisioning() {
     fs::create_dir_all(&runtime_root).expect("create managed runtime root");
     let lock = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(runtime_root.join(".install.lock"))
@@ -211,4 +212,28 @@ fn missing_npm_is_reported_as_a_node_js_setup_requirement() {
         error,
         crate::protocol::errors::RuntimeError::NodeJsRequired(_)
     ));
+}
+
+#[test]
+fn successful_install_removes_stale_staging_and_unleased_versions_beyond_previous() {
+    let storage = TempDir::new().expect("temporary storage root");
+    let runtime_root = storage.path().join("agent-runtimes/codex-acp");
+    fs::create_dir_all(runtime_root.join(".1.1.5.installing-abandoned"))
+        .expect("create stale staging fixture");
+    for version in ["1.0.0", "1.0.1", "1.1.0"] {
+        fs::create_dir_all(runtime_root.join(version)).expect("create old version fixture");
+    }
+    let provisioner = CodexAcpProvisioner::with_installer(
+        storage.path().to_path_buf(),
+        Arc::new(RecordingInstaller::default()),
+    );
+
+    provisioner
+        .prepare(AcpAgentConfig::codex())
+        .expect("managed Codex launch");
+
+    assert!(!runtime_root.join(".1.1.5.installing-abandoned").exists());
+    assert!(runtime_root.join("1.1.0").exists());
+    assert!(!runtime_root.join("1.0.1").exists());
+    assert!(!runtime_root.join("1.0.0").exists());
 }

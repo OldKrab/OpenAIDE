@@ -174,6 +174,7 @@ impl CodexAcpProvisioner {
     ) -> Result<PreparedCodexAcpLaunch, RuntimeError> {
         let install_lock = open_lock_file(&runtimes_root.join(".install.lock"))?;
         lock_exclusive_until(&install_lock, Instant::now() + self.timeout)?;
+        cleanup_stale_staging(runtimes_root);
 
         if !valid_installation(version_root) {
             if version_root.exists() {
@@ -199,6 +200,7 @@ impl CodexAcpProvisioner {
             }
             result?;
         }
+        prune_old_versions(runtimes_root, CODEX_ACP_VERSION);
         FileExt::unlock(&install_lock).map_err(provisioning_io_error)?;
 
         let lease = Arc::new(open_lock_file(&version_root.join(".lease"))?);
@@ -321,6 +323,8 @@ fn validate_package(version_root: &Path) -> Result<(), RuntimeError> {
 fn open_lock_file(path: &Path) -> Result<File, RuntimeError> {
     OpenOptions::new()
         .create(true)
+        // Lock files preserve their inode and contents are intentionally irrelevant.
+        .truncate(false)
         .read(true)
         .write(true)
         .open(path)
@@ -342,6 +346,69 @@ fn lock_exclusive_until(file: &File, deadline: Instant) -> Result<(), RuntimeErr
             Err(error) => return Err(provisioning_io_error(error)),
         }
     }
+}
+
+fn cleanup_stale_staging(runtimes_root: &Path) {
+    let Ok(entries) = fs::read_dir(runtimes_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') && name.contains(".installing-") {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+fn prune_old_versions(runtimes_root: &Path, current: &str) {
+    let Ok(entries) = fs::read_dir(runtimes_root) else {
+        return;
+    };
+    let mut versions = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (entry.path().is_dir() && name != current)
+                .then(|| version_key(&name).map(|key| (key, entry.path())))
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    versions.sort_by(|left, right| right.0.cmp(&left.0));
+
+    for (_, version_root) in versions.into_iter().skip(1) {
+        prune_unleased_version(&version_root);
+    }
+}
+
+fn version_key(version: &str) -> Option<(u64, u64, u64, String)> {
+    let numeric = version
+        .split_once('-')
+        .map_or(version, |(numeric, _)| numeric);
+    let mut parts = numeric.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    parts
+        .next()
+        .is_none()
+        .then(|| (major, minor, patch, version.to_string()))
+}
+
+#[cfg(not(windows))]
+fn prune_unleased_version(version_root: &Path) {
+    let Ok(lease) = open_lock_file(&version_root.join(".lease")) else {
+        return;
+    };
+    if lease.try_lock_exclusive().is_ok() {
+        let _ = fs::remove_dir_all(version_root);
+    }
+}
+
+#[cfg(windows)]
+fn prune_unleased_version(_version_root: &Path) {
+    // Windows cannot safely remove a directory containing an open lease file.
+    // Retaining old versions is preferable to racing a still-running App Server.
 }
 
 fn provisioning_io_error(_: std::io::Error) -> RuntimeError {

@@ -41,6 +41,9 @@ pub(super) struct GatewayFactoryOutput {
     pub attachment_runtime: crate::attachment_runtime::AttachmentRuntime,
 }
 
+// This is the protocol-edge composition root; keeping dependencies explicit here
+// makes their ownership clearer than hiding them behind a generic context bag.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn gateway(
     state_root: StateRoot,
     store: Store,
