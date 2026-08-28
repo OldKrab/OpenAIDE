@@ -150,6 +150,40 @@ try {
     "bin",
     "codex.js",
   );
+  const adapterEntrypoint = path.join(
+    stateRoot,
+    "agent-runtimes",
+    "codex-acp",
+    "1.1.5",
+    "node_modules",
+    "@openaide",
+    "codex-acp",
+    "dist",
+    "index.js",
+  );
+  const adapterProbeInput = `${JSON.stringify({
+    jsonrpc: "2.0",
+    id: "1",
+    method: "initialize",
+    params: {
+      protocolVersion: 1,
+      clientCapabilities: {
+        _meta: { parameterizedModelPicker: true },
+        auth: { terminal: true },
+        elicitation: { form: {} },
+        fs: { readTextFile: true, writeTextFile: true },
+        session: { configOptions: { boolean: {} } },
+        terminal: true,
+      },
+    },
+  })}\n`;
+  const adapterProbe = spawnSync(process.execPath, [adapterEntrypoint], {
+    encoding: "utf8",
+    env: childEnv,
+    input: adapterProbeInput,
+    timeout: 30_000,
+    windowsHide: true,
+  });
   const directProbeInput = [
     JSON.stringify({
       id: "1",
@@ -180,6 +214,13 @@ try {
     stderr: directProbe.stderr,
     stdout: directProbe.stdout,
   }));
+  const adapterProbeResult = redact(JSON.stringify({
+    error: adapterProbe.error?.message,
+    signal: adapterProbe.signal,
+    status: adapterProbe.status,
+    stderr: adapterProbe.stderr,
+    stdout: adapterProbe.stdout,
+  }));
   const acpEvents = appServerLog
     .split(/\r?\n/u)
     .filter((line) => line.includes('"event":"acp_'))
@@ -190,6 +231,7 @@ try {
     `${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}; `
       + `Codex adapter log: ${redact(adapterLog).slice(-4_000)}; `
       + `OpenAIDE ACP events: ${acpEvents}; `
+      + `Direct adapter probe: ${adapterProbeResult.slice(-4_000)}; `
       + `Direct Codex probe: ${directProbeResult.slice(-4_000)}`,
   );
 } finally {
