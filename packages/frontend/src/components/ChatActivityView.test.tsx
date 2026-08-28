@@ -1,11 +1,40 @@
 import { act, create } from "react-test-renderer";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NormalizedMessage } from "@openaide/app-shell-contracts";
 import { ChatActivityView } from "./ChatActivityView";
 
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
 describe("ChatActivityView", () => {
+  it("renders agent boundaries as conversation notices instead of tool activity", () => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "subagent_started",
+      title: "Main Agent started this subagent",
+      status: "completed",
+      created_at: "2026-08-28T00:00:00Z",
+      collapsed: true,
+      steps: [{
+        kind: "text",
+        level: "agent_boundary",
+        text: "The delegated prompt is unavailable.",
+      }],
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const notice = tree.root.findByProps({ className: "agent-boundary-notice" });
+    expect(notice.findAllByProps({ className: "activity-status-mark" })).toHaveLength(0);
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Completed");
+
+    const trigger = notice.findByProps({ className: "activity-disclosure-trigger" });
+    act(() => trigger.props.onClick());
+    expect(trigger.props["aria-expanded"]).toBe(true);
+    expect(notice.findByProps({ className: "agent-boundary-explanation" }).children).toHaveLength(2);
+  });
+
   it("renders adjacent bold Thought chunks as separate Markdown blocks", async () => {
     const activity = mixedActivity();
     activity.steps = [{
@@ -124,6 +153,51 @@ describe("ChatActivityView", () => {
     const rendered = JSON.stringify(tree.toJSON());
     expect(rendered).toContain("Allow once");
     expect(rendered).toContain("Reject");
+  });
+
+  it("expands a linked subagent row before offering history navigation", () => {
+    const onOpenSubagent = vi.fn();
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_subagent",
+      title: "Subagent activity",
+      status: "completed",
+      created_at: "2026-08-27T00:00:00Z",
+      collapsed: true,
+      steps: [{
+        kind: "subagent",
+        name: "Answer alpha",
+        path: ["Answer alpha"],
+        status: "completed",
+        events: ["delegated", "completed"],
+        tool_call_id: "call_alpha",
+        subagent_id: "subagent_alpha",
+      }],
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ChatActivityView
+          activity={activity}
+          onOpenSubagent={onOpenSubagent}
+          taskId="task_1"
+        />,
+      );
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+    const rowTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[1];
+    expect(rowTrigger.props["aria-expanded"]).toBe(false);
+
+    act(() => rowTrigger.props.onClick());
+
+    expect(rowTrigger.props["aria-expanded"]).toBe(true);
+    expect(onOpenSubagent).not.toHaveBeenCalled();
+    const historyAction = tree.root.findByProps({ className: "subagent-history-action" });
+    expect(historyAction.findByType("span").children.join("")).toBe("Open Answer alpha history");
+    act(() => historyAction.props.onClick());
+    expect(onOpenSubagent).toHaveBeenCalledWith("subagent_alpha");
   });
 
   it("does not expose returned read content in the collapsed activity row", () => {

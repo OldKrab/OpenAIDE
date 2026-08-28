@@ -895,6 +895,16 @@ fn background_native_catalog_refresh_request_is_delegated() {
 }
 
 #[test]
+fn terminal_agent_activity_requests_native_session_reconciliation() {
+    let workflow = Arc::new(RecordingCatalogRefresh::default());
+    let mut gateway = gateway_with_agent_session_listing(workflow.clone());
+
+    let _ = gateway.publish_background_agent_status_update(AppServerTime(2));
+
+    assert_eq!(workflow.requests.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn repeated_task_navigation_subscription_does_not_restart_catalog_discovery() {
     let workflow = Arc::new(RecordingCatalogRefresh::default());
     let mut gateway = gateway_with_agent_session_listing(workflow.clone());
@@ -3802,6 +3812,7 @@ impl TaskHistoryWorkflow for FixedTaskHistory {
     > {
         Ok(openaide_app_server_protocol::task::TaskChatPageResult {
             task_id: "task-1".into(),
+            subagent_id: None,
             items: vec![openaide_app_server_protocol::snapshot::ChatItem {
                 message_id: "msg-1".into(),
                 turn_id: None,

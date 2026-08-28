@@ -44,6 +44,7 @@ pub(crate) mod acp_update_projection;
 pub(crate) mod attached_native_session;
 pub(crate) mod attached_native_session_registry;
 pub(crate) mod catalog_store;
+pub(crate) mod codex_acp_provisioner;
 mod command_presentation;
 pub(crate) use command_presentation::infer_saved_execute_presentation;
 pub mod events;

@@ -29,6 +29,7 @@ type ComposerControlsProps = {
   configChangeLabel?: string;
   agents?: AgentOption[];
   configLocked: boolean;
+  configLoadingLabel?: string;
   configOptions?: ConfigOptionsCatalog;
   disabled: boolean;
   fileBrowser?: TaskFileBrowserCallbacks;
@@ -55,6 +56,7 @@ export function ComposerControls({
   configChangeLabel,
   agents = agentOptions,
   configLocked,
+  configLoadingLabel,
   configOptions,
   disabled,
   fileBrowser,
@@ -299,6 +301,7 @@ export function ComposerControls({
         configChangeLabel={configChangeLabel}
         configLocked={configControlsLocked}
         configOptions={configOptions}
+        loadingLabel={configLoadingLabel}
         controlsLocked={controlsLocked}
         disabled={disabled}
         onSelectConfigOption={onSelectConfigOption}

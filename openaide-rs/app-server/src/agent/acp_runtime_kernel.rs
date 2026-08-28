@@ -5,6 +5,7 @@ use crate::agent::acp_active_session_manager::AcpActiveSessionManager;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_runtime_threading::close_in_parallel;
 use crate::agent::acp_trace::AcpTraceState;
+use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
@@ -45,6 +46,10 @@ impl AcpRuntimeKernel {
         self.active_sessions.with_trace_state(trace_state);
     }
 
+    pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
+        self.active_sessions.with_codex_provisioner(provisioner);
+    }
+
     pub(super) fn probe(
         &self,
         request: AgentProbeRequest,
@@ -74,6 +79,17 @@ impl AcpRuntimeKernel {
             .is_some_and(|cwd| !std::path::Path::new(cwd).is_absolute())
         {
             return Err(RuntimeError::InvalidParams("workspace_root".to_string()));
+        }
+
+        if !self
+            .active_sessions
+            .allows_passive_session_discovery(&request.agent_id)
+        {
+            return Ok(AgentListSessionsResult {
+                agent_id: request.agent_id,
+                sessions: Vec::new(),
+                next_cursor: None,
+            });
         }
 
         self.active_sessions.list_sessions(request)

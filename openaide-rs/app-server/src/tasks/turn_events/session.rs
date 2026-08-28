@@ -122,12 +122,33 @@ impl AgentSessionEventSink for TaskSessionEventSink {
     fn subagent_spawned(&self, event: AgentNativeSubagentSpawned) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let now = now_string();
-        let record = self.mutations.store().record_subagent_spawn(
+        let prompt_unavailable = event.delegated_task.is_none();
+        let child_already_exists = match self
+            .mutations
+            .store()
+            .subagent_record_by_native(&self.task_id, &event.native_session_id)
+        {
+            Ok(_) => true,
+            Err(RuntimeError::TaskNotFound(_)) => false,
+            Err(error) => return Err(error),
+        };
+        // A resumed Codex connection has a fresh in-memory router, so its first
+        // repeated announcement cannot be classified there. Codex omits the
+        // delegated prompt, while the durable child identity proves this is not
+        // the child's first announcement.
+        let parent_interaction =
+            event.parent_interaction || (prompt_unavailable && child_already_exists);
+        let actor = if event.parent_native_session_id == self.session_id {
+            "Main Agent"
+        } else {
+            "Parent Agent"
+        };
+        let mut record = self.mutations.store().record_subagent_spawn(
             &self.task_id,
             &event.parent_native_session_id,
             &event.native_session_id,
             event.name,
-            event.delegated_task,
+            event.delegated_task.unwrap_or_default(),
             crate::storage::subagents::SubagentCapabilitiesRecord {
                 cancel: event.capabilities.cancel,
                 close: event.capabilities.close,
@@ -141,6 +162,40 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 })
                 .collect(),
         )?;
+        if parent_interaction {
+            record = self.mutations.store().update_subagent_status(
+                &self.task_id,
+                &record.native_session_id,
+                crate::storage::subagents::SubagentStatusRecord::WaitingForActivity,
+            )?;
+            self.mutations.store().append_subagent_message(
+                &self.task_id,
+                &record.native_session_id,
+                codex_subagent_notice(
+                    format!(
+                        "{}:codex:interaction:{}",
+                        record.subagent_id,
+                        record.history_revision.saturating_add(1),
+                    ),
+                    &format!("{actor} interacted with this subagent"),
+                    "The inter-agent message is unavailable because Codex does not expose it to clients.",
+                    &now,
+                ),
+                false,
+            )?;
+        } else if prompt_unavailable {
+            self.mutations.store().append_subagent_message(
+                &self.task_id,
+                &record.native_session_id,
+                codex_subagent_notice(
+                    format!("{}:codex:started", record.subagent_id),
+                    &format!("{actor} started this subagent"),
+                    "The original delegated prompt is unavailable because Codex does not expose it to clients.",
+                    &now,
+                ),
+                true,
+            )?;
+        }
         let identity = subagent_lifecycle_identity(&record.subagent_id);
         self.mutations.commit_existing_task(
             &self.task_id,
@@ -161,7 +216,8 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                     steps: vec![ActivityStep::Subagent {
                         subagent_id: Some(record.subagent_id.clone()),
                         tool_call_id: None,
-                        title: Some(record.delegated_task.clone()),
+                        title: (!record.delegated_task.is_empty())
+                            .then_some(record.delegated_task.clone()),
                         thread_id: None,
                         raw_path: None,
                         activity: None,
@@ -189,7 +245,37 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             .mutations
             .store()
             .subagent_record_by_native(&self.task_id, native_session_id)?;
+        let nested_target = if let AgentEvent::Subagent(subagent) = &event {
+            self.append_codex_subagent_interaction(subagent, "Parent Agent", &now)?
+        } else {
+            None
+        };
         match event {
+            AgentEvent::UserMessageChunk {
+                text,
+                source_message_id,
+            } => {
+                let message_id = {
+                    let mut routes = self
+                        .subagent_text_chunk_routes
+                        .lock()
+                        .expect("Subagent text route lock poisoned");
+                    routes
+                        .entry(record.subagent_id.clone())
+                        .or_insert_with(|| super::TextChunkRoutes::new(record.subagent_id.clone()))
+                        .message_id(super::TextChannel::User, source_message_id)
+                };
+                self.mutations.store().append_subagent_message_part(
+                    &self.task_id,
+                    native_session_id,
+                    NormalizedMessage::User {
+                        id: message_id,
+                        text,
+                        created_at: now,
+                        attachments: Vec::new(),
+                    },
+                )?;
+            }
             AgentEvent::MessageChunk {
                 role,
                 part,
@@ -264,7 +350,13 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 )?;
             }
         }
-        self.publish_subagent_snapshots(&record.subagent_id)
+        self.publish_subagent_snapshots(&record.subagent_id)?;
+        if let Some(target_subagent_id) = nested_target {
+            if target_subagent_id != record.subagent_id {
+                self.publish_subagent_snapshots(&target_subagent_id)?;
+            }
+        }
+        Ok(())
     }
 
     fn subagent_state_changed(
@@ -325,6 +417,58 @@ impl AgentSessionEventSink for TaskSessionEventSink {
 
     fn record_question_error(&self, message: String) -> Result<(), RuntimeError> {
         self.append_question_error(message)
+    }
+}
+
+impl TaskSessionEventSink {
+    pub(super) fn append_codex_subagent_interaction(
+        &self,
+        subagent: &crate::agent::events::AgentSubagent,
+        actor: &str,
+        now: &str,
+    ) -> Result<Option<String>, RuntimeError> {
+        if subagent.activity != "interacted" {
+            return Ok(None);
+        }
+        let record = self
+            .mutations
+            .store()
+            .subagent_record_by_native(&self.task_id, &subagent.thread_id)?;
+        self.mutations.store().append_subagent_message(
+            &self.task_id,
+            &record.native_session_id,
+            codex_subagent_notice(
+                format!(
+                    "{}:codex:interaction:{}",
+                    record.subagent_id, subagent.tool_call_id
+                ),
+                &format!("{actor} interacted with this subagent"),
+                "The inter-agent message is unavailable because Codex does not expose it to clients.",
+                now,
+            ),
+            true,
+        )?;
+        Ok(Some(record.subagent_id))
+    }
+}
+
+fn codex_subagent_notice(
+    id: String,
+    title: &str,
+    explanation: &str,
+    created_at: &str,
+) -> NormalizedMessage {
+    NormalizedMessage::Activity {
+        id,
+        title: title.to_string(),
+        status: ActivityStatus::Completed,
+        created_at: created_at.to_string(),
+        collapsed: true,
+        steps: vec![ActivityStep::Text {
+            text: explanation.to_string(),
+            // Frontend renders agent-boundary notices separately from ordinary Tool activity.
+            level: Some("agent_boundary".to_string()),
+        }],
     }
 }
 

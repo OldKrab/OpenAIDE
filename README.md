@@ -65,9 +65,11 @@ Other operating-system and CPU combinations are not currently packaged. VS Code
 3. Open the OpenAIDE activity-bar view.
 4. Check Agent Settings, then create your first Task.
 
-Codex and OpenCode must be authenticated separately. OpenAIDE first uses
-compatible Agent commands already on `PATH` and may fall back to `npx`, which
-requires Node.js, npm, and network access on first launch.
+Codex and OpenCode must be authenticated separately. On first explicit Codex
+use, OpenAIDE installs its version-locked Codex integration in durable per-user
+storage and reuses it on later launches. This initial install requires Node.js,
+npm, and network access. The built-in Codex Agent never uses a `codex-acp`
+executable from `PATH`; register a Custom Agent to use a different build.
 
 Each VSIX bundles the matching App Server executable. Standalone App Server,
 Web App archive, and container artifacts are not currently published.

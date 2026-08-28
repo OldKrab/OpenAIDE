@@ -45,6 +45,17 @@ fn failed_probe_records_user_visible_status() {
 }
 
 #[test]
+fn managed_integration_installation_is_visible_until_agent_launch_begins() {
+    let cache = AgentStatusCache::default();
+
+    let previous = cache.begin_installation("codex");
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Installing);
+
+    cache.complete_installation("codex", previous);
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Launching);
+}
+
+#[test]
 fn successful_session_records_connected_without_replacing_authenticating() {
     let cache = AgentStatusCache::default();
     cache.record_connected("codex");

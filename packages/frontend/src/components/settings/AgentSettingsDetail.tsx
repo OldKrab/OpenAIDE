@@ -4,6 +4,7 @@ import {
   CircleAlert,
   FileText,
   KeyRound,
+  LoaderCircle,
   Palette,
   Save,
   Terminal,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "../AgentIcon";
+import { CODEX_INTEGRATION_INSTALLING_LABEL } from "../agentActivityPresentation";
 import { AgentRecoveryButtons, type AgentRecoveryActions, type AgentRecoveryKind } from "../AgentRecovery";
 import { AgentEnvEditor, AgentIconPicker } from "./AgentCustomFields";
 import type { AgentDraft } from "./agentSettingsModel";
@@ -185,7 +187,11 @@ export function AgentPageRow({ action, detail, icon, label }: { action: ReactNod
 
 function AgentStatusText({ agent }: { agent: AgentSettingsRecord }) {
   const attention = needsAttention(agent);
-  return <span className={`agent-page-status ${agent.status}`}>{attention ? <CircleAlert size={12} /> : <i />}{shortStatus(agent.status)}</span>;
+  const installing = agent.status === "installing";
+  return <span aria-busy={installing || undefined} className={`agent-page-status ${agent.status}`}>
+    {installing ? <LoaderCircle aria-hidden="true" className="spin" size={12} /> : attention ? <CircleAlert size={12} /> : <i />}
+    {shortStatus(agent.status)}
+  </span>;
 }
 
 function AgentAttentionSection({
@@ -312,6 +318,7 @@ function shortStatus(status: AgentSettingsRecord["status"]) {
     case "disabled": return "Disabled";
     case "connected": return "Connected";
     case "ready": return "Ready";
+    case "installing": return CODEX_INTEGRATION_INSTALLING_LABEL;
     default: return status.replaceAll("_", " ");
   }
 }

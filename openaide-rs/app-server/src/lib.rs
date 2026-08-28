@@ -65,8 +65,12 @@ impl Runtime {
             AcpTraceState::from_env_with_persisted(&storage_root, store.read_acp_trace_enabled()?);
         let agent_registry =
             AgentRegistryHandle::new(AgentCatalogStore::new(store.clone()).registry()?);
-        let agent_runtime =
-            AcpAgentRuntime::new_with_registry(agent_registry.clone(), HostBridge::disabled());
+        let agent_runtime = AcpAgentRuntime::new_with_managed_codex(
+            agent_registry.clone(),
+            HostBridge::disabled(),
+            storage_root,
+            crate::agent::status_cache::AgentStatusCache::default(),
+        );
         Self::new_with_open_store_and_agent(
             store,
             Arc::new(agent_runtime.with_trace_state(acp_trace_state.clone())),
@@ -87,8 +91,12 @@ impl Runtime {
             AcpTraceState::from_env_with_persisted(&storage_root, store.read_acp_trace_enabled()?);
         let agent_registry =
             AgentRegistryHandle::new(AgentCatalogStore::new(store.clone()).registry()?);
-        let agent_runtime =
-            AcpAgentRuntime::new_with_registry(agent_registry.clone(), host_bridge.clone());
+        let agent_runtime = AcpAgentRuntime::new_with_managed_codex(
+            agent_registry.clone(),
+            host_bridge.clone(),
+            storage_root,
+            crate::agent::status_cache::AgentStatusCache::default(),
+        );
         let runtime = Self::new_with_open_store_and_agent(
             store,
             Arc::new(agent_runtime.with_trace_state(acp_trace_state.clone())),

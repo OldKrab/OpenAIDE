@@ -44,8 +44,15 @@ fn draft_subagents_are_advertised_only_at_the_explicit_activation_boundary() {
     .unwrap();
 
     assert!(disabled["clientCapabilities"].get("subagents").is_none());
+    assert!(disabled["clientCapabilities"]["_meta"]
+        .get("openaide")
+        .is_none());
     assert_eq!(
         enabled["clientCapabilities"]["subagents"],
         serde_json::json!({})
+    );
+    assert_eq!(
+        enabled["clientCapabilities"]["_meta"]["openaide"]["nativeSubagentSessions"],
+        true
     );
 }

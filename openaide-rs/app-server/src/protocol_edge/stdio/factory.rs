@@ -48,6 +48,8 @@ pub(super) fn gateway(
     agent_runtime: Arc<dyn AgentRuntime>,
     acp_trace_state: crate::agent::acp_trace::AcpTraceState,
     configured_projects: ConfiguredProjectRoots,
+    agent_statuses: AgentStatusCache,
+    agent_status_updates: crate::agent::status_cache::AgentStatusUpdateReceiver,
 ) -> Result<GatewayFactoryOutput, ProtocolEdgeStdioStartError> {
     let storage_fatal_events = store.take_task_storage_fatal_events();
     configured_projects.enable_persistence(store.clone())?;
@@ -72,7 +74,6 @@ pub(super) fn gateway(
     let skills_settings = Arc::new(SkillsSettingsService::with_project_roots(
         configured_projects.clone(),
     ));
-    let (agent_statuses, agent_status_updates) = AgentStatusCache::channel();
     let agent_runtime = AgentStatusRecordingRuntime::wrap(agent_runtime, agent_statuses.clone());
     let agent_snapshots = AgentRegistrySnapshotSource::with_status_cache(
         agent_registry.clone(),

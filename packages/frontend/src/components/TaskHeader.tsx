@@ -5,6 +5,7 @@ import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { workspaceLabel } from "./taskSurfaceHelpers";
 import type { DesktopWindowCapability } from "../services/frontendShell";
 import { desktopDragRegionProps } from "./DesktopTitleBar";
+import type { ReactNode } from "react";
 
 const STATUS_PRESENTATION = {
   active: { label: "Running", Icon: LoaderCircle },
@@ -34,6 +35,7 @@ export function TaskHeader({
   showWorkspaceContext = true,
   worktreeName,
   gitRef,
+  agentNavigation,
 }: {
   agentId: string;
   agentName: string;
@@ -49,6 +51,7 @@ export function TaskHeader({
   showWorkspaceContext?: boolean;
   worktreeName?: string;
   gitRef?: string;
+  agentNavigation?: ReactNode;
 }) {
   const statusPresentation = STATUS_PRESENTATION[status];
   const visibleStatusLabel = statusLabel ?? statusPresentation.label;
@@ -72,10 +75,10 @@ export function TaskHeader({
             <StatusIcon aria-hidden="true" size={12} />
             {visibleStatusLabel}
           </span>
-          <span className="task-header-agent">
+          {agentNavigation ?? <span className="task-header-agent">
             <AgentIcon agentId={agentId} agentName={agentName} size={11} />
             <span>{agentName}</span>
-          </span>
+          </span>}
         </span>
       </span>
       {permissionPolicy && onPermissionPolicyChange ? (

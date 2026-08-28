@@ -364,7 +364,7 @@ export type AgentSettingsSourceKind = "builtIn" | "custom";
 
 export type AgentSettingsTransport = "stdio";
 
-export type AgentSettingsStatus = "disconnected" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed" | "disabled";
+export type AgentSettingsStatus = "disconnected" | "installing" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed" | "disabled";
 
 export type AgentSettingsEnvRow = { name: string, value?: string | null, secret: boolean, };
 
@@ -818,9 +818,9 @@ export type TaskCancelParams = { taskId: TaskId, turnId?: TurnId | null, };
 
 export type TaskCancelResult = { task: TaskSnapshot, };
 
-export type TaskChatPageParams = { taskId: TaskId, beforeCursor: MessageId, limit: number, };
+export type TaskChatPageParams = { taskId: TaskId, subagentId?: SubagentId | null, beforeCursor: MessageId, limit: number, };
 
-export type TaskChatPageResult = { taskId: TaskId, items: Array<ChatItem>, hasBefore: boolean, totalCount: number, revision: number, startCursor?: MessageId | null, endCursor?: MessageId | null, };
+export type TaskChatPageResult = { taskId: TaskId, subagentId?: SubagentId | null, items: Array<ChatItem>, hasBefore: boolean, totalCount: number, revision: number, startCursor?: MessageId | null, endCursor?: MessageId | null, };
 
 export type ComposerHistoryScope = { "kind": "task", taskId: TaskId, } | { "kind": "project", projectId: ProjectId, };
 
@@ -980,7 +980,7 @@ export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
 export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities, };
 
-export type AgentStatus = "disconnected" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed";
+export type AgentStatus = "disconnected" | "installing" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed";
 
 export type AgentSetupReason = "nodeJsRequired";
 

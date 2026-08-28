@@ -28,6 +28,32 @@ describe("app reducer composer state", () => {
     expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
   });
 
+  it("retains a text signal carried by the terminal snapshot until a later settled snapshot", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [chatMessage("agent-live", "Complete")]),
+      liveText: {
+        messageId: "agent-live",
+        channel: "agent",
+        eventCursor: "cursor-terminal-text",
+      },
+    });
+
+    expect(state.taskLiveTextPresentation.task_1?.agent).toEqual({
+      messageId: "agent-live",
+      eventCursor: "cursor-terminal-text",
+    });
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: snapshot("task_1", [chatMessage("agent-live", "Complete")]),
+    });
+    expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
+  });
+
   it("applies a config result without replacing a pending permission request", () => {
     const initial = snapshot("task_1");
     initial.agent_config = configCatalog("off");

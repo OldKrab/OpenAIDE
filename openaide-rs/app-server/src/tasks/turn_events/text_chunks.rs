@@ -2,11 +2,12 @@ use std::sync::Mutex;
 
 use uuid::Uuid;
 
-use crate::agent::acp_message_identity::stable_agent_message_id;
+use crate::agent::acp_message_identity::{stable_agent_message_id, stable_user_message_id};
 use crate::protocol::model::AgentMessageRole;
 
 #[derive(Clone, Copy)]
 pub(super) enum TextChannel {
+    User,
     Agent,
     Thought,
 }
@@ -19,6 +20,7 @@ pub(super) struct TextChunkRoutes {
 
 #[derive(Default)]
 struct AnonymousRoutes {
+    user: Option<String>,
     agent: Option<String>,
     thought: Option<String>,
 }
@@ -38,15 +40,24 @@ impl TextChunkRoutes {
     ) -> String {
         if let Some(source_message_id) = source_message_id {
             self.finish_anonymous(channel);
-            let role = match channel {
-                TextChannel::Agent => AgentMessageRole::Agent,
-                TextChannel::Thought => AgentMessageRole::Thought,
+            return match channel {
+                TextChannel::User => stable_user_message_id(&self.session_id, &source_message_id),
+                TextChannel::Agent => stable_agent_message_id(
+                    &self.session_id,
+                    AgentMessageRole::Agent,
+                    &source_message_id,
+                ),
+                TextChannel::Thought => stable_agent_message_id(
+                    &self.session_id,
+                    AgentMessageRole::Thought,
+                    &source_message_id,
+                ),
             };
-            return stable_agent_message_id(&self.session_id, role, &source_message_id);
         }
 
         let mut anonymous = self.anonymous.lock().expect("text route lock poisoned");
         let route = match channel {
+            TextChannel::User => &mut anonymous.user,
             TextChannel::Agent => &mut anonymous.agent,
             TextChannel::Thought => &mut anonymous.thought,
         };
@@ -58,6 +69,7 @@ impl TextChunkRoutes {
     pub(super) fn finish_anonymous(&self, channel: TextChannel) {
         let mut anonymous = self.anonymous.lock().expect("text route lock poisoned");
         match channel {
+            TextChannel::User => anonymous.user = None,
             TextChannel::Agent => anonymous.agent = None,
             TextChannel::Thought => anonymous.thought = None,
         }

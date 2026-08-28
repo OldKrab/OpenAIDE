@@ -176,7 +176,7 @@ export function TaskView({
   agentRecoveryActions?: AgentRecoveryActions;
   archived?: boolean;
   backendConnectionState?: BackendConnectionState;
-  subagentConnection?: Pick<AppServerSession, "subscribeState">;
+  subagentConnection?: Pick<AppServerSession, "request" | "subscribeState">;
   backendReady: boolean;
   taskMutationReady?: boolean;
   chatPageState: AppState["chatPages"][string] | undefined;
@@ -442,7 +442,7 @@ export function TaskView({
       : snapshot.history_sync.state,
     itemKeys: timelineRowKeys,
     latestMessageKey: chatItems.at(-1)?.message_id,
-    onLoadEarlier: subagents.selected ? () => undefined : loadChatPage,
+    onLoadEarlier: subagents.selected ? subagents.loadEarlier : loadChatPage,
     onScrollState: intents.recordScroll,
     pendingPrepend: chat.pending,
     savedScrollState: subagents.selected ? undefined : savedScrollState,
@@ -499,6 +499,14 @@ export function TaskView({
     >
       <div className="task-work-stack-header">
         <TaskHeader
+          agentNavigation={(
+            <SubagentNavigator
+              entries={subagents.catalog?.entries ?? []}
+              onSelect={subagents.selectSubagent}
+              selectedId={subagents.selectedSubagentId}
+              unseen={subagents.unseen}
+            />
+          )}
           agentId={snapshot.task.agent_id}
           agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
           desktopWindow={desktopWindow}
@@ -543,12 +551,6 @@ export function TaskView({
         data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
       >
         <div className="chat-column task-conversation">
-        <SubagentNavigator
-          entries={subagents.catalog?.entries ?? []}
-          onSelect={subagents.selectSubagent}
-          selectedId={subagents.selectedSubagentId}
-          unseen={subagents.unseen}
-        />
         {visiblePlan ? (
           <aside aria-label="Current plan" className="task-plan-column">
             <AgentPlanView
@@ -568,7 +570,7 @@ export function TaskView({
           chatScroll={chatScroll}
           commandCatalog={snapshot.agent_commands}
           items={chatItems}
-          liveTextPresentation={liveTextPresentation}
+          liveTextPresentation={subagents.selected ? subagents.liveTextPresentation : liveTextPresentation}
           onLoadChatPage={loadChatPage}
           onLoadToolImagePreview={loadToolImagePreview}
           onOpenSubagent={subagents.selectSubagent}
@@ -635,8 +637,17 @@ export function TaskView({
         ) : null}
         {subagents.selected ? (
           <div className="subagent-inspection-footer" role="note">
-            <span>Viewing {subagents.selected.name}</span>
-            <small>Return to Main Agent to send a message.</small>
+            <span className="subagent-inspection-context">
+              Viewing <strong>{subagents.selected.name}</strong>
+            </span>
+            <button
+              aria-keyshortcuts="Alt+ArrowLeft"
+              onClick={() => subagents.selectSubagent(undefined)}
+              title="Back to Main Agent (Alt+Left)"
+              type="button"
+            >
+              Back to Main Agent
+            </button>
           </div>
         ) : recovery && agentRecoveryActions ? <AgentRecoveryPanel
           actions={agentRecoveryActions}

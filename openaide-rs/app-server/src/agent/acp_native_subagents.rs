@@ -142,11 +142,22 @@ impl AcpNativeSubagentRouter {
         let (root_session_id, root_sink) = self.root_for_parent(&parent_session_id)?;
         let details = codex_details(spawned.meta.as_ref());
         let child_name = spawned.name.clone();
+        let delegated_task = (self.agent_id != "codex").then_some(spawned.task);
+        // Codex ACP re-announces an already routed child when the parent sends it
+        // another message. The draft protocol currently has no separate event for it.
+        let parent_interaction = self.agent_id == "codex"
+            && self
+                .inner
+                .lock()
+                .expect("ACP Subagent router poisoned")
+                .children
+                .contains_key(&child_session_id);
         let event = AgentNativeSubagentSpawned {
             parent_native_session_id: parent_session_id.clone(),
             native_session_id: child_session_id.clone(),
             name: spawned.name,
-            delegated_task: spawned.task,
+            delegated_task,
+            parent_interaction,
             capabilities: AgentNativeSubagentCapabilities {
                 cancel: spawned.capabilities.cancel,
                 close: spawned.capabilities.close,
@@ -315,7 +326,7 @@ impl AgentEventSink for SubagentEventSink {
 }
 
 /// Agent-specific metadata mapping is intentionally typed and allowlisted.
-/// Unknown values are counted in diagnostics elsewhere, never sent to Frontend.
+/// Unknown values are ignored and never sent to Frontend.
 fn codex_details(
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> Vec<AgentNativeSubagentDetail> {
@@ -350,3 +361,7 @@ fn codex_details(
     })
     .collect()
 }
+
+#[cfg(test)]
+#[path = "acp_native_subagents_tests.rs"]
+mod tests;

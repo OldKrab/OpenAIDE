@@ -394,6 +394,8 @@ pub struct TaskMarkReadResult {
 #[serde(rename_all = "camelCase")]
 pub struct TaskChatPageParams {
     pub task_id: TaskId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_id: Option<crate::ids::SubagentId>,
     pub before_cursor: MessageId,
     pub limit: u32,
 }
@@ -402,6 +404,8 @@ pub struct TaskChatPageParams {
 #[serde(rename_all = "camelCase")]
 pub struct TaskChatPageResult {
     pub task_id: TaskId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_id: Option<crate::ids::SubagentId>,
     pub items: Vec<ChatItem>,
     pub has_before: bool,
     pub total_count: u64,

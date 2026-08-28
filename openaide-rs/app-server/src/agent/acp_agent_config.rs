@@ -13,6 +13,8 @@ use crate::protocol::host::HostBridge;
 #[path = "acp_agent_config_tests.rs"]
 mod tests;
 
+const PRODUCT_CODEX_ACP_SPEC: &str = "@openaide/codex-acp@1.1.5";
+
 #[derive(Debug, Clone)]
 pub struct AcpAgentConfig {
     pub agent_id: String,
@@ -29,15 +31,16 @@ impl AcpAgentConfig {
     /// users who need a different adapter build can register it as a Custom
     /// Agent, while the built-in entry stays reproducible across releases.
     pub fn codex() -> Self {
-        Self::codex_npx_fallback()
+        Self::codex_managed_package()
     }
 
-    /// The fallback is versioned with OpenAIDE so unchanged builds remain reproducible.
-    pub(crate) fn codex_npx_fallback() -> Self {
+    /// This declaration identifies the locked package policy. Production resolves it
+    /// to the per-user managed installation before any process command is evaluated.
+    pub(crate) fn codex_managed_package() -> Self {
         Self {
             agent_id: "codex".to_string(),
             command: resolved_command_or_name("npx"),
-            args: vec!["-y".to_string(), "@openaide/codex-acp@1.1.0".to_string()],
+            args: vec!["-y".to_string(), PRODUCT_CODEX_ACP_SPEC.to_string()],
             env: Vec::new(),
             secret_env: Vec::new(),
         }
@@ -104,12 +107,21 @@ impl AcpAgentConfig {
     pub(crate) fn diagnostic_launcher_kind(&self) -> &'static str {
         let command_name = Path::new(&self.command).file_stem().and_then(OsStr::to_str);
         if command_name.is_some_and(|name| name.eq_ignore_ascii_case("npx"))
-            && self.args == ["-y", "@openaide/codex-acp@1.1.0"]
+            && self.args == ["-y", PRODUCT_CODEX_ACP_SPEC]
         {
-            "pinned_npx_package"
+            "managed_package"
         } else {
             "configured_command"
         }
+    }
+
+    pub(crate) fn uses_product_pinned_codex_package(&self) -> bool {
+        self.agent_id == "codex"
+            && Path::new(&self.command)
+                .file_stem()
+                .and_then(OsStr::to_str)
+                .is_some_and(|name| name.eq_ignore_ascii_case("npx"))
+            && self.args == ["-y", PRODUCT_CODEX_ACP_SPEC]
     }
 
     fn secret_env_values(
@@ -167,7 +179,7 @@ fn command_in_path(command: &str) -> bool {
     resolve_command_in_path(command).is_some()
 }
 
-fn resolved_command_or_name(command: &str) -> String {
+pub(super) fn resolved_command_or_name(command: &str) -> String {
     // Unix can execute the command name through PATH. Windows needs the
     // resolved launcher suffix (usually `.cmd`) so CreateProcess can delegate
     // it through `cmd.exe` reliably.
@@ -199,7 +211,7 @@ fn process_args(
     process_args
 }
 
-fn is_windows_batch_file(command: &str) -> bool {
+pub(super) fn is_windows_batch_file(command: &str) -> bool {
     Path::new(command)
         .extension()
         .and_then(OsStr::to_str)
@@ -284,7 +296,11 @@ fn command_not_found_error(agent_id: &str, command: &str) -> RuntimeError {
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(command);
-    if agent_id == "codex" && executable.eq_ignore_ascii_case("npx") {
+    if agent_id == "codex"
+        && ["node", "npm", "npx"]
+            .iter()
+            .any(|candidate| executable.eq_ignore_ascii_case(candidate))
+    {
         return RuntimeError::NodeJsRequired(
             "Codex needs Node.js before it can start.".to_string(),
         );
