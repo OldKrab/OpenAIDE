@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import { Archive, ArrowLeft, FolderPlus, Plus, RefreshCcw, Search, Settings, X } from "lucide-react";
+import { Archive, ArrowLeft, FolderPlus, LoaderCircle, Plus, RefreshCcw, Search, Settings, X } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { TaskArchiveOlderCutoff, TaskArchiveOlderResult } from "@openaide/app-server-client";
 import type { ProjectOption } from "../state/composerOptions";
@@ -16,6 +16,7 @@ import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
 import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
+import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -71,6 +72,7 @@ type SidebarProps = {
   maxVisibleProjects?: number;
   loadingTasks?: boolean;
   showNativeSessions?: boolean;
+  codexIntegrationInstalling?: boolean;
 };
 
 export const Sidebar = memo(function Sidebar({
@@ -119,6 +121,7 @@ export const Sidebar = memo(function Sidebar({
   maxVisibleProjects = 5,
   loadingTasks = false,
   showNativeSessions = true,
+  codexIntegrationInstalling = false,
 }: SidebarProps) {
   const taskListRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -167,7 +170,8 @@ export const Sidebar = memo(function Sidebar({
     !groupSearchQuery &&
     nativeSessionProjectId !== undefined &&
     collapsedProjectKeys.has(nativeSessionProjectId);
-  const showEmptyState = !taskListError && (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
+  const showEmptyState = !taskListError && !codexIntegrationInstalling &&
+    (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
   const noProjects = groupByProject && projects.length === 0;
@@ -272,6 +276,15 @@ export const Sidebar = memo(function Sidebar({
                   : nativeSessions.recoveryKind === "launchFailed" ? "Try again" : "Set up Codex"}
               </button>
             ) : null}
+          </div>
+        ) : null}
+        {!showWorkspaceSetup && !showArchived && showNativeSessions && codexIntegrationInstalling ? (
+          <div aria-busy={true} className="native-session-activity" role="status">
+            <LoaderCircle aria-hidden="true" className="spin" size={14} />
+            <span>
+              {CODEX_INTEGRATION_INSTALLING_LABEL}
+              <small>This can take a minute.</small>
+            </span>
           </div>
         ) : null}
         {!showWorkspaceSetup && (groupByProject
@@ -457,5 +470,6 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.maxTasksPerProject === next.maxTasksPerProject &&
     prev.maxVisibleProjects === next.maxVisibleProjects &&
     prev.loadingTasks === next.loadingTasks &&
-    prev.showNativeSessions === next.showNativeSessions;
+    prev.showNativeSessions === next.showNativeSessions &&
+    prev.codexIntegrationInstalling === next.codexIntegrationInstalling;
 }

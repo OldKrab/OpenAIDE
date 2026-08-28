@@ -270,6 +270,7 @@ pub enum AgentSettingsTransport {
 #[serde(rename_all = "camelCase")]
 pub enum AgentSettingsStatus {
     Disconnected,
+    Installing,
     Launching,
     Connected,
     SetupRequired,

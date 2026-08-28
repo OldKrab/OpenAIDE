@@ -66,6 +66,38 @@ describe("TaskView timeline presentation", () => {
     expect(settledTask).not.toContain("chat-streaming-caret");
   });
 
+  it("finishes presenting the last streamed text after the task settles", async () => {
+    const { TaskView } = await import("./TaskView");
+    const initial = snapshotWithAuthoritativeTail(true);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(initial)} />);
+    });
+
+    const terminal = structuredClone(initial);
+    terminal.task.status = "inactive";
+    const latestAgent = terminal.chat.items.find((item) => item.message_id === "agent-later");
+    if (latestAgent?.message.kind !== "agent_message" || latestAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected latest Agent text");
+    }
+    latestAgent.message.parts[0].text = "Latest update delivered with terminal state";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(terminal)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-later", eventCursor: "cursor-terminal-text" },
+          }}
+        />,
+      );
+    });
+
+    const firstPaint = JSON.stringify(tree.toJSON());
+    expect(firstPaint).toContain("Latest update");
+    expect(firstPaint).not.toContain("delivered with terminal state");
+    expect(firstPaint).toContain("chat-streaming-caret");
+  });
+
   it("does not let a large received suffix build a visible presentation backlog", async () => {
     const { TaskView } = await import("./TaskView");
     const initial = snapshotWithAuthoritativeTail(true);

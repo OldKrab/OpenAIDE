@@ -17,6 +17,7 @@ type ComposerRunOptionsProps = {
   configChangeLabel?: string;
   configLocked: boolean;
   configOptions?: ConfigOptionsCatalog;
+  loadingLabel?: string;
   controlsLocked: boolean;
   disabled: boolean;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
@@ -35,6 +36,7 @@ export function ComposerRunOptions({
   configChangeLabel,
   configLocked,
   configOptions,
+  loadingLabel,
   controlsLocked,
   disabled,
   onSelectConfigOption,
@@ -79,7 +81,7 @@ export function ComposerRunOptions({
           role={catalogFailed ? "alert" : "status"}
         >
           {catalogLoading ? <LoaderCircle aria-hidden size={12} /> : catalogFailed ? <CircleAlert aria-hidden size={12} /> : null}
-          {catalogLoading ? "Loading options…" : catalogFailed ? "Couldn’t load options" : "Options unavailable"}
+          {catalogLoading ? loadingLabel ?? "Loading options…" : catalogFailed ? "Couldn’t load options" : "Options unavailable"}
           {onRetryConfigOptions && (catalogFailed || configOptions?.status === "stale") ? (
             <button onClick={onRetryConfigOptions} type="button">
               {catalogFailed ? "Retry" : "Reload options"}

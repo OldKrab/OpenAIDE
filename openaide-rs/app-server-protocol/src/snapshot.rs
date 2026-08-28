@@ -153,6 +153,7 @@ pub enum AgentSetupReason {
 #[serde(rename_all = "camelCase")]
 pub enum AgentStatus {
     Disconnected,
+    Installing,
     Launching,
     Connected,
     SetupRequired,

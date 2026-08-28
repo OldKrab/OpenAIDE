@@ -387,3 +387,25 @@ body[data-shell="web"] .task-list {
   padding: 2px 3px;
   font-size: 12px;
 }
+
+.native-session-activity {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 8px;
+  padding: 7px 8px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.native-session-activity svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.native-session-activity small {
+  display: block;
+  margin-top: 2px;
+  color: var(--oa-muted-subtle);
+  font-size: 11px;
+}

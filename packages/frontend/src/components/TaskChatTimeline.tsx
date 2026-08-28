@@ -174,8 +174,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                     permissionResponse={permissionResponseForMessage(row.message.message, permissionResponses)}
                     permissionTool={row.permissionTool}
                     presentLiveText={
-                      (taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping")
-                      && isLiveTextMessage(liveTextPresentation, row.message)
+                      isLiveTextMessage(liveTextPresentation, row.message)
                     }
                     questionResponse={questionResponseForMessage(row.message.message, questionResponses)}
                     taskId={taskId}

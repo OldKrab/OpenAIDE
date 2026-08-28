@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
-    AgentContextUsage, AgentEvent, AgentPermissionOption, AgentPermissionOptionKind,
-    AgentPermissionOutcome, AgentPermissionRequest, AgentSubagent, AgentTerminalAppend,
-    AgentToolCall, AgentToolCallRef, AgentToolCallStatus, AgentToolUpdate, AgentTurnUsage,
-    AgentUsageCost,
+    AgentContextUsage, AgentEvent, AgentNativeSubagentCapabilities, AgentNativeSubagentSpawned,
+    AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionOutcome,
+    AgentPermissionRequest, AgentSubagent, AgentTerminalAppend, AgentToolCall, AgentToolCallRef,
+    AgentToolCallStatus, AgentToolUpdate, AgentTurnUsage, AgentUsageCost,
 };
 use crate::agent::{
     AgentEventSink, AgentMetadataField, AgentPromptOutcome, AgentSessionEventSink,
@@ -56,6 +56,69 @@ fn sourced_agent_text_event(text: &str, source_message_id: &str) -> AgentEvent {
         },
         source_message_id: Some(source_message_id.to_string()),
     }
+}
+
+#[test]
+fn codex_child_history_explains_parent_lifecycle_without_inventing_prompts() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    sink.subagent_spawned(AgentNativeSubagentSpawned {
+        parent_native_session_id: "session_1".to_string(),
+        native_session_id: "child_1".to_string(),
+        name: "Researcher".to_string(),
+        delegated_task: None,
+        parent_interaction: false,
+        capabilities: AgentNativeSubagentCapabilities::default(),
+        details: Vec::new(),
+    })
+    .unwrap();
+
+    // Codex ACP re-announces the same native child when the Main Agent sends a
+    // follow-up; it does not emit a separate collaboration Tool call.
+    sink.subagent_spawned(AgentNativeSubagentSpawned {
+        parent_native_session_id: "session_1".to_string(),
+        native_session_id: "child_1".to_string(),
+        name: "Researcher".to_string(),
+        delegated_task: None,
+        // A fresh router after session/resume cannot classify the repeat from
+        // process memory; the durable child identity must still recover it.
+        parent_interaction: false,
+        capabilities: AgentNativeSubagentCapabilities::default(),
+        details: Vec::new(),
+    })
+    .unwrap();
+
+    let record = store
+        .subagent_record_by_native("task_1", "child_1")
+        .unwrap();
+    let history = store
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+    assert_eq!(history.messages.len(), 2);
+    assert!(matches!(
+        &history.messages[0].chat.message,
+        NormalizedMessage::Activity { title, steps, .. }
+            if title == "Main Agent started this subagent"
+                && matches!(steps.as_slice(), [crate::protocol::model::ActivityStep::Text { text, .. }]
+                    if text == "The original delegated prompt is unavailable because Codex does not expose it to clients.")
+    ));
+    assert!(matches!(
+        &history.messages[1].chat.message,
+        NormalizedMessage::Activity { title, steps, .. }
+            if title == "Main Agent interacted with this subagent"
+                && matches!(steps.as_slice(), [crate::protocol::model::ActivityStep::Text { text, .. }]
+                    if text == "The inter-agent message is unavailable because Codex does not expose it to clients.")
+    ));
+    assert!(!history
+        .messages
+        .iter()
+        .any(|stored| matches!(stored.chat.message, NormalizedMessage::User { .. })));
 }
 
 #[test]

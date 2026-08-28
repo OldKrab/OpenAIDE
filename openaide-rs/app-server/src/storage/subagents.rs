@@ -164,6 +164,46 @@ impl Store {
         })
     }
 
+    pub fn subagent_page_before(
+        &self,
+        task_id: &str,
+        subagent_id: &str,
+        before_cursor: &str,
+        limit: usize,
+    ) -> Result<crate::protocol::model::MessagePage, RuntimeError> {
+        crate::storage::id::validate_task_id(task_id)?;
+        validate_subagent_id(subagent_id)?;
+        let _guard = self
+            .inner
+            .subagent_write_lock
+            .lock()
+            .expect("Subagent store lock poisoned");
+        let history = load_history(&self.subagent_root(task_id).join(subagent_id))?;
+        let end = history
+            .messages
+            .iter()
+            .position(|message| message.chat.cursor == before_cursor)
+            .ok_or_else(|| RuntimeError::InvalidParams("before_cursor".to_string()))?;
+        let start = crate::storage::message_store::chat_page_start(
+            &history.messages,
+            end.saturating_sub(limit.clamp(1, 500)),
+            end,
+        );
+        let items = history.messages[start..end]
+            .iter()
+            .map(|stored| stored.chat.clone())
+            .collect::<Vec<_>>();
+        Ok(crate::protocol::model::MessagePage {
+            task_id: task_id.to_string(),
+            start_cursor: items.first().map(|message| message.cursor.clone()),
+            end_cursor: items.last().map(|message| message.cursor.clone()),
+            items,
+            has_before: start > 0,
+            total_count: history.messages.len() as u64,
+            version: history.revision,
+        })
+    }
+
     pub fn subagent_record_by_native(
         &self,
         task_id: &str,
@@ -315,16 +355,15 @@ impl Store {
                 .iter_mut()
                 .find(|stored| stored.chat.identity == identity)
             {
-                let appended = if let (
-                    NormalizedMessage::AgentMessage { role, parts, .. },
-                    NormalizedMessage::AgentMessage {
-                        role: incoming_role,
-                        parts: incoming_parts,
-                        ..
-                    },
-                ) = (&mut stored.chat.message, message)
-                {
-                    if *role == incoming_role && incoming_parts.len() == 1 {
+                let appended = match (&mut stored.chat.message, message) {
+                    (
+                        NormalizedMessage::AgentMessage { role, parts, .. },
+                        NormalizedMessage::AgentMessage {
+                            role: incoming_role,
+                            parts: incoming_parts,
+                            ..
+                        },
+                    ) if *role == incoming_role && incoming_parts.len() == 1 => {
                         let part = incoming_parts.into_iter().next().expect("one checked part");
                         if let (
                             Some(crate::protocol::model::AgentMessagePart::Text { text }),
@@ -336,11 +375,22 @@ impl Store {
                             parts.push(part);
                         }
                         true
-                    } else {
-                        false
                     }
-                } else {
-                    false
+                    (
+                        NormalizedMessage::User {
+                            text, attachments, ..
+                        },
+                        NormalizedMessage::User {
+                            text: chunk,
+                            attachments: incoming_attachments,
+                            ..
+                        },
+                    ) => {
+                        text.push_str(&chunk);
+                        attachments.extend(incoming_attachments);
+                        true
+                    }
+                    _ => false,
                 };
                 if !appended {
                     return Err(RuntimeError::Storage(
@@ -543,6 +593,24 @@ fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
             ));
         }
         history = frame.history;
+    }
+    // codex-acp previously projected the encrypted causal-root placeholder as if it
+    // were child-authored User text. The identity is adapter-owned, so suppressing
+    // that exact legacy shape does not discard genuine provider-neutral history.
+    history.messages.retain(|stored| {
+        let identity = stored.chat.identity.as_str();
+        !(identity.contains(":user:collab:") && identity.ends_with(":prompt"))
+    });
+    for stored in &mut history.messages {
+        if !stored.chat.identity.contains(":codex:") {
+            continue;
+        }
+        if let NormalizedMessage::Activity { steps, .. } = &mut stored.chat.message {
+            if let [crate::protocol::model::ActivityStep::Text { level, .. }] = steps.as_mut_slice()
+            {
+                *level = Some("agent_boundary".to_string());
+            }
+        }
     }
     Ok(history)
 }

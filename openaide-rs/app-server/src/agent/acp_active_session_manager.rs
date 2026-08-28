@@ -12,6 +12,7 @@ use crate::agent::acp_host_terminal_ownership::AcpTerminalOwnerId;
 use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
 use crate::agent::attached_native_session::AttachedNativeSession;
 use crate::agent::attached_native_session_registry::AttachedNativeSessionRegistry;
+use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
@@ -59,6 +60,10 @@ impl AcpActiveSessionManager {
         self.trace_state = trace_state;
     }
 
+    pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
+        self.processes.with_codex_provisioner(provisioner);
+    }
+
     #[cfg(test)]
     pub(super) fn with_start_timeout(&mut self, start_timeout: Duration) {
         self.start_timeout = start_timeout;
@@ -92,6 +97,10 @@ impl AcpActiveSessionManager {
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         self.processes
             .list_sessions(request, self.auth_method_cache.preferred_method())
+    }
+
+    pub(super) fn allows_passive_session_discovery(&self, agent_id: &str) -> bool {
+        self.processes.allows_passive_session_discovery(agent_id)
     }
 
     pub(super) fn probe(

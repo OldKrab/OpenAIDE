@@ -156,6 +156,7 @@ fn status_for(agent_id: &str, enabled: bool, api: &AgentProductApi) -> AgentSett
     }
     match api.statuses.snapshot(agent_id).status {
         AgentStatus::Disconnected => AgentSettingsStatus::Disconnected,
+        AgentStatus::Installing => AgentSettingsStatus::Installing,
         AgentStatus::Launching => AgentSettingsStatus::Launching,
         AgentStatus::Connected => AgentSettingsStatus::Connected,
         AgentStatus::SetupRequired => AgentSettingsStatus::SetupRequired,

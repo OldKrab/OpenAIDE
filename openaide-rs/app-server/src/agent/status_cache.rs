@@ -65,6 +65,39 @@ impl AgentStatusCache {
         self.notify();
     }
 
+    /// Publishes the shared prerequisite without treating it as Agent process launch.
+    pub(crate) fn begin_installation(&self, agent_id: &str) -> AgentStatus {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        let previous = snapshot.status;
+        snapshot.status = AgentStatus::Installing;
+        drop(entries);
+        self.notify();
+        previous
+    }
+
+    pub(crate) fn complete_installation(&self, agent_id: &str, previous: AgentStatus) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        snapshot.status = if previous == AgentStatus::Authenticating {
+            AgentStatus::Authenticating
+        } else {
+            AgentStatus::Launching
+        };
+        drop(entries);
+        self.notify();
+    }
+
+    pub(crate) fn record_launching(&self, agent_id: &str) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        if snapshot.status != AgentStatus::Authenticating {
+            snapshot.status = AgentStatus::Launching;
+        }
+        drop(entries);
+        self.notify();
+    }
+
     pub(crate) fn record_session_error(&self, agent_id: &str, error: &RuntimeError) {
         if !session_error_updates_agent_status(error) {
             return;

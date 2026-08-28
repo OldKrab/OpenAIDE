@@ -402,7 +402,7 @@ function activityStatusFromProtocol(status: ProtocolActivityStatus): ActivitySta
 }
 
 function activityStepLevel(level: string | null | undefined): Extract<ActivityStep, { kind: "text" }>["level"] {
-  if (level === "info" || level === "warning" || level === "error") return level;
+  if (level === "info" || level === "warning" || level === "error" || level === "agent_boundary") return level;
   return undefined;
 }
 

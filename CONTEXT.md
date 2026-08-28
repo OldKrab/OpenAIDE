@@ -249,7 +249,7 @@ An Agent that has successfully launched and initialized, supports the required O
 _Avoid_: Letting users start work with an unavailable Agent
 
 **Agent Status**:
-The user-facing availability state of an Agent: disconnected, launching, connected, setup required, auth required, authenticating, unsupported, or failed.
+The user-facing availability state of an Agent: disconnected, installing, launching, connected, setup required, auth required, authenticating, unsupported, or failed. Installing is an ephemeral App Server-owned activity for a managed Agent integration, not a Task state or user setup requirement.
 _Avoid_: Representing Agent setup problems as failed Tasks
 
 **Setup Required Agent**:

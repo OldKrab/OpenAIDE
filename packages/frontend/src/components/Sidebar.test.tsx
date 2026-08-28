@@ -1158,6 +1158,26 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
   });
 
+  it("keeps saved rows visible while the Codex integration installs", () => {
+    const tree = render(
+      <Sidebar
+        codexIntegrationInstalling
+        nativeSessions={nativeSessions({
+          items: [nativeSession({ session_id: "session_1", title: "Existing" })],
+        })}
+        showArchived={false}
+        tasks={[]}
+        {...sidebarCallbacks()}
+      />,
+    );
+
+    const activity = tree.root.findByProps({ className: "native-session-activity" });
+    expect(activity.props["aria-busy"]).toBe(true);
+    expect(textContent(tree)).toContain("Installing the Codex integration…");
+    expect(textContent(tree)).toContain("This can take a minute.");
+    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
+  });
+
   it("refreshes external sessions from the sidebar header", () => {
     const onLoadNativeSessions = vi.fn();
     const tree = render(

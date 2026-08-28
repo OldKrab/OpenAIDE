@@ -1321,8 +1321,7 @@ fn replay_keeps_sourced_text_distinct_when_the_next_chunk_is_anonymous() {
 fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();
-    let projection =
-        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+    let projection = LivePromptProjection::for_native_subagent("codex", sink);
 
     projection
         .emit(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
@@ -1353,6 +1352,22 @@ fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
         } => assert_eq!(text, " more"),
         other => panic!("expected thought event, got {other:?}"),
     }
+}
+
+#[test]
+fn codex_child_user_chunks_do_not_invent_visible_prompts() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection = LivePromptProjection::for_native_subagent("codex", sink);
+
+    projection
+        .emit(SessionUpdate::UserMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Follow up")))
+                .message_id("child-user-1"),
+        ))
+        .unwrap();
+
+    assert!(capture.events().is_empty());
 }
 
 #[test]

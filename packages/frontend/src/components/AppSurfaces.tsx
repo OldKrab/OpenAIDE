@@ -37,6 +37,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       .map((agent) => agent.id)),
     [controller.agents],
   );
+  const codexIntegrationInstalling = controller.agents?.some(
+    (agent) => agent.id === "codex" && agent.status === "installing",
+  ) === true;
   // The App Server Project catalog is global; current-Project shells expose only
   // the ordered Project identities represented by this App Shell workspace.
   const currentNavigationProjectIds = bootstrap.surface !== "invalid"
@@ -348,6 +351,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
+          codexIntegrationInstalling={codexIntegrationInstalling}
           groupByProject={true}
           nativeSessions={navigation.nativeSessions}
           nativeSessionMutations={navigation.nativeSessionMutations}
@@ -469,6 +473,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const taskNavigation = (
       <Sidebar
         activeTaskId={sidebarActiveTaskId}
+        codexIntegrationInstalling={codexIntegrationInstalling}
         groupByProject={true}
         hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
         modal={mobileLayoutActive && mobileNavigation.active}

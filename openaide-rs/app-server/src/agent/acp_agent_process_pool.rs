@@ -12,6 +12,7 @@ use crate::agent::acp_agent_process::{
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwner};
 use crate::agent::acp_runtime_threading::block_on_new_runtime;
 use crate::agent::attached_native_session::record_terminal_error;
+use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSessionFork,
@@ -29,6 +30,7 @@ pub(super) struct AcpAgentProcessPool {
     processes: Mutex<HashMap<String, AcpAgentProcessClient>>,
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
     list_timeout: Duration,
+    codex_provisioner: Option<CodexAcpProvisioner>,
 }
 
 #[derive(Clone)]
@@ -46,6 +48,7 @@ struct AcpAgentProcessClient {
     terminal_error: Arc<Mutex<Option<String>>>,
     terminal_registry: AcpHostTerminalRegistry,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
+    _runtime_lease: Option<Arc<std::fs::File>>,
 }
 
 pub(super) struct AcpAgentProcessSession {
@@ -62,7 +65,20 @@ impl AcpAgentProcessPool {
             processes: Mutex::new(HashMap::new()),
             auth_environments: Mutex::new(HashMap::new()),
             list_timeout: DEFAULT_LIST_TIMEOUT,
+            codex_provisioner: None,
         }
+    }
+
+    pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
+        self.codex_provisioner = Some(provisioner);
+    }
+
+    pub(super) fn allows_passive_session_discovery(&self, agent_id: &str) -> bool {
+        agent_id != "codex"
+            || self
+                .codex_provisioner
+                .as_ref()
+                .is_none_or(CodexAcpProvisioner::is_provisioned)
     }
 
     #[cfg(test)]
@@ -348,6 +364,14 @@ impl AcpAgentProcessPool {
             // launch identity remains the process-pool key, not this lookup key.
             config.agent_id = auth.secret_storage_agent_id;
         }
+        let prepared = match &self.codex_provisioner {
+            Some(provisioner) => provisioner.prepare(config)?,
+            None => crate::agent::codex_acp_provisioner::PreparedCodexAcpLaunch {
+                config,
+                lease: None,
+            },
+        };
+        let config = prepared.config;
         config.ensure_command_available()?;
         let host_bridge = self.host_bridge.clone();
         let terminal_registry = AcpHostTerminalRegistry::new(host_bridge.clone());
@@ -363,6 +387,7 @@ impl AcpAgentProcessPool {
             terminal_error: terminal_error.clone(),
             terminal_registry: terminal_registry.clone(),
             shutdown_tx,
+            _runtime_lease: prepared.lease.clone(),
         };
         self.processes
             .lock()
@@ -371,7 +396,9 @@ impl AcpAgentProcessPool {
 
         let worker_agent_id = agent_id.to_string();
         let worker_terminal_error = terminal_error.clone();
+        let worker_runtime_lease = prepared.lease;
         thread::spawn(move || {
+            let _runtime_lease = worker_runtime_lease;
             let result = block_on_new_runtime(run_acp_agent_process(AcpAgentProcessInput {
                 config,
                 first_open,

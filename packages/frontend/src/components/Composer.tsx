@@ -29,6 +29,7 @@ import { appendQuoteToDraft } from "./quoteSelection";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
 import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
+import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
 import {
   FileMentionPicker,
   fileMentionTokenAtCursor,
@@ -131,6 +132,9 @@ export function Composer({
   const presentedConfigOptions = configOptions && presentedConfigChange
     ? { ...configOptions, pending_change: presentedConfigChange }
     : configOptions;
+  const configLoadingLabel = agents.find((agent) => agent.id === selection.agentId)?.status === "installing"
+    ? CODEX_INTEGRATION_INSTALLING_LABEL
+    : undefined;
   const configMutationId = presentedConfigChange?.mutation_id;
   const [configChangeStage, setConfigChangeStage] = useState<{ index: number; mutationId: string }>();
   const configChangeStatus = configMutationId && configChangeStage?.mutationId === configMutationId
@@ -580,6 +584,7 @@ export function Composer({
           configLocked={configLocked || optimisticConfigChange !== undefined}
           configChangeLabel={configChangeLabel}
           configOptions={presentedConfigOptions}
+          configLoadingLabel={configLoadingLabel}
           disabled={disabled}
           fileBrowser={fileBrowser}
           fileDropHandlerRef={fileDropHandlerRef}

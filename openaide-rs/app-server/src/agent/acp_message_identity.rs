@@ -5,6 +5,11 @@ pub(crate) fn stable_message_id(session_id: &str, source_message_id: &str) -> St
     format!("acp:{session_id}:message:{source_message_id}")
 }
 
+/// User input reported by an Agent needs its own namespace within child history.
+pub(crate) fn stable_user_message_id(session_id: &str, source_message_id: &str) -> String {
+    format!("acp:{session_id}:user:{source_message_id}")
+}
+
 /// Agent text and private thought are separate Chat channels even when an Agent reuses one ACP ID.
 pub(crate) fn stable_agent_message_id(
     session_id: &str,

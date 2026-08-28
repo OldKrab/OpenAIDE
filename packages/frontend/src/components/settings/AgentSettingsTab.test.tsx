@@ -279,6 +279,23 @@ describe("AgentSettingsTab interactions", () => {
     expect(textContent(view.root)).toContain("Off");
   });
 
+  it("shows the shared managed integration activity in the catalog and Agent details", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", { status: "installing" })],
+      openFirst: false,
+    });
+
+    const catalogActivity = view.root.findByProps({ className: "agent-library-state installing" });
+    expect(catalogActivity.props["aria-busy"]).toBe(true);
+    expect(textContent(catalogActivity)).toBe("Installing the Codex integration…");
+
+    act(() => view.root.findByProps({ className: "agent-catalog-row" }).props.onClick());
+
+    const detailActivity = view.root.findByProps({ className: "agent-page-status installing" });
+    expect(detailActivity.props["aria-busy"]).toBe(true);
+    expect(textContent(detailActivity)).toBe("Installing the Codex integration…");
+  });
+
   it("offers recovery when the selected Agent requires setup", () => {
     const onRetry = vi.fn(async () => true);
     const view = renderAgentSettings({

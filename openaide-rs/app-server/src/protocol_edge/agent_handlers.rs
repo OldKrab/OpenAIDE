@@ -474,6 +474,11 @@ impl RpcGateway {
         &mut self,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
+        // Provisioning completion is an Agent Status transition. Reuse the
+        // coalesced discovery owner so session history appears without a
+        // frontend-authored retry or a prompt replay.
+        self.agent_list_sessions
+            .request_native_session_catalog_refresh();
         match self.snapshots.agent_collection_snapshot() {
             Ok(agents) => self.publish_agent_collection_update(agents, now),
             Err(_) => Vec::new(),

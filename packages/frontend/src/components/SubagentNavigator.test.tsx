@@ -38,16 +38,20 @@ describe("SubagentNavigator", () => {
       />);
     });
 
-    const main = view!.root.findByProps({ className: "subagent-main-button" });
-    expect(main.props["aria-keyshortcuts"]).toBe("Alt+ArrowLeft");
-    act(() => main.props.onClick());
-    expect(onSelect).toHaveBeenCalledWith(undefined);
+    const trigger = view!.root.findByProps({
+      "aria-label": "Switch agent. Currently viewing Reviewer",
+    });
+    act(() => trigger.props.onClick());
 
-    const options = view!.root.findAllByType("option");
-    expect(options.map((option) => option.children.join(""))).toEqual([
-      "Switch subagent",
-      "● Explorer • New",
-      "  ✓ Reviewer",
-    ]);
+    const choices = view!.root.findAllByProps({ role: "menuitemradio" });
+    expect(choices).toHaveLength(3);
+    expect(choices[0]!.findByType("strong").children.join("")).toBe("Main Agent");
+    expect(choices.flatMap((choice) => choice.findAllByType("small"))
+      .map((copy) => copy.children.join(""))).not.toContain("Inspect");
+    expect(choices.flatMap((choice) => choice.findAllByType("small"))
+      .map((copy) => copy.children.join(""))).not.toContain("Review");
+
+    act(() => choices[0]!.props.onClick());
+    expect(onSelect).toHaveBeenCalledWith(undefined);
   });
 });

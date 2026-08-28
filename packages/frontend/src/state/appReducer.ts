@@ -474,7 +474,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       );
       if (reconciliation.state === state) {
         const nextState = settleTaskLiveTextPresentation(state, taskId, action.snapshot.task.status);
-        return action.liveText && taskAcceptsLiveText(action.snapshot.task.status)
+        return action.liveText
           ? applyTaskLiveTextPresentation(state, taskId, action.liveText)
           : nextState;
       }
@@ -499,7 +499,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         },
       };
       const presentationState = settleTaskLiveTextPresentation(nextState, taskId, snapshot.task.status);
-      return action.liveText && taskAcceptsLiveText(snapshot.task.status)
+      return action.liveText
         ? applyTaskLiveTextPresentation(nextState, taskId, action.liveText)
         : presentationState;
     }

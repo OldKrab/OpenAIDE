@@ -34,6 +34,14 @@ fn initialize_request_with_subagents(
         "parameterizedModelPicker".to_string(),
         serde_json::Value::Bool(true),
     );
+    if native_subagents {
+        // SDK 1.4 strips the draft standard field before Codex ACP can inspect it.
+        // This namespaced fallback is temporary until ACP PR #1992 ships in the SDK.
+        meta.insert(
+            "openaide".to_string(),
+            serde_json::json!({ "nativeSubagentSessions": true }),
+        );
+    }
     let capabilities = ClientCapabilities::new()
         // Cursor uses this ACP extension to expose model parameters (such as
         // thinking effort and fast mode) as independent session options.

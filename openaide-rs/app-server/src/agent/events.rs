@@ -5,6 +5,11 @@ use crate::protocol::model::{
 
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
+    /// User-authored input reported on a native child session stream.
+    UserMessageChunk {
+        text: String,
+        source_message_id: Option<String>,
+    },
     MessageChunk {
         role: AgentMessageRole,
         part: AgentMessagePart,
@@ -49,7 +54,11 @@ pub struct AgentNativeSubagentSpawned {
     pub parent_native_session_id: String,
     pub native_session_id: String,
     pub name: String,
-    pub delegated_task: String,
+    /// `None` means the provider announced the child but did not expose the delegated prompt.
+    pub delegated_task: Option<String>,
+    /// The provider uses a repeated announcement to signal a parent-to-child interaction.
+    /// This stays typed at the Agent boundary instead of leaking provider metadata downstream.
+    pub parent_interaction: bool,
     pub capabilities: AgentNativeSubagentCapabilities,
     pub details: Vec<AgentNativeSubagentDetail>,
 }

@@ -45,6 +45,7 @@ pub(super) struct LivePromptProjection {
     codex_subagents: CodexSubagentState,
     cancellation: TurnCancellation,
     preceding_update_drain: Option<PrecedingUpdateDrain>,
+    project_user_messages: bool,
 }
 
 impl LivePromptProjection {
@@ -76,6 +77,7 @@ impl LivePromptProjection {
                 .unwrap_or_default(),
             cancellation,
             preceding_update_drain: None,
+            project_user_messages: false,
         }
     }
 
@@ -105,7 +107,11 @@ impl LivePromptProjection {
         agent_id: impl Into<String>,
         sink: Arc<dyn AgentEventSink>,
     ) -> Self {
-        Self::for_prompt(agent_id, sink, TurnCancellation::new(), None)
+        let mut projection = Self::for_prompt(agent_id, sink, TurnCancellation::new(), None);
+        // Codex currently projects an encrypted causal-root placeholder as a child User
+        // message. It is not the delegated prompt, so presenting it invents transcript data.
+        projection.project_user_messages = projection.agent_id != "codex";
+        projection
     }
 
     #[cfg(test)]
@@ -237,6 +243,14 @@ impl LivePromptProjection {
 
     pub(super) fn emit(&self, update: SessionUpdate) -> Result<(), RuntimeError> {
         match update {
+            SessionUpdate::UserMessageChunk(chunk) if self.project_user_messages => {
+                if let crate::agent::acp_schema::ContentBlock::Text(text) = chunk.content {
+                    self.sink.emit(AgentEvent::UserMessageChunk {
+                        text: text.text,
+                        source_message_id: chunk.message_id.map(|id| id.to_string()),
+                    })?;
+                }
+            }
             SessionUpdate::AgentMessageChunk(chunk) => {
                 self.sink.emit(AgentEvent::MessageChunk {
                     role: AgentMessageRole::Agent,

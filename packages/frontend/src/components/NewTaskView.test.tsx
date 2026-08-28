@@ -528,6 +528,36 @@ describe("NewTaskView", () => {
     expect(textContent(tree)).not.toContain("Preparing task");
   });
 
+  it("explains that options are waiting for the managed Codex integration", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptionsLoading = true;
+
+    const tree = render(
+      <NewTaskView
+        agents={[{
+          id: "codex",
+          label: "Codex",
+          description: "Code agent",
+          icon: "openai",
+          status: "installing",
+        }]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    const status = tree.root.findByProps({ className: "composer-options-status" });
+    expect(status.props["aria-busy"]).toBe(true);
+    expect(status.children).toContain("Installing the Codex integration…");
+    expect(textContent(tree)).not.toContain("Loading options…");
+  });
+
   it("keeps Agent option failure and Retry in the options slot", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };

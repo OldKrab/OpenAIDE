@@ -1,8 +1,9 @@
-import { CircleAlert, Plus } from "lucide-react";
+import { CircleAlert, LoaderCircle, Plus } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 
 import { AgentIcon } from "../AgentIcon";
+import { CODEX_INTEGRATION_INSTALLING_LABEL } from "../agentActivityPresentation";
 import { SettingsCatalogSearch } from "./SettingsCatalogSearch";
 
 export function AgentSettingsList({
@@ -106,9 +107,10 @@ function AgentStatus({ agent }: { agent: AgentSettingsRecord }) {
   const copy = statusCopy(agent.status);
   if (!copy) return null;
   const attention = agent.status === "auth_required" || agent.status === "failed" || agent.status === "setup_required";
+  const installing = agent.status === "installing";
   return (
-    <span className={`agent-library-state ${agent.status}`}>
-      {attention ? <CircleAlert size={13} /> : <i />}
+    <span aria-busy={installing || undefined} className={`agent-library-state ${agent.status}`}>
+      {installing ? <LoaderCircle aria-hidden="true" className="spin" size={13} /> : attention ? <CircleAlert size={13} /> : <i />}
       {copy}
     </span>
   );
@@ -122,6 +124,7 @@ function statusCopy(status: AgentSettingsRecord["status"]) {
     case "disabled": return "Off";
     case "connected": return "Connected";
     case "ready": return "Ready";
+    case "installing": return CODEX_INTEGRATION_INSTALLING_LABEL;
     case "disconnected":
     case "unprobed":
     case "launching":

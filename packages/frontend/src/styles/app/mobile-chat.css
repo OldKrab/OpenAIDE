@@ -18,6 +18,18 @@
     min-height: 36px;
   }
 
+  .agent-boundary-notice > .activity-disclosure-trigger {
+    min-height: 36px;
+  }
+
+  .agent-boundary-label {
+    max-width: calc(100% - 24px);
+  }
+
+  .agent-boundary-explanation {
+    max-width: calc(100% - 24px);
+  }
+
   .chat-user-block {
     max-width: min(70ch, 90%);
   }
