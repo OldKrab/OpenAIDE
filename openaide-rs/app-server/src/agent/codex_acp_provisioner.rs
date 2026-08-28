@@ -211,7 +211,7 @@ impl CodexAcpProvisioner {
                 .map_err(provisioning_installer_error)
                 .and_then(|_| {
                     validate_package(&staging)?;
-                    validate_platform_launcher(&staging, self.windows)?;
+                    validate_platform_runtime(&staging, self.windows)?;
                     fs::write(staging.join(MANAGED_MARKER), managed_marker())
                         .map_err(provisioning_io_error)?;
                     fs::rename(&staging, version_root).map_err(provisioning_io_error)
@@ -226,26 +226,23 @@ impl CodexAcpProvisioner {
 
         let lease = Arc::new(open_lock_file(&version_root.join(".lease"))?);
         FileExt::lock_shared(lease.as_ref()).map_err(provisioning_io_error)?;
-        let (command, args) = if self.windows {
-            (
-                windows_package_launcher(version_root)
+        let entrypoint = package_root(version_root).join("dist/index.js");
+        let mut config = config;
+        config.command = resolved_command_or_name("node");
+        config.args = vec![entrypoint.to_string_lossy().into_owned()];
+        if self.windows {
+            // The @openai/codex Node launcher can terminate when nested under
+            // codex-acp on Windows. Use its pinned native binary directly.
+            config.env.retain(|(name, _)| name != "CODEX_PATH");
+            config.env.push((
+                "CODEX_PATH".to_string(),
+                windows_codex_binary(version_root)
                     .to_string_lossy()
                     .into_owned(),
-                Vec::new(),
-            )
-        } else {
-            let entrypoint = package_root(version_root).join("dist/index.js");
-            (
-                resolved_command_or_name("node"),
-                vec![entrypoint.to_string_lossy().into_owned()],
-            )
-        };
+            ));
+        }
         Ok(PreparedCodexAcpLaunch {
-            config: AcpAgentConfig {
-                command,
-                args,
-                ..config
-            },
+            config,
             lease: Some(lease),
         })
     }
@@ -336,17 +333,19 @@ fn valid_installation(version_root: &Path, windows: bool) -> bool {
         .as_deref()
         == Some(managed_marker().as_str())
         && validate_package(version_root).is_ok()
-        && validate_platform_launcher(version_root, windows).is_ok()
+        && validate_platform_runtime(version_root, windows).is_ok()
 }
 
-fn windows_package_launcher(version_root: &Path) -> PathBuf {
-    version_root.join("node_modules/.bin/codex-acp.cmd")
+fn windows_codex_binary(version_root: &Path) -> PathBuf {
+    version_root
+        .join("node_modules/@openai/codex-win32-x64")
+        .join("vendor/x86_64-pc-windows-msvc/bin/codex.exe")
 }
 
-fn validate_platform_launcher(version_root: &Path, windows: bool) -> Result<(), RuntimeError> {
-    if windows && !windows_package_launcher(version_root).is_file() {
+fn validate_platform_runtime(version_root: &Path, windows: bool) -> Result<(), RuntimeError> {
+    if windows && !windows_codex_binary(version_root).is_file() {
         return Err(provisioning_error(
-            "installed Codex integration did not provide its Windows launcher".to_string(),
+            "installed Codex integration did not provide its native Windows runtime".to_string(),
         ));
     }
     Ok(())
