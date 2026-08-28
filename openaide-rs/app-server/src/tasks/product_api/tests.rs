@@ -4589,12 +4589,12 @@ fn failed_native_session_listing_is_not_cached() {
     )
     .unwrap();
 
-    for expected in [1, 2] {
+    for expected in [2, 4] {
         assert!(api.refresh_native_session_catalogs().is_err());
         assert_eq!(agent.list_calls.load(Ordering::SeqCst), expected);
     }
 
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
 }
 
 #[test]
