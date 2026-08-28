@@ -23,6 +23,7 @@ import { currentFrontendShell } from "../../services/frontendShell";
 import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
 import { PopupDialog } from "../Popup";
 import { DesktopRuntimeSettings } from "./DesktopRuntimeSettings";
+import { DesktopUpdateSettings } from "./DesktopUpdateSettings";
 import { SupportExportButton } from "../SupportExportDialog";
 
 export function GeneralSettingsTab({
@@ -53,6 +54,7 @@ export function GeneralSettingsTab({
   const newLineShortcut = enterSends ? "Ctrl/Cmd+Enter" : "Enter";
   const developerSettings = runtimeSettings?.developer;
   const desktopRuntime = currentFrontendShell()?.desktopRuntime;
+  const desktopUpdates = currentFrontendShell()?.desktopUpdates;
 
   return (
     <div className="general-settings-panel">
@@ -71,6 +73,15 @@ export function GeneralSettingsTab({
           label="Environment"
         >
           <DesktopRuntimeSettings capability={desktopRuntime} />
+        </GeneralSection>
+      ) : null}
+
+      {desktopUpdates ? (
+        <GeneralSection
+          description="Review, download, and apply signed OpenAIDE Desktop releases."
+          label="Application updates"
+        >
+          <DesktopUpdateSettings capability={desktopUpdates} />
         </GeneralSection>
       ) : null}
 

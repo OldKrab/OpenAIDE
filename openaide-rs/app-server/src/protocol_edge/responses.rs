@@ -144,6 +144,37 @@ pub fn invalid_params(error: serde_json::Error) -> ProtocolError {
     }
 }
 
+pub fn invalid_update_shutdown_attempt() -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::InvalidRequest,
+        message: "Update shutdown attempt id must be between 1 and 128 characters".to_string(),
+        recoverable: false,
+        target: None,
+    }
+}
+
+pub fn update_shutdown_in_progress(method: String) -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::ServerStopping,
+        message: "The App Server is preparing for an application update".to_string(),
+        recoverable: true,
+        target: Some(ErrorTarget {
+            method: Some(method),
+            field: None,
+            current_task: None,
+        }),
+    }
+}
+
+pub fn update_shutdown_readiness_failed() -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::Internal,
+        message: "Could not determine whether the App Server is ready to update".to_string(),
+        recoverable: true,
+        target: None,
+    }
+}
+
 pub fn unsupported_method(method: &str) -> ProtocolError {
     ProtocolError {
         code: ProtocolErrorCode::InvalidRequest,

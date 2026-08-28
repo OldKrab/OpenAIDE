@@ -3,6 +3,9 @@ pub const CLIENT_INITIALIZE: &str = "client/initialize";
 pub const CLIENT_CAPABILITIES_CHANGED: &str = "client/capabilitiesChanged";
 pub const CLIENT_HEARTBEAT: &str = "client/heartbeat";
 pub const CLIENT_DETACH: &str = "client/detach";
+pub const CLIENT_UPDATE_SHUTDOWN_PREPARE: &str = "client/updateShutdownPrepare";
+pub const CLIENT_UPDATE_SHUTDOWN_COMMIT: &str = "client/updateShutdownCommit";
+pub const CLIENT_UPDATE_SHUTDOWN_ABORT: &str = "client/updateShutdownAbort";
 pub const PENDING_REQUEST_RESOLVE: &str = "pendingRequest/resolve";
 pub const STATE_SUBSCRIBE: &str = "state/subscribe";
 pub const STATE_UNSUBSCRIBE: &str = "state/unsubscribe";
@@ -103,6 +106,9 @@ pub const CLIENT_METHODS: &[&str] = &[
     CLIENT_CAPABILITIES_CHANGED,
     CLIENT_HEARTBEAT,
     CLIENT_DETACH,
+    CLIENT_UPDATE_SHUTDOWN_PREPARE,
+    CLIENT_UPDATE_SHUTDOWN_COMMIT,
+    CLIENT_UPDATE_SHUTDOWN_ABORT,
     PENDING_REQUEST_RESOLVE,
     STATE_SUBSCRIBE,
     STATE_UNSUBSCRIBE,

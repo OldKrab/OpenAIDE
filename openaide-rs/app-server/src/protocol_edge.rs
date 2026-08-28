@@ -28,7 +28,9 @@ pub use messages::{GatewayEventDelivery, GatewayOutcome, GatewayResponse, Inboun
 pub use shared_gateway::SharedRpcGateway;
 
 use openaide_app_server_protocol::envelopes::RequestMeta;
-use openaide_app_server_protocol::methods::{STATE_SUBSCRIBE, STATE_UNSUBSCRIBE};
+use openaide_app_server_protocol::methods::{
+    CLIENT_INITIALIZE, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
+};
 use openaide_app_server_protocol::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
 };
@@ -100,11 +102,11 @@ pub struct RpcGateway {
     task_storage_maintenance: Arc<dyn TaskStorageMaintenanceWorkflow>,
     worktrees: Arc<crate::worktrees::WorktreeManager>,
     shutdown: Arc<dyn AppServerShutdownWorkflow>,
+    update_shutdown: Option<UpdateShutdownBarrier>,
 }
 
 pub(crate) trait AppServerShutdownWorkflow: Send + Sync {
     fn shutdown(&self) -> Result<(), RuntimeError>;
-    #[cfg(test)]
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError>;
 }
 
@@ -114,11 +116,17 @@ pub(crate) struct RemovedTask {
     pub(crate) next_revision: u64,
 }
 
-#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ShutdownBlockers {
     pub active_turns: usize,
     pub pending_task_requests: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpdateShutdownBarrier {
+    owner: openaide_app_server_protocol::ids::ClientInstanceId,
+    attempt_id: String,
+    committed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,6 +225,7 @@ impl RpcGateway {
             task_storage_maintenance: Arc::new(NoopTaskStorageMaintenance),
             worktrees,
             shutdown,
+            update_shutdown: None,
         }
     }
 
@@ -277,6 +286,20 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
+        if let Some(barrier) = &self.update_shutdown {
+            if barrier.owner == params.client_instance_id {
+                // A WebView reload keeps the native Desktop client identity. Clearing its
+                // abandoned barrier restores the app after a crash between prepare and detach.
+                self.update_shutdown = None;
+            } else {
+                return self.error(
+                    connection_id,
+                    id,
+                    meta,
+                    responses::update_shutdown_in_progress(CLIENT_INITIALIZE.to_string()),
+                );
+            }
+        }
         if let InitializeAdmission::Rejected(error) = self.lifecycle.admit_initialize(now) {
             return self.error(connection_id, id, meta, error);
         }

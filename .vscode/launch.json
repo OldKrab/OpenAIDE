@@ -5,7 +5,7 @@
       "name": "OpenAIDE: Desktop (Development)",
       "type": "pwa-node",
       "request": "launch",
-      "program": "${workspaceFolder}/apps/desktop-validation/scripts/development-launch.mjs",
+      "program": "${workspaceFolder}/apps/desktop/scripts/development-launch.mjs",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "autoAttachChildProcesses": false,

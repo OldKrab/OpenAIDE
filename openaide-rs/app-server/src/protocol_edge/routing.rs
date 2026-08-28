@@ -6,6 +6,7 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
+    CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT, CLIENT_UPDATE_SHUTDOWN_PREPARE,
     DIAGNOSTICS_CREATE_SUPPORT_EXPORT, DIAGNOSTICS_GET_RUNTIME, DIAGNOSTICS_LIST_SUPPORT_EXPORT,
     FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE,
     MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED,
@@ -124,6 +125,24 @@ impl RpcGateway {
             }
         }
 
+        let update_shutdown_control = matches!(
+            method.as_str(),
+            CLIENT_INITIALIZE
+                | CLIENT_HEARTBEAT
+                | CLIENT_DETACH
+                | CLIENT_UPDATE_SHUTDOWN_PREPARE
+                | CLIENT_UPDATE_SHUTDOWN_COMMIT
+                | CLIENT_UPDATE_SHUTDOWN_ABORT
+        );
+        if self.update_shutdown.is_some() && !update_shutdown_control {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                responses::update_shutdown_in_progress(method),
+            );
+        }
+
         match method.as_str() {
             CLIENT_PROBE => self.handle_client_probe(connection_id, id, params, meta),
             CLIENT_INITIALIZE => self.handle_initialize(connection_id, id, params, meta, now),
@@ -132,6 +151,15 @@ impl RpcGateway {
             }
             CLIENT_HEARTBEAT => self.handle_client_heartbeat(connection_id, id, params, meta, now),
             CLIENT_DETACH => self.handle_client_detach(connection_id, id, params, meta, now),
+            CLIENT_UPDATE_SHUTDOWN_PREPARE => {
+                self.handle_update_shutdown_prepare(connection_id, id, params, meta)
+            }
+            CLIENT_UPDATE_SHUTDOWN_COMMIT => {
+                self.handle_update_shutdown_commit(connection_id, id, params, meta)
+            }
+            CLIENT_UPDATE_SHUTDOWN_ABORT => {
+                self.handle_update_shutdown_abort(connection_id, id, params, meta)
+            }
             PENDING_REQUEST_RESOLVE => {
                 self.handle_pending_request_resolve(connection_id, id, params, meta, now)
             }

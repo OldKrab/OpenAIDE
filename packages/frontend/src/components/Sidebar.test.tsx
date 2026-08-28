@@ -1230,6 +1230,21 @@ describe("Sidebar", () => {
     expect(settings.props.className).toContain("settings-button selected");
   });
 
+  it("keeps an available Desktop update discoverable beside Settings", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        settingsStatus="Update available"
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    expect(tree.root.findByProps({ className: "settings-button-copy" }).findByType("small").children)
+      .toEqual(["Update available"]);
+  });
+
   it("shows only the animated refresh control while refreshing native sessions", () => {
     const tree = render(
       <Sidebar

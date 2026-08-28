@@ -22,7 +22,9 @@ use crate::attachment::{
 use crate::client::{
     ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientDetachParams,
     ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeParams,
-    ClientProbeResult, InitializeParams, InitializeResult,
+    ClientProbeResult, InitializeParams, InitializeResult, UpdateShutdownAbortParams,
+    UpdateShutdownAbortResult, UpdateShutdownCommitParams, UpdateShutdownCommitResult,
+    UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
 };
 use crate::diagnostics::{
     RuntimeDiagnosticsParams, RuntimeDiagnosticsResult, SupportExportCreateParams,
@@ -157,6 +159,24 @@ protocol_method!(
     CLIENT_DETACH,
     ClientDetachParams,
     ClientDetachResult
+);
+protocol_method!(
+    ClientUpdateShutdownPrepare,
+    CLIENT_UPDATE_SHUTDOWN_PREPARE,
+    UpdateShutdownPrepareParams,
+    UpdateShutdownPrepareResult
+);
+protocol_method!(
+    ClientUpdateShutdownCommit,
+    CLIENT_UPDATE_SHUTDOWN_COMMIT,
+    UpdateShutdownCommitParams,
+    UpdateShutdownCommitResult
+);
+protocol_method!(
+    ClientUpdateShutdownAbort,
+    CLIENT_UPDATE_SHUTDOWN_ABORT,
+    UpdateShutdownAbortParams,
+    UpdateShutdownAbortResult
 );
 protocol_method!(
     PendingRequestResolve,

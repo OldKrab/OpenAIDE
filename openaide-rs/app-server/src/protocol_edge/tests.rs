@@ -1,7 +1,7 @@
 use openaide_app_server_protocol::client::{
     ClientCapabilities, ClientCapabilitiesChangedParams, ClientProtocolCapability,
     ClientWorkspaceRoot, InitializeParams, RequestedSurface, ShellCapability, ShellDescriptor,
-    ShellKind,
+    ShellKind, UpdateShutdownAbortParams, UpdateShutdownCommitParams, UpdateShutdownPrepareParams,
 };
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta};
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
@@ -13,6 +13,7 @@ use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_REPLACE_CUSTOM,
     AGENT_SET_ENABLED, AGENT_UPDATE_CUSTOM_METADATA, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE,
+    CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT, CLIENT_UPDATE_SHUTDOWN_PREPARE,
     DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
     MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
     SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
@@ -121,6 +122,179 @@ fn initialize_records_client_and_returns_snapshot_cursor() {
         .client_hub
         .context_for_connection(&ConnectionId::new("conn-1"))
         .is_some());
+}
+
+#[test]
+fn update_shutdown_prepare_blocks_while_another_client_owns_the_server() {
+    let mut gateway = gateway();
+    initialize_client(&mut gateway, ConnectionId::new("conn-1"));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("2", CLIENT_INITIALIZE, init_params("client-2")),
+        AppServerTime(2),
+    ));
+
+    let prepared = response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            CLIENT_UPDATE_SHUTDOWN_PREPARE,
+            UpdateShutdownPrepareParams {
+                attempt_id: "update-1".to_string(),
+                stop_active_work: true,
+            },
+        ),
+        AppServerTime(3),
+    ));
+
+    assert_eq!(
+        prepared["result"],
+        json!({ "kind": "blocked", "reason": "otherClients" })
+    );
+}
+
+#[test]
+fn update_shutdown_requires_confirmation_then_quiesces_until_abort() {
+    let mut gateway = gateway();
+    gateway.shutdown = Arc::new(FixedShutdownWithBlockers {
+        active_turns: 1,
+        pending_task_requests: 0,
+    });
+    initialize_client(&mut gateway, ConnectionId::new("conn-1"));
+
+    let blocked = response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            CLIENT_UPDATE_SHUTDOWN_PREPARE,
+            UpdateShutdownPrepareParams {
+                attempt_id: "update-1".to_string(),
+                stop_active_work: false,
+            },
+        ),
+        AppServerTime(2),
+    ));
+    assert_eq!(
+        blocked["result"],
+        json!({ "kind": "blocked", "reason": "activeWork" })
+    );
+
+    let ready = response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            CLIENT_UPDATE_SHUTDOWN_PREPARE,
+            UpdateShutdownPrepareParams {
+                attempt_id: "update-1".to_string(),
+                stop_active_work: true,
+            },
+        ),
+        AppServerTime(3),
+    ));
+    assert_eq!(ready["result"], json!({ "kind": "ready" }));
+
+    let rejected = response_error(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "4",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(4),
+    ));
+    assert_eq!(rejected.error.code, ProtocolErrorCode::ServerStopping);
+
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "5",
+            CLIENT_UPDATE_SHUTDOWN_ABORT,
+            UpdateShutdownAbortParams {
+                attempt_id: "update-1".to_string(),
+            },
+        ),
+        AppServerTime(5),
+    ));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "6",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(6),
+    ));
+}
+
+#[test]
+fn update_shutdown_commit_is_idempotent_for_its_owner() {
+    let mut gateway = gateway();
+    initialize_client(&mut gateway, ConnectionId::new("conn-1"));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            CLIENT_UPDATE_SHUTDOWN_PREPARE,
+            UpdateShutdownPrepareParams {
+                attempt_id: "update-1".to_string(),
+                stop_active_work: false,
+            },
+        ),
+        AppServerTime(2),
+    ));
+
+    for id in ["3", "4"] {
+        response_value(gateway.handle_inbound(
+            ConnectionId::new("conn-1"),
+            request(
+                id,
+                CLIENT_UPDATE_SHUTDOWN_COMMIT,
+                UpdateShutdownCommitParams {
+                    attempt_id: "update-1".to_string(),
+                },
+            ),
+            AppServerTime(3),
+        ));
+    }
+}
+
+#[test]
+fn update_shutdown_barrier_is_recovered_by_the_same_desktop_client() {
+    let mut gateway = gateway();
+    initialize_client(&mut gateway, ConnectionId::new("conn-1"));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            CLIENT_UPDATE_SHUTDOWN_PREPARE,
+            UpdateShutdownPrepareParams {
+                attempt_id: "abandoned-update".to_string(),
+                stop_active_work: false,
+            },
+        ),
+        AppServerTime(2),
+    ));
+
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-reloaded"),
+        request("3", CLIENT_INITIALIZE, init_params("client-1")),
+        AppServerTime(3),
+    ));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-reloaded"),
+        request(
+            "4",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(4),
+    ));
 }
 
 #[test]
@@ -3005,6 +3179,26 @@ impl AppServerShutdownWorkflow for FixedShutdown {
     }
 }
 
+struct FixedShutdownWithBlockers {
+    active_turns: usize,
+    pending_task_requests: usize,
+}
+
+impl AppServerShutdownWorkflow for FixedShutdownWithBlockers {
+    fn shutdown(&self) -> Result<(), crate::protocol::errors::RuntimeError> {
+        Ok(())
+    }
+
+    fn shutdown_blockers(
+        &self,
+    ) -> Result<crate::protocol_edge::ShutdownBlockers, crate::protocol::errors::RuntimeError> {
+        Ok(crate::protocol_edge::ShutdownBlockers {
+            active_turns: self.active_turns,
+            pending_task_requests: self.pending_task_requests,
+        })
+    }
+}
+
 struct RejectingAgentProbe;
 
 impl AgentProbeWorkflow for RejectingAgentProbe {
@@ -4253,6 +4447,14 @@ fn initialize(gateway: &mut RpcGateway, connection_id: ConnectionId) {
 
 fn request<T: serde::Serialize>(id: &str, method: &str, params: T) -> InboundProtocolMessage {
     request_with_meta(id, method, params, RequestMeta::default())
+}
+
+fn initialize_client(gateway: &mut RpcGateway, connection_id: ConnectionId) {
+    response_value(gateway.handle_inbound(
+        connection_id,
+        request("1", CLIENT_INITIALIZE, init_params("client-1")),
+        AppServerTime(1),
+    ));
 }
 
 fn request_with_meta<T: serde::Serialize>(

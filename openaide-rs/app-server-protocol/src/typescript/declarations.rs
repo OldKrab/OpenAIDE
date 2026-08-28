@@ -31,7 +31,9 @@ use crate::client::{
     ClientDetachParams, ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult,
     ClientProbeLifecycle, ClientProbeParams, ClientProbeResult, ClientProtocolCapability,
     ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface, SettingsSection,
-    ShellCapability, ShellDescriptor, ShellKind,
+    ShellCapability, ShellDescriptor, ShellKind, UpdateShutdownAbortParams,
+    UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
+    UpdateShutdownCommitResult, UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
 };
 use crate::diagnostics::{
     ActiveTaskDiagnosticsResult, DiagnosticsRedaction, RuntimeDiagnosticsParams,
@@ -204,6 +206,13 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ClientHeartbeatResult>(output, config);
     push_decl::<ClientDetachParams>(output, config);
     push_decl::<ClientDetachResult>(output, config);
+    push_decl::<UpdateShutdownPrepareParams>(output, config);
+    push_decl::<UpdateShutdownPrepareResult>(output, config);
+    push_decl::<UpdateShutdownBlockedReason>(output, config);
+    push_decl::<UpdateShutdownCommitParams>(output, config);
+    push_decl::<UpdateShutdownCommitResult>(output, config);
+    push_decl::<UpdateShutdownAbortParams>(output, config);
+    push_decl::<UpdateShutdownAbortResult>(output, config);
     push_decl::<ClientProbeLifecycle>(output, config);
     push_decl::<InitializeParams>(output, config);
     push_decl::<InitializeResult>(output, config);

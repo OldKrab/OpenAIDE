@@ -6,6 +6,18 @@ fn client_initialize_uses_slash_method_namespace() {
     assert_eq!(ClientInitialize::METHOD, "client/initialize");
     assert_eq!(ClientDetach::METHOD, "client/detach");
     assert_eq!(
+        ClientUpdateShutdownPrepare::METHOD,
+        "client/updateShutdownPrepare"
+    );
+    assert_eq!(
+        ClientUpdateShutdownCommit::METHOD,
+        "client/updateShutdownCommit"
+    );
+    assert_eq!(
+        ClientUpdateShutdownAbort::METHOD,
+        "client/updateShutdownAbort"
+    );
+    assert_eq!(
         ClientCapabilitiesChanged::METHOD,
         "client/capabilitiesChanged"
     );

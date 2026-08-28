@@ -6,6 +6,7 @@ use crate::methods::{
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
+    CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT, CLIENT_UPDATE_SHUTDOWN_PREPARE,
     DIAGNOSTICS_CREATE_SUPPORT_EXPORT, DIAGNOSTICS_GET_RUNTIME, DIAGNOSTICS_LIST_SUPPORT_EXPORT,
     FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE,
     MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED,
@@ -48,8 +49,20 @@ pub(super) fn push_method_constants(output: &mut String) {
         CLIENT_HEARTBEAT
     ));
     output.push_str(&format!(
-        "export const CLIENT_DETACH = {:?} as const;\n\n",
+        "export const CLIENT_DETACH = {:?} as const;\n",
         CLIENT_DETACH
+    ));
+    output.push_str(&format!(
+        "export const CLIENT_UPDATE_SHUTDOWN_PREPARE = {:?} as const;\n",
+        CLIENT_UPDATE_SHUTDOWN_PREPARE
+    ));
+    output.push_str(&format!(
+        "export const CLIENT_UPDATE_SHUTDOWN_COMMIT = {:?} as const;\n",
+        CLIENT_UPDATE_SHUTDOWN_COMMIT
+    ));
+    output.push_str(&format!(
+        "export const CLIENT_UPDATE_SHUTDOWN_ABORT = {:?} as const;\n\n",
+        CLIENT_UPDATE_SHUTDOWN_ABORT
     ));
     output.push_str(&format!(
         "export const PENDING_REQUEST_RESOLVE = {:?} as const;\n\n",

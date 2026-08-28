@@ -249,7 +249,7 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          workspaces: apps/desktop-validation/src-tauri
+          workspaces: apps/desktop/src-tauri
       - run: npm ci
       - name: Set artifact versions
         run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
@@ -268,22 +268,22 @@ jobs:
       - name: Stage App Server sidecar for Tauri
         shell: bash
         run: |
-          mkdir -p apps/desktop-validation/src-tauri/binaries
+          mkdir -p apps/desktop/src-tauri/binaries
           cp \
             "app-server/${{ matrix.binary }}" \
-            "apps/desktop-validation/src-tauri/binaries/openaide-app-server-${{ matrix.target_triple }}${{ matrix.sidecar_extension }}"
+            "apps/desktop/src-tauri/binaries/openaide-app-server-${{ matrix.target_triple }}${{ matrix.sidecar_extension }}"
       - name: Stage WSL App Server resource for Tauri
         if: matrix.target == 'win32-x64'
         shell: bash
         run: |
-          mkdir -p apps/desktop-validation/src-tauri/resources/wsl
+          mkdir -p apps/desktop/src-tauri/resources/wsl
           cp \
             wsl-app-server/openaide-app-server \
-            apps/desktop-validation/src-tauri/resources/wsl/openaide-app-server
-          test "$(od -An -tx1 -N4 apps/desktop-validation/src-tauri/resources/wsl/openaide-app-server | tr -d ' \n')" = "7f454c46"
+            apps/desktop/src-tauri/resources/wsl/openaide-app-server
+          test "$(od -An -tx1 -N4 apps/desktop/src-tauri/resources/wsl/openaide-app-server | tr -d ' \n')" = "7f454c46"
       - name: Build unsigned desktop installer
         run: >-
-          npm run tauri --workspace openaide-desktop-validation --
+          npm run tauri --workspace openaide-desktop --
           build
           --ci
           --no-sign
@@ -292,10 +292,10 @@ jobs:
       - name: Verify and normalize desktop artifact
         shell: bash
         run: |
-          bundled_server="apps/desktop-validation/src-tauri/target/release/${{ matrix.binary }}"
+          bundled_server="apps/desktop/src-tauri/target/release/${{ matrix.binary }}"
           cmp "app-server/${{ matrix.binary }}" "$bundled_server"
           source_artifact="$(find \
-            "apps/desktop-validation/src-tauri/target/release/bundle/${{ matrix.bundle_directory }}" \
+            "apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundle_directory }}" \
             -maxdepth 1 -type f -name '*.${{ matrix.extension }}' -print -quit)"
           test -n "$source_artifact"
 
@@ -341,12 +341,12 @@ jobs:
         shell: pwsh
         run: |
           $desktopExecutable = Join-Path $env:RUNNER_TEMP `
-            "openaide-desktop-nsis/openaide-desktop-validation.exe"
+            "openaide-desktop-nsis/openaide-desktop.exe"
           node scripts/assert-windows-gui-executable.mjs $desktopExecutable
 
           Add-Type -AssemblyName System.Drawing
           $expectedIconPath = Join-Path $env:GITHUB_WORKSPACE `
-            "apps/desktop-validation/src-tauri/icons/windows/icon.ico"
+            "apps/desktop/src-tauri/icons/windows/icon.ico"
           function Assert-AssociatedIconMatches([string] $binaryPath, [string] $iconPath) {
             $expectedIcon = New-Object System.Drawing.Icon($iconPath, 32, 32)
             $actualIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($binaryPath)
@@ -370,12 +370,12 @@ jobs:
           }
           Assert-AssociatedIconMatches $desktopExecutable $expectedIconPath
           $installer = Get-ChildItem `
-            "apps/desktop-validation/src-tauri/target/release/bundle/nsis" `
+            "apps/desktop/src-tauri/target/release/bundle/nsis" `
             -Filter "*.exe" |
             Select-Object -First 1
           if (-not $installer) { throw "Windows installer was not found" }
           $expectedInstallerIconPath = Join-Path $env:GITHUB_WORKSPACE `
-            "apps/desktop-validation/src-tauri/icons/windows/installer.ico"
+            "apps/desktop/src-tauri/icons/windows/installer.ico"
           Assert-AssociatedIconMatches $installer.FullName $expectedInstallerIconPath
 
           $stdout = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stdout.log"

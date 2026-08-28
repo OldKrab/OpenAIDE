@@ -16,20 +16,20 @@ export function setReleaseArtifactVersion(repoRoot, version) {
   }
 
   setJsonVersion(path.join(repoRoot, "apps/vscode-extension/package.json"), version);
-  setJsonVersion(path.join(repoRoot, "apps/desktop-validation/package.json"), version);
-  setJsonVersion(path.join(repoRoot, "apps/desktop-validation/src-tauri/tauri.conf.json"), version);
+  setJsonVersion(path.join(repoRoot, "apps/desktop/package.json"), version);
+  setJsonVersion(path.join(repoRoot, "apps/desktop/src-tauri/tauri.conf.json"), version);
   for (const relativePath of [
     "openaide-rs/app-server/Cargo.toml",
     "openaide-rs/app-server-protocol/Cargo.toml",
-    "apps/desktop-validation/src-tauri/Cargo.toml",
+    "apps/desktop/src-tauri/Cargo.toml",
   ]) {
     setCargoVersion(path.join(repoRoot, relativePath), version);
   }
   // Keep the lockfile in sync so release builds can retain Cargo's --locked guarantee.
   setCargoLockVersions(path.join(repoRoot, "Cargo.lock"), ROOT_CARGO_PACKAGE_NAMES, version);
   setCargoLockVersions(
-    path.join(repoRoot, "apps/desktop-validation/src-tauri/Cargo.lock"),
-    ["openaide-desktop-validation"],
+    path.join(repoRoot, "apps/desktop/src-tauri/Cargo.lock"),
+    ["openaide-desktop"],
     version,
   );
 }
