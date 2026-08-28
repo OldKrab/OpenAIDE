@@ -146,9 +146,26 @@ try {
     "bin",
     "codex.js",
   );
-  const directProbe = spawnSync(process.execPath, [codexEntrypoint, "--version"], {
+  const directProbeInput = [
+    JSON.stringify({
+      id: "1",
+      method: "initialize",
+      params: {
+        capabilities: null,
+        clientInfo: { name: "openaide-smoke", title: "OpenAIDE Smoke", version: "0" },
+      },
+    }),
+    JSON.stringify({
+      id: "2",
+      method: "account/read",
+      params: { refreshToken: false },
+    }),
+    "",
+  ].join("\n");
+  const directProbe = spawnSync(process.execPath, [codexEntrypoint, "app-server"], {
     encoding: "utf8",
     env: childEnv,
+    input: directProbeInput,
     timeout: 30_000,
     windowsHide: true,
   });
