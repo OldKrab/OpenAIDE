@@ -5,7 +5,7 @@ use std::time::Duration;
 use fs2::FileExt;
 use tempfile::TempDir;
 
-use super::{CodexAcpInstaller, CodexAcpProvisioner, CODEX_ACP_VERSION};
+use super::{process_path_argument, CodexAcpInstaller, CodexAcpProvisioner, CODEX_ACP_VERSION};
 use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::status_cache::AgentStatusCache;
 use crate::logging::capture_test_logs;
@@ -177,11 +177,21 @@ fn windows_launch_uses_the_managed_native_codex_binary() {
             .iter()
             .find(|(name, _)| name == "CODEX_PATH")
             .map(|(_, value)| value.as_str()),
-        Some(expected_codex.to_string_lossy().as_ref()),
+        Some(process_path_argument(&expected_codex, true).as_str()),
     );
     assert_eq!(launch.config.args.len(), 1);
     assert!(launch.config.args[0].ends_with("node_modules/@openaide/codex-acp/dist/index.js"));
     assert!(!launch.config.command.ends_with(".cmd"));
+}
+
+#[test]
+fn windows_process_paths_are_unambiguous_to_node() {
+    let path = std::path::Path::new(r"C:\Users\runneradmin\agent-runtimes\codex-acp\dist\index.js");
+
+    assert_eq!(
+        process_path_argument(path, true),
+        "C:/Users/runneradmin/agent-runtimes/codex-acp/dist/index.js"
+    );
 }
 
 #[test]
