@@ -120,7 +120,9 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         // The WebView receives no updater capability. Native commands below
-        // expose the fixed, stateful operations owned by Desktop Update.
+        // expose the fixed, stateful operations owned by Desktop Update. The
+        // plugin's required static config deliberately has no usable key;
+        // each check builds an updater from compiled Release/Recovery trust.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_local_data = app.path().app_local_data_dir()?;
