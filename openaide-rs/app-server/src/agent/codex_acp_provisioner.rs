@@ -39,6 +39,7 @@ pub(crate) struct CodexAcpProvisioner {
     installer: Arc<dyn CodexAcpInstaller>,
     timeout: Duration,
     statuses: AgentStatusCache,
+    windows: bool,
 }
 
 impl CodexAcpProvisioner {
@@ -50,6 +51,7 @@ impl CodexAcpProvisioner {
             }),
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses,
+            windows: cfg!(windows),
         }
     }
 
@@ -63,6 +65,7 @@ impl CodexAcpProvisioner {
             installer,
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses: AgentStatusCache::default(),
+            windows: cfg!(windows),
         }
     }
 
@@ -77,6 +80,7 @@ impl CodexAcpProvisioner {
             installer,
             timeout,
             statuses: AgentStatusCache::default(),
+            windows: cfg!(windows),
         }
     }
 
@@ -91,6 +95,22 @@ impl CodexAcpProvisioner {
             installer,
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses,
+            windows: cfg!(windows),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_installer_for_platform(
+        storage_root: PathBuf,
+        installer: Arc<dyn CodexAcpInstaller>,
+        windows: bool,
+    ) -> Self {
+        Self {
+            storage_root,
+            installer,
+            timeout: DEFAULT_INSTALL_TIMEOUT,
+            statuses: AgentStatusCache::default(),
+            windows,
         }
     }
 
@@ -110,7 +130,7 @@ impl CodexAcpProvisioner {
         let runtimes_root = self.storage_root.join("agent-runtimes").join("codex-acp");
         fs::create_dir_all(&runtimes_root).map_err(provisioning_io_error)?;
         let version_root = runtimes_root.join(CODEX_ACP_VERSION);
-        let cache_hit = valid_installation(&version_root);
+        let cache_hit = valid_installation(&version_root, self.windows);
         let previous_status = (!cache_hit).then(|| self.statuses.begin_installation("codex"));
         let started_at = Instant::now();
         if !cache_hit {
@@ -176,7 +196,7 @@ impl CodexAcpProvisioner {
         lock_exclusive_until(&install_lock, Instant::now() + self.timeout)?;
         cleanup_stale_staging(runtimes_root);
 
-        if !valid_installation(version_root) {
+        if !valid_installation(version_root, self.windows) {
             if version_root.exists() {
                 fs::remove_dir_all(version_root).map_err(provisioning_io_error)?;
             }
@@ -191,6 +211,7 @@ impl CodexAcpProvisioner {
                 .map_err(provisioning_installer_error)
                 .and_then(|_| {
                     validate_package(&staging)?;
+                    validate_platform_launcher(&staging, self.windows)?;
                     fs::write(staging.join(MANAGED_MARKER), managed_marker())
                         .map_err(provisioning_io_error)?;
                     fs::rename(&staging, version_root).map_err(provisioning_io_error)
@@ -205,11 +226,24 @@ impl CodexAcpProvisioner {
 
         let lease = Arc::new(open_lock_file(&version_root.join(".lease"))?);
         FileExt::lock_shared(lease.as_ref()).map_err(provisioning_io_error)?;
-        let entrypoint = package_root(version_root).join("dist/index.js");
+        let (command, args) = if self.windows {
+            (
+                windows_package_launcher(version_root)
+                    .to_string_lossy()
+                    .into_owned(),
+                Vec::new(),
+            )
+        } else {
+            let entrypoint = package_root(version_root).join("dist/index.js");
+            (
+                resolved_command_or_name("node"),
+                vec![entrypoint.to_string_lossy().into_owned()],
+            )
+        };
         Ok(PreparedCodexAcpLaunch {
             config: AcpAgentConfig {
-                command: resolved_command_or_name("node"),
-                args: vec![entrypoint.to_string_lossy().into_owned()],
+                command,
+                args,
                 ..config
             },
             lease: Some(lease),
@@ -223,6 +257,7 @@ impl CodexAcpProvisioner {
                 .join("agent-runtimes")
                 .join("codex-acp")
                 .join(CODEX_ACP_VERSION),
+            self.windows,
         )
     }
 }
@@ -295,12 +330,26 @@ fn package_root(version_root: &Path) -> PathBuf {
     version_root.join("node_modules/@openaide/codex-acp")
 }
 
-fn valid_installation(version_root: &Path) -> bool {
+fn valid_installation(version_root: &Path, windows: bool) -> bool {
     fs::read_to_string(version_root.join(MANAGED_MARKER))
         .ok()
         .as_deref()
         == Some(managed_marker().as_str())
         && validate_package(version_root).is_ok()
+        && validate_platform_launcher(version_root, windows).is_ok()
+}
+
+fn windows_package_launcher(version_root: &Path) -> PathBuf {
+    version_root.join("node_modules/.bin/codex-acp.cmd")
+}
+
+fn validate_platform_launcher(version_root: &Path, windows: bool) -> Result<(), RuntimeError> {
+    if windows && !windows_package_launcher(version_root).is_file() {
+        return Err(provisioning_error(
+            "installed Codex integration did not provide its Windows launcher".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_package(version_root: &Path) -> Result<(), RuntimeError> {
