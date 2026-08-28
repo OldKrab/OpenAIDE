@@ -905,6 +905,31 @@ fn terminal_agent_activity_requests_native_session_reconciliation() {
 }
 
 #[test]
+fn background_agent_status_update_is_queued_for_local_http_subscribers() {
+    let workflow = Arc::new(RecordingCatalogRefresh::default());
+    let mut gateway = gateway_with_agent_session_listing(workflow);
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Agents,
+            },
+        ),
+        AppServerTime(2),
+    ));
+
+    let published = gateway.publish_background_agent_status_update(AppServerTime(3));
+    assert!(!published.is_empty());
+    let queued = gateway.drain_event_deliveries_for_connection(&connection_id);
+
+    assert_eq!(queued, published);
+}
+
+#[test]
 fn repeated_task_navigation_subscription_does_not_restart_catalog_discovery() {
     let workflow = Arc::new(RecordingCatalogRefresh::default());
     let mut gateway = gateway_with_agent_session_listing(workflow.clone());

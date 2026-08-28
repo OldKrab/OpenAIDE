@@ -660,6 +660,7 @@ export function TaskView({
           >
             <Composer
               agentLocked
+              agents={agents}
               attachments={taskInput.context}
               autoFocus
               availability={availability}
