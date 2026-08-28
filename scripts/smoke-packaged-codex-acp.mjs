@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -24,13 +24,14 @@ await writeFile(path.join(stateRoot, "agents", "catalog.json"), JSON.stringify({
     command: "missing-global-codex-acp",
   }],
 }));
+const childEnv = {
+  ...process.env,
+  OPENAIDE_APP_SERVER_PROTOCOL: "app-server-protocol",
+  OPENAIDE_STORAGE_ROOT: stateRoot,
+  APP_SERVER_LOGS: adapterLogs,
+};
 const child = spawn(path.resolve(binaryPath), [], {
-  env: {
-    ...process.env,
-    OPENAIDE_APP_SERVER_PROTOCOL: "app-server-protocol",
-    OPENAIDE_STORAGE_ROOT: stateRoot,
-    APP_SERVER_LOGS: adapterLogs,
-  },
+  env: childEnv,
   stdio: "pipe",
   windowsHide: true,
 });
@@ -131,15 +132,37 @@ try {
 } catch (error) {
   const adapterLog = await readFile(path.join(adapterLogs, "app-server.log"), "utf8")
     .catch(() => "");
-  const diagnosticLines = adapterLog
-    .split(/\r?\n/u)
-    .filter((line) => line.includes("[ERR]") || line.includes("[SYSTEM_ERROR]"))
-    .join("\n")
+  const redact = (value) => value
     .replaceAll(stateParent, "<smoke-state>")
     .replaceAll(path.resolve(workspaceRoot), "<workspace>");
+  const adapterEntrypoint = path.join(
+    stateRoot,
+    "agent-runtimes",
+    "codex-acp",
+    "1.1.5",
+    "node_modules",
+    "@openaide",
+    "codex-acp",
+    "dist",
+    "index.js",
+  );
+  const directProbe = spawnSync(process.execPath, [adapterEntrypoint, "cli", "--version"], {
+    encoding: "utf8",
+    env: childEnv,
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  const directProbeResult = redact(JSON.stringify({
+    error: directProbe.error?.message,
+    signal: directProbe.signal,
+    status: directProbe.status,
+    stderr: directProbe.stderr,
+    stdout: directProbe.stdout,
+  }));
   throw new Error(
     `${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}; `
-      + `Codex adapter errors: ${diagnosticLines.slice(-4_000)}`,
+      + `Codex adapter log: ${redact(adapterLog).slice(-4_000)}; `
+      + `Direct Codex probe: ${directProbeResult.slice(-4_000)}`,
   );
 } finally {
   if (!child.stdin.destroyed) child.stdin.end();
