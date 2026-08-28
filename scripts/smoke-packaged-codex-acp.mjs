@@ -132,6 +132,10 @@ try {
 } catch (error) {
   const adapterLog = await readFile(path.join(adapterLogs, "app-server.log"), "utf8")
     .catch(() => "");
+  const appServerLog = await readFile(
+    path.join(stateRoot, "diagnostics", "logs", "openaide-app-server.jsonl"),
+    "utf8",
+  ).catch(() => "");
   const redact = (value) => value
     .replaceAll(stateParent, "<smoke-state>")
     .replaceAll(path.resolve(workspaceRoot), "<workspace>");
@@ -176,9 +180,16 @@ try {
     stderr: directProbe.stderr,
     stdout: directProbe.stdout,
   }));
+  const acpEvents = appServerLog
+    .split(/\r?\n/u)
+    .filter((line) => line.includes('"event":"acp_'))
+    .slice(-40)
+    .join("\n")
+    .slice(-8_000);
   throw new Error(
     `${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}; `
       + `Codex adapter log: ${redact(adapterLog).slice(-4_000)}; `
+      + `OpenAIDE ACP events: ${acpEvents}; `
       + `Direct Codex probe: ${directProbeResult.slice(-4_000)}`,
   );
 } finally {
