@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,7 @@ if (!binaryPath || !workspaceRoot) {
 
 const stateParent = await mkdtemp(path.join(os.tmpdir(), "openaide-codex-acp-smoke-"));
 const stateRoot = path.join(stateParent, "state");
+const adapterLogs = path.join(stateParent, "adapter-logs");
 await mkdir(path.join(stateRoot, "agents"), { recursive: true });
 // Releases must recover catalogs written before built-in ids were reserved.
 // The missing command makes any accidental Custom-Agent shadowing fail here.
@@ -28,6 +29,7 @@ const child = spawn(path.resolve(binaryPath), [], {
     ...process.env,
     OPENAIDE_APP_SERVER_PROTOCOL: "app-server-protocol",
     OPENAIDE_STORAGE_ROOT: stateRoot,
+    APP_SERVER_LOGS: adapterLogs,
   },
   stdio: "pipe",
   windowsHide: true,
@@ -127,7 +129,18 @@ try {
     console.log("Verified packaged App Server Task persistence and Codex ACP initialization through the authentication boundary.");
   }
 } catch (error) {
-  throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
+  const adapterLog = await readFile(path.join(adapterLogs, "app-server.log"), "utf8")
+    .catch(() => "");
+  const diagnosticLines = adapterLog
+    .split(/\r?\n/u)
+    .filter((line) => line.includes("[ERR]") || line.includes("[SYSTEM_ERROR]"))
+    .join("\n")
+    .replaceAll(stateParent, "<smoke-state>")
+    .replaceAll(path.resolve(workspaceRoot), "<workspace>");
+  throw new Error(
+    `${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}; `
+      + `Codex adapter errors: ${diagnosticLines.slice(-4_000)}`,
+  );
 } finally {
   if (!child.stdin.destroyed) child.stdin.end();
   await Promise.race([
