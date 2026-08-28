@@ -8,7 +8,7 @@
     "packages/app-shell-contracts",
     "packages/app-server-client",
     "packages/frontend",
-    "apps/desktop-validation",
+    "apps/desktop",
     "apps/web",
     "apps/vscode-extension"
   ],
@@ -21,7 +21,7 @@
     "check": "npm run check:source-size && cargo check --workspace && npm run protocol:check && npm run build:typescript-deps && npm run check --workspaces --if-present && node scripts/check-app-server-client-dist-import.mjs",
     "check:source-size": "node scripts/check-production-source-size.mjs",
     "test": "npm run test:gate && npm run backend:test && npm run build:typescript-deps && npm run test --workspaces --if-present",
-    "test:gate": "node --test --test-concurrency=1 deploy/local-web.test.mjs scripts/check-release-main-ci.test.mjs scripts/local-web.test.mjs scripts/production-source-policy.test.mjs scripts/reconcile-release-registry.test.mjs scripts/redeploy-web-dev.test.mjs scripts/release-version.test.mjs scripts/set-release-artifact-version.test.mjs scripts/smoke-release-vsix.test.mjs scripts/sync-frontend-assets.test.mjs scripts/test-workspace-gate.test.mjs scripts/update-extension-changelog.test.mjs scripts/validate-release-notes.test.mjs",
+    "test:gate": "node --test --test-concurrency=1 deploy/local-web.test.mjs scripts/check-release-main-ci.test.mjs scripts/desktop-update-feed.test.mjs scripts/local-web.test.mjs scripts/production-source-policy.test.mjs scripts/reconcile-release-registry.test.mjs scripts/redeploy-web-dev.test.mjs scripts/release-version.test.mjs scripts/set-release-artifact-version.test.mjs scripts/smoke-release-vsix.test.mjs scripts/sync-frontend-assets.test.mjs scripts/test-workspace-gate.test.mjs scripts/update-extension-changelog.test.mjs scripts/validate-release-notes.test.mjs",
     "test:smoke": "node --test tests/smoke/test-acp-agent.test.mjs && playwright test",
     "protocol:generate": "node scripts/generate-app-server-protocol.mjs",
     "protocol:check": "node scripts/check-app-server-protocol-generated.mjs",
@@ -38,7 +38,8 @@
     "web:preview": "OPENAIDE_WEB_PORT=5574 OPENAIDE_WEB_VITE_PORT=5573 OPENAIDE_WEB_STATE_ROOT=.openaide-web-preview/state OPENAIDE_WEB_RUNTIME_ROOT=.openaide-web-preview/runtime OPENAIDE_WEB_STATIC_ROOT=.openaide-web-preview/static OPENAIDE_WEB_PID_FILE=/tmp/openaide-web-preview-5574.pid OPENAIDE_WEB_LOG_FILE=/tmp/openaide-web-preview-5574.log OPENAIDE_WEB_ALLOWED_HOSTS=localhost,127.0.0.1 OPENAIDE_WEB_BUILD=1 bash deploy/local-web.sh restart",
     "web:redeploy": "node scripts/redeploy-web-dev.mjs",
     "vscode:launch": "npm run build && code --extensionDevelopmentPath=$(pwd)/apps/vscode-extension $(pwd)",
-    "desktop:dev": "node apps/desktop-validation/scripts/development-launch.mjs",
+    "desktop:dev": "node apps/desktop/scripts/development-launch.mjs",
+    "desktop:update-feed:validate": "node scripts/desktop-update-feed.mjs",
     "backend:test": "cargo test --workspace",
     "app-server:build": "cargo build -p openaide-app-server",
     "app-server:test": "cargo test -p openaide-app-server"

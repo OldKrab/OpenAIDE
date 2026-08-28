@@ -60,6 +60,7 @@ type SidebarProps = {
   onSettings: () => void;
   onToggleArchived: () => void;
   searchQuery: string;
+  settingsStatus?: string;
   settingsActive?: boolean;
   showArchived: boolean;
   taskListError?: string;
@@ -109,6 +110,7 @@ export const Sidebar = memo(function Sidebar({
   onSettings,
   onToggleArchived,
   searchQuery,
+  settingsStatus,
   settingsActive = false,
   showArchived,
   taskListError,
@@ -442,7 +444,10 @@ export const Sidebar = memo(function Sidebar({
           onClick={onSettings}
         >
           <Settings size={15} />
-          Settings
+          <span className="settings-button-copy">
+            <span>Settings</span>
+            {settingsStatus ? <small>{settingsStatus}</small> : null}
+          </span>
         </button>
       </div>
     </aside>
@@ -459,6 +464,7 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.forkableAgentIds === next.forkableAgentIds &&
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
+    prev.settingsStatus === next.settingsStatus &&
     prev.settingsActive === next.settingsActive &&
     prev.showArchived === next.showArchived &&
     prev.taskListError === next.taskListError &&

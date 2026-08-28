@@ -284,6 +284,24 @@ body[data-shell="web"] .sidebar {
   width: 100%;
 }
 
+.settings-button-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-button-copy small {
+  overflow: hidden;
+  color: var(--oa-focus);
+  font-size: 11px;
+  font-weight: 580;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .add-project-button {
   width: 100%;
   color: var(--oa-text);

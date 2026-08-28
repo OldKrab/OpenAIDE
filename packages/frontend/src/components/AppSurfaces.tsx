@@ -1,5 +1,5 @@
 import { ListTodo, Menu, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
 import { DesktopTitleBar } from "./DesktopTitleBar";
@@ -14,7 +14,7 @@ import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
-import { currentFrontendShell } from "../services/frontendShell";
+import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -31,6 +31,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     visibleTasks,
   } = controller;
   const { appServerError, navigation, settings } = view;
+  const frontendShell = currentFrontendShell();
+  const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
+  const updateAvailable = desktopUpdate?.kind === "available"
+    || desktopUpdate?.kind === "downloading"
+    || desktopUpdate?.kind === "readyToUpdate";
   const forkableAgentIds = useMemo(
     () => new Set((controller.agents ?? [])
       .filter((agent) => agent.capabilities?.forkNativeSessions)
@@ -158,7 +163,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
-  const frontendShell = currentFrontendShell();
   // Folder acquisition belongs to the App Shell: Web browses through the App
   // Server, Desktop opens the OS picker, and VS Code delegates to its host.
   const workspaceBrowser = isWebShell ? callbacks.newTask.workspaceBrowser : undefined;
@@ -203,7 +207,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         ? () => setProjectFolderDialogOpen(true)
         : undefined;
   useEffect(() => frontendShell?.desktopCommands?.subscribe((command) => {
-    if (command === "new-task") callbacks.navigation.openNewTask();
+    if (command === "check-for-updates") {
+      callbacks.navigation.openSettings(undefined, undefined, undefined, "common");
+      void frontendShell.desktopUpdates?.check();
+    } else if (command === "new-task") callbacks.navigation.openNewTask();
     else if (command === "settings") callbacks.navigation.openSettings();
     else if (command === "open-project") addProject?.();
   }), [addProject, callbacks.navigation, frontendShell]);
@@ -388,10 +395,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
           onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
           onSearchChange={callbacks.navigation.changeSearch}
-          onSettings={() => callbacks.navigation.openSettings()}
+          onSettings={() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "common" : undefined)}
           onToggleArchived={callbacks.navigation.toggleArchived}
           projects={navigationProjects}
           searchQuery={navigation.searchQuery}
+          settingsStatus={updateAvailable ? "Update available" : undefined}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
@@ -508,10 +516,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
         onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
         onSearchChange={callbacks.navigation.changeSearch}
-        onSettings={closeAfter(() => callbacks.navigation.openSettings())}
+        onSettings={closeAfter(() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "common" : undefined))}
         onToggleArchived={callbacks.navigation.toggleArchived}
         projects={navigation.projects}
         searchQuery={navigation.searchQuery}
+        settingsStatus={updateAvailable ? "Update available" : undefined}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
         tasks={visibleTasks}
@@ -653,6 +662,19 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
       />
     </main>
+  );
+}
+
+const subscribeToNothing = () => () => undefined;
+const noDesktopUpdateSnapshot = () => undefined;
+
+function useDesktopUpdateSnapshot(
+  capability: DesktopUpdateCapability | undefined,
+) {
+  return useSyncExternalStore(
+    capability?.subscribe ?? subscribeToNothing,
+    capability?.snapshot ?? noDesktopUpdateSnapshot,
+    capability?.snapshot ?? noDesktopUpdateSnapshot,
   );
 }
 

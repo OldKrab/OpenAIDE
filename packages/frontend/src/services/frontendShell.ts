@@ -36,7 +36,58 @@ export type DesktopRuntimeCapability = {
   select(environment: DesktopRuntimeEnvironment): Promise<void>;
 };
 
-export type DesktopCommand = "new-task" | "open-project" | "settings";
+export type DesktopUpdateKind =
+  | "unavailable"
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "readyToUpdate"
+  | "applying"
+  | "failed";
+
+export type DesktopUpdateSnapshot = {
+  revision: number;
+  installedVersion: string;
+  kind: DesktopUpdateKind;
+  unavailableReason?: "developmentBuild" | "unsignedBuild" | "notConfigured" | "unsupportedInstallation";
+  offer?: {
+    version: string;
+    notes: string;
+    sizeBytes: number;
+    publishedAt?: string;
+  };
+  progress?: { downloadedBytes: number; totalBytes: number };
+  error?:
+    | "network"
+    | "invalidManifest"
+    | "untrustedArtifact"
+    | "artifactTooLarge"
+    | "insufficientSpace"
+    | "downloadFailed"
+    | "installFailed"
+    | "configuration"
+    | "unsupportedInstallation"
+    | "incompleteUpdate"
+    | "shutdownFailed";
+  lastCheckedAtMs?: number;
+  updatedVersion?: string;
+};
+
+/** Fixed native updater operations; callers cannot provide trust or transport configuration. */
+export type DesktopUpdateCapability = {
+  snapshot(): DesktopUpdateSnapshot;
+  subscribe(listener: () => void): () => void;
+  check(): Promise<void>;
+  download(): Promise<void>;
+  cancelDownload(): Promise<void>;
+  restartAndUpdate(options?: { stopActiveWork?: boolean }): Promise<DesktopUpdateRestartResult>;
+  openReleaseNotes(version: string): void;
+};
+
+export type DesktopUpdateRestartResult = "started" | "activeWork" | "otherClients";
+
+export type DesktopCommand = "check-for-updates" | "new-task" | "open-project" | "settings";
 
 export type DesktopCommandCapability = {
   subscribe(listener: (command: DesktopCommand) => void): () => void;
@@ -83,6 +134,8 @@ export type FrontendShell = {
   desktopWindow?: DesktopWindowCapability;
   /** Desktop-owned backend OS selection, resolved before App Server startup. */
   desktopRuntime?: DesktopRuntimeCapability;
+  /** Desktop-owned signed update lifecycle; omitted by other App Shells. */
+  desktopUpdates?: DesktopUpdateCapability;
   /** Native menu and keyboard commands routed into the shared Desktop surface. */
   desktopCommands?: DesktopCommandCapability;
   messages: {

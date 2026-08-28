@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER",
+        " | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -12,6 +12,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedParams;\n");
     output.push_str("  [CLIENT_HEARTBEAT]: ClientHeartbeatParams;\n");
     output.push_str("  [CLIENT_DETACH]: ClientDetachParams;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_PREPARE]: UpdateShutdownPrepareParams;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_COMMIT]: UpdateShutdownCommitParams;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_ABORT]: UpdateShutdownAbortParams;\n");
     output.push_str("  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveParams;\n");
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeParams;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;\n");
@@ -114,6 +117,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedResult;\n");
     output.push_str("  [CLIENT_HEARTBEAT]: ClientHeartbeatResult;\n");
     output.push_str("  [CLIENT_DETACH]: ClientDetachResult;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_PREPARE]: UpdateShutdownPrepareResult;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_COMMIT]: UpdateShutdownCommitResult;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_ABORT]: UpdateShutdownAbortResult;\n");
     output.push_str("  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveResult;\n");
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeResult;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;\n");
@@ -224,6 +230,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output
         .push_str("export type ClientDetachRequest = TypedClientRequest<typeof CLIENT_DETACH>;\n");
+    output.push_str("export type ClientUpdateShutdownPrepareRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_PREPARE>;\n");
+    output.push_str("export type ClientUpdateShutdownCommitRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_COMMIT>;\n");
+    output.push_str("export type ClientUpdateShutdownAbortRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_ABORT>;\n");
     output.push_str(
         "export type ClientCapabilitiesChangedRequest = TypedClientRequest<typeof CLIENT_CAPABILITIES_CHANGED>;\n",
     );
@@ -235,6 +244,9 @@ pub(super) fn push_method_maps(output: &mut String) {
         "export type ClientHeartbeatResponse = ResponseEnvelope<ClientHeartbeatResult>;\n",
     );
     output.push_str("export type ClientDetachResponse = ResponseEnvelope<ClientDetachResult>;\n");
+    output.push_str("export type ClientUpdateShutdownPrepareResponse = ResponseEnvelope<UpdateShutdownPrepareResult>;\n");
+    output.push_str("export type ClientUpdateShutdownCommitResponse = ResponseEnvelope<UpdateShutdownCommitResult>;\n");
+    output.push_str("export type ClientUpdateShutdownAbortResponse = ResponseEnvelope<UpdateShutdownAbortResult>;\n");
     output
         .push_str("export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;\n");
     output.push_str(

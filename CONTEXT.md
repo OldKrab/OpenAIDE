@@ -276,6 +276,50 @@ _Avoid_: Treating available Authentication Methods as active authentication, all
 The application form OpenAIDE runs in, such as the Web App, Desktop App, Mobile App, or VS Code Extension.
 _Avoid_: Host as a product term
 
+**Desktop Update**:
+A newer official OpenAIDE Desktop App release offered inside the installed Desktop App. The user may review its Release Notes, initiate download and staging, and restart OpenAIDE to apply it.
+_Avoid_: Silently replacing a running release, treating a downloaded update as already applied
+
+**Ready to Update**:
+The Desktop Update state in which an eligible update has been downloaded and verified but has not changed the installed Desktop App. Applying it still requires explicit Restart and Update consent.
+_Avoid_: Updated, installed, restart required after installation
+
+**Update Attempt Receipt**:
+The minimal Desktop record that a Restart and Update attempt began, identifying its previous and target versions so the next launch can report whether that attempt succeeded.
+_Avoid_: Persisted update artifact, download URL, treating installer launch as update success
+
+**Update Shutdown Readiness**:
+The App Server-owned confirmation that Desktop is its only initialized App Shell client and that every Desktop-owned runtime can enter a coherent update shutdown without abandoning another client's work.
+_Avoid_: Desktop guessing from visible Tasks, force-disconnecting another App Shell, process exit as readiness
+
+**Release Notes**:
+The user-facing summary of changes in one OpenAIDE release, shown before the user chooses whether to install its Desktop Update.
+_Avoid_: Changelog as the user-facing product term
+
+**Desktop Update Feed**:
+The OpenAIDE-controlled release view that offers each installed Desktop App the next eligible Desktop Update for its platform, channel, and current version.
+_Avoid_: Treating the newest release as eligible for every installation, artifact storage
+
+**Desktop Update Graph**:
+The reviewed release policy that defines each valid Update Edge and from which the deployed Desktop Update Feed is derived.
+_Avoid_: Hand-edited production manifest, inferring eligibility from release order
+
+**Update Edge**:
+One authorized Desktop Update path from a specific installed release to a newer release whose platform, trust, and durable-state compatibility have been proven for that transition.
+_Avoid_: Assuming every older release can jump directly to latest, release existence as update eligibility
+
+**Storage-Compatible Desktop Update**:
+A Desktop Update whose Update Edge preserves the installed release's durable state without an irreversible migration and retains a proven recovery path through the source release.
+_Avoid_: Migration-required update, assuming binary reinstall restores migrated data
+
+**Desktop Update Release Key**:
+A platform-specific signing identity authorized to approve ordinary Desktop Update artifacts through the protected release process.
+_Avoid_: Platform code-signing certificate, sharing one release key across every platform
+
+**Desktop Update Recovery Key**:
+A platform-specific signing identity reserved for restoring Desktop Update trust after loss or compromise of a Desktop Update Release Key. Its private material remains outside the ordinary release process.
+_Avoid_: Backup CI secret, routine release key
+
 **Unattended App Shell**:
 An App Shell that is open but does not currently have user focus. When one App Shell has multiple views, it is unattended only when none has focus; Task-level navigation within a focused App Shell does not make it unattended.
 _Avoid_: Hidden Task, inactive Task Page

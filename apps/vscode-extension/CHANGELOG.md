@@ -90,7 +90,7 @@
 
 ### Features
 
-- Add a native desktop validation shell for Windows and macOS, with self-contained preview installers and Windows WSL runtime support.
+- Add the native Desktop App for Windows and macOS, with self-contained preview installers and Windows WSL runtime support.
 - Use an OpenAIDE-owned Codex ACP adapter with a pinned fork release for reproducible agent launches.
 - Share task, settings, and shell behavior across the VS Code, web, and desktop surfaces.
 

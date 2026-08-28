@@ -23,7 +23,6 @@ use crate::attachment_runtime::AttachmentRuntime;
 use crate::projects::{ConfiguredProjectRoots, ProjectResolver};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::AppServerShutdownWorkflow;
-#[cfg(test)]
 use crate::protocol_edge::ShutdownBlockers;
 use crate::server_requests::ServerRequestRuntime;
 use crate::snapshots::task_snapshot::{
@@ -330,7 +329,6 @@ impl AppServerShutdownWorkflow for TaskProductApi {
         TaskProductApi::shutdown(self)
     }
 
-    #[cfg(test)]
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError> {
         let mut owned_turns = self.turn_acceptance.owned_turns();
         owned_turns.extend(self.turn_runner.active_turns());

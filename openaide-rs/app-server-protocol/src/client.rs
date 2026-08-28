@@ -35,6 +35,52 @@ pub struct ClientDetachParams {}
 #[serde(rename_all = "camelCase")]
 pub struct ClientDetachResult {}
 
+/// Begins the App Server-owned quiescence boundary required before a Desktop update.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShutdownPrepareParams {
+    pub attempt_id: String,
+    pub stop_active_work: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum UpdateShutdownPrepareResult {
+    Ready,
+    Blocked { reason: UpdateShutdownBlockedReason },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateShutdownBlockedReason {
+    ActiveWork,
+    OtherClients,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShutdownCommitParams {
+    pub attempt_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShutdownCommitResult {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShutdownAbortParams {
+    pub attempt_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShutdownAbortResult {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientProbeLifecycle {
