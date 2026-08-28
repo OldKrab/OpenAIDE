@@ -135,18 +135,18 @@ try {
   const redact = (value) => value
     .replaceAll(stateParent, "<smoke-state>")
     .replaceAll(path.resolve(workspaceRoot), "<workspace>");
-  const adapterEntrypoint = path.join(
+  const codexEntrypoint = path.join(
     stateRoot,
     "agent-runtimes",
     "codex-acp",
     "1.1.5",
     "node_modules",
-    "@openaide",
-    "codex-acp",
-    "dist",
-    "index.js",
+    "@openai",
+    "codex",
+    "bin",
+    "codex.js",
   );
-  const directProbe = spawnSync(process.execPath, [adapterEntrypoint, "cli", "--version"], {
+  const directProbe = spawnSync(process.execPath, [codexEntrypoint, "--version"], {
     encoding: "utf8",
     env: childEnv,
     timeout: 30_000,

@@ -281,6 +281,10 @@ jobs:
             wsl-app-server/openaide-app-server \
             apps/desktop/src-tauri/resources/wsl/openaide-app-server
           test "$(od -An -tx1 -N4 apps/desktop/src-tauri/resources/wsl/openaide-app-server | tr -d ' \n')" = "7f454c46"
+      - name: Diagnose staged Windows Codex ACP launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node scripts/smoke-packaged-codex-acp.mjs app-server/openaide-app-server.exe $env:GITHUB_WORKSPACE
       - name: Build unsigned desktop installer
         run: >-
           npm run tauri --workspace openaide-desktop --
