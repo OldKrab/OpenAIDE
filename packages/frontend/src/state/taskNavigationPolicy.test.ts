@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { initialTaskNavigationRowsPerProject, TASK_NAVIGATION_PAGE_SIZE } from "./taskNavigationPolicy";
+import { initialTaskNavigationRowsPerProject, taskNavigationPageSize } from "./taskNavigationPolicy";
 
 describe("Task Navigation presentation budget", () => {
-  it("allocates 20 rows for one Project, 10 for two, and 7 for three or more", () => {
+  it("allocates 20 rows for one Project, 7 for two, and 5 for three or more", () => {
     expect(initialTaskNavigationRowsPerProject(1)).toBe(20);
-    expect(initialTaskNavigationRowsPerProject(2)).toBe(10);
-    expect(initialTaskNavigationRowsPerProject(5)).toBe(7);
+    expect(initialTaskNavigationRowsPerProject(2)).toBe(7);
+    expect(initialTaskNavigationRowsPerProject(5)).toBe(5);
   });
 
-  it("reveals ten more rows per explicit load-more action", () => {
-    expect(TASK_NAVIGATION_PAGE_SIZE).toBe(10);
+  it("reveals seven more rows when there are at least three Projects", () => {
+    expect(taskNavigationPageSize(1)).toBe(10);
+    expect(taskNavigationPageSize(2)).toBe(10);
+    expect(taskNavigationPageSize(3)).toBe(7);
+    expect(taskNavigationPageSize(5)).toBe(7);
   });
 });

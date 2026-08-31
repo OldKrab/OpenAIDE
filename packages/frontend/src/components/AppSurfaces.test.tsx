@@ -422,8 +422,8 @@ describe("AppSurfaces callback wiring", () => {
         && node.props.className.includes("task-row"),
       );
 
-    expect(visibleRows("OpenAIDE")).toHaveLength(10);
-    expect(visibleRows("Other")).toHaveLength(10);
+    expect(visibleRows("OpenAIDE")).toHaveLength(7);
+    expect(visibleRows("Other")).toHaveLength(7);
   });
 
   it("limits current-Project Task Navigation to Projects in the workspace", () => {

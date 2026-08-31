@@ -1108,6 +1108,32 @@ describe("app reducer composer state", () => {
     expect(state.taskSnapshots.task_1.permission_policy).toBe("auto_approve");
   });
 
+  it("preserves a resolved custom Agent label across a context-free Task response", () => {
+    const current = snapshot("task_1", [], 4);
+    current.task.agent_id = "custom.4fc93c5";
+    current.task.agent_name = "IM";
+    let state = appReducer(createInitialState(), {
+      type: "snapshot",
+      intent: "open",
+      snapshot: current,
+    });
+    const mutationResponse = snapshot("task_1", [], 5);
+    mutationResponse.task.agent_id = "custom.4fc93c5";
+    mutationResponse.task.agent_name = "custom.4fc93c5";
+    mutationResponse.permission_policy = "auto_approve";
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: mutationResponse,
+      confirmedPermissionPolicy: mutationResponse.permission_policy,
+    });
+
+    expect(state.snapshot?.permission_policy).toBe("auto_approve");
+    expect(state.snapshot?.task.agent_name).toBe("IM");
+    expect(state.taskSnapshots.task_1.task.agent_name).toBe("IM");
+  });
+
   it("retains a confirmed permission policy when the user navigates away before its response", () => {
     let state = appReducer(createInitialState(), {
       type: "snapshot",

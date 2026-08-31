@@ -9,9 +9,10 @@ requests, session configuration, and errors together. Work stays visible when a
 run fails or is interrupted, and OpenAIDE does not silently retry actions that
 may have changed your files.
 
-The packaged extension runs inside VS Code. A local Web App is available when
-building from source. Both use the same Rust App Server and shared Frontend;
-Desktop and Mobile App Shells are planned, not included today.
+OpenAIDE is published as a Desktop App for Windows x64 and macOS Apple Silicon,
+and as a packaged VS Code extension. A local Web App is also available when
+building from source. Every App Shell uses the same Rust App Server and shared
+Frontend. A Mobile App Shell is planned but is not included today.
 
 ## Agents
 
@@ -73,6 +74,31 @@ executable from `PATH`; register a Custom Agent to use a different build.
 
 Each VSIX bundles the matching App Server executable. Standalone App Server,
 Web App archive, and container artifacts are not currently published.
+
+## Install the Desktop App
+
+Download the package for your platform from
+[GitHub Releases](https://github.com/OldKrab/OpenAIDE/releases):
+
+| Platform | Release file | Current trust status |
+| --- | --- | --- |
+| Windows x64 | `openaide-desktop-win32-x64-VERSION-unsigned.exe` | Unsigned until SignPath Foundation accepts the project |
+| macOS Apple Silicon | `openaide-desktop-darwin-arm64-VERSION-unnotarized.dmg` | Ad-hoc signed, but not Apple-notarized |
+
+Windows may show an unknown-publisher warning. macOS may require approval in
+**System Settings → Privacy & Security** after the first launch. These packages
+do not yet use the production in-app update feed; install a newer package from
+GitHub Releases to update.
+
+The Desktop installer adds the application and its bundled OpenAIDE App Server.
+On Windows, selecting a WSL project also installs the bundled Linux App Server
+under `~/.local/share/openaide` in that distribution. OpenAIDE stores Tasks,
+settings, and local diagnostics in per-user application data. Uninstall the
+Windows app through **Settings → Apps → Installed apps**, or move `OpenAIDE.app`
+to Trash on macOS. Uninstalling does not remove saved user data or project files.
+
+See the [privacy policy](PRIVACY.md) for local storage and network behavior and
+the [code signing policy](CODE_SIGNING.md) for release trust and verification.
 
 ## Build from source
 
@@ -141,6 +167,8 @@ release. Prerelease tags such as `v0.0.2-beta.1` remain GitHub prereleases.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Report
 security vulnerabilities privately by following [SECURITY.md](SECURITY.md).
+Free Windows code signing is provided by SignPath.io, certificate by SignPath
+Foundation.
 
 ## License
 

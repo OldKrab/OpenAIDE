@@ -198,6 +198,14 @@ export function reconcileTaskSnapshot(
     );
   const historySync = keepCurrent ? currentSync : incomingSync;
   const durableSnapshot = shouldIgnoreStaleTaskSnapshot(current, incoming) ? current : incoming;
+  // Context-free Task responses can only fall back to the custom Agent id. Keep
+  // the resolved collection label until an authoritative mapping supplies another.
+  const task = durableSnapshot === incoming
+    && incoming.task.agent_id === current.task.agent_id
+    && incoming.task.agent_name === incoming.task.agent_id
+    && current.task.agent_name !== current.task.agent_id
+    ? { ...incoming.task, agent_name: current.task.agent_name }
+    : durableSnapshot.task;
   // Request responses and state events are independent transports. The queue has
   // its own durable revision because Agent traffic can advance the Task revision
   // before a queue mutation response arrives.
@@ -208,10 +216,11 @@ export function reconcileTaskSnapshot(
     : currentQueueRevision > incomingQueueRevision
       ? current.message_queue
       : durableSnapshot.message_queue;
-  return durableSnapshot.history_sync === historySync
+  return durableSnapshot.task === task
+    && durableSnapshot.history_sync === historySync
     && durableSnapshot.message_queue === messageQueue
     ? durableSnapshot
-    : { ...durableSnapshot, history_sync: historySync, message_queue: messageQueue };
+    : { ...durableSnapshot, task, history_sync: historySync, message_queue: messageQueue };
 }
 
 function historySyncIsTerminal(sync: TaskSnapshot["history_sync"]) {

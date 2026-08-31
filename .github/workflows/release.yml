@@ -75,7 +75,12 @@ jobs:
           commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
           notes_path="$RUNNER_TEMP/release-notes.md"
           git log -1 --format=%B "$commit" > "$notes_path"
-          printf '\n' >> "$notes_path"
+          cat >> "$notes_path" <<'EOF'
+
+          ---
+
+          [Privacy policy](https://github.com/OldKrab/OpenAIDE/blob/main/PRIVACY.md) · [Code signing policy](https://github.com/OldKrab/OpenAIDE/blob/main/CODE_SIGNING.md)
+          EOF
           echo "path=$notes_path" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -96,7 +101,7 @@ jobs:
             test -f "release/openaide-vscode-$target-$RELEASE_VERSION.vsix"
           done
           test -f "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe"
-          test -f "release/openaide-desktop-darwin-arm64-$RELEASE_VERSION-unsigned.dmg"
+          test -f "release/openaide-desktop-darwin-arm64-$RELEASE_VERSION-unnotarized.dmg"
           test "$(find release -maxdepth 1 -type f -name '*.vsix' | wc -l)" -eq 3
           test "$(find release -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | wc -l)" -eq 2
       - name: Create draft and attach verified assets

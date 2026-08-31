@@ -5,7 +5,7 @@ use std::time::Duration;
 use fs2::FileExt;
 use tempfile::TempDir;
 
-use super::{CodexAcpInstaller, CodexAcpProvisioner, CODEX_ACP_VERSION};
+use super::{process_path_argument, CodexAcpInstaller, CodexAcpProvisioner, CODEX_ACP_VERSION};
 use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::status_cache::AgentStatusCache;
 use crate::logging::capture_test_logs;
@@ -61,6 +61,11 @@ impl CodexAcpInstaller for RecordingInstaller {
         .expect("write managed package manifest");
         fs::write(package_root.join("dist/index.js"), "#!/usr/bin/env node\n")
             .expect("write managed package entrypoint");
+        let codex_root = destination
+            .join("node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin");
+        fs::create_dir_all(&codex_root).expect("create managed native Codex fixture");
+        fs::write(codex_root.join("codex.exe"), "native Codex fixture")
+            .expect("write managed native Codex fixture");
         Ok(())
     }
 }
@@ -144,6 +149,57 @@ fn explicit_codex_launch_installs_the_locked_integration_once_and_reuses_it() {
         .args
         .iter()
         .any(|argument| argument.contains("agentclientprotocol")));
+}
+
+#[test]
+fn windows_launch_uses_the_managed_native_codex_binary() {
+    let storage = TempDir::new().expect("temporary storage root");
+    let provisioner = CodexAcpProvisioner::with_installer_for_platform(
+        storage.path().to_path_buf(),
+        Arc::new(RecordingInstaller::default()),
+        true,
+    );
+
+    let launch = provisioner
+        .prepare(AcpAgentConfig::codex())
+        .expect("managed Windows Codex launch");
+
+    let expected_codex = storage
+        .path()
+        .join("agent-runtimes/codex-acp")
+        .join(CODEX_ACP_VERSION)
+        .join("node_modules/@openai/codex-win32-x64")
+        .join("vendor/x86_64-pc-windows-msvc/bin/codex.exe");
+    assert_eq!(
+        launch
+            .config
+            .env
+            .iter()
+            .find(|(name, _)| name == "CODEX_PATH")
+            .map(|(_, value)| value.as_str()),
+        Some(process_path_argument(&expected_codex, true).as_str()),
+    );
+    assert_eq!(launch.config.args.len(), 1);
+    assert!(launch.config.args[0].ends_with("node_modules/@openaide/codex-acp/dist/index.js"));
+    assert!(!launch.config.command.ends_with(".cmd"));
+}
+
+#[test]
+fn windows_process_paths_are_unambiguous_to_node() {
+    let path =
+        std::path::Path::new(r"\\?\C:\Users\runneradmin\agent-runtimes\codex-acp\dist\index.js");
+
+    assert_eq!(
+        process_path_argument(path, true),
+        "C:/Users/runneradmin/agent-runtimes/codex-acp/dist/index.js"
+    );
+    assert_eq!(
+        process_path_argument(
+            std::path::Path::new(r"\\?\UNC\server\share\codex-acp\dist\index.js"),
+            true,
+        ),
+        "//server/share/codex-acp/dist/index.js"
+    );
 }
 
 #[test]
