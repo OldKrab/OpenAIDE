@@ -357,7 +357,7 @@ jobs:
             codesign --verify --deep --strict "$mount_root/OpenAIDE.app"
             codesign --display --verbose=4 "$mount_root/OpenAIDE.app" 2>&1 |
               grep -q '^Signature=adhoc$'
-            artifact_trust_suffix="unnotarized"
+            artifact_platform="macos-arm64"
           else
             extraction_root="$RUNNER_TEMP/openaide-desktop-nsis"
             7z x -y "$source_artifact" "-o$extraction_root"
@@ -367,17 +367,17 @@ jobs:
             packaged_wsl_server="$extraction_root/wsl/openaide-app-server"
             test -f "$packaged_wsl_server"
             cmp "wsl-app-server/openaide-app-server" "$packaged_wsl_server"
-            artifact_trust_suffix="unsigned"
+            artifact_platform="windows-x64"
           fi
 
           mkdir -p artifacts
           cp "$source_artifact" \
-            "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-${artifact_trust_suffix}.${{ matrix.extension }}"
+            "artifacts/openaide-desktop-${artifact_platform}-${{ needs.prepare.outputs.version }}.${{ matrix.extension }}"
 
           if [[ "${{ matrix.target }}" == "win32-x64" && "${{ inputs.enable_windows_updates }}" == "true" ]]; then
             test -f "$source_artifact.sig"
             cp "$source_artifact.sig" \
-              "artifacts/openaide-desktop-win32-x64-${{ needs.prepare.outputs.version }}-unsigned.exe.sig"
+              "artifacts/openaide-desktop-windows-x64-${{ needs.prepare.outputs.version }}.exe.sig"
           fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

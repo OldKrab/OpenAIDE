@@ -70,6 +70,38 @@ describe("Desktop update shell adapter", () => {
     );
   });
 
+  it("continues installer handoff when the final detach response is lost during shutdown", async () => {
+    vi.useFakeTimers();
+    try {
+      const session = fakeSession();
+      session.request.mockImplementation(async (method: string) => {
+        if (method === "client/updateShutdownPrepare") return { kind: "ready" };
+        if (method === "client/detach") return new Promise(() => undefined);
+        return {};
+      });
+      const invoke = vi.fn(async () => snapshot(2, "applying"));
+      const updates = createDesktopUpdates({
+        invoke,
+        listen: vi.fn(async () => () => undefined),
+        openReleaseNotes: vi.fn(),
+        reload: vi.fn(),
+        session,
+      });
+
+      const handoff = updates.restartAndUpdate();
+      await vi.runAllTimersAsync();
+
+      await expect(Promise.race([
+        handoff,
+        Promise.resolve("stalled" as const),
+      ])).resolves.toBe("started");
+      expect(session.close).toHaveBeenCalledOnce();
+      expect(invoke).toHaveBeenCalledWith("desktop_install_update");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not detach when active work requires confirmation", async () => {
     const session = fakeSession();
     session.request.mockImplementationOnce(async () => ({

@@ -172,8 +172,8 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(artifactBuild, /--bundles "\$\{\{ matrix\.bundle \}\}"/);
   assert.match(artifactBuild, /tauri\.release-bundle\.conf\.json/);
   assert.match(artifactBuild, /openaide-app-server-\$\{\{ matrix\.target_triple \}\}/);
-  assert.match(release, /openaide-desktop-win32-x64-\$RELEASE_VERSION-unsigned\.exe/);
-  assert.match(release, /openaide-desktop-darwin-arm64-\$RELEASE_VERSION-unnotarized\.dmg/);
+  assert.match(release, /openaide-desktop-windows-x64-\$RELEASE_VERSION\.exe/);
+  assert.match(release, /openaide-desktop-macos-arm64-\$RELEASE_VERSION\.dmg/);
   assert.doesNotMatch(artifactBuild, /extension_version=|--cwd/);
   assert.match(extensionPackage.scripts.build, /esbuild/);
   assert.match(extensionPackage.scripts.build, /--external:vscode/);

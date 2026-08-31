@@ -51,7 +51,7 @@ test("rejects a target without its immutable updater asset", () => {
 });
 
 function release(version, { prerelease = false, updater = true } = {}) {
-  const name = `openaide-desktop-win32-x64-${version}-unsigned.exe`;
+  const name = `openaide-desktop-windows-x64-${version}.exe`;
   return {
     tag_name: `v${version}`,
     draft: false,

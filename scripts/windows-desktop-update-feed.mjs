@@ -103,7 +103,7 @@ function releaseVersion(release) {
 }
 
 function installerAssetName(version) {
-  return `openaide-desktop-win32-x64-${version}-unsigned.exe`;
+  return `openaide-desktop-windows-x64-${version}.exe`;
 }
 
 function hasUpdaterArtifacts(release, version) {

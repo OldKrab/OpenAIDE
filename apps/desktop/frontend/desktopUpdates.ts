@@ -21,6 +21,24 @@ const initialSnapshot: DesktopUpdateSnapshot = {
   kind: "unavailable",
   unavailableReason: "notConfigured",
 };
+const FINAL_DETACH_RESPONSE_TIMEOUT_MS = 1_000;
+
+type FinalDetachOutcome = "response" | "transportClosed" | "timeout";
+
+/** The App Server may exit after accepting its final detach before its response is observable. */
+async function waitForFinalDetach(request: Promise<unknown>): Promise<FinalDetachOutcome> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<FinalDetachOutcome>((resolve) => {
+    timeout = setTimeout(() => resolve("timeout"), FINAL_DETACH_RESPONSE_TIMEOUT_MS);
+  });
+  const response = request.then<FinalDetachOutcome, FinalDetachOutcome>(
+    () => "response",
+    () => "transportClosed",
+  );
+  const outcome = await Promise.race([response, deadline]);
+  if (timeout !== undefined) clearTimeout(timeout);
+  return outcome;
+}
 
 /** Adapts native revisioned snapshots without exposing Tauri's generic updater API. */
 export function createDesktopUpdates({
@@ -80,8 +98,16 @@ export function createDesktopUpdates({
         if (readiness.kind === "blocked") return readiness.reason;
         prepared = true;
         await session.request(CLIENT_UPDATE_SHUTDOWN_COMMIT, { attemptId });
-        await session.request(CLIENT_DETACH, {});
+        const detachStartedAt = performance.now();
+        console.info(`desktop_update_detach_started operation_id=${attemptId}`);
+        const detachRequest = session.request(CLIENT_DETACH, {});
+        // Dispatching detach commits the point of no return. The native command
+        // remains authoritative for proving that the listener actually stopped.
         detached = true;
+        const detachOutcome = await waitForFinalDetach(detachRequest);
+        console.info(
+          `desktop_update_detach_completed operation_id=${attemptId} outcome=${detachOutcome} duration_ms=${Math.round(performance.now() - detachStartedAt)}`,
+        );
         await session.close();
         await run("desktop_install_update");
         return "started";
