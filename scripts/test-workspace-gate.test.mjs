@@ -91,7 +91,7 @@ test("workflows pin every external action and declared release toolchain", () =>
   assert.equal(readFileSync(path.join(repoRoot, ".node-version"), "utf8").trim(), "24.18.0");
   assert.match(readFileSync(path.join(repoRoot, "rust-toolchain.toml"), "utf8"), /channel = "1\.97\.1"/);
   assert.match(rootPackage.devDependencies["@vscode/vsce"], /^\d+\.\d+\.\d+$/);
-  assert.equal(rootPackage.devDependencies.ovsx, "1.0.2");
+  assert.equal(rootPackage.devDependencies.ovsx, "1.1.1");
 });
 
 test("the root package is the only source of the release version", () => {
