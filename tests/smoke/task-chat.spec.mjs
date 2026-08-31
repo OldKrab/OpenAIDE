@@ -734,11 +734,14 @@ test("keeps text typed at a slash-command boundary outside the highlighted token
 test("sends an attachment-only first message through the real resolver boundary", async ({ page }) => {
   await openPreparedNewTask(page);
   await page.getByRole("button", { name: "Add context" }).click();
-  const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("menu", { name: "Add context" })
-    .getByRole("menuitem", { name: /Attach images/ })
-    .click();
-  await (await chooser).setFiles({
+  const attachImages = page.getByRole("menu", { name: "Add context" })
+    .getByRole("menuitem", { name: /Attach images/ });
+  await expect(attachImages).toBeEnabled();
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    attachImages.click(),
+  ]);
+  await chooser.setFiles({
     name: "pixel.png",
     mimeType: "image/png",
     buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nXcAAAAASUVORK5CYII=", "base64"),
@@ -755,11 +758,14 @@ test("sends an attachment-only first message through the real resolver boundary"
 test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
   await openPreparedNewTask(page);
   await page.getByRole("button", { name: "Add context" }).click();
-  const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("menu", { name: "Add context" })
-    .getByRole("menuitem", { name: /Attach files/ })
-    .click();
-  await (await chooser).setFiles({
+  const attachFiles = page.getByRole("menu", { name: "Add context" })
+    .getByRole("menuitem", { name: /Attach files/ });
+  await expect(attachFiles).toBeEnabled();
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    attachFiles.click(),
+  ]);
+  await chooser.setFiles({
     name: "two-megabytes.bin",
     mimeType: "application/octet-stream",
     buffer: Buffer.alloc(2 * 1024 * 1024, 7),
@@ -790,18 +796,26 @@ test("uploads a 2 MiB file and sends it with the first New Task message", async 
 test("keeps Images and files in one composer attachment list", async ({ page }) => {
   await openPreparedNewTask(page);
   await page.getByRole("button", { name: "Add context" }).click();
-  let chooser = page.waitForEvent("filechooser");
-  await page.getByRole("menuitem", { name: /Attach images/ }).click();
-  await (await chooser).setFiles({
+  const attachImages = page.getByRole("menuitem", { name: /Attach images/ });
+  await expect(attachImages).toBeEnabled();
+  let [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    attachImages.click(),
+  ]);
+  await chooser.setFiles({
     name: "pixel.png",
     mimeType: "image/png",
     buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
   });
   await expect(page.getByRole("menu", { name: "Add context" })).toHaveCount(0);
   await page.getByRole("button", { name: "Add context" }).click();
-  chooser = page.waitForEvent("filechooser");
-  await page.getByRole("menuitem", { name: /Attach files/ }).click();
-  await (await chooser).setFiles({
+  const attachFiles = page.getByRole("menuitem", { name: /Attach files/ });
+  await expect(attachFiles).toBeEnabled();
+  [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    attachFiles.click(),
+  ]);
+  await chooser.setFiles({
     name: "notes.md",
     mimeType: "text/markdown",
     buffer: Buffer.from("attachment list"),
