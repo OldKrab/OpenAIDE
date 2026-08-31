@@ -229,9 +229,18 @@ if [[ -f "$KEY_PATH" || -f "$PUBLIC_KEY_PATH" ]]; then
   warn "An updater key already exists at $KEY_PATH."
   confirm "Reuse this key?" || exit 1
 else
-  TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$DESKTOP_UPDATE_KEY_PASSWORD" \
-    npm run tauri --workspace openaide-desktop -- signer generate --ci -w "$KEY_PATH"
+  # The CLI does not consistently honor its password environment variable for
+  # key generation. Invoke it directly so the required password argument is not
+  # echoed by npm's command wrapper.
+  ./node_modules/.bin/tauri signer generate \
+    --ci \
+    --password "$DESKTOP_UPDATE_KEY_PASSWORD" \
+    -w "$KEY_PATH" >/dev/null
   chmod 600 "$KEY_PATH" "$PUBLIC_KEY_PATH"
+  if ! base64 --decode "$KEY_PATH" | head -1 | grep -q '^untrusted comment: rsign encrypted secret key$'; then
+    warn "Tauri did not produce a password-encrypted updater key."
+    exit 1
+  fi
 fi
 PRIVATE_KEY="$(<"$KEY_PATH")"
 PUBLIC_KEY="$(<"$PUBLIC_KEY_PATH")"
