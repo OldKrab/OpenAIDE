@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 - 2026-08-31
+
+### Desktop updates
+
+- Fixed Windows release packaging so updater-enabled installers include the configured update identity and can publish signed update artifacts.
+
 ## 0.4.1 - 2026-08-31
 
 ### Desktop updates
