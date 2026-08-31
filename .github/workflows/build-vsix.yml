@@ -25,6 +25,11 @@ on:
         options: [all, win32-x64, darwin-arm64]
         default: all
         required: true
+      enable_windows_updates:
+        description: Build Windows with the production updater identity
+        type: boolean
+        default: false
+        required: true
   workflow_call:
     inputs:
       artifacts:
@@ -374,8 +379,39 @@ jobs:
             cp "$source_artifact.sig" \
               "artifacts/openaide-desktop-win32-x64-${{ needs.prepare.outputs.version }}-unsigned.exe.sig"
           fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-desktop-smoke:
+    name: Smoke-test packaged win32-x64 desktop app
+    if: >-
+      (inputs.artifacts == 'all' || inputs.artifacts == 'desktop') &&
+      (inputs.desktop_target == 'all' || inputs.desktop_target == 'win32-x64')
+    needs: [prepare, desktop]
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+      # Keep smoke tests downstream from the uploaded installer. A failed smoke
+      # retry then reuses the exact release candidate instead of recompiling it.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-win32-x64${{ needs.prepare.outputs.artifact_suffix }}
+          path: artifacts
+      - name: Extract packaged Windows desktop
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem artifacts -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not found" }
+          $extractionRoot = Join-Path $env:RUNNER_TEMP "openaide-desktop-nsis"
+          7z x -y $installer.FullName "-o$extractionRoot"
       - name: Smoke-test packaged Windows Codex ACP launcher
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $packagedServer = Get-ChildItem `
@@ -403,7 +439,6 @@ jobs:
             $packagedServer.FullName `
             $env:GITHUB_WORKSPACE
       - name: Smoke-test packaged Windows desktop startup
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $desktopExecutable = Join-Path $env:RUNNER_TEMP `
@@ -442,10 +477,7 @@ jobs:
             }
           }
           Assert-AssociatedIconMatches $desktopExecutable $expectedIconPath
-          $installer = Get-ChildItem `
-            "apps/desktop/src-tauri/target/release/bundle/nsis" `
-            -Filter "*.exe" |
-            Select-Object -First 1
+          $installer = Get-ChildItem artifacts -Filter "*.exe" | Select-Object -First 1
           if (-not $installer) { throw "Windows installer was not found" }
           $expectedInstallerIconPath = Join-Path $env:GITHUB_WORKSPACE `
             "apps/desktop/src-tauri/icons/windows/installer.ico"
@@ -471,9 +503,3 @@ jobs:
               $global:LASTEXITCODE = 0
             }
           }
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: desktop-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 14
