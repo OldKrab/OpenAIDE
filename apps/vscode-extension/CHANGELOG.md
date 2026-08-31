@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1 - 2026-08-31
+
+### Desktop updates
+
+- OpenAIDE Desktop on Windows can now detect signed application updates, show release notes, download the installer, and request a restart to finish updating.
+- Improved packaged Windows Codex startup, path handling, task recovery, diagnostic downloads, title-bar interactions, and live Codex installation status.
+- Prepared Windows and macOS desktop artifacts for the free code-signing path while preserving explicit trust labels for unsigned or unnotarized downloads.
+
+### Agents and tasks
+
+- Added native ACP subagent histories and follow-up support.
+- Fixed custom Agent label reconciliation, task-navigation refresh loops, collapsed-sidebar restoration, and first-click auto-approval behavior.
+- Improved Composer feedback when configuration changes and adjusted task-navigation limits for larger projects.
+
 ## 0.4.0 - 2026-08-27
 
 ### Features
