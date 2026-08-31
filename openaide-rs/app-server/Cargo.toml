@@ -5,6 +5,13 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[package.metadata.tauri-winres]
+ProductName = "OpenAIDE"
+FileDescription = "OpenAIDE App Server"
+OriginalFilename = "openaide-app-server.exe"
+CompanyName = "OpenAIDE"
+LegalCopyright = "Copyright OpenAIDE contributors"
+
 [dependencies]
 agent-client-protocol.workspace = true
 agent-client-protocol-schema.workspace = true
@@ -27,5 +34,8 @@ zstd.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "=0.3.6"
 
 [dev-dependencies]

@@ -281,14 +281,21 @@ jobs:
             wsl-app-server/openaide-app-server \
             apps/desktop/src-tauri/resources/wsl/openaide-app-server
           test "$(od -An -tx1 -N4 apps/desktop/src-tauri/resources/wsl/openaide-app-server | tr -d ' \n')" = "7f454c46"
-      - name: Build unsigned desktop installer
-        run: >-
-          npm run tauri --workspace openaide-desktop --
-          build
-          --ci
-          --no-sign
-          --bundles "${{ matrix.bundle }}"
-          --config "src-tauri/tauri.release-bundle.conf.json"
+      - name: Build desktop installer
+        shell: bash
+        run: |
+          build_args=(
+            build
+            --ci
+            --bundles "${{ matrix.bundle }}"
+            --config "src-tauri/tauri.release-bundle.conf.json"
+          )
+          # macOS release bundles use the configured free ad-hoc identity. Windows
+          # remains explicitly unsigned until the SignPath pipeline is available.
+          if [[ "${{ matrix.target }}" != "darwin-arm64" ]]; then
+            build_args+=(--no-sign)
+          fi
+          npm run tauri --workspace openaide-desktop -- "${build_args[@]}"
       - name: Verify and normalize desktop artifact
         shell: bash
         run: |
@@ -304,9 +311,18 @@ jobs:
             mkdir -p "$mount_root"
             hdiutil attach "$source_artifact" -nobrowse -readonly -mountpoint "$mount_root"
             trap 'hdiutil detach "$mount_root"' EXIT
+            packaged_server="$mount_root/OpenAIDE.app/Contents/MacOS/openaide-app-server"
+            unsigned_server="$RUNNER_TEMP/openaide-app-server-unsigned"
+            cp "$packaged_server" "$unsigned_server"
+            codesign --remove-signature "$unsigned_server"
             cmp \
               "app-server/openaide-app-server" \
-              "$mount_root/OpenAIDE.app/Contents/MacOS/openaide-app-server"
+              "$unsigned_server"
+            codesign --verify --strict "$packaged_server"
+            codesign --verify --deep --strict "$mount_root/OpenAIDE.app"
+            codesign --display --verbose=4 "$mount_root/OpenAIDE.app" 2>&1 |
+              grep -q '^Signature=adhoc$'
+            artifact_trust_suffix="unnotarized"
           else
             extraction_root="$RUNNER_TEMP/openaide-desktop-nsis"
             7z x -y "$source_artifact" "-o$extraction_root"
@@ -316,11 +332,12 @@ jobs:
             packaged_wsl_server="$extraction_root/wsl/openaide-app-server"
             test -f "$packaged_wsl_server"
             cmp "wsl-app-server/openaide-app-server" "$packaged_wsl_server"
+            artifact_trust_suffix="unsigned"
           fi
 
           mkdir -p artifacts
           cp "$source_artifact" \
-            "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-unsigned.${{ matrix.extension }}"
+            "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-${artifact_trust_suffix}.${{ matrix.extension }}"
       - name: Smoke-test packaged Windows Codex ACP launcher
         if: runner.os == 'Windows'
         shell: pwsh
@@ -333,6 +350,19 @@ jobs:
           if (-not $packagedServer) {
             throw "Packaged App Server was not found"
           }
+          $serverVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($packagedServer.FullName)
+          if ($serverVersion.ProductName -ne "OpenAIDE") {
+            throw "Packaged App Server has unexpected ProductName: $($serverVersion.ProductName)"
+          }
+          if ($serverVersion.FileDescription -ne "OpenAIDE App Server") {
+            throw "Packaged App Server has unexpected FileDescription: $($serverVersion.FileDescription)"
+          }
+          if ($serverVersion.OriginalFilename -ne "openaide-app-server.exe") {
+            throw "Packaged App Server has unexpected OriginalFilename: $($serverVersion.OriginalFilename)"
+          }
+          if ($serverVersion.ProductVersion -ne "${{ needs.prepare.outputs.version }}") {
+            throw "Packaged App Server version does not match the release: $($serverVersion.ProductVersion)"
+          }
           node scripts/smoke-packaged-codex-acp.mjs `
             $packagedServer.FullName `
             $env:GITHUB_WORKSPACE
@@ -343,6 +373,13 @@ jobs:
           $desktopExecutable = Join-Path $env:RUNNER_TEMP `
             "openaide-desktop-nsis/openaide-desktop.exe"
           node scripts/assert-windows-gui-executable.mjs $desktopExecutable
+          $desktopVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($desktopExecutable)
+          if ($desktopVersion.ProductName -ne "OpenAIDE") {
+            throw "Packaged Desktop has unexpected ProductName: $($desktopVersion.ProductName)"
+          }
+          if ($desktopVersion.ProductVersion -ne "${{ needs.prepare.outputs.version }}") {
+            throw "Packaged Desktop version does not match the release: $($desktopVersion.ProductVersion)"
+          }
 
           Add-Type -AssemblyName System.Drawing
           $expectedIconPath = Join-Path $env:GITHUB_WORKSPACE `

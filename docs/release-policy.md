@@ -83,10 +83,12 @@ Before that release:
    startup and graceful JSON-RPC shutdown before upload. Desktop builds verify
    that Tauri bundled the exact App Server binary built for that platform.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
-   asset set, publishes the draft, and verifies immutability. Desktop filenames
-   end in `-unsigned` until Apple notarization and Windows Authenticode signing
-   are configured; users must explicitly approve those preview installers with
-   the operating system. This GitHub Release is the canonical release. Every
+   asset set, publishes the draft, and verifies immutability. Windows Desktop
+   filenames end in `-unsigned` until Authenticode signing is configured. macOS
+   Desktop bundles are ad-hoc signed and end in `-unnotarized` until Developer ID
+   signing and Apple notarization are configured. Users must explicitly approve
+   these preview installers with the operating system. This GitHub Release is
+   the canonical release. Every
    release then reconciles the same downloaded bytes with Open VSX; stable
    releases also reconcile them with the VS Code Marketplace.
 7. Confirm that the Release workflow completed successfully. No manual rebuild
