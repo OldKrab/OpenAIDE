@@ -192,7 +192,7 @@
   height: 12px;
   display: inline-block;
   position: relative;
-  margin-left: 6px;
+  margin-left: 4px;
   vertical-align: middle;
 }
 
@@ -201,7 +201,8 @@
   height: 8px;
   box-sizing: border-box;
   position: absolute;
-  top: 2px;
+  /* Lowercase labels sit optically below their line box center. */
+  top: 3px;
   left: 2px;
   border: 1px solid color-mix(in oklch, var(--oa-muted) 58%, transparent);
   border-radius: 50%;
