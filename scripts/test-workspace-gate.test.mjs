@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { resolveReleaseArtifactMatrices } from "./resolve-release-artifact-matrices.mjs";
+import { resolveReleaseArtifactGraph } from "./resolve-release-artifact-graph.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rootPackage = packageJson("package.json");
@@ -79,7 +79,16 @@ test("the local CI command runs every required validation class", () => {
 
 test("workflows pin every external action and declared release toolchain", () => {
   const workflowDirectory = path.join(repoRoot, ".github", "workflows");
-  for (const workflowName of ["build-vsix.yml", "ci.yml", "reconcile-release.yml", "release.yml", "version-bump.yml"]) {
+  for (const workflowName of [
+    "build-app-server-target.yml",
+    "build-vsix.yml",
+    "ci.yml",
+    "package-desktop-target.yml",
+    "package-vsix-target.yml",
+    "reconcile-release.yml",
+    "release.yml",
+    "version-bump.yml",
+  ]) {
     const workflow = readFileSync(path.join(workflowDirectory, workflowName), "utf8");
     for (const match of workflow.matchAll(/^\s*-?\s*uses:\s+([^\s#]+)/gm)) {
       if (!match[1].startsWith("./")) {
@@ -149,37 +158,34 @@ test("a manual workflow commits and tags an exact release version", () => {
 test("release publishing produces every supported VSIX and desktop package", () => {
   const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
   const artifactBuild = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
+  const serverBuild = readFileSync(path.join(repoRoot, ".github/workflows/build-app-server-target.yml"), "utf8");
+  const vsixBuild = readFileSync(path.join(repoRoot, ".github/workflows/package-vsix-target.yml"), "utf8");
+  const desktopBuild = readFileSync(path.join(repoRoot, ".github/workflows/package-desktop-target.yml"), "utf8");
   const extensionPackage = packageJson("apps/vscode-extension/package.json");
 
   assert.match(release, /uses: \.\/\.github\/workflows\/build-vsix\.yml/);
   assert.match(release, /artifacts: all/);
   assert.match(release, /version: \$\{\{ needs\.validate\.outputs\.version \}\}/);
-  assert.match(artifactBuild, /cp LICENSE apps\/vscode-extension\/LICENSE/);
-  assert.match(artifactBuild, /cd apps\/vscode-extension/);
-  assert.match(artifactBuild, /npm exec -- vsce package/);
-  assert.match(artifactBuild, /RELEASE_VERSION: \$\{\{ needs\.prepare\.outputs\.version \}\}/);
-  assert.doesNotMatch(artifactBuild, /RELEASE_VERSION: \$\{\{ steps\.version\.outputs\.version \}\}/);
-  assert.match(artifactBuild, /--no-dependencies/);
-  assert.match(artifactBuild, /cargo build --locked --release/);
-  // The shared App Server job has one command for target-specific builds and
-  // one fallback command for hosts without a Rust target override.
-  assert.equal(occurrences(artifactBuild, "cargo build --locked --release -p openaide-app-server"), 2);
-  assert.match(artifactBuild, /name: app-server-\$\{\{ matrix\.target \}\}/);
-  assert.match(artifactBuild, /actions\/download-artifact@[0-9a-f]{40}/);
-  assert.match(artifactBuild, /needs: \[prepare, app-server\]/);
-  assert.match(artifactBuild, /node scripts\/smoke-release-vsix\.mjs/);
-  assert.match(artifactBuild, /node scripts\/set-release-artifact-version\.mjs "\$\{\{ needs\.prepare\.outputs\.version \}\}"/);
-  assert.match(artifactBuild, /--bundles "\$\{\{ matrix\.bundle \}\}"/);
-  assert.match(artifactBuild, /tauri\.release-bundle\.conf\.json/);
-  assert.match(artifactBuild, /openaide-app-server-\$\{\{ matrix\.target_triple \}\}/);
+  assert.match(vsixBuild, /cp LICENSE apps\/vscode-extension\/LICENSE/);
+  assert.match(vsixBuild, /cd apps\/vscode-extension/);
+  assert.match(vsixBuild, /npm exec -- vsce package/);
+  assert.match(vsixBuild, /--no-dependencies/);
+  assert.equal(occurrences(serverBuild, "cargo build --locked --release -p openaide-app-server"), 2);
+  assert.match(serverBuild, /name: app-server-\$\{\{ inputs\.target \}\}/);
+  assert.match(vsixBuild, /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.match(vsixBuild, /node scripts\/smoke-release-vsix\.mjs/);
+  assert.match(vsixBuild, /app-server-linux-x64-musl/);
+  assert.match(desktopBuild, /--bundles "\$\{\{ steps\.target\.outputs\.bundle \}\}"/);
+  assert.match(desktopBuild, /tauri\.release-bundle\.conf\.json/);
+  assert.match(desktopBuild, /openaide-app-server-\$\{\{ steps\.target\.outputs\.target_triple \}\}/);
   assert.match(release, /openaide-desktop-windows-x64-\$RELEASE_VERSION\.exe/);
   assert.match(release, /openaide-desktop-macos-arm64-\$RELEASE_VERSION\.dmg/);
-  assert.doesNotMatch(artifactBuild, /extension_version=|--cwd/);
+  assert.doesNotMatch(`${artifactBuild}\n${vsixBuild}\n${desktopBuild}`, /extension_version=|--cwd/);
   assert.match(extensionPackage.scripts.build, /esbuild/);
   assert.match(extensionPackage.scripts.build, /--external:vscode/);
   assert.deepEqual(extensionPackage.extensionKind, ["workspace"]);
   assert.equal(extensionPackage.extensionDependencies, undefined);
-  assert.doesNotMatch(artifactBuild, /notification-companion|apps\/vscode-notification-companion/);
+  assert.doesNotMatch(`${artifactBuild}\n${vsixBuild}\n${desktopBuild}`, /notification-companion|apps\/vscode-notification-companion/);
   assert.doesNotMatch(release, /notification-companion|apps\/vscode-notification-companion/);
   assert.match(release, /Read release notes from version commit/);
   assert.match(release, /body_path: \$\{\{ steps\.release-notes\.outputs\.path \}\}/);
@@ -199,46 +205,77 @@ test("release publishing produces every supported VSIX and desktop package", () 
 
 test("manual artifact builds can select VSIX, desktop, or all without publishing", () => {
   const workflow = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
+  const vsixBuild = readFileSync(path.join(repoRoot, ".github/workflows/package-vsix-target.yml"), "utf8");
+  const desktopBuild = readFileSync(path.join(repoRoot, ".github/workflows/package-desktop-target.yml"), "utf8");
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /workflow_call:/);
   assert.match(workflow, /options: \[all, vsix, desktop\]/);
   assert.match(workflow, /vsix_target:/);
   assert.match(workflow, /options: \[all, linux-x64, win32-x64, darwin-arm64\]/);
-  assert.match(workflow, /vsix_matrix: \$\{\{ steps\.build\.outputs\.vsix_matrix \}\}/);
-  assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs\.prepare\.outputs\.vsix_matrix\) \}\}/);
-  assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/);
-  assert.match(workflow, /npm exec -- vsce package/);
+  assert.match(workflow, /resolve-release-artifact-graph\.mjs/);
+  assert.match(vsixBuild, /actions\/upload-artifact@[0-9a-f]{40}/);
+  assert.match(vsixBuild, /npm exec -- vsce package/);
   assert.match(workflow, /short_sha="\$\{GITHUB_SHA:0:7\}"/);
   assert.match(workflow, /version="\$\{base_version\}\.g\$\{short_sha\}"/);
   assert.match(workflow, /version="\$\{base_version\}-g\$\{short_sha\}"/);
-  assert.match(workflow, /name: vsix-\$\{\{ matrix\.target \}\}/);
-  assert.match(workflow, /name: desktop-\$\{\{ matrix\.target \}\}/);
-  assert.doesNotMatch(workflow, /vsce publish/);
+  assert.match(vsixBuild, /name: vsix-\$\{\{ inputs\.target \}\}/);
+  assert.match(desktopBuild, /name: desktop-\$\{\{ inputs\.target \}\}/);
+  assert.doesNotMatch(`${workflow}\n${vsixBuild}\n${desktopBuild}`, /vsce publish/);
   assert.doesNotMatch(workflow, /action-gh-release|contents: write|push:\s*\n\s*tags:/);
 });
 
 test("artifact builds select only the requested package targets and required servers", () => {
-  const windows = resolveReleaseArtifactMatrices({
+  const linuxVsix = resolveReleaseArtifactGraph({
+    artifacts: "vsix",
+    vsixTarget: "linux-x64",
+    desktopTarget: "all",
+  });
+  assert.deepEqual(linuxVsix.enabledNodes, ["server-linux-x64-musl", "vsix-linux-x64"]);
+  assert.deepEqual(linuxVsix.dependencies["vsix-linux-x64"], ["server-linux-x64-musl"]);
+
+  const windows = resolveReleaseArtifactGraph({
     artifacts: "all",
     vsixTarget: "win32-x64",
     desktopTarget: "win32-x64",
   });
-  assert.deepEqual(windows.vsix_matrix.include.map(({ target }) => target), ["win32-x64"]);
-  assert.deepEqual(windows.desktop_matrix.include.map(({ target }) => target), ["win32-x64"]);
-  assert.deepEqual(windows.server_matrix.include.map(({ target }) => target), ["win32-x64", "linux-x64-musl"]);
+  assert.deepEqual(windows.enabledNodes, [
+    "server-linux-x64-musl",
+    "server-win32-x64",
+    "vsix-win32-x64",
+    "desktop-win32-x64",
+  ]);
+  assert.deepEqual(windows.dependencies["vsix-win32-x64"], ["server-win32-x64"]);
+  assert.deepEqual(windows.dependencies["desktop-win32-x64"], [
+    "server-win32-x64",
+    "server-linux-x64-musl",
+  ]);
 
-  const fullRelease = resolveReleaseArtifactMatrices({
+  const fullRelease = resolveReleaseArtifactGraph({
     artifacts: "all",
     vsixTarget: "all",
     desktopTarget: "all",
   });
-  assert.deepEqual(fullRelease.vsix_matrix.include.map(({ target }) => target), vsixTargets());
-  assert.deepEqual(fullRelease.desktop_matrix.include.map(({ target }) => target), ["win32-x64", "darwin-arm64"]);
-  assert.deepEqual(fullRelease.server_matrix.include.map(({ target }) => target), [
-    ...vsixTargets(),
-    "linux-x64-musl",
+  assert.deepEqual(fullRelease.enabledNodes, [
+    "server-linux-x64-musl",
+    "server-win32-x64",
+    "server-darwin-arm64",
+    "vsix-linux-x64",
+    "vsix-win32-x64",
+    "vsix-darwin-arm64",
+    "desktop-win32-x64",
+    "desktop-darwin-arm64",
   ]);
+  assert.deepEqual(fullRelease.dependencies["vsix-linux-x64"], ["server-linux-x64-musl"]);
+
+  assert.throws(
+    () => resolveReleaseArtifactGraph({
+      artifacts: "desktop",
+      vsixTarget: "unsupported",
+      desktopTarget: "all",
+    }),
+    /vsix_target must be/,
+  );
 });
 
 function packageJson(relativePath) {
@@ -247,8 +284,4 @@ function packageJson(relativePath) {
 
 function occurrences(value, search) {
   return value.split(search).length - 1;
-}
-
-function vsixTargets() {
-  return ["linux-x64", "win32-x64", "darwin-arm64"];
 }

@@ -1,0 +1,115 @@
+name: Package VSIX Target
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: VS Code package target
+        type: string
+        required: true
+      version:
+        description: Version stamped into the package
+        type: string
+        required: true
+      artifact_suffix:
+        description: Suffix isolating non-release artifacts
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build and smoke-test ${{ inputs.target }} VSIX
+    runs-on: ${{ inputs.target == 'win32-x64' && 'windows-2025' || inputs.target == 'darwin-arm64' && 'macos-15' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Resolve target contract
+        id: target
+        shell: bash
+        run: |
+          case "${{ inputs.target }}" in
+            linux-x64)
+              echo "binary=openaide-app-server" >> "$GITHUB_OUTPUT"
+              echo "server_artifact=app-server-linux-x64-musl" >> "$GITHUB_OUTPUT"
+              ;;
+            win32-x64)
+              echo "binary=openaide-app-server.exe" >> "$GITHUB_OUTPUT"
+              echo "server_artifact=app-server-win32-x64" >> "$GITHUB_OUTPUT"
+              ;;
+            darwin-arm64)
+              echo "binary=openaide-app-server" >> "$GITHUB_OUTPUT"
+              echo "server_artifact=app-server-darwin-arm64" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported VSIX target: ${{ inputs.target }}" >&2
+              exit 1
+              ;;
+          esac
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Set artifact versions
+        run: node scripts/set-release-artifact-version.mjs "${{ inputs.version }}"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ steps.target.outputs.server_artifact }}${{ inputs.artifact_suffix }}
+          path: app-server
+      - name: Restore App Server executable permission
+        if: runner.os != 'Windows'
+        run: chmod +x "app-server/${{ steps.target.outputs.binary }}"
+      - run: npm run build:frontend
+      - name: Test VS Code New Task Project handoff
+        if: inputs.target == 'linux-x64'
+        run: |
+          npm test --workspace openaide-frontend -- --run src/components/AppSurfaces.test.tsx
+          npm test --workspace openaide-vscode-extension -- --run src/webview/messaging.test.ts src/webview/surfaces.test.ts
+      - name: Add extension license
+        shell: bash
+        run: cp LICENSE apps/vscode-extension/LICENSE
+      - name: Package platform VSIX
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p artifacts apps/vscode-extension/dist/app-server
+          cp "app-server/${{ steps.target.outputs.binary }}" apps/vscode-extension/dist/app-server/
+          cd apps/vscode-extension
+          package_args=(
+            --target "${{ inputs.target }}"
+            --no-dependencies
+            --out "../../artifacts/openaide-vscode-${{ inputs.target }}-${RELEASE_VERSION}.vsix"
+          )
+          # Registry clients use VSIX metadata, not the SemVer suffix, to select the prerelease channel.
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            package_args+=(--pre-release)
+          fi
+          npm exec -- vsce package "${package_args[@]}"
+      - name: Verify packaged content and bundled App Server lifecycle
+        shell: bash
+        run: |
+          extraction_root="$RUNNER_TEMP/openaide-vsix-${{ inputs.target }}"
+          unzip -q "artifacts/openaide-vscode-${{ inputs.target }}-${{ inputs.version }}.vsix" -d "$extraction_root"
+          node scripts/smoke-release-vsix.mjs \
+            "$extraction_root/extension" \
+            "${{ inputs.version }}" \
+            "${{ inputs.target }}" \
+            "${{ steps.target.outputs.binary }}"
+      - name: Smoke-test packaged Linux Codex ACP fallback
+        if: inputs.target == 'linux-x64'
+        shell: bash
+        run: |
+          extraction_root="$RUNNER_TEMP/openaide-vsix-${{ inputs.target }}"
+          node scripts/smoke-packaged-codex-acp.mjs \
+            "$extraction_root/extension/dist/app-server/${{ steps.target.outputs.binary }}" \
+            "$GITHUB_WORKSPACE"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: vsix-${{ inputs.target }}${{ inputs.artifact_suffix }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
