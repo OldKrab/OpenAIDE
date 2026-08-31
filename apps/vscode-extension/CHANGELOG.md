@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4 - 2026-08-31
+
+### Desktop updates
+
+- Fixed Restart and update so installer handoff continues when the App Server closes before its final detach response reaches the Desktop UI.
+- Simplified Windows and macOS desktop download filenames.
+
 ## 0.4.3 - 2026-08-31
 
 ### Desktop updates
