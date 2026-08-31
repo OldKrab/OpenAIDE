@@ -1,4 +1,6 @@
-use crate::agent::events::{AgentPermissionOutcome, AgentPermissionRequest};
+use crate::agent::events::{
+    AgentPermissionOptionKind, AgentPermissionOutcome, AgentPermissionRequest,
+};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -9,6 +11,7 @@ use crate::tasks::attention::{current_request_attention, request_attention};
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 use openaide_app_server_protocol::ids::TaskId;
+use openaide_app_server_protocol::snapshot::TaskPermissionPolicy;
 use serde_json::json;
 
 use super::TaskEventSink;
@@ -49,6 +52,53 @@ impl TaskEventSink {
                 "option_count": request.options.len(),
             }),
         );
+
+        if let Some(option_id) = allow_once_option_id(&request) {
+            let auto_approved =
+                match self.auto_approve_permission_if_enabled(&server_request_id, option_id) {
+                    Ok(auto_approved) => auto_approved,
+                    Err(error) => {
+                        self.server_requests.interrupt_request(
+                            &server_request_id,
+                            crate::client_lifecycle::AppServerTime(0),
+                        );
+                        return Err(error);
+                    }
+                };
+            if auto_approved {
+                logging::info(
+                    "task_permission_auto_approval_started",
+                    json!({
+                        "task_id": self.task_id.as_str(),
+                        "turn_id": self.turn_id.as_str(),
+                        "agent_request_id": request_id.as_str(),
+                        "server_request_id": server_request_id.as_str(),
+                        "option_kind": "allow_once",
+                    }),
+                );
+                let response = self
+                    .server_requests
+                    .wait_permission_response(&server_request_id, &self.cancellation)?;
+                self.persist_permission_resolution(
+                    request,
+                    server_request_id.as_str(),
+                    request_id.as_str(),
+                    &response.outcome,
+                    response.decision,
+                )?;
+                logging::info(
+                    "task_permission_auto_approval_completed",
+                    json!({
+                        "task_id": self.task_id.as_str(),
+                        "turn_id": self.turn_id.as_str(),
+                        "agent_request_id": request_id.as_str(),
+                        "server_request_id": server_request_id.as_str(),
+                        "outcome": agent_permission_outcome_name(&response.outcome),
+                    }),
+                );
+                return Ok(response.outcome);
+            }
+        }
 
         match self.mark_permission_waiting(server_request_id.as_str()) {
             Ok(true) => {}
@@ -105,6 +155,36 @@ impl TaskEventSink {
             response.decision,
         )?;
         Ok(response.outcome)
+    }
+
+    /// The Task mutation lock is the ordering point between a user policy change and an Agent
+    /// request. Requests that reach this point after Auto-approve is saved resolve immediately;
+    /// earlier or unsupported requests continue through the normal human decision path.
+    fn auto_approve_permission_if_enabled(
+        &self,
+        server_request_id: &openaide_app_server_protocol::ids::RequestId,
+        option_id: &str,
+    ) -> Result<bool, RuntimeError> {
+        let mut auto_approved = false;
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                let task = ctx.task();
+                if task.active_turn_id.as_deref() == Some(self.turn_id.as_str())
+                    && !self.cancellation.is_cancelled()
+                    && task.permission_policy == TaskPermissionPolicy::AutoApprove
+                {
+                    auto_approved = self.server_requests.auto_approve_permission(
+                        server_request_id,
+                        option_id,
+                        crate::client_lifecycle::AppServerTime(0),
+                    );
+                }
+                Ok(TaskMutationResult::Unchanged)
+            },
+        )?;
+        Ok(auto_approved)
     }
 
     fn mark_permission_waiting(&self, server_request_id: &str) -> Result<bool, RuntimeError> {
@@ -174,6 +254,17 @@ impl TaskEventSink {
             option_label,
             resolved_at: now.clone(),
         };
+        if let Some(native_session_id) = request.subagent_native_session_id.as_deref() {
+            let record = self.mutations.store().record_subagent_permission_outcome(
+                &self.task_id,
+                native_session_id,
+                &tool_call_id,
+                permission_outcome.clone(),
+            )?;
+            self.session_sink
+                .publish_subagent_snapshots(&record.subagent_id)?;
+        }
+        let is_subagent_request = request.subagent_native_session_id.is_some();
         self.mutations.commit_existing_task(
             &self.task_id,
             TaskCommitOptions {
@@ -181,11 +272,13 @@ impl TaskEventSink {
                 response_snapshot_tail_limit: None,
             },
             |ctx| {
-                if !ctx.record_tool_permission_outcome(
-                    &activity_identity,
-                    &tool_call_id,
-                    permission_outcome,
-                )? {
+                if !is_subagent_request
+                    && !ctx.record_tool_permission_outcome(
+                        &activity_identity,
+                        &tool_call_id,
+                        permission_outcome,
+                    )?
+                {
                     return Err(RuntimeError::Internal(format!(
                         "permission request {server_request_id} has no linked tool {tool_call_id}"
                     )));
@@ -222,6 +315,14 @@ impl TaskEventSink {
         );
         Ok(())
     }
+}
+
+fn allow_once_option_id(request: &AgentPermissionRequest) -> Option<&str> {
+    request
+        .options
+        .iter()
+        .find(|option| matches!(option.kind, AgentPermissionOptionKind::AllowOnce))
+        .map(|option| option.option_id.as_str())
 }
 
 fn agent_permission_outcome_name(outcome: &AgentPermissionOutcome) -> &'static str {

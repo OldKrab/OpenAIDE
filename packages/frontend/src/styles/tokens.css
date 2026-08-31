@@ -27,7 +27,8 @@
   font-size: 14px;
 }
 
-body[data-shell="web"],
+body[data-shell="web"][data-theme="light"],
+body[data-shell="desktop"][data-theme="light"],
 body.vscode-light,
 body.vscode-high-contrast-light {
   --oa-reference-command: oklch(52% 0.15 275);

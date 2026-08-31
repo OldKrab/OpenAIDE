@@ -43,6 +43,40 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(tree.root.findAllByType("strong").some((item) => item.children.includes("New line shortcut"))).toBe(false);
   });
 
+  it("lets a shell expose and update its app theme", () => {
+    const setTheme = vi.fn();
+    const tree = render(
+      <GeneralSettingsTab
+        appearance={{ theme: () => "system", setTheme }}
+        onSetAcpTrace={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        preferences={{ composer_submit_shortcut: "enter" }}
+      />,
+    );
+
+    const choices = tree.root.findAll((node) => node.props.role === "radio");
+    expect(choices).toHaveLength(3);
+    expect(choices.map((choice) => choice.props["aria-checked"])).toEqual([true, false, false]);
+
+    act(() => choices[2].props.onClick());
+
+    expect(setTheme).toHaveBeenCalledWith("dark");
+    expect(tree.root.findAll((node) => node.props.role === "radio").map((choice) => choice.props["aria-checked"]))
+      .toEqual([false, false, true]);
+  });
+
+  it("omits theme controls when the host owns appearance", () => {
+    const tree = render(
+      <GeneralSettingsTab
+        onSetAcpTrace={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        preferences={{ composer_submit_shortcut: "enter" }}
+      />,
+    );
+
+    expect(tree.root.findAll((node) => node.props.role === "radio")).toHaveLength(0);
+  });
+
   it("requires explicit confirmation before resetting Task history", async () => {
     const resetTaskHistory = vi.fn(async () => undefined);
     const tree = render(
@@ -183,10 +217,39 @@ describe("SettingsView custom Agent acknowledgements", () => {
       />,
     );
 
-    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Search settings")).toBe(true);
-    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Enter sends message")).toBe(true);
+    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Search settings")).toBe(false);
+    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Send with Enter")).toBe(true);
     expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "ACP logs")).toBe(false);
     expect(tree.root.findAllByType("code").some((code) => code.props.title === "/runtime/traces")).toBe(false);
+  });
+
+  it("restores the persisted developer unlock supplied by the App Shell", () => {
+    const tree = render(
+      <SettingsView
+        developerSettingsUnlocked
+        onAuthenticate={() => undefined}
+        onCreateCustomAgent={() => undefined}
+        onDeleteCustomAgent={() => undefined}
+        onRefresh={() => undefined}
+        onReplaceCustomAgent={() => undefined}
+        onSelectTab={() => undefined}
+        onSetAcpTrace={() => undefined}
+        onSetAgentEnabled={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onUpdateCustomAgentMetadata={() => undefined}
+        onUnlockDeveloperSettings={() => undefined}
+        preferences={{ composer_submit_shortcut: "mod_enter" }}
+        state={{
+          activeTab: "common",
+          loading: false,
+          runtimeSettings: {
+            developer: { acp_trace: { enabled: true, directory: "/runtime/traces" } },
+          },
+        }}
+      />,
+    );
+
+    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "ACP logs")).toBe(true);
   });
 
   it("renders browser-local desktop notification state and forwards opt-in", () => {
@@ -369,7 +432,7 @@ describe("SettingsView custom Agent acknowledgements", () => {
       />,
     );
 
-    act(() => tree.root.findAllByProps({ "aria-label": "Back to app" })[0]?.props.onClick());
+    act(() => tree.root.findAllByProps({ "aria-label": "Close settings" })[0]?.props.onClick());
 
     expect(onBackToApp).toHaveBeenCalledOnce();
   });

@@ -15,8 +15,8 @@ mod store;
 
 pub(crate) use model::TaskOperation;
 pub use model::{
-    CommittedArtifactChange, CommittedTaskBatch, TaskJournalQueueMetrics, TaskProjection,
-    TaskStorageFailure, TaskStorageFatalFailure, TaskWrite, TerminalOutputAppend,
+    CommittedArtifactChange, CommittedChatTextAppend, CommittedTaskBatch, TaskJournalQueueMetrics,
+    TaskProjection, TaskStorageFailure, TaskStorageFatalFailure, TaskWrite, TerminalOutputAppend,
     ToolArtifactProjection, ToolArtifactReplacement, ToolTerminalAppend,
 };
 pub(crate) use store::TrySubmit;

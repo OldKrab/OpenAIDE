@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use crate::tasks::product_api::ResolvedSentFile;
 use openaide_app_server_protocol::attachment::PreSendAttachment;
@@ -11,6 +14,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
+use crate::shell_file_handles::ShellFileRevealTarget;
 use crate::task_events::TaskUpdate;
 use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
@@ -24,6 +28,17 @@ pub struct SharedRpcGateway {
 }
 
 impl SharedRpcGateway {
+    pub(crate) fn consume_file_handle(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        file_handle_id: &str,
+    ) -> Option<ShellFileRevealTarget> {
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        gateway.client_hub.client_by_instance(client_instance_id)?;
+        gateway
+            .shell_file_reveals
+            .consume_for_client(client_instance_id, file_handle_id)
+    }
     pub fn new(gateway: RpcGateway) -> Self {
         Self {
             gateway: Arc::new(Mutex::new(gateway)),
@@ -75,10 +90,46 @@ impl SharedRpcGateway {
         message: InboundProtocolMessage,
         now: AppServerTime,
     ) -> GatewayOutcome {
-        self.gateway
-            .lock()
-            .expect("protocol gateway lock poisoned")
-            .handle_inbound(connection_id, message, now)
+        let started_at = Instant::now();
+        self.handle_inbound_with_completion_clock(connection_id, message, now, || {
+            let elapsed_ms = started_at
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX);
+            AppServerTime(now.0.saturating_add(elapsed_ms))
+        })
+    }
+
+    fn handle_inbound_with_completion_clock(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+        completion_clock: impl FnOnce() -> AppServerTime,
+    ) -> GatewayOutcome {
+        let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        let outcome = gateway.handle_inbound(connection_id.clone(), message, now);
+        // An authenticated request that completes after a long Agent operation is fresh
+        // client-liveness evidence. Renew before releasing the protocol lock so the expiry
+        // worker cannot invalidate the client between completion and the next heartbeat.
+        // Attachment leases deliberately remain tied to request-start transport activity;
+        // completion must not revive handles already abandoned during the long request.
+        gateway
+            .client_hub
+            .observe_connection_activity(&connection_id, completion_clock());
+        outcome
+    }
+
+    #[cfg(test)]
+    pub(crate) fn handle_inbound_completed_at(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+        completed_at: AppServerTime,
+    ) -> GatewayOutcome {
+        self.handle_inbound_with_completion_clock(connection_id, message, now, || completed_at)
     }
 
     pub fn probe_facts(&self) -> AppServerProbeFacts {
@@ -196,6 +247,13 @@ impl SharedRpcGateway {
             .lock()
             .expect("protocol gateway lock poisoned")
             .publish_background_worktree_repository_update(repository, now)
+    }
+
+    pub fn publish_agent_status_update(&self, now: AppServerTime) -> Vec<GatewayEventDelivery> {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .publish_background_agent_status_update(now)
     }
 
     pub fn publish_committed_task_update_for_connection(

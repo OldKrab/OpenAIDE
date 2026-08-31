@@ -28,6 +28,32 @@ describe("app reducer composer state", () => {
     expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
   });
 
+  it("retains a text signal carried by the terminal snapshot until a later settled snapshot", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [chatMessage("agent-live", "Complete")]),
+      liveText: {
+        messageId: "agent-live",
+        channel: "agent",
+        eventCursor: "cursor-terminal-text",
+      },
+    });
+
+    expect(state.taskLiveTextPresentation.task_1?.agent).toEqual({
+      messageId: "agent-live",
+      eventCursor: "cursor-terminal-text",
+    });
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: snapshot("task_1", [chatMessage("agent-live", "Complete")]),
+    });
+    expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
+  });
+
   it("applies a config result without replacing a pending permission request", () => {
     const initial = snapshot("task_1");
     initial.agent_config = configCatalog("off");
@@ -109,6 +135,23 @@ describe("app reducer composer state", () => {
     expect(state.settings.loading).toBe(false);
     expect(state.settings.error).toBeUndefined();
     expect(state.settings.agentDetails?.map((agent) => agent.id)).toEqual(["codex", "custom.agent"]);
+  });
+
+  it("updates loaded Agent Settings status from a live Agent collection", () => {
+    let state = createInitialState();
+    const agents = settingsAgents(["codex"]);
+
+    state = appReducer(state, {
+      type: "settings:agentDetailsResult",
+      generatedAt: "now",
+      agents,
+    });
+    state = appReducer(state, {
+      type: "settings:agentCollection",
+      agents: [{ agentId: "codex", status: "connected" }],
+    });
+
+    expect(state.settings.agentDetails?.[0]).toMatchObject({ id: "codex", status: "connected" });
   });
 
   it("reconciles Agent mutations into Backend Agent Settings details", () => {
@@ -1042,6 +1085,81 @@ describe("app reducer composer state", () => {
     expect(state.taskInputs.task_1.pending).toBeUndefined();
   });
 
+  it("applies a confirmed permission policy without rolling back newer Task state", () => {
+    const visibleMessage = userMessage("user_1", "Keep current Chat");
+    let state = appReducer(createInitialState(), {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [visibleMessage], 5),
+    });
+    const mutationResponse = snapshot("task_1", [], 4);
+    mutationResponse.permission_policy = "auto_approve";
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: mutationResponse,
+      confirmedPermissionPolicy: mutationResponse.permission_policy,
+    });
+
+    expect(state.snapshot?.permission_policy).toBe("auto_approve");
+    expect(state.snapshot?.revision).toBe(5);
+    expect(state.snapshot?.chat.items).toEqual([visibleMessage]);
+    expect(state.taskSnapshots.task_1.permission_policy).toBe("auto_approve");
+  });
+
+  it("preserves a resolved custom Agent label across a context-free Task response", () => {
+    const current = snapshot("task_1", [], 4);
+    current.task.agent_id = "custom.4fc93c5";
+    current.task.agent_name = "IM";
+    let state = appReducer(createInitialState(), {
+      type: "snapshot",
+      intent: "open",
+      snapshot: current,
+    });
+    const mutationResponse = snapshot("task_1", [], 5);
+    mutationResponse.task.agent_id = "custom.4fc93c5";
+    mutationResponse.task.agent_name = "custom.4fc93c5";
+    mutationResponse.permission_policy = "auto_approve";
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: mutationResponse,
+      confirmedPermissionPolicy: mutationResponse.permission_policy,
+    });
+
+    expect(state.snapshot?.permission_policy).toBe("auto_approve");
+    expect(state.snapshot?.task.agent_name).toBe("IM");
+    expect(state.taskSnapshots.task_1.task.agent_name).toBe("IM");
+  });
+
+  it("retains a confirmed permission policy when the user navigates away before its response", () => {
+    let state = appReducer(createInitialState(), {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [userMessage("user_1", "Current")], 5),
+    });
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_2", [], 1),
+    });
+    const mutationResponse = snapshot("task_1", [], 4);
+    mutationResponse.permission_policy = "auto_approve";
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: mutationResponse,
+      confirmedPermissionPolicy: mutationResponse.permission_policy,
+    });
+
+    expect(state.activeTaskId).toBe("task_2");
+    expect(state.taskSnapshots.task_1.permission_policy).toBe("auto_approve");
+    expect(state.taskSnapshots.task_1.revision).toBe(5);
+  });
+
   it("accepts a newer queue revision from a globally older mutation response", () => {
     let state = createInitialState();
     state = { ...state, activeTaskId: "task_1" };
@@ -1194,6 +1312,7 @@ describe("app reducer composer state", () => {
     expect(state.newTask.prompt).toBe("Build the thing");
     expect(state.newTask.pending).toBeUndefined();
     expect(state.newTask.error).toBe("Send failed");
+    expect(state.newTask.errorRetryable).toBe(true);
   });
 
   it("invalidates a submitted New Task attachment through the root reducer", () => {
@@ -2415,6 +2534,7 @@ function snapshot(taskId: string, items: ChatMessage[] = [], revision = 1): Task
   const task = taskSummary(taskId);
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: { ...task, task_version: revision, message_history_version: revision },
     chat: {
       task_id: taskId,

@@ -141,6 +141,10 @@ pub enum ActivityStep {
     },
     /// One delegated Agent thread. Correlation identity stays on the parent message.
     Subagent {
+        /// Product-owned identity for an inspectable native child. Legacy flattened
+        /// Tool rows omit it and remain non-navigable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
         /// New protocol-faithful fields are optional so tasks saved by the first
         /// Subagent renderer remain readable after upgrade.
         #[serde(default, skip_serializing_if = "Option::is_none")]

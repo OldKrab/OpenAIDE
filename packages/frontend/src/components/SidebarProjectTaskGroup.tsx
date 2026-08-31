@@ -1,5 +1,5 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
-import { Check, Folder, FolderOpen, GitBranch, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Folder, FolderOpen, GitBranch, Monitor, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
@@ -12,6 +12,7 @@ import {
 import { useSidebarTaskPreview } from "./SidebarTaskPreview";
 import { useRef } from "react";
 import { taskForkMutationKey } from "../state/store";
+import type { ArchiveOlderTasksAction } from "./SidebarArchiveOlderMenu";
 
 type SidebarProjectTaskGroupProps = {
   activeTaskId?: string;
@@ -28,8 +29,11 @@ type SidebarProjectTaskGroupProps = {
   loading: boolean;
   canManageWorktrees: boolean;
   forkableAgentIds?: ReadonlySet<string>;
+  environmentLabel?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
+  onArchiveOlderNativeSessions?: ArchiveOlderTasksAction;
   onArchiveTask: (taskId: string) => void;
+  onArchiveOlderTasks?: ArchiveOlderTasksAction;
   onForkNativeSession?: (session: AgentListedSession) => void;
   onForkTask?: (taskId: string) => void;
   onLoadMore: (visibleIncrement: number) => void;
@@ -40,6 +44,8 @@ type SidebarProjectTaskGroupProps = {
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreNativeSession: (session: AgentListedSession) => void;
+  onSetNativeSessionPinned?: (session: AgentListedSession, pinned: boolean) => Promise<void>;
+  onSetNativeSessionTitle?: (session: AgentListedSession, title: string) => Promise<void>;
   onRestoreTask: (taskId: string) => void;
   onSetTaskPinned?: (taskId: string, pinned: boolean) => Promise<void>;
   onSetTaskTitle?: (
@@ -65,8 +71,11 @@ export function SidebarProjectTaskGroup({
   loading,
   canManageWorktrees,
   forkableAgentIds = new Set(),
+  environmentLabel,
   onArchiveNativeSession,
+  onArchiveOlderNativeSessions,
   onArchiveTask,
+  onArchiveOlderTasks,
   onForkNativeSession,
   onForkTask,
   onLoadMore,
@@ -77,6 +86,8 @@ export function SidebarProjectTaskGroup({
   onOpenNativeSession,
   onOpenTask,
   onRestoreNativeSession,
+  onSetNativeSessionPinned,
+  onSetNativeSessionTitle,
   onRestoreTask,
   onSetTaskPinned,
   onSetTaskTitle,
@@ -159,6 +170,12 @@ export function SidebarProjectTaskGroup({
               </button>
             )}
           >
+            {environmentLabel ? (
+              <div className="project-task-group-environment" role="none">
+                <Monitor aria-hidden="true" size={13} />
+                <span><small>Environment</small><strong>{environmentLabel}</strong></span>
+              </div>
+            ) : null}
             <button onClick={() => { setMenuOpen(false); onNewTask(); }} role="menuitem" type="button"><Plus size={13} />New task</button>
             {canManageWorktrees && onManageWorktrees ? <button onClick={() => { setMenuOpen(false); onManageWorktrees(); }} role="menuitem" type="button"><GitBranch size={13} />Manage worktrees</button> : null}
             {onRenameProject ? <button onClick={() => { setMenuOpen(false); setRenameDraft(group.label); setRenameError(undefined); setRenaming(true); }} role="menuitem" type="button"><Pencil size={13} />Rename Project</button> : null}
@@ -181,6 +198,7 @@ export function SidebarProjectTaskGroup({
                 canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
                 forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
                 onArchiveTask={onArchiveTask}
+                onArchiveOlderTasks={onArchiveOlderTasks}
                 onForkTask={onForkTask}
                 onOpenTask={onOpenTask}
                 onRestoreTask={onRestoreTask}
@@ -201,16 +219,21 @@ export function SidebarProjectTaskGroup({
                 nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                 nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
                 onArchiveNativeSession={onArchiveNativeSession}
+                onArchiveOlderNativeSessions={onArchiveOlderNativeSessions}
                 onForkNativeSession={onForkNativeSession}
                 onOpenNativeSession={onOpenNativeSession}
                 onRestoreNativeSession={onRestoreNativeSession}
+                onSetNativeSessionPinned={onSetNativeSessionPinned}
+                onSetNativeSessionTitle={onSetNativeSessionTitle}
                 session={row.session}
               />
             ),
           )}
           {hiddenCount > 0 || nativeSessionsHaveMore ? (
             <button
+              aria-busy={loading || undefined}
               className="project-task-more"
+              disabled={loading}
               onClick={() => onLoadMore(hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize)}
               type="button"
             >

@@ -3,8 +3,10 @@ use std::sync::Arc;
 pub use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_runtime_kernel::AcpRuntimeKernel;
 use crate::agent::acp_trace::AcpTraceState;
+use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::registry_handle::AgentRegistryHandle;
+use crate::agent::status_cache::AgentStatusCache;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
     AgentLoadedSession, AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession,
@@ -42,6 +44,22 @@ impl AcpAgentRuntime {
         }
     }
 
+    pub(crate) fn new_with_managed_codex(
+        registry: AgentRegistryHandle,
+        host_bridge: HostBridge,
+        storage_root: std::path::PathBuf,
+        statuses: AgentStatusCache,
+    ) -> Self {
+        let mut runtime = Self::new_with_registry(registry, host_bridge);
+        runtime
+            .kernel
+            .with_codex_provisioner(CodexAcpProvisioner::new_with_statuses(
+                storage_root,
+                statuses,
+            ));
+        runtime
+    }
+
     pub fn with_trace_state(mut self, trace_state: AcpTraceState) -> Self {
         self.kernel.with_trace_state(trace_state);
         self
@@ -67,6 +85,12 @@ impl AcpAgentRuntime {
     #[cfg(test)]
     fn with_session_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.kernel.with_session_idle_timeout(timeout);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_list_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.kernel.with_list_timeout(timeout);
         self
     }
 }

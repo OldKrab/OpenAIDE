@@ -70,6 +70,17 @@ impl TaskProductApi {
                 now_millis,
                 cutoff_millis,
                 process_protected,
+                |expiring| {
+                    let Some(session_id) = expiring.agent_session_id.as_deref() else {
+                        return Ok(());
+                    };
+                    self.native_catalog.archive_task_identity(
+                        &crate::native_sessions::catalog::NativeSessionRef::new(
+                            &expiring.agent_id,
+                            session_id,
+                        ),
+                    )
+                },
             ) {
                 Ok(true) => {
                     report.purged_tasks += 1;

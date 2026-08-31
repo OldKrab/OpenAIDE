@@ -43,6 +43,7 @@ import {
 } from "./appController";
 
 const postHostMessage = vi.fn();
+const retainNewTaskProject = vi.fn();
 const replaceSettingsTabRoute = vi.fn();
 const listeners: Array<(message: HostToWebviewMessage) => void> = [];
 const webRouteListeners: Array<(nextBootstrap: TestBootstrap) => void> = [];
@@ -90,6 +91,7 @@ vi.mock("../services/hostBridge", () => ({
   openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
     ? { type: "surface.openNewTask", payload: { project_id: projectId } }
     : { type: "surface.openNewTask" }),
+  retainNewTaskProject: (projectId: string) => retainNewTaskProject(projectId),
   openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
   openTaskSurface: (taskId: string, title?: string) => postHostMessage({
     type: "surface.openTask",
@@ -137,6 +139,7 @@ describe("app controller mounted lifecycle", () => {
     });
     vi.stubGlobal("sessionStorage", memoryStorage());
     postHostMessage.mockClear();
+    retainNewTaskProject.mockClear();
     replaceSettingsTabRoute.mockClear();
     listeners.length = 0;
     webRouteListeners.length = 0;
@@ -344,6 +347,7 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.state.newTask.nativeSessions.adoptionError).toEqual({
       sessionId: "missing_session",
+      kind: "notFound",
       message: "This session no longer exists.",
     });
   });
@@ -757,7 +761,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.selection.projectId).toBe("project_2");
   });
 
-  it("keeps a user-selected VS Code New Task Project after applying the route hint", async () => {
+  it("keeps VS Code New Task Project changes client-local until Send", async () => {
     bootstrap = vscodeNewTaskBootstrap("project_1");
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
     initializedSnapshot.newTaskDefaults.projectId = "project_2" as never;
@@ -780,9 +784,6 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_1");
-    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
-      projectId: "project_1",
-    });
 
     await act(async () => {
       latestPublicController?.intents.newTask.selectProject({
@@ -795,9 +796,128 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_2");
-    expect(request).toHaveBeenCalledWith(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
-      projectId: "project_2",
+    expect(request.mock.calls.filter(([method]) => method === SETTINGS_UPDATE_NEW_TASK_DEFAULTS)).toEqual([]);
+  });
+
+  it("acquires only the App Server default when VS Code workspace roots arrive first", async () => {
+    const firstProjectId = projectIdForWorkspaceRoot("/workspace/first");
+    const defaultProjectId = projectIdForWorkspaceRoot("/workspace/default");
+    bootstrap = {
+      ...vscodeNewTaskBootstrap(),
+      projectIds: [firstProjectId, defaultProjectId],
+    };
+    const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
+    initializedSnapshot.newTaskDefaults.projectId = defaultProjectId as never;
+    initializedSnapshot.projects = {
+      projects: [
+        { projectId: firstProjectId as never, label: "First", workspaceRoot: "/workspace/first", available: true },
+        { projectId: defaultProjectId as never, label: "Default", workspaceRoot: "/workspace/default", available: true },
+      ],
+    };
+    const initialize = deferredInitialize();
+    const request = vi.fn(async (
+      method: string,
+      params?: { projectId?: string; scope?: { kind: string } },
+    ) => {
+      if (method === STATE_SUBSCRIBE) {
+        const baseline = nonTaskSubscriptionSnapshot(params?.scope);
+        if (params?.scope?.kind !== "projects") return baseline;
+        return {
+          ...baseline,
+          snapshot: { kind: "projects" as const, projects: initializedSnapshot.projects },
+        };
+      }
+      if (method === TASK_ACQUIRE) {
+        const task = protocolTaskSnapshot("task_new", "New task", { hasMessages: false });
+        task.task.projectId = params?.projectId as never;
+        return { task: { ...task, lifecycle: "prepared" as const } };
+      }
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      throw new Error(method);
     });
+    backendConnection = {
+      initialize: vi.fn(() => initialize.promise),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+    });
+    act(() => {
+      listeners.forEach((listener) => listener({
+        type: "workspace.roots.result",
+        payload: { roots: [{ path: "/workspace/first", label: "First" }] },
+      }));
+    });
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "webview.telemetry",
+      payload: expect.objectContaining({
+        event: "new_task_workspace_project_seeded",
+        project_id: firstProjectId,
+        selection_source: "workspace_roots",
+        workspace_roots_seeded: true,
+      }),
+    });
+    await act(async () => {
+      initialize.resolve({ snapshot: initializedSnapshot });
+      await initialize.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe(defaultProjectId);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toEqual([
+      [TASK_ACQUIRE, {
+        projectId: defaultProjectId,
+        agentId: "codex",
+        workspaceRoot: "/workspace/default",
+      }],
+    ]);
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "webview.telemetry",
+      payload: expect.objectContaining({
+        event: "new_task_initial_project_selected",
+        project_id: defaultProjectId,
+        selection_source: "app_server_default",
+        client_identity_source: "shell",
+        shell_project_present: false,
+        retained_project_present: false,
+        default_project_valid: true,
+      }),
+    });
+  });
+
+  it("keeps a user-selected New Task Agent client-local until Send", async () => {
+    bootstrap = vscodeNewTaskBootstrap("project_1");
+    const initializedSnapshot = clientSnapshot({
+      includeActiveTask: false,
+      agents: [
+        { agentId: "codex" as never, label: "Codex", status: "connected" },
+        { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+      ],
+    });
+    const request = vi.fn();
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
+      request,
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      latestPublicController?.intents.newTask.selectAgent("opencode", "OpenCode");
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === SETTINGS_UPDATE_NEW_TASK_DEFAULTS)).toEqual([]);
   });
 
   it("loads only the initial visible rows after adding a Project", async () => {
@@ -849,7 +969,7 @@ describe("app controller mounted lifecycle", () => {
     expect(request).toHaveBeenCalledWith(PROJECT_ADD, { workspaceRoot: "/workspace/added" });
     expect(request).toHaveBeenCalledWith(TASK_NAVIGATION_LOAD_MORE, {
       projectId: "project_2",
-      targetRowCount: 10,
+      targetRowCount: 7,
     });
     discovery.resolve({ accepted: true });
   });
@@ -1404,6 +1524,7 @@ describe("app controller mounted lifecycle", () => {
       }),
     });
     expect(latestController?.backendReady).toBe(false);
+    expect(latestController?.taskMutationReady).toBe(false);
 
     act(() => {
       latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "Keep this draft" });
@@ -1417,6 +1538,7 @@ describe("app controller mounted lifecycle", () => {
     expect(taskSubscriptionAttempts).toBe(2);
     expect(latestController?.backendConnectionState).toEqual({ status: "ready" });
     expect(latestController?.backendReady).toBe(true);
+    expect(latestController?.taskMutationReady).toBe(true);
     expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "webview.telemetry",
@@ -1426,6 +1548,80 @@ describe("app controller mounted lifecycle", () => {
       }),
     });
     expect(JSON.stringify(postHostMessage.mock.calls)).not.toContain("NetworkError when attempting to fetch resource.");
+  });
+
+  it("keeps active Task mutations available while an unrelated Projects baseline recovers", async () => {
+    const eventListeners: Array<(event: AppServerEvent) => void> = [];
+    const replacementProjects = deferredValue<ReturnType<typeof nonTaskSubscriptionSnapshot>>();
+    let projectSubscriptionAttempts = 0;
+    const request = vi.fn((
+      method: string,
+      params?: { scope?: { kind: string; taskId?: string } },
+    ) => {
+      if (method === TASK_OPEN) {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Task") });
+      }
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (method !== STATE_SUBSCRIBE) throw new Error(method);
+      if (params?.scope?.kind === "task") {
+        return Promise.resolve(taskSubscriptionSnapshot("cursor_task"));
+      }
+      if (params?.scope?.kind === "projects") {
+        projectSubscriptionAttempts += 1;
+        if (projectSubscriptionAttempts === 2) return replacementProjects.promise;
+        return Promise.resolve(nonTaskSubscriptionSnapshot(params.scope, "cursor_projects"));
+      }
+      return Promise.resolve(nonTaskSubscriptionSnapshot(params?.scope));
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: (_method, listener) => {
+        eventListeners.push(listener);
+        return () => undefined;
+      },
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.backendReady).toBe(true);
+    expect(latestController?.taskMutationReady).toBe(true);
+
+    await act(async () => {
+      const event: AppServerEvent = {
+        subscription: { kind: "projects" },
+        previousCursor: "cursor_missing" as never,
+        cursor: "cursor_projects_gap" as never,
+        scope: { kind: "stateRoot", stateRootId: "state_root_1" as never },
+        payload: {
+          kind: "projectCollectionUpdated",
+          projects: { projects: [] },
+        },
+      };
+      for (const listener of eventListeners) listener(event);
+      await Promise.resolve();
+    });
+
+    expect(projectSubscriptionAttempts).toBe(2);
+    expect(latestController?.backendReady).toBe(false);
+    expect(latestController?.taskMutationReady).toBe(true);
+
+    await act(async () => {
+      replacementProjects.resolve(nonTaskSubscriptionSnapshot(
+        { kind: "projects" },
+        "cursor_projects_recovered",
+      ));
+      await replacementProjects.promise;
+      await Promise.resolve();
+    });
+    expect(latestController?.backendReady).toBe(true);
+    expect(latestController?.taskMutationReady).toBe(true);
   });
 
   it("opens a task once when navigation changes to its route", async () => {
@@ -1541,6 +1737,47 @@ describe("app controller mounted lifecycle", () => {
       .filter((method) => method === TASK_ACQUIRE || method === AGENT_LIST_SESSIONS);
     expect(startupRequests).toEqual([TASK_ACQUIRE]);
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new");
+  });
+
+  it("reports options loading while Prepared Task acquisition is pending", async () => {
+    const acquired = deferredValue<{ task: ProtocolTaskSnapshot }>();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_ACQUIRE) return acquired.promise;
+      return Promise.reject(new Error(method));
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request).toHaveBeenCalledWith(TASK_ACQUIRE, {
+      projectId: "project_1",
+      agentId: "codex",
+    });
+    expect(latestPublicController?.view.primaryTask.newTask.newTask.configOptionsLoading).toBe(true);
+
+    await act(async () => {
+      acquired.resolve({
+        task: {
+          ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
+          lifecycle: "prepared",
+        },
+      });
+      await acquired.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestPublicController?.view.primaryTask.newTask.newTask.configOptionsLoading).toBe(false);
   });
 
   it("keeps the hidden New Task subscription current while an existing Task is visible", async () => {
@@ -2300,6 +2537,92 @@ describe("app controller mounted lifecycle", () => {
       task_id: "task_project_2",
       project_id: "project_2",
     });
+    expect(retainNewTaskProject).toHaveBeenLastCalledWith("project_2");
+    expect(latestController?.state.newTask.error).toBeUndefined();
+  });
+
+  it("releases a superseded in-flight Prepared Task before acquiring another context", async () => {
+    const firstAcquire = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    let leasedTaskId: string | undefined;
+    let acquireCount = 0;
+    const request = vi.fn(async (
+      method: string,
+      params?: { projectId?: string; taskId?: string },
+    ) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "Project", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_RELEASE) {
+        if (params?.taskId === leasedTaskId) leasedTaskId = undefined;
+        return { discardedTaskId: params?.taskId };
+      }
+      if (method === TASK_ACQUIRE) {
+        if (leasedTaskId) {
+          throw new Error("Release the current Prepared Task before acquiring another context");
+        }
+        const projectId = params?.projectId ?? "project_1";
+        const taskId = projectId === "project_1" ? "task_project_1" : "task_project_2";
+        const task = protocolTaskSnapshot(taskId, "New task", { hasMessages: false });
+        task.task.projectId = projectId as never;
+        acquireCount += 1;
+        if (acquireCount === 1) {
+          return firstAcquire.promise.then((result) => {
+            leasedTaskId = result.task.task.taskId;
+            return result;
+          });
+        }
+        leasedTaskId = taskId;
+        return { task };
+      }
+      throw new Error(method);
+    });
+    const snapshot = clientSnapshot({ includeActiveTask: false });
+    const projects = [
+      { projectId: "project_1", label: "One", workspaceRoot: "/workspace/project_1", available: true },
+      { projectId: "project_2", label: "Two", workspaceRoot: "/workspace/project_2", available: true },
+    ];
+    snapshot.projects = { projects: projects.map((project) => ({ ...project, projectId: project.projectId as never })) };
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
+
+    await act(async () => {
+      latestController?.dispatch({ type: "newTask:project", project: projects[1] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const firstTask = protocolTaskSnapshot("task_project_1", "New task", { hasMessages: false });
+    firstTask.task.projectId = "project_1" as never;
+    await act(async () => {
+      firstAcquire.resolve({ task: firstTask });
+      await firstAcquire.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toContainEqual([
+      TASK_RELEASE,
+      { taskId: "task_project_1" },
+    ]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toEqual([
+      [TASK_ACQUIRE, { projectId: "project_1", agentId: "codex" }],
+      [TASK_ACQUIRE, { projectId: "project_2", agentId: "codex" }],
+    ]);
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_project_2");
     expect(latestController?.state.newTask.error).toBeUndefined();
   });
 
@@ -3214,6 +3537,65 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.title).toBe("Second task");
   });
 
+  it("does not replace the routed task with a recovery baseline for another task", async () => {
+    let publishInvalidation: ((event: { reason: "httpSessionExpired" }) => void) | undefined;
+    let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
+    const request = vi.fn((method: string, params: { taskId?: string }) => {
+      if (method === TASK_OPEN && params.taskId === "task_1") {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "First task") });
+      }
+      if (method === TASK_OPEN && params.taskId === "task_2") {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_2", "Second task") });
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleGenerationInvalidated(handler) {
+        publishInvalidation = handler;
+        return () => {
+          publishInvalidation = undefined;
+        };
+      },
+      handleRecoveryBaseline(handler) {
+        publishRecoveryBaseline = handler;
+        return () => {
+          publishRecoveryBaseline = undefined;
+        };
+      },
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_1");
+
+    await act(async () => {
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap("task_2")));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_2");
+
+    await act(async () => {
+      publishInvalidation?.({ reason: "httpSessionExpired" });
+      publishRecoveryBaseline?.({
+        reason: "httpSessionExpired",
+        result: { snapshot: clientSnapshot({ activeTaskTitle: "Stale first task" }) },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_2");
+    expect(latestController?.state.snapshot?.task.title).toBe("Second task");
+  });
+
   it("shows a cached task snapshot immediately when switching back while refreshing it", async () => {
     const task2 = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn((method: string, params: { taskId?: string }) => {
@@ -3541,6 +3923,7 @@ function vscodeNewTaskBootstrap(projectId?: string) {
     surface: "task" as const,
     shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
     projectId,
+    clientInstanceId: "vscode-new-task-client" as never,
     projectIds: ["project_1", "project_2"],
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },
@@ -3589,6 +3972,7 @@ function webSettingsBootstrap(settingsTab?: "agents" | "mcp" | "skills" | "commo
 function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title = "Task"): TaskSnapshot {
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: taskId,
       title,
@@ -3714,6 +4098,7 @@ function protocolTaskSnapshot(
   return {
     task: protocolTaskSummary(taskId, title, status, hasMessages),
     lifecycle: hasMessages ? "open" : "prepared",
+    permissionPolicy: "askEveryTime",
     revision: 1,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },
@@ -3728,6 +4113,7 @@ function protocolTaskSnapshot(
         : { state: "loading" as const },
     messageQueue: { revision: 0, items: [] },
     historySync: { state: "idle", generation: 0 },
+    subagents: { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
     chat: {
       items: userText
         ? [{

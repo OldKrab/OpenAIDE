@@ -12,8 +12,9 @@ use openaide_app_server_protocol::snapshot::AgentCollectionSnapshot;
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionForkParams,
     NativeSessionForkResult, NativeSessionRestoreParams, NativeSessionRestoreResult,
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult,
+    NativeSessionSetPinnedParams, NativeSessionSetPinnedResult, NativeSessionSetTitleParams,
+    NativeSessionSetTitleResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
+    TaskNavigationRefreshParams, TaskNavigationRefreshResult,
 };
 use serde_json::Value;
 use std::time::Instant;
@@ -23,6 +24,66 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
+    pub(super) fn handle_native_session_set_title(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<NativeSessionSetTitleParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let mutation = match self.task_archive.set_native_session_title(params) {
+            Ok(mutation) => mutation,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
+        self.result_with_events::<NativeSessionSetTitleResult>(
+            connection_id,
+            id,
+            meta,
+            NativeSessionSetTitleResult {
+                session: mutation.session,
+            },
+            events,
+        )
+    }
+
+    pub(super) fn handle_native_session_set_pinned(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<NativeSessionSetPinnedParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let mutation = match self.task_archive.set_native_session_pinned(params) {
+            Ok(mutation) => mutation,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
+        self.result_with_events::<NativeSessionSetPinnedResult>(
+            connection_id,
+            id,
+            meta,
+            NativeSessionSetPinnedResult {
+                session: mutation.session,
+            },
+            events,
+        )
+    }
+
     pub(super) fn handle_native_session_archive(
         &mut self,
         connection_id: ConnectionId,
@@ -406,6 +467,45 @@ impl RpcGateway {
             now,
         ));
         events.extend(self.publish_navigation_replacement(now));
+        events
+    }
+
+    pub(crate) fn publish_background_agent_status_update(
+        &mut self,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        // Provisioning activity is an Agent Status transition. Reuse the
+        // coalesced discovery owner so session history appears without a
+        // frontend-authored retry or a prompt replay.
+        self.agent_list_sessions
+            .request_native_session_catalog_refresh();
+        let events = match self.snapshots.agent_collection_snapshot() {
+            Ok(agents) => {
+                let installing_agent_count = agents
+                    .agents
+                    .iter()
+                    .filter(|agent| {
+                        agent.status
+                            == openaide_app_server_protocol::snapshot::AgentStatus::Installing
+                    })
+                    .count();
+                let events = self.publish_agent_collection_update(agents, now);
+                if installing_agent_count > 0 {
+                    crate::logging::info(
+                        "agent_installation_status_published",
+                        serde_json::json!({
+                            "installing_agent_count": installing_agent_count,
+                            "event_count": events.len(),
+                        }),
+                    );
+                }
+                events
+            }
+            Err(_) => Vec::new(),
+        };
+        // Local HTTP clients drain background publications on their next poll;
+        // stdio callers also receive this returned copy for immediate delivery.
+        self.pending_event_deliveries.extend(events.clone());
         events
     }
 

@@ -13,6 +13,7 @@ import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
 import { useLiveMessagePresentation } from "./useLiveMessagePresentation";
 import { currentFrontendShell } from "../services/frontendShell";
+import { useAgentFileOpen } from "./agentFileOpen";
 import { ClosedPlanView, CompletedPlanView } from "./AgentPlan";
 import { presentThoughtMarkdown } from "./thoughtPresentation";
 
@@ -21,6 +22,7 @@ export { firstToolPath } from "../state/toolDetailsViewModel";
 export const ChatRow = memo(function ChatRow({
   message,
   onLoadToolImagePreview,
+  onOpenSubagent,
   onSubscribeToolDetail,
   onPermissionRespond,
   onQuestionRespond,
@@ -38,6 +40,7 @@ export const ChatRow = memo(function ChatRow({
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  onOpenSubagent?: (subagentId: string) => void;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   onPermissionRespond: (
     requestId: string,
@@ -56,6 +59,7 @@ export const ChatRow = memo(function ChatRow({
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
   const referenceRootRef = useRef<HTMLDivElement | null>(null);
+  useAgentFileOpen();
   const body = message.message;
   if (body.kind === "user") {
     const hasText = body.text.trim().length > 0;
@@ -94,6 +98,7 @@ export const ChatRow = memo(function ChatRow({
       <ChatActivityView
         activity={body}
         onLoadToolImagePreview={onLoadToolImagePreview}
+        onOpenSubagent={onOpenSubagent}
         onSubscribeToolDetail={onSubscribeToolDetail}
         taskId={taskId}
         toolDetails={toolDetails}

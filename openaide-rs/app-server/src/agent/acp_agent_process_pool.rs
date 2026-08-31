@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -11,6 +12,7 @@ use crate::agent::acp_agent_process::{
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwner};
 use crate::agent::acp_runtime_threading::block_on_new_runtime;
 use crate::agent::attached_native_session::record_terminal_error;
+use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSessionFork,
@@ -19,11 +21,16 @@ use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
 
+const DEFAULT_LIST_TIMEOUT: Duration = Duration::from_secs(30);
+const LIST_REPLY_TIMEOUT_GRACE: Duration = Duration::from_secs(1);
+
 pub(super) struct AcpAgentProcessPool {
     registry: AgentRegistryHandle,
     host_bridge: HostBridge,
     processes: Mutex<HashMap<String, AcpAgentProcessClient>>,
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
+    list_timeout: Duration,
+    codex_provisioner: Option<CodexAcpProvisioner>,
 }
 
 #[derive(Clone)]
@@ -41,9 +48,11 @@ struct AcpAgentProcessClient {
     terminal_error: Arc<Mutex<Option<String>>>,
     terminal_registry: AcpHostTerminalRegistry,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
+    _runtime_lease: Option<Arc<std::fs::File>>,
 }
 
 pub(super) struct AcpAgentProcessSession {
+    process: AcpAgentProcessClient,
     pub(super) terminal_error: Arc<Mutex<Option<String>>>,
     pub(super) terminal_owner: AcpTerminalOwner,
 }
@@ -55,7 +64,26 @@ impl AcpAgentProcessPool {
             host_bridge,
             processes: Mutex::new(HashMap::new()),
             auth_environments: Mutex::new(HashMap::new()),
+            list_timeout: DEFAULT_LIST_TIMEOUT,
+            codex_provisioner: None,
         }
+    }
+
+    pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
+        self.codex_provisioner = Some(provisioner);
+    }
+
+    pub(super) fn allows_passive_session_discovery(&self, agent_id: &str) -> bool {
+        agent_id != "codex"
+            || self
+                .codex_provisioner
+                .as_ref()
+                .is_none_or(CodexAcpProvisioner::is_provisioned)
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_list_timeout(&mut self, timeout: Duration) {
+        self.list_timeout = timeout;
     }
 
     pub(super) fn open_session(
@@ -68,6 +96,7 @@ impl AcpAgentProcessPool {
             match process.open_tx.send(open) {
                 Ok(()) => {
                     return Ok(AcpAgentProcessSession {
+                        process: process.clone(),
                         terminal_error: process.terminal_error.clone(),
                         terminal_owner: process.terminal_registry.owner(owner_id),
                     });
@@ -82,9 +111,14 @@ impl AcpAgentProcessPool {
         let owner_id = open.terminal_owner_id;
         let process = self.launch_process(agent_id, Some(open))?;
         Ok(AcpAgentProcessSession {
+            process: process.clone(),
             terminal_error: process.terminal_error.clone(),
             terminal_owner: process.terminal_registry.owner(owner_id),
         })
+    }
+
+    pub(super) fn stop_session_process(&self, agent_id: &str, session: &AcpAgentProcessSession) {
+        self.stop_process(agent_id, &session.process);
     }
 
     pub(super) fn list_sessions(
@@ -92,24 +126,65 @@ impl AcpAgentProcessPool {
         request: AgentListSessionsRequest,
         preferred_auth_method_id: Option<String>,
     ) -> Result<crate::protocol::model::AgentListSessionsResult, RuntimeError> {
-        let process = self.get_or_launch_process(&request.agent_id)?;
-        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        if process
-            .list_tx
-            .send(AcpAgentProcessList {
-                request,
-                preferred_auth_method_id,
+        let agent_id = request.agent_id.clone();
+        for attempt in 1..=2 {
+            let process = self.get_or_launch_process(&agent_id)?;
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            let sent = process.list_tx.send(AcpAgentProcessList {
+                request: request.clone(),
+                preferred_auth_method_id: preferred_auth_method_id.clone(),
+                timeout: self.list_timeout,
                 reply_tx,
-            })
-            .is_err()
-        {
-            return Err(RuntimeError::NotReady(
-                "ACP agent process ended before session listing".to_string(),
-            ));
+            });
+            if sent.is_err() {
+                self.remove_process_if_current(&agent_id, &process);
+                if attempt == 1 {
+                    logging::info(
+                        "acp_session_list_retry",
+                        serde_json::json!({
+                            "operation": "agent/list_sessions",
+                            "agent_id": agent_id,
+                            "attempt": 2,
+                            "reason": "process_ended",
+                        }),
+                    );
+                    continue;
+                }
+                return Err(RuntimeError::NotReady(
+                    "ACP agent process ended before session listing".to_string(),
+                ));
+            }
+            match reply_rx.recv_timeout(self.list_timeout.saturating_add(LIST_REPLY_TIMEOUT_GRACE))
+            {
+                Ok(result) => return result,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    self.remove_process_if_current(&agent_id, &process);
+                    if attempt == 1 {
+                        logging::info(
+                            "acp_session_list_retry",
+                            serde_json::json!({
+                                "operation": "agent/list_sessions",
+                                "agent_id": agent_id,
+                                "attempt": 2,
+                                "reason": "process_ended",
+                            }),
+                        );
+                        continue;
+                    }
+                    return Err(RuntimeError::NotReady(
+                        "ACP agent process ended during session listing".to_string(),
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // The async ACP request owns the listing deadline. This receiver is only a
+                    // worker watchdog and must never terminate a process with live attachments.
+                    return Err(RuntimeError::NotReady(
+                        "ACP session listing timed out".to_string(),
+                    ));
+                }
+            }
         }
-        reply_rx
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .map_err(|_| RuntimeError::NotReady("ACP session listing timed out".to_string()))?
+        unreachable!("ACP session listing attempts are bounded")
     }
 
     pub(super) fn fork_session(
@@ -242,9 +317,25 @@ impl AcpAgentProcessPool {
             .remove(agent_id);
     }
 
+    /// A failed client must not evict a replacement installed by another caller.
+    fn remove_process_if_current(&self, agent_id: &str, process: &AcpAgentProcessClient) -> bool {
+        let mut processes = self
+            .processes
+            .lock()
+            .expect("ACP process registry poisoned");
+        let is_current = processes
+            .get(agent_id)
+            .is_some_and(|current| current.list_tx.same_channel(&process.list_tx));
+        if is_current {
+            processes.remove(agent_id);
+        }
+        is_current
+    }
+
     fn stop_process(&self, agent_id: &str, process: &AcpAgentProcessClient) {
-        self.remove_process(agent_id);
-        let _ = process.shutdown_tx.send(true);
+        if self.remove_process_if_current(agent_id, process) {
+            let _ = process.shutdown_tx.send(true);
+        }
     }
 
     fn get_or_launch_process(&self, agent_id: &str) -> Result<AcpAgentProcessClient, RuntimeError> {
@@ -273,6 +364,14 @@ impl AcpAgentProcessPool {
             // launch identity remains the process-pool key, not this lookup key.
             config.agent_id = auth.secret_storage_agent_id;
         }
+        let prepared = match &self.codex_provisioner {
+            Some(provisioner) => provisioner.prepare(config)?,
+            None => crate::agent::codex_acp_provisioner::PreparedCodexAcpLaunch {
+                config,
+                lease: None,
+            },
+        };
+        let config = prepared.config;
         config.ensure_command_available()?;
         let host_bridge = self.host_bridge.clone();
         let terminal_registry = AcpHostTerminalRegistry::new(host_bridge.clone());
@@ -288,6 +387,7 @@ impl AcpAgentProcessPool {
             terminal_error: terminal_error.clone(),
             terminal_registry: terminal_registry.clone(),
             shutdown_tx,
+            _runtime_lease: prepared.lease.clone(),
         };
         self.processes
             .lock()
@@ -296,7 +396,9 @@ impl AcpAgentProcessPool {
 
         let worker_agent_id = agent_id.to_string();
         let worker_terminal_error = terminal_error.clone();
+        let worker_runtime_lease = prepared.lease;
         thread::spawn(move || {
+            let _runtime_lease = worker_runtime_lease;
             let result = block_on_new_runtime(run_acp_agent_process(AcpAgentProcessInput {
                 config,
                 first_open,
@@ -317,7 +419,6 @@ impl AcpAgentProcessPool {
                         "error": error.to_string(),
                     }),
                 );
-                eprintln!("OpenAIDE ACP agent process ended: {error}");
             }
         });
         drop(open_tx);

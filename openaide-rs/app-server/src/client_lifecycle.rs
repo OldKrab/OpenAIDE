@@ -343,6 +343,14 @@ impl ClientHub {
         !self.clients.is_empty()
     }
 
+    /// Reconnecting clients still count: their grace period preserves ownership and must
+    /// not be bypassed by an update preparing to terminate the shared App Server.
+    pub fn has_other_initialized_client(&self, client_instance_id: &ClientInstanceId) -> bool {
+        self.clients
+            .keys()
+            .any(|candidate| candidate != client_instance_id)
+    }
+
     pub fn has_ever_initialized_clients(&self) -> bool {
         self.has_ever_initialized
     }

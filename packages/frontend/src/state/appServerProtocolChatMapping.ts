@@ -322,6 +322,7 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
   if (step.kind === "subagent") {
     return {
       kind: "subagent",
+      subagent_id: step.subagentId ?? undefined,
       name: step.name,
       path: step.path,
       status: activityStatusFromProtocol(step.status),
@@ -401,7 +402,7 @@ function activityStatusFromProtocol(status: ProtocolActivityStatus): ActivitySta
 }
 
 function activityStepLevel(level: string | null | undefined): Extract<ActivityStep, { kind: "text" }>["level"] {
-  if (level === "info" || level === "warning" || level === "error") return level;
+  if (level === "info" || level === "warning" || level === "error" || level === "agent_boundary") return level;
   return undefined;
 }
 

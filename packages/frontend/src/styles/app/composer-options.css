@@ -22,7 +22,7 @@
   min-height: 28px;
 }
 
-.composer-options-unavailable {
+.composer-options-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -34,8 +34,24 @@
   white-space: nowrap;
 }
 
-.composer-options-unavailable svg {
+.composer-options-status svg {
   animation: composer-options-status-spin 1.15s linear infinite;
+}
+
+.composer-options-status.error,
+.composer-options-status.error svg {
+  color: var(--oa-danger);
+}
+
+.composer-options-status button {
+  min-height: 24px;
+  border: 1px solid color-mix(in oklch, var(--oa-border-strong) 70%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--oa-text);
+  padding: 3px 8px;
+  font: inherit;
+  cursor: pointer;
 }
 
 @keyframes composer-options-status-spin {
@@ -43,11 +59,46 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-options-unavailable svg { animation: none; }
+  .composer-options-status svg { animation: none; }
 }
 
 .composer-config-control-anchor {
   margin-inline: 1px;
+}
+
+.composer-option-change-status {
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
+  min-height: 14px;
+  position: absolute;
+  z-index: 13;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  color: var(--oa-muted);
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  white-space: normal;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* New Task has room to keep slow feedback beside the changed control without
+   mixing it into the draft. Chat keeps the same feedback above its bottom edge. */
+.new-task-surface .composer-option-change-status {
+  top: calc(100% + 18px);
+  bottom: auto;
+}
+
+@media (max-width: 600px) {
+  /* A narrow row can put the changed pill too close to an edge for centered
+     copy. Use the Composer as the positioning box: New Task places the caption
+     below it, while bottom-anchored Chat places the caption above it. */
+  .composer-config-control-anchor.is-mutation-target {
+    position: static;
+  }
 }
 
 .composer-option-info {
@@ -196,6 +247,12 @@
   opacity: 1;
 }
 
+.composer-adaptive-options.mutation-pending .composer-config-control-anchor.is-mutation-locked > .composer-pill,
+.composer-adaptive-options.mutation-pending .composer-config-control-anchor.is-mutation-locked > .composer-boolean-control {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
 .composer-pill.pending,
 .composer-boolean-control.pending,
 .composer-overflow-boolean-control.pending {
@@ -204,6 +261,8 @@
   background: color-mix(in oklch, var(--oa-focus) 10%, transparent);
   color: var(--oa-text);
   opacity: 1;
+  box-shadow: none;
+  cursor: wait;
 }
 
 .composer-pill.pending::after,

@@ -141,6 +141,55 @@
   min-width: 132px;
 }
 
+.task-row-menu:has(.archive-older-confirmation) {
+  width: min(260px, calc(100vw - 16px));
+}
+
+.archive-older-confirmation {
+  display: grid;
+  gap: 4px;
+  padding: 8px 8px 7px;
+}
+
+.archive-older-confirmation strong {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.archive-older-confirmation p,
+.archive-older-confirmation small {
+  margin: 0;
+  color: var(--oa-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.archive-older-confirmation .archive-older-error {
+  color: var(--oa-danger);
+}
+
+.oa-popup-menu button.archive-older-confirm {
+  justify-content: center;
+  margin-top: 2px;
+  background: var(--oa-focus);
+  color: oklch(0.985 0.004 255);
+  font-weight: 650;
+}
+
+.oa-popup-menu button.archive-older-confirm > svg {
+  color: currentColor;
+}
+
+.oa-popup-menu button.archive-older-confirm:hover:not(:disabled),
+.oa-popup-menu button.archive-older-confirm:focus-visible {
+  background: color-mix(in oklch, var(--oa-focus) 88%, var(--oa-text));
+}
+
+.oa-popup-menu button.archive-older-confirm:disabled {
+  opacity: 0.68;
+}
+
 .session-more:hover:not(:disabled) {
   background: var(--oa-raised);
 }
@@ -336,4 +385,10 @@
 .composer-popover .agent-brand-icon {
   width: 13px;
   height: 13px;
+}
+.task-row-menu-separator {
+  display: block;
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--oa-border-subtle);
 }

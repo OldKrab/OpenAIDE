@@ -12,9 +12,11 @@ use openaide_app_server_protocol::task::{
 
 use crate::agent::acp::{AcpAgentConfig, AcpAgentRuntime};
 use crate::agent::registry::AgentRegistry;
+use crate::attachment_runtime::AttachmentOwner;
+use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery, RequestCapability};
 use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots, StorageProjectResolver};
 use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage, TaskStatus};
-use crate::server_requests::ServerRequestRuntime;
+use crate::server_requests::{ResponderScope, ServerRequestAnswer, ServerRequestRuntime};
 use crate::storage::records::TaskPreparationRecord;
 use crate::storage::{Store, StoreOpenError};
 use crate::task_events::TaskUpdateNotifier;
@@ -70,6 +72,166 @@ fn live_acp_message_ids_create_separate_chat_messages() {
                 "Final message".to_string(),
                 ChatItemStatus::Complete,
             ),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn user_message_splits_anonymous_agent_text() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) =
+        task_chat_fixture(&temp, "anonymous_across_user_boundary")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    for prompt in ["first prompt", "second prompt"] {
+        api.send(send_params(&task_id, prompt))
+            .expect("send prompt");
+        wait_until(|| {
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.status == TaskStatus::Inactive)
+                .unwrap_or(false)
+        });
+    }
+
+    assert_eq!(
+        logical_text_messages(&store, &task_id),
+        [
+            ("user", "first prompt".to_string()),
+            ("agent", "Answer 1".to_string()),
+            ("user", "second prompt".to_string()),
+            ("agent", "Answer 2".to_string()),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn steering_message_splits_anonymous_agent_text() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) =
+        task_chat_fixture(&temp, "anonymous_steering_boundary")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "start primary work"))
+        .expect("send primary prompt");
+    wait_until(|| {
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Answer 1")
+    });
+    api.send(send_params(&task_id, "redirect the work"))
+        .expect("send steering prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+
+    assert_eq!(
+        logical_text_messages(&store, &task_id),
+        [
+            ("user", "start primary work".to_string()),
+            ("agent", "Answer 1".to_string()),
+            ("user", "redirect the work".to_string()),
+            ("agent", "Answer 2".to_string()),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn permission_does_not_split_already_received_anonymous_agent_text() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let server_requests = ServerRequestRuntime::new();
+    let Some((api, store, workspace_root)) = task_chat_fixture_with_requests(
+        &temp,
+        "anonymous_permission_burst",
+        server_requests.clone(),
+    ) else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    register_permission_responder(&server_requests, task_id.as_str());
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    let answerer = std::thread::spawn({
+        let server_requests = server_requests.clone();
+        let task_id = task_id.clone();
+        move || auto_allow_permission(&server_requests, task_id.as_str())
+    });
+    api.send(send_params(&task_id, "edit the config"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+    answerer.join().expect("permission answerer joins");
+
+    assert_eq!(
+        visible_chat_rows(&store, &task_id),
+        [
+            ("user", "edit the config".to_string()),
+            (
+                "agent",
+                "Setting `approvalMode` to `unrestricted`.".to_string()
+            ),
+            ("activity", "Edit File".to_string()),
+            ("agent", "After the edit.".to_string()),
         ]
     );
     api.shutdown().expect("shutdown task runtime");
@@ -442,6 +604,39 @@ fn replayed_acp_chunks_use_live_logical_message_grouping() {
 }
 
 #[test]
+fn adopting_a_native_session_open_elsewhere_returns_a_recoverable_conflict() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, _store, workspace_root)) = task_chat_fixture(&temp, "active_writer") else {
+        return;
+    };
+
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace(&workspace_root),
+        cursor: None,
+    })
+    .expect("list externally owned ACP session");
+
+    let error = api
+        .adopt_native_session(TaskAdoptNativeSessionParams {
+            agent_id: AgentId::from("codex"),
+            native_session_id: "task-chat-session".to_string(),
+        })
+        .expect_err("an active writer cannot be adopted into this App Server");
+
+    assert_eq!(
+        error.code,
+        openaide_app_server_protocol::errors::ProtocolErrorCode::Conflict
+    );
+    assert!(error.recoverable);
+    assert_eq!(
+        error.message,
+        "Native Session is currently in use elsewhere"
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn non_text_acp_output_is_visible_as_typed_chat_parts() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "content_blocks") else {
@@ -589,9 +784,75 @@ fn steering_end_turn_makes_the_task_idle_when_primary_never_returns() {
     api.shutdown().expect("shutdown task runtime");
 }
 
+#[test]
+fn steering_keeps_task_active_when_primary_is_cancelled() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "steering_primary_cancelled")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "start primary work"))
+        .expect("send primary prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Active && task.active_turn_id.is_some())
+            .unwrap_or(false)
+    });
+    api.send(send_params(&task_id, "redirect the work"))
+        .expect("send steering prompt");
+
+    wait_until(|| {
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Primary prompt superseded")
+    });
+    assert_eq!(
+        store
+            .read_task(task_id.as_str())
+            .expect("read active task")
+            .status,
+        TaskStatus::Active,
+        "primary cancellation must not settle an accepted steering turn"
+    );
+
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    api.shutdown().expect("shutdown task runtime");
+}
+
 fn task_chat_fixture(
     temp: &tempfile::TempDir,
     mode: &str,
+) -> Option<(TaskProductApi, Store, String)> {
+    task_chat_fixture_with_requests(temp, mode, ServerRequestRuntime::new())
+}
+
+fn task_chat_fixture_with_requests(
+    temp: &tempfile::TempDir,
+    mode: &str,
+    server_requests: ServerRequestRuntime,
 ) -> Option<(TaskProductApi, Store, String)> {
     if Command::new("python3").arg("--version").output().is_err() {
         return None;
@@ -619,7 +880,7 @@ fn task_chat_fixture(
         AgentRegistry::codex(config.clone()),
         Arc::new(AcpAgentRuntime::new(config)),
         TaskUpdateNotifier::disabled(),
-        ServerRequestRuntime::new(),
+        server_requests,
     )
     .expect("task product api");
     Some((api, store, workspace_root))
@@ -676,6 +937,71 @@ fn logical_text_messages(store: &Store, task_id: &TaskId) -> Vec<(&'static str, 
         .collect()
 }
 
+fn visible_chat_rows(store: &Store, task_id: &TaskId) -> Vec<(&'static str, String)> {
+    store
+        .read_messages(task_id.as_str())
+        .expect("read task messages")
+        .into_iter()
+        .filter_map(|stored| match stored.chat.message {
+            NormalizedMessage::User { text, .. } => Some(("user", text)),
+            NormalizedMessage::AgentMessage { role, parts, .. } => {
+                parts.into_iter().find_map(|part| match part {
+                    AgentMessagePart::Text { text } => Some((
+                        match role {
+                            AgentMessageRole::Agent => "agent",
+                            AgentMessageRole::Thought => "thought",
+                        },
+                        text,
+                    )),
+                    _ => None,
+                })
+            }
+            NormalizedMessage::Activity { title, .. } if title != "Working" => {
+                Some(("activity", title))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id: &str) {
+    server_requests.observe_subscription_added(
+        Delivery::new(
+            AttachmentOwner::test_client_instance_id(),
+            ConnectionId::new("conn-1"),
+        )
+        .with_request_capabilities(vec![RequestCapability::Permission]),
+        TaskId::from(task_id),
+        AppServerTime(0),
+    );
+}
+
+fn auto_allow_permission(server_requests: &ServerRequestRuntime, task_id: &str) {
+    let task_id = TaskId::from(task_id);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let pending = server_requests.pending_for_task(&task_id);
+        if let Some(request) = pending.first() {
+            assert!(matches!(
+                server_requests.handle_response_from_scopes(
+                    AttachmentOwner::test_client_instance_id(),
+                    request.request_id.clone(),
+                    ServerRequestAnswer::Result(serde_json::json!({ "optionId": "allow-once" })),
+                    &[ResponderScope::Task(task_id.clone())],
+                    AppServerTime(1),
+                ),
+                crate::server_requests::ResponseOutcome::Accepted { .. }
+            ));
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for permission request"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn wait_until(mut predicate: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !predicate() {
@@ -702,11 +1028,14 @@ fn task_chat_agent_script() -> &'static str {
     r#"import json
 import os
 import sys
+import time
 
 mode = os.environ.get("OPENAIDE_TASK_CHAT_MODE", "message_ids")
 session_id = "task-chat-session"
 prompt_count = 0
 pending_primary_id = None
+pending_prompt_id = None
+permission_rpc_id = "permission-1"
 
 def write(message):
     sys.stdout.write(json.dumps(message) + "\n")
@@ -716,16 +1045,18 @@ def respond(message, result):
     write({"jsonrpc": "2.0", "id": message.get("id"), "result": result})
 
 def update_chunk(kind, text, message_id):
+    payload = {
+        "sessionUpdate": kind,
+        "content": {"type": "text", "text": text},
+    }
+    if message_id is not None:
+        payload["messageId"] = message_id
     write({
         "jsonrpc": "2.0",
         "method": "session/update",
         "params": {
             "sessionId": session_id,
-            "update": {
-                "sessionUpdate": kind,
-                "messageId": message_id,
-                "content": {"type": "text", "text": text},
-            },
+            "update": payload,
         },
     })
 
@@ -773,6 +1104,12 @@ def update_plan(entries):
 
 for line in sys.stdin:
     message = json.loads(line)
+    if message.get("id") == permission_rpc_id:
+        if pending_prompt_id is not None:
+            update_chunk("agent_message_chunk", "After the edit.", None)
+            respond({"id": pending_prompt_id}, {"stopReason": "end_turn"})
+            pending_prompt_id = None
+        continue
     method = message.get("method")
     if method == "initialize":
         respond(message, {
@@ -789,6 +1126,16 @@ for line in sys.stdin:
         cwd = message.get("params", {}).get("cwd") or os.getcwd()
         respond(message, {"sessions": [{"sessionId": session_id, "cwd": cwd, "title": "Task chat session"}]})
     elif method == "session/load":
+        if mode == "active_writer":
+            write({
+                "jsonrpc": "2.0",
+                "id": message.get("id"),
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error: {\"details\":\"thread active-writer-fixture already has an active writer\"}",
+                },
+            })
+            continue
         if mode == "replay":
             update_chunk("user_message_chunk", "Prior ", "33333333-3333-4333-8333-333333333333")
             update_chunk("user_message_chunk", "question", "33333333-3333-4333-8333-333333333333")
@@ -802,8 +1149,26 @@ for line in sys.stdin:
         respond(message, {"configOptions": []})
     elif method == "session/prompt":
         prompt_count += 1
+        if mode == "anonymous_steering_boundary":
+            update_chunk("agent_message_chunk", f"Answer {prompt_count}", None)
+            if prompt_count == 1:
+                pending_primary_id = message.get("id")
+                continue
+            respond(message, {"stopReason": "end_turn"})
+            continue
         if mode == "steering_end_turn" and prompt_count == 1:
             pending_primary_id = message.get("id")
+            continue
+        if mode == "steering_primary_cancelled" and prompt_count == 1:
+            pending_primary_id = message.get("id")
+            continue
+        if mode == "steering_primary_cancelled" and prompt_count == 2:
+            respond({"id": pending_primary_id}, {"stopReason": "cancelled"})
+            pending_primary_id = None
+            time.sleep(0.2)
+            update_chunk("agent_message_chunk", "Primary prompt superseded", "superseded")
+            time.sleep(0.5)
+            respond(message, {"stopReason": "end_turn"})
             continue
         if mode == "content_blocks":
             update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U=", "uri": "memory://diagram.png"}, "content-image")
@@ -845,6 +1210,35 @@ for line in sys.stdin:
             update_chunk("agent_message_chunk", "Visible before thought", message_id)
             update_chunk("agent_thought_chunk", "Private thought", message_id)
             update_chunk("agent_message_chunk", "Visible after thought", message_id)
+        elif mode == "anonymous_across_user_boundary":
+            update_chunk("agent_message_chunk", f"Answer {prompt_count}", None)
+        elif mode == "anonymous_permission_burst":
+            for token in [
+                "Setting", " `", "approval", "Mode", "`",
+                " to ", "`", "unrestricted", "`.",
+            ]:
+                update_chunk("agent_message_chunk", token, None)
+            write({
+                "jsonrpc": "2.0",
+                "id": permission_rpc_id,
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": session_id,
+                    "toolCall": {
+                        "toolCallId": "edit-1",
+                        "title": "Edit File",
+                        "kind": "edit",
+                        "status": "pending",
+                    },
+                    "options": [{
+                        "optionId": "allow-once",
+                        "name": "Allow once",
+                        "kind": "allow_once",
+                    }],
+                },
+            })
+            pending_prompt_id = message.get("id")
+            continue
         else:
             update_chunk("agent_message_chunk", "Commentary ", "11111111-1111-4111-8111-111111111111")
             update_chunk("agent_message_chunk", "message", "11111111-1111-4111-8111-111111111111")

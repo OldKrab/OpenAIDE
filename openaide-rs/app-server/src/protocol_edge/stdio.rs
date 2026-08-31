@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::agent::acp::AcpAgentRuntime;
 use crate::agent::catalog_store::AgentCatalogStore;
+use crate::agent::status_cache::AgentStatusUpdateReceiver;
 use crate::agent::{registry_handle::AgentRegistryHandle, AgentRuntime};
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::projects::ConfiguredProjectRoots;
@@ -16,7 +17,11 @@ use crate::storage_runtime::StateRoot;
 use crate::task_events::{TaskUpdate, TaskUpdateReceiver};
 use crate::worktree_events::WorktreeUpdateReceiver;
 
+#[cfg(test)]
+mod agent_settings_status_tests;
 mod factory;
+#[cfg(test)]
+mod file_viewer_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod wire;
@@ -41,6 +46,7 @@ pub struct ProtocolEdgeStdioDispatcher {
     next_tick: u64,
     task_updates: Option<TaskUpdateReceiver>,
     worktree_updates: Option<WorktreeUpdateReceiver>,
+    agent_status_updates: Option<AgentStatusUpdateReceiver>,
     host_bridge: HostBridge,
     host_requests: Option<mpsc::Receiver<HostRequest>>,
     storage_fatal_events:
@@ -70,12 +76,22 @@ impl ProtocolEdgeStdioDispatcher {
             }
             AcpHostRequestTransport::Unavailable => (HostBridge::disabled(), None),
         };
-        let acp_trace_state = crate::agent::acp_trace::AcpTraceState::from_env(state_root.path());
-        let agent_runtime = Arc::new(
-            AcpAgentRuntime::new_with_registry(agent_registry.clone(), host_bridge.clone())
-                .with_trace_state(acp_trace_state.clone()),
+        let acp_trace_state = crate::agent::acp_trace::AcpTraceState::from_env_with_persisted(
+            state_root.path(),
+            store.read_acp_trace_enabled()?,
         );
-        Self::try_new_with_agent(
+        let (agent_statuses, agent_status_updates) =
+            crate::agent::status_cache::AgentStatusCache::channel();
+        let agent_runtime = Arc::new(
+            AcpAgentRuntime::new_with_managed_codex(
+                agent_registry.clone(),
+                host_bridge.clone(),
+                state_root.path().to_path_buf(),
+                agent_statuses.clone(),
+            )
+            .with_trace_state(acp_trace_state.clone()),
+        );
+        Self::try_new_with_agent_and_statuses(
             state_root,
             store,
             agent_registry,
@@ -83,6 +99,8 @@ impl ProtocolEdgeStdioDispatcher {
             acp_trace_state,
             configured_project_roots_from_env(),
             (host_bridge, host_requests),
+            agent_statuses,
+            agent_status_updates,
         )
     }
 
@@ -110,6 +128,7 @@ impl ProtocolEdgeStdioDispatcher {
         .expect("protocol edge test dispatcher storage must open")
     }
 
+    #[cfg(test)]
     fn try_new_with_agent(
         state_root: StateRoot,
         store: Store,
@@ -119,6 +138,33 @@ impl ProtocolEdgeStdioDispatcher {
         configured_projects: ConfiguredProjectRoots,
         host_transport: (HostBridge, Option<mpsc::Receiver<HostRequest>>),
     ) -> Result<Self, ProtocolEdgeStdioStartError> {
+        let (agent_statuses, agent_status_updates) =
+            crate::agent::status_cache::AgentStatusCache::channel();
+        Self::try_new_with_agent_and_statuses(
+            state_root,
+            store,
+            agent_registry,
+            agent_runtime,
+            acp_trace_state,
+            configured_projects,
+            host_transport,
+            agent_statuses,
+            agent_status_updates,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_new_with_agent_and_statuses(
+        state_root: StateRoot,
+        store: Store,
+        agent_registry: AgentRegistryHandle,
+        agent_runtime: Arc<dyn AgentRuntime>,
+        acp_trace_state: crate::agent::acp_trace::AcpTraceState,
+        configured_projects: ConfiguredProjectRoots,
+        host_transport: (HostBridge, Option<mpsc::Receiver<HostRequest>>),
+        agent_statuses: crate::agent::status_cache::AgentStatusCache,
+        agent_status_updates: crate::agent::status_cache::AgentStatusUpdateReceiver,
+    ) -> Result<Self, ProtocolEdgeStdioStartError> {
         let (host_bridge, host_requests) = host_transport;
         let output = factory::gateway(
             state_root,
@@ -127,6 +173,8 @@ impl ProtocolEdgeStdioDispatcher {
             agent_runtime,
             acp_trace_state,
             configured_projects,
+            agent_statuses,
+            agent_status_updates,
         )?;
         Ok(Self {
             gateway: SharedRpcGateway::new(output.gateway),
@@ -136,6 +184,7 @@ impl ProtocolEdgeStdioDispatcher {
             next_tick: 1,
             task_updates: Some(output.task_updates),
             worktree_updates: Some(output.worktree_updates),
+            agent_status_updates: Some(output.agent_status_updates),
             host_bridge,
             host_requests,
             storage_fatal_events: Some(output.storage_fatal_events),
@@ -150,6 +199,10 @@ impl ProtocolEdgeStdioDispatcher {
         self.worktree_updates.take()
     }
 
+    pub fn take_agent_status_updates(&mut self) -> Option<AgentStatusUpdateReceiver> {
+        self.agent_status_updates.take()
+    }
+
     pub fn handle_worktree_update(
         &mut self,
         repository: openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot,
@@ -158,6 +211,15 @@ impl ProtocolEdgeStdioDispatcher {
         let events = self
             .gateway
             .publish_worktree_repository_update(repository, now);
+        event_wire_messages(self.connection_id.clone(), events)
+            .into_iter()
+            .map(serialize_message)
+            .collect()
+    }
+
+    pub fn handle_agent_status_update(&mut self) -> Vec<String> {
+        let now = self.next_time();
+        let events = self.gateway.publish_agent_status_update(now);
         event_wire_messages(self.connection_id.clone(), events)
             .into_iter()
             .map(serialize_message)

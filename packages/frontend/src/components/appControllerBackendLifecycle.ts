@@ -27,7 +27,7 @@ import { agentOptionsFromProtocol } from "../state/appServerAgents";
 import { actionsFromInitialSnapshot } from "../state/appServerInitialSnapshot";
 import {
   retainedNewTaskContextForInitialization,
-  type NewTaskContextIds,
+  type LiveNewTaskContext,
 } from "../state/newTaskSelectionDefaults";
 import {
   bindAppServerReplicaEpoch,
@@ -79,7 +79,7 @@ type BackendLifecycleOptions = {
   asyncOperations: AsyncOperationOwner;
   backendConnection?: AppControllerBackendConnection;
   currentAgentId: RefObject<string>;
-  currentNewTaskContext: RefObject<NewTaskContextIds>;
+  currentNewTaskContext: RefObject<LiveNewTaskContext>;
   dispatch: Dispatch<AppAction>;
   initialBootstrap: WebviewBootstrap;
   newTaskController: NewTaskController;
@@ -121,6 +121,7 @@ export function useAppControllerBackendLifecycle({
     dispatch,
   );
   const [backendReady, setBackendReady] = useState(false);
+  const [backendSessionReady, setBackendSessionReady] = useState(false);
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>({
     status: "connecting",
   });
@@ -223,8 +224,9 @@ export function useAppControllerBackendLifecycle({
         }
       }
 
+      const currentBootstrap = bootstrapRef.current;
       const ingestion = actionsFromInitialSnapshot(recoveredSnapshot, {
-        includeActiveTask: initialBootstrap.surface === "task" && Boolean(initialBootstrap.taskId),
+        includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
         retainedNewTaskContext: retainedNewTaskContextForInitialization(
           recoveredSnapshot,
           currentNewTaskContext.current,
@@ -232,7 +234,7 @@ export function useAppControllerBackendLifecycle({
       });
       for (const action of ingestion.actions) {
         if (action.type === "settings:preferences") setPreferences(action.preferences);
-        recoveredDispatch(action);
+        recoveredDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
       }
       if (recoveredSnapshot.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.agents));
       setBackendStateGeneration((current) => current + 1);
@@ -251,31 +253,35 @@ export function useAppControllerBackendLifecycle({
         ...(next.status === "unavailable" ? { error_name: errorName(next.error) } : {}),
       });
       if (next.status === "recovering") {
+        setBackendSessionReady(false);
         setBackendReady(false);
         setBackendConnectionState({
           status: "reconnecting",
           message: "Connection interrupted. Reconnecting automatically.",
         });
       } else if (next.status === "unavailable") {
+        setBackendSessionReady(false);
         setBackendReady(false);
         setBackendConnectionState({
           status: "unavailable",
           message: next.error instanceof Error ? next.error.message : "Unable to restore App Server session.",
         });
-      } else if (
-        next.status === "ready"
-        && backendInitialized.current
-        && pendingGlobalSubscriptionBaselines.current.size === 0
-        && failedSubscriptionBaselines.current.size === 0
-      ) {
-        setBackendReady(true);
-        setBackendConnectionState({ status: "ready" });
+      } else if (next.status === "ready" && backendInitialized.current) {
+        setBackendSessionReady(true);
+        if (
+          pendingGlobalSubscriptionBaselines.current.size === 0
+          && failedSubscriptionBaselines.current.size === 0
+        ) {
+          setBackendReady(true);
+          setBackendConnectionState({ status: "ready" });
+        }
       }
     });
     const stopSubscriptions: Array<() => void> = [];
     setBackendStateGeneration((generation) => generation + 1);
     backendInitialized.current = false;
     setBackendInitializationReady(false);
+    setBackendSessionReady(false);
     failedSubscriptionBaselines.current.clear();
     pendingGlobalSubscriptionBaselines.current.clear();
     setBackendReady(false);
@@ -312,8 +318,9 @@ export function useAppControllerBackendLifecycle({
             const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
             const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
             initializedDispatch({ type: "appServer:ready" });
+            const currentBootstrap = bootstrapRef.current;
             const ingestion = actionsFromInitialSnapshot(result.snapshot, {
-              includeActiveTask: initialBootstrap.surface === "task",
+              includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
               retainedNewTaskContext: retainedNewTaskContextForInitialization(
                 result.snapshot,
                 currentNewTaskContext.current,
@@ -327,7 +334,7 @@ export function useAppControllerBackendLifecycle({
                 newTaskController.updateSnapshot(action.snapshot);
                 continue;
               }
-              initializedDispatch(action);
+              initializedDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
             }
             if (result.snapshot.agents) {
               setAgents(agentOptionsFromProtocol(result.snapshot.agents));
@@ -391,10 +398,24 @@ export function useAppControllerBackendLifecycle({
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;
             setBackendInitializationReady(true);
+            setBackendSessionReady(true);
             sendWebviewTelemetry(postHostMessage, "app_server_initialize_completed", {
               surface: initialBootstrap.surface,
               task_id: initialBootstrap.taskId,
               duration_ms: Date.now() - initializeStartedAt,
+            });
+            const projectSelection = ingestion.newTaskProjectSelection;
+            sendWebviewTelemetry(postHostMessage, "new_task_initial_project_selected", {
+              surface: initialBootstrap.surface,
+              project_id: projectSelection.projectId,
+              selection_source: projectSelection.source,
+              client_identity_source: initialBootstrap.clientInstanceId ? "shell" : "web_storage",
+              shell_project_present: projectSelection.shellProjectPresent,
+              shell_project_valid: projectSelection.shellProjectValid,
+              retained_project_present: projectSelection.retainedProjectPresent,
+              retained_project_valid: projectSelection.retainedProjectValid,
+              default_project_present: projectSelection.defaultProjectPresent,
+              default_project_valid: projectSelection.defaultProjectValid,
             });
             const globalBaselinesReady = pendingGlobalSubscriptionBaselines.current.size === 0;
             setBackendReady(globalBaselinesReady);
@@ -412,6 +433,7 @@ export function useAppControllerBackendLifecycle({
             });
             backendInitialized.current = false;
             setBackendInitializationReady(false);
+            setBackendSessionReady(false);
             setBackendReady(false);
             const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
             setBackendConnectionState({ status: "unavailable", message });
@@ -450,6 +472,7 @@ export function useAppControllerBackendLifecycle({
       active = false;
       backendInitialized.current = false;
       setBackendInitializationReady(false);
+      setBackendSessionReady(false);
       failedSubscriptionBaselines.current.clear();
       pendingGlobalSubscriptionBaselines.current.clear();
       setBackendReady(false);
@@ -521,7 +544,6 @@ export function useAppControllerBackendLifecycle({
     operationOwner,
     replicaEpochRef,
     setBackendConnectionState,
-    snapshot: state.snapshot,
     stateSubscriptionContext,
   });
 
@@ -531,6 +553,7 @@ export function useAppControllerBackendLifecycle({
     backendInitializationReady,
     backendConnectionState,
     backendReady: backendReady && taskRouteLifecycle.ready,
+    taskMutationReady: backendSessionReady && taskRouteLifecycle.ready,
     bootstrap,
     createSnapshotRequestId,
     operationOwner,
@@ -541,4 +564,12 @@ export function useAppControllerBackendLifecycle({
 
 function errorName(error: unknown) {
   return error instanceof Error && error.name ? error.name : typeof error;
+}
+
+/** Recovery and initialize snapshots may describe a Task that is no longer routed. */
+function routeOwnedSnapshotAction(action: AppAction, bootstrap: WebviewBootstrap): AppAction {
+  if (action.type !== "snapshot") return action;
+  const routedTaskId = bootstrap.surface === "task" ? bootstrap.taskId : undefined;
+  if (!routedTaskId || action.snapshot.task.task_id === routedTaskId) return action;
+  return { ...action, intent: "refresh" };
 }

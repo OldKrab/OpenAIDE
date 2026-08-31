@@ -9,21 +9,37 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const agentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-agent.mjs");
 
 /** Starts an isolated real Web, App Server, and deterministic ACP Agent stack. */
-export async function startFullStackHarness() {
+export async function startFullStackHarness({ agentArgs = [], frontend = "web" } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-smoke-"));
   const staticRoot = path.join(root, "static");
   try {
     await run("npm", ["run", "build:typescript-deps"]);
-    await run("npm", [
-      "run",
-      "build",
-      "--workspace",
-      "openaide-frontend",
-      "--",
-      "--outDir",
-      staticRoot,
-      "--emptyOutDir",
-    ]);
+    if (frontend === "desktop") {
+      await run("npm", [
+        "exec",
+        "--workspace",
+        "openaide-frontend",
+        "vite",
+        "--",
+        "build",
+        "--config",
+        path.join(repoRoot, "tests/smoke/desktop-shell/vite.config.mjs"),
+        "--outDir",
+        staticRoot,
+        "--emptyOutDir",
+      ]);
+    } else {
+      await run("npm", [
+        "run",
+        "build",
+        "--workspace",
+        "openaide-frontend",
+        "--",
+        "--outDir",
+        staticRoot,
+        "--emptyOutDir",
+      ]);
+    }
     await run("cargo", ["build", "-p", "openaide-app-server"]);
   } catch (error) {
     await rm(root, { recursive: true, force: true });
@@ -64,15 +80,24 @@ export async function startFullStackHarness() {
       agentId: "custom.openaide-smoke-agent",
       label: "OpenAIDE Test Agent",
       icon: "terminal",
-      commandLine: `${process.execPath} ${agentFixture}`,
+      commandLine: [process.execPath, agentFixture, ...agentArgs].join(" "),
       command: process.execPath,
-      args: [agentFixture],
+      args: [agentFixture, ...agentArgs],
       env: {},
       secretEnv: [],
       enabled: true,
     });
     for (const agent of initialized.snapshot?.agents?.agents ?? []) {
       await setup.request("agent/setEnabled", { agentId: agent.agentId, enabled: false });
+    }
+    if (agentArgs.includes("--active-writer")) {
+      const projectId = initialized.snapshot?.projects?.projects?.[0]?.projectId;
+      if (!projectId) throw new Error("Desktop Native Session smoke scenario requires a Project");
+      await setup.request("agent/listSessions", {
+        agentId: "custom.openaide-smoke-agent",
+        projectId,
+        cursor: null,
+      });
     }
   } catch (error) {
     await stopProcess(server);

@@ -42,6 +42,16 @@ describe("App Server initial snapshot ingestion", () => {
       actions: [{ type: "newTask:agent", agentId: "codex", agentLabel: "Codex" }],
       warnings: [],
       requiresNativeSurface: false,
+      newTaskProjectSelection: {
+        projectId: undefined,
+        source: "none",
+        shellProjectPresent: false,
+        shellProjectValid: false,
+        retainedProjectPresent: false,
+        retainedProjectValid: false,
+        defaultProjectPresent: false,
+        defaultProjectValid: false,
+      },
     });
   });
 
@@ -149,6 +159,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
             projectId: "project-1" as ProjectId,
             workspaceRoot: "/workspace/Project",
             title: "Cached Native Session",
+            pinned: false,
           },
         },
         ],
@@ -157,6 +168,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     activeTask: {
       task: taskSummary(),
       lifecycle: "open",
+      permissionPolicy: "askEveryTime",
       revision: 2,
       preparation: { kind: "ready" },
       agentConfig: { state: "ready", options: [] },
@@ -164,6 +176,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
       sendCapability: { state: "ready" },
       messageQueue: { revision: 0, items: [] },
       historySync: { state: "idle", generation: 0 },
+      subagents: { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
       chat: { items: [], hasMoreBefore: false, hasMessages: true },
     },
     ...overrides,

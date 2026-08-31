@@ -1,4 +1,5 @@
 import * as nodePath from "node:path";
+import { homedir } from "node:os";
 import * as vscode from "vscode";
 import {
   SECRET_READ,
@@ -24,6 +25,10 @@ import { isObject } from "./messagingFields";
 import { handleAgentSecretTransaction } from "./messagingSecrets";
 
 export async function routeSurfaceCommand(message: WebviewToHostMessage, context: MessageContext) {
+  if (message.type === "surface.retainNewTaskProject") {
+    context.surfaces?.retainNewTaskProject(message.payload.project_id, context.surface);
+    return true;
+  }
   if (message.type === "surface.openNewTask") {
     context.surfaces?.openNewTask(message.payload?.project_id);
     return true;
@@ -75,6 +80,28 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
       await context.post({
         type: "shell.clipboard.writeText.result",
         payload: { requestId: message.payload.requestId, ok: false, error: "Unable to copy text." },
+      });
+    }
+    return true;
+  }
+  if (message.type === "supportExport.save") {
+    const { requestId, fileHandleId, label } = message.payload;
+    try {
+      const target = await context.runtime.resolveOwnAppServerFileReveal(fileHandleId);
+      if (!nodePath.isAbsolute(target.path)) throw new Error("Support export path is invalid.");
+      const destination = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(nodePath.join(homedir(), label)),
+        filters: { "ZIP archive": ["zip"] },
+        saveLabel: "Save Support Bundle",
+        title: "Export OpenAIDE Support Diagnostics",
+      });
+      if (!destination) throw new Error("Save canceled.");
+      await vscode.workspace.fs.copy(vscode.Uri.file(target.path), destination, { overwrite: true });
+      await context.post({ type: "supportExport.save.result", payload: { requestId, ok: true } });
+    } catch (error) {
+      await context.post({
+        type: "supportExport.save.result",
+        payload: { requestId, ok: false, error: error instanceof Error ? error.message : "Unable to save support export." },
       });
     }
     return true;

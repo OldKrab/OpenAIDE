@@ -83,6 +83,10 @@ id_type!(
     "string & { readonly __openaideBrand: \"FileBrowserRootId\" }"
 );
 id_type!(
+    FileViewerHandleId,
+    "string & { readonly __openaideBrand: \"FileViewerHandleId\" }"
+);
+id_type!(
     MessageId,
     "string & { readonly __openaideBrand: \"MessageId\" }"
 );
@@ -103,6 +107,10 @@ id_type!(
     "string & { readonly __openaideBrand: \"StateRootId\" }"
 );
 id_type!(TaskId, "string & { readonly __openaideBrand: \"TaskId\" }");
+id_type!(
+    SubagentId,
+    "string & { readonly __openaideBrand: \"SubagentId\" }"
+);
 id_type!(
     QueuedMessageId,
     "string & { readonly __openaideBrand: \"QueuedMessageId\" }"

@@ -15,6 +15,9 @@ use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 use crate::tasks::query_store::TaskReadStore;
 
+mod support_export;
+pub(crate) use support_export::CreatedSupportExport;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticNotice {
     pub component: &'static str,
@@ -96,6 +99,30 @@ fn active_task_diagnostics(task: &TaskRecord) -> ActiveTaskDiagnostics {
 
 pub(crate) trait RuntimeDiagnosticsWorkflow: Send + Sync {
     fn runtime_diagnostics(&self) -> Result<RuntimeDiagnosticsResult, ProtocolError>;
+    fn list_support_export(
+        &self,
+        params: openaide_app_server_protocol::diagnostics::SupportExportListParams,
+    ) -> Result<openaide_app_server_protocol::diagnostics::SupportExportListResult, ProtocolError>
+    {
+        let _ = params;
+        Err(export_unavailable())
+    }
+    fn create_support_export(
+        &self,
+        params: &openaide_app_server_protocol::diagnostics::SupportExportCreateParams,
+    ) -> Result<CreatedSupportExport, ProtocolError> {
+        let _ = params;
+        Err(export_unavailable())
+    }
+}
+
+fn export_unavailable() -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::CapabilityUnavailable,
+        message: "Support export is unavailable".to_string(),
+        recoverable: true,
+        target: None,
+    }
 }
 
 #[derive(Clone)]
@@ -122,6 +149,21 @@ impl RuntimeDiagnosticsWorkflow for RuntimeDiagnosticsService {
             tasks: protocol_task_diagnostics(diagnostics),
             redaction: DiagnosticsRedaction::PromptTextFileContentsTerminalOutputAndSecretsRemoved,
         })
+    }
+
+    fn list_support_export(
+        &self,
+        params: openaide_app_server_protocol::diagnostics::SupportExportListParams,
+    ) -> Result<openaide_app_server_protocol::diagnostics::SupportExportListResult, ProtocolError>
+    {
+        support_export::list(&self.store, params).map_err(protocol_error)
+    }
+
+    fn create_support_export(
+        &self,
+        params: &openaide_app_server_protocol::diagnostics::SupportExportCreateParams,
+    ) -> Result<CreatedSupportExport, ProtocolError> {
+        support_export::create(&self.store, params).map_err(protocol_error)
     }
 }
 

@@ -1,6 +1,7 @@
 import type {
   AgentCollectionSnapshot,
   AgentSettingsDetail,
+  AgentStatus,
 } from "@openaide/app-server-client";
 import {
   agentCatalogEntry,
@@ -124,7 +125,9 @@ export function settingsRecordWithEnabled(
   };
 }
 
-function agentSettingsStatusFromProtocol(status: AgentSettingsDetail["status"]): AgentSettingsRecord["status"] {
+export function agentSettingsStatusFromProtocol(
+  status: AgentSettingsDetail["status"] | AgentStatus,
+): AgentSettingsRecord["status"] {
   switch (status) {
     case "setupRequired":
       return "setup_required";

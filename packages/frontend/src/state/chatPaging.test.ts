@@ -243,6 +243,7 @@ describe("chatPaging", () => {
 function snapshot(items: ChatMessage[]): TaskSnapshot {
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: "task_1",
       title: "Task",

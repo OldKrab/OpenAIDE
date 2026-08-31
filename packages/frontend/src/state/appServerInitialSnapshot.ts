@@ -9,6 +9,8 @@ import { mapProtocolRuntimeSettings } from "./runtimeSettingsMapping";
 import { mapSettingsSections } from "./settingsProjectionMapping";
 import {
   selectInitialNewTaskContext,
+  selectInitialNewTaskProject,
+  type InitialNewTaskProjectSelection,
   type NewTaskContextIds,
 } from "./newTaskSelectionDefaults";
 
@@ -16,6 +18,7 @@ export type InitialSnapshotIngestion = {
   actions: AppAction[];
   warnings: ProtocolMappingWarning[];
   requiresNativeSurface: boolean;
+  newTaskProjectSelection: InitialNewTaskProjectSelection;
 };
 
 export type InitialSnapshotIngestionOptions = {
@@ -53,6 +56,12 @@ export function actionsFromInitialSnapshot(
     defaults: snapshot.newTaskDefaults,
     projects,
     agents: snapshot.agents?.agents ?? [],
+  });
+  const newTaskProjectSelection = selectInitialNewTaskProject({
+    retained: options.retainedNewTaskContext,
+    shellProjectId,
+    defaults: snapshot.newTaskDefaults,
+    projects,
   });
 
   if (snapshot.projects) {
@@ -100,5 +109,5 @@ export function actionsFromInitialSnapshot(
     requiresNativeSurface ||= mapped.requiresNativeSurface;
   }
 
-  return { actions, warnings, requiresNativeSurface };
+  return { actions, warnings, requiresNativeSurface, newTaskProjectSelection };
 }

@@ -448,6 +448,10 @@ function scopeKey(scope: SubscriptionScope) {
       return `taskNavigation:${scope.section}:${scope.projectIds?.join(",") ?? "*"}`;
     case "task":
       return `task:${scope.taskId}`;
+    case "subagentCatalog":
+      return `subagentCatalog:${scope.taskId}`;
+    case "subagentHistory":
+      return `subagentHistory:${scope.taskId}:${scope.subagentId}`;
     case "toolDetail":
       return `toolDetail:${scope.taskId}:${scope.artifactId}`;
     case "worktreeRepository":

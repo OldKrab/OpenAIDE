@@ -2,27 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActivityStep, ChatMessage } from "@openaide/app-shell-contracts";
 
 describe("new task surface", () => {
-  it("labels Agent option preparation while send is blocked", async () => {
+  it("reserves the New Task status for task-level progress", async () => {
     vi.stubGlobal("window", { acquireVsCodeApi: undefined });
     const { newTaskStatusLabel } = await import("./App");
 
     expect(
       newTaskStatusLabel({
-        agentLabel: "OpenCode",
-        configOptionsLoading: false,
-        configOptionsReady: false,
-        needsWorkspace: false,
+        openingNativeSession: true,
         submitting: false,
       }),
-    ).toBe("Preparing OpenCode options");
+    ).toBe("Opening task");
     expect(
       newTaskStatusLabel({
-        agentLabel: "OpenCode",
-        configOptionsReady: true,
-        needsWorkspace: false,
-        submitting: false,
+        submitting: true,
       }),
-    ).toBeUndefined();
+    ).toBe("Starting task");
   });
 });
 

@@ -6,6 +6,7 @@ import type {
   ActivityToolInput,
 } from "@openaide/app-shell-contracts";
 import { postHostMessage } from "../services/hostBridge";
+import { useAgentFileOpen } from "./agentFileOpen";
 import {
   buildUnifiedDiff,
   displayCommand,
@@ -144,6 +145,7 @@ function formatByteCount(sizeBytes: number): string {
 }
 
 export function ToolPath({ className, label, line, path }: { className?: string; label?: string; line?: number; path: string }) {
+  const openFile = useAgentFileOpen();
   const display = label ?? (line ? `${path}:${line}` : path);
   return (
     <button
@@ -151,6 +153,10 @@ export function ToolPath({ className, label, line, path }: { className?: string;
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (openFile) {
+          openFile(path, line);
+          return;
+        }
         postHostMessage(toolOpenPathMessage({ line, path }));
       }}
       title="Open file"

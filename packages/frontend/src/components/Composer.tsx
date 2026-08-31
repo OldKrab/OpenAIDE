@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStop, ListPlus, LoaderCircle } from "lucide-react";
+import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
@@ -29,6 +29,7 @@ import { appendQuoteToDraft } from "./quoteSelection";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
 import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
+import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
 import {
   FileMentionPicker,
   fileMentionTokenAtCursor,
@@ -62,6 +63,8 @@ type ComposerProps = {
   onRemoveAttachment: (attachmentId: string) => void;
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
+  onRetryConfigOptions?: () => void;
+  onRetryError?: () => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   onSubmit: (prompt: string) => void;
   prompt: string;
@@ -96,6 +99,8 @@ export function Composer({
   onRemoveAttachment,
   onSelectAgent,
   onSelectConfigOption,
+  onRetryConfigOptions,
+  onRetryError,
   onSelectIsolation,
   onSubmit,
   prompt,
@@ -127,8 +132,24 @@ export function Composer({
   const presentedConfigOptions = configOptions && presentedConfigChange
     ? { ...configOptions, pending_change: presentedConfigChange }
     : configOptions;
+  const configLoadingLabel = agents.find((agent) => agent.id === selection.agentId)?.status === "installing"
+    ? CODEX_INTEGRATION_INSTALLING_LABEL
+    : undefined;
   const configMutationId = presentedConfigChange?.mutation_id;
-  const [showSlowConfigUpdate, setShowSlowConfigUpdate] = useState(false);
+  const [configChangeStage, setConfigChangeStage] = useState<{ index: number; mutationId: string }>();
+  const configChangeStatus = configMutationId && configChangeStage?.mutationId === configMutationId
+    ? configChangeStage.index
+    : undefined;
+  const changingConfigOption = presentedConfigChange
+    ? presentedConfigOptions?.options.find((option) => option.id === presentedConfigChange.option_id)
+    : undefined;
+  const configChangeLabel = changingConfigOption && configChangeStatus !== undefined
+    ? slowConfigChangeLabel(
+        selection.agentLabel,
+        changingConfigOption.label.trim() || changingConfigOption.id,
+        configChangeStatus,
+      )
+    : undefined;
   const [filePicker, setFilePicker] = useFileMentionPicker(fileBrowser, fileMentionToken);
   const completionListboxId = filePicker
     ? `${completionId}-files`
@@ -154,10 +175,17 @@ export function Composer({
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
 
   useEffect(() => {
-    setShowSlowConfigUpdate(false);
-    if (!configMutationId) return undefined;
-    const timer = globalThis.setTimeout(() => setShowSlowConfigUpdate(true), 5_000);
-    return () => globalThis.clearTimeout(timer);
+    if (!configMutationId) {
+      setConfigChangeStage(undefined);
+      return undefined;
+    }
+    setConfigChangeStage(undefined);
+    const timers = CONFIG_CHANGE_STATUS_STAGES.map((stage, index) => (
+      globalThis.setTimeout(() => {
+        setConfigChangeStage({ index, mutationId: configMutationId });
+      }, stage.afterMs)
+    ));
+    return () => timers.forEach((timer) => globalThis.clearTimeout(timer));
   }, [configMutationId]);
 
   useEffect(() => {
@@ -277,6 +305,9 @@ export function Composer({
 
   const showStopAction = Boolean(onCancel && (!hasDraftContent || !canSubmit));
   const showSendAction = !onCancel || (hasDraftContent && canSubmit);
+  const blockedStatus = !canSubmit && availability.submissionBlockedMessage
+    ? composerBlockedStatus(availability.submissionBlockedMessage)
+    : undefined;
 
   const submitDraft = () => {
     const draft = draftRef.current;
@@ -358,8 +389,10 @@ export function Composer({
       }}
     >
       <ComposerAttachments
+        agentLabel={selection.agentLabel}
         attachments={attachments}
         disabled={disabled}
+        imageAttachmentsAllowed={imageAttachmentsAllowed}
         onRemoveAttachment={onRemoveAttachment}
         onRevealAttachment={onRevealAttachment}
         uploads={fileUploads}
@@ -544,24 +577,14 @@ export function Composer({
         />
       ) : null}
       {filePicker ? <FileMentionPicker id={`${completionId}-files`} onSelect={selectFileMention} state={filePicker} /> : null}
-      {error ? <p className="inline-error">{error}</p> : null}
-      {hasDraftContent && !canSubmit && availability.submissionBlockedMessage ? (
-        <p aria-live="polite" className="inline-status composer-submission-blocker">
-          {availability.submissionBlockedMessage}
-        </p>
-      ) : null}
-      {showSlowConfigUpdate && configMutationId ? (
-        <p aria-live="polite" className="inline-status composer-config-update-status">
-          <LoaderCircle aria-hidden="true" className="composer-config-pending" size={13} />
-          <span>Agent is still updating options…</span>
-        </p>
-      ) : null}
       <div className="composer-footer">
         <ComposerControls
           agentLocked={agentLocked}
           agents={agents}
           configLocked={configLocked || optimisticConfigChange !== undefined}
+          configChangeLabel={configChangeLabel}
           configOptions={presentedConfigOptions}
+          configLoadingLabel={configLoadingLabel}
           disabled={disabled}
           fileBrowser={fileBrowser}
           fileDropHandlerRef={fileDropHandlerRef}
@@ -571,6 +594,7 @@ export function Composer({
           onUnsupportedImageAttachment={onUnsupportedImageAttachment}
           onSelectAgent={onSelectAgent}
           onSelectConfigOption={selectConfigOption}
+          onRetryConfigOptions={onRetryConfigOptions}
           onSelectIsolation={onSelectIsolation}
           openMenu={openMenu}
           setOpenMenu={setOpenMenu}
@@ -580,10 +604,29 @@ export function Composer({
           showAgentSelector={showAgentSelector}
           showIsolationSelector={showIsolationSelector}
         />
+        {error ? (
+          <span aria-live="assertive" className="composer-footer-status error" role="alert">
+            <CircleAlert aria-hidden="true" size={13} />
+            {error}
+            {onRetryError ? <button onClick={onRetryError} type="button">Retry</button> : null}
+          </span>
+        ) : blockedStatus?.placement === "footer" ? (
+          <span aria-live="polite" className="composer-footer-status" role="status">
+            <LoaderCircle aria-hidden="true" size={13} />
+            <strong>{blockedStatus.label}</strong>
+            {blockedStatus.secondary ? <small>{blockedStatus.secondary}</small> : null}
+          </span>
+        ) : null}
         <div className="composer-actions">
+          {blockedStatus?.placement === "action" ? (
+            <span aria-live="polite" className="composer-action-status" role="status">
+              <LoaderCircle aria-hidden="true" size={13} /> {blockedStatus.label}
+            </span>
+          ) : null}
           {availability.submitting ? (
             <span aria-label={availability.submitPendingLabel} className="composer-submit-pending">
               <LoaderCircle size={14} aria-hidden="true" />
+              <span>Sending…</span>
             </span>
           ) : null}
           {showStopAction && onCancel ? (
@@ -615,6 +658,38 @@ export function Composer({
   );
 }
 
+function slowConfigChangeLabel(agentLabel: string, optionLabel: string, stage: number) {
+  if (stage === 0) return `Asking ${agentLabel} to change ${optionLabel}…`;
+  if (stage === 1) return `${agentLabel} is taking its time with ${optionLabel}…`;
+  if (stage === 2) return `Still waiting on ${agentLabel}. We did pass the message along…`;
+  return `${agentLabel} hasn’t changed ${optionLabel} yet. Suspicious…`;
+}
+
 function configValueEquals(left: ConfigOptionCurrentValue, right: ConfigOptionCurrentValue) {
   return left.type === right.type && left.value === right.value;
+}
+
+const CONFIG_CHANGE_STATUS_STAGES = [
+  { afterMs: 2_000 },
+  { afterMs: 5_000 },
+  { afterMs: 10_000 },
+  { afterMs: 15_000 },
+] as const;
+
+function composerBlockedStatus(message: string) {
+  const normalized = message.trim().replace(/[.]$/, "");
+  if (normalized === "Moving queued message to Composer") {
+    return { label: "Moving…", placement: "action" as const };
+  }
+  if (normalized.startsWith("Reconnecting")) {
+    return { label: "Reconnecting", placement: "footer" as const, secondary: "Draft saved" };
+  }
+  if (normalized === "Connecting to App Server") {
+    return { label: "Connecting…", placement: "footer" as const, secondary: "Draft saved" };
+  }
+  if (normalized === "Preparing task") {
+    return { label: "Preparing task…", placement: "footer" as const };
+  }
+  // Context and attachment blockers render at their owning boundary.
+  return undefined;
 }

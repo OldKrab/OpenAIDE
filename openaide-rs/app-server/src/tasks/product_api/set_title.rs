@@ -12,6 +12,20 @@ use super::{conflict_error, protocol_error_from_runtime, validation_error, TaskP
 
 const MAX_USER_TITLE_CHARS: usize = 200;
 
+pub(super) fn normalize_user_title(value: String, field: &str) -> Result<String, ProtocolError> {
+    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if value.is_empty() {
+        return Err(validation_error(field, "Task title is required"));
+    }
+    if value.chars().count() > MAX_USER_TITLE_CHARS {
+        return Err(validation_error(
+            field,
+            "Task title must be 200 characters or fewer",
+        ));
+    }
+    Ok(value)
+}
+
 impl TaskProductApi {
     pub(super) fn set_task_title(
         &self,
@@ -76,15 +90,6 @@ fn normalize_selection(selection: TaskTitleSelection) -> Result<TaskTitleSelecti
     let TaskTitleSelection::User { value } = selection else {
         return Ok(TaskTitleSelection::Automatic);
     };
-    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if value.is_empty() {
-        return Err(validation_error("title.value", "Task title is required"));
-    }
-    if value.chars().count() > MAX_USER_TITLE_CHARS {
-        return Err(validation_error(
-            "title.value",
-            "Task title must be 200 characters or fewer",
-        ));
-    }
+    let value = normalize_user_title(value, "title.value")?;
     Ok(TaskTitleSelection::User { value })
 }

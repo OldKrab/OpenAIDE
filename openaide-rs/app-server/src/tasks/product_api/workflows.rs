@@ -7,11 +7,13 @@ use openaide_app_server_protocol::support::{
 };
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionForkParams, NativeSessionRestoreParams,
-    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
-    TaskClosePlanParams, TaskLifecycleChanged, TaskQueueAppendParams, TaskQueueMoveParams,
-    TaskQueueRemoveParams, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskRestoreParams, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams,
+    NativeSessionSetPinnedParams, NativeSessionSetTitleParams, TaskAcquireParams,
+    TaskAdoptNativeSessionParams, TaskArchiveOlderParams, TaskArchiveOlderResult,
+    TaskArchiveParams, TaskCancelParams, TaskClosePlanParams, TaskLifecycleChanged,
+    TaskQueueAppendParams, TaskQueueMoveParams, TaskQueueRemoveParams, TaskQueueTakeParams,
+    TaskQueueTakeResult, TaskReleaseParams, TaskRestoreParams, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSetConfigOptionParams,
+    TaskSetPermissionPolicyParams, TaskSetPinnedParams, TaskSetTitleParams,
 };
 
 pub(crate) trait TaskAcquireWorkflow: Send + Sync {
@@ -150,6 +152,12 @@ pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
 }
 
 pub(crate) trait TaskMetadataWorkflow: Send + Sync {
+    fn set_permission_policy_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskSetPermissionPolicyParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
+
     fn set_title_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -199,6 +207,19 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
         params: TaskRestoreParams,
     ) -> Result<TaskLifecycleChanged, ProtocolError>;
 
+    fn archive_older_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: TaskArchiveOlderParams,
+    ) -> Result<TaskArchiveOlderResult, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Bulk Task archive is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
+
     fn archive_native_session(
         &self,
         _params: NativeSessionArchiveParams,
@@ -223,6 +244,30 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
         })
     }
 
+    fn set_native_session_title(
+        &self,
+        _params: NativeSessionSetTitleParams,
+    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Native Session rename is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
+
+    fn set_native_session_pinned(
+        &self,
+        _params: NativeSessionSetPinnedParams,
+    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Native Session pinning is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
+
     fn fork_native_session_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
@@ -242,6 +287,12 @@ pub(crate) struct NativeSessionArchiveMutation {
     pub(crate) reference: openaide_app_server_protocol::snapshot::NativeSessionReference,
     pub(crate) project_id: openaide_app_server_protocol::ids::ProjectId,
     pub(crate) archived: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct NativeSessionMetadataMutation {
+    pub(crate) session: openaide_app_server_protocol::snapshot::NativeSessionSummary,
+    pub(crate) project_id: openaide_app_server_protocol::ids::ProjectId,
 }
 
 #[derive(Debug, Clone)]

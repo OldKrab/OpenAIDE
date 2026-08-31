@@ -5,11 +5,13 @@ import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppController } from "./appController";
 import { AppSurfaces } from "./AppSurfaces";
 import { createInitialState, type AppState } from "../state/store";
+import type { FrontendShell } from "../services/frontendShell";
 
 type TestController = AppController & { state: AppState };
 
 const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
 const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
+const DESKTOP_SHELL = { kind: "desktop", navigationMode: "project" } as const;
 
 const surfaceMocks = vi.hoisted(() => ({
   newTask: vi.fn(() => null),
@@ -19,6 +21,10 @@ const surfaceMocks = vi.hoisted(() => ({
   task: vi.fn(() => null),
   taskLoading: vi.fn(() => null),
   updateTaskSurfaceTitle: vi.fn(),
+}));
+
+const frontendShellMocks = vi.hoisted(() => ({
+  current: undefined as Partial<FrontendShell> | undefined,
 }));
 
 function latestMockProps<T>(mock: { mock: { calls: unknown[][] } }) {
@@ -55,6 +61,11 @@ vi.mock("../services/hostBridge", async (importOriginal) => ({
   updateTaskSurfaceTitle: surfaceMocks.updateTaskSurfaceTitle,
 }));
 
+vi.mock("../services/frontendShell", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../services/frontendShell")>(),
+  currentFrontendShell: () => frontendShellMocks.current as FrontendShell | undefined,
+}));
+
 describe("AppSurfaces callback wiring", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -65,6 +76,7 @@ describe("AppSurfaces callback wiring", () => {
     surfaceMocks.task.mockClear();
     surfaceMocks.taskLoading.mockClear();
     surfaceMocks.updateTaskSurfaceTitle.mockClear();
+    frontendShellMocks.current = undefined;
   });
 
   afterEach(() => {
@@ -80,7 +92,7 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({
         onArchiveTask: controller.callbacks.navigation.archiveTask,
         onLoadNativeSessions: controller.callbacks.navigation.loadNativeSessions,
-        onNewTask: controller.callbacks.navigation.openNewTask,
+        onNewTask: expect.any(Function),
         onOpenNativeSession: controller.callbacks.navigation.openNativeSession,
         onOpenTask: controller.callbacks.navigation.openTask,
         onRestoreTask: controller.callbacks.navigation.restoreTask,
@@ -90,6 +102,30 @@ describe("AppSurfaces callback wiring", () => {
       }),
       undefined,
     );
+  });
+
+  it("opens the global VS Code New Task action without overriding the shell-retained Project", () => {
+    const controller = controllerFor("navigation");
+    controller.state.newTask.selection.projectId = "project-codearts";
+
+    render(controller);
+    const sidebarProps = latestMockProps<{ onNewTask: (projectId?: string) => void }>(surfaceMocks.sidebar);
+
+    act(() => sidebarProps?.onNewTask());
+
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith(undefined);
+  });
+
+  it("keeps a Project-scoped VS Code New Task action explicit", () => {
+    const controller = controllerFor("navigation");
+    controller.state.newTask.selection.projectId = "project-codearts";
+
+    render(controller);
+    const sidebarProps = latestMockProps<{ onNewTask: (projectId?: string) => void }>(surfaceMocks.sidebar);
+
+    act(() => sidebarProps?.onNewTask("project-agent-kernel"));
+
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project-agent-kernel");
   });
 
   it("passes shell-provided workspace recovery to Task Navigation", () => {
@@ -123,7 +159,10 @@ describe("AppSurfaces callback wiring", () => {
     controller.bootstrap = { surface: "navigation", shell: WEB_SHELL };
     controller.callbacks.newTask.workspaceBrowser = {
       ownerKey: "project-browser",
-      listDirectory: vi.fn(),
+      listDirectory: vi.fn(async () => ({
+        directory: { label: "Computer", path: "/", parentPath: null },
+        entries: [{ label: "home", path: "/home" }],
+      })),
       listRoots: vi.fn(async () => [{ label: "Computer", path: "/" }]),
     };
     const tree = render(controller);
@@ -133,6 +172,98 @@ describe("AppSurfaces callback wiring", () => {
 
     expect(tree.root.findByProps({ "aria-label": "Add Project" })).toBeDefined();
     expect(controller.callbacks.newTask.workspaceBrowser.listRoots).toHaveBeenCalledOnce();
+  });
+
+  it("uses the native Project folder picker on Desktop", async () => {
+    const controller = controllerFor("navigation");
+    controller.bootstrap = { surface: "navigation", shell: DESKTOP_SHELL };
+    const listRoots = vi.fn(async () => [{ label: "Computer", path: "/" }]);
+    controller.callbacks.newTask.workspaceBrowser = {
+      ownerKey: "project-browser",
+      listDirectory: vi.fn(),
+      listRoots,
+    };
+    const pickFolder = vi.fn(async () => ({ path: "C:\\workspace\\OpenAIDE", label: "OpenAIDE" }));
+    frontendShellMocks.current = { projects: { pickFolder } };
+    controller.intents.projects.add = vi.fn(async () => ({
+      projectId: "project_1" as never,
+      label: "OpenAIDE",
+      workspaceRoot: "C:\\workspace\\OpenAIDE",
+      available: true,
+    }));
+    const tree = render(controller);
+    const sidebar = latestMockProps<ComponentProps<typeof import("./Sidebar").Sidebar>>(surfaceMocks.sidebar);
+
+    await act(async () => sidebar?.onAddProject?.());
+
+    expect(pickFolder).toHaveBeenCalledOnce();
+    expect(listRoots).not.toHaveBeenCalled();
+    expect(controller.intents.projects.add).toHaveBeenCalledWith("C:\\workspace\\OpenAIDE");
+    expect(tree.root.findAllByProps({ "aria-label": "Add Project" })).toHaveLength(0);
+  });
+
+  it("delegates Project folder acquisition to the VS Code host", async () => {
+    const controller = controllerFor("navigation");
+    const listRoots = vi.fn(async () => [{ label: "Computer", path: "/" }]);
+    controller.callbacks.newTask.workspaceBrowser = {
+      ownerKey: "project-browser",
+      listDirectory: vi.fn(),
+      listRoots,
+    };
+    const openFolder = vi.fn();
+    frontendShellMocks.current = { workspace: { openFolder } };
+    const tree = render(controller);
+    const sidebar = latestMockProps<ComponentProps<typeof import("./Sidebar").Sidebar>>(surfaceMocks.sidebar);
+
+    await act(async () => sidebar?.onAddProject?.());
+
+    expect(openFolder).toHaveBeenCalledOnce();
+    expect(listRoots).not.toHaveBeenCalled();
+    expect(tree.root.findAllByProps({ "aria-label": "Add Project" })).toHaveLength(0);
+  });
+
+  it("overlays empty Windows window controls on New Task", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: DESKTOP_SHELL };
+    frontendShellMocks.current = {
+      desktopWindow: {
+        platform: "windows",
+        close: vi.fn(async () => undefined),
+        minimize: vi.fn(async () => undefined),
+        startDragging: vi.fn(async () => undefined),
+        toggleMaximize: vi.fn(async () => undefined),
+      },
+    };
+
+    const tree = render(controller);
+    const frame = tree.root.find((node) => typeof node.props.className === "string"
+      && node.props.className.split(" ").includes("app-sidebar-frame"));
+
+    expect(frame.props.className).toContain("app-sidebar-frame-with-overlay-header");
+    expect(tree.root.findByProps({ "aria-label": "Window controls" })).toBeDefined();
+  });
+
+  it("uses the task header as the Windows title bar instead of adding a product-title row", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: DESKTOP_SHELL, taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1");
+    const desktopWindow = {
+      platform: "windows" as const,
+      close: vi.fn(async () => undefined),
+      minimize: vi.fn(async () => undefined),
+      startDragging: vi.fn(async () => undefined),
+      toggleMaximize: vi.fn(async () => undefined),
+    };
+    frontendShellMocks.current = { desktopWindow };
+
+    const tree = render(controller);
+    const frame = tree.root.find((node) => typeof node.props.className === "string"
+      && node.props.className.split(" ").includes("app-sidebar-frame"));
+
+    expect(frame.props.className).toContain("app-sidebar-frame-with-overlay-header");
+    expect(frame.props.className).toContain("desktop-task-title-bar");
+    expect(tree.root.findAllByProps({ className: "desktop-title-bar-label" })).toHaveLength(0);
+    expect(latestMockProps<{ desktopWindow?: unknown }>(surfaceMocks.task)?.desktopWindow).toBe(desktopWindow);
   });
 
   it("limits VS Code New Task Project choices to opened workspace Projects", () => {
@@ -291,8 +422,8 @@ describe("AppSurfaces callback wiring", () => {
         && node.props.className.includes("task-row"),
       );
 
-    expect(visibleRows("OpenAIDE")).toHaveLength(10);
-    expect(visibleRows("Other")).toHaveLength(10);
+    expect(visibleRows("OpenAIDE")).toHaveLength(7);
+    expect(visibleRows("Other")).toHaveLength(7);
   });
 
   it("limits current-Project Task Navigation to Projects in the workspace", () => {
@@ -556,17 +687,36 @@ describe("AppSurfaces callback wiring", () => {
 
   it("shows task status in the narrow workbench header", () => {
     const controller = webControllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_1",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
     controller.state.snapshot = snapshot("task_1");
 
     const tree = render(controller);
     const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
 
     expect(header.findByType("small").children.join("")).toBe("Ready · OpenAIDE");
+    expect(header.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
   });
 
   it("opens the Task Plan from the narrow workbench header", () => {
     stubMobileWindow();
     const controller = webControllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_1",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
     controller.state.snapshot = snapshot("task_1");
     controller.state.snapshot.current_plan = {
       entries: [{ content: "Verify layout", priority: "medium", status: "in_progress" }],
@@ -575,7 +725,7 @@ describe("AppSurfaces callback wiring", () => {
     const tree = render(controller);
     act(() => tree.root.findByProps({ "aria-label": "Open Plan" }).props.onClick());
 
-    expect(tree.root.findByProps({ "aria-label": "Close Plan" }).props["aria-expanded"]).toBe(true);
+    expect(tree.root.findByProps({ "aria-label": "Hide Plan" }).props["aria-expanded"]).toBe(true);
     expect(latestMockProps<{ planDrawerOpen?: boolean }>(surfaceMocks.task)?.planDrawerOpen).toBe(true);
   });
 
@@ -772,6 +922,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("passes active task callbacks to task view", () => {
     const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", true);
 
     render(controller);
@@ -849,6 +1000,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("passes archive context and restore action to the task view", () => {
     const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", true);
     controller.state.showArchived = true;
     controller.activeTask = controller.state.snapshot.task;
@@ -866,6 +1018,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("does not mark the open task archived just because the sidebar shows archive", () => {
     const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", true);
     controller.state.showArchived = true;
 
@@ -1146,6 +1299,28 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.task).not.toHaveBeenCalled();
   });
 
+  it("does not keep another task's chat on the current task route", () => {
+    const controller = webControllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_routed",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    controller.state.activeTaskId = "task_other";
+    controller.state.snapshot = snapshot("task_other");
+    controller.state.snapshot.task.title = "why always 24% of cpu taken on this server. always";
+    controller.activeTask = controller.state.snapshot.task;
+
+    render(controller);
+
+    expect(surfaceMocks.task).not.toHaveBeenCalled();
+    expect(surfaceMocks.taskLoading).toHaveBeenCalled();
+  });
+
   it("keeps the Native Session route visible when adoption reports not-found", () => {
     const controller = webControllerFor("nativeSession");
     controller.bootstrap = {
@@ -1205,6 +1380,19 @@ describe("AppSurfaces callback wiring", () => {
     expect(secondFocusKey).toBe(firstFocusKey + 1);
     expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalled();
     expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
+  });
+
+  it("renders the shared project workbench for Desktop", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: DESKTOP_SHELL,
+    };
+
+    const tree = render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledOnce();
+    expect(tree.root.findByProps({ "aria-label": "Open task navigation" })).toBeDefined();
   });
 
   it("passes project loading state to new task view until backend initialize completes", () => {
@@ -1319,10 +1507,12 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
     agents: [],
     backendConnectionState: { status: "connecting" },
     backendReady: false,
+    taskMutationReady: false,
     bootstrap: surface === "invalid" ? { surface } : { surface, shell: VSCODE_SHELL },
     callbacks: {
       navigation: {
         archiveNativeSession: vi.fn(),
+        archiveOlderTasks: vi.fn(),
         archiveTask: vi.fn(),
         forkNativeSession: vi.fn(),
         forkTask: vi.fn(),
@@ -1334,6 +1524,8 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         retryAgent: vi.fn(async () => true),
         openTask: vi.fn(),
       restoreNativeSession: vi.fn(),
+      setNativeSessionPinned: vi.fn(),
+      setNativeSessionTitle: vi.fn(),
       restoreTask: vi.fn(),
       setTaskPinned: vi.fn(),
       setTaskTitle: vi.fn(),
@@ -1380,6 +1572,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         respondToQuestion: vi.fn(),
         selectConfigOption: vi.fn(),
         sendPrompt: vi.fn(),
+        setPermissionPolicy: vi.fn(async () => undefined),
       },
     },
     intents: {
@@ -1513,6 +1706,7 @@ function stubMobileWindow() {
 function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
   return {
     lifecycle: hasMessages ? "open" : "prepared",
+    permission_policy: "ask_every_time",
     chat: {
       has_before: false,
       has_messages: hasMessages,

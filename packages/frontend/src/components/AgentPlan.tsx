@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { ChevronDown, CircleX, X } from "lucide-react";
+import { ChevronDown, CircleX, MoreHorizontal, X } from "lucide-react";
 import type { AgentPlan, AgentPlanEntry, TaskStatus } from "@openaide/app-shell-contracts";
+import { PopupMenu } from "./Popup";
 
 const currentPlanDisclosure = new Map<string, boolean>();
 const PLAN_DISCLOSURE_STORAGE_PREFIX = "openaide.agentPlanDisclosure:";
@@ -8,7 +9,8 @@ const PLAN_DISCLOSURE_STORAGE_PREFIX = "openaide.agentPlanDisclosure:";
 export function AgentPlanView({
   collapsible = true,
   defaultOpen = false,
-  onClose,
+  onDismiss,
+  onHide,
   plan,
   taskId,
   taskStatus,
@@ -17,7 +19,10 @@ export function AgentPlanView({
   collapsible?: boolean;
   /** Used only until the user establishes a retained disclosure preference for this Task. */
   defaultOpen?: boolean;
-  onClose?: () => Promise<void> | void;
+  /** Removes the current Plan into Chat. Distinct from hiding a drawer. */
+  onDismiss?: () => Promise<void> | void;
+  /** Conceals a Plan drawer without changing App Server Plan state. */
+  onHide?: () => void;
   plan: AgentPlan;
   taskId: string;
   taskStatus: TaskStatus;
@@ -25,14 +30,24 @@ export function AgentPlanView({
   const [disclosureOpen, setDisclosureOpen] = useState(
     () => readAgentPlanDisclosure(taskId) ?? defaultOpen,
   );
-  const [closing, setClosing] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+  const [entered, setEntered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const open = collapsible ? disclosureOpen : true;
   const completed = plan.entries.filter((entry) => entry.status === "completed").length;
   const current = plan.entries.find((entry) => entry.status === "in_progress")
     ?? plan.entries.find((entry) => entry.status === "pending");
 
   return (
-    <section className="agent-plan" data-open={open}>
+    <section
+      className="agent-plan"
+      data-entered={entered || undefined}
+      data-open={open}
+      onAnimationEnd={(event) => {
+        if (event.target !== event.currentTarget) return;
+        setEntered(true);
+      }}
+    >
       {collapsible ? (
         <button
           aria-expanded={open}
@@ -65,20 +80,55 @@ export function AgentPlanView({
           />
         </div>
       )}
-      {onClose ? (
-        <button
-          aria-label="Close Plan"
-          className="agent-plan-close"
-          disabled={closing}
-          onClick={() => {
-            setClosing(true);
-            void Promise.resolve(onClose()).finally(() => setClosing(false));
-          }}
-          title="Close Plan"
-          type="button"
-        >
-          <X aria-hidden="true" size={14} />
-        </button>
+      {onDismiss || onHide ? (
+        <div className="agent-plan-actions">
+          {onDismiss ? (
+            <PopupMenu
+              className="agent-plan-menu"
+              label="Plan actions"
+              onOpenChange={setMenuOpen}
+              open={menuOpen}
+              trigger={(triggerProps) => (
+                <button
+                  {...triggerProps}
+                  aria-label="Plan actions"
+                  className="agent-plan-action"
+                  data-plan-action="menu"
+                  disabled={dismissing}
+                  title="Plan actions"
+                  type="button"
+                >
+                  <MoreHorizontal aria-hidden="true" size={14} />
+                </button>
+              )}
+            >
+              <button
+                disabled={dismissing}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setDismissing(true);
+                  void Promise.resolve(onDismiss()).finally(() => setDismissing(false));
+                }}
+                role="menuitem"
+                type="button"
+              >
+                Close Plan
+              </button>
+            </PopupMenu>
+          ) : null}
+          {onHide ? (
+            <button
+              aria-label="Hide Plan"
+              className="agent-plan-action"
+              data-plan-action="hide"
+              onClick={onHide}
+              title="Hide Plan"
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+            </button>
+          ) : null}
+        </div>
       ) : null}
       <PlanDisclosure open={open}>
         <PlanEntries entries={plan.entries} taskRunning={open && taskStatus === "active"} />
@@ -197,7 +247,11 @@ function PlanEntries({
   return (
     <ol className="agent-plan-entries">
       {entries.map((entry, index) => (
-        <li data-status={entry.status} key={`${index}:${entry.content}`}>
+        <li
+          data-status={entry.status}
+          key={`${index}:${entry.content}`}
+          style={{ ["--agent-plan-entry" as string]: String(index) }}
+        >
           <PlanStatusMark entry={entry} taskRunning={taskRunning} />
           <span className="agent-plan-entry-content">{entry.content}</span>
           {entry.priority === "medium" ? null : (

@@ -44,6 +44,10 @@ export type AppControllerCallbacks = {
 export type NavigationCallbacks = {
   archiveNativeSession: (session: AgentListedSession) => void;
   archiveTask: (taskId: string) => void;
+  archiveOlderTasks: (
+    cutoff: import("@openaide/app-server-client").TaskArchiveOlderCutoff,
+    preview: boolean,
+  ) => Promise<import("@openaide/app-server-client").TaskArchiveOlderResult>;
   forkNativeSession: (session: AgentListedSession) => void;
   forkTask: (taskId: string) => void;
   changeSearch: (query: string) => void;
@@ -54,6 +58,8 @@ export type NavigationCallbacks = {
   openTask: (taskId: string) => void;
   retryAgent: (agentId: string) => Promise<boolean>;
   restoreNativeSession: (session: AgentListedSession) => void;
+  setNativeSessionPinned: (session: AgentListedSession, pinned: boolean) => Promise<void>;
+  setNativeSessionTitle: (session: AgentListedSession, title: string) => Promise<void>;
   setTaskPinned: (taskId: string, pinned: boolean) => Promise<void>;
   setTaskTitle: (
     taskId: string,
@@ -123,7 +129,10 @@ export type TaskCallbacks = {
   ) => void;
   respondToQuestion: (requestId: string, response: ElicitationResponse) => void;
   sendPrompt: (prompt?: string) => void;
+  setPermissionPolicy: (policy: import("@openaide/app-shell-contracts").TaskPermissionPolicy) => Promise<void>;
   selectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
+  /** Same attached App Server session as other Task intents. */
+  fileViewer?: Pick<BackendConnection, "request">;
 };
 
 export type TaskFileBrowserCallbacks = {

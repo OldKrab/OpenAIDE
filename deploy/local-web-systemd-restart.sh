@@ -28,6 +28,7 @@ delegate_systemd_restart() {
     --setenv "OPENAIDE_WEB_SKIP_BUILD=${OPENAIDE_WEB_SKIP_BUILD:-0}"
     --setenv "OPENAIDE_WEB_DAEMON=$daemon_mode"
     --setenv "OPENAIDE_WEB_SYSTEMD_UNIT=$systemd_unit"
+    --setenv "OPENAIDE_ACP_NATIVE_SUBAGENTS=${OPENAIDE_ACP_NATIVE_SUBAGENTS:-}"
   )
   if [[ -v OPENAIDE_ACP_TRACE ]]; then
     helper_env_args+=(--setenv "OPENAIDE_ACP_TRACE=$OPENAIDE_ACP_TRACE")

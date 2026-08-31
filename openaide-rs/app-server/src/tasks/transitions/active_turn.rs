@@ -337,22 +337,7 @@ fn queued_attachments_available(
     {
         return false;
     }
-    let roots = [
-        Some(task.workspace_root.as_str()),
-        task.project_root.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter_map(|root| std::fs::canonicalize(root).ok())
-    .collect::<Vec<_>>();
-    queued.agent_attachments.iter().all(|attachment| {
-        let Some(path) = attachment.path.as_deref() else {
-            return true;
-        };
-        std::fs::canonicalize(path)
-            .ok()
-            .is_some_and(|path| roots.iter().any(|root| path.starts_with(root)))
-    })
+    crate::tasks::product_api::queued_attachment_paths_are_available(&queued.agent_attachments)
 }
 
 fn append_prompt_outcome_activity(

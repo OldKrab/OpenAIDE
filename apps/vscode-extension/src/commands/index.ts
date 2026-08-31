@@ -1,14 +1,11 @@
 import * as vscode from "vscode";
 import { SUPPORT_RECOVER_STUCK_SESSIONS } from "@openaide/app-server-client";
-import { exportSupportDiagnostics } from "../diagnostics/export";
-import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
 import { TaskEditorManager } from "../webview/editorManager";
 
 export function registerCommands(
   context: vscode.ExtensionContext,
   taskEditors: TaskEditorManager,
-  runtimeProcess: RuntimeProcess,
   runtime: RuntimeClient,
 ) {
   context.subscriptions.push(
@@ -32,7 +29,7 @@ export function registerCommands(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("openaide.exportDiagnostics", async () => {
-      await exportSupportDiagnostics(runtime, runtimeProcess);
+      taskEditors.openSettings(undefined, undefined, undefined, "common");
     }),
   );
 

@@ -296,6 +296,7 @@ function attachment(handleId: string) {
 function taskSnapshot(taskId: string, hasMessages: boolean): NonNullable<AppState["snapshot"]> {
   return {
     lifecycle: hasMessages ? "open" : "prepared",
+    permission_policy: "ask_every_time",
     task: {
       task_id: taskId,
       title: "Task",

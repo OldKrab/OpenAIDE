@@ -5,6 +5,11 @@ use crate::protocol::model::{
 
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
+    /// User-authored input reported on a native child session stream.
+    UserMessageChunk {
+        text: String,
+        source_message_id: Option<String>,
+    },
     MessageChunk {
         role: AgentMessageRole,
         part: AgentMessagePart,
@@ -40,6 +45,49 @@ pub struct AgentSubagent {
     pub path: String,
     pub activity: String,
     pub status: ActivityStatus,
+}
+
+/// Provider-neutral lifecycle announcement for a negotiated ACP child session.
+/// Native session identifiers remain inside the Agent/App Server boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentSpawned {
+    pub parent_native_session_id: String,
+    pub native_session_id: String,
+    pub name: String,
+    /// `None` means the provider announced the child but did not expose the delegated prompt.
+    pub delegated_task: Option<String>,
+    /// The provider uses a repeated announcement to signal a parent-to-child interaction.
+    /// This stays typed at the Agent boundary instead of leaking provider metadata downstream.
+    pub parent_interaction: bool,
+    pub capabilities: AgentNativeSubagentCapabilities,
+    pub details: Vec<AgentNativeSubagentDetail>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentNativeSubagentCapabilities {
+    pub cancel: bool,
+    pub close: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentDetail {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentNativeSubagentState {
+    Completed,
+    Failed,
+    Cancelled,
+    Disconnected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentStateUpdate {
+    pub parent_native_session_id: String,
+    pub native_session_id: String,
+    pub state: AgentNativeSubagentState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +169,9 @@ pub struct AgentPermissionRequest {
     pub scope: Option<String>,
     pub risk: Option<String>,
     pub tool_call: AgentToolCallRef,
+    /// Present only when a task-wide request originated from a native child session.
+    /// This stays inside the Agent/App Server boundary and routes durable attribution.
+    pub subagent_native_session_id: Option<String>,
     pub options: Vec<AgentPermissionOption>,
 }
 

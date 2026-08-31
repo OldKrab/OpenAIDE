@@ -55,7 +55,24 @@ describe("composer availability", () => {
     })).toMatchObject({
       canEdit: true,
       submissionAllowed: false,
-      placeholder: "Send a follow-up",
+      placeholder: "Send follow-up",
+      submissionBlockedMessage: "Send a follow-up",
+    });
+  });
+
+  it("keeps connection recovery in status while the prompt still describes drafting", () => {
+    expect(composerAvailability({
+      allowEditingWhileSendBlocked: true,
+      attachmentsReady: true,
+      connectionStatus: "connecting",
+      contextReady: true,
+      readyPlaceholder: "Send follow-up",
+      sendCapability: { state: "ready" },
+    })).toMatchObject({
+      canEdit: true,
+      placeholder: "Send follow-up",
+      submissionAllowed: false,
+      submissionBlockedMessage: "Connecting to App Server.",
     });
   });
 

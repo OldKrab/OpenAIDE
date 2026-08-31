@@ -31,6 +31,16 @@ describe("webview html", () => {
     expect(html).toContain("img-src data:;");
   });
 
+  it("passes persisted developer settings visibility into the shared Frontend", () => {
+    const html = renderWebviewHtml(context(), webview(), {
+      surface: "settings",
+      shell: VSCODE_SHELL,
+      developerSettingsUnlocked: true,
+    });
+
+    expect(html).toContain('data-developer-settings-unlocked="true"');
+  });
+
   it("provides the packaged Mermaid renderer script without navigating a local HTML document", () => {
     const html = renderWebviewHtml(context(), webview(), {
       surface: "task",

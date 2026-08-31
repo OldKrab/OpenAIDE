@@ -1,5 +1,6 @@
 import {
   Braces,
+  CircleAlert,
   Code2,
   Database,
   File,
@@ -219,12 +220,16 @@ export function FileMentionPicker({ id, state, onSelect }: {
     <EditorListbox className="composer-file-popover" id={listboxId} label="Workspace files">
       {state.loading ? (
         <div className="composer-file-status" role="status">
-          <LoaderCircle aria-hidden="true" size={13} /> Indexing files…
+          <LoaderCircle aria-hidden="true" size={13} /> Searching workspace…
         </div>
       ) : state.error ? (
-        <div className="composer-file-status composer-file-error" role="status">{state.error}</div>
+        <div className="composer-file-status composer-file-error" role="alert">
+          <CircleAlert aria-hidden="true" size={13} /> File search unavailable
+        </div>
       ) : state.paths.length === 0 ? (
-        <div className="composer-file-status" role="status">No matching files</div>
+        <div className="composer-file-status" role="status">
+          {state.token.query ? `No files match “${state.token.query}”` : "No files found"}
+        </div>
       ) : state.paths.map((path, index) => (
         <button
           aria-selected={index === state.activeIndex}

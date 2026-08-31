@@ -1,4 +1,4 @@
-import { Bot, Brain, ChevronRight, CircleX, Check, Terminal, Wrench } from "lucide-react";
+import { ArrowRight, Bot, Brain, ChevronRight, CircleX, Check, Info, Terminal, Wrench } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityStep, ActivityToolDetails, NormalizedMessage } from "@openaide/app-shell-contracts";
 import type { ToolImagePreview } from "@openaide/app-server-client";
@@ -17,7 +17,8 @@ import {
   type ActivityStepSemanticTitle,
 } from "../state/activityLabels";
 import { hasToolDetails, toolKindClass } from "../state/toolDetailsViewModel";
-import { toolPresentationName } from "../state/toolDetailsShared";
+import { readDetailOutput, toolPresentationName } from "../state/toolDetailsShared";
+import { skillDocumentName } from "../state/skillToolViewModel";
 import { ChatToolDetails } from "./ChatToolDetailsView";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { toolKindIcon } from "./chatToolIcons";
@@ -26,16 +27,22 @@ import { presentThoughtMarkdown } from "./thoughtPresentation";
 export function ChatActivityView({
   activity,
   onLoadToolImagePreview,
+  onOpenSubagent,
   onSubscribeToolDetail,
   taskId,
   toolDetails,
 }: {
   activity: Extract<NormalizedMessage, { kind: "activity" }>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  onOpenSubagent?: (subagentId: string) => void;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
 }) {
+  const boundaryNotice = agentBoundaryNotice(activity);
+  if (boundaryNotice) {
+    return <AgentBoundaryNotice explanation={boundaryNotice.text} title={activity.title} />;
+  }
   // Longer reasoning runs stay recoverable without overwhelming the default activity scan.
   const [showThoughts, setShowThoughts] = useState(false);
   const thoughtCount = activity.steps.filter((step) => step.kind === "thought").length;
@@ -75,6 +82,7 @@ export function ChatActivityView({
               key={activityStepIdentity(step) ?? index}
               legacyToolName={activity.steps.length === 1 ? activity.title : undefined}
               onLoadToolImagePreview={onLoadToolImagePreview}
+              onOpenSubagent={onOpenSubagent}
               onSubscribeToolDetail={onSubscribeToolDetail}
               step={step}
               taskId={taskId}
@@ -87,6 +95,38 @@ export function ChatActivityView({
   );
 }
 
+function AgentBoundaryNotice({ explanation, title }: { explanation: string; title: string }) {
+  return (
+    <AnimatedDisclosure
+      className="agent-boundary-notice"
+      trigger={(
+        <>
+          <span className="agent-boundary-rule" aria-hidden="true" />
+          <span className="agent-boundary-label">
+            <span className="agent-boundary-glyph" aria-hidden="true">
+              <Bot size={12} strokeWidth={1.8} />
+            </span>
+            <span>{title}</span>
+            <ChevronRight className="agent-boundary-chevron" size={12} aria-hidden="true" />
+          </span>
+          <span className="agent-boundary-rule" aria-hidden="true" />
+        </>
+      )}
+    >
+      <div className="agent-boundary-explanation">
+        <Info size={12} aria-hidden="true" />
+        <span>{explanation}</span>
+      </div>
+    </AnimatedDisclosure>
+  );
+}
+
+function agentBoundaryNotice(activity: Extract<NormalizedMessage, { kind: "activity" }>) {
+  if (activity.steps.length !== 1) return undefined;
+  const [step] = activity.steps;
+  return step?.kind === "text" && step.level === "agent_boundary" ? step : undefined;
+}
+
 function thoughtCountLabel(count: number) {
   return `${count} ${count === 1 ? "Thought" : "Thoughts"} hidden`;
 }
@@ -94,6 +134,7 @@ function thoughtCountLabel(count: number) {
 export function ActivityStepRow({
   legacyToolName,
   onLoadToolImagePreview,
+  onOpenSubagent,
   onSubscribeToolDetail,
   step,
   taskId,
@@ -101,6 +142,7 @@ export function ActivityStepRow({
 }: {
   legacyToolName?: string;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  onOpenSubagent?: (subagentId: string) => void;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   step: ActivityStep;
   taskId: string;
@@ -193,6 +235,16 @@ export function ActivityStepRow({
             ))}
           </ol>
         )}
+        {displayStep.subagent_id && onOpenSubagent ? (
+          <button
+            className="subagent-history-action"
+            onClick={() => onOpenSubagent(displayStep.subagent_id!)}
+            type="button"
+          >
+            <span>Open {displayStep.name} history</span>
+            <ArrowRight aria-hidden="true" size={13} />
+          </button>
+        ) : null}
       </AnimatedDisclosure>
     );
   }
@@ -376,8 +428,13 @@ function presentToolStep(
   step: Extract<ActivityStep, { kind: "tool" }>,
   details: ActivityToolDetails | undefined,
 ): Extract<ActivityStep, { kind: "tool" }> {
-  const name = toolPresentationName(step.name, details);
-  const inputSummary = name === "web_search" && step.name !== "web_search" ? details?.input?.query : step.input_summary;
+  const name = toolPresentationName(step.name, details, step.output_preview);
+  const output = details ? readDetailOutput(details, step.output_preview) : step.output_preview ?? "";
+  const inputSummary = name === "skill"
+    ? skillDocumentName(output)
+    : name === "web_search" && step.name !== "web_search"
+      ? details?.input?.query
+      : step.input_summary;
   return { ...step, name, input_summary: inputSummary, ...(details ? { details } : {}) };
 }
 
@@ -385,12 +442,14 @@ function ActivityStepContent({
   disclosure = false,
   icon,
   label,
+  preview,
   titleClassName,
   tooltip,
 }: {
   disclosure?: boolean;
   icon: ReactNode;
   label: ReactNode;
+  preview?: string;
   titleClassName?: string;
   tooltip?: string;
 }) {
@@ -408,6 +467,7 @@ function ActivityStepContent({
       >
         {label}
       </span>
+      {preview ? <span className="activity-step-preview" title={preview}>{preview}</span> : null}
     </span>
   );
 }

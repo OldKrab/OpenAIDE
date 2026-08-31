@@ -4,7 +4,7 @@ import type { SettingsTabId } from "./preferences.js";
 export type WebviewSurfaceKind = "navigation" | "nativeSession" | "task" | "settings";
 
 export type AppShellBootstrap = {
-  kind: "web" | "vscodeExtension";
+  kind: "desktop" | "web" | "vscodeExtension";
   /** Selects Project Navigation or current-Project Task Navigation independently of transport. */
   navigationMode: "project" | "currentProject";
 };
@@ -36,6 +36,8 @@ export type WebviewBootstrap = {
   /** Agent detail and return intent supplied by a recovery entry point. */
   settingsAgentId?: string;
   returnToNewTask?: boolean;
+  /** App Shell-persisted unlock for local diagnostic controls. */
+  developerSettingsUnlocked?: boolean;
   preferences?: AppPreferencesRecord;
   appServerConnection?: WebviewAppServerConnection;
 };

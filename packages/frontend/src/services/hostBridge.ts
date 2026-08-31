@@ -32,6 +32,10 @@ export function openNewTaskSurface(projectId?: string) {
   frontendShell().navigation.openNewTask(projectId);
 }
 
+export function retainNewTaskProject(projectId: string) {
+  frontendShell().navigation.retainNewTaskProject?.(projectId);
+}
+
 export function openNativeSessionSurface(agentId: string, nativeSessionId: string, projectId?: string) {
   frontendShell().navigation.openNativeSession(agentId, nativeSessionId, projectId);
 }

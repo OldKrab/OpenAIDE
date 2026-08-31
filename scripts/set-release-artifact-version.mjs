@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/;
 const NEUTRAL_VERSION = "0.0.0";
-const CARGO_PACKAGE_NAMES = ["openaide-app-server", "openaide-app-server-protocol"];
+const ROOT_CARGO_PACKAGE_NAMES = ["openaide-app-server", "openaide-app-server-protocol"];
 
 /**
  * Stamps the canonical release version into manifests consumed by packaged artifacts.
@@ -16,14 +16,22 @@ export function setReleaseArtifactVersion(repoRoot, version) {
   }
 
   setJsonVersion(path.join(repoRoot, "apps/vscode-extension/package.json"), version);
+  setJsonVersion(path.join(repoRoot, "apps/desktop/package.json"), version);
+  setJsonVersion(path.join(repoRoot, "apps/desktop/src-tauri/tauri.conf.json"), version);
   for (const relativePath of [
     "openaide-rs/app-server/Cargo.toml",
     "openaide-rs/app-server-protocol/Cargo.toml",
+    "apps/desktop/src-tauri/Cargo.toml",
   ]) {
     setCargoVersion(path.join(repoRoot, relativePath), version);
   }
   // Keep the lockfile in sync so release builds can retain Cargo's --locked guarantee.
-  setCargoLockVersions(path.join(repoRoot, "Cargo.lock"), version);
+  setCargoLockVersions(path.join(repoRoot, "Cargo.lock"), ROOT_CARGO_PACKAGE_NAMES, version);
+  setCargoLockVersions(
+    path.join(repoRoot, "apps/desktop/src-tauri/Cargo.lock"),
+    ["openaide-desktop"],
+    version,
+  );
 }
 
 function setJsonVersion(filePath, version) {
@@ -55,12 +63,12 @@ function setCargoVersion(filePath, version) {
   writeFileSync(filePath, lines.join(lineEnding));
 }
 
-function setCargoLockVersions(filePath, version) {
+function setCargoLockVersions(filePath, packageNames, version) {
   const lockfile = readFileSync(filePath, "utf8");
   const lineEnding = lockfile.includes("\r\n") ? "\r\n" : "\n";
   const lines = lockfile.split(/\r?\n/);
 
-  for (const packageName of CARGO_PACKAGE_NAMES) {
+  for (const packageName of packageNames) {
     const packageHeaderIndex = lines.findIndex(
       (line, index) => line === "[[package]]" && lines[index + 1] === `name = "${packageName}"`,
     );

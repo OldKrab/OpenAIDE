@@ -47,8 +47,13 @@ body[data-input-modality="pointer"] button:focus-visible {
     padding: 7px 10px;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar[data-has-plan="true"] {
+  body[data-shell="web"] .mobile-workbench-bar[data-has-plan="true"],
+  body[data-shell="web"] .mobile-workbench-bar[data-has-permission-policy="true"] {
     grid-template-columns: 44px minmax(0, 1fr) 44px;
+  }
+
+  body[data-shell="web"] .mobile-workbench-bar[data-has-plan="true"][data-has-permission-policy="true"] {
+    grid-template-columns: 44px minmax(0, 1fr) 44px 44px;
   }
 
   body[data-shell="web"] .mobile-workbench-bar button {
@@ -66,6 +71,10 @@ body[data-input-modality="pointer"] button:focus-visible {
 
   body[data-shell="web"] .mobile-workbench-bar button:hover {
     background: var(--oa-raised);
+  }
+
+  body[data-shell="web"] .mobile-workbench-bar .task-permission-policy-trigger > span {
+    display: none;
   }
 
   body[data-shell="web"] .mobile-workbench-bar span {
@@ -206,16 +215,23 @@ body[data-input-modality="pointer"] button:focus-visible {
     grid-template-rows: minmax(0, 1fr);
   }
 
-  body[data-shell="web"] .task-header {
+  body[data-shell="web"] .task-header,
+  body[data-shell="web"] .task-work-stack-header {
     display: none;
   }
 
+  /* Header still occupies grid row 1 in the Task surface. Hide it without
+     leaving Chat on row 2, or the empty row 1 shows as a blank strip. */
+  body[data-shell="web"] .task-workbench {
+    grid-row: 1;
+  }
+
   body[data-shell="web"] .chat-column {
-    --oa-chat-inline-gutter: 10px;
+    --oa-chat-inline-gutter: 16px;
     height: 100%;
     gap: 10px;
     grid-template-rows: minmax(0, 1fr) auto;
-    padding: 12px var(--oa-chat-inline-gutter) 10px;
+    padding: 12px 0 10px;
   }
 
   body[data-shell="web"] .sidebar-search,

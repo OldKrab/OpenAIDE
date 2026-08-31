@@ -1,0 +1,123 @@
+.desktop-title-bar {
+  min-width: 0;
+  height: 32px;
+  display: grid;
+  grid-template-columns: var(--app-sidebar-width, 304px) minmax(0, 1fr) auto;
+  border-bottom: 1px solid var(--oa-border-subtle);
+  background: var(--oa-bg);
+  user-select: none;
+}
+
+.app-sidebar-frame-overlay-header .desktop-title-bar {
+  height: 32px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.desktop-task-title-bar.app-sidebar-frame-with-overlay-header .sidebar {
+  padding-top: 45px;
+}
+
+.desktop-task-title-bar .app-sidebar-frame-overlay-header {
+  height: 45px;
+  /* The real Task header owns center controls and native drag handling. */
+  pointer-events: none;
+}
+
+.app-sidebar-frame-overlay-header .desktop-title-bar-integrated {
+  height: 45px;
+}
+
+.desktop-title-bar-integrated {
+  pointer-events: none;
+}
+
+.desktop-title-bar-integrated .desktop-title-bar-sidebar,
+.desktop-title-bar-integrated .desktop-title-bar-native-end,
+.desktop-title-bar-integrated .desktop-caption-buttons {
+  pointer-events: auto;
+}
+
+.app-sidebar-frame-overlay-header .desktop-caption-buttons button {
+  height: 32px;
+}
+
+.app-sidebar-frame-overlay-header .desktop-title-bar-integrated .desktop-caption-buttons button {
+  height: 45px;
+}
+
+.desktop-title-bar-sidebar {
+  min-width: 0;
+  position: relative;
+  border-right: 1px solid var(--oa-border-subtle);
+  background: var(--oa-panel);
+  display: flex;
+  align-items: center;
+  padding-inline: 9px;
+}
+
+.desktop-title-bar-macos .desktop-title-bar-sidebar {
+  padding-left: 78px;
+}
+
+.app-sidebar-frame.sidebar-collapsed .desktop-title-bar-windows {
+  grid-template-columns: 144px minmax(0, 1fr) auto;
+}
+
+.app-sidebar-frame.sidebar-collapsed .desktop-title-bar-macos {
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+}
+
+.app-sidebar-frame.sidebar-collapsed .desktop-title-bar-sidebar {
+  border-right-color: transparent;
+  background: transparent;
+}
+
+.desktop-title-bar-content {
+  min-width: 0;
+  display: grid;
+  place-items: center;
+}
+
+.desktop-title-bar-label {
+  overflow: hidden;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-title-bar-native-end {
+  width: 12px;
+}
+
+.desktop-error-shell {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.desktop-caption-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 46px);
+}
+
+.desktop-caption-buttons button {
+  width: 46px;
+  height: 31px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  place-items: center;
+}
+
+.desktop-caption-buttons button:hover {
+  background: var(--oa-raised);
+}
+
+.desktop-caption-buttons button:last-child:hover {
+  background: #c42b1c;
+  color: white;
+}

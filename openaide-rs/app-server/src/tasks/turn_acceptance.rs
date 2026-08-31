@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-#[cfg(test)]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crate::tasks::task_operation::TaskOperationCoordinator;
@@ -82,7 +80,6 @@ impl TurnAcceptanceCoordinator {
             .remove(task_id);
     }
 
-    #[cfg(test)]
     pub(super) fn owned_turns(&self) -> HashSet<(String, String)> {
         self.pending_turns
             .lock()

@@ -4,6 +4,7 @@ import readline from "node:readline";
 
 const sessions = new Map();
 const pendingClientRequests = new Map();
+const nativeSessionScenario = process.argv.includes("--active-writer") ? "active-writer" : undefined;
 let nextSession = 1;
 let nextClientRequest = 1;
 
@@ -54,7 +55,15 @@ async function handleRequestOrNotification(message) {
       loadSession(message);
       break;
     case "session/list":
-      respond(message.id, { sessions: [] });
+      respond(message.id, {
+        sessions: nativeSessionScenario === "active-writer"
+          ? [{
+              sessionId: "smoke-active-writer-session",
+              cwd: params.cwd,
+              title: "Session open elsewhere",
+            }]
+          : [],
+      });
       break;
     case "session/set_config_option":
       setConfigOption(message);
@@ -98,6 +107,14 @@ function createSession(message) {
 
 function loadSession(message) {
   const sessionId = message.params.sessionId;
+  if (sessionId === "smoke-active-writer-session") {
+    respondError(
+      message.id,
+      -32603,
+      'Internal error: {"details":"thread smoke-active-writer already has an active writer"}',
+    );
+    return;
+  }
   sessions.set(sessionId, { activePrompts: new Map(), promptCount: 0 });
   textUpdate(sessionId, "user_message_chunk", "Earlier question", "replay-user");
   textUpdate(sessionId, "agent_thought_chunk", "Earlier reasoning", "replay-thought");
@@ -128,6 +145,48 @@ async function runPrompt(message) {
   const prompt = { id: message.id, cancelled: false };
   session.activePrompts.set(String(message.id), prompt);
 
+  if (text.includes("smoke:file-viewer-layout")) {
+    update(sessionId, {
+      sessionUpdate: "plan",
+      entries: [
+        { content: "Open the workspace README", priority: "high", status: "completed" },
+        { content: "Inspect File Viewer layout", priority: "medium", status: "in_progress" },
+        { content: "Return to Chat", priority: "low", status: "pending" },
+      ],
+    });
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Open [README.md](README.md) to inspect the file.",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
+  if (text.includes("smoke:long-plan-layout")) {
+    update(sessionId, {
+      sessionUpdate: "plan",
+      entries: [
+        { content: "Establish the overall objective, boundaries, assumptions, and desired result for this demonstration task before beginning the work.", priority: "medium", status: "in_progress" },
+        { content: "Gather the basic information and context needed to understand the demonstration task while distinguishing confirmed facts from assumptions.", priority: "medium", status: "pending" },
+        { content: "Identify the expected dependencies, possible blockers, and decision points that could affect the order of work or require later validation.", priority: "medium", status: "pending" },
+        { content: "Break the task into a simple sequence of steps, verify those steps remain feasible, and record meaningful progress as each step changes.", priority: "medium", status: "pending" },
+        { content: "Perform the planned activities in sequence while keeping the remaining steps accurate when new information changes the original assumptions.", priority: "medium", status: "pending" },
+        { content: "Review the completed work by checking whether the result satisfies the original objective and whether any important part remains unfinished.", priority: "medium", status: "pending" },
+        { content: "Summarize the outcome of the demonstration, including what was completed, what was verified, and what limitations or follow-up actions remain.", priority: "medium", status: "pending" },
+      ],
+    });
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Long Plan rendered",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:hold")) {
     textUpdate(sessionId, "agent_message_chunk", "Waiting for steering", `agent-${promptNumber}`);
     return;

@@ -181,10 +181,41 @@ describe("TaskView render isolation", () => {
       />);
     });
 
-    expect(tree.root.findAllByProps({ className: "task-plan-column" })).toHaveLength(1);
+    const conversation = tree.root.findByProps({ className: "chat-column task-conversation" });
+    expect(conversation.findAllByProps({ className: "task-plan-column" })).toHaveLength(1);
     expect(tree.root.findAllByProps({ className: "task-plan-drawer" })).toHaveLength(1);
     expect(tree.root.findByProps({ className: "task-queue-anchor" })
       .findByProps({ className: "task-message-queue" }).props["data-single"]).toBeUndefined();
+  });
+
+  it("opens Plan when the Agent creates one during the Task", () => {
+    const snapshot = taskSnapshot();
+    const onPlanDrawerOpenChange = vi.fn();
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot)} onPlanDrawerOpenChange={onPlanDrawerOpenChange} />);
+    });
+    expect(onPlanDrawerOpenChange).not.toHaveBeenCalled();
+
+    snapshot.current_plan = {
+      entries: [{ content: "Write the patch", priority: "medium", status: "pending" }],
+    };
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(snapshot)} onPlanDrawerOpenChange={onPlanDrawerOpenChange} />);
+    });
+    expect(onPlanDrawerOpenChange).toHaveBeenCalledWith(true);
+  });
+
+  it("does not reopen Plan when the Task already has one", () => {
+    const snapshot = taskSnapshot();
+    snapshot.current_plan = {
+      entries: [{ content: "Existing", priority: "medium", status: "in_progress" }],
+    };
+    const onPlanDrawerOpenChange = vi.fn();
+    act(() => {
+      create(<TaskView {...taskViewProps(snapshot)} onPlanDrawerOpenChange={onPlanDrawerOpenChange} />);
+    });
+    expect(onPlanDrawerOpenChange).not.toHaveBeenCalled();
   });
 });
 
@@ -220,6 +251,7 @@ function taskSnapshot(): TaskSnapshot {
   const message = chatMessage(1);
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: "task-1",
       title: "Task",

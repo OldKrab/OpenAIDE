@@ -450,6 +450,7 @@ import time
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
 prompt_mode = os.environ.get("OPENAIDE_ACP_FIXTURE_PROMPT_MODE", "")
+exit_on_second_new = os.environ.get("OPENAIDE_ACP_FIXTURE_EXIT_ON_SECOND_NEW", "") == "1"
 supports_resume = os.environ.get("OPENAIDE_ACP_FIXTURE_RESUME", "1") == "1"
 supports_close = os.environ.get("OPENAIDE_ACP_FIXTURE_CLOSE", "1") == "1"
 with_config_options = os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS", "") == "1"
@@ -564,7 +565,11 @@ for line in sys.stdin:
             env = {item["name"]: item["value"] for item in server.get("env", [])}
             log("mcp:" + server.get("name", "") + ":" + env.get("TOKEN", ""))
         next_session_number += 1
-        if prompt_mode == "host_terminal_during_new_hang":
+        if prompt_mode == "hang_second_new" and next_session_number >= 2:
+            continue
+        elif exit_on_second_new and next_session_number >= 2:
+            sys.exit(1)
+        elif prompt_mode == "host_terminal_during_new_hang":
             request_terminal("startup-terminal-create")
         elif session_id == "__counter__":
             respond(message, {"sessionId": f"counter-session-{next_session_number}"})
@@ -607,6 +612,8 @@ for line in sys.stdin:
             notify_text_chunk("replayed through active attachment")
         respond(message, {"configOptions": []})
     elif method == "session/resume":
+        if prompt_mode == "exit_on_resume":
+            sys.exit(1)
         respond(message, {
             "configOptions": [{
                 "id": "model",
@@ -633,18 +640,26 @@ for line in sys.stdin:
         if session_id == "idle-session":
             notify_title("Title after idle resume")
     elif method == "session/list":
+        if prompt_mode == "pending_prompt_and_slow_list":
+            time.sleep(0.2)
         respond(message, {"sessions": []})
+        if prompt_mode == "pending_prompt_and_slow_list" and pending_prompt_ids:
+            respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
     elif method == "authenticate":
         respond(message, {})
     elif method == "session/prompt":
         if log_details:
             log("prompt:" + json.dumps(message.get("params", {}), sort_keys=True))
         prompt_request_count += 1
-        if prompt_mode == "host_terminal_wait_for_cancel":
+        if prompt_mode.startswith("exit_on_prompt:"):
+            sys.exit(int(prompt_mode.split(":", 1)[1]))
+        elif prompt_mode.startswith("signal_on_prompt:"):
+            os.kill(os.getpid(), int(prompt_mode.split(":", 1)[1]))
+        elif prompt_mode == "host_terminal_wait_for_cancel":
             pending_prompt_ids.append(message.get("id"))
             request_terminal("prompt-terminal-create-1")
             request_terminal("prompt-terminal-create-2")
-        elif prompt_mode == "wait_for_cancel" or (
+        elif prompt_mode in ("wait_for_cancel", "pending_prompt_and_slow_list") or (
             prompt_mode == "delay_first_cancel_response" and prompt_request_count == 1
         ):
             pending_prompt_ids.append(message.get("id"))
@@ -1165,6 +1180,104 @@ fn listing_sessions_reuses_the_active_agent_process() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/list", "session/close"]
+    );
+}
+
+#[test]
+fn session_listing_timeout_does_not_disconnect_active_prompt() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
+        &temp,
+        "active-during-list-timeout",
+        "pending_prompt_and_slow_list",
+    ) else {
+        return;
+    };
+    let runtime = Arc::new(runtime.with_list_timeout(Duration::from_millis(50)));
+    let session = runtime
+        .start_session(start_request("task-active-during-list", cwd_string()))
+        .expect("start session");
+    let prompt_handle = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = session.session_id.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-active-during-list".to_string(),
+                    session_id,
+                    text: "keep working".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+    wait_for_method(&log_path, "session/prompt");
+
+    let error = runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: Some(cwd_string()),
+            cursor: None,
+        })
+        .expect_err("slow listing should reach its deadline");
+    assert_eq!(
+        error.to_string(),
+        "runtime not ready: ACP session listing timed out"
+    );
+    assert_eq!(
+        prompt_handle.join().expect("prompt thread").unwrap(),
+        AgentPromptOutcome::EndTurn
+    );
+    runtime
+        .close_session(&session.key())
+        .expect("close active session");
+    assert_eq!(
+        read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| method.as_str() == "initialize")
+            .count(),
+        1,
+        "listing failure must not replace the live Agent process"
+    );
+}
+
+#[test]
+fn listing_sessions_recovers_after_a_failed_resume_ends_the_shared_process() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "missing-session", "exit_on_resume")
+    else {
+        return;
+    };
+
+    let resume_result = runtime.resume_session(AgentSessionResume {
+        agent_id: "codex".to_string(),
+        task_id: "task-stale-session".to_string(),
+        session_id: "missing-session".to_string(),
+        cwd: cwd_string(),
+        model_id: None,
+        cancellation: TurnCancellation::new(),
+        secret_resolver: None,
+    });
+    assert!(
+        resume_result.is_err(),
+        "the stale session should end the first Agent process"
+    );
+
+    runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: Some(cwd_string()),
+            cursor: None,
+        })
+        .expect("listing should relaunch the ended Agent process");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/resume", "initialize", "session/list"]
     );
 }
 
@@ -3463,6 +3576,227 @@ fn active_session_start_timeout_reports_stable_error() {
     };
 
     assert_eq!(error, "runtime not ready: ACP session start timed out");
+}
+
+#[test]
+fn session_start_retry_launches_a_fresh_process_after_timeout() {
+    let diagnostic_logs = crate::logging::capture_test_logs();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let mut manager = AcpActiveSessionManager::new(
+        AgentRegistry::codex(AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    "__counter__".to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_PROMPT_MODE".to_string(),
+                    "hang_second_new".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        }),
+        HostBridge::disabled(),
+        AcpAuthMethodCache::default(),
+    );
+    manager.with_start_timeout(Duration::from_secs(1));
+
+    let first = manager
+        .start_session(start_request("task-before-timeout", cwd_string()))
+        .expect("first session");
+    manager
+        .close_session(&first.key())
+        .expect("close first session");
+    let timeout = match manager.start_session(start_request("task-timeout", cwd_string())) {
+        Ok(session) => panic!(
+            "reused fixture process unexpectedly started {}",
+            session.session_id
+        ),
+        Err(error) => error,
+    };
+    assert_eq!(
+        timeout.to_string(),
+        "runtime not ready: ACP session start timed out"
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let terminal = loop {
+        if let Some(entry) = diagnostic_logs.snapshot().into_iter().find(|entry| {
+            entry["event"] == "acp_agent_connection_completed"
+                && entry["fields"]["outcome_kind"] == "requested_shutdown"
+        }) {
+            break entry;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing requested ACP shutdown diagnostic"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(terminal["fields"]["exit_code"], serde_json::Value::Null);
+    assert_eq!(terminal["fields"]["exit_signal"], serde_json::Value::Null);
+
+    let retried = manager
+        .start_session(start_request("task-after-timeout", cwd_string()))
+        .expect("retry with fresh Agent process");
+    assert_eq!(retried.session_id, "counter-session-1");
+    assert_eq!(
+        read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| method.as_str() == "initialize")
+            .count(),
+        2,
+    );
+}
+
+#[test]
+fn session_start_retries_after_agent_process_ends_during_open() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let manager = AcpActiveSessionManager::new(
+        AgentRegistry::codex(AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    "__counter__".to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_EXIT_ON_SECOND_NEW".to_string(),
+                    "1".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        }),
+        HostBridge::disabled(),
+        AcpAuthMethodCache::default(),
+    );
+
+    let first = manager
+        .start_session(start_request("task-before-process-exit", cwd_string()))
+        .expect("first session");
+    manager
+        .close_session(&first.key())
+        .expect("close first session");
+    let second = manager
+        .start_session(start_request("task-after-process-exit", cwd_string()))
+        .expect("retry with fresh Agent process");
+
+    assert_eq!(second.session_id, "counter-session-1");
+    assert_eq!(
+        read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| method.as_str() == "initialize")
+            .count(),
+        2,
+    );
+}
+
+fn active_prompt_process_termination(
+    prompt_mode: &str,
+    expected_exit_code: Option<i64>,
+    expected_exit_signal: Option<i64>,
+) -> Option<serde_json::Value> {
+    let diagnostic_logs = crate::logging::capture_test_logs();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let task_id = format!("task-process-termination-{}", prompt_mode.replace(':', "-"));
+    let (runtime, _) = fixture_runtime_with_prompt_mode(&temp, "exiting-session", prompt_mode)?;
+    let session = runtime
+        .start_session(start_request(&task_id, cwd_string()))
+        .expect("start session");
+
+    runtime
+        .prompt(
+            AgentPrompt {
+                agent_id: "codex".to_string(),
+                task_id: task_id.clone(),
+                session_id: session.session_id,
+                text: "trigger fixture exit".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(CapturingEventSink::default()),
+        )
+        .expect_err("process exit must interrupt the prompt");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut observed = Vec::new();
+    let terminal = loop {
+        observed.extend(diagnostic_logs.snapshot());
+        if let Some(entry) = observed
+            .iter()
+            .find(|entry| {
+                let terminal_event = entry["event"] == "acp_agent_connection_completed"
+                    || entry["event"] == "acp_agent_connection_failed";
+                let expected_termination = expected_exit_code
+                    .is_some_and(|status| entry["fields"]["exit_code"] == status)
+                    || expected_exit_signal
+                        .is_some_and(|signal| entry["fields"]["exit_signal"] == signal);
+                terminal_event && expected_termination
+            })
+            .cloned()
+        {
+            break entry;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing ACP terminal diagnostic for {task_id}; observed {observed:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    Some(terminal)
+}
+
+#[test]
+fn active_prompt_process_exit_records_safe_terminal_diagnostics() {
+    let Some(terminal) = active_prompt_process_termination("exit_on_prompt:23", Some(23), None)
+    else {
+        return;
+    };
+
+    assert_eq!(terminal["fields"]["outcome_kind"], "process_exit");
+    assert_eq!(terminal["fields"]["exit_code"], 23);
+    assert_eq!(terminal["fields"]["exit_signal"], serde_json::Value::Null);
+    assert_eq!(terminal["fields"]["active_session_count"], 1);
+    assert_eq!(terminal["fields"]["active_prompt_count"], 1);
+    assert!(terminal["fields"].get("stderr").is_none());
+    assert!(terminal["fields"].get("error").is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn active_prompt_process_signal_records_numeric_signal() {
+    let Some(terminal) = active_prompt_process_termination("signal_on_prompt:15", None, Some(15))
+    else {
+        return;
+    };
+
+    assert_eq!(terminal["fields"]["outcome_kind"], "process_exit");
+    assert_eq!(terminal["fields"]["exit_code"], serde_json::Value::Null);
+    assert_eq!(terminal["fields"]["exit_signal"], 15);
 }
 
 #[test]

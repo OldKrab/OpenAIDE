@@ -76,7 +76,8 @@ The start screen keeps the centered question **What are we working on?** followe
 
 Adding a Project chooses a folder and creates or selects the canonical Project record.
 
-- Web opens the approved modal folder explorer. It supports Back, Up, editable path navigation, folder traversal, and an explicit **Add this folder** action.
+- Web opens the framed folder explorer. It starts in the home folder when that root is available, keeps the current directory as the selection, prefills the Project name from that folder, and supports Up, breadcrumbs, editable path, folder traversal, and **Add this folder**.
+- The Project name follows the current folder until the user edits it.
 - Desktop uses the operating system's native folder picker.
 - VS Code uses the appropriate VS Code workspace or folder capability.
 - Shell-specific folder selection stays behind the shell boundary; the shared Frontend receives a selected-folder result.

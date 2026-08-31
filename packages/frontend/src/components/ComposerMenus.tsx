@@ -26,8 +26,10 @@ type WebFileUploadItem = {
 
 type ComposerControlsProps = {
   agentLocked: boolean;
+  configChangeLabel?: string;
   agents?: AgentOption[];
   configLocked: boolean;
+  configLoadingLabel?: string;
   configOptions?: ConfigOptionsCatalog;
   disabled: boolean;
   fileBrowser?: TaskFileBrowserCallbacks;
@@ -38,6 +40,7 @@ type ComposerControlsProps = {
   onUnsupportedImageAttachment?: (message?: string) => void;
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
+  onRetryConfigOptions?: () => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   openMenu?: ComposerMenu;
   selectAndClose: (select: () => void) => void;
@@ -50,8 +53,10 @@ type ComposerControlsProps = {
 
 export function ComposerControls({
   agentLocked,
+  configChangeLabel,
   agents = agentOptions,
   configLocked,
+  configLoadingLabel,
   configOptions,
   disabled,
   fileBrowser,
@@ -62,6 +67,7 @@ export function ComposerControls({
   onUnsupportedImageAttachment,
   onSelectAgent,
   onSelectConfigOption,
+  onRetryConfigOptions,
   onSelectIsolation,
   openMenu,
   selectAndClose,
@@ -210,7 +216,7 @@ export function ComposerControls({
           trigger={(popupTrigger) => (
             <IconButton
               ariaLabel="Add context"
-              disabled={disabled || (!fileBrowser?.attachFiles && !imageAttachmentsAllowed)}
+              disabled={disabled || (!fileBrowser?.attachFiles && (!imageAttachmentsAllowed || !fileBrowser?.attachImage))}
               icon={<Plus size={14} />}
               popupTrigger={popupTrigger}
               pressed={openMenu === "add"}
@@ -292,11 +298,14 @@ export function ComposerControls({
         </div>
       ) : null}
       <ComposerRunOptions
+        configChangeLabel={configChangeLabel}
         configLocked={configControlsLocked}
         configOptions={configOptions}
+        loadingLabel={configLoadingLabel}
         controlsLocked={controlsLocked}
         disabled={disabled}
         onSelectConfigOption={onSelectConfigOption}
+        onRetryConfigOptions={onRetryConfigOptions}
         onSelectIsolation={onSelectIsolation}
         openMenu={openMenu}
         selectAndClose={selectAndClose}

@@ -12,10 +12,12 @@ import type {
   SettingsProjectionAvailability,
   SettingsTabId,
   SkillSettingsRecord,
+  TaskPermissionPolicy,
   TaskSnapshot,
   TaskSummary,
   ActivityToolDetails,
 } from "@openaide/app-shell-contracts";
+import { projectIdForWorkspaceRoot } from "@openaide/app-shell-contracts";
 import {
   selectionWithProject,
   selectionWithWorkspace,
@@ -81,6 +83,7 @@ type AppActionPayload =
       snapshot: TaskSnapshot;
       intent: SnapshotIntent;
       liveText?: { messageId: string; channel: "agent" | "thought"; eventCursor: string };
+      confirmedPermissionPolicy?: TaskPermissionPolicy;
     }
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
   | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventCursor: string }
@@ -106,7 +109,13 @@ type AppActionPayload =
   | { type: "newTask:nativeSessions:start"; append: boolean }
   | { type: "newTask:nativeSessions:result"; result: AgentListSessionsResult; append: boolean }
   | { type: "newTask:nativeSessions:listError"; message: string; recoveryKind?: NativeSessionsState["recoveryKind"] }
-  | { type: "newTask:nativeSessions:error"; sessionId: string; message: string; recoverable?: boolean }
+  | {
+      type: "newTask:nativeSessions:error";
+      sessionId: string;
+      kind?: "conflict" | "notFound";
+      message: string;
+      recoverable?: boolean;
+    }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
@@ -163,6 +172,7 @@ type AppActionPayload =
   | { type: "settings:start" }
   | { type: "settings:sections"; tabs: SettingsTabId[] }
   | { type: "settings:agentDetailsResult"; generatedAt: string; agents: AgentSettingsRecord[] }
+  | { type: "settings:agentCollection"; agents: Array<{ agentId: string; status: AgentSettingsRecord["status"]; setupReason?: "nodeJsRequired" }> }
   | { type: "settings:mcpServersStart" }
   | { type: "settings:mcpServersResult"; generatedAt: string; availability: SettingsProjectionAvailability; servers: McpServerSettingsRecord[] }
   | { type: "settings:mcpServersError"; message: string }
@@ -445,16 +455,26 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       if (replicaEpoch < state.appServerReplicaEpoch) return state;
       if (action.intent === "refresh" && state.activeTaskId !== action.snapshot.task.task_id) {
         return settleTaskLiveTextPresentation(
-          reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch),
+          reconcileBackgroundTaskSnapshot(
+            state,
+            action.snapshot,
+            replicaEpoch,
+            action.confirmedPermissionPolicy,
+          ),
           action.snapshot.task.task_id,
           action.snapshot.task.status,
         );
       }
       const taskId = action.snapshot.task.task_id;
-      const reconciliation = reconcileTaskSnapshotDependents(state, action.snapshot, replicaEpoch);
+      const reconciliation = reconcileTaskSnapshotDependents(
+        state,
+        action.snapshot,
+        replicaEpoch,
+        action.confirmedPermissionPolicy,
+      );
       if (reconciliation.state === state) {
         const nextState = settleTaskLiveTextPresentation(state, taskId, action.snapshot.task.status);
-        return action.liveText && taskAcceptsLiveText(action.snapshot.task.status)
+        return action.liveText
           ? applyTaskLiveTextPresentation(state, taskId, action.liveText)
           : nextState;
       }
@@ -479,7 +499,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         },
       };
       const presentationState = settleTaskLiveTextPresentation(nextState, taskId, snapshot.task.status);
-      return action.liveText && taskAcceptsLiveText(snapshot.task.status)
+      return action.liveText
         ? applyTaskLiveTextPresentation(nextState, taskId, action.liveText)
         : presentationState;
     }
@@ -494,7 +514,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
     case "taskChat:liveText":
       return applyTaskLiveTextPresentation(state, action.taskId, action);
     case "projects": {
-      const currentProject = state.newTask.selection.projectId
+      const currentProject = !state.newTask.workspaceRootsSeededProject && state.newTask.selection.projectId
         ? action.projects.find((project) => project.projectId === state.newTask.selection.projectId)
         : undefined;
       const selected = currentProject ?? selectedProject(action.projects, action.initialProjectId);
@@ -510,7 +530,12 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       return {
         ...state,
         projects: action.projects,
-        newTask: { ...state.newTask, error: undefined, selection },
+        newTask: {
+          ...state.newTask,
+          error: undefined,
+          selection,
+          workspaceRootsSeededProject: undefined,
+        },
       };
     }
     case "worktreeRepository":
@@ -523,11 +548,30 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       };
     case "workspace:roots": {
       const firstRoot = action.roots[0];
-      const selection =
-        state.newTask.selection.workspaceRoot || !firstRoot
-          ? state.newTask.selection
-          : selectionWithWorkspace(state.newTask.selection, firstRoot);
-      return { ...state, workspaceRoots: action.roots, workspaceRootsLoaded: true, newTask: { ...state.newTask, selection } };
+      const firstRootProjectId = firstRoot?.projectId
+        ?? (firstRoot ? projectIdForWorkspaceRoot(firstRoot.path) : undefined);
+      const fillsSelectedWorkspace = !state.newTask.selection.workspaceRoot
+        && firstRoot !== undefined
+        && (
+          !state.newTask.selection.projectId
+          || state.newTask.selection.projectId === firstRootProjectId
+        );
+      const seedsProject = fillsSelectedWorkspace && !state.newTask.selection.projectId;
+      const selection = fillsSelectedWorkspace && firstRoot
+        ? selectionWithWorkspace(state.newTask.selection, firstRoot)
+        : state.newTask.selection;
+      return {
+        ...state,
+        workspaceRoots: action.roots,
+        workspaceRootsLoaded: true,
+        newTask: {
+          ...state.newTask,
+          selection,
+          workspaceRootsSeededProject: seedsProject
+            ? true
+            : state.newTask.workspaceRootsSeededProject,
+        },
+      };
     }
     case "search:set":
       return { ...state, searchQuery: action.query };

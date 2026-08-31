@@ -6,10 +6,10 @@ use crate::agent::acp_host::{
 };
 use crate::agent::acp_runtime_threading::close_in_parallel;
 use crate::agent::acp_schema::{
-    AgentCapabilities, AudioContent, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
-    AuthMethodTerminal, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
-    AvailableCommandInput, AvailableCommandsUpdate, BlobResourceContents, ContentBlock,
-    ContentChunk, CreateTerminalRequest, CreateTerminalResponse, Diff, EmbeddedResource,
+    AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthMethodTerminal,
+    AuthenticateRequest, AuthenticateResponse, AvailableCommand, AvailableCommandInput,
+    AvailableCommandsUpdate, BlobResourceContents, ContentBlock, ContentChunk,
+    CreateTerminalRequest, CreateTerminalResponse, Diff, EmbeddedResource,
     EmbeddedResourceResource, ImageContent, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     McpCapabilities, NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
@@ -781,19 +781,13 @@ fn probe_result_normalizes_initialize_without_raw_payloads() {
 }
 
 #[test]
-fn validate_auth_method_accepts_every_acp_v1_method_type() {
+fn validate_auth_method_accepts_every_current_acp_v1_method_type() {
     let initialize = InitializeResponse::new(ProtocolVersion::V1).auth_methods(vec![
         AuthMethod::Agent(AuthMethodAgent::new("codex-login", "Codex login")),
-        AuthMethod::EnvVar(AuthMethodEnvVar::new(
-            "api-key",
-            "API key",
-            vec![AuthEnvVar::new("API_KEY")],
-        )),
         AuthMethod::Terminal(AuthMethodTerminal::new("terminal-login", "Terminal login")),
     ]);
 
     validate_auth_method(&initialize, "codex-login").unwrap();
-    validate_auth_method(&initialize, "api-key").unwrap();
     validate_auth_method(&initialize, "terminal-login").unwrap();
     assert!(matches!(
         validate_auth_method(&initialize, "missing").unwrap_err(),
@@ -965,6 +959,7 @@ fn replay_projects_each_recorded_codex_subagent_tool_with_agent_owned_copy() {
             && matches!(
                 steps.as_slice(),
                 [crate::protocol::model::ActivityStep::Subagent {
+                    subagent_id: None,
                     thread_id: Some(thread_id),
                     activity: Some(activity),
                     ..
@@ -983,6 +978,7 @@ fn replay_projects_each_recorded_codex_subagent_tool_with_agent_owned_copy() {
             && matches!(
                 steps.as_slice(),
                 [crate::protocol::model::ActivityStep::Subagent {
+                    subagent_id: None,
                     activity: Some(activity),
                     ..
                 }] if activity == "interacted"
@@ -1325,8 +1321,7 @@ fn replay_keeps_sourced_text_distinct_when_the_next_chunk_is_anonymous() {
 fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();
-    let projection =
-        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+    let projection = LivePromptProjection::for_native_subagent("codex", sink);
 
     projection
         .emit(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
@@ -1357,6 +1352,22 @@ fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
         } => assert_eq!(text, " more"),
         other => panic!("expected thought event, got {other:?}"),
     }
+}
+
+#[test]
+fn codex_child_user_chunks_do_not_invent_visible_prompts() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection = LivePromptProjection::for_native_subagent("codex", sink);
+
+    projection
+        .emit(SessionUpdate::UserMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Follow up")))
+                .message_id("child-user-1"),
+        ))
+        .unwrap();
+
+    assert!(capture.events().is_empty());
 }
 
 #[test]
@@ -1715,6 +1726,49 @@ fn tool_call_update_keeps_partial_fields_from_existing_call() {
             assert_eq!(
                 tool_call.output_preview.as_deref(),
                 Some("Found configuration")
+            );
+        }
+        other => panic!("expected tool call event, got {other:?}"),
+    }
+}
+
+#[test]
+fn tool_call_update_preserves_cursor_input_summary_when_output_arrives() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("cursor", sink, crate::agent::TurnCancellation::new());
+
+    projection
+        .emit(SessionUpdate::ToolCall(
+            ToolCall::new("cursor_read", "Read File")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::InProgress)
+                .raw_input(serde_json::json!({ "path": "/workspace/src/main.rs" })),
+        ))
+        .unwrap();
+    projection
+        .emit(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "cursor_read",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .raw_output(serde_json::json!({ "content": "fn main() {}" })),
+        )))
+        .unwrap();
+
+    let events = capture.events();
+    assert_eq!(events.len(), 2);
+    match &events[1] {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("main.rs"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("fn main() {}"));
+            assert_eq!(
+                tool_call
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.input.as_ref())
+                    .and_then(|input| input.path.as_deref()),
+                Some("/workspace/src/main.rs")
             );
         }
         other => panic!("expected tool call event, got {other:?}"),
@@ -2308,6 +2362,50 @@ fn tool_call_preview_reads_inputs_from_a_structured_tool_envelope() {
             );
         }
         other => panic!("expected tool call event, got {other:?}"),
+    }
+}
+
+#[test]
+fn tool_call_preview_reads_cursor_raw_output() {
+    let read = tool_call_event(
+        &ToolCall::new("cursor_read", "Read File")
+            .kind(ToolKind::Read)
+            .raw_input(serde_json::json!({ "path": "/workspace/src/main.rs" }))
+            .raw_output(serde_json::json!({ "content": "fn main() {}" })),
+    );
+    let search = tool_call_event(
+        &ToolCall::new("cursor_search", "Find")
+            .kind(ToolKind::Search)
+            .raw_input(serde_json::json!({ "pattern": "ToolCall", "path": "/workspace/src" }))
+            .raw_output(serde_json::json!({ "totalMatches": 3, "truncated": false })),
+    );
+    let command = tool_call_event(
+        &ToolCall::new("cursor_command", "Run command")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "command": "printf ok" }))
+            .raw_output(serde_json::json!({ "exitCode": 0, "stdout": "ok" })),
+    );
+
+    match read {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("main.rs"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("fn main() {}"));
+        }
+        other => panic!("expected read tool call event, got {other:?}"),
+    }
+    match search {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("ToolCall"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("3 matches"));
+        }
+        other => panic!("expected search tool call event, got {other:?}"),
+    }
+    match command {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(tool_call.input_summary.as_deref(), Some("printf ok"));
+            assert_eq!(tool_call.output_preview.as_deref(), Some("ok"));
+        }
+        other => panic!("expected command tool call event, got {other:?}"),
     }
 }
 

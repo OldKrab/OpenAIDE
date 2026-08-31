@@ -8,7 +8,7 @@ on:
         type: string
         required: true
       release_notes:
-        description: "User-facing Markdown; the changelog link is added automatically"
+        description: "Generated Markdown for this release"
         type: string
         required: true
 
@@ -52,15 +52,15 @@ jobs:
 
       - name: Validate release inputs
         env:
-          RELEASE_NOTES: ${{ inputs.release_notes }}
           RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
         shell: bash
         run: |
+          set -euo pipefail
           node scripts/release-version.mjs next "$RELEASE_VERSION"
-          if [[ -z "${RELEASE_NOTES//[[:space:]]/}" ]]; then
-            echo "Release notes must contain user-facing Markdown" >&2
-            exit 1
-          fi
+          notes_path="$RUNNER_TEMP/release-notes.md"
+          printf '%s\n' "$RELEASE_NOTES" > "$notes_path"
+          node scripts/validate-release-notes.mjs "$RELEASE_VERSION" "$notes_path"
 
       - name: Configure git
         run: |
@@ -71,20 +71,11 @@ jobs:
       - name: Commit version and tag
         shell: bash
         env:
-          RELEASE_NOTES: ${{ inputs.release_notes }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          # Stable notes cover changes since the previous stable release; prerelease
-          # tags are intentionally not exposed in stable release notes.
-          previous_tag="$(node scripts/release-version.mjs previous-tag "$RELEASE_VERSION")"
           notes_path="$RUNNER_TEMP/release-notes.md"
 
-          printf '%s\n' "$RELEASE_NOTES" > "$notes_path"
           node scripts/update-extension-changelog.mjs "$RELEASE_VERSION" "$notes_path"
-          if [[ -n "$previous_tag" ]]; then
-            printf '\n## Changelog\n\n**Full Changelog**: %s/%s/compare/%s...v%s\n' \
-              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous_tag" "$RELEASE_VERSION" >> "$notes_path"
-          fi
 
           npm version "$RELEASE_VERSION" --allow-same-version=false --no-git-tag-version
           git add package.json package-lock.json apps/vscode-extension/CHANGELOG.md

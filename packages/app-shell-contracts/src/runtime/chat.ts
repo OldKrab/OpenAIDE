@@ -45,12 +45,13 @@ export type AgentMessagePart =
   | { kind: "unsupported"; content_type: string; media_type?: string; uri?: string };
 
 export type ActivityStep =
-  | { kind: "text"; text: string; level?: "info" | "warning" | "error" }
+  | { kind: "text"; text: string; level?: "info" | "warning" | "error" | "agent_boundary" }
   | { kind: "thought"; message_id?: string; text: string; streaming?: boolean }
   | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; presentation?: ToolPresentation; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails; permission_outcomes?: ToolPermissionOutcome[] }
   | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string }
   | {
       kind: "subagent";
+      subagent_id?: string;
       name: string;
       path: string[];
       status: ActivityStatus;

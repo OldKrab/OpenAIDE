@@ -3,6 +3,27 @@
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentPlan } from "@openaide/app-shell-contracts";
+import type { ReactNode } from "react";
+
+vi.mock("./Popup", () => ({
+  PopupMenu: ({
+    children,
+    onOpenChange,
+    open,
+    trigger,
+  }: {
+    children: ReactNode;
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+    trigger: (props: { onClick: () => void }) => ReactNode;
+  }) => (
+    <>
+      {trigger({ onClick: () => onOpenChange(!open) })}
+      {open ? children : null}
+    </>
+  ),
+}));
+
 import { AgentPlanView, ClosedPlanView, CompletedPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -141,13 +162,35 @@ describe("Agent Plan", () => {
     })).toHaveLength(0);
   });
 
-  it("lets the user close the current Plan", () => {
-    const onClose = vi.fn(() => new Promise<void>(() => undefined));
+  it("hides a Plan drawer without dismissing it", () => {
+    const onHide = vi.fn();
+    const onDismiss = vi.fn();
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
         <AgentPlanView
-          onClose={onClose}
+          onDismiss={onDismiss}
+          onHide={onHide}
+          plan={plan}
+          taskId="task-hide"
+          taskStatus="active"
+        />,
+      );
+    });
+
+    act(() => tree.root.findByProps({ "data-plan-action": "hide" }).props.onClick());
+
+    expect(onHide).toHaveBeenCalledOnce();
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("lets the user close the current Plan from the overflow menu", () => {
+    const onDismiss = vi.fn(() => new Promise<void>(() => undefined));
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentPlanView
+          onDismiss={onDismiss}
           plan={plan}
           taskId="task-close"
           taskStatus="active"
@@ -155,9 +198,10 @@ describe("Agent Plan", () => {
       );
     });
 
-    act(() => tree.root.findByProps({ "aria-label": "Close Plan" }).props.onClick());
+    act(() => tree.root.findByProps({ "data-plan-action": "menu" }).props.onClick());
+    act(() => tree.root.findByProps({ role: "menuitem" }).props.onClick());
 
-    expect(onClose).toHaveBeenCalledOnce();
+    expect(onDismiss).toHaveBeenCalledOnce();
   });
 
   it("keeps a completed Plan Chat row collapsed by default", () => {

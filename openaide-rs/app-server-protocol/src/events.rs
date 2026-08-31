@@ -6,10 +6,10 @@ use crate::ids::{
 };
 use crate::snapshot::{
     AgentCollectionSnapshot, AgentPlanSnapshot, ChatItem, ChatSnapshot, ClientSnapshot,
-    PendingRequestSnapshot, ProjectCollectionSnapshot, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities,
-    TaskLifecycle, TaskMessageQueueSnapshot, TaskNavigationSnapshot, TaskPreparationSnapshot,
-    TaskSendCapabilitySnapshot, TaskSummary,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
+    SubagentHistorySnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot,
+    TaskNavigationSnapshot, TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
@@ -97,6 +97,12 @@ pub enum AppServerEventPayload {
     TaskRequestsUpdated {
         task_id: TaskId,
         requests: Vec<PendingRequestSnapshot>,
+    },
+    SubagentCatalogUpdated {
+        catalog: SubagentCatalogSnapshot,
+    },
+    SubagentHistoryUpdated {
+        history: SubagentHistorySnapshot,
     },
     ToolDetailUpdated {
         task_id: TaskId,

@@ -1,9 +1,11 @@
 import { ListTodo, Menu, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
+import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
+import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
@@ -12,19 +14,37 @@ import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
-import { currentFrontendShell } from "../services/frontendShell";
+import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
   const taskNotifications = useWebTaskNotifications(controller);
-  const { activeNavigationTaskId, activeTask, backendReady, bootstrap, callbacks, preferences, view, visibleTasks } = controller;
+  const {
+    activeNavigationTaskId,
+    activeTask,
+    backendReady,
+    bootstrap,
+    callbacks,
+    preferences,
+    taskMutationReady,
+    view,
+    visibleTasks,
+  } = controller;
   const { appServerError, navigation, settings } = view;
+  const frontendShell = currentFrontendShell();
+  const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
+  const updateAvailable = desktopUpdate?.kind === "available"
+    || desktopUpdate?.kind === "downloading"
+    || desktopUpdate?.kind === "readyToUpdate";
   const forkableAgentIds = useMemo(
     () => new Set((controller.agents ?? [])
       .filter((agent) => agent.capabilities?.forkNativeSessions)
       .map((agent) => agent.id)),
     [controller.agents],
   );
+  const codexIntegrationInstalling = controller.agents?.some(
+    (agent) => agent.id === "codex" && agent.status === "installing",
+  ) === true;
   // The App Server Project catalog is global; current-Project shells expose only
   // the ordered Project identities represented by this App Shell workspace.
   const currentNavigationProjectIds = bootstrap.surface !== "invalid"
@@ -50,11 +70,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
-  const isWebWorkbench = isWebShell && (
+  const isProjectWorkbench = bootstrap.surface !== "invalid"
+    && bootstrap.shell.navigationMode === "project" && (
     bootstrap.surface === "task"
     || bootstrap.surface === "nativeSession"
     || bootstrap.surface === "settings"
   );
+  const isWebWorkbench = isWebShell && isProjectWorkbench;
   const sidebarActiveTaskId = bootstrap.surface === "settings"
     ? undefined
     : bootstrap.surface === "task"
@@ -63,6 +85,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
+  const mobilePermissionTask = isWebWorkbench ? taskSurfaceModel.renderableTaskSnapshot : undefined;
+  const hasMobilePermissionPolicy = Boolean(mobilePermissionTask);
   const taskRecoveryActions = createAgentRecoveryActions(controller);
   const settingsRecoveryActions = {
     ...taskRecoveryActions,
@@ -91,7 +115,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     });
     callbacks.navigation.openNewTask(project.projectId);
   };
-  const backFromSettings = isWebShell
+  const backFromSettings = isProjectWorkbench
     ? () => {
         if (activeNavigationTaskId) {
           callbacks.navigation.openTask(activeNavigationTaskId);
@@ -102,7 +126,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         );
       }
     : undefined;
-  const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
+  const { openingNativeSession, renderableTaskArchived, renderableTaskSnapshot } = taskSurfaceModel;
   const routedTaskProjectId = bootstrap.surface === "task"
     ? (renderableTaskSnapshot && renderableTaskSnapshot.task.task_id === bootstrap.taskId
         ? renderableTaskSnapshot.task.project_id
@@ -139,11 +163,30 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
-  const workspaceBrowser = callbacks.newTask.workspaceBrowser;
-  const workspaceCapability = currentFrontendShell()?.workspace;
-  const projectFolderPicker = currentFrontendShell()?.projects;
-  const finishAddingProject = async (folder: { path: string }) => {
-    const project = await controller.intents.projects.add(folder.path);
+  // Folder acquisition belongs to the App Shell: Web browses through the App
+  // Server, Desktop opens the OS picker, and VS Code delegates to its host.
+  const workspaceBrowser = isWebShell ? callbacks.newTask.workspaceBrowser : undefined;
+  const workspaceCapability = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "vscodeExtension"
+    ? frontendShell?.workspace
+    : undefined;
+  const projectFolderPicker = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
+    ? frontendShell?.projects
+    : undefined;
+  const desktopWindow = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
+    ? frontendShell?.desktopWindow
+    : undefined;
+  const desktopRuntimeEnvironment = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop"
+    ? frontendShell?.desktopRuntime?.snapshot().active
+    : undefined;
+  const desktopEnvironmentLabel = desktopRuntimeEnvironment?.kind === "wsl"
+    ? `WSL · ${desktopRuntimeEnvironment.distro}`
+    : desktopRuntimeEnvironment ? "Windows" : undefined;
+  const finishAddingProject = async (folder: { path: string; label: string }) => {
+    let project = await controller.intents.projects.add(folder.path);
+    const label = folder.label.trim();
+    if (label && label !== project.label) {
+      project = await controller.intents.projects.rename(project.projectId, label);
+    }
     setProjectFolderDialogOpen(false);
     controller.intents.newTask.selectProject({
       projectId: project.projectId,
@@ -156,13 +199,34 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     });
     callbacks.navigation.openNewTask(project.projectId);
   };
-  const addProject = workspaceBrowser
-    ? () => setProjectFolderDialogOpen(true)
+  const addProject = projectFolderPicker
+    ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
     : workspaceCapability
       ? () => workspaceCapability.openFolder()
-      : projectFolderPicker
-        ? () => { void projectFolderPicker.pickFolder().then((folder) => folder && finishAddingProject(folder)); }
+      : workspaceBrowser
+        ? () => setProjectFolderDialogOpen(true)
         : undefined;
+  useEffect(() => frontendShell?.desktopCommands?.subscribe((command) => {
+    if (command === "check-for-updates") {
+      callbacks.navigation.openSettings(undefined, undefined, undefined, "common");
+      void frontendShell.desktopUpdates?.check();
+    } else if (command === "new-task") callbacks.navigation.openNewTask();
+    else if (command === "settings") callbacks.navigation.openSettings();
+    else if (command === "open-project") addProject?.();
+  }), [addProject, callbacks.navigation, frontendShell]);
+  const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
+  const desktopTitleBar = desktopWindow
+    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
+    : undefined;
+  const desktopSettingsTitleBar = desktopWindow ? (
+    <DesktopTitleBar window={desktopWindow} />
+  ) : undefined;
+  // Desktop chrome overlays product content so native controls never consume a
+  // separate blank row. Active Tasks provide the draggable product header.
+  const desktopTitleBarPlacement = desktopWindow ? "overlay" : "row";
+  const desktopSettingsTitleBarPlacement = desktopWindow?.platform === "macos"
+    ? "overlay"
+    : "row";
   const projectFolderDialog = projectFolderDialogOpen && workspaceBrowser ? (
     <ProjectFolderDialog
       browser={workspaceBrowser}
@@ -294,6 +358,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
+          codexIntegrationInstalling={codexIntegrationInstalling}
           groupByProject={true}
           nativeSessions={navigation.nativeSessions}
           nativeSessionMutations={navigation.nativeSessionMutations}
@@ -301,7 +366,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
           forkableAgentIds={forkableAgentIds}
+          environmentLabel={desktopEnvironmentLabel}
           onArchiveTask={callbacks.navigation.archiveTask}
+          onArchiveOlderTasks={callbacks.navigation.archiveOlderTasks}
           onAddProject={addProject}
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onForkNativeSession={callbacks.navigation.forkNativeSession}
@@ -310,7 +377,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onManageWorktrees={manageWorktrees}
           onRemoveProject={prepareProjectRemoval}
           onRenameProject={async (projectId, label) => { await controller.intents.projects.rename(projectId, label); }}
-          onNewTask={callbacks.navigation.openNewTask}
+          onNewTask={(projectId) => {
+            // The global action leaves Project resolution to the shell-retained
+            // selection. Project-group actions still provide an explicit scope.
+            callbacks.navigation.openNewTask(projectId);
+          }}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
           onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
           onOpenTask={callbacks.navigation.openTask}
@@ -321,11 +392,14 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
+          onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
+          onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
           onSearchChange={callbacks.navigation.changeSearch}
-          onSettings={() => callbacks.navigation.openSettings()}
+          onSettings={() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "common" : undefined)}
           onToggleArchived={callbacks.navigation.toggleArchived}
           projects={navigationProjects}
           searchQuery={navigation.searchQuery}
+          settingsStatus={updateAvailable ? "Update available" : undefined}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
@@ -338,7 +412,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
 
   if (appServerError && !isWebShell) {
     return (
-      <main className="app-shell editor-shell">
+      <main className={`app-shell editor-shell ${desktopTitleBar ? "desktop-error-shell" : ""}`}>
+        {desktopTitleBar}
         <AppServerErrorView message={appServerError} />
       </main>
     );
@@ -347,7 +422,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   if (bootstrap.surface === "settings") {
     return (
       <SettingsView
+        backendConnection={controller.backendConnection}
+        developerSettingsUnlocked={bootstrap.developerSettingsUnlocked}
         desktopNotifications={taskNotifications?.settings}
+        frameHeader={desktopSettingsTitleBar}
+        frameHeaderPlacement={desktopSettingsTitleBarPlacement}
         onAuthenticate={authenticateAndReturn}
         onBackToApp={backFromSettings}
         onCreateCustomAgent={callbacks.settings.createCustomAgent}
@@ -379,7 +458,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (isWebWorkbench) {
+  if (isProjectWorkbench) {
     const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = renderableTaskSnapshot?.task.title
       ?? routedActiveTask?.title
@@ -402,6 +481,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const taskNavigation = (
       <Sidebar
         activeTaskId={sidebarActiveTaskId}
+        codexIntegrationInstalling={codexIntegrationInstalling}
         groupByProject={true}
         hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
         modal={mobileLayoutActive && mobileNavigation.active}
@@ -412,11 +492,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
         nativeSessionProjectId={navigation.newTaskSelection.projectId}
         forkableAgentIds={forkableAgentIds}
+        environmentLabel={desktopEnvironmentLabel}
         onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
         onForkNativeSession={callbacks.navigation.forkNativeSession}
         onForkTask={callbacks.navigation.forkTask}
         onAddProject={addProject}
         onArchiveTask={callbacks.navigation.archiveTask}
+        onArchiveOlderTasks={callbacks.navigation.archiveOlderTasks}
         onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
         onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
         onRemoveProject={(project) => { closeMobileNavigation({ restoreFocus: false }); prepareProjectRemoval(project); }}
@@ -431,11 +513,14 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onSetTaskPinned={callbacks.navigation.setTaskPinned}
         onSetTaskTitle={callbacks.navigation.setTaskTitle}
         onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
+        onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
+        onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
         onSearchChange={callbacks.navigation.changeSearch}
-        onSettings={closeAfter(() => callbacks.navigation.openSettings())}
+        onSettings={closeAfter(() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "common" : undefined))}
         onToggleArchived={callbacks.navigation.toggleArchived}
         projects={navigation.projects}
         searchQuery={navigation.searchQuery}
+        settingsStatus={updateAvailable ? "Update available" : undefined}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
         tasks={visibleTasks}
@@ -445,9 +530,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <AppSidebarFrame
         className={[
           "app-shell web-workbench-shell",
+          desktopTaskHeaderIntegrated ? "desktop-task-title-bar" : undefined,
           mobileNavigationOpen ? "mobile-navigation-open" : undefined,
           mobileNavigation.dragging ? "mobile-navigation-dragging" : undefined,
         ].filter(Boolean).join(" ")}
+        header={desktopTitleBar}
+        headerPlacement={desktopTitleBarPlacement}
         onKeyDown={trapMobileNavigationFocus}
         onPointerCancel={mobileNavigation.cancelSwipe}
         onPointerDownCapture={mobileNavigation.beginSwipe}
@@ -460,7 +548,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       >
          {projectFolderDialog}
          {projectRemoveDialog}
-        <header className="mobile-workbench-bar" data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}>
+        <header
+          className="mobile-workbench-bar"
+          data-has-permission-policy={hasMobilePermissionPolicy || undefined}
+          data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}
+        >
           <button
             aria-expanded={mobileNavigationOpen}
             aria-label={mobileNavigationOpen ? "Close task navigation" : "Open task navigation"}
@@ -481,10 +573,23 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             <strong>{mobileTitle}</strong>
             <small>{mobileSubtitle}</small>
           </span>
+          {mobilePermissionTask ? (
+            <TaskPermissionPolicyControl
+              disabled={renderableTaskArchived || !taskMutationReady}
+              disabledReason={renderableTaskArchived
+                ? "Archived Tasks are read-only."
+                : !taskMutationReady
+                  ? "Permission handling is unavailable until this Task is connected."
+                  : undefined}
+              onChange={callbacks.task.setPermissionPolicy}
+              policy={mobilePermissionTask.permission_policy}
+            />
+          ) : null}
           {renderableTaskSnapshot?.current_plan ? (
             <button
               aria-expanded={planDrawerOpen}
-              aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
+              aria-label={planDrawerOpen ? "Hide Plan" : "Open Plan"}
+              className="task-plan-appear-chip"
               onClick={() => {
                 closeMobileNavigation({ restoreFocus: false });
                 setPlanDrawerOpen((open) => !open);
@@ -511,6 +616,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           ) : (
             <AppPrimaryTaskSurface
               controller={controller}
+              desktopWindow={desktopWindow}
               focusRequestKey={newTaskFocusRequestKey}
               model={taskSurfaceModel}
               projects={navigationProjects}
@@ -556,6 +662,19 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
       />
     </main>
+  );
+}
+
+const subscribeToNothing = () => () => undefined;
+const noDesktopUpdateSnapshot = () => undefined;
+
+function useDesktopUpdateSnapshot(
+  capability: DesktopUpdateCapability | undefined,
+) {
+  return useSyncExternalStore(
+    capability?.subscribe ?? subscribeToNothing,
+    capability?.snapshot ?? noDesktopUpdateSnapshot,
+    capability?.snapshot ?? noDesktopUpdateSnapshot,
   );
 }
 

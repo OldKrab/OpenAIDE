@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 
 use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentSetupReason, AgentStatus};
 
@@ -34,9 +34,77 @@ impl Default for AgentStatusSnapshot {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentStatusCache {
     entries: Arc<Mutex<HashMap<String, AgentStatusSnapshot>>>,
+    updates: Option<mpsc::Sender<()>>,
 }
 
+pub(crate) type AgentStatusUpdateReceiver = mpsc::Receiver<()>;
+
 impl AgentStatusCache {
+    pub(crate) fn channel() -> (Self, AgentStatusUpdateReceiver) {
+        let (sender, receiver) = mpsc::channel();
+        (
+            Self {
+                entries: Arc::default(),
+                updates: Some(sender),
+            },
+            receiver,
+        )
+    }
+    pub(crate) fn record_connected(&self, agent_id: &str) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        if snapshot.status == AgentStatus::Authenticating {
+            return;
+        }
+        if snapshot.status == AgentStatus::Connected {
+            return;
+        }
+        snapshot.status = AgentStatus::Connected;
+        snapshot.setup_reason = None;
+        drop(entries);
+        self.notify();
+    }
+
+    /// Publishes the shared prerequisite without treating it as Agent process launch.
+    pub(crate) fn begin_installation(&self, agent_id: &str) -> AgentStatus {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        let previous = snapshot.status;
+        snapshot.status = AgentStatus::Installing;
+        drop(entries);
+        self.notify();
+        previous
+    }
+
+    pub(crate) fn complete_installation(&self, agent_id: &str, previous: AgentStatus) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        snapshot.status = if previous == AgentStatus::Authenticating {
+            AgentStatus::Authenticating
+        } else {
+            AgentStatus::Launching
+        };
+        drop(entries);
+        self.notify();
+    }
+
+    pub(crate) fn record_launching(&self, agent_id: &str) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        if snapshot.status != AgentStatus::Authenticating {
+            snapshot.status = AgentStatus::Launching;
+        }
+        drop(entries);
+        self.notify();
+    }
+
+    pub(crate) fn record_session_error(&self, agent_id: &str, error: &RuntimeError) {
+        if !session_error_updates_agent_status(error) {
+            return;
+        }
+        self.record_probe_error(agent_id, error);
+    }
+
     pub(crate) fn record_probe_success(&self, result: &AgentProbeResult) {
         self.record(
             result.agent_id.clone(),
@@ -125,6 +193,13 @@ impl AgentStatusCache {
             .lock()
             .expect("agent status cache poisoned")
             .insert(agent_id, snapshot);
+        self.notify();
+    }
+
+    fn notify(&self) {
+        if let Some(updates) = &self.updates {
+            let _ = updates.send(());
+        }
     }
 
     fn update_authentication_result(&self, agent_id: &str, status: AgentStatus) {
@@ -171,6 +246,20 @@ fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
 
 fn setup_reason_from_probe_error(error: &RuntimeError) -> Option<AgentSetupReason> {
     matches!(error, RuntimeError::NodeJsRequired(_)).then_some(AgentSetupReason::NodeJsRequired)
+}
+
+fn session_error_updates_agent_status(error: &RuntimeError) -> bool {
+    matches!(
+        error,
+        RuntimeError::AuthRequired(_)
+            | RuntimeError::SetupRequired(_)
+            | RuntimeError::NodeJsRequired(_)
+            | RuntimeError::Unsupported(_)
+            | RuntimeError::CapabilityMissing(_)
+            | RuntimeError::MethodNotFound(_)
+            | RuntimeError::NotReady(_)
+            | RuntimeError::Internal(_)
+    )
 }
 
 #[cfg(test)]

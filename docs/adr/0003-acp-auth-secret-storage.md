@@ -4,6 +4,8 @@ OpenAIDE will persist user-entered ACP environment-variable authentication secre
 
 Custom Agent launch environment follows the same rule for sensitive values. Settings may store plain environment values for non-sensitive configuration and secret environment variable names for credentials, but not secret values. Secret values live in VS Code SecretStorage keyed by Custom Agent identity and environment variable name. Because the runtime owns ACP Agent process launch, it requests those named secret values from the Host immediately before starting the Agent process.
 
+The Desktop App stores secret values through a Rust-owned native secret capability backed by macOS Keychain and Windows Credential Manager. The Desktop WebView cannot call those stores directly and never receives saved values. An application-managed encrypted vault such as Tauri Stronghold is not the Desktop credential store because it would add a master-key bootstrap problem, would not use the operating-system credential facility, and would widen the privileged WebView command surface.
+
 Agent settings renders auth actions from ACP `authMethods`, not from Codex-specific branches. Agent-handled auth, `env_var` auth, and terminal auth are separate method types with generic UI and Host behavior.
 
 Agent Settings is the single authentication interaction surface. New Task and Task pages may render Auth Required status and an action that opens the affected Agent in Settings, but they do not duplicate method selection, credential forms, terminal-auth controls, or logout.
@@ -31,6 +33,8 @@ Successful authentication automatically retries only ACP session lifecycle and r
 For `env_var` auth, OpenAIDE restarts the Agent process with the stored secret values injected into the process environment, then calls ACP `authenticate` with the selected method id. Secrets are not sent through normal settings, task state, chat state, logs, support export data, or webview state.
 
 New `env_var` values are staged through the App Shell's secure-storage transaction before the process restart. OpenAIDE commits secret and non-secret value changes only after ACP authentication succeeds; failure or cancellation restores the previous values. There is no per-sign-in remember toggle in the first version.
+
+Desktop secure-storage transactions use immutable secret generations because Keychain and Credential Manager do not provide one atomic transaction across several credentials. The Desktop shell writes a transaction-scoped generation without changing the active generation, supplies only that staged generation to the authentication attempt, and deletes it on failure or cancellation. On success, App Server atomically commits the non-secret active-generation reference with the corresponding auth configuration before the shell garbage-collects the former generation. A crash leaves the previously referenced generation authoritative; unreferenced staged generations are safe to remove during recovery. Desktop serializes secret-store operations so concurrent requests cannot reorder changes to one credential identity.
 
 Agent Settings never receives a saved secret value. It receives only whether a value is saved: an empty field reuses that value, entered text transactionally replaces it after successful authentication, and a separate Forget action removes it. Non-secret auth values may be prefilled from ordinary Agent auth configuration.
 

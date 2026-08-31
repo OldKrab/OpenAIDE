@@ -28,12 +28,28 @@ export function updateSubscriptionSnapshot(
         ? changed({ kind: "projects", projects: payload.projects })
         : unchanged(snapshot);
     case "agents":
+      return payload.kind === "agentCollectionUpdated"
+        ? changed({ kind: "agents", agents: payload.agents })
+        : unchanged(snapshot);
     case "settings":
       return unchanged(snapshot);
     case "taskNavigation":
       return updateTaskNavigationSnapshot(scope, snapshot, payload);
     case "task":
       return updateTaskSnapshot(snapshot, payload);
+    case "subagentCatalog":
+      return payload.kind === "subagentCatalogUpdated"
+        && payload.catalog.taskId === snapshot.catalog.taskId
+        && payload.catalog.revision >= snapshot.catalog.revision
+        ? changed({ kind: "subagentCatalog", catalog: payload.catalog })
+        : unchanged(snapshot);
+    case "subagentHistory":
+      return payload.kind === "subagentHistoryUpdated"
+        && payload.history.taskId === snapshot.history.taskId
+        && payload.history.subagentId === snapshot.history.subagentId
+        && payload.history.revision >= snapshot.history.revision
+        ? changed({ kind: "subagentHistory", history: payload.history })
+        : unchanged(snapshot);
     case "toolDetail":
       if ((payload.kind !== "toolDetailUpdated" && payload.kind !== "toolDetailChanged")
         || payload.taskId !== snapshot.taskId
@@ -99,6 +115,9 @@ function updateFromClientSnapshot(
       return clientSnapshot.activeTask && clientSnapshot.activeTask.task.taskId === snapshot.task.task.taskId
         ? changed({ kind: "task", task: clientSnapshot.activeTask })
         : unchanged(snapshot);
+    case "subagentCatalog":
+    case "subagentHistory":
+      return unchanged(snapshot);
     case "toolDetail":
     case "worktreeRepository":
       return unchanged(snapshot);

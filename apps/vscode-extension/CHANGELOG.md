@@ -1,5 +1,110 @@
 # Changelog
 
+## 0.4.0 - 2026-08-27
+
+### Features
+
+- Preview and archive older Project Tasks in bulk while protecting pinned, active, queued, pending-request, and open-elsewhere Tasks.
+- Rename and pin unadopted Native Sessions, preserving that metadata when they become Tasks.
+
+### Bug Fixes
+
+- Preserve the selected Project across VS Code New Task panels without letting stale panels overwrite the App Server default.
+- Keep the built-in Codex launcher available when legacy Custom Agent data uses its reserved identifier.
+- Recover Prepared Task sessions before changing Agent options, with immediate loading, failure, attachment, and retry feedback in Composer.
+- Preserve first-send attachments when workspace paths resolve to the same canonical Project.
+- Keep the built-in Codex launcher available when legacy Custom Agent data uses its reserved identifier.
+- Preserve first-send attachments when workspace paths resolve to the same canonical Project.
+- Keep active Native Sessions attached when ACP session discovery times out.
+- Keep Task permission controls available while unrelated global state recovers.
+- Save Support Export bundles correctly from VS Code.
+- Prevent wrapped Agent Plan entries from overlapping.
+
+### Chores
+
+- Allow manual artifact builds to target one VSIX platform while release builds continue to cover every platform.
+- Strengthen Linux VSIX packaging gates and the bundled Codex startup smoke test.
+
+**Full Changelog**: https://github.com/OldKrab/OpenAIDE/compare/v0.3.0...v0.4.0
+
+## 0.3.0 - 2026-08-19
+
+### Features
+
+- Open Agent file references in an in-Task viewer on Web and Desktop, with source highlighting and one-click line quotes into Chat.
+- Browse folders directly when adding a Web project.
+- Choose a per-Task permission policy that can automatically approve safe one-time Agent requests.
+- Export selected recent session diagnostics from Settings, with sensitive Agent artifacts kept opt-in.
+
+### Bug Fixes
+
+- Keep the routed Task's Chat visible after an App Server reconnect.
+- Preserve Agent response boundaries around User messages and permission requests.
+- Keep steered Tasks active while the replacement Agent response is still running.
+- Deliver queued Web uploads after their source files move into App Server-managed storage.
+- Keep the File Viewer and line quoting usable on narrow Task pages.
+- Reflect live Agent connection status in Settings.
+
+### Chores
+
+- Capture production-safe ACP process exit metadata for support diagnostics.
+- Generate release notes at release time and reuse them for the changelog and GitHub Release.
+
+**Full Changelog**: https://github.com/OldKrab/OpenAIDE/compare/v0.2.5...v0.3.0
+
+## 0.2.5 - 2026-08-18
+
+### Bug Fixes
+
+- Batch streamed Agent text durability so long responses remain responsive.
+- Preserve ordered live Chat updates while coalescing streamed text writes.
+- Keep prepared Tasks aligned with the current Agent configuration at startup.
+- Render Cursor ACP tool activity with the correct structured details.
+
+## 0.2.4 - 2026-08-17
+
+### Bug Fixes
+
+- Recover shared ACP agents when their process exits during session startup.
+- Persist the ACP developer trace setting across App Server restarts.
+- Add metadata-only diagnostics for ACP connection, initialization, requests, and options.
+
+## 0.2.3 - 2026-08-17
+
+### Bug Fixes
+
+- Restore the VS Code Developer settings unlock after a webview reload.
+- Remember the latest New Task Agent selection as the next default.
+
+## 0.2.2 - 2026-08-17
+
+### Bug Fixes
+
+- Recover agent startup after an ACP session times out by replacing the unresponsive shared process before retrying.
+
+### Chores
+
+- Harden release-note validation and canonical release checks.
+
+## 0.2.1 - 2026-08-17
+
+### Features
+
+- Add the native Desktop App for Windows and macOS, with self-contained preview installers and Windows WSL runtime support.
+- Use an OpenAIDE-owned Codex ACP adapter with a pinned fork release for reproducible agent launches.
+- Share task, settings, and shell behavior across the VS Code, web, and desktop surfaces.
+
+### Bug Fixes
+
+- Harden ACP session recovery, Agent configuration lifecycle, and Native Session persistence across reloads and attachment recovery.
+- Persist project state and prepared-Task transitions safely across repeated writes.
+- Fix worktree path copy placement and desktop packaging and startup behavior.
+
+### Chores
+
+- Validate exact-version VSIX and desktop artifacts, including bundled App Server startup, WSL packaging, and platform smoke tests.
+- Align supported Node, Rust, VS Code, and packaging toolchains.
+
 ## 0.1.3 - 2026-08-14
 
 ### Fixes

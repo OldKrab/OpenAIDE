@@ -6,22 +6,26 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
-    DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
-    MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_FORK,
-    NATIVE_SESSION_RESTORE, PENDING_REQUEST_RESOLVE, PROJECT_ADD, PROJECT_REFRESH, PROJECT_REMOVE,
-    PROJECT_RENAME, SETTINGS_GET_AGENT_DETAILS, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
-    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_GET_SKILL_DETAILS,
-    SETTINGS_RESET_TASK_HISTORY, SETTINGS_UPDATE_NEW_TASK_DEFAULTS, SETTINGS_UPDATE_PREFERENCES,
-    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE, TASK_ACQUIRE_IN_WORKTREE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_CHAT_PAGE, TASK_CLOSE_PLAN,
-    TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE,
-    TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND, TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE,
-    TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION, TASK_RESTORE, TASK_SEARCH_FILES,
-    TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW,
-    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
-    WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
-    WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
+    CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT, CLIENT_UPDATE_SHUTDOWN_PREPARE,
+    DIAGNOSTICS_CREATE_SUPPORT_EXPORT, DIAGNOSTICS_GET_RUNTIME, DIAGNOSTICS_LIST_SUPPORT_EXPORT,
+    FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE,
+    MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED,
+    MCP_UPDATE_SERVER, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_FORK, NATIVE_SESSION_RESTORE,
+    NATIVE_SESSION_SET_PINNED, NATIVE_SESSION_SET_TITLE, PENDING_REQUEST_RESOLVE, PROJECT_ADD,
+    PROJECT_REFRESH, PROJECT_REMOVE, PROJECT_RENAME, SETTINGS_GET_AGENT_DETAILS,
+    SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
+    SETTINGS_GET_SKILL_DETAILS, SETTINGS_RESET_TASK_HISTORY, SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
+    TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_ARCHIVE_OLDER,
+    TASK_CANCEL, TASK_CHAT_PAGE, TASK_CLOSE_PLAN, TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ,
+    TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND,
+    TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE, TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION,
+    TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PERMISSION_POLICY,
+    TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW, WORKSPACE_LIST_DIRECTORY,
+    WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS, WORKTREE_RECREATE,
+    WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE, WORKTREE_RENAME,
+    WORKTREE_RESOLVE_FOLDER,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -121,6 +125,24 @@ impl RpcGateway {
             }
         }
 
+        let update_shutdown_control = matches!(
+            method.as_str(),
+            CLIENT_INITIALIZE
+                | CLIENT_HEARTBEAT
+                | CLIENT_DETACH
+                | CLIENT_UPDATE_SHUTDOWN_PREPARE
+                | CLIENT_UPDATE_SHUTDOWN_COMMIT
+                | CLIENT_UPDATE_SHUTDOWN_ABORT
+        );
+        if self.update_shutdown.is_some() && !update_shutdown_control {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                responses::update_shutdown_in_progress(method),
+            );
+        }
+
         match method.as_str() {
             CLIENT_PROBE => self.handle_client_probe(connection_id, id, params, meta),
             CLIENT_INITIALIZE => self.handle_initialize(connection_id, id, params, meta, now),
@@ -129,6 +151,15 @@ impl RpcGateway {
             }
             CLIENT_HEARTBEAT => self.handle_client_heartbeat(connection_id, id, params, meta, now),
             CLIENT_DETACH => self.handle_client_detach(connection_id, id, params, meta, now),
+            CLIENT_UPDATE_SHUTDOWN_PREPARE => {
+                self.handle_update_shutdown_prepare(connection_id, id, params, meta)
+            }
+            CLIENT_UPDATE_SHUTDOWN_COMMIT => {
+                self.handle_update_shutdown_commit(connection_id, id, params, meta)
+            }
+            CLIENT_UPDATE_SHUTDOWN_ABORT => {
+                self.handle_update_shutdown_abort(connection_id, id, params, meta)
+            }
             PENDING_REQUEST_RESOLVE => {
                 self.handle_pending_request_resolve(connection_id, id, params, meta, now)
             }
@@ -136,6 +167,12 @@ impl RpcGateway {
             STATE_UNSUBSCRIBE => self.handle_unsubscribe(connection_id, id, params, meta, now),
             DIAGNOSTICS_GET_RUNTIME => {
                 self.handle_diagnostics_get_runtime(connection_id, id, params, meta)
+            }
+            DIAGNOSTICS_LIST_SUPPORT_EXPORT => {
+                self.handle_diagnostics_list_support_export(connection_id, id, params, meta)
+            }
+            DIAGNOSTICS_CREATE_SUPPORT_EXPORT => {
+                self.handle_diagnostics_create_support_export(connection_id, id, params, meta)
             }
             SUPPORT_RECOVER_STUCK_SESSIONS => {
                 self.handle_support_recover_stuck_sessions(connection_id, id, params, meta, now)
@@ -153,6 +190,12 @@ impl RpcGateway {
             }
             NATIVE_SESSION_ARCHIVE => {
                 self.handle_native_session_archive(connection_id, id, params, meta, now)
+            }
+            NATIVE_SESSION_SET_TITLE => {
+                self.handle_native_session_set_title(connection_id, id, params, meta, now)
+            }
+            NATIVE_SESSION_SET_PINNED => {
+                self.handle_native_session_set_pinned(connection_id, id, params, meta, now)
             }
             NATIVE_SESSION_RESTORE => {
                 self.handle_native_session_restore(connection_id, id, params, meta, now)
@@ -297,14 +340,26 @@ impl RpcGateway {
             TASK_SET_CONFIG_OPTION => {
                 self.handle_task_set_config_option(connection_id, id, params, meta, now)
             }
+            TASK_SET_PERMISSION_POLICY => {
+                self.handle_task_set_permission_policy(connection_id, id, params, meta)
+            }
             TASK_SET_TITLE => self.handle_task_set_title(connection_id, id, params, meta, now),
             TASK_SET_PINNED => self.handle_task_set_pinned(connection_id, id, params, meta, now),
             TASK_CLOSE_PLAN => self.handle_task_close_plan(connection_id, id, params, meta),
             TASK_TOOL_IMAGE_PREVIEW => {
                 self.handle_task_tool_image_preview(connection_id, id, params, meta)
             }
+            FILE_VIEWER_OPEN => self.handle_file_viewer_open(connection_id, id, params, meta),
+            FILE_VIEWER_OPEN_FROM_HANDLE => {
+                self.handle_file_viewer_open_from_handle(connection_id, id, params, meta)
+            }
+            FILE_VIEWER_REFRESH => self.handle_file_viewer_refresh(connection_id, id, params, meta),
+            FILE_VIEWER_RELEASE => self.handle_file_viewer_release(connection_id, id, params, meta),
             TASK_RELEASE => self.handle_task_release(connection_id, id, params, meta, now),
             TASK_ARCHIVE => self.handle_task_archive(connection_id, id, params, meta, now),
+            TASK_ARCHIVE_OLDER => {
+                self.handle_task_archive_older(connection_id, id, params, meta, now)
+            }
             TASK_RESTORE => self.handle_task_restore(connection_id, id, params, meta),
             TASK_LIST => self.handle_task_list(connection_id, id, params, meta),
             TASK_OPEN => self.handle_task_open(connection_id, id, params, meta),

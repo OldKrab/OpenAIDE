@@ -10,11 +10,13 @@ use crate::ids::{
 pub(crate) mod chat;
 pub(crate) mod pending_request;
 pub(crate) mod settings;
+pub(crate) mod subagent;
 pub(crate) mod task;
 
 pub use chat::*;
 pub use pending_request::*;
 pub use settings::*;
+pub use subagent::*;
 pub use task::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -151,6 +153,7 @@ pub enum AgentSetupReason {
 #[serde(rename_all = "camelCase")]
 pub enum AgentStatus {
     Disconnected,
+    Installing,
     Launching,
     Connected,
     SetupRequired,

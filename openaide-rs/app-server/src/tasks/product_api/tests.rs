@@ -35,8 +35,8 @@ use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentConfigOptionCurrentValue, LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot,
-    TaskPreparationSnapshot, TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
-    TaskTitleSource as ProtocolTaskTitleSource,
+    TaskPermissionPolicy, TaskPreparationSnapshot, TaskSendCapabilityState,
+    TaskStatus as ProtocolTaskStatus, TaskTitleSource as ProtocolTaskTitleSource,
 };
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
@@ -46,7 +46,8 @@ use openaide_app_server_protocol::task::{
     TaskCancelParams, TaskClosePlanParams, TaskMarkReadParams, TaskOpenParams,
     TaskQueueAppendParams, TaskQueueMoveParams, TaskQueueRemoveParams, TaskQueueSendSelection,
     TaskQueueTakeParams, TaskReleaseParams, TaskReloadNativeSessionParams, TaskSendParams,
-    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
+    TaskSetConfigOptionParams, TaskSetPermissionPolicyParams, TaskSetPinnedParams,
+    TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -486,6 +487,102 @@ fn released_prepared_task_is_reused_by_another_client() {
 }
 
 #[test]
+fn releasing_preparing_task_cancels_agent_start_and_next_acquire_becomes_ready() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_start: AtomicBool::new(true),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = ClientInstanceId::from("client-a");
+    let params = TaskAcquireParams {
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    };
+    let first = api.acquire_for_client(&client, params.clone()).unwrap();
+    wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
+
+    api.release_for_client(
+        &client,
+        TaskReleaseParams {
+            task_id: first.task.task_id.clone(),
+        },
+    )
+    .unwrap();
+    wait_until(|| agent.start_cancellations.load(Ordering::SeqCst) == 1);
+    agent.block_start.store(false, Ordering::SeqCst);
+
+    let second = api.acquire_for_client(&client, params).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(second.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert_ne!(first.task.task_id, second.task.task_id);
+    assert!(
+        store
+            .read_task(first.task.task_id.as_str())
+            .unwrap()
+            .tombstoned
+    );
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn preparation_that_starts_after_release_does_not_contact_the_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = ClientInstanceId::from("client-a");
+    let mut stale = task_record("task-stale-preparation", "/tmp/openaide-unit-workspace/app");
+    stale.lifecycle = TaskLifecycle::Prepared {
+        lease: Some(client.clone()),
+    };
+    stale.preparation = TaskPreparationRecord::Preparing;
+    store.write_task(&stale).unwrap();
+
+    api.release_for_client(
+        &client,
+        TaskReleaseParams {
+            task_id: stale.task_id.clone().into(),
+        },
+    )
+    .unwrap();
+    api.native_sessions.prepare_task(&stale).unwrap();
+
+    assert!(store.read_task(&stale.task_id).unwrap().tombstoned);
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn restart_clears_prepared_task_lease_and_preserves_the_task_for_reuse() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -734,6 +831,18 @@ fn create_reactivates_the_reused_draft_native_session() {
     );
     let reopened = store.read_task("task-draft").unwrap();
     assert_eq!(task_config_id(&reopened, "model"), Some("gpt-5"));
+    assert_eq!(
+        reopened.native_session_data_freshness.config(),
+        TaskNativeSessionCatalogFreshness::Fresh
+    );
+    let prepared_snapshot = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-draft", 100).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        prepared_snapshot.agent_config.state,
+        LiveSessionDataState::Ready
+    );
     let updated = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-draft".into(),
@@ -1825,6 +1934,49 @@ fn set_pinned_persists_without_advancing_task_activity_and_is_idempotent() {
 }
 
 #[test]
+fn permission_policy_is_task_scoped_durable_and_does_not_advance_activity() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = task_record("task-policy", "/tmp/openaide-policy-workspace/app");
+    let last_activity = record.last_activity.clone();
+    store.write_task(&record).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = crate::attachment_runtime::AttachmentOwner::test_client_instance_id();
+
+    let changed = api
+        .set_task_permission_policy(
+            &client,
+            TaskSetPermissionPolicyParams {
+                task_id: "task-policy".into(),
+                policy: TaskPermissionPolicy::AutoApprove,
+            },
+        )
+        .unwrap();
+    assert_eq!(changed.permission_policy, TaskPermissionPolicy::AutoApprove);
+    let stored = store.read_task("task-policy").unwrap();
+    assert_eq!(stored.permission_policy, TaskPermissionPolicy::AutoApprove);
+    assert_eq!(stored.last_activity, last_activity);
+    let revision = stored.revision;
+
+    api.set_task_permission_policy(
+        &client,
+        TaskSetPermissionPolicyParams {
+            task_id: "task-policy".into(),
+            policy: TaskPermissionPolicy::AutoApprove,
+        },
+    )
+    .unwrap();
+    assert_eq!(store.read_task("task-policy").unwrap().revision, revision);
+}
+
+#[test]
 fn user_can_close_an_incomplete_plan_and_retain_it_in_chat() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1983,14 +2135,21 @@ fn resumed_identity_only_session_preserves_known_image_capability() {
 #[test]
 fn acquiring_recovers_a_prepared_task_whose_native_session_is_missing() {
     let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let state_root = temp.path().to_path_buf();
+    let store = Store::open(state_root.clone()).unwrap();
     let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("missing-session".to_string());
+    draft.config_options_catalog = Some(config_catalog("gpt-5"));
+    draft.agent_commands_catalog = Some(command_catalog());
     store.write_task(&draft).unwrap();
+    drop(store);
+    let store = Store::open(state_root).unwrap();
     let agent = Arc::new(RecordingAgent {
         fail_list: true,
         resume_session_missing: true,
+        config_catalog: Some(config_catalog("gpt-5.5")),
+        commands_catalog: Some(command_catalog()),
         ..Default::default()
     });
     let api = TaskProductApi::new(
@@ -2024,6 +2183,73 @@ fn acquiring_recovers_a_prepared_task_whose_native_session_is_missing() {
         store.read_task("task-draft").unwrap().agent_session_id,
         Some("recorded-session".to_string())
     );
+    assert!(
+        store
+            .read_task("task-draft")
+            .unwrap()
+            .native_session_data_freshness
+            .is_fresh(),
+        "a replacement Native Session owns fresh config and command catalogs"
+    );
+    let snapshot = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-draft", 100).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Ready);
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
+}
+
+#[test]
+fn acquiring_a_stale_prepared_task_republishes_controls_after_replacing_its_missing_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
+    draft.lifecycle = test_new_task_lifecycle();
+    draft.agent_session_id = Some("missing-session".to_string());
+    draft.config_options_catalog = Some(config_catalog("gpt-5"));
+    draft.agent_commands_catalog = Some(command_catalog());
+    assert!(draft.clear_process_local_agent_state());
+    store.write_task(&draft).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        config_catalog: Some(config_catalog("gpt-5.5")),
+        commands_catalog: Some(command_catalog()),
+        resume_session_missing: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    })
+    .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    let stored = store.read_task("task-draft").unwrap();
+    let snapshot = project_stored_task_snapshot(
+        crate::tasks::snapshot::build_snapshot(&store, "task-draft", 100).unwrap(),
+    )
+    .unwrap();
+    assert!(stored.native_session_data_freshness.is_fresh());
+    assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Ready);
+    assert_eq!(
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
 }
 
 #[test]
@@ -2933,8 +3159,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
     let workspace_root = temp.path().join("project-with-agent-history");
-    let session_workspace = workspace_root.join("nested-workspace");
-    std::fs::create_dir_all(&session_workspace).unwrap();
+    std::fs::create_dir_all(&workspace_root).unwrap();
     let configured_projects = ConfiguredProjectRoots::default();
     configured_projects
         .enable_persistence(store.clone())
@@ -2946,7 +3171,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-existing".to_string(),
-            cwd: session_workspace.to_string_lossy().to_string(),
+            cwd: workspace_root.to_string_lossy().to_string(),
             title: Some("Existing Agent session".to_string()),
             last_activity: Some("2026-08-01T00:00:00Z".to_string()),
             updated_at: Some("2026-08-01T00:00:00Z".to_string()),
@@ -2980,7 +3205,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
 }
 
 #[test]
-fn full_native_catalog_refresh_discovers_sessions_in_nested_project_folders() {
+fn full_native_catalog_refresh_discovers_sessions_in_known_task_workspaces() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
     let project_root = temp.path().join("project");
@@ -2993,6 +3218,9 @@ fn full_native_catalog_refresh_discovers_sessions_in_nested_project_folders() {
     let project = configured_projects
         .add_project(&project_root.to_string_lossy())
         .unwrap();
+    let mut task = task_record("task-in-nested-workspace", &session_root.to_string_lossy());
+    task.project_root = Some(project_root.to_string_lossy().to_string());
+    store.write_task(&task).unwrap();
     let resolver = StorageProjectResolver::new_with_configured_roots(
         store.clone(),
         configured_projects.clone(),
@@ -3173,19 +3401,136 @@ fn project_load_stops_after_the_requested_navigation_window() {
         !api.native_session_catalog()
             .project_refreshing(project.project_id.as_str())
     });
-    assert_eq!(
-        agent.requested_cursors(),
-        vec![None, Some("page-2".to_string())]
-    );
+    for agent_id in ["codex", "opencode"] {
+        assert_eq!(
+            agent.requested_cursors_for(agent_id),
+            vec![None, Some("page-2".to_string())]
+        );
+    }
     assert_eq!(
         api.native_session_catalog()
             .project(project.project_id.as_str())
             .len(),
-        10
+        20
     );
     assert!(api
         .native_session_catalog()
         .project_has_more(project.project_id.as_str()));
+}
+
+#[test]
+fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace_root = temp.path().join("bounded-navigation-project");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let project = configured_projects
+        .add_project(&workspace_root.to_string_lossy())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(BoundedGlobalSessionAgent {
+        requested_cursors: Mutex::new(Vec::new()),
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects,
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_refresh();
+    wait_until(|| !api.native_session_catalog().refreshing());
+
+    for agent_id in ["codex", "opencode"] {
+        assert_eq!(
+            agent.requested_cursors_for(agent_id),
+            vec![
+                None,
+                Some("page-2".to_string()),
+                Some("page-3".to_string()),
+                Some("page-4".to_string()),
+            ]
+        );
+    }
+    assert!(api
+        .native_session_catalog()
+        .project_has_more(project.project_id.as_str()));
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 30);
+    wait_until(|| {
+        !api.native_session_catalog()
+            .project_refreshing(project.project_id.as_str())
+    });
+
+    for agent_id in ["codex", "opencode"] {
+        assert!(agent
+            .requested_cursors_for(agent_id)
+            .iter()
+            .any(|cursor| cursor.as_deref() == Some("page-5")));
+    }
+}
+
+#[test]
+fn exhausted_project_load_more_does_not_restart_agent_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace_root = temp.path().join("exhausted-project");
+    std::fs::create_dir_all(&workspace_root).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let project = configured_projects
+        .add_project(&workspace_root.to_string_lossy())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(BoundedGlobalSessionAgent {
+        requested_cursors: Mutex::new(Vec::new()),
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects,
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 100);
+    wait_until(|| {
+        !api.native_session_catalog()
+            .project_refreshing(project.project_id.as_str())
+    });
+    let calls_after_exhaustion = agent.requested_cursors().len();
+    assert!(!api
+        .native_session_catalog()
+        .project_has_more(project.project_id.as_str()));
+
+    api.request_native_session_catalog_load_more(project.project_id.as_str(), 110);
+    wait_until(|| {
+        !api.native_session_catalog()
+            .project_refreshing(project.project_id.as_str())
+    });
+
+    assert_eq!(agent.requested_cursors().len(), calls_after_exhaustion);
 }
 
 #[test]
@@ -3253,6 +3598,30 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
 
     wait_until(|| !api.native_session_catalog().refreshing());
     assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn background_native_session_refresh_logs_completion() {
+    let diagnostic_logs = crate::logging::capture_test_logs();
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_refresh();
+    wait_until(|| !api.native_session_catalog().refreshing());
+
+    assert!(diagnostic_logs
+        .snapshot()
+        .iter()
+        .any(|entry| entry["event"] == "native_session_catalog_refresh_completed"));
 }
 
 #[test]
@@ -4220,12 +4589,12 @@ fn failed_native_session_listing_is_not_cached() {
     )
     .unwrap();
 
-    for expected in [1, 2] {
+    for expected in [2, 4] {
         assert!(api.refresh_native_session_catalogs().is_err());
         assert_eq!(agent.list_calls.load(Ordering::SeqCst), expected);
     }
 
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
 }
 
 #[test]
@@ -5676,6 +6045,73 @@ fn automatic_queue_delivery_preserves_inline_image_attachments() {
     let prompt_attachments = agent.prompt_attachments.lock().unwrap();
     assert_eq!(prompt_attachments[1][0].kind, "image");
     assert!(prompt_attachments[1][0].payload.is_some());
+}
+
+#[test]
+fn automatic_queue_delivery_accepts_a_managed_web_upload_outside_the_workspace() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let upload_directory = temp.path().join("openaide/uploads/task-queue-upload");
+    std::fs::create_dir_all(&upload_directory).unwrap();
+    let upload_path = upload_directory.join("profile.json.gz");
+    std::fs::write(&upload_path, b"profile bytes").unwrap();
+    store
+        .write_task(&task_record(
+            "task-queue-upload",
+            &workspace.to_string_lossy(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let task_id = TaskId::from("task-queue-upload");
+    let attachment = api
+        .create_uploaded_file_reference(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            &task_id,
+            upload_path.to_string_lossy().into_owned(),
+            "profile.json.gz".to_string(),
+        )
+        .unwrap();
+
+    api.send(send_params("task-queue-upload", "first turn"))
+        .unwrap();
+    wait_until(|| store.read_task("task-queue-upload").unwrap().status == TaskStatus::Active);
+    api.queue_append_for_test(TaskQueueAppendParams {
+        task_id,
+        message: ComposerMessage {
+            text: Some("inspect profile".into()),
+            attachments: vec![attachment.handle_id],
+            ..Default::default()
+        },
+    })
+    .unwrap();
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) >= 2);
+    let prompt_attachments = agent.prompt_attachments.lock().unwrap();
+    assert_eq!(
+        prompt_attachments[1][0].path.as_deref(),
+        Some(upload_path.to_string_lossy().as_ref())
+    );
+    assert!(store
+        .read_task("task-queue-upload")
+        .unwrap()
+        .message_queue
+        .items
+        .is_empty());
 }
 
 #[test]
@@ -7584,6 +8020,51 @@ fn set_config_option_recovers_an_inactive_native_session_before_agent_io() {
 }
 
 #[test]
+fn prepared_task_option_change_recovers_when_native_session_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-prepared",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_session_missing: true,
+        config_requires_active_session: true,
+        config_catalog: Some(config_catalog("gpt-5")),
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let mut task = store.read_task("task-prepared").unwrap();
+    task.lifecycle = test_new_task_lifecycle();
+    task.agent_session_id = Some("missing-session".to_string());
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    store.write_task(&task).unwrap();
+
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
+            task_id: "task-prepared".into(),
+            config_id: "model".into(),
+            value: protocol_config_id("gpt-5.5"),
+            client_mutation_id: "mutation-after-session-loss".into(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
+}
+
+#[test]
 fn config_recovery_loads_when_the_agent_does_not_support_resume() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -8453,6 +8934,12 @@ fn release_keeps_one_free_prepared_task_for_reuse() {
         workspace_root: None,
     })
     .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
 
     api.release_for_test(TaskReleaseParams {
         task_id: "task-draft".into(),
@@ -8728,6 +9215,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "codex".to_string(),
@@ -8869,6 +9357,7 @@ fn append_running_turn(store: &Store, task_id: &str, turn_id: &str) {
 #[derive(Default)]
 struct RecordingAgent {
     starts: AtomicUsize,
+    start_cancellations: AtomicUsize,
     loads: AtomicUsize,
     resumes: AtomicUsize,
     prompts: AtomicUsize,
@@ -9150,6 +9639,12 @@ impl AgentRuntime for RecordingAgent {
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
         while self.block_start.load(Ordering::SeqCst) {
+            if request.cancellation.is_cancelled() {
+                self.start_cancellations.fetch_add(1, Ordering::SeqCst);
+                return Err(RuntimeError::NotReady(
+                    "ACP session start cancelled".to_string(),
+                ));
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
         if self.fail_start {
@@ -9160,6 +9655,7 @@ impl AgentRuntime for RecordingAgent {
                 "ACP session start cancelled".to_string(),
             ));
         }
+        self.active_after_load.store(true, Ordering::SeqCst);
         let session = AgentSession::new(request.agent_id, "recorded-session");
         Ok(match &self.config_catalog {
             Some(catalog) => session.with_config_options(catalog),
@@ -9399,13 +9895,28 @@ struct ArchivedFirstPageAgent {
 }
 
 struct BoundedGlobalSessionAgent {
-    requested_cursors: Mutex<Vec<Option<String>>>,
+    requested_cursors: Mutex<Vec<(String, Option<String>)>>,
     workspace_root: String,
 }
 
 impl BoundedGlobalSessionAgent {
     fn requested_cursors(&self) -> Vec<Option<String>> {
-        self.requested_cursors.lock().unwrap().clone()
+        self.requested_cursors
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, cursor)| cursor.clone())
+            .collect()
+    }
+
+    fn requested_cursors_for(&self, agent_id: &str) -> Vec<Option<String>> {
+        self.requested_cursors
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(requested_agent_id, _)| requested_agent_id == agent_id)
+            .map(|(_, cursor)| cursor.clone())
+            .collect()
     }
 }
 
@@ -9417,12 +9928,14 @@ impl AgentRuntime for BoundedGlobalSessionAgent {
         self.requested_cursors
             .lock()
             .unwrap()
-            .push(request.cursor.clone());
+            .push((request.agent_id.clone(), request.cursor.clone()));
         let page = match request.cursor.as_deref() {
             None => 0,
             Some("page-2") => 1,
             Some("page-3") => 2,
-            _ => 3,
+            Some("page-4") => 3,
+            Some("page-5") => 4,
+            _ => 5,
         };
         let sessions = (0..5)
             .map(|index| AgentListedSession {
@@ -9437,6 +9950,8 @@ impl AgentRuntime for BoundedGlobalSessionAgent {
             0 => Some("page-2".to_string()),
             1 => Some("page-3".to_string()),
             2 => Some("page-4".to_string()),
+            3 => Some("page-5".to_string()),
+            4 => Some("page-6".to_string()),
             _ => None,
         };
         Ok(AgentListSessionsResult {

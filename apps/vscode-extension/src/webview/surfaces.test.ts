@@ -42,7 +42,7 @@ vi.mock("../workspace/roots", () => ({
 }));
 
 describe("VS Code webview surfaces", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vscodeMocks.asExternalUri.mockReset();
     vscodeMocks.asExternalUri.mockImplementation(async (uri: { toString(): string }) => ({
       toString: () => uri.toString(),
@@ -51,18 +51,8 @@ describe("VS Code webview surfaces", () => {
     vscodeMocks.configuredAgents = [];
     vscodeMocks.createWebviewPanel.mockReset();
     vi.mocked(handleWebviewMessage).mockReset();
-    vi.mocked(handleWebviewMessage).mockImplementation(async (message, context: {
-      adoptTask?: (taskId: string, title?: string, agentId?: string) => void;
-      surfaces?: { openTask: (taskId: string, title?: string, agentId?: string) => void };
-    }) => {
-      if (!isObject(message) || message.type !== "surface.openTask" || !isObject(message.payload)) return;
-      const taskId = typeof message.payload.task_id === "string" ? message.payload.task_id : undefined;
-      if (!taskId) return;
-      const title = typeof message.payload.title === "string" ? message.payload.title : undefined;
-      const agentId = typeof message.payload.agent_id === "string" ? message.payload.agent_id : undefined;
-      context.adoptTask?.(taskId, title, agentId);
-      context.surfaces?.openTask(taskId, title, agentId);
-    });
+    const actualMessaging = await vi.importActual<typeof import("./messaging")>("./messaging");
+    vi.mocked(handleWebviewMessage).mockImplementation(actualMessaging.handleWebviewMessage);
     vscodeMocks.createWebviewPanel.mockImplementation(() => {
       const panel = createPanelMock();
       vscodeMocks.panels.push(panel);
@@ -72,7 +62,8 @@ describe("VS Code webview surfaces", () => {
 
   it("boots the activity sidebar as navigation only", () => {
     const view = createViewMock();
-    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), logger(), surfaces());
+    const viewLogger = logger();
+    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), viewLogger, surfaces());
 
     provider.resolveWebviewView(view as never);
 
@@ -84,6 +75,11 @@ describe("VS Code webview surfaces", () => {
     expect(view.webview.html).toContain('data-composer-submit-shortcut="enter"');
     expect(view.webview.html).not.toContain('data-surface="task"');
     expect(view.webview.html).not.toContain('data-surface="settings"');
+    expect(viewLogger.info).toHaveBeenCalledWith("VS Code webview client created", {
+      surface: "navigation",
+      client_identity_source: "shell",
+      extension_version: "0.3.0-test",
+    });
   });
 
   it("does not let disposal of a replaced navigation view detach its replacement", () => {
@@ -99,6 +95,10 @@ describe("VS Code webview surfaces", () => {
 
     provider.resolveWebviewView(first as never);
     provider.resolveWebviewView(second as never);
+    expect(htmlDataAttribute(first.webview.html, "client-instance-id")).not.toBe("");
+    expect(htmlDataAttribute(second.webview.html, "client-instance-id")).not.toBe(
+      htmlDataAttribute(first.webview.html, "client-instance-id"),
+    );
     triggerViewDispose(first);
 
     expect(firstStop).toHaveBeenCalledOnce();
@@ -198,6 +198,64 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-api"');
   });
 
+  it("uses and records the Project retained by one New Task panel for the native New Task command", async () => {
+    const projectLogger = logger();
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), projectLogger);
+
+    manager.retainNewTaskProject("project-api", "task");
+    manager.openNewTask();
+    await vi.waitFor(() => expect(projectLogger.info).toHaveBeenCalledWith(
+      "VS Code New Task Project retention completed",
+      expect.objectContaining({
+        duration_ms: expect.any(Number),
+        outcome: "updated",
+        project_id: "project-api",
+        surface: "task",
+      }),
+    ));
+
+    expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-api"');
+    expect(projectLogger.info).toHaveBeenCalledWith("VS Code New Task Project retention started", {
+      project_id: "project-api",
+      surface: "task",
+    });
+    expect(projectLogger.info).toHaveBeenCalledWith("VS Code New Task Project resolved", {
+      project_id: "project-api",
+      project_present: true,
+      selection_source: "shell_retained",
+    });
+  });
+
+  it("opens the sidebar global New Task action in the Project selected by the created task", async () => {
+    const sharedContext = context();
+    const manager = new TaskEditorManager(sharedContext, runtime(), runtimeProcess(), logger());
+    manager.openNewTask("project-current");
+    const createdTaskPanel = vscodeMocks.panels[0];
+
+    await triggerLastMessageHandler(createdTaskPanel, {
+      type: "surface.retainNewTaskProject",
+      payload: { project_id: "project-api" },
+    });
+    await triggerLastMessageHandler(createdTaskPanel, {
+      type: "surface.openTask",
+      payload: { task_id: "created_task", title: "Created task" },
+    });
+    const navigation = new TaskViewProvider(
+      sharedContext,
+      runtime(),
+      runtimeProcess(),
+      logger(),
+      manager,
+    );
+    const view = createViewMock();
+    navigation.resolveWebviewView(view as never);
+
+    await triggerLastMessageHandler(view, { type: "surface.openNewTask" });
+
+    await vi.waitFor(() => expect(vscodeMocks.panels).toHaveLength(2));
+    expect(vscodeMocks.panels[1].webview.html).toContain('data-project-id="project-api"');
+  });
+
   it("updates an existing New Task tab when a Project-scoped action is opened", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
@@ -212,7 +270,7 @@ describe("VS Code webview surfaces", () => {
     });
   });
 
-  it("opens a Native Session route and adopts the resulting Task in the same panel", () => {
+  it("opens a Native Session route and adopts the resulting Task in the same panel", async () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
     manager.openNativeSession("codex", "session_1", "project-current");
@@ -221,7 +279,7 @@ describe("VS Code webview surfaces", () => {
     expect(panel.webview.html).toContain('data-surface="nativeSession"');
     expect(panel.webview.html).toContain('data-agent-id="codex"');
     expect(panel.webview.html).toContain('data-native-session-id="session_1"');
-    triggerLastMessageHandler(panel, {
+    await triggerLastMessageHandler(panel, {
       type: "surface.openTask",
       payload: { task_id: "task_adopted", title: "Existing session" },
     });
@@ -234,12 +292,12 @@ describe("VS Code webview surfaces", () => {
     });
   });
 
-  it("keeps the editor tab concise when a New Task becomes a Task", () => {
+  it("keeps the editor tab concise when a New Task becomes a Task", async () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
     manager.openNewTask();
     const panel = vscodeMocks.panels[0];
-    triggerLastMessageHandler(panel, {
+    await triggerLastMessageHandler(panel, {
       type: "surface.openTask",
       payload: {
         task_id: "created_task",
@@ -261,19 +319,18 @@ describe("VS Code webview surfaces", () => {
 
     expect(broker.attachAppServerView).toHaveBeenCalledTimes(2);
     for (const panel of vscodeMocks.panels) {
-      expect(panel.webview.html).not.toContain("data-client-instance-id");
       expect(panel.webview.html).not.toContain("data-app-server-connection");
       expect(panel.webview.html).not.toContain("authToken");
     }
   });
 
-  it("routes typed App Server session messages through the extension host client", () => {
+  it("routes typed App Server session messages through the extension host client", async () => {
     const broker = runtime();
     const manager = new TaskEditorManager(context(), broker, runtimeProcess(), logger());
 
     manager.openNewTask();
     const panel = vscodeMocks.panels[0];
-    triggerLastMessageHandler(panel, {
+    await triggerLastMessageHandler(panel, {
       type: "appServer.session.initialize",
       requestId: "initialize-1",
     });
@@ -334,7 +391,7 @@ describe("VS Code webview surfaces", () => {
     expect(view.webview.html).toContain('data-focused-task-id="&quot;task_1&quot;"');
   });
 
-  it("reuses the registered Task panel when a New Task routes to the same Task", () => {
+  it("reuses the registered Task panel when a New Task routes to the same Task", async () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
     manager.openTask("task_1", "Existing task");
@@ -342,7 +399,7 @@ describe("VS Code webview surfaces", () => {
     manager.openNewTask();
     const supersededNewTaskPanel = vscodeMocks.panels[1];
 
-    triggerLastMessageHandler(supersededNewTaskPanel, {
+    await triggerLastMessageHandler(supersededNewTaskPanel, {
       type: "surface.openTask",
       payload: { task_id: "task_1", title: "Existing task" },
     });
@@ -361,12 +418,12 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledTimes(3);
   });
 
-  it("keeps adopted task panels from clearing a newer New Task panel", () => {
+  it("keeps adopted task panels from clearing a newer New Task panel", async () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
     manager.openNewTask();
     const firstPanel = vscodeMocks.panels[0];
-    triggerLastMessageHandler(firstPanel, {
+    await triggerLastMessageHandler(firstPanel, {
       type: "surface.openTask",
       payload: { task_id: "created_task", title: "Created task" },
     });
@@ -380,7 +437,7 @@ describe("VS Code webview surfaces", () => {
     expect(secondPanel.reveal).toHaveBeenCalledWith(1);
   });
 
-  it("adopts a successful New Task in place through the production surface route", () => {
+  it("adopts a successful New Task in place through the production surface route", async () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
     manager.openNewTask();
@@ -388,7 +445,7 @@ describe("VS Code webview surfaces", () => {
     const originalHtml = panel.webview.html;
     expect(panel.webview.html).toContain('data-task-id=""');
 
-    triggerLastMessageHandler(panel, {
+    await triggerLastMessageHandler(panel, {
       type: "surface.openTask",
       payload: { task_id: "created_task", title: "Created task" },
     });
@@ -407,11 +464,49 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledTimes(2);
   });
 
+  it("gives each New Task panel a distinct shell-owned client identity", async () => {
+    const panelLogger = logger();
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), panelLogger);
+
+    manager.openNewTask();
+    const firstPanel = vscodeMocks.panels[0];
+    const firstClientId = htmlDataAttribute(firstPanel.webview.html, "client-instance-id");
+    await triggerLastMessageHandler(firstPanel, {
+      type: "surface.openTask",
+      payload: { task_id: "created_task", title: "Created task" },
+    });
+    manager.openNewTask();
+    const secondClientId = htmlDataAttribute(
+      vscodeMocks.panels[1].webview.html,
+      "client-instance-id",
+    );
+
+    expect(firstClientId).not.toBe("");
+    expect(secondClientId).not.toBe("");
+    expect(secondClientId).not.toBe(firstClientId);
+    expect(htmlDataAttribute(firstPanel.webview.html, "client-instance-id")).toBe(firstClientId);
+    expect(panelLogger.info).toHaveBeenCalledWith("VS Code webview client created", {
+      surface: "task",
+      client_identity_source: "shell",
+      extension_version: "0.3.0-test",
+    });
+  });
+
 });
 
+function htmlDataAttribute(html: string, name: string) {
+  return html.match(new RegExp(`data-${name}="([^"]*)"`))?.[1] ?? "";
+}
+
 function context() {
+  const workspaceState = new Map<string, unknown>();
   return {
     extensionUri: { fsPath: "/extension" },
+    extension: { packageJSON: { version: "0.3.0-test" } },
+    workspaceState: {
+      get: <T>(key: string) => workspaceState.get(key) as T | undefined,
+      update: async (key: string, value: unknown) => { workspaceState.set(key, value); },
+    },
   } as never;
 }
 
@@ -449,6 +544,7 @@ function surfaces() {
     currentFocusedTaskId: vi.fn(() => undefined),
     onDidChangeFocusedTask: vi.fn(() => ({ dispose: vi.fn() })),
     openNewTask: vi.fn(),
+    retainNewTaskProject: vi.fn(),
     openSettings: vi.fn(),
     openTask: vi.fn(),
   };
@@ -485,14 +581,13 @@ function createWebviewMock() {
   };
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function triggerLastMessageHandler(panel: ReturnType<typeof createPanelMock>, message: unknown) {
+async function triggerLastMessageHandler(panel: ReturnType<typeof createPanelMock>, message: unknown) {
   const handler = panel.webview.onDidReceiveMessage.mock.calls.at(-1)?.[0];
   if (!handler) throw new Error("missing message handler");
-  handler(message);
+  await handler(message);
+  // Production event listeners intentionally detach async routing from VS Code's
+  // callback. Let the router finish before observing the resulting surface.
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function triggerFirstDisposeHandler(panel: ReturnType<typeof createPanelMock>) {

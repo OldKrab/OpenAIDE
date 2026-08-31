@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   readRetainedNewTaskContext,
   retainNewTaskContext,
+  selectInitialNewTaskProject,
   selectInitialNewTaskContext,
 } from "./newTaskSelectionDefaults";
 
@@ -16,6 +17,23 @@ const agents = [
 ];
 
 describe("New Task initial selection", () => {
+  it("explains which Project source won initialization", () => {
+    expect(selectInitialNewTaskProject({
+      retained: { projectId: "project-b" },
+      defaults: { projectId: "project-a" as never, agentId: null },
+      projects,
+    })).toEqual({
+      projectId: "project-b",
+      source: "retained",
+      shellProjectPresent: false,
+      shellProjectValid: false,
+      retainedProjectPresent: true,
+      retainedProjectValid: true,
+      defaultProjectPresent: true,
+      defaultProjectValid: true,
+    });
+  });
+
   it("uses a valid shell Project before client and App Server defaults", () => {
     expect(selectInitialNewTaskContext({
       retained: { projectId: "project-b", agentId: "opencode" },

@@ -14,39 +14,63 @@ import { Check, CircleAlert, Copy } from "lucide-react";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { postHostMessage } from "../services/hostBridge";
+import {
+  chatMarkdownFileLocation,
+  markdownFileLocation,
+  pathLikeFileLocation,
+  relativeMarkdownHref,
+} from "../state/fileViewerReferences";
+import { useAgentFileOpen, type OpenAgentFileReference } from "./agentFileOpen";
 import { copyText } from "./clipboard";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 type AgentMarkdownProps = {
   className?: string;
+  /** Resolves relative hrefs from an already-open File Tab without sending a raw path. */
+  onOpenRelativeHref?: (href: string) => void;
   quoteSource?: "agent";
   renderDiagrams?: boolean;
   streaming?: boolean;
   text: string;
 };
 
+const MarkdownLinkBehaviorContext = createContext<{
+  onOpenRelativeHref?: (href: string) => void;
+  openFile?: OpenAgentFileReference;
+}>({});
+
 // Unrelated Task and composer updates must not re-enter the synchronous Markdown parser.
-export const AgentMarkdown = memo(function AgentMarkdown({ className, quoteSource, renderDiagrams = false, streaming = false, text }: AgentMarkdownProps) {
+export const AgentMarkdown = memo(function AgentMarkdown({
+  className,
+  onOpenRelativeHref,
+  quoteSource,
+  renderDiagrams = false,
+  streaming = false,
+  text,
+}: AgentMarkdownProps) {
+  const openFile = useAgentFileOpen();
   const parts = splitDataImageMarkdown(text);
   return (
-    <div className={className} data-quote-source={quoteSource}>
-      {parts.map((part, index) => (
-        <Fragment key={index}>
-          {part.kind === "image" ? (
-            <>
-              <AgentMarkdownImage label={part.label} url={part.url} />
-              {streaming && index === parts.length - 1 ? <StreamingCaret /> : null}
-            </>
-          ) : (
-            <MarkdownRenderer
-              renderDiagrams={renderDiagrams}
-              streaming={streaming && index === parts.length - 1}
-              text={part.text}
-            />
-          )}
-        </Fragment>
-      ))}
-    </div>
+    <MarkdownLinkBehaviorContext.Provider value={{ onOpenRelativeHref, openFile }}>
+      <div className={className} data-quote-source={quoteSource}>
+        {parts.map((part, index) => (
+          <Fragment key={index}>
+            {part.kind === "image" ? (
+              <>
+                <AgentMarkdownImage label={part.label} url={part.url} />
+                {streaming && index === parts.length - 1 ? <StreamingCaret /> : null}
+              </>
+            ) : (
+              <MarkdownRenderer
+                renderDiagrams={renderDiagrams}
+                streaming={streaming && index === parts.length - 1}
+                text={part.text}
+              />
+            )}
+          </Fragment>
+        ))}
+      </div>
+    </MarkdownLinkBehaviorContext.Provider>
   );
 });
 
@@ -71,37 +95,97 @@ const MarkdownSourceContext = createContext({ renderDiagrams: false, source: "",
 
 // Stable component identities keep native pointer gestures alive across streamed Markdown updates.
 const agentMarkdownComponents: Components = {
-  a: ({ children, href, node: _node, ...props }) => {
-    const label = plainText(children) || "Image";
-    if (isSafeDataImageUrl(href)) {
-      return <AgentMarkdownImage label={label} url={href} />;
-    }
-    const fileLocation = markdownFileLocation(href);
-    if (fileLocation) {
-      return (
-        <a
-          {...props}
-          href={href}
-          onClick={(event) => {
-            event.preventDefault();
-            postHostMessage({ type: "tool.openPath", payload: fileLocation });
-          }}
-        >
-          {children}
-        </a>
-      );
-    }
-    return href ? (
-      <a {...props} href={href} rel="noreferrer" target="_blank">
-        {children}
-      </a>
-    ) : (
-      <span>{children}</span>
-    );
-  },
+  a: AgentMarkdownAnchor,
+  code: AgentMarkdownCode,
   pre: MarkdownPreBlock,
   blockquote: MarkdownQuoteBlock,
 };
+
+function AgentMarkdownAnchor({ children, href, node: _node, ...props }: ComponentProps<"a"> & ExtraProps) {
+  const { onOpenRelativeHref, openFile } = useContext(MarkdownLinkBehaviorContext);
+  const label = plainText(children) || "Image";
+  if (isSafeDataImageUrl(href)) {
+    return <AgentMarkdownImage label={label} url={href} />;
+  }
+  const relativeHref = relativeMarkdownHref(href);
+  if (onOpenRelativeHref && relativeHref) {
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          onOpenRelativeHref(relativeHref);
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  const fileLocation = chatMarkdownFileLocation(href);
+  if (fileLocation) {
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          activateAgentFileReference(openFile, fileLocation.path, fileLocation.line);
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  return href ? (
+    <a {...props} href={href} rel="noreferrer" target="_blank">
+      {children}
+    </a>
+  ) : (
+    <span>{children}</span>
+  );
+}
+
+function AgentMarkdownCode({ children, className, node: _node, ...props }: ComponentProps<"code"> & ExtraProps) {
+  const { openFile } = useContext(MarkdownLinkBehaviorContext);
+  const fenced = className?.split(/\s+/).some((token) => token.startsWith("language-"));
+  const text = plainText(children);
+  const location = !fenced ? pathLikeFileLocation(text) : undefined;
+  if (!location) {
+    return <code {...props} className={className}>{children}</code>;
+  }
+  return (
+    <code
+      {...props}
+      className={["agent-file-ref", className].filter(Boolean).join(" ")}
+      onClick={(event) => {
+        event.preventDefault();
+        activateAgentFileReference(openFile, location.path, location.line);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        activateAgentFileReference(openFile, location.path, location.line);
+      }}
+      role="link"
+      tabIndex={0}
+    >
+      {children}
+    </code>
+  );
+}
+
+function activateAgentFileReference(
+  openFile: ReturnType<typeof useAgentFileOpen>,
+  path: string,
+  line?: number,
+) {
+  if (openFile) {
+    openFile(path, line);
+    return;
+  }
+  postHostMessage({ type: "tool.openPath", payload: { path, line } });
+}
 
 function MarkdownPreBlock({ children, node: _node, ...props }: ComponentProps<"pre"> & ExtraProps) {
   const context = useContext(MarkdownSourceContext);
@@ -261,27 +345,9 @@ export function splitDataImageMarkdown(text: string): MarkdownPart[] {
 }
 
 function safeMarkdownUrl(value: string) {
-  return isSafeDataImageUrl(value) || markdownFileLocation(value) ? value : defaultUrlTransform(value);
-}
-
-// Agent file citations use an absolute path with an optional one-based line suffix.
-function markdownFileLocation(href: string | undefined): { path: string; line?: number } | undefined {
-  if (!href) return undefined;
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(href);
-  } catch {
-    return undefined;
-  }
-  const lineSuffix = decoded.match(/^(.*):([1-9]\d*)$/);
-  if (lineSuffix?.[1] && isAbsoluteFilePath(lineSuffix[1])) {
-    return { path: lineSuffix[1], line: Number(lineSuffix[2]) };
-  }
-  return isAbsoluteFilePath(decoded) ? { path: decoded } : undefined;
-}
-
-function isAbsoluteFilePath(value: string) {
-  return value.startsWith("/") || /^[a-z]:[\\/]/i.test(value);
+  return isSafeDataImageUrl(value) || markdownFileLocation(value) || relativeMarkdownHref(value)
+    ? value
+    : defaultUrlTransform(value);
 }
 
 function isSafeDataImageUrl(value: unknown): value is string {

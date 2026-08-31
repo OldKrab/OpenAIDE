@@ -66,6 +66,38 @@ describe("TaskView timeline presentation", () => {
     expect(settledTask).not.toContain("chat-streaming-caret");
   });
 
+  it("finishes presenting the last streamed text after the task settles", async () => {
+    const { TaskView } = await import("./TaskView");
+    const initial = snapshotWithAuthoritativeTail(true);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(initial)} />);
+    });
+
+    const terminal = structuredClone(initial);
+    terminal.task.status = "inactive";
+    const latestAgent = terminal.chat.items.find((item) => item.message_id === "agent-later");
+    if (latestAgent?.message.kind !== "agent_message" || latestAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected latest Agent text");
+    }
+    latestAgent.message.parts[0].text = "Latest update delivered with terminal state";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(terminal)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-later", eventCursor: "cursor-terminal-text" },
+          }}
+        />,
+      );
+    });
+
+    const firstPaint = JSON.stringify(tree.toJSON());
+    expect(firstPaint).toContain("Latest update");
+    expect(firstPaint).not.toContain("delivered with terminal state");
+    expect(firstPaint).toContain("chat-streaming-caret");
+  });
+
   it("does not let a large received suffix build a visible presentation backlog", async () => {
     const { TaskView } = await import("./TaskView");
     const initial = snapshotWithAuthoritativeTail(true);
@@ -319,6 +351,26 @@ describe("TaskView timeline presentation", () => {
     expect(rendered).not.toContain("task not found: task_unknown");
   });
 
+  it("renders a Native Session writer conflict as an open-elsewhere state", async () => {
+    const { TaskLoadingView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskLoadingView
+          error="This session is open in another OpenAIDE window. Close it there, then try again."
+          errorKind="conflict"
+        />,
+      );
+    });
+
+    expect(tree.root.findByType("section").props["aria-label"]).toBe("Session open elsewhere");
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Session open elsewhere.");
+    expect(rendered).toContain("Close it there, then try again.");
+    expect(rendered).not.toContain("Unable to open task.");
+  });
+
   it("uses the route-specific opening label", async () => {
     const { TaskLoadingView } = await import("./TaskView");
     let tree!: ReactTestRenderer;
@@ -470,6 +522,80 @@ describe("TaskView timeline presentation", () => {
     expect(configControl.props.disabled).toBe(true);
   });
 
+  it("shows managed integration activity while a saved Codex Task restores its options", async () => {
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.agent_config = {
+      agent_id: "codex",
+      status: "loading",
+      options: [],
+    };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshot)}
+          agents={[{
+            id: "codex",
+            label: "Codex",
+            description: "Codex Agent",
+            icon: "openai",
+            status: "installing",
+          }]}
+        />,
+      );
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Installing the Codex integration…");
+    expect(rendered).not.toContain("Loading options…");
+  });
+
+  it("keeps permission handling available during unrelated Backend recovery", async () => {
+    const { TaskView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshotWithAuthoritativeTail(true))}
+          backendReady={false}
+          taskMutationReady
+          onPermissionPolicyChange={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    const permissionControl = tree.root.findByProps({
+      "aria-label": "Permission handling: Ask every time",
+    });
+    expect(permissionControl.props.disabled).toBe(false);
+  });
+
+  it("explains when permission handling is unavailable for the active Task", async () => {
+    const { TaskView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshotWithAuthoritativeTail(true))}
+          taskMutationReady={false}
+          onPermissionPolicyChange={vi.fn(async () => undefined)}
+        />,
+      );
+    });
+
+    const permissionControl = tree.root.findByProps({
+      "aria-label": "Permission handling: Ask every time",
+    });
+    expect(permissionControl.props.disabled).toBe(true);
+    expect(permissionControl.props.title).toBe(
+      "Permission handling is unavailable until this Task is connected.",
+    );
+  });
+
   it("locks Configuration Options until the correlated change settles", async () => {
     const { TaskView } = await import("./TaskView");
     const snapshot = snapshotWithAuthoritativeTail(true);
@@ -570,16 +696,12 @@ describe("TaskView timeline presentation", () => {
     expect(JSON.stringify(tree.toJSON())).not.toContain("Reconnecting to App Server.");
     const editor = tree.root.findByProps({ role: "textbox", "aria-label": "Message" });
     expect(editor.props.contentEditable).toBe("plaintext-only");
-    expect(editor.props["aria-placeholder"]).toBe("Reconnecting. Draft is saved here.");
+    expect(editor.props["aria-placeholder"]).toBe("Send follow-up");
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-
     const rendered = JSON.stringify(tree.toJSON());
-    expect(rendered).toContain("Reconnecting to App Server.");
-    expect(rendered).toContain("App Server is temporarily unavailable.");
+    expect(rendered).toContain("Reconnecting");
+    expect(rendered).toContain("Draft saved");
+    expect(rendered).not.toContain("Reconnecting to App Server.");
     expect(rendered).not.toContain("Connection closed.");
   });
 
@@ -635,7 +757,10 @@ describe("TaskView timeline presentation", () => {
       );
     });
 
-    expect(JSON.stringify(tree.toJSON())).toContain("This Agent does not accept images.");
+    const imageStatus = tree.root.findByProps({ className: "context-token-status error" });
+    expect(imageStatus.children.filter((child) => typeof child === "string").join("")).toBe(
+      "Images aren’t supported by Codex",
+    );
     expect(tree.root.findByProps({ "aria-label": "Add context" }).props.disabled).toBe(true);
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });
@@ -734,6 +859,7 @@ function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
 
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: "task-1",
       title: "Task",

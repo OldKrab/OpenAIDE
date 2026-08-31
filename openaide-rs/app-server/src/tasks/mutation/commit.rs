@@ -56,6 +56,10 @@ fn commit_existing_task_with_session_policy(
     mutation: impl FnOnce(&mut TaskMutationContext<'_>) -> Result<TaskMutationResult, RuntimeError>,
 ) -> Result<TaskCommitResult, RuntimeError> {
     let _guard = target.lock();
+    // Agent text uses an asynchronous lane, but later synchronous mutations
+    // must draft from its durable projection. This narrow barrier leaves
+    // streamed Tool output queued so structured Tool updates stay atomic.
+    target.flush_streamed_agent_text(task_id)?;
     let mut projection = target.store.task_journal().load(task_id)?;
     session_policy.validate_replacement_boundary(&projection)?;
     let original_task = projection.task.clone();
@@ -342,7 +346,11 @@ pub(super) fn release_prepared_task(
         task.preparation,
         crate::storage::records::TaskPreparationRecord::Failed { .. }
     );
-    if failed || same_key_already_free {
+    let preparation_incomplete = !matches!(
+        task.preparation,
+        crate::storage::records::TaskPreparationRecord::Ready
+    );
+    if preparation_incomplete || same_key_already_free {
         task.tombstoned = true;
     }
     let facts = persist_changed_task(
@@ -362,6 +370,8 @@ pub(super) fn release_prepared_task(
     };
     let release_reason = if failed {
         "preparation_failed"
+    } else if preparation_incomplete {
+        "preparation_incomplete"
     } else if same_key_already_free {
         "duplicate_pool_key"
     } else {

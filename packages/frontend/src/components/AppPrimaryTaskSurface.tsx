@@ -3,22 +3,30 @@ import { TaskLoadingView, TaskView } from "./TaskView";
 import type { AppController } from "./appController";
 import { openRecoveryUrl, reloadRecoveryShell } from "../services/hostBridge";
 import type { AgentRecoveryActions } from "./AgentRecovery";
+import type { DesktopWindowCapability } from "../services/frontendShell";
 
 export function primaryTaskSurfaceModel(controller: AppController) {
   const { activeTask, bootstrap, view } = controller;
   const { primaryTask } = view;
   const snapshotTaskInput = primaryTask.taskInput;
-  const adoptedEmptyTaskHasDraft = bootstrap.surface === "task"
-    && bootstrap.taskId === primaryTask.snapshot?.task.task_id
-    && hasVisibleTaskDraft(snapshotTaskInput);
+  // Chat belongs to one Task identity. A leftover replica from reconnect or
+  // navigation must not paint another Task's history onto the current route.
+  const routedSnapshot = bootstrap.surface === "task"
+    && bootstrap.taskId
+    && primaryTask.snapshot?.task.task_id === bootstrap.taskId
+    ? primaryTask.snapshot
+    : undefined;
+  const adoptedEmptyTaskHasDraft = Boolean(routedSnapshot) && hasVisibleTaskDraft(snapshotTaskInput);
   // Task preparation can publish an active New Task while the route remains
   // /new-task. Only an explicit Task route may promote that snapshot to TaskView.
-  const activeNoMessageTask = bootstrap.taskId === primaryTask.snapshot?.task.task_id
-    && primaryTask.snapshot?.task.status === "active";
-  const renderableTaskSnapshot = primaryTask.snapshot?.task.has_messages === true
-    || adoptedEmptyTaskHasDraft
-    || activeNoMessageTask
-    ? primaryTask.snapshot
+  const activeNoMessageTask = routedSnapshot?.task.status === "active";
+  const renderableTaskSnapshot = routedSnapshot
+    && (
+      routedSnapshot.task.has_messages === true
+      || adoptedEmptyTaskHasDraft
+      || activeNoMessageTask
+    )
+    ? routedSnapshot
     : undefined;
   const startupConfigOptions = renderableTaskSnapshot?.task.has_messages === false && snapshotTaskInput?.pending
     ? primaryTask.newTask.newTask.pending?.configOptions
@@ -42,7 +50,7 @@ export function primaryTaskSurfaceModel(controller: AppController) {
     : undefined;
   const taskLoadingError = openingNativeSession ? nativeRouteError : routedTaskOpenError?.message;
   const taskLoadingErrorKind = openingNativeSession
-    ? nativeRouteError ? "failed" as const : undefined
+    ? nativeRouteError ? adoptionError?.kind ?? "failed" as const : undefined
     : routedTaskOpenError?.kind;
   return {
     openingNativeSession,
@@ -69,6 +77,7 @@ function hasVisibleTaskDraft(input: AppController["view"]["primaryTask"]["taskIn
 
 type AppPrimaryTaskSurfaceProps = {
   controller: AppController;
+  desktopWindow?: DesktopWindowCapability;
   focusRequestKey: number;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
   projects?: AppController["view"]["navigation"]["projects"];
@@ -86,6 +95,7 @@ type AppPrimaryTaskSurfaceProps = {
 
 export function AppPrimaryTaskSurface({
   controller,
+  desktopWindow,
   focusRequestKey,
   model,
   projects,
@@ -96,7 +106,17 @@ export function AppPrimaryTaskSurface({
   planDrawerOpen,
   workspaceRecovery,
 }: AppPrimaryTaskSurfaceProps) {
-  const { activeTask, agents, backendReady, bootstrap, callbacks, intents, preferences, view } = controller;
+  const {
+    activeTask,
+    agents,
+    backendReady,
+    bootstrap,
+    callbacks,
+    intents,
+    preferences,
+    taskMutationReady,
+    view,
+  } = controller;
   const { primaryTask } = view;
   const {
     openingNativeSession,
@@ -127,9 +147,13 @@ export function AppPrimaryTaskSurface({
         agentRecoveryActions={recoveryActions}
         archived={renderableTaskArchived}
         backendConnectionState={controller.backendConnectionState}
+        subagentConnection={controller.backendConnection}
         chatPageState={primaryTask.chatPageState}
+        desktopWindow={desktopWindow}
         backendReady={backendReady}
+        taskMutationReady={taskMutationReady}
         fileBrowser={callbacks.task.fileBrowser}
+        fileViewer={callbacks.task.fileViewer}
         intents={intents.task}
         onCancel={renderableTaskSnapshot.task.has_messages || renderableTaskSnapshot.task.status === "active"
           ? callbacks.task.cancel
@@ -143,9 +167,11 @@ export function AppPrimaryTaskSurface({
         onOpenProjectSettings={workspaceRecovery?.openProjectSettings}
         onSubscribeToolDetail={callbacks.task.subscribeToolDetail}
         onPermissionRespond={callbacks.task.respondToPermission}
+        onPermissionPolicyChange={callbacks.task.setPermissionPolicy}
         onQuestionRespond={callbacks.task.respondToQuestion}
         onReconnectProject={workspaceRecovery?.reconnectProject}
         onRetryConnection={retryTaskOpen}
+        onRetryConfigOptions={controller.retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
         onRemoveQueueMessage={callbacks.task.removeQueueMessage}
@@ -167,7 +193,7 @@ export function AppPrimaryTaskSurface({
         submitShortcut={preferences.composer_submit_shortcut}
         taskInput={primaryTask.taskInput ?? { prompt: "", context: [] }}
         toolDetails={primaryTask.toolDetails}
-        showWorkspaceContext={usesProjectNavigation}
+        showWorkspaceContext={usesProjectNavigation && bootstrap.shell.kind !== "desktop"}
       />
     );
   }
@@ -199,6 +225,7 @@ export function AppPrimaryTaskSurface({
       onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onRemoveProject={onRemoveProject}
+      onRetryPreparation={() => callbacks.newTask.submit()}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={canSelectNewTaskProject ? "selectable" : "fixed"}

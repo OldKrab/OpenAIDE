@@ -56,6 +56,10 @@ _Avoid_: Image, Attachment, persisted SVG
 A general file explicitly linked to one unsent message through **Attach files**. It is distinct from an Image and from an `@file` mention.
 _Avoid_: Upload when the App Shell references an original local path, treating `@file` text as attached content
 
+**Agent File Reference**:
+A user-activated path-like location in Agent output — a markdown file link, path-like inline code, or an expanded tool path — that Web and Desktop may open in the File Viewer. Relative paths resolve on App Server against the Task Workspace; an absolute path the user clicked may be outside the current Project. The reference does not open or disclose file contents by itself.
+_Avoid_: Treating Agent output as an automatic file read, markdown-link-only Chat open, workspace-only path
+
 **Chat**:
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
 _Avoid_: Log-style names
@@ -71,6 +75,10 @@ _Avoid_: Using Approval Required as the domain name for a Permission Request
 **Quote**:
 An editable `>`-prefixed quotation inserted into the Composer from selected visible text in one User or Agent message. It is ordinary User text and carries no durable relationship to its source.
 _Avoid_: Reply, Reply Reference, source metadata
+
+**File Quote**:
+An editable `>`-prefixed quotation inserted into the Composer from a selected File Viewer line, including that file's display path, line location, and captured line text as ordinary User text.
+_Avoid_: Persisted Comment, review thread, live line anchor
 
 **Queued Message**:
 A user-authored instruction accepted for later automatic or manual delivery. It remains distinct from Chat until delivery begins.
@@ -149,8 +157,20 @@ A lightweight OpenAIDE record for a user work area, such as a folder, workspace,
 _Avoid_: Git remote or shell-specific workspace identity as the primary identity
 
 **Task Page**:
-The main user-facing page for one Task's Chat, composer, permissions, and folded activity.
+The main user-facing page for one Task's Chat, composer, permissions, folded activity, and Task Panel.
 _Avoid_: Squeezing the main work surface into Task Navigation
+
+**Task Panel**:
+The Task Page column beside Chat for inspectable surfaces. File Viewer is the v1 occupant; later surfaces can use the same column without becoming a separate Task Page.
+_Avoid_: Files panel as the column name, treating File Viewer as that column's only possible occupant, a second Task Page
+
+**File Viewer**:
+A read-only surface in the Task Panel that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface. On a wide Task Page it shares the page with Chat and Composer; on a narrow Task Page the Task Panel occupies the page until Chat is restored.
+_Avoid_: Treating a browser download or file-manager reveal as the File Viewer, live editor, global editor pane, naming the Task Panel after files
+
+**File Tab**:
+A File Viewer entry for one selected file, retaining that file's visible location within the Task Page while other files may be opened in neighboring tabs.
+_Avoid_: Global editor tab, independent Task surface
 
 **Settings**:
 The global user-facing area for reusable configuration across Tasks and Worktree Management. It includes Agents, MCP Servers, Skills, application preferences, and Worktrees, but does not own Project records or Task lifecycle management.
@@ -169,8 +189,8 @@ An explicit, irreversible Settings action that deletes all OpenAIDE Tasks, Chat,
 _Avoid_: Clear data, repair, reset OpenAIDE
 
 **Support Export**:
-A hidden command that writes redacted troubleshooting data for bug reports.
-_Avoid_: Visible troubleshooting area in first-iteration Settings
+A shared Task- or Settings-launched flow that writes a user-selected troubleshooting bundle. Standard diagnostics remain redacted by default; explicitly selected session history, ACP traces, and Agent-native transcripts are raw sensitive artifacts shown behind a clear warning.
+_Avoid_: Automatic uploads, silently including sensitive artifacts, exposing storage paths
 
 **MCP Server**:
 A settings-managed tool or resource server configuration that compatible Agents can receive for Task work.
@@ -183,6 +203,22 @@ _Avoid_: Automatically injected prompt content in the first iteration
 **Agent**:
 A user-selectable external ACP worker that performs Task work.
 _Avoid_: Adapter, provider, raw runtime process, non-ACP protocol selector
+
+**Main Agent**:
+The user-addressable Agent role bound directly to a Task. Its Chat accepts User messages, and its work may create top-level Subagents.
+_Avoid_: Root Agent, Primary Agent, treating it as a second Agent selection
+
+**Subagent**:
+An Agent-created restricted child of a Task with its own inspectable history and, optionally, nested Subagents. It is not a Task and does not appear in Task Navigation.
+_Avoid_: Child Task, background Task, treating delegated activity as an independent Task
+
+**Subagent Identity**:
+The stable App Server-owned identity of one Subagent instance within a Task. It is independent of the Subagent's display name, hierarchy path, and Agent-owned Native Session identity.
+_Avoid_: Subagent name, ACP child session id, hierarchy path
+
+**Subagent History**:
+The Task-owned durable projection of one Subagent's messages, reasoning, and activity using the same presentation language as Chat. It is observational and has no Composer unless the Subagent explicitly supports user input.
+_Avoid_: Subagent Chat, child Task Chat, raw ACP stream
 
 **Agent Plan**:
 The Agent's current non-empty ordered strategy for a Task. An Agent Plan has no independent identity; each new snapshot supersedes the current snapshot until every entry is complete, while an empty snapshot clears it.
@@ -213,7 +249,7 @@ An Agent that has successfully launched and initialized, supports the required O
 _Avoid_: Letting users start work with an unavailable Agent
 
 **Agent Status**:
-The user-facing availability state of an Agent: disconnected, launching, connected, setup required, auth required, authenticating, unsupported, or failed.
+The user-facing availability state of an Agent: disconnected, installing, launching, connected, setup required, auth required, authenticating, unsupported, or failed. Installing is an ephemeral App Server-owned activity for a managed Agent integration, not a Task state or user setup requirement.
 _Avoid_: Representing Agent setup problems as failed Tasks
 
 **Setup Required Agent**:
@@ -239,6 +275,50 @@ _Avoid_: Treating available Authentication Methods as active authentication, all
 **App Shell**:
 The application form OpenAIDE runs in, such as the Web App, Desktop App, Mobile App, or VS Code Extension.
 _Avoid_: Host as a product term
+
+**Desktop Update**:
+A newer official OpenAIDE Desktop App release offered inside the installed Desktop App. The user may review its Release Notes, initiate download and staging, and restart OpenAIDE to apply it.
+_Avoid_: Silently replacing a running release, treating a downloaded update as already applied
+
+**Ready to Update**:
+The Desktop Update state in which an eligible update has been downloaded and verified but has not changed the installed Desktop App. Applying it still requires explicit Restart and Update consent.
+_Avoid_: Updated, installed, restart required after installation
+
+**Update Attempt Receipt**:
+The minimal Desktop record that a Restart and Update attempt began, identifying its previous and target versions so the next launch can report whether that attempt succeeded.
+_Avoid_: Persisted update artifact, download URL, treating installer launch as update success
+
+**Update Shutdown Readiness**:
+The App Server-owned confirmation that Desktop is its only initialized App Shell client and that every Desktop-owned runtime can enter a coherent update shutdown without abandoning another client's work.
+_Avoid_: Desktop guessing from visible Tasks, force-disconnecting another App Shell, process exit as readiness
+
+**Release Notes**:
+The user-facing summary of changes in one OpenAIDE release, shown before the user chooses whether to install its Desktop Update.
+_Avoid_: Changelog as the user-facing product term
+
+**Desktop Update Feed**:
+The OpenAIDE-controlled release view that offers each installed Desktop App the next eligible Desktop Update for its platform, channel, and current version.
+_Avoid_: Treating the newest release as eligible for every installation, artifact storage
+
+**Desktop Update Graph**:
+The reviewed release policy that defines each valid Update Edge and from which the deployed Desktop Update Feed is derived.
+_Avoid_: Hand-edited production manifest, inferring eligibility from release order
+
+**Update Edge**:
+One authorized Desktop Update path from a specific installed release to a newer release whose platform, trust, and durable-state compatibility have been proven for that transition.
+_Avoid_: Assuming every older release can jump directly to latest, release existence as update eligibility
+
+**Storage-Compatible Desktop Update**:
+A Desktop Update whose Update Edge preserves the installed release's durable state without an irreversible migration and retains a proven recovery path through the source release.
+_Avoid_: Migration-required update, assuming binary reinstall restores migrated data
+
+**Desktop Update Release Key**:
+A platform-specific signing identity authorized to approve ordinary Desktop Update artifacts through the protected release process.
+_Avoid_: Platform code-signing certificate, sharing one release key across every platform
+
+**Desktop Update Recovery Key**:
+A platform-specific signing identity reserved for restoring Desktop Update trust after loss or compromise of a Desktop Update Release Key. Its private material remains outside the ordinary release process.
+_Avoid_: Backup CI secret, routine release key
 
 **Unattended App Shell**:
 An App Shell that is open but does not currently have user focus. When one App Shell has multiple views, it is unattended only when none has focus; Task-level navigation within a focused App Shell does not make it unattended.
@@ -331,7 +411,7 @@ _Avoid_: Treating every unread update or status change as an alert
 - **Settings** contains Agents, MCP Servers, Skills, application preferences, and **Worktree Management**.
 - **Settings** presents global and **Project-scoped configuration** for all Projects on the relevant resource page.
 - **Worktree Management** groups worktrees by Project for navigation. Projects that share a **Worktree Repository** may present the same inventory in more than one group, but mutations and operation state still belong to that one authoritative repository.
-- **Support Export** is available through a hidden command, not visible Settings UI in the first iteration.
+- **Support Export** is available from Settings and Task context in every App Shell; shell commands may open the same shared flow.
 - **MCP Servers** are configured in **Settings** and made available to compatible **Agents** for Task work.
 - **Skills** are managed in **Settings** and are not automatically injected into Agent prompts in the first iteration.
 - A **Task** is handled by one **Agent**.
@@ -440,6 +520,6 @@ _Avoid_: Treating every unread update or status change as an alert
 - "last client" was ambiguous between a Task subscriber and an App Shell client; resolved: losing Task subscribers does not stop a **Running Task**, but losing all **App Shell** clients lets **App Server** shut down.
 - "side panel" was used ambiguously; resolved: **Task Navigation** is the sidebar, while **Task Page** is the main work surface.
 - Settings was discussed through MCP task selection and Worktree management; resolved: **Settings** owns reusable configuration across Tasks plus aggregated **Worktree Management**, but not Project records or Task lifecycle management.
-- Diagnostics was unclear user-facing language; resolved: use hidden **Support Export** for first iteration, not visible Settings troubleshooting UI.
+- Diagnostics was unclear user-facing language; resolved: **Support Export** is the visible shared troubleshooting flow, while ordinary logs remain local implementation detail.
 - MCP selection was discussed as per-Agent or per-Task; resolved: enabled **MCP Servers** apply to compatible **Agents** in the first iteration.
 - Skills were discussed as editable or toggleable Settings records; resolved: the first iteration discovers and inspects **Skill** files read-only, with no enable state or automatic Task injection.

@@ -126,10 +126,9 @@ impl TaskProductApi {
     /// Revalidates live file references before queued delivery and restores durable payloads.
     pub(super) fn resolved_queued_attachments(
         &self,
-        task: &crate::storage::records::TaskRecord,
         queued: &QueuedMessageRecord,
     ) -> Result<crate::attachment_runtime::ResolvedSendAttachments, ProtocolError> {
-        validate_queued_attachment_paths(task, &queued.agent_attachments)?;
+        validate_queued_attachment_paths(&queued.agent_attachments)?;
         Ok(
             crate::attachment_runtime::ResolvedSendAttachments::from_persisted(
                 queued.chat_attachments.clone(),
@@ -228,7 +227,7 @@ impl TaskProductApi {
                 .find(|item| item.queued_message_id == queued_message_id)
                 .cloned()
                 .ok_or_else(|| conflict_error("Queued Message no longer exists"))?;
-            validate_queued_attachment_paths(&observed, &queued.agent_attachments)?;
+            validate_queued_attachment_paths(&queued.agent_attachments)?;
             let owner = crate::attachment_runtime::AttachmentOwner::new(
                 client_instance_id,
                 &params.task_id,
@@ -409,33 +408,38 @@ impl TaskProductApi {
 }
 
 pub(super) fn validate_queued_attachment_paths(
-    task: &crate::storage::records::TaskRecord,
     attachments: &[crate::protocol::model::Attachment],
 ) -> Result<(), ProtocolError> {
-    let allowed_roots = [
-        Some(task.workspace_root.as_str()),
-        task.project_root.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter_map(|root| std::fs::canonicalize(root).ok())
-    .collect::<Vec<_>>();
     for attachment in attachments {
         let Some(path) = attachment.path.as_deref() else {
             continue;
         };
-        let canonical = std::fs::canonicalize(path).map_err(|_| {
-            validation_error(
-                "message.attachments",
-                "A queued attachment is no longer available",
-            )
-        })?;
-        if !allowed_roots.iter().any(|root| canonical.starts_with(root)) {
+        if !queued_attachment_path_is_available(path) {
             return Err(validation_error(
                 "message.attachments",
-                "A queued attachment is outside the Task workspace",
+                "A queued attachment is no longer available",
             ));
         }
     }
     Ok(())
+}
+
+pub(crate) fn queued_attachment_paths_are_available(
+    attachments: &[crate::protocol::model::Attachment],
+) -> bool {
+    attachments.iter().all(|attachment| {
+        let Some(path) = attachment.path.as_deref() else {
+            return true;
+        };
+        queued_attachment_path_is_available(path)
+    })
+}
+
+fn queued_attachment_path_is_available(path: &str) -> bool {
+    // The opaque attachment handle canonicalizes and validates the exact selected file before
+    // Queue acceptance. Requiring that identity to remain canonical prevents a later symlink
+    // swap while allowing Web uploads and native selections outside a Task.
+    std::fs::canonicalize(path)
+        .ok()
+        .is_some_and(|canonical| canonical == std::path::Path::new(path) && canonical.is_file())
 }

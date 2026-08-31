@@ -47,6 +47,7 @@ describe("webview surface routing", () => {
     expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "vscodeExtension" } })).toBe(false);
     expect(shouldLoadTaskNavigation({ surface: "settings", shell: { kind: "vscodeExtension" } })).toBe(false);
     expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "web" } })).toBe(true);
+    expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "desktop" } })).toBe(true);
   });
 
   it("keys prepared options by agent and project", () => {

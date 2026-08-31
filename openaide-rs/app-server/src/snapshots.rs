@@ -26,7 +26,9 @@ mod worktree_repository;
 
 pub use agent_collection::{AgentCollectionSnapshotSource, AgentRegistrySnapshotSource};
 pub use project_collection::{ProjectCollectionSnapshotSource, ProjectCollectionStore};
-pub(crate) use task_navigation::{project_task_lifecycle, project_task_summary};
+pub(crate) use task_navigation::{
+    native_session_summary, project_task_lifecycle, project_task_summary,
+};
 pub use task_navigation::{TaskNavigationSnapshotSource, TaskNavigationStore};
 pub use task_snapshot::{TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore};
 pub use worktree_repository::WorktreeRepositorySnapshotSource;
@@ -225,6 +227,12 @@ impl SnapshotBuilder {
         self.projects.snapshot()
     }
 
+    pub(crate) fn agent_collection_snapshot(
+        &self,
+    ) -> Result<AgentCollectionSnapshot, ProtocolError> {
+        self.agents.snapshot()
+    }
+
     pub(crate) fn task_navigation_snapshot(
         &self,
         section: openaide_app_server_protocol::task::TaskNavigationSection,
@@ -266,6 +274,23 @@ impl SnapshotProvider for SnapshotBuilder {
                 task: self
                     .task_snapshots
                     .open_for_client(&ctx.client_instance_id, task_id)?,
+            },
+            SubscriptionScope::SubagentCatalog { task_id } => {
+                SubscriptionSnapshot::SubagentCatalog {
+                    catalog: self
+                        .task_snapshots
+                        .subagent_catalog_for_client(&ctx.client_instance_id, task_id)?,
+                }
+            }
+            SubscriptionScope::SubagentHistory {
+                task_id,
+                subagent_id,
+            } => SubscriptionSnapshot::SubagentHistory {
+                history: self.task_snapshots.subagent_history_for_client(
+                    &ctx.client_instance_id,
+                    task_id,
+                    subagent_id,
+                )?,
             },
             SubscriptionScope::ToolDetail {
                 task_id,
@@ -423,6 +448,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             worktree_id: None,
             workspace_available: false,
         },
+        permission_policy: Default::default(),
         active_turn_started_at: None,
         lifecycle: TaskLifecycle::Open,
         revision: 0,
@@ -459,6 +485,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
         },
         input_capabilities: None,
         context_usage: None,
+        subagents: Default::default(),
         current_plan: None,
         message_queue: Default::default(),
         chat: ChatSnapshot {

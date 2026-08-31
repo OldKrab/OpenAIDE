@@ -75,6 +75,8 @@ pub(super) async fn run_prompt(
         }),
     );
     while cancel_rx.try_recv().is_ok() {}
+    let (preceding_update_drain_tx, mut preceding_update_drain_rx) =
+        tokio::sync::mpsc::unbounded_channel();
     let mut active_prompt = ActivePrompt::start(
         active_session,
         context.current_prompts,
@@ -85,6 +87,7 @@ pub(super) async fn run_prompt(
         sink.clone(),
         session_projection.as_ref(),
         request_guard,
+        Some(preceding_update_drain_tx),
     )?;
 
     let mut cancel_sent = false;
@@ -92,6 +95,8 @@ pub(super) async fn run_prompt(
     let mut settled_by_response = false;
     let result = loop {
         if active_prompt.cancellation().is_cancelled() && !cancel_sent {
+            // A session cancel can arrive without cancelling the prompt token.
+            active_prompt.mark_cancel_requested();
             match dispatch_prompt_cancel(
                 active_session,
                 context.trace.as_ref(),
@@ -109,6 +114,9 @@ pub(super) async fn run_prompt(
         }
         tokio::select! {
             Some(()) = cancel_rx.recv(), if !cancel_sent => {
+                // Keep primary `cancelled` terminal for explicit session cancellation,
+                // even when a steer was admitted first.
+                active_prompt.mark_cancel_requested();
                 match dispatch_prompt_cancel(
                     active_session,
                     context.trace.as_ref(),
@@ -140,7 +148,7 @@ pub(super) async fn run_prompt(
                 }
                 let connection = active_session.connection();
                 close_active_session(
-                    &connection,
+                    connection,
                     active_session.session_id().clone(),
                     context.supports_session_close,
                     context.trace.as_ref(),
@@ -217,7 +225,7 @@ pub(super) async fn run_prompt(
                     AcpSessionCommand::Delete { reply_tx } => {
                         let connection = active_session.connection();
                         let result = delete_active_session(
-                            &connection,
+                            connection,
                             active_session.session_id().clone(),
                             context.supports_session_delete,
                             context.trace.as_ref(),
@@ -247,19 +255,18 @@ pub(super) async fn run_prompt(
                 let Some(completion) = completion else {
                     break Err(RuntimeError::NotReady("ACP prompt completion channel stopped".to_string()));
                 };
-                for update in take_preceding_session_updates(active_session).await? {
-                    let catalogs = apply_prompt_session_message(
-                        context.agent_id,
-                        active_prompt.task_id(),
-                        active_session_id.as_str(),
-                        update,
-                        session_projection.clone(),
-                        session_event_sink.clone(),
-                        pending_session_catalogs,
-                    )
-                    .await?;
-                    apply_session_catalogs(catalogs, config_catalog, commands_catalog);
-                }
+                project_preceding_session_updates(
+                    active_session,
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    session_projection.clone(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
+                    config_catalog,
+                    commands_catalog,
+                )
+                .await?;
                 active_prompt.mark_settled(PromptSettlementKind::PromptResponse);
                 settled_by_response = true;
                 let result = completion.finish();
@@ -274,6 +281,21 @@ pub(super) async fn run_prompt(
                     }),
                 );
                 break result;
+            }
+            Some(reply_tx) = preceding_update_drain_rx.recv() => {
+                let result = project_preceding_session_updates(
+                    active_session,
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    session_projection.clone(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
+                    config_catalog,
+                    commands_catalog,
+                )
+                .await;
+                let _ = reply_tx.send(result);
             }
             update = active_session.read_update() => {
                 let update = match update.map_err(acp_error) {
@@ -393,6 +415,34 @@ async fn dispatch_prompt_cancel(
     result.map(|()| requested_at)
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn project_preceding_session_updates(
+    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
+    agent_id: &str,
+    task_id: &str,
+    active_session_id: &str,
+    projection: Option<LivePromptProjection>,
+    session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
+    pending_session_catalogs: &mut PendingSessionCatalogs,
+    config_catalog: &mut ConfigOptionsCatalog,
+    commands_catalog: &mut Option<AgentCommandsCatalog>,
+) -> Result<(), RuntimeError> {
+    for update in take_preceding_session_updates(active_session).await? {
+        let catalogs = apply_prompt_session_message(
+            agent_id,
+            task_id,
+            active_session_id,
+            update,
+            projection.clone(),
+            session_event_sink.clone(),
+            pending_session_catalogs,
+        )
+        .await?;
+        apply_session_catalogs(catalogs, config_catalog, commands_catalog);
+    }
+    Ok(())
+}
+
 async fn apply_prompt_session_message(
     agent_id: &str,
     task_id: &str,
@@ -467,7 +517,7 @@ async fn handle_prompt_config_command(
                     "queue_wait_ms": queued_at.elapsed().as_millis(),
                 }),
             );
-            let connection = active_session.connection();
+            let connection = active_session.connection().clone();
             let mut response = match set_task_config_option_after_prior_updates(
                 &connection,
                 active_session,

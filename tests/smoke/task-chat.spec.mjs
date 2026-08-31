@@ -86,6 +86,30 @@ test("keeps the New Task form stable across constrained editor heights", async (
   expect(await surface.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 });
 
+test("keeps wrapped Plan entries readable at desktop and narrow widths", async ({ page }) => {
+  await page.setViewportSize({ width: 1_180, height: 700 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:long-plan-layout");
+  await expect(page.getByText("Long Plan rendered", { exact: true })).toBeVisible();
+
+  const planTrigger = page.locator(".task-plan-drawer-trigger");
+  await expect(planTrigger).toBeVisible();
+  if (await planTrigger.getAttribute("aria-expanded") !== "true") await planTrigger.click();
+  const desktopPlan = page.locator(".task-plan-drawer[data-open='true'] .agent-plan");
+  await expect(desktopPlan).toBeVisible();
+  expectPlanEntriesReadable(await planEntryLayout(desktopPlan));
+
+  await page.setViewportSize({ width: 1_800, height: 900 });
+  const widePlan = page.locator(".task-plan-column .agent-plan");
+  await expect(widePlan).toBeVisible();
+  expectPlanEntriesReadable(await planEntryLayout(widePlan));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrowPlan = page.locator(".task-plan-drawer[data-open='true'] .agent-plan");
+  await expect(narrowPlan).toBeVisible();
+  expectPlanEntriesReadable(await planEntryLayout(narrowPlan));
+});
+
 test("creates a New Task, sends once, streams Chat, tools, and Agent title", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");
@@ -589,15 +613,16 @@ test("recovers an open Task composer once after client liveness expires", async 
   const editor = page.getByRole("textbox", { name: "Message" });
   await expect(page.getByLabel("Task status: Ready")).toBeVisible();
   await editor.fill("draft survives recovery");
-  await startComposerPlaceholderTrace(page);
+  await startComposerConnectionTrace(page);
   const stopExpiryFault = await reportClientLivenessExpiredOnNextHeartbeat(page);
   try {
-    const transitions = await waitForComposerPlaceholderRecovery(page);
+    const transitions = await waitForComposerConnectionRecovery(page);
     expect(transitions).toEqual([
-      "Send follow-up",
-      "Reconnecting. Draft is saved here.",
-      "Send follow-up",
+      "ready",
+      "reconnecting",
+      "ready",
     ]);
+    await expect(editor).toHaveAttribute("data-placeholder", "Send follow-up");
     await expect(editor).toHaveText("draft survives recovery");
   } finally {
     await stopExpiryFault();
@@ -653,7 +678,7 @@ test("retains an unsent prepared New Task across ordinary navigation", async ({ 
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
-  await page.getByRole("button", { name: "Back to app" }).click();
+  await page.getByRole("button", { name: "Close settings" }).click();
 
   await expect(page.getByLabel("New task")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("keep this draft");
@@ -899,6 +924,29 @@ async function maximumVirtualRowOverlapDuring(page, action) {
   });
 }
 
+async function planEntryLayout(plan) {
+  return plan.locator(".agent-plan-entries").evaluate((list) => {
+    const bounds = [...list.querySelectorAll(".agent-plan-entry-content")]
+      .map((element) => element.getBoundingClientRect());
+    return {
+      clientHeight: list.clientHeight,
+      clientWidth: list.clientWidth,
+      maximumOverlap: bounds.slice(0, -1).reduce(
+        (maximum, current, index) => Math.max(maximum, current.bottom - bounds[index + 1].top),
+        0,
+      ),
+      scrollHeight: list.scrollHeight,
+      scrollWidth: list.scrollWidth,
+    };
+  });
+}
+
+function expectPlanEntriesReadable(layout) {
+  expect(layout.maximumOverlap).toBeLessThanOrEqual(0.5);
+  expect(layout.scrollWidth).toBe(layout.clientWidth);
+  expect(layout.scrollHeight).toBeGreaterThan(layout.clientHeight);
+}
+
 async function openPreparedNewTask(page) {
   await page.goto(`${harness.baseUrl}/new-task`);
   await expect(page.getByLabel("New task")).toBeVisible();
@@ -945,33 +993,26 @@ function composerText(element) {
   return element.innerText.endsWith("\n") ? element.innerText.slice(0, -1) : element.innerText;
 }
 
-async function startComposerPlaceholderTrace(page) {
+async function startComposerConnectionTrace(page) {
   await page.evaluate(() => {
-    const expected = [
-      "Send follow-up",
-      "Reconnecting. Draft is saved here.",
-      "Send follow-up",
-    ];
+    const expected = ["ready", "reconnecting", "ready"];
     const transitions = [];
     const sample = () => {
-      const editor = document.querySelector('[role="textbox"][aria-label="Message"]');
-      const value = editor instanceof HTMLElement
-        ? editor.getAttribute("data-placeholder") ?? "missing"
-        : "missing";
+      const status = document.querySelector(".composer-footer-status");
+      const value = status?.textContent?.includes("Reconnecting") ? "reconnecting" : "ready";
       if (transitions.at(-1) !== value) transitions.push(value);
       const completed = expected.every((item, index) => transitions[index] === item);
       if (completed) {
         observer.disconnect();
-        window.__openaideComposerPlaceholderTrace.completed = true;
+        window.__openaideComposerConnectionTrace.completed = true;
       }
     };
     const observer = new MutationObserver(sample);
-    window.__openaideComposerPlaceholderTrace = { completed: false, transitions };
+    window.__openaideComposerConnectionTrace = { completed: false, transitions };
     sample();
-    if (!window.__openaideComposerPlaceholderTrace.completed) {
+    if (!window.__openaideComposerConnectionTrace.completed) {
       observer.observe(document.body, {
         attributes: true,
-        attributeFilter: ["data-placeholder"],
         childList: true,
         subtree: true,
       });
@@ -979,9 +1020,9 @@ async function startComposerPlaceholderTrace(page) {
   });
 }
 
-async function waitForComposerPlaceholderRecovery(page) {
-  await page.waitForFunction(() => window.__openaideComposerPlaceholderTrace?.completed === true);
-  return page.evaluate(() => window.__openaideComposerPlaceholderTrace?.transitions ?? []);
+async function waitForComposerConnectionRecovery(page) {
+  await page.waitForFunction(() => window.__openaideComposerConnectionTrace?.completed === true);
+  return page.evaluate(() => window.__openaideComposerConnectionTrace?.transitions ?? []);
 }
 
 async function reportClientLivenessExpiredOnNextHeartbeat(page) {

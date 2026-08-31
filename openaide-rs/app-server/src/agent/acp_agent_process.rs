@@ -11,6 +11,7 @@ use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
+use crate::agent::acp_process_diagnostics::acp_connection_terminal_diagnostics;
 use crate::agent::acp_schema::{AuthenticateRequest, CloseSessionRequest, ForkSessionRequest};
 use crate::agent::acp_session_capabilities::{
     validate_auth_method, validate_session_fork_capabilities,
@@ -44,6 +45,7 @@ use crate::agent::attached_native_session::{
     AttachedNativeSessionRunInput,
 };
 
+#[derive(Clone)]
 pub(super) enum AcpSessionOpenRequest {
     Start(AgentSessionStart),
     Load(AgentSessionLoad),
@@ -140,6 +142,7 @@ pub(super) enum AcpAgentProcessControl {
 pub(super) struct AcpAgentProcessList {
     pub(super) request: AgentListSessionsRequest,
     pub(super) preferred_auth_method_id: Option<String>,
+    pub(super) timeout: std::time::Duration,
     pub(super) reply_tx: mpsc::Sender<Result<AgentListSessionsResult, RuntimeError>>,
 }
 
@@ -161,13 +164,38 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     let active_session_ids: Arc<Mutex<HashSet<String>>> = Arc::default();
     let session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap =
         Arc::default();
+    let native_subagents = crate::agent::acp_native_subagents::AcpNativeSubagentRouter::new(
+        config.agent_id.clone(),
+        session_event_sinks.clone(),
+    );
     let session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap = Arc::default();
+    let diagnostic_current_prompts = current_prompts.clone();
+    let diagnostic_active_session_ids = active_session_ids.clone();
     let elicitation_cancellations: crate::agent::acp_host_capabilities::AcpElicitationCancellationMap =
         Arc::default();
     let first_started_tx = first_open.as_ref().map(|open| open.started_tx.clone());
     if let Some(open) = &first_open {
         terminal_registry.begin_open(open.terminal_owner_id);
     }
+    let agent_id = config.agent_id.clone();
+    let initial_operation = first_open
+        .as_ref()
+        .map(|open| open.request.operation_name().to_string());
+    let initial_task_id = first_open
+        .as_ref()
+        .map(|open| open.request.task_id().to_string());
+    let has_initial_session = first_open.is_some();
+    let launcher_kind = config.diagnostic_launcher_kind();
+    logging::info(
+        "acp_agent_launch_selected",
+        serde_json::json!({
+            "agent_id": agent_id,
+            "has_initial_session": has_initial_session,
+            "launcher_kind": launcher_kind,
+            "operation": initial_operation,
+            "task_id": initial_task_id,
+        }),
+    );
     let agent = match config.to_acp_agent(
         first_open.as_ref().and_then(|open| open.trace.clone()),
         &host_bridge,
@@ -192,9 +220,21 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         session_event_sinks: session_event_sinks.clone(),
         session_traces: session_traces.clone(),
         elicitation_cancellations,
+        native_subagents: native_subagents.clone(),
     };
     let connection_terminal_registry = terminal_registry.clone();
 
+    let connection_started_at = Instant::now();
+    logging::info(
+        "acp_agent_connection_started",
+        serde_json::json!({
+            "agent_id": agent_id,
+            "has_initial_session": has_initial_session,
+            "launcher_kind": launcher_kind,
+            "operation": initial_operation,
+            "task_id": initial_task_id,
+        }),
+    );
     let connection = connect_acp_session_client(
         agent,
         connection_context,
@@ -202,9 +242,27 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
             let initialize = initialize_shared_process_connection(
                 &connection,
                 &host_bridge,
+                &config.agent_id,
                 first_open.as_ref(),
             )
             .await?;
+            let client_enabled = crate::agent::acp_host::native_subagents_enabled();
+            let agent_advertised = initialize
+                .agent_capabilities
+                .session_capabilities
+                .subagents
+                .is_some();
+            let negotiated = client_enabled && agent_advertised;
+            native_subagents.set_negotiated(negotiated);
+            crate::logging::info(
+                "acp_native_subagents_negotiated",
+                serde_json::json!({
+                    "agent_id": config.agent_id,
+                    "client_enabled": client_enabled,
+                    "agent_advertised": agent_advertised,
+                    "negotiated": negotiated,
+                }),
+            );
             if let Some(first_open) = first_open {
                 open_on_shared_process(
                     &connection,
@@ -272,12 +330,23 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     }
                     list = list_rx.recv() => {
                         let Some(list) = list else { break };
-                        let result = list_sessions_on_shared_process(
-                            &connection,
-                            &initialize,
-                            list.request,
-                            list.preferred_auth_method_id.as_deref(),
-                        ).await;
+                        // Discovery is best-effort background work. Bound only its ACP request;
+                        // active Native Session attachments continue on the shared connection.
+                        let result = tokio::time::timeout(
+                            list.timeout,
+                            list_sessions_on_shared_process(
+                                &connection,
+                                &initialize,
+                                list.request,
+                                list.preferred_auth_method_id.as_deref(),
+                            ),
+                        )
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(RuntimeError::NotReady(
+                                "ACP session listing timed out".to_string(),
+                            ))
+                        });
                         let _ = list.reply_tx.send(result);
                     }
                     control = control_rx.recv() => {
@@ -311,10 +380,58 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
             Ok(())
         },
     );
-    let result = tokio::select! {
-        result = connection => result.map_err(acp_error),
-        _ = shutdown_rx.changed() => Ok(()),
+    let (result, selected_shutdown) = tokio::select! {
+        result = connection => (result.map_err(acp_error), false),
+        _ = shutdown_rx.changed() => (Ok(()), true),
     };
+    // Shutdown and transport completion can become ready in the same scheduler turn. The
+    // authoritative control signal wins even when `select!` observes the connection first.
+    let requested_shutdown = selected_shutdown || *shutdown_rx.borrow();
+    let active_session_count = diagnostic_active_session_ids
+        .lock()
+        .expect("ACP active session registry poisoned")
+        .len();
+    let active_prompt_count = diagnostic_current_prompts
+        .lock()
+        .expect("ACP current prompt registry poisoned")
+        .len();
+    let terminal = acp_connection_terminal_diagnostics(
+        &result,
+        requested_shutdown,
+        active_session_count,
+        active_prompt_count,
+    );
+    match &result {
+        Ok(()) => logging::info(
+            "acp_agent_connection_completed",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "duration_ms": connection_started_at.elapsed().as_millis(),
+                "outcome_kind": terminal.outcome_kind,
+                "operation": initial_operation,
+                "task_id": initial_task_id,
+                "exit_code": terminal.exit_code,
+                "exit_signal": terminal.exit_signal,
+                "active_session_count": terminal.active_session_count,
+                "active_prompt_count": terminal.active_prompt_count,
+            }),
+        ),
+        Err(_) => logging::warn(
+            "acp_agent_connection_failed",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "duration_ms": connection_started_at.elapsed().as_millis(),
+                "error_kind": "transport_error",
+                "outcome_kind": terminal.outcome_kind,
+                "operation": initial_operation,
+                "task_id": initial_task_id,
+                "exit_code": terminal.exit_code,
+                "exit_signal": terminal.exit_signal,
+                "active_session_count": terminal.active_session_count,
+                "active_prompt_count": terminal.active_prompt_count,
+            }),
+        ),
+    }
     if let (Err(error), Some(first_started_tx)) = (&result, first_started_tx) {
         let _ = first_started_tx.send(Err(RuntimeError::Internal(format!("ACP error: {error}"))));
     }
@@ -467,6 +584,7 @@ async fn list_sessions_on_shared_process(
 async fn initialize_shared_process_connection(
     connection: &ConnectionTo<Agent>,
     host_bridge: &HostBridge,
+    agent_id: &str,
     first_open: Option<&AcpAgentProcessOpen>,
 ) -> agent_client_protocol::Result<InitializeResponse> {
     let initialize_request = initialize_request(host_bridge);
@@ -474,12 +592,51 @@ async fn initialize_shared_process_connection(
         trace.record("client_to_agent", "initialize.request", &initialize_request);
     }
     let Some(first_open) = first_open else {
+        let started_at = Instant::now();
+        logging::info(
+            "acp_initialize_started",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "source": "shared_process",
+            }),
+        );
         let initialize = connection
             .send_request(initialize_request)
             .block_task()
-            .await?;
-        crate::agent::acp_session_capabilities::validate_initialize_protocol(&initialize)
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+            .await
+            .inspect_err(|_error| {
+                logging::warn(
+                    "acp_initialize_failed",
+                    serde_json::json!({
+                        "agent_id": agent_id,
+                        "duration_ms": started_at.elapsed().as_millis(),
+                        "error_kind": "protocol_error",
+                    }),
+                );
+            })?;
+        if let Err(error) =
+            crate::agent::acp_session_capabilities::validate_initialize_protocol(&initialize)
+        {
+            logging::warn(
+                "acp_initialize_failed",
+                serde_json::json!({
+                    "agent_id": agent_id,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "error_kind": "invalid_capabilities",
+                }),
+            );
+            return Err(agent_client_protocol::util::internal_error(
+                error.to_string(),
+            ));
+        }
+        logging::info(
+            "acp_initialize_completed",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "duration_ms": started_at.elapsed().as_millis(),
+                "auth_method_count": initialize.auth_methods.len(),
+            }),
+        );
         return Ok(initialize);
     };
     let cancellation = first_open.request.cancellation();

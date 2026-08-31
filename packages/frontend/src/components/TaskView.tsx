@@ -8,7 +8,7 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "@openaide/app-shell-contracts";
-import type { ToolImagePreview } from "@openaide/app-server-client";
+import type { AppServerSession, BackendConnection, ToolImagePreview } from "@openaide/app-server-client";
 import { renderedChat } from "../state/chatPaging";
 import type {
   AppState,
@@ -20,6 +20,7 @@ import type {
 import { Composer } from "./Composer";
 import { composerAvailability, composerCanSubmit } from "./composerAvailability";
 import { TaskHeader } from "./TaskHeader";
+import type { DesktopWindowCapability } from "../services/frontendShell";
 import { scrollTopAfterPrependedContent } from "./TaskViewModel";
 import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
@@ -33,12 +34,19 @@ import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
+import { AgentFileOpenContext } from "./agentFileOpen";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
+import { FileViewerPanel, TaskPanelToggle } from "./FileViewerPanel";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
 import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
 import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
 import { TaskSessionReloadNotice } from "./TaskSessionReloadNotice";
+import { currentFrontendShell } from "../services/frontendShell";
+import { useTaskFileViewer } from "./useTaskFileViewer";
+import { useSubagentSessions } from "./useSubagentSessions";
+import { SubagentNavigator } from "./SubagentNavigator";
+import { mapProtocolChatItem } from "../state/appServerProtocolChatMapping";
 
 export {
   scrollTopAfterPrependedContent,
@@ -49,7 +57,6 @@ export {
 } from "./taskChatPresentation";
 export { chatRowKey, formatElapsedDuration } from "./TaskChatTimeline";
 
-const RECONNECT_NOTICE_DELAY_MS = 1_000;
 
 export type TaskViewIntents = {
   changePrompt: (prompt: string) => void;
@@ -70,6 +77,14 @@ export function TaskLoadingView({
   onRetry?: () => void;
 }) {
   if (error) {
+    if (errorKind === "conflict") {
+      return (
+        <section className="task-surface task-loading" aria-label="Session open elsewhere">
+          <p>Session open elsewhere.</p>
+          <small className="inline-error" role="alert">{error}</small>
+        </section>
+      );
+    }
     if (errorKind === "notFound") {
       return (
         <section className="task-surface task-loading" aria-label="Task not found">
@@ -110,13 +125,17 @@ export function TaskView({
   agentRecoveryActions,
   archived = false,
   backendConnectionState,
+  subagentConnection,
   backendReady,
+  taskMutationReady = backendReady,
   chatPageState,
+  desktopWindow,
   intents,
   onCancel,
   onClosePlan,
   onAddToQueue,
   fileBrowser,
+  fileViewer: fileViewerConnection,
   onLoadChatPage,
   onLoadComposerHistory,
   onLoadToolImagePreview,
@@ -127,6 +146,7 @@ export function TaskView({
   onQuestionRespond,
   onReconnectProject,
   onRetryConnection,
+  onRetryConfigOptions,
   onRevealAttachment,
   onRemoveAttachment,
   onRemoveQueueMessage,
@@ -137,6 +157,7 @@ export function TaskView({
   onSendQueueMessageNow,
   onRestoreTask,
   onSendPrompt,
+  onPermissionPolicyChange,
   onSelectConfigOption,
   permissionResponses,
   planDrawerOpen = false,
@@ -155,13 +176,17 @@ export function TaskView({
   agentRecoveryActions?: AgentRecoveryActions;
   archived?: boolean;
   backendConnectionState?: BackendConnectionState;
+  subagentConnection?: Pick<AppServerSession, "request" | "subscribeState">;
   backendReady: boolean;
+  taskMutationReady?: boolean;
   chatPageState: AppState["chatPages"][string] | undefined;
+  desktopWindow?: DesktopWindowCapability;
   intents: TaskViewIntents;
   onCancel: () => void;
   onClosePlan?: () => Promise<void>;
   onAddToQueue?: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
+  fileViewer?: Pick<BackendConnection, "request">;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadComposerHistory?: () => Promise<string[]>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
@@ -175,6 +200,7 @@ export function TaskView({
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
   onReconnectProject?: (projectId: string) => void;
   onRetryConnection?: () => void;
+  onRetryConfigOptions?: () => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
   onRemoveQueueMessage?: (queuedMessageId: string) => void;
@@ -185,6 +211,7 @@ export function TaskView({
   onSendQueueMessageNow?: (queuedMessageId: string) => void;
   onRestoreTask?: (taskId: string) => void;
   onSendPrompt: (prompt?: string) => void;
+  onPermissionPolicyChange?: (policy: import("@openaide/app-shell-contracts").TaskPermissionPolicy) => Promise<void>;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   permissionResponses: AppState["permissionResponses"];
   planDrawerOpen?: boolean;
@@ -200,6 +227,15 @@ export function TaskView({
 }) {
   const quoteRequestSequence = useRef(0);
   const [quoteRequest, setQuoteRequest] = useState<{ id: number; taskId: string; text: string }>();
+  const fileViewerEnabled = currentFrontendShell()?.fileViewer === true && fileViewerConnection !== undefined;
+  const fileViewer = useTaskFileViewer({
+    connection: fileViewerEnabled ? fileViewerConnection : undefined,
+    enabled: fileViewerEnabled,
+    taskId: snapshot.task.task_id,
+  });
+  const openAgentFile = useCallback((path: string, line?: number) => {
+    void fileViewer.openPath(path, line);
+  }, [fileViewer.openPath]);
   const queueOverlayRef = useCallback((node: HTMLDivElement | null) => (
     node ? installTaskQueueOverlayClearance(node) : undefined
   ), []);
@@ -210,11 +246,51 @@ export function TaskView({
     agents,
     snapshot.preparation,
   );
-  const chat = useMemo(() => renderedChat(snapshot, chatPageState), [chatPageState, snapshot]);
+  const subagents = useSubagentSessions({
+    connection: subagentConnection,
+    enabled: backendReady,
+    taskId: snapshot.task.task_id,
+  });
+  useEffect(() => {
+    if (!subagents.selectedSubagentId) return;
+    const returnToMain = (event: KeyboardEvent) => {
+      if (!event.altKey || event.key !== "ArrowLeft" || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      event.preventDefault();
+      subagents.selectSubagent(undefined);
+    };
+    window.addEventListener("keydown", returnToMain);
+    return () => window.removeEventListener("keydown", returnToMain);
+  }, [subagents.selectSubagent, subagents.selectedSubagentId]);
+  const mainChat = useMemo(() => renderedChat(snapshot, chatPageState), [chatPageState, snapshot]);
+  const childChat = useMemo(() => {
+    if (!subagents.selected) return undefined;
+    const history = subagents.history;
+    return {
+      items: (history?.chat.items ?? []).map((item) => mapProtocolChatItem(item, snapshot.task.updated_at)),
+      hasBefore: history?.chat.hasMoreBefore === true,
+      beforeCursor: history?.chat.startCursor ?? undefined,
+      pending: history === undefined,
+      error: history?.availability === "unavailable" ? "This subagent history is unavailable." : undefined,
+    };
+  }, [snapshot.task.updated_at, subagents.history, subagents.selected]);
+  const chat = childChat ?? mainChat;
   const chatItems = useMemo(() => [
     ...chat.items,
     ...snapshot.active_requests,
   ], [chat.items, snapshot.active_requests]);
+  const visiblePlan = useMemo(() => {
+    if (!subagents.selected) return snapshot.current_plan;
+    const plan = subagents.history?.currentPlan;
+    return plan ? {
+      entries: plan.entries.map((entry) => ({
+        content: entry.content,
+        priority: entry.priority,
+        status: entry.status === "inProgress" ? "in_progress" as const : entry.status,
+      })),
+    } : undefined;
+  }, [snapshot.current_plan, subagents.history?.currentPlan, subagents.selected]);
   const turnBusy = snapshot.task.status === "active";
   const queueAvailable = snapshot.task.status === "active"
     || snapshot.task.status === "waiting"
@@ -256,13 +332,14 @@ export function TaskView({
   const quoteAvailable = availability.canEdit && !archived && !recovery;
   const requestQuote = useCallback((text: string) => {
     if (!quoteAvailable) return;
+    subagents.selectSubagent(undefined);
     quoteRequestSequence.current += 1;
     setQuoteRequest({
       id: quoteRequestSequence.current,
       taskId: snapshot.task.task_id,
       text,
     });
-  }, [quoteAvailable, snapshot.task.task_id]);
+  }, [quoteAvailable, snapshot.task.task_id, subagents.selectSubagent]);
   const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
   const queue = useMemo(() => {
     const current = snapshot.message_queue ?? { revision: 0, items: [] };
@@ -275,24 +352,12 @@ export function TaskView({
     return { ...current, items };
   }, [snapshot.message_queue, taskInput.queueTake]);
   const composerEmpty = taskInput.prompt.length === 0 && taskInput.context.length === 0;
-  const completedPlanSteps = snapshot.current_plan?.entries.filter((entry) => entry.status === "completed").length ?? 0;
+  const completedPlanSteps = visiblePlan?.entries.filter((entry) => entry.status === "completed").length ?? 0;
   const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
   const [reloadPending, setReloadPending] = useState(false);
   const [reloadError, setReloadError] = useState<string>();
-  const [showReconnectNotice, setShowReconnectNotice] = useState(false);
   const announcedHistoryUpdate = useRef<string | undefined>(undefined);
-  const reconnecting = backendConnectionState?.status === "reconnecting";
-  useEffect(() => {
-    if (!reconnecting) {
-      setShowReconnectNotice(false);
-      return undefined;
-    }
-    // Page unloads and brief stream replacement are normal. Keep Send blocked
-    // immediately, but do not turn a sub-second resynchronization into an error.
-    const timer = window.setTimeout(() => setShowReconnectNotice(true), RECONNECT_NOTICE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [reconnecting]);
   useEffect(() => {
     if (snapshot.history_sync.state !== "updated") {
       setShowHistoryUpdated(false);
@@ -314,21 +379,42 @@ export function TaskView({
       setReloadError(undefined);
     }
   }, [snapshot.history_sync.state]);
+  const seenPlanForTask = useRef({
+    hasPlan: Boolean(visiblePlan),
+    taskId: snapshot.task.task_id,
+  });
   useEffect(() => {
-    if (!snapshot.current_plan) {
+    if (!visiblePlan) {
       resetAgentPlanDisclosure(snapshot.task.task_id);
       resetAgentPlanDisclosure(`${snapshot.task.task_id}:column`);
       resetAgentPlanDisclosure(`${snapshot.task.task_id}:drawer`);
     }
-  }, [snapshot.current_plan, snapshot.task.task_id]);
-  const timelineStatusLabel = taskWorkingStatusLabel(
-    chatItems,
-    snapshot.task.status,
-    inputPending,
-    snapshot.history_sync.state === "updated" && !showHistoryUpdated
-      ? { state: "idle", generation: snapshot.history_sync.generation }
-      : snapshot.history_sync,
-  );
+  }, [visiblePlan, snapshot.task.task_id]);
+  useEffect(() => {
+    const seen = seenPlanForTask.current;
+    const hasPlan = Boolean(visiblePlan);
+    if (seen.taskId !== snapshot.task.task_id) {
+      seen.taskId = snapshot.task.task_id;
+      seen.hasPlan = hasPlan;
+      return;
+    }
+    if (hasPlan && !seen.hasPlan) onPlanDrawerOpenChange?.(true);
+    seen.hasPlan = hasPlan;
+  }, [onPlanDrawerOpenChange, visiblePlan, snapshot.task.task_id]);
+  const timelineStatusLabel = subagents.selected
+    ? subagents.history === undefined
+      ? "Loading subagent history"
+      : subagents.history.availability === "waitingForActivity"
+        ? "Waiting for subagent activity"
+        : undefined
+    : taskWorkingStatusLabel(
+      chatItems,
+      snapshot.task.status,
+      inputPending,
+      snapshot.history_sync.state === "updated" && !showHistoryUpdated
+        ? { state: "idle", generation: snapshot.history_sync.generation }
+        : snapshot.history_sync,
+    );
   const timelineStatusKind = showHistoryUpdated && snapshot.history_sync.state === "updated"
     ? "notice"
       : snapshot.task.status === "waiting"
@@ -351,16 +437,18 @@ export function TaskView({
   const chatScroll = useTaskChatScroll({
     beforeCursor: chat.beforeCursor,
     hasEarlier: chat.hasBefore,
-    historySyncState: snapshot.history_sync.state === "reloadAvailable"
+    historySyncState: subagents.selected ? "idle" : snapshot.history_sync.state === "reloadAvailable"
       ? "idle"
       : snapshot.history_sync.state,
     itemKeys: timelineRowKeys,
     latestMessageKey: chatItems.at(-1)?.message_id,
-    onLoadEarlier: loadChatPage,
+    onLoadEarlier: subagents.selected ? subagents.loadEarlier : loadChatPage,
     onScrollState: intents.recordScroll,
     pendingPrepend: chat.pending,
-    savedScrollState,
-    taskId: snapshot.task.task_id,
+    savedScrollState: subagents.selected ? undefined : savedScrollState,
+    taskId: subagents.selected
+      ? `${snapshot.task.task_id}:${subagents.selected.subagentId}`
+      : snapshot.task.task_id,
   });
   const loadToolImagePreview = useCurrentCallback(onLoadToolImagePreview ?? unavailableToolImagePreview);
   const subscribeToolDetail = useCurrentCallback(onSubscribeToolDetail);
@@ -399,47 +487,82 @@ export function TaskView({
     onSendPrompt(prompt);
   };
 
-  return (
-    <section className="task-surface task-work-stack" aria-label="Task chat">
+  const taskSurface = (
+    <section
+      aria-label="Task chat"
+      className="task-surface task-work-stack"
+      data-desktop-window={desktopWindow?.platform}
+      data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
+      style={fileViewer.visible
+        ? { ["--task-panel-ratio" as string]: String(fileViewer.splitRatio) }
+        : undefined}
+    >
       <div className="task-work-stack-header">
         <TaskHeader
+          agentNavigation={(
+            <SubagentNavigator
+              entries={subagents.catalog?.entries ?? []}
+              onSelect={subagents.selectSubagent}
+              selectedId={subagents.selectedSubagentId}
+              unseen={subagents.unseen}
+            />
+          )}
           agentId={snapshot.task.agent_id}
           agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
+          desktopWindow={desktopWindow}
           status={snapshot.task.status}
           title={activeTask?.title ?? snapshot.task.title}
+          permissionPolicy={snapshot.permission_policy}
+          onPermissionPolicyChange={onPermissionPolicyChange}
+          permissionPolicyDisabled={archived || !taskMutationReady}
+          permissionPolicyDisabledReason={archived
+            ? "Archived Tasks are read-only."
+            : !taskMutationReady
+              ? "Permission handling is unavailable until this Task is connected."
+              : undefined}
           workspaceRoot={snapshot.task.workspace_root}
           worktreeName={snapshot.task.worktree_name}
           gitRef={snapshot.task.git_ref}
           showWorkspaceContext={showWorkspaceContext}
         />
-        {snapshot.current_plan ? (
-          <button
-            aria-expanded={planDrawerOpen}
-            aria-label={planDrawerOpen ? "Close Plan" : "Open Plan"}
-            className="task-plan-drawer-trigger"
-            onClick={() => onPlanDrawerOpenChange?.(!planDrawerOpen)}
-            type="button"
-          >
-            <ListTodo aria-hidden="true" size={14} />
-            <span>Plan</span>
-            <small>{completedPlanSteps}/{snapshot.current_plan.entries.length}</small>
-          </button>
-        ) : null}
+        <div className="task-work-stack-header-actions">
+          {visiblePlan ? (
+            <button
+              aria-expanded={planDrawerOpen}
+              aria-label={planDrawerOpen ? "Hide Plan" : "Open Plan"}
+              className="task-plan-drawer-trigger"
+              onClick={() => onPlanDrawerOpenChange?.(!planDrawerOpen)}
+              type="button"
+            >
+              <ListTodo aria-hidden="true" size={14} />
+              <span>Plan</span>
+              <small>{completedPlanSteps}/{visiblePlan.entries.length}</small>
+            </button>
+          ) : null}
+          <TaskPanelToggle
+            collapsed={fileViewer.collapsed}
+            onToggle={() => fileViewer.setCollapsed(!fileViewer.collapsed)}
+            visible={fileViewer.visible && fileViewer.collapsed}
+          />
+        </div>
       </div>
-      <div className="task-workbench">
-        {snapshot.current_plan ? (
+      <div
+        className="task-workbench"
+        data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
+      >
+        <div className="chat-column task-conversation">
+        {visiblePlan ? (
           <aside aria-label="Current plan" className="task-plan-column">
             <AgentPlanView
               defaultOpen
               key={`column:${snapshot.task.task_id}`}
-              onClose={onClosePlan}
-              plan={snapshot.current_plan}
+              onDismiss={onClosePlan}
+              plan={visiblePlan}
               taskId={`${snapshot.task.task_id}:column`}
               taskStatus={snapshot.task.status}
             />
           </aside>
         ) : null}
-        <div className="chat-column task-conversation">
         <TaskChatTimeline
           archived={archived}
           canRestoreTask={onRestoreTask !== undefined}
@@ -447,9 +570,10 @@ export function TaskView({
           chatScroll={chatScroll}
           commandCatalog={snapshot.agent_commands}
           items={chatItems}
-          liveTextPresentation={liveTextPresentation}
+          liveTextPresentation={subagents.selected ? subagents.liveTextPresentation : liveTextPresentation}
           onLoadChatPage={loadChatPage}
           onLoadToolImagePreview={loadToolImagePreview}
+          onOpenSubagent={subagents.selectSubagent}
           onPermissionRespond={respondToPermission}
           onQuestionRespond={respondToQuestion}
           onQuote={quoteAvailable ? requestQuote : undefined}
@@ -465,14 +589,10 @@ export function TaskView({
           timelineStatusLabel={timelineStatusLabel}
           workingStartedAt={workingStartedAt}
         />
-        {(reconnecting && showReconnectNotice) || backendConnectionState?.status === "unavailable" ? (
+        {backendConnectionState?.status === "unavailable" ? (
           <div className="task-connection-notice" role="status" aria-live="polite">
-            <span>
-              {reconnecting
-                ? "Reconnecting to App Server."
-                : "Unable to refresh task."}
-            </span>
-            <small>{reconnecting ? "App Server is temporarily unavailable." : backendConnectionState.message}</small>
+            <span>Unable to refresh task.</span>
+            <small>{backendConnectionState.message}</small>
             {backendConnectionState.status === "unavailable" && onRetryConnection ? (
               <button type="button" onClick={onRetryConnection}>Retry</button>
             ) : null}
@@ -515,7 +635,21 @@ export function TaskView({
             </div>
           </section>
         ) : null}
-        {recovery && agentRecoveryActions ? <AgentRecoveryPanel
+        {subagents.selected ? (
+          <div className="subagent-inspection-footer" role="note">
+            <span className="subagent-inspection-context">
+              Viewing <strong>{subagents.selected.name}</strong>
+            </span>
+            <button
+              aria-keyshortcuts="Alt+ArrowLeft"
+              onClick={() => subagents.selectSubagent(undefined)}
+              title="Back to Main Agent (Alt+Left)"
+              type="button"
+            >
+              Back to Main Agent
+            </button>
+          </div>
+        ) : recovery && agentRecoveryActions ? <AgentRecoveryPanel
           actions={agentRecoveryActions}
           agent={recovery.agent}
           kind={recovery.kind}
@@ -526,6 +660,7 @@ export function TaskView({
           >
             <Composer
               agentLocked
+              agents={agents}
               attachments={taskInput.context}
               autoFocus
               availability={availability}
@@ -548,6 +683,7 @@ export function TaskView({
               onUnsupportedImageAttachment={intents.reportAttachmentError}
               onRevealAttachment={onRevealAttachment}
               onRemoveAttachment={onRemoveAttachment}
+              onRetryConfigOptions={onRetryConfigOptions}
               onSelectConfigOption={onSelectConfigOption}
               onSubmit={submit}
               prompt={taskInput.prompt}
@@ -562,7 +698,20 @@ export function TaskView({
         )}
         </div>
       </div>
-      {snapshot.current_plan ? (
+      <FileViewerPanel
+        collapsed={fileViewer.collapsed}
+        onClose={fileViewer.closeTab}
+        onOpenFromHandle={fileViewer.openFromHandle}
+        onQuote={quoteAvailable ? requestQuote : () => undefined}
+        onRefresh={(handle) => void fileViewer.refresh(handle)}
+        onSelect={fileViewer.selectTab}
+        onSplitRatio={fileViewer.setSplitRatio}
+        onToggleCollapsed={() => fileViewer.setCollapsed(!fileViewer.collapsed)}
+        splitRatio={fileViewer.splitRatio}
+        tab={fileViewer.activeTab}
+        tabs={fileViewer.tabs}
+      />
+      {visiblePlan ? (
         <>
           <div
             aria-hidden="true"
@@ -579,11 +728,9 @@ export function TaskView({
             <AgentPlanView
               collapsible={false}
               key={`drawer:${snapshot.task.task_id}`}
-              onClose={() => {
-                onPlanDrawerOpenChange?.(false);
-                return onClosePlan?.();
-              }}
-              plan={snapshot.current_plan}
+              onDismiss={onClosePlan}
+              onHide={() => onPlanDrawerOpenChange?.(false)}
+              plan={visiblePlan}
               taskId={`${snapshot.task.task_id}:drawer`}
               taskStatus={snapshot.task.status}
             />
@@ -591,6 +738,13 @@ export function TaskView({
         </>
       ) : null}
     </section>
+  );
+
+  if (!fileViewerEnabled) return taskSurface;
+  return (
+    <AgentFileOpenContext.Provider value={openAgentFile}>
+      {taskSurface}
+    </AgentFileOpenContext.Provider>
   );
 }
 

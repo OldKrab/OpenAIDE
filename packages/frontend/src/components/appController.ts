@@ -29,7 +29,6 @@ import {
   PROJECT_REFRESH,
   PROJECT_REMOVE,
   PROJECT_RENAME,
-  SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_LIST,
   type ProjectId,
@@ -58,6 +57,7 @@ import type { TaskViewIntents } from "./TaskView";
 import { mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
 import { useNativeSessionRouteLifecycle } from "./useNativeSessionRouteLifecycle";
 import { initialTaskNavigationRowsPerProject } from "../state/taskNavigationPolicy";
+import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 
 /** Internal workflow assembly exposed only to the controller lifecycle tests. */
 export type AppControllerTestHarness = {
@@ -65,6 +65,7 @@ export type AppControllerTestHarness = {
   activeNavigationTaskId?: string;
   agents?: AgentOption[];
   backendReady: boolean;
+  taskMutationReady: boolean;
   backendConnectionState: BackendConnectionState;
   bootstrap: WebviewBootstrap;
   callbacks: AppControllerCallbacks;
@@ -109,7 +110,11 @@ export type AppController = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
   agents?: AgentOption[];
+  /** Shared request boundary used by UI workflows that are not App Shell capabilities. */
+  backendConnection?: AppControllerBackendConnection;
   backendReady: boolean;
+  /** Active-Task mutations remain available when only unrelated global replicas are recovering. */
+  taskMutationReady: boolean;
   backendConnectionState: BackendConnectionState;
   bootstrap: WebviewBootstrap;
   callbacks: AppControllerCallbacks;
@@ -140,14 +145,10 @@ export type AppController = {
 export type AppControllerOptions = {
   backendConnection?: AppControllerBackendConnection;
 };
-type AppControllerCoreOptions = AppControllerOptions & {
-  rememberNewTaskProject?: (projectId: string) => void;
-};
 
 function useAppControllerCore({
   backendConnection,
-  rememberNewTaskProject,
-}: AppControllerCoreOptions = {}): AppControllerTestHarness {
+}: AppControllerOptions = {}): AppControllerTestHarness {
   const backendConnectionRef = useMemo(() => backendConnection ?? getBackendConnection(), [backendConnection]);
   const initialBootstrap = useMemo(() => getBootstrap(), []);
   const clientInstanceId = useMemo(() => clientInstanceIdForBootstrap(initialBootstrap), [initialBootstrap]);
@@ -162,10 +163,12 @@ function useAppControllerCore({
   const currentNewTaskContext = useRef({
     projectId: state.newTask.selection.projectId,
     agentId: state.newTask.selection.agentId || undefined,
+    workspaceRootsSeededProject: state.newTask.workspaceRootsSeededProject,
   });
   currentNewTaskContext.current = {
     projectId: state.newTask.selection.projectId,
     agentId: state.newTask.selection.agentId || undefined,
+    workspaceRootsSeededProject: state.newTask.workspaceRootsSeededProject,
   };
   const pendingPreparedNewTask = useRef<PendingNewTaskPreparation | undefined>(undefined);
   const newTaskController = useMemo(() => new NewTaskController(), []);
@@ -195,6 +198,7 @@ function useAppControllerCore({
     operationOwner,
     replicaEpoch,
     retryTaskOpen,
+    taskMutationReady,
   } = useAppControllerBackendLifecycle({
     asyncOperations,
     backendConnection: backendConnectionRef,
@@ -226,7 +230,6 @@ function useAppControllerCore({
     newTaskSnapshot,
     pendingPreparation: pendingPreparedNewTask,
     replicaEpoch,
-    rememberNewTaskProject,
     startAttempt: newTaskStartAttempt,
     state,
   });
@@ -281,6 +284,20 @@ function useAppControllerCore({
     state: callbackState,
   });
   const automaticAuthRetry = useRef<string | undefined>(undefined);
+  const loggedWorkspaceSeededProject = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const projectId = state.newTask.workspaceRootsSeededProject
+      ? state.newTask.selection.projectId
+      : undefined;
+    if (!projectId || loggedWorkspaceSeededProject.current === projectId) return;
+    loggedWorkspaceSeededProject.current = projectId;
+    sendWebviewTelemetry(postHostMessage, "new_task_workspace_project_seeded", {
+      surface: bootstrap.surface,
+      project_id: projectId,
+      selection_source: "workspace_roots",
+      workspace_roots_seeded: true,
+    });
+  }, [bootstrap.surface, state.newTask.selection.projectId, state.newTask.workspaceRootsSeededProject]);
   useEffect(() => {
     const preparation = newTaskSnapshot?.preparation;
     const selectedAgent = agents?.find((agent) => agent.id === state.newTask.selection.agentId);
@@ -308,6 +325,7 @@ function useAppControllerCore({
     retryNativeSessionOpen,
     retryTaskOpen,
     state,
+    taskMutationReady,
     visibleTasks,
   };
 }
@@ -319,22 +337,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
   const workspaceCapability = useMemo(() => getWorkspaceCapability(), []);
   const backendConnection = options.backendConnection ?? defaultBackendConnection;
   const request = backendConnection?.request;
-  const rememberNewTaskProject = useCallback((projectId: string) => {
-    if (!request) return;
-    // The preference is auxiliary to the live selection: a storage failure must
-    // never prevent the user from creating a Task in the chosen Project.
-    void Promise.resolve()
-      .then(() => request(SETTINGS_UPDATE_NEW_TASK_DEFAULTS, {
-        projectId: projectId as ProjectId,
-      }))
-      .catch((error: unknown) => {
-        console.warn("[OpenAIDE] Remembering the New Task Project failed", {
-          error_kind: error instanceof Error && error.name ? error.name : typeof error,
-          projectId,
-        });
-      });
-  }, [request]);
-  const core = useAppControllerCore({ backendConnection, rememberNewTaskProject });
+  const core = useAppControllerCore({ backendConnection });
   const { createSnapshotRequestId: _createSnapshotRequestId, dispatch, newTaskSnapshot, state, ...renderState } = core;
   const routedTaskId = state.snapshot?.task.task_id;
   const newTaskViewSnapshot = newTaskSnapshot ?? state.snapshot;
@@ -394,6 +397,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
   return {
     ...renderState,
     activeTask: decoratedActiveTask,
+    backendConnection,
     visibleTasks: decoratedVisibleTasks,
     taskNotifications: {
       stateRootId: state.appServerStateRootId,
@@ -409,10 +413,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         }),
         selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
         selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
-        selectProject: (project) => {
-          dispatch({ type: "newTask:project", project });
-          if (project.available !== false) rememberNewTaskProject(project.projectId);
-        },
+        selectProject: (project) => dispatch({ type: "newTask:project", project }),
         selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
         selectWorktree: (worktree) => dispatch({ type: "newTask:worktree", ...worktree }),
         refreshWorktrees,

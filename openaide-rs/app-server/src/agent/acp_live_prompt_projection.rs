@@ -1,10 +1,9 @@
 use std::sync::Arc;
+use std::time::Instant;
 
-#[cfg(test)]
-use crate::agent::acp_schema::ToolCallUpdate;
 use crate::agent::acp_schema::{
     PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall, ToolCallUpdate,
 };
 use serde_json::json;
 
@@ -33,6 +32,11 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::AgentMessageRole;
 use crate::protocol::model::{AgentPlan, AgentPlanEntry, AgentPlanPriority, AgentPlanStatus};
 
+/// Asks the Native Session worker to project queued `session/update`s before a
+/// permission publishes its Tool, so already-received anonymous text is not split.
+pub(super) type PrecedingUpdateDrain =
+    tokio::sync::mpsc::UnboundedSender<tokio::sync::oneshot::Sender<Result<(), RuntimeError>>>;
+
 #[derive(Clone)]
 pub(super) struct LivePromptProjection {
     agent_id: String,
@@ -40,6 +44,8 @@ pub(super) struct LivePromptProjection {
     tool_calls: ToolCallState,
     codex_subagents: CodexSubagentState,
     cancellation: TurnCancellation,
+    preceding_update_drain: Option<PrecedingUpdateDrain>,
+    project_user_messages: bool,
 }
 
 impl LivePromptProjection {
@@ -70,7 +76,14 @@ impl LivePromptProjection {
                 .map(|projection| projection.codex_subagents.clone())
                 .unwrap_or_default(),
             cancellation,
+            preceding_update_drain: None,
+            project_user_messages: false,
         }
+    }
+
+    pub(super) fn with_preceding_update_drain(mut self, drain: PrecedingUpdateDrain) -> Self {
+        self.preceding_update_drain = Some(drain);
+        self
     }
 
     pub(super) fn cancellation(&self) -> TurnCancellation {
@@ -90,6 +103,17 @@ impl LivePromptProjection {
         )
     }
 
+    pub(super) fn for_native_subagent(
+        agent_id: impl Into<String>,
+        sink: Arc<dyn AgentEventSink>,
+    ) -> Self {
+        let mut projection = Self::for_prompt(agent_id, sink, TurnCancellation::new(), None);
+        // Codex currently projects an encrypted causal-root placeholder as a child User
+        // message. It is not the delegated prompt, so presenting it invents transcript data.
+        projection.project_user_messages = projection.agent_id != "codex";
+        projection
+    }
+
     #[cfg(test)]
     pub(super) fn remember_tool_call(&self, tool_call: ToolCall) {
         remember_tool_call(&self.tool_calls, tool_call);
@@ -104,13 +128,46 @@ impl LivePromptProjection {
         self,
         request: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse, RuntimeError> {
+        self.permission_response_inner(request, true, None).await
+    }
+
+    /// Child-session permission requests project their authoritative Tool call into
+    /// child history first, then use the root prompt only for the task-wide request.
+    pub(super) async fn permission_response_without_tool_projection(
+        self,
+        request: RequestPermissionRequest,
+        subagent_native_session_id: String,
+    ) -> Result<RequestPermissionResponse, RuntimeError> {
+        self.permission_response_inner(request, false, Some(subagent_native_session_id))
+            .await
+    }
+
+    pub(super) fn publish_permission_tool(
+        &self,
+        update: ToolCallUpdate,
+    ) -> Result<(), RuntimeError> {
+        let (tool_call, status_changed) =
+            merge_tool_call_update_with_status_change(&self.tool_calls, update);
+        self.publish_tool_call(&tool_call, status_changed)
+    }
+
+    async fn permission_response_inner(
+        self,
+        request: RequestPermissionRequest,
+        publish_tool: bool,
+        subagent_native_session_id: Option<String>,
+    ) -> Result<RequestPermissionResponse, RuntimeError> {
+        self.drain_preceding_session_updates().await?;
         let (tool_call, status_changed) =
             merge_tool_call_update_with_status_change(&self.tool_calls, request.tool_call.clone());
         // ACP permission requests carry the authoritative tool-call update. Publish it
         // before waiting so Chat shows the activity beside the transient request even
         // when the Agent did not send a separate tool-call notification first.
-        self.publish_tool_call(&tool_call, status_changed)?;
-        let permission = permission_request_from_acp(request, &tool_call);
+        if publish_tool {
+            self.publish_tool_call(&tool_call, status_changed)?;
+        }
+        let permission =
+            permission_request_from_acp(request, &tool_call, subagent_native_session_id);
         logging::info(
             "acp_permission_bridge_wait_start",
             json!({
@@ -147,8 +204,53 @@ impl LivePromptProjection {
         })
     }
 
+    async fn drain_preceding_session_updates(&self) -> Result<(), RuntimeError> {
+        let Some(drain) = self.preceding_update_drain.as_ref() else {
+            return Ok(());
+        };
+        let started = Instant::now();
+        logging::info(
+            "acp_permission_preceding_updates_drain_start",
+            json!({
+                "agent_id": self.agent_id.as_str(),
+            }),
+        );
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        if drain.send(reply_tx).is_err() {
+            logging::info(
+                "acp_permission_preceding_updates_drain_end",
+                json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "outcome": "closed",
+                    "duration_ms": started.elapsed().as_millis(),
+                }),
+            );
+            return Ok(());
+        }
+        let result = reply_rx.await.map_err(|_| {
+            RuntimeError::NotReady("ACP preceding-update drain dropped".to_string())
+        })?;
+        logging::info(
+            "acp_permission_preceding_updates_drain_end",
+            json!({
+                "agent_id": self.agent_id.as_str(),
+                "outcome": if result.is_ok() { "ok" } else { "error" },
+                "duration_ms": started.elapsed().as_millis(),
+            }),
+        );
+        result
+    }
+
     pub(super) fn emit(&self, update: SessionUpdate) -> Result<(), RuntimeError> {
         match update {
+            SessionUpdate::UserMessageChunk(chunk) if self.project_user_messages => {
+                if let crate::agent::acp_schema::ContentBlock::Text(text) = chunk.content {
+                    self.sink.emit(AgentEvent::UserMessageChunk {
+                        text: text.text,
+                        source_message_id: chunk.message_id.map(|id| id.to_string()),
+                    })?;
+                }
+            }
             SessionUpdate::AgentMessageChunk(chunk) => {
                 self.sink.emit(AgentEvent::MessageChunk {
                     role: AgentMessageRole::Agent,
@@ -348,6 +450,7 @@ fn agent_permission_outcome_name(outcome: &AgentPermissionOutcome) -> &'static s
 fn permission_request_from_acp(
     request: RequestPermissionRequest,
     tool_call: &ToolCall,
+    subagent_native_session_id: Option<String>,
 ) -> AgentPermissionRequest {
     let tool_call_id = tool_call.tool_call_id.to_string();
     let title = tool_call.title.clone();
@@ -362,6 +465,7 @@ fn permission_request_from_acp(
             title,
             kind: Some(tool_kind_name(tool_call.kind)),
         },
+        subagent_native_session_id,
         options: request
             .options
             .into_iter()

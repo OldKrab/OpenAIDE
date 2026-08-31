@@ -185,6 +185,103 @@
   opacity: 0.8;
 }
 
+.agent-boundary-notice {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding-block: 3px;
+  color: color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text));
+}
+
+.agent-boundary-notice > .activity-disclosure-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  border: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  outline: 0;
+}
+
+.agent-boundary-rule {
+  min-width: 12px;
+  height: 1px;
+  flex: 1 1 32px;
+  background: color-mix(in oklch, var(--oa-border) 34%, transparent);
+}
+
+.agent-boundary-label {
+  min-width: 0;
+  max-width: calc(100% - 40px);
+  min-height: 24px;
+  padding: 2px 6px 2px 3px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-align: left;
+  transition:
+    background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.agent-boundary-glyph {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border: 1px solid color-mix(in oklch, var(--oa-border) 42%, transparent);
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--oa-surface) 72%, transparent);
+  color: color-mix(in oklch, var(--oa-muted) 68%, var(--oa-text));
+}
+
+.agent-boundary-chevron {
+  flex: 0 0 auto;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.agent-boundary-notice > .activity-disclosure-trigger:hover .agent-boundary-label {
+  background: color-mix(in oklch, var(--oa-muted) 9%, transparent);
+  color: var(--oa-text);
+}
+
+.agent-boundary-notice > .activity-disclosure-trigger:focus-visible .agent-boundary-label {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.agent-boundary-notice.open .agent-boundary-chevron {
+  transform: rotate(90deg);
+}
+
+.agent-boundary-explanation {
+  width: fit-content;
+  max-width: min(62ch, calc(100% - 40px));
+  margin: 3px auto 1px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text));
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.agent-boundary-explanation > svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
 .activity-step-list {
   min-width: 0;
   max-width: 100%;
@@ -296,6 +393,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.activity-step-preview {
+  min-width: 0;
+  max-width: min(42ch, 38vw);
+  overflow: hidden;
+  color: color-mix(in oklch, var(--oa-muted) 78%, var(--oa-text));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--oa-mono-font);
+  font-size: 12px;
+}
+
+.activity-step-preview::before {
+  content: "·";
+  margin-inline: 6px;
+  color: color-mix(in oklch, var(--oa-muted) 70%, var(--oa-text));
+  font-family: var(--oa-chat-font);
 }
 
 .activity-step small {

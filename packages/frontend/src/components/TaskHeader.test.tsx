@@ -39,4 +39,22 @@ describe("TaskHeader", () => {
     expect(html).toContain('aria-label="Task status: Waiting"');
     expect(html).not.toContain("Workspace");
   });
+
+  it("uses the workspace slot for the Task-owned permission policy", () => {
+    const html = renderToStaticMarkup(
+      <TaskHeader
+        agentId="codex"
+        agentName="Codex"
+        onPermissionPolicyChange={async () => {}}
+        permissionPolicy="auto_approve"
+        status="active"
+        title="Task"
+        workspaceRoot="/workspace/OpenAIDE"
+      />,
+    );
+
+    expect(html).toContain("Auto-approve on");
+    expect(html).toContain('aria-label="Permission handling: Auto-approve on"');
+    expect(html).not.toContain("task-header-workspace");
+  });
 });

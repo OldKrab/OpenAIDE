@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
-    AgentContextUsage, AgentEvent, AgentPermissionOption, AgentPermissionOptionKind,
+    AgentContextUsage, AgentEvent, AgentNativeSubagentCapabilities, AgentNativeSubagentSpawned,
+    AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionOutcome,
     AgentPermissionRequest, AgentSubagent, AgentTerminalAppend, AgentToolCall, AgentToolCallRef,
     AgentToolCallStatus, AgentToolUpdate, AgentTurnUsage, AgentUsageCost,
 };
@@ -55,6 +56,69 @@ fn sourced_agent_text_event(text: &str, source_message_id: &str) -> AgentEvent {
         },
         source_message_id: Some(source_message_id.to_string()),
     }
+}
+
+#[test]
+fn codex_child_history_explains_parent_lifecycle_without_inventing_prompts() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    sink.subagent_spawned(AgentNativeSubagentSpawned {
+        parent_native_session_id: "session_1".to_string(),
+        native_session_id: "child_1".to_string(),
+        name: "Researcher".to_string(),
+        delegated_task: None,
+        parent_interaction: false,
+        capabilities: AgentNativeSubagentCapabilities::default(),
+        details: Vec::new(),
+    })
+    .unwrap();
+
+    // Codex ACP re-announces the same native child when the Main Agent sends a
+    // follow-up; it does not emit a separate collaboration Tool call.
+    sink.subagent_spawned(AgentNativeSubagentSpawned {
+        parent_native_session_id: "session_1".to_string(),
+        native_session_id: "child_1".to_string(),
+        name: "Researcher".to_string(),
+        delegated_task: None,
+        // A fresh router after session/resume cannot classify the repeat from
+        // process memory; the durable child identity must still recover it.
+        parent_interaction: false,
+        capabilities: AgentNativeSubagentCapabilities::default(),
+        details: Vec::new(),
+    })
+    .unwrap();
+
+    let record = store
+        .subagent_record_by_native("task_1", "child_1")
+        .unwrap();
+    let history = store
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+    assert_eq!(history.messages.len(), 2);
+    assert!(matches!(
+        &history.messages[0].chat.message,
+        NormalizedMessage::Activity { title, steps, .. }
+            if title == "Main Agent started this subagent"
+                && matches!(steps.as_slice(), [crate::protocol::model::ActivityStep::Text { text, .. }]
+                    if text == "The original delegated prompt is unavailable because Codex does not expose it to clients.")
+    ));
+    assert!(matches!(
+        &history.messages[1].chat.message,
+        NormalizedMessage::Activity { title, steps, .. }
+            if title == "Main Agent interacted with this subagent"
+                && matches!(steps.as_slice(), [crate::protocol::model::ActivityStep::Text { text, .. }]
+                    if text == "The inter-agent message is unavailable because Codex does not expose it to clients.")
+    ));
+    assert!(!history
+        .messages
+        .iter()
+        .any(|stored| matches!(stored.chat.message, NormalizedMessage::User { .. })));
 }
 
 #[test]
@@ -699,6 +763,97 @@ fn permission_is_transient_until_the_server_request_resolves() {
 }
 
 #[test]
+fn auto_approve_policy_resolves_an_allow_once_permission_without_waiting() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    let mut task = running_task("task_1");
+    task.permission_policy =
+        openaide_app_server_protocol::snapshot::TaskPermissionPolicy::AutoApprove;
+    store.write_task(&task).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    );
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
+    let mut request = permission_request("permission_1");
+    request.options.insert(
+        0,
+        AgentPermissionOption {
+            option_id: "allow_always".to_string(),
+            name: "Always allow".to_string(),
+            kind: AgentPermissionOptionKind::AllowAlways,
+        },
+    );
+
+    let outcome = sink.request_permission(request).unwrap();
+
+    assert!(matches!(
+        outcome,
+        AgentPermissionOutcome::Selected { option_id } if option_id == "allow"
+    ));
+    assert_eq!(server_requests.pending_count(), 0);
+    assert_eq!(
+        store.read_task("task_1").unwrap().status,
+        TaskStatus::Active
+    );
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::Activity { steps, .. }
+            if matches!(
+                steps.as_slice(),
+                [crate::protocol::model::ActivityStep::Tool { permission_outcomes, .. }]
+                    if matches!(permission_outcomes.as_slice(), [outcome]
+                        if outcome.decision == crate::protocol::model::ToolPermissionDecision::Approved
+                            && outcome.option_id.as_deref() == Some("allow"))
+            )
+    ));
+}
+
+#[test]
+fn auto_approve_policy_leaves_requests_without_allow_once_for_manual_decision() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    register_permission_responder(&server_requests, "task_1");
+    let mut task = running_task("task_1");
+    task.permission_policy =
+        openaide_app_server_protocol::snapshot::TaskPermissionPolicy::AutoApprove;
+    store.write_task(&task).unwrap();
+    let sink = Arc::new(TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    ));
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
+    let mut request = permission_request("permission_1");
+    request.options[0] = AgentPermissionOption {
+        option_id: "allow_always".to_string(),
+        name: "Always allow".to_string(),
+        kind: AgentPermissionOptionKind::AllowAlways,
+    };
+
+    let worker = std::thread::spawn({
+        let sink = Arc::clone(&sink);
+        move || sink.request_permission(request)
+    });
+    while server_requests.pending_count() == 0 {
+        std::thread::yield_now();
+    }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
+    answer_permission(&server_requests, "task_1", "allow_always");
+
+    assert!(matches!(
+        worker.join().unwrap().unwrap(),
+        AgentPermissionOutcome::Selected { option_id } if option_id == "allow_always"
+    ));
+}
+
+#[test]
 fn multiple_permission_decisions_remain_linked_after_later_tool_updates() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     register_permission_responder(&server_requests, "task_1");
@@ -1003,6 +1158,12 @@ fn native_session_update_is_persisted_after_prompt_completion() {
 
     sink.session_update(sourced_agent_text_event(" after", "agent-message-1"))
         .unwrap();
+    store
+        .task_journal()
+        .submit(crate::storage::task_journal::TaskWrite::barrier("task_1"))
+        .unwrap()
+        .wait()
+        .unwrap();
 
     let messages = store.read_messages("task_1").unwrap();
     let message = messages
@@ -1238,6 +1399,8 @@ fn mixed_tool_update_publishes_one_atomic_detail_delta() {
                 TaskUpdateKind::Changed(change) => Some(change),
                 TaskUpdateKind::ToolDetailChanged { .. } => None,
                 TaskUpdateKind::HistorySync(_)
+                | TaskUpdateKind::SubagentCatalogChanged { .. }
+                | TaskUpdateKind::SubagentHistoryChanged { .. }
                 | TaskUpdateKind::NavigationProjectEntriesChanged { .. }
                 | TaskUpdateKind::NavigationRefreshStateChanged { .. } => None,
             }
@@ -1616,6 +1779,122 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
 }
 
 #[test]
+fn synchronous_task_change_waits_for_streamed_agent_text_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store,
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.session_update(agent_text_event("first")).unwrap();
+    assert_eq!(notifications.recv().unwrap().revision, 1);
+
+    sink.session_update(agent_text_event(" second")).unwrap();
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("Updated title".to_string()),
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+
+    let streamed = notifications.recv().unwrap();
+    assert_eq!(streamed.revision, 2);
+    assert!(matches!(
+        streamed.kind,
+        TaskUpdateKind::Changed(change)
+            if matches!(change.changes.chat.as_slice(),
+                [TaskChatChange::AppendText { text, .. }] if text == " second")
+    ));
+    let metadata = notifications.recv().unwrap();
+    assert_eq!(metadata.revision, 3);
+    assert!(matches!(
+        metadata.kind,
+        TaskUpdateKind::Changed(change) if change.changes.task.is_some()
+    ));
+}
+
+#[test]
+fn agent_text_chunks_batch_durable_writes_without_losing_ordered_chat_updates() {
+    const CHUNK_COUNT: usize = 128;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_streaming")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_streaming".to_string(),
+        "turn_1".to_string(),
+        ServerRequestRuntime::new(),
+        TurnCancellation::new(),
+    );
+
+    sink.emit(agent_text_event("start")).unwrap();
+    notifications
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("initial Agent message is published");
+    let syncs_before_chunks = store.task_journal().durability_sync_calls();
+
+    for _ in 0..CHUNK_COUNT {
+        sink.emit(agent_text_event("x")).unwrap();
+    }
+
+    // A real workflow barrier flushes all admitted stream deltas before a
+    // subsequent lifecycle mutation or prompt settlement reads the projection.
+    store
+        .task_journal()
+        .submit(crate::storage::task_journal::TaskWrite::barrier(
+            "task_streaming",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let messages = store.read_messages("task_streaming").unwrap();
+    let expected = format!("start{}", "x".repeat(CHUNK_COUNT));
+    assert_eq!(
+        agent_message_text(&messages[0].chat.message),
+        Some(expected.as_str())
+    );
+    let task = store.read_task("task_streaming").unwrap();
+    assert!(
+        task.revision > 1,
+        "streamed Chat must advance Task revision"
+    );
+
+    let syncs_for_chunks = store.task_journal().durability_sync_calls() - syncs_before_chunks;
+    assert!(
+        syncs_for_chunks < CHUNK_COUNT as u64,
+        "streamed chunks performed {syncs_for_chunks} durability syncs"
+    );
+
+    let mut latest_revision = 1;
+    while latest_revision < task.revision {
+        let update = notifications
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("durable streamed Chat update is published");
+        latest_revision = latest_revision.max(update.revision);
+    }
+    assert_eq!(latest_revision, task.revision);
+}
+
+#[test]
 fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
@@ -1789,6 +2068,12 @@ fn interleaved_source_message_ids_update_their_original_agent_messages() {
         sink.emit(sourced_agent_text_event(text, source_message_id))
             .unwrap();
     }
+    store
+        .task_journal()
+        .submit(crate::storage::task_journal::TaskWrite::barrier("task_1"))
+        .unwrap()
+        .wait()
+        .unwrap();
 
     let messages = store.read_messages("task_1").unwrap();
     let agent_texts = messages
@@ -1993,6 +2278,7 @@ fn permission_request(request_id: &str) -> AgentPermissionRequest {
             title: "Tool".to_string(),
             kind: Some("edit".to_string()),
         },
+        subagent_native_session_id: None,
         options: vec![
             AgentPermissionOption {
                 option_id: "allow".to_string(),
@@ -2053,6 +2339,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         created_at: "1".to_string(),
         updated_at: "1".to_string(),
         last_activity: "1".to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_name: "Codex".to_string(),

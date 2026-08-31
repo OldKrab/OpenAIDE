@@ -211,6 +211,7 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: updated_at.to_string(),
         last_activity: updated_at.to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "agent-a".to_string(),

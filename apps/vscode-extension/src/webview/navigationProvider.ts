@@ -8,6 +8,7 @@ import { renderWebviewHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import { VSCODE_SHELL, type TaskFocusSource, type WebviewHost } from "./types";
 import { currentWorkspaceRoot, workspaceRoots, type WorkspaceRoot } from "../workspace/roots";
+import { developerSettingsVisible } from "../settings/snapshot";
 
 export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = "openaide.tasks";
@@ -44,7 +45,15 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       enableScripts: true,
       localResourceRoots: [webviewRoot(this.context)],
     };
-    const viewId = `navigation-${randomUUID()}`;
+    // VS Code owns the webview lifecycle identity, including replacements of
+    // the contributed view that may share the same browser storage partition.
+    const clientInstanceId = randomUUID();
+    const viewId = `navigation-${clientInstanceId}`;
+    this.logger.info("VS Code webview client created", {
+      surface: "navigation",
+      client_identity_source: "shell",
+      extension_version: extensionVersion(this.context),
+    });
     const detachAppServerView = this.runtime.attachAppServerView(viewId, (message) => {
       void view.webview.postMessage(message);
     });
@@ -56,7 +65,11 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       }
       if (this.view === view) this.view = undefined;
     });
-    view.webview.html = renderWebviewHtml(this.context, view.webview, this.bootstrap());
+    view.webview.html = renderWebviewHtml(
+      this.context,
+      view.webview,
+      this.bootstrap(clientInstanceId),
+    );
     view.webview.onDidReceiveMessage((message) => {
       if (isAppServerSessionViewMessage(message)) {
         void this.runtime.handleAppServerViewMessage(viewId, message);
@@ -67,6 +80,7 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         runtimeProcess: this.runtimeProcess,
         post: (payload) => view.webview.postMessage(payload),
         logger: this.logger,
+        surface: "navigation",
         developerSettingsStore: this.context.globalState,
         agentSecretStore: this.context.secrets,
         surfaces: this.surfaces,
@@ -96,13 +110,20 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     }
   }
 
-  private bootstrap(): Parameters<typeof renderWebviewHtml>[2] {
+  private bootstrap(clientInstanceId: string): Parameters<typeof renderWebviewHtml>[2] {
     return {
       surface: "navigation",
       shell: VSCODE_SHELL,
+      clientInstanceId,
       focusedTaskId: this.focusedTaskId ?? null,
       projectId: currentWorkspaceRoot()?.projectId,
       projectIds: workspaceRoots().map((root) => root.projectId),
+      developerSettingsUnlocked: developerSettingsVisible(this.context.globalState),
     };
   }
+}
+
+function extensionVersion(context: vscode.ExtensionContext) {
+  const version = context.extension.packageJSON.version as unknown;
+  return typeof version === "string" ? version : "unknown";
 }

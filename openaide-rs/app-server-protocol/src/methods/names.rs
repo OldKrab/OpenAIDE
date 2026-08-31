@@ -3,10 +3,15 @@ pub const CLIENT_INITIALIZE: &str = "client/initialize";
 pub const CLIENT_CAPABILITIES_CHANGED: &str = "client/capabilitiesChanged";
 pub const CLIENT_HEARTBEAT: &str = "client/heartbeat";
 pub const CLIENT_DETACH: &str = "client/detach";
+pub const CLIENT_UPDATE_SHUTDOWN_PREPARE: &str = "client/updateShutdownPrepare";
+pub const CLIENT_UPDATE_SHUTDOWN_COMMIT: &str = "client/updateShutdownCommit";
+pub const CLIENT_UPDATE_SHUTDOWN_ABORT: &str = "client/updateShutdownAbort";
 pub const PENDING_REQUEST_RESOLVE: &str = "pendingRequest/resolve";
 pub const STATE_SUBSCRIBE: &str = "state/subscribe";
 pub const STATE_UNSUBSCRIBE: &str = "state/unsubscribe";
 pub const DIAGNOSTICS_GET_RUNTIME: &str = "diagnostics/getRuntime";
+pub const DIAGNOSTICS_LIST_SUPPORT_EXPORT: &str = "diagnostics/listSupportExport";
+pub const DIAGNOSTICS_CREATE_SUPPORT_EXPORT: &str = "diagnostics/createSupportExport";
 pub const SUPPORT_RECOVER_STUCK_SESSIONS: &str = "support/recoverStuckSessions";
 pub const AGENT_PROBE: &str = "agent/probe";
 pub const AGENT_AUTHENTICATE: &str = "agent/authenticate";
@@ -67,10 +72,15 @@ pub const TASK_QUEUE_TAKE: &str = "task/queueTake";
 pub const TASK_QUEUE_MOVE: &str = "task/queueMove";
 pub const TASK_SEND: &str = "task/send";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
+pub const TASK_SET_PERMISSION_POLICY: &str = "task/setPermissionPolicy";
 pub const TASK_SET_TITLE: &str = "task/setTitle";
 pub const TASK_SET_PINNED: &str = "task/setPinned";
 pub const TASK_CLOSE_PLAN: &str = "task/closePlan";
 pub const TASK_TOOL_IMAGE_PREVIEW: &str = "task/toolImagePreview";
+pub const FILE_VIEWER_OPEN: &str = "fileViewer/open";
+pub const FILE_VIEWER_OPEN_FROM_HANDLE: &str = "fileViewer/openFromHandle";
+pub const FILE_VIEWER_REFRESH: &str = "fileViewer/refresh";
+pub const FILE_VIEWER_RELEASE: &str = "fileViewer/release";
 pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
 pub const TASK_RELOAD_NATIVE_SESSION: &str = "task/reloadNativeSession";
@@ -81,10 +91,13 @@ pub const TASK_LIST: &str = "task/list";
 pub const TASK_NAVIGATION_REFRESH: &str = "taskNavigation/refresh";
 pub const TASK_NAVIGATION_LOAD_MORE: &str = "taskNavigation/loadMore";
 pub const NATIVE_SESSION_ARCHIVE: &str = "nativeSession/archive";
+pub const NATIVE_SESSION_SET_TITLE: &str = "nativeSession/setTitle";
+pub const NATIVE_SESSION_SET_PINNED: &str = "nativeSession/setPinned";
 pub const NATIVE_SESSION_RESTORE: &str = "nativeSession/restore";
 pub const NATIVE_SESSION_FORK: &str = "nativeSession/fork";
 pub const TASK_RELEASE: &str = "task/release";
 pub const TASK_ARCHIVE: &str = "task/archive";
+pub const TASK_ARCHIVE_OLDER: &str = "task/archiveOlder";
 pub const TASK_RESTORE: &str = "task/restore";
 
 pub const CLIENT_METHODS: &[&str] = &[
@@ -93,10 +106,15 @@ pub const CLIENT_METHODS: &[&str] = &[
     CLIENT_CAPABILITIES_CHANGED,
     CLIENT_HEARTBEAT,
     CLIENT_DETACH,
+    CLIENT_UPDATE_SHUTDOWN_PREPARE,
+    CLIENT_UPDATE_SHUTDOWN_COMMIT,
+    CLIENT_UPDATE_SHUTDOWN_ABORT,
     PENDING_REQUEST_RESOLVE,
     STATE_SUBSCRIBE,
     STATE_UNSUBSCRIBE,
     DIAGNOSTICS_GET_RUNTIME,
+    DIAGNOSTICS_LIST_SUPPORT_EXPORT,
+    DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
     SUPPORT_RECOVER_STUCK_SESSIONS,
     AGENT_PROBE,
     AGENT_AUTHENTICATE,
@@ -157,10 +175,15 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_QUEUE_MOVE,
     TASK_SEND,
     TASK_SET_CONFIG_OPTION,
+    TASK_SET_PERMISSION_POLICY,
     TASK_SET_TITLE,
     TASK_SET_PINNED,
     TASK_CLOSE_PLAN,
     TASK_TOOL_IMAGE_PREVIEW,
+    FILE_VIEWER_OPEN,
+    FILE_VIEWER_OPEN_FROM_HANDLE,
+    FILE_VIEWER_REFRESH,
+    FILE_VIEWER_RELEASE,
     TASK_CANCEL,
     TASK_OPEN,
     TASK_MARK_READ,
@@ -170,9 +193,12 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_NAVIGATION_REFRESH,
     TASK_NAVIGATION_LOAD_MORE,
     NATIVE_SESSION_ARCHIVE,
+    NATIVE_SESSION_SET_TITLE,
+    NATIVE_SESSION_SET_PINNED,
     NATIVE_SESSION_RESTORE,
     NATIVE_SESSION_FORK,
     TASK_RELEASE,
     TASK_ARCHIVE,
+    TASK_ARCHIVE_OLDER,
     TASK_RESTORE,
 ];

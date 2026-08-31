@@ -8,7 +8,8 @@ import {
   type ActivityStepSemanticTitle,
   type PresentationDisplayKind,
 } from "./activityPresentationLabels";
-import { firstFieldValue } from "./toolDetailsShared";
+import { firstFieldValue, readDetailOutput } from "./toolDetailsShared";
+import { skillDocumentName } from "./skillToolViewModel";
 
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
@@ -101,7 +102,7 @@ export function activityStepSemanticTitle(
   const presentation = step.presentation;
   if (presentation) return presentationSemanticTitle(presentation);
   if (step.name === "read") {
-    const providedTitle = step.input_summary?.trim();
+    const providedTitle = meaningfulToolInputSummary(step);
     if (providedTitle) {
       const suppliedAction = /^(Read|View|List)\s+(.+)$/i.exec(providedTitle);
       if (suppliedAction) {
@@ -110,8 +111,8 @@ export function activityStepSemanticTitle(
       }
       return semanticTitle([{ action: "Read", subjects: [providedTitle] }]);
     }
-    const path = pathSubjectLabel(step);
-    return path ? semanticTitle([{ action: "Read", subjects: [path] }]) : undefined;
+    const subject = pathSubjectLabel(step) ?? readOutputSubjectLabel(step);
+    return subject ? semanticTitle([{ action: "Read", subjects: [subject] }]) : undefined;
   }
   if (step.name !== "search") return undefined;
   const scope = searchScopeLabel(step);
@@ -263,8 +264,13 @@ export function activityStepStatus(step: ActivityStep) {
 }
 
 export function activityStepPreview(step: ActivityStep) {
-  if (step.kind === "text" || step.kind === "thought" || step.kind === "subagent") return undefined;
+  if (step.kind === "text" || step.kind === "thought" || step.kind === "subagent" || documentTool(step)) return undefined;
   return step.output_preview;
+}
+
+/** File contents belong in the expanded details view, not beside a collapsed Read row. */
+function documentTool(step: ActivityStep) {
+  return step.kind === "tool" && (step.name === "read" || step.name === "skill");
 }
 
 type ActivitySummaryKind =
@@ -421,7 +427,9 @@ function toolSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   if (collaborationLabel) return collaborationLabel;
   if (step.name === "search" || step.name === "web_search") return searchSubjectLabel(step);
   if (step.name === "read" || step.name === "edit" || step.name === "delete" || step.name === "move") {
-    return pathSubjectLabel(step) ?? step.input_summary;
+    return pathSubjectLabel(step)
+      ?? (step.name === "read" ? readOutputSubjectLabel(step) : undefined)
+      ?? meaningfulToolInputSummary(step);
   }
   if (step.name === "fetch") return fetchSubjectLabel(step) ?? step.input_summary;
   const detailsLabel = toolDetailsLabel(step);
@@ -487,23 +495,25 @@ function searchSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   const queryField = ["query", "q", "pattern"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean);
   if (queryField) return queryField;
   const command = commandLabel(input?.command);
-  if (command && step.input_summary && isContextOnlySummary(step, step.input_summary)) return command;
-  return searchTitleParts(step.input_summary)?.query ?? step.input_summary ?? command;
+  const summary = meaningfulToolInputSummary(step);
+  if (command && summary && isContextOnlySummary(step, summary)) return command;
+  return searchTitleParts(summary)?.query ?? summary ?? command;
 }
 
 function searchQueryLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   const input = step.details?.input;
+  const summary = meaningfulToolInputSummary(step);
   return (
     input?.query ??
     ["query", "q", "pattern"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean) ??
-    searchTitleParts(step.input_summary)?.query
+    searchTitleParts(summary)?.query
   );
 }
 
 function searchScopeLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   const input = step.details?.input;
   const fieldScope = ["path", "file", "cwd"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean);
-  return input?.path ?? fieldScope ?? searchTitleParts(step.input_summary)?.scope ?? input?.cwd;
+  return input?.path ?? fieldScope ?? searchTitleParts(meaningfulToolInputSummary(step))?.scope ?? input?.cwd;
 }
 
 function searchTitleParts(value: string | undefined) {
@@ -540,6 +550,30 @@ function pathSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   const details = step.details;
   const path = details?.locations?.[0]?.path ?? diffPath(details?.content) ?? details?.input?.path;
   return path ? pathLeaf(path) : undefined;
+}
+
+function meaningfulToolInputSummary(step: Extract<ActivityStep, { kind: "tool" }>) {
+  const summary = step.input_summary?.trim();
+  return summary && !isGenericToolSummary(step.name, summary) ? summary : undefined;
+}
+
+function isGenericToolSummary(name: string, summary: string) {
+  const normalized = summary.replace(/\s+/g, " ").trim().toLowerCase();
+  if (name === "read") {
+    return ["read", "read file", "read files", "view", "view file", "list", "list files"].includes(normalized);
+  }
+  if (name === "search" || name === "web_search") {
+    return ["find", "search", "search find", "search files", "search results"].includes(normalized);
+  }
+  return false;
+}
+
+/** Cursor may return a skill file's frontmatter while omitting its read path. */
+function readOutputSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
+  const output = step.details
+    ? readDetailOutput(step.details, step.output_preview)
+    : step.output_preview ?? "";
+  return skillDocumentName(output);
 }
 
 function diffPath(content: NonNullable<Extract<ActivityStep, { kind: "tool" }>["details"]>["content"] | undefined) {

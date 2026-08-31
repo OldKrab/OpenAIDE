@@ -323,8 +323,10 @@ fn has_pending_exclusive_control(state: &SchedulerState) -> bool {
 }
 
 fn validate_write_size(write: &TaskWrite) -> Result<(), RuntimeError> {
-    if write.boundary == CommitBoundary::Stream
-        && write.estimated_bytes() > PER_TASK_STREAM_BYTE_CAPACITY
+    if matches!(
+        write.boundary,
+        CommitBoundary::Stream | CommitBoundary::TextStream
+    ) && write.estimated_bytes() > PER_TASK_STREAM_BYTE_CAPACITY
     {
         return Err(RuntimeError::Storage(
             "Task journal stream write exceeds admission capacity".to_string(),
@@ -335,7 +337,7 @@ fn validate_write_size(write: &TaskWrite) -> Result<(), RuntimeError> {
 
 fn has_capacity(state: &SchedulerState, write: &TaskWrite) -> bool {
     match write.boundary {
-        CommitBoundary::Stream => {
+        CommitBoundary::Stream | CommitBoundary::TextStream => {
             let write_bytes = write.estimated_bytes();
             let task_bytes = state
                 .pending
@@ -344,7 +346,9 @@ fn has_capacity(state: &SchedulerState, write: &TaskWrite) -> bool {
             write_bytes <= GLOBAL_STREAM_BYTE_CAPACITY.saturating_sub(state.global_stream_bytes)
                 && write_bytes <= PER_TASK_STREAM_BYTE_CAPACITY.saturating_sub(task_bytes)
         }
-        CommitBoundary::Barrier => state.global_control_writes < CONTROL_CAPACITY,
+        CommitBoundary::TextBarrier | CommitBoundary::Barrier => {
+            state.global_control_writes < CONTROL_CAPACITY
+        }
     }
 }
 
@@ -363,7 +367,7 @@ fn enqueue(
         .queued_operations
         .saturating_add(write.operations.len() + write.artifacts.len());
     match boundary {
-        CommitBoundary::Stream => {
+        CommitBoundary::Stream | CommitBoundary::TextStream => {
             entry.stream_bytes += write_bytes;
             state.global_stream_bytes += write_bytes;
             state.peak_global_stream_bytes = state
@@ -371,7 +375,7 @@ fn enqueue(
                 .max(state.global_stream_bytes);
             state.peak_task_stream_bytes = state.peak_task_stream_bytes.max(entry.stream_bytes);
         }
-        CommitBoundary::Barrier => {
+        CommitBoundary::TextBarrier | CommitBoundary::Barrier => {
             entry.control_writes += 1;
             state.global_control_writes += 1;
         }
@@ -396,6 +400,11 @@ fn should_wait_for_batch(state: &SchedulerState, task_id: &str) -> bool {
 }
 
 fn take_batch(state: &mut SchedulerState, task_id: &str) -> Vec<QueuedWrite> {
+    let first_control = state.pending.get(task_id).and_then(first_control_boundary);
+    if first_control == Some(CommitBoundary::TextBarrier) {
+        return take_text_barrier_batch(state, task_id);
+    }
+
     let task = state
         .pending
         .get_mut(task_id)
@@ -418,18 +427,21 @@ fn take_batch(state: &mut SchedulerState, task_id: &str) -> Vec<QueuedWrite> {
         bytes += next_bytes;
         operations += next_operations;
         match queued.write.boundary {
-            CommitBoundary::Stream => {
+            CommitBoundary::Stream | CommitBoundary::TextStream => {
                 task.stream_bytes -= next_bytes;
                 state.global_stream_bytes -= next_bytes;
             }
-            CommitBoundary::Barrier => {
+            CommitBoundary::TextBarrier | CommitBoundary::Barrier => {
                 task.control_writes -= 1;
                 state.global_control_writes -= 1;
             }
         }
         let boundary = queued.write.boundary;
         batch.push(queued);
-        if boundary == CommitBoundary::Barrier {
+        if matches!(
+            boundary,
+            CommitBoundary::TextBarrier | CommitBoundary::Barrier
+        ) {
             break;
         }
     }
@@ -439,4 +451,85 @@ fn take_batch(state: &mut SchedulerState, task_id: &str) -> Vec<QueuedWrite> {
         state.ready.push_back(task_id.to_string());
     }
     batch
+}
+
+fn first_control_boundary(task: &PendingTask) -> Option<CommitBoundary> {
+    task.writes
+        .iter()
+        .find_map(|queued| match queued.write.boundary {
+            CommitBoundary::Stream | CommitBoundary::TextStream => None,
+            boundary => Some(boundary),
+        })
+}
+
+/// Removes a text-only barrier and the earlier text writes while retaining
+/// streamed Tool output in its original queue. Agent text and Tool artifacts
+/// have independent publication owners, so flushing one must not split the
+/// other from a following structured Tool mutation.
+fn take_text_barrier_batch(state: &mut SchedulerState, task_id: &str) -> Vec<QueuedWrite> {
+    let mut selected = Vec::new();
+    let mut retained = VecDeque::new();
+    let mut selected_bytes = 0usize;
+    let mut selected_operations = 0usize;
+    let mut barrier_seen = false;
+    let mut limits_reached = false;
+
+    let task = state
+        .pending
+        .get_mut(task_id)
+        .expect("ready Task has pending queue");
+    let mut queued = std::mem::take(&mut task.writes);
+    while let Some(write) = queued.pop_front() {
+        if barrier_seen || limits_reached {
+            retained.push_back(write);
+            continue;
+        }
+        match write.write.boundary {
+            CommitBoundary::TextStream => {
+                let next_bytes = write.write.estimated_bytes();
+                let next_operations = write.write.operations.len() + write.write.artifacts.len();
+                if !selected.is_empty()
+                    && (selected_bytes + next_bytes > MAX_BATCH_BYTES
+                        || selected_operations + next_operations > MAX_BATCH_OPERATIONS)
+                {
+                    limits_reached = true;
+                    retained.push_back(write);
+                    continue;
+                }
+                selected_bytes += next_bytes;
+                selected_operations += next_operations;
+                selected.push(write);
+            }
+            CommitBoundary::TextBarrier => {
+                barrier_seen = true;
+                selected.push(write);
+            }
+            CommitBoundary::Stream | CommitBoundary::Barrier => retained.push_back(write),
+        }
+    }
+    task.writes = retained;
+
+    for write in &selected {
+        let bytes = write.write.estimated_bytes();
+        let operations = write.write.operations.len() + write.write.artifacts.len();
+        task.queued_bytes = task.queued_bytes.saturating_sub(bytes);
+        task.queued_operations = task.queued_operations.saturating_sub(operations);
+        match write.write.boundary {
+            CommitBoundary::Stream | CommitBoundary::TextStream => {
+                task.stream_bytes = task.stream_bytes.saturating_sub(bytes);
+                state.global_stream_bytes = state.global_stream_bytes.saturating_sub(bytes);
+            }
+            CommitBoundary::TextBarrier | CommitBoundary::Barrier => {
+                task.control_writes = task.control_writes.saturating_sub(1);
+                state.global_control_writes = state.global_control_writes.saturating_sub(1);
+            }
+        }
+    }
+
+    if task.writes.is_empty() {
+        state.pending.remove(task_id);
+    } else {
+        state.ready.push_back(task_id.to_string());
+    }
+    selected
 }

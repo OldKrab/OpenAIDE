@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="400" viewBox="0 0 660 400">
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="660" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15191F"/>
+      <stop offset="1" stop-color="#0D1116"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(330 224) rotate(90) scale(150 260)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5199F7" stop-opacity=".15"/>
+      <stop offset="1" stop-color="#5199F7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="660" height="400" fill="url(#surface)"/>
+  <rect width="660" height="400" fill="url(#glow)"/>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif" text-anchor="middle">
+    <text x="330" y="58" fill="#FFFFFF" font-size="24" font-weight="700" letter-spacing="-.35">Install OpenAIDE</text>
+    <text x="330" y="84" fill="#C2C9D2" font-size="14" font-weight="500">Drag OpenAIDE into Applications</text>
+  </g>
+
+  <path d="M270 224H390" stroke="#5199F7" stroke-width="5" stroke-linecap="round"/>
+  <path d="M374 208L392 224L374 240" fill="none" stroke="#8BC0FF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Finder owns the item labels and chooses dark text, so give them one neutral shelf. -->
+  <path d="M0 284H660V400H0Z" fill="#F3F5F8"/>
+  <path d="M0 284H660" stroke="#FFFFFF" stroke-opacity=".22"/>
+</svg>

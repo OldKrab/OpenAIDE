@@ -21,6 +21,7 @@ use crate::agent::acp_host::{
     write_text_file_from_host,
 };
 use crate::agent::acp_host_terminal_ownership::AcpHostTerminalRegistry;
+use crate::agent::acp_native_subagents::AcpNativeSubagentRouter;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::{AgentSessionEventSink, TurnCancellation};
@@ -44,26 +45,31 @@ pub(super) struct AcpHostCapabilityHandlers {
     session_event_sinks: AcpSessionEventSinkMap,
     session_traces: AcpSessionTraceMap,
     elicitation_cancellations: AcpElicitationCancellationMap,
+    native_subagents: AcpNativeSubagentRouter,
+}
+
+pub(super) struct AcpHostCapabilityContext {
+    pub(super) host_bridge: HostBridge,
+    pub(super) trace: Option<AcpTraceSession>,
+    pub(super) current_prompts: AcpSessionPromptMap,
+    pub(super) terminal_registry: AcpHostTerminalRegistry,
+    pub(super) session_event_sinks: AcpSessionEventSinkMap,
+    pub(super) session_traces: AcpSessionTraceMap,
+    pub(super) elicitation_cancellations: AcpElicitationCancellationMap,
+    pub(super) native_subagents: AcpNativeSubagentRouter,
 }
 
 impl AcpHostCapabilityHandlers {
-    pub(super) fn new(
-        host_bridge: HostBridge,
-        trace: Option<AcpTraceSession>,
-        current_prompts: AcpSessionPromptMap,
-        terminal_registry: AcpHostTerminalRegistry,
-        session_event_sinks: AcpSessionEventSinkMap,
-        session_traces: AcpSessionTraceMap,
-        elicitation_cancellations: AcpElicitationCancellationMap,
-    ) -> Self {
+    pub(super) fn new(context: AcpHostCapabilityContext) -> Self {
         Self {
-            host_bridge,
-            trace,
-            current_prompts,
-            terminal_registry,
-            session_event_sinks,
-            session_traces,
-            elicitation_cancellations,
+            host_bridge: context.host_bridge,
+            trace: context.trace,
+            current_prompts: context.current_prompts,
+            terminal_registry: context.terminal_registry,
+            session_event_sinks: context.session_event_sinks,
+            session_traces: context.session_traces,
+            elicitation_cancellations: context.elicitation_cancellations,
+            native_subagents: context.native_subagents,
         }
     }
 
@@ -183,12 +189,18 @@ impl AcpHostCapabilityHandlers {
             return Ok(ElicitationCreateResponse::Cancel);
         }
         let session_id = request.session_id.expect("validated session scope");
+        let child_attribution = self.native_subagents.child_attribution(&session_id);
         let sink = self
             .session_event_sinks
             .lock()
             .expect("ACP session event sink lock poisoned")
             .get(&session_id)
-            .cloned();
+            .cloned()
+            .or_else(|| {
+                self.native_subagents
+                    .root_sink_for_child(&session_id)
+                    .map(|(_root_session_id, sink)| sink)
+            });
         let Some(sink) = sink else {
             return Ok(ElicitationCreateResponse::Cancel);
         };
@@ -196,7 +208,7 @@ impl AcpHostCapabilityHandlers {
             let _ = sink.record_question_error("The Agent sent an invalid question.".to_string());
             return Err(invalid_params("form elicitation requires requestedSchema"));
         };
-        let form = match normalize_form(request.message, schema) {
+        let mut form = match normalize_form(request.message, schema) {
             Ok(form) => form,
             Err(error) => {
                 let _ =
@@ -204,6 +216,9 @@ impl AcpHostCapabilityHandlers {
                 return Err(invalid_params(&error.to_string()));
             }
         };
+        if let Some((_root_session_id, child_name)) = child_attribution {
+            form.message = format!("{child_name} · {}", form.message);
+        }
         let cancellation = TurnCancellation::new();
         self.elicitation_cancellations
             .lock()
@@ -250,7 +265,7 @@ impl AcpHostCapabilityHandlers {
 
     pub(super) async fn request_permission(
         &self,
-        request: RequestPermissionRequest,
+        mut request: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
         let session_id = request.session_id.to_string();
         let tool_call_id = request.tool_call.tool_call_id.to_string();
@@ -268,6 +283,52 @@ impl AcpHostCapabilityHandlers {
                 "session/request_permission.request",
                 &request,
             );
+        }
+        if let Some((root_session_id, subagent_name)) = self
+            .native_subagents
+            .permission_attribution(&session_id, request.tool_call.clone())
+            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+        {
+            if let Some(title) = request.tool_call.fields.title.as_mut() {
+                *title = format!("{} · {}", subagent_name, title);
+            }
+            let handle = self
+                .current_prompts
+                .lock()
+                .expect("ACP active prompt lock poisoned")
+                .get(&root_session_id)
+                .cloned();
+            let response = match handle {
+                Some(handle) => {
+                    handle
+                        .permission_response_without_tool_projection(
+                            request.clone(),
+                            session_id.clone(),
+                        )
+                        .await
+                }
+                None => Ok(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                )),
+            }
+            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+            logging::info(
+                "acp_permission_response_returned",
+                json!({
+                    "session_id": session_id,
+                    "tool_call_id": tool_call_id,
+                    "outcome": acp_permission_outcome_name(&response.outcome),
+                    "scope": "subagent",
+                }),
+            );
+            if let Some(trace) = &self.trace {
+                trace.record(
+                    "client_to_agent",
+                    "session/request_permission.response",
+                    &response,
+                );
+            }
+            return Ok(response);
         }
         let handle = self
             .current_prompts

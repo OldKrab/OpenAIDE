@@ -16,7 +16,7 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 
 #[test]
-fn retention_sweep_uses_three_day_idle_window() {
+fn retention_sweep_uses_seven_day_idle_window() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -30,8 +30,8 @@ fn retention_sweep_uses_three_day_idle_window() {
     )
     .unwrap();
     let now = crate::time::activity_millis("2026-08-07T00:00:00Z").unwrap();
-    let three_days_millis = 3 * 24 * 60 * 60 * 1_000;
-    let cutoff = now - three_days_millis;
+    let seven_days_millis = 7 * 24 * 60 * 60 * 1_000;
+    let cutoff = now - seven_days_millis;
 
     for task_id in ["at-cutoff", "inside-window"] {
         let task = task_record(
@@ -56,7 +56,7 @@ fn retention_sweep_uses_three_day_idle_window() {
 }
 
 #[test]
-fn retention_sweep_purges_only_three_day_old_idle_unpinned_local_task_state() {
+fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -136,6 +136,14 @@ fn retention_sweep_purges_only_three_day_old_idle_unpinned_local_task_state() {
             Err(RuntimeError::TaskNotFound(_))
         ));
     }
+    let catalog =
+        crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone()).unwrap();
+    assert!(
+        catalog.is_archived(&crate::native_sessions::catalog::NativeSessionRef::new(
+            "codex",
+            "native-session-preserved",
+        ))
+    );
     for retained in [
         "recently-opened",
         "pinned",
@@ -283,6 +291,7 @@ fn task_record(task_id: &str, workspace: &str, activity: String) -> TaskRecord {
         created_at: activity.clone(),
         updated_at: activity.clone(),
         last_activity: activity,
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "codex".to_string(),

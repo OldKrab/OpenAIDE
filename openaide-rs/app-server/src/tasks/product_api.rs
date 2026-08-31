@@ -9,9 +9,10 @@ use openaide_app_server_protocol::support::{
 };
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionForkParams, NativeSessionRestoreParams,
-    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
-    TaskClosePlanParams, TaskLifecycleChanged, TaskRestoreParams, TaskSendParams,
-    TaskSetPinnedParams, TaskSetTitleParams,
+    NativeSessionSetPinnedParams, NativeSessionSetTitleParams, TaskAcquireParams,
+    TaskAdoptNativeSessionParams, TaskArchiveOlderParams, TaskArchiveOlderResult,
+    TaskArchiveParams, TaskCancelParams, TaskClosePlanParams, TaskLifecycleChanged,
+    TaskRestoreParams, TaskSendParams, TaskSetPinnedParams, TaskSetTitleParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -22,7 +23,6 @@ use crate::attachment_runtime::AttachmentRuntime;
 use crate::projects::{ConfiguredProjectRoots, ProjectResolver};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::AppServerShutdownWorkflow;
-#[cfg(test)]
 use crate::protocol_edge::ShutdownBlockers;
 use crate::server_requests::ServerRequestRuntime;
 use crate::snapshots::task_snapshot::{
@@ -51,6 +51,7 @@ mod list_sessions;
 mod native_session_archive;
 mod native_session_discovery;
 mod native_session_fork;
+mod native_session_metadata;
 mod open;
 mod prepare;
 mod queue;
@@ -61,11 +62,13 @@ pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;
 mod set_config_option;
+mod set_permission_policy;
 mod set_pinned;
 mod set_title;
 mod support_recovery;
 mod workflows;
 
+pub(crate) use queue::queued_attachment_paths_are_available;
 pub(crate) use workflows::*;
 
 #[derive(Clone)]
@@ -326,7 +329,6 @@ impl AppServerShutdownWorkflow for TaskProductApi {
         TaskProductApi::shutdown(self)
     }
 
-    #[cfg(test)]
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError> {
         let mut owned_turns = self.turn_acceptance.owned_turns();
         owned_turns.extend(self.turn_runner.active_turns());
@@ -644,6 +646,14 @@ impl TaskArchiveWorkflow for TaskProductApi {
         self.restore_task(client_instance_id, params)
     }
 
+    fn archive_older_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskArchiveOlderParams,
+    ) -> Result<TaskArchiveOlderResult, ProtocolError> {
+        self.archive_older_tasks(client_instance_id, params)
+    }
+
     fn archive_native_session(
         &self,
         params: NativeSessionArchiveParams,
@@ -658,6 +668,28 @@ impl TaskArchiveWorkflow for TaskProductApi {
         self.set_native_session_archived(params.agent_id.as_str(), &params.native_session_id, false)
     }
 
+    fn set_native_session_title(
+        &self,
+        params: NativeSessionSetTitleParams,
+    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
+        self.set_native_session_title(
+            params.agent_id.as_str(),
+            &params.native_session_id,
+            params.title,
+        )
+    }
+
+    fn set_native_session_pinned(
+        &self,
+        params: NativeSessionSetPinnedParams,
+    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
+        self.set_native_session_pinned(
+            params.agent_id.as_str(),
+            &params.native_session_id,
+            params.pinned,
+        )
+    }
+
     fn fork_native_session_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -668,6 +700,14 @@ impl TaskArchiveWorkflow for TaskProductApi {
 }
 
 impl TaskMetadataWorkflow for TaskProductApi {
+    fn set_permission_policy_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskSetPermissionPolicyParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.set_task_permission_policy(client_instance_id, params)
+    }
+
     fn set_title_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

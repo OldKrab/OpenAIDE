@@ -31,6 +31,7 @@ import {
   closeTaskPlanIntent,
   removeTaskQueueMessageIntent,
   reloadNativeSessionIntent,
+  setTaskPermissionPolicyIntent,
   moveTaskQueueMessageIntent,
   takeTaskQueueMessageIntent,
   sendTaskQueueMessageNowIntent,
@@ -112,6 +113,7 @@ export function createTaskCallbacks({
       state.snapshot,
     ),
     fileBrowser: createTaskFileBrowserCallbacks(backendConnection, dispatch, state, attachmentResources),
+    fileViewer: backendConnection?.request ? { request: backendConnection.request } : undefined,
     loadComposerHistory: () => {
       const taskId = state.snapshot?.task.task_id;
       if (!taskId) return Promise.resolve([]);
@@ -309,6 +311,18 @@ export function createTaskCallbacks({
         input,
       );
     },
+    setPermissionPolicy: (policy) => setTaskPermissionPolicyIntent(
+      {
+        backendConnection,
+        clientInstanceId,
+        createSnapshotRequestId,
+        dispatch,
+        postHostMessage,
+        stateRootId: state.appServerStateRootId,
+      },
+      state.snapshot,
+      policy,
+    ),
     selectConfigOption: (configId, value) => {
       if (!state.snapshot) return;
       const taskId = state.snapshot.task.task_id;

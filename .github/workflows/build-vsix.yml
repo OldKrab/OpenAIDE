@@ -1,54 +1,82 @@
-name: Build VSIX Artifacts
+name: Build Release Artifacts
 
 on:
   workflow_dispatch:
+    inputs:
+      artifacts:
+        description: Artifact family to build
+        type: choice
+        options: [all, vsix, desktop]
+        default: all
+        required: true
+      version:
+        description: SemVer stamped into artifacts; defaults to package.json plus the commit SHA.
+        type: string
+        required: false
+      vsix_target:
+        description: VSIX platform to build
+        type: choice
+        options: [all, linux-x64, win32-x64, darwin-arm64]
+        default: all
+        required: true
+      desktop_target:
+        description: Desktop platform to build
+        type: choice
+        options: [all, win32-x64, darwin-arm64]
+        default: all
+        required: true
   workflow_call:
     inputs:
-      version:
-        description: SemVer stamped into packaged artifacts; defaults to package.json for manual runs.
+      artifacts:
+        description: Artifact family to build (all, vsix, or desktop)
         type: string
+        default: all
+        required: false
+      version:
+        description: SemVer stamped into artifacts; defaults to package.json plus the commit SHA.
+        type: string
+        required: false
+      vsix_target:
+        description: VSIX platform to build (all, linux-x64, win32-x64, or darwin-arm64)
+        type: string
+        default: all
+        required: false
+      desktop_target:
+        description: Desktop platform to build (all, win32-x64, or darwin-arm64)
+        type: string
+        default: all
         required: false
 
 permissions:
   contents: read
 
 jobs:
-  artifacts:
-    name: Build and smoke-test ${{ matrix.target }} VSIX
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            target: linux-x64
-            binary: openaide-app-server
-          - os: windows-2025
-            target: win32-x64
-            binary: openaide-app-server.exe
-          - os: macos-15
-            target: darwin-arm64
-            binary: openaide-app-server
-    runs-on: ${{ matrix.os }}
+  prepare:
+    name: Resolve artifact build
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact_suffix: ${{ steps.build.outputs.artifact_suffix }}
+      desktop_matrix: ${{ steps.build.outputs.desktop_matrix }}
+      server_matrix: ${{ steps.build.outputs.server_matrix }}
+      vsix_matrix: ${{ steps.build.outputs.vsix_matrix }}
+      version: ${{ steps.build.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .node-version
-          cache: npm
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-        with:
-          toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: npm ci
-      - name: Set artifact versions
-        id: version
+      - name: Validate selection and resolve artifact version
+        id: build
         shell: bash
         env:
+          ARTIFACT_SELECTION: ${{ inputs.artifacts }}
           REQUESTED_VERSION: ${{ inputs.version }}
+          VSIX_TARGET: ${{ inputs.vsix_target }}
+          DESKTOP_TARGET: ${{ inputs.desktop_target }}
         run: |
           if [[ -n "$REQUESTED_VERSION" ]]; then
             version="$REQUESTED_VERSION"
-            artifact_name="vsix-${{ matrix.target }}"
+            artifact_suffix=""
           else
             base_version="$(node -p "require('./package.json').version")"
             short_sha="${GITHUB_SHA:0:7}"
@@ -58,23 +86,114 @@ jobs:
             else
               version="${base_version}-g${short_sha}"
             fi
-            artifact_name="vsix-${{ matrix.target }}-g${short_sha}"
+            artifact_suffix="-g${short_sha}"
           fi
-          node scripts/set-release-artifact-version.mjs "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
-      - run: cargo build --locked --release -p openaide-app-server
+          {
+            echo "version=$version"
+            echo "artifact_suffix=$artifact_suffix"
+          } >> "$GITHUB_OUTPUT"
+          node scripts/resolve-release-artifact-matrices.mjs \
+            "$ARTIFACT_SELECTION" \
+            "$VSIX_TARGET" \
+            "$DESKTOP_TARGET" >> "$GITHUB_OUTPUT"
+
+  app-server:
+    name: Build ${{ matrix.target }} App Server
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.server_matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install static Linux build prerequisites
+        if: matrix.target == 'linux-x64-musl'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+      - name: Set artifact versions
+        run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
+      - name: Test repeated Windows Project persistence
+        if: matrix.target == 'win32-x64'
+        run: cargo test --locked -p openaide-app-server --test project_persistence managed_projects_survive_repeated_catalog_writes
+      - name: Build App Server once for both package formats
+        shell: bash
+        run: |
+          if [[ -n "${{ matrix.rust_target }}" ]]; then
+            cargo build --locked --release -p openaide-app-server --target "${{ matrix.rust_target }}"
+          else
+            cargo build --locked --release -p openaide-app-server
+          fi
+      - name: Stage App Server artifact
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [[ -n "${{ matrix.rust_target }}" ]]; then
+            file "target/${{ matrix.rust_target }}/release/${{ matrix.binary }}" | grep -q 'static-pie linked'
+            if readelf -l "target/${{ matrix.rust_target }}/release/${{ matrix.binary }}" | grep -q 'INTERP'; then
+              echo "WSL App Server must not require a dynamic loader" >&2
+              exit 1
+            fi
+            cp "target/${{ matrix.rust_target }}/release/${{ matrix.binary }}" artifacts/
+          else
+            cp "target/release/${{ matrix.binary }}" artifacts/
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  vsix:
+    name: Build and smoke-test ${{ matrix.target }} VSIX
+    if: inputs.artifacts == 'all' || inputs.artifacts == 'vsix'
+    needs: [prepare, app-server]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.vsix_matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Set artifact versions
+        run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: app-server
+      - name: Restore App Server executable permission
+        if: runner.os != 'Windows'
+        run: chmod +x "app-server/${{ matrix.binary }}"
       - run: npm run build:frontend
+      - name: Test VS Code New Task Project handoff
+        if: matrix.target == 'linux-x64'
+        run: |
+          npm test --workspace openaide-frontend -- --run src/components/AppSurfaces.test.tsx
+          npm test --workspace openaide-vscode-extension -- --run src/webview/messaging.test.ts src/webview/surfaces.test.ts
       - name: Add extension license
         shell: bash
         run: cp LICENSE apps/vscode-extension/LICENSE
       - name: Package platform VSIX
         shell: bash
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          # The prepare job owns release-version resolution; this job has no version step.
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           mkdir -p artifacts apps/vscode-extension/dist/app-server
-          cp "target/release/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
+          cp "app-server/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
           cd apps/vscode-extension
           package_args=(
             --target "${{ matrix.target }}"
@@ -90,15 +209,233 @@ jobs:
         shell: bash
         run: |
           extraction_root="$RUNNER_TEMP/openaide-vsix-${{ matrix.target }}"
-          unzip -q "artifacts/openaide-vscode-${{ matrix.target }}-${{ steps.version.outputs.version }}.vsix" -d "$extraction_root"
+          unzip -q "artifacts/openaide-vscode-${{ matrix.target }}-${{ needs.prepare.outputs.version }}.vsix" -d "$extraction_root"
           node scripts/smoke-release-vsix.mjs \
             "$extraction_root/extension" \
-            "${{ steps.version.outputs.version }}" \
+            "${{ needs.prepare.outputs.version }}" \
             "${{ matrix.target }}" \
             "${{ matrix.binary }}"
+      - name: Smoke-test packaged Linux Codex ACP fallback
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          extraction_root="$RUNNER_TEMP/openaide-vsix-${{ matrix.target }}"
+          node scripts/smoke-packaged-codex-acp.mjs \
+            "$extraction_root/extension/dist/app-server/${{ matrix.binary }}" \
+            "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ steps.version.outputs.artifact_name }}
+          name: vsix-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  desktop:
+    name: Build self-contained ${{ matrix.target }} desktop app
+    if: inputs.artifacts == 'all' || inputs.artifacts == 'desktop'
+    needs: [prepare, app-server]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.desktop_matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - name: Set artifact versions
+        run: node scripts/set-release-artifact-version.mjs "${{ needs.prepare.outputs.version }}"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: app-server-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: app-server
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: matrix.target == 'win32-x64'
+        with:
+          name: app-server-linux-x64-musl${{ needs.prepare.outputs.artifact_suffix }}
+          path: wsl-app-server
+      - name: Restore App Server executable permission
+        if: runner.os != 'Windows'
+        run: chmod +x "app-server/${{ matrix.binary }}"
+      - name: Stage App Server sidecar for Tauri
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/src-tauri/binaries
+          cp \
+            "app-server/${{ matrix.binary }}" \
+            "apps/desktop/src-tauri/binaries/openaide-app-server-${{ matrix.target_triple }}${{ matrix.sidecar_extension }}"
+      - name: Stage WSL App Server resource for Tauri
+        if: matrix.target == 'win32-x64'
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/src-tauri/resources/wsl
+          cp \
+            wsl-app-server/openaide-app-server \
+            apps/desktop/src-tauri/resources/wsl/openaide-app-server
+          test "$(od -An -tx1 -N4 apps/desktop/src-tauri/resources/wsl/openaide-app-server | tr -d ' \n')" = "7f454c46"
+      - name: Build desktop installer
+        shell: bash
+        run: |
+          build_args=(
+            build
+            --ci
+            --bundles "${{ matrix.bundle }}"
+            --config "src-tauri/tauri.release-bundle.conf.json"
+          )
+          # macOS release bundles use the configured free ad-hoc identity. Windows
+          # remains explicitly unsigned until the SignPath pipeline is available.
+          if [[ "${{ matrix.target }}" != "darwin-arm64" ]]; then
+            build_args+=(--no-sign)
+          fi
+          npm run tauri --workspace openaide-desktop -- "${build_args[@]}"
+      - name: Verify and normalize desktop artifact
+        shell: bash
+        run: |
+          bundled_server="apps/desktop/src-tauri/target/release/${{ matrix.binary }}"
+          cmp "app-server/${{ matrix.binary }}" "$bundled_server"
+          source_artifact="$(find \
+            "apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundle_directory }}" \
+            -maxdepth 1 -type f -name '*.${{ matrix.extension }}' -print -quit)"
+          test -n "$source_artifact"
+
+          if [[ "${{ matrix.target }}" == "darwin-arm64" ]]; then
+            mount_root="$RUNNER_TEMP/openaide-desktop-dmg"
+            mkdir -p "$mount_root"
+            hdiutil attach "$source_artifact" -nobrowse -readonly -mountpoint "$mount_root"
+            trap 'hdiutil detach "$mount_root"' EXIT
+            packaged_server="$mount_root/OpenAIDE.app/Contents/MacOS/openaide-app-server"
+            test -f "$packaged_server"
+            # The pre-bundle cmp above proves the sidecar input. Tauri then
+            # replaces its linker signature while sealing the app, which changes
+            # Mach-O load commands and cannot be reversed for a byte comparison.
+            codesign --verify --strict "$packaged_server"
+            codesign --verify --deep --strict "$mount_root/OpenAIDE.app"
+            codesign --display --verbose=4 "$mount_root/OpenAIDE.app" 2>&1 |
+              grep -q '^Signature=adhoc$'
+            artifact_trust_suffix="unnotarized"
+          else
+            extraction_root="$RUNNER_TEMP/openaide-desktop-nsis"
+            7z x -y "$source_artifact" "-o$extraction_root"
+            packaged_server="$(find "$extraction_root" -type f -iname 'openaide-app-server.exe' -print -quit)"
+            test -n "$packaged_server"
+            cmp "app-server/openaide-app-server.exe" "$packaged_server"
+            packaged_wsl_server="$extraction_root/wsl/openaide-app-server"
+            test -f "$packaged_wsl_server"
+            cmp "wsl-app-server/openaide-app-server" "$packaged_wsl_server"
+            artifact_trust_suffix="unsigned"
+          fi
+
+          mkdir -p artifacts
+          cp "$source_artifact" \
+            "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-${artifact_trust_suffix}.${{ matrix.extension }}"
+      - name: Smoke-test packaged Windows Codex ACP launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packagedServer = Get-ChildItem `
+            "$env:RUNNER_TEMP/openaide-desktop-nsis" `
+            -Filter "openaide-app-server.exe" `
+            -Recurse |
+            Select-Object -First 1
+          if (-not $packagedServer) {
+            throw "Packaged App Server was not found"
+          }
+          $serverVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($packagedServer.FullName)
+          if ($serverVersion.ProductName -ne "OpenAIDE") {
+            throw "Packaged App Server has unexpected ProductName: $($serverVersion.ProductName)"
+          }
+          if ($serverVersion.FileDescription -ne "OpenAIDE App Server") {
+            throw "Packaged App Server has unexpected FileDescription: $($serverVersion.FileDescription)"
+          }
+          if ($serverVersion.OriginalFilename -ne "openaide-app-server.exe") {
+            throw "Packaged App Server has unexpected OriginalFilename: $($serverVersion.OriginalFilename)"
+          }
+          if ($serverVersion.ProductVersion -ne "${{ needs.prepare.outputs.version }}") {
+            throw "Packaged App Server version does not match the release: $($serverVersion.ProductVersion)"
+          }
+          node scripts/smoke-packaged-codex-acp.mjs `
+            $packagedServer.FullName `
+            $env:GITHUB_WORKSPACE
+      - name: Smoke-test packaged Windows desktop startup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $desktopExecutable = Join-Path $env:RUNNER_TEMP `
+            "openaide-desktop-nsis/openaide-desktop.exe"
+          node scripts/assert-windows-gui-executable.mjs $desktopExecutable
+          $desktopVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($desktopExecutable)
+          if ($desktopVersion.ProductName -ne "OpenAIDE") {
+            throw "Packaged Desktop has unexpected ProductName: $($desktopVersion.ProductName)"
+          }
+          if ($desktopVersion.ProductVersion -ne "${{ needs.prepare.outputs.version }}") {
+            throw "Packaged Desktop version does not match the release: $($desktopVersion.ProductVersion)"
+          }
+
+          Add-Type -AssemblyName System.Drawing
+          $expectedIconPath = Join-Path $env:GITHUB_WORKSPACE `
+            "apps/desktop/src-tauri/icons/windows/icon.ico"
+          function Assert-AssociatedIconMatches([string] $binaryPath, [string] $iconPath) {
+            $expectedIcon = New-Object System.Drawing.Icon($iconPath, 32, 32)
+            $actualIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($binaryPath)
+            if (-not $actualIcon) { throw "No Windows icon was embedded in $binaryPath" }
+            $expectedBitmap = $expectedIcon.ToBitmap()
+            $actualBitmap = $actualIcon.ToBitmap()
+            try {
+              for ($x = 0; $x -lt 32; $x++) {
+                for ($y = 0; $y -lt 32; $y++) {
+                  if ($expectedBitmap.GetPixel($x, $y).ToArgb() -ne $actualBitmap.GetPixel($x, $y).ToArgb()) {
+                    throw "Embedded Windows icon does not match OpenAIDE icon: $binaryPath"
+                  }
+                }
+              }
+            } finally {
+              $expectedBitmap.Dispose()
+              $actualBitmap.Dispose()
+              $expectedIcon.Dispose()
+              $actualIcon.Dispose()
+            }
+          }
+          Assert-AssociatedIconMatches $desktopExecutable $expectedIconPath
+          $installer = Get-ChildItem `
+            "apps/desktop/src-tauri/target/release/bundle/nsis" `
+            -Filter "*.exe" |
+            Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not found" }
+          $expectedInstallerIconPath = Join-Path $env:GITHUB_WORKSPACE `
+            "apps/desktop/src-tauri/icons/windows/installer.ico"
+          Assert-AssociatedIconMatches $installer.FullName $expectedInstallerIconPath
+
+          $stdout = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "openaide-desktop-startup.stderr.log"
+          $process = Start-Process `
+            -FilePath $desktopExecutable `
+            -PassThru `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr
+          try {
+            if ($process.WaitForExit(10000)) {
+              $capturedOutput = (Get-Content $stdout, $stderr -ErrorAction SilentlyContinue) -join "`n"
+              throw "Packaged Windows desktop exited during startup with code $($process.ExitCode): $capturedOutput"
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              # A descendant can exit between WaitForExit and taskkill. The desktop
+              # process is the assertion target; cleanup races must not fail the job.
+              taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+              $global:LASTEXITCODE = 0
+            }
+          }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

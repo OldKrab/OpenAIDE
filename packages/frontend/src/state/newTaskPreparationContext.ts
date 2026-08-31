@@ -38,11 +38,12 @@ export function preparedTaskMatchesNewTaskContext(
     && task.agentId === context.agentId
     && task.worktreeId === context.worktreeId
     // The protocol Task summary omits workspaceRoot; derived Project identity
-    // already binds that root. App-shell snapshots verify it when available.
+    // already binds that root. App-shell paths can use different equivalent
+    // spellings because the App Server returns the canonical workspace root.
     && (
       context.workspaceRoot === undefined
       || task.workspaceRoot === undefined
-      || task.workspaceRoot === context.workspaceRoot
+      || projectIdForWorkspaceRoot(task.workspaceRoot) === projectIdForWorkspaceRoot(context.workspaceRoot)
     );
 }
 

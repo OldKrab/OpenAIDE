@@ -108,11 +108,47 @@ describe("WorktreesSettingsTab", () => {
 
     await act(async () => {
       await tree.root.findByProps({ "aria-label": "Copy full path for Settings refactor" })
-        .props.onClick();
+        .props.onClick({ stopPropagation: vi.fn() });
     });
 
     expect(writeText).toHaveBeenCalledWith(path);
     expect(tree.root.findAllByProps({ title: path })).toHaveLength(0);
+  });
+
+  it("keeps each copy action with its corresponding displayed path", () => {
+    const tree = renderCatalog([
+      worktree({ worktreeId: "settings", name: "Settings refactor", path: "/home/dev/src/OpenAIDE/.worktrees/settings-refactor" }),
+      worktree({ worktreeId: "notifications", name: "Notifications", path: "/tmp/openaide-notification-companion" }),
+    ]);
+
+    const settingsCopy = tree.root.findByProps({
+      "aria-label": "Copy full path for Settings refactor",
+    });
+    const notificationsCopy = tree.root.findByProps({
+      "aria-label": "Copy full path for Notifications",
+    });
+    expect(settingsCopy.parent?.props.className).toBe("settings-worktree-location");
+    expect(notificationsCopy.parent?.props.className).toBe("settings-worktree-location");
+    expect(settingsCopy.parent).not.toBe(notificationsCopy.parent);
+  });
+
+  it("keeps the path region navigable while the copy action stays on the catalog", async () => {
+    const writeText = vi.fn();
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const tree = renderCatalog([
+      worktree({ worktreeId: "settings", name: "Settings refactor" }),
+    ]);
+    const location = tree.root.findByProps({ className: "settings-worktree-location" });
+
+    act(() => location.props.onClick());
+    expect(tree.root.findByProps({ className: "settings-worktree-detail" })).toBeTruthy();
+
+    act(() => tree.root.findByProps({ "aria-label": "Back to Worktrees" }).props.onClick());
+    await act(async () => {
+      await tree.root.findByProps({ "aria-label": "Copy full path for Settings refactor" })
+        .props.onClick({ stopPropagation: vi.fn() });
+    });
+    expect(tree.root.findAllByProps({ className: "settings-worktree-detail" })).toHaveLength(0);
   });
 
   it("opens a worktree detail view from its row", () => {

@@ -17,6 +17,7 @@
     "@tanstack/react-virtual": "^3.14.9",
     "@vitejs/plugin-react": "^6.0.5",
     "fuzzysort": "^3.1.0",
+    "lowlight": "^3.3.0",
     "lucide-react": "^1.28.0",
     "mermaid": "11.16.1",
     "react": "^19.2.1",
@@ -28,7 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "~24.13.3",
-    "@types/react": "^19.2.17",
+    "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@types/react-test-renderer": "^19.1.0",
     "jsdom": "^30.0.1",

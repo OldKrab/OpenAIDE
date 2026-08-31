@@ -768,6 +768,148 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
 }
 
 #[test]
+fn native_session_title_override_publishes_and_survives_restart() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let catalog =
+        crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone()).unwrap();
+    catalog
+        .record_page(
+            "project-1",
+            "/workspace/OpenAIDE",
+            vec![
+                crate::native_sessions::catalog::NativeSessionObservation {
+                    reference: crate::native_sessions::catalog::NativeSessionRef::new(
+                        "codex",
+                        "native-session",
+                    ),
+                    title: Some("Agent title".to_string()),
+                    last_activity: Some("2026-01-03T00:00:00.000Z".to_string()),
+                },
+                crate::native_sessions::catalog::NativeSessionObservation {
+                    reference: crate::native_sessions::catalog::NativeSessionRef::new(
+                        "codex",
+                        "older-native-session",
+                    ),
+                    title: Some("Older session".to_string()),
+                    last_activity: Some("2026-01-01T00:00:00.000Z".to_string()),
+                },
+            ],
+        )
+        .unwrap();
+    drop(catalog);
+    drop(store);
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root.clone());
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe-tasks",
+            "method": STATE_SUBSCRIBE,
+            "params": StateSubscribeParams {
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
+            },
+        })
+        .to_string(),
+    );
+
+    let renamed = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "rename-native",
+            "method": "nativeSession/setTitle",
+            "params": {
+                "agentId": "codex",
+                "nativeSessionId": "native-session",
+                "title": "My session"
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        response(&renamed[0])["result"]["result"]["session"]["title"],
+        "My session"
+    );
+    assert_eq!(
+        response(&renamed[1])["params"]["payload"]["entries"][0]["session"]["title"],
+        "My session"
+    );
+    let pinned = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "pin-native",
+            "method": "nativeSession/setPinned",
+            "params": {
+                "agentId": "codex",
+                "nativeSessionId": "native-session",
+                "pinned": true
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        response(&pinned[0])["result"]["result"]["session"]["pinned"],
+        true
+    );
+    assert_eq!(
+        response(&pinned[1])["params"]["payload"]["entries"][0]["session"]["pinned"],
+        true
+    );
+    let cleanup = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "preview-native-cutoff",
+            "method": "task/archiveOlder",
+            "params": {
+                "cutoff": {
+                    "kind": "nativeSession",
+                    "agentId": "codex",
+                    "nativeSessionId": "native-session"
+                },
+                "preview": true
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        response(&cleanup[0])["result"]["result"]["eligibleNativeSessions"][0]["sessionId"],
+        "older-native-session"
+    );
+    drop(dispatcher);
+
+    let mut reopened = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    reopened.handle_line(&init_request("2", "client-2"));
+    let baseline = reopened.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe-after-restart",
+            "method": STATE_SUBSCRIBE,
+            "params": StateSubscribeParams {
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
+            },
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        response(&baseline[0])["result"]["result"]["snapshot"]["navigation"]["groups"][0]
+            ["entries"][0]["session"]["title"],
+        "My session"
+    );
+    assert_eq!(
+        response(&baseline[0])["result"]["result"]["snapshot"]["navigation"]["groups"][0]
+            ["entries"][0]["session"]["pinned"],
+        true
+    );
+}
+
+#[test]
 fn agent_probe_updates_agent_snapshot_and_emits_event() {
     let (_temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
@@ -1904,9 +2046,13 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let deadline = Instant::now() + Duration::from_secs(1);
     let mut navigation_updated = false;
     while Instant::now() < deadline {
-        let committed = notifications
-            .recv_timeout(Duration::from_millis(50))
-            .expect("committed send notification");
+        let committed = match notifications.recv_timeout(Duration::from_millis(50)) {
+            Ok(committed) => committed,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("committed send notification channel disconnected")
+            }
+        };
         navigation_updated = dispatcher
             .handle_task_update(committed)
             .iter()
@@ -2447,6 +2593,158 @@ fn task_archive_moves_task_between_lifecycle_lists() {
 }
 
 #[test]
+fn task_archive_older_previews_then_archives_only_safe_tasks_in_the_cutoff_project() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        let mut old = task_record("task-old");
+        old.last_activity = "2026-01-01T00:00:00.000Z".to_string();
+        let mut pinned = task_record("task-pinned");
+        pinned.last_activity = "2026-01-02T00:00:00.000Z".to_string();
+        pinned.pinned = true;
+        let mut cutoff = task_record("task-cutoff");
+        cutoff.last_activity = "2026-01-03T00:00:00.000Z".to_string();
+        for task in [old, pinned, cutoff] {
+            store.write_task(&task).unwrap();
+        }
+        let catalog =
+            crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone()).unwrap();
+        let project_id = project_id_for_workspace("/tmp/openaide-stdio-workspace/a");
+        catalog
+            .record_page(
+                project_id.as_str(),
+                "/tmp/openaide-stdio-workspace/a",
+                vec![crate::native_sessions::catalog::NativeSessionObservation {
+                    reference: crate::native_sessions::catalog::NativeSessionRef::new(
+                        "codex",
+                        "native-old",
+                    ),
+                    title: Some("Native old".to_string()),
+                    last_activity: Some("2025-12-31T00:00:00.000Z".to_string()),
+                }],
+            )
+            .unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let preview = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "preview",
+            "method": "task/archiveOlder",
+            "params": { "cutoff": { "kind": "task", "taskId": "task-cutoff" }, "preview": true }
+        })
+        .to_string(),
+    );
+    let preview = &response(&preview[0])["result"]["result"];
+    assert_eq!(preview["eligibleTaskIds"], json!(["task-old"]));
+    assert_eq!(
+        preview["eligibleNativeSessions"],
+        json!([{ "agentId": "codex", "sessionId": "native-old" }])
+    );
+    assert_eq!(
+        preview["protected"],
+        json!([{
+            "taskId": "task-pinned",
+            "reason": "pinned"
+        }])
+    );
+    assert_eq!(preview["archivedTaskIds"], json!([]));
+
+    let archived = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "archive-older",
+            "method": "task/archiveOlder",
+            "params": { "cutoff": { "kind": "task", "taskId": "task-cutoff" }, "preview": false }
+        })
+        .to_string(),
+    );
+    let archived = &response(&archived[0])["result"]["result"];
+    assert_eq!(archived["archivedTaskIds"], json!(["task-old"]));
+    assert_eq!(
+        archived["archivedNativeSessions"],
+        json!([{ "agentId": "codex", "sessionId": "native-old" }])
+    );
+    drop(dispatcher);
+    let store = open_store_after_dispatcher_drop(temp.path());
+    assert_eq!(
+        store.read_task("task-old").unwrap().lifecycle,
+        crate::storage::records::TaskLifecycle::Archived
+    );
+    assert_eq!(
+        store.read_task("task-pinned").unwrap().lifecycle,
+        crate::storage::records::TaskLifecycle::Open
+    );
+    assert!(
+        crate::native_sessions::catalog::NativeSessionCatalog::open(store)
+            .unwrap()
+            .is_archived(&crate::native_sessions::catalog::NativeSessionRef::new(
+                "codex",
+                "native-old",
+            ))
+    );
+}
+
+#[test]
+fn task_archive_older_completes_large_project_cleanup_promptly() {
+    const OLDER_SESSION_COUNT: usize = 800;
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        let mut cutoff = task_record("task-cutoff");
+        cutoff.last_activity = "2026-01-03T00:00:00.000Z".to_string();
+        store.write_task(&cutoff).unwrap();
+        let catalog =
+            crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone()).unwrap();
+        let project_id = project_id_for_workspace("/tmp/openaide-stdio-workspace/a");
+        let observations = (0..OLDER_SESSION_COUNT)
+            .map(
+                |index| crate::native_sessions::catalog::NativeSessionObservation {
+                    reference: crate::native_sessions::catalog::NativeSessionRef::new(
+                        "codex",
+                        format!("native-old-{index}"),
+                    ),
+                    title: Some(format!("Native old {index}")),
+                    last_activity: Some("2026-01-01T00:00:00.000Z".to_string()),
+                },
+            )
+            .collect();
+        catalog
+            .record_page(
+                project_id.as_str(),
+                "/tmp/openaide-stdio-workspace/a",
+                observations,
+            )
+            .unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let started = Instant::now();
+    let archived = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "archive-older-large-project",
+            "method": "task/archiveOlder",
+            "params": { "cutoff": { "kind": "task", "taskId": "task-cutoff" }, "preview": false }
+        })
+        .to_string(),
+    );
+    let elapsed = started.elapsed();
+    let archived = &response(&archived[0])["result"]["result"]["archivedNativeSessions"];
+
+    assert_eq!(archived.as_array().map(Vec::len), Some(OLDER_SESSION_COUNT));
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "archiving {OLDER_SESSION_COUNT} older tasks took {elapsed:?}"
+    );
+}
+
+#[test]
 fn task_set_pinned_publishes_authoritative_state_through_protocol() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
@@ -2773,6 +3071,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "codex".to_string(),

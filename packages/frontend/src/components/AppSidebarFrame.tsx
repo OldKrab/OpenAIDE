@@ -1,12 +1,15 @@
 import { ChevronRight } from "lucide-react";
 import {
+  useLayoutEffect,
   useRef,
   useState,
   type ComponentPropsWithoutRef,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
+import { applySidebarWidth, setLayoutResizing } from "./layoutResize";
 
 const STORAGE_KEY = "openaide.app.sidebar";
 const LEGACY_SETTINGS_STORAGE_KEY = "openaide.settings.sidebar";
@@ -21,6 +24,8 @@ type SidebarFrameState = {
 
 type AppSidebarFrameProps = Omit<ComponentPropsWithoutRef<"main">, "children"> & {
   children: ReactNode;
+  header?: ReactNode;
+  headerPlacement?: "overlay" | "row";
   sidebar: ReactNode;
 };
 
@@ -31,16 +36,22 @@ type AppSidebarFrameProps = Omit<ComponentPropsWithoutRef<"main">, "children"> &
 export function AppSidebarFrame({
   children,
   className,
+  header,
+  headerPlacement = "row",
   sidebar,
   style,
   ...rootProps
 }: AppSidebarFrameProps) {
-  const sidebarState = useAppSidebarState();
+  const frameRef = useRef<HTMLElement>(null);
+  const sidebarState = useAppSidebarState(frameRef);
   return (
     <main
       {...rootProps}
+      ref={frameRef}
       className={[
         "app-sidebar-frame",
+        header && headerPlacement === "row" ? "app-sidebar-frame-with-header" : undefined,
+        header && headerPlacement === "overlay" ? "app-sidebar-frame-with-overlay-header" : undefined,
         sidebarState.collapsed ? "sidebar-collapsed" : undefined,
         className,
       ].filter(Boolean).join(" ")}
@@ -49,6 +60,14 @@ export function AppSidebarFrame({
         "--app-sidebar-width": `${sidebarState.width}px`,
       } as React.CSSProperties}
     >
+      {header ? (
+        <div className={headerPlacement === "overlay"
+          ? "app-sidebar-frame-overlay-header"
+          : "app-sidebar-frame-header"}
+        >
+          {header}
+        </div>
+      ) : null}
       <div className="app-sidebar-pane">{sidebar}</div>
       {!sidebarState.collapsed ? (
         <>
@@ -85,10 +104,11 @@ export function AppSidebarFrame({
   );
 }
 
-function useAppSidebarState() {
+function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
   const [state, setState] = useState<SidebarFrameState>(readState);
   const stateRef = useRef(state);
   const dragRef = useRef<{
+    liveWidth: number;
     pointerId: number;
     startWidth: number;
     startX: number;
@@ -99,35 +119,49 @@ function useAppSidebarState() {
     setState(next);
     if (persist) writeState(next);
   };
+
+  useLayoutEffect(() => {
+    const drag = dragRef.current;
+    const frame = frameRef.current;
+    if (!drag || !frame) return;
+    applySidebarWidth(frame, drag.liveWidth);
+    setLayoutResizing(frame, true);
+  });
   const beginResize = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
+    event.preventDefault();
     dragRef.current = {
+      liveWidth: stateRef.current.width,
       pointerId: event.pointerId,
       startWidth: stateRef.current.width,
       startX: event.clientX,
     };
+    setLayoutResizing(frameRef.current, true);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const resize = (event: PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    update({
-      ...stateRef.current,
-      width: clampDragWidth(drag.startWidth + event.clientX - drag.startX),
-    }, false);
+    const width = clampDragWidth(drag.startWidth + event.clientX - drag.startX);
+    drag.liveWidth = width;
+    applySidebarWidth(frameRef.current, width);
   };
   const finishResize = (event: PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragRef.current = undefined;
-    if (stateRef.current.width <= COLLAPSE_THRESHOLD) {
+    setLayoutResizing(frameRef.current, false);
+    if (drag.liveWidth <= COLLAPSE_THRESHOLD) {
+      // React still considers the remembered width current, so restore the
+      // CSS variable after the imperative drag before hiding the column.
+      applySidebarWidth(frameRef.current, drag.startWidth);
       update({ collapsed: true, width: drag.startWidth });
       return;
     }
     update({
       collapsed: false,
-      width: clampWidth(stateRef.current.width),
+      width: clampWidth(drag.liveWidth),
     });
   };
   const cancelResize = (event: PointerEvent<HTMLElement>) => {
@@ -135,6 +169,8 @@ function useAppSidebarState() {
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragRef.current = undefined;
+    applySidebarWidth(frameRef.current, drag.startWidth);
+    setLayoutResizing(frameRef.current, false);
     update({ ...stateRef.current, width: drag.startWidth }, false);
   };
   const resizeWithKeyboard = (event: KeyboardEvent<HTMLElement>) => {

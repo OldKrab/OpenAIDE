@@ -6,6 +6,7 @@ import {
   TASK_QUEUE_REMOVE,
   TASK_QUEUE_TAKE,
   TASK_SEND,
+  TASK_SET_PERMISSION_POLICY,
   type AttachmentHandleId,
 } from "@openaide/app-server-client";
 
@@ -14,6 +15,25 @@ afterEach(() => {
 });
 
 describe("task mutation intents", () => {
+  it("sends the Task-owned auto-approve policy through the central mutation seam", async () => {
+    const { setTaskPermissionPolicyIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("connection closed"));
+
+    await setTaskPermissionPolicyIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch: vi.fn(),
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot(), "auto_approve");
+
+    expect(request).toHaveBeenCalledWith(TASK_SET_PERMISSION_POLICY, {
+      taskId: "task-a",
+      policy: "autoApprove",
+    });
+  });
+
   it("requests a durable close for the current Plan", async () => {
     const { closeTaskPlanIntent } = await import("./taskMutationIntents");
     const request = vi.fn().mockRejectedValue(new Error("connection closed"));
@@ -324,6 +344,7 @@ describe("task mutation intents", () => {
 function taskSnapshot(): TaskSnapshot {
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: "task-a",
       project_id: "project-a",

@@ -38,7 +38,13 @@ type NewTaskAction =
   | { type: "newTask:nativeSessions:start"; append: boolean }
   | { type: "newTask:nativeSessions:result"; result: AgentListSessionsResult; append: boolean }
   | { type: "newTask:nativeSessions:listError"; message: string }
-  | { type: "newTask:nativeSessions:error"; sessionId: string; message: string; recoverable?: boolean }
+  | {
+      type: "newTask:nativeSessions:error";
+      sessionId: string;
+      kind?: "conflict" | "notFound";
+      message: string;
+      recoverable?: boolean;
+    }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
@@ -67,6 +73,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           },
           submitting: true,
           error: undefined,
+          errorRetryable: undefined,
         },
       };
     }
@@ -80,6 +87,8 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: action.message,
+          errorRetryable: state.newTask.pending !== undefined,
+          configOptionsLoading: false,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
       };
@@ -93,6 +102,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: undefined,
+          errorRetryable: undefined,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
       };
@@ -111,6 +121,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: action.message,
+          errorRetryable: false,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
         taskInputs: {
@@ -133,17 +144,22 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           pending: undefined,
           submitting: false,
           error: undefined,
+          errorRetryable: undefined,
           nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined },
         },
       };
     case "newTask:prepared": {
-      return state;
+      return {
+        ...state,
+        newTask: { ...state.newTask, configOptionsLoading: false },
+      };
     }
     case "newTask:replaced": {
       const staleInput = state.taskInputs[action.staleTaskId];
       const { [action.staleTaskId]: _staleInput, ...taskInputs } = state.taskInputs;
       return {
         ...state,
+        newTask: { ...state.newTask, configOptionsLoading: false },
         taskInputs: staleInput
           ? { ...taskInputs, [action.taskId]: staleInput }
           : taskInputs,
@@ -186,6 +202,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: selectionWithProject(state.newTask.selection, action.project),
+          workspaceRootsSeededProject: undefined,
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -201,6 +218,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             projectId: action.projectId,
             workspaceLabel: project?.label ?? state.newTask.selection.workspaceLabel,
           },
+          workspaceRootsSeededProject: undefined,
           configOptions: sameProject ? state.newTask.configOptions : undefined,
           configOptionsLoading: sameProject ? state.newTask.configOptionsLoading : false,
           configOptionsError: sameProject ? state.newTask.configOptionsError : undefined,
@@ -298,6 +316,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             loaded: true,
             adoptionError: {
               sessionId: action.sessionId,
+              ...(action.kind ? { kind: action.kind } : {}),
               message: action.message,
               ...(action.recoverable ? { recoverable: true } : {}),
             },
@@ -311,6 +330,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           ...state.newTask,
           submitting: true,
           error: undefined,
+          errorRetryable: undefined,
           nativeSessions: {
             ...state.newTask.nativeSessions,
             adoptingSessionId: action.sessionId,
@@ -339,6 +359,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: selectionWithWorkspace(state.newTask.selection, action.workspace),
+          workspaceRootsSeededProject: undefined,
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -354,6 +375,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           workspaceRoot: action.path,
           isolation: action.worktreeId ? "git_worktree" : "local",
         },
+        workspaceRootsSeededProject: undefined,
         configOptions: undefined,
         configOptionsLoading: false,
         configOptionsError: undefined,
@@ -388,7 +410,7 @@ function replacePreparedDraftOnContextChange(
   }
   // Preparation errors belong to the Project/Agent/worktree combination that
   // produced them; carrying one into a new context makes valid choices look broken.
-  nextNewTask = { ...nextNewTask, error: undefined };
+  nextNewTask = { ...nextNewTask, error: undefined, errorRetryable: undefined };
   const preparedTaskId = newTaskId;
   if (!preparedTaskId) return { ...state, newTask: nextNewTask };
   const preparedInput = state.taskInputs[preparedTaskId];

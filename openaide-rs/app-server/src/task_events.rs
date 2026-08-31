@@ -45,6 +45,12 @@ pub enum TaskUpdateKind {
         artifact_id: String,
         deltas: Vec<openaide_app_server_protocol::events::ToolDetailDelta>,
     },
+    SubagentCatalogChanged {
+        catalog: openaide_app_server_protocol::snapshot::SubagentCatalogSnapshot,
+    },
+    SubagentHistoryChanged {
+        history: openaide_app_server_protocol::snapshot::SubagentHistorySnapshot,
+    },
     /// Native Session membership or ordering changed for one Project.
     NavigationProjectEntriesChanged {
         project_id: ProjectId,
@@ -92,6 +98,26 @@ impl TaskUpdateNotifier {
         });
     }
 
+    pub(crate) fn streamed_chat_changed(
+        &self,
+        task_id: &str,
+        revision: u64,
+        chat: Vec<openaide_app_server_protocol::events::TaskChatChange>,
+    ) {
+        self.task_changed(
+            task_id,
+            revision,
+            CommittedTaskChange {
+                changes: TaskChanges {
+                    chat,
+                    ..Default::default()
+                },
+                tool_details: Vec::new(),
+                navigation: None,
+            },
+        );
+    }
+
     pub(crate) fn history_sync_updated(
         &self,
         task_id: &str,
@@ -130,6 +156,28 @@ impl TaskUpdateNotifier {
                     })
                     .collect(),
             },
+        });
+    }
+
+    pub(crate) fn subagent_catalog_changed(
+        &self,
+        catalog: openaide_app_server_protocol::snapshot::SubagentCatalogSnapshot,
+    ) {
+        self.publish(TaskUpdate {
+            task_id: catalog.task_id.as_str().to_string(),
+            revision: catalog.revision,
+            kind: TaskUpdateKind::SubagentCatalogChanged { catalog },
+        });
+    }
+
+    pub(crate) fn subagent_history_changed(
+        &self,
+        history: openaide_app_server_protocol::snapshot::SubagentHistorySnapshot,
+    ) {
+        self.publish(TaskUpdate {
+            task_id: history.task_id.as_str().to_string(),
+            revision: history.revision,
+            kind: TaskUpdateKind::SubagentHistoryChanged { history },
         });
     }
 

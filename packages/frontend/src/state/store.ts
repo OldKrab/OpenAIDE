@@ -35,7 +35,12 @@ export type NativeSessionsState = {
   loaded: boolean;
   nextCursor?: string;
   error?: string;
-  adoptionError?: { sessionId: string; message: string; recoverable?: boolean };
+  adoptionError?: {
+    sessionId: string;
+    kind?: "conflict" | "notFound";
+    message: string;
+    recoverable?: boolean;
+  };
   recoveryKind?: "nodeJsRequired" | "authRequired" | "setupRequired" | "launchFailed";
   adoptingSessionId?: string;
 };
@@ -65,11 +70,15 @@ export type NewTaskState = {
     configOptions?: ConfigOptionsCatalog;
   };
   selection: ComposerSelection;
+  /** Allows authoritative initialization to replace only the shell's automatic workspace seed. */
+  workspaceRootsSeededProject?: boolean;
   configOptions?: ConfigOptionsCatalog;
   configOptionsLoading?: boolean;
   configOptionsError?: string;
   nativeSessions: NativeSessionsState;
   error?: string;
+  /** True only when the error followed an accepted first-send attempt. */
+  errorRetryable?: boolean;
 };
 
 export type TaskComposerInput = {
@@ -154,7 +163,7 @@ export function toolDetailCacheKey(taskId: string, artifactId: string) {
 
 export type TaskOpenError = {
   taskId: string;
-  kind: "notFound" | "failed";
+  kind: "conflict" | "notFound" | "failed";
   message: string;
 };
 

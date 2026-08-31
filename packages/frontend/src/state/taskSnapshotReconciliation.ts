@@ -1,4 +1,4 @@
-import type { TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
+import type { TaskPermissionPolicy, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import { retainSnapshotWindow } from "./chatPageMerge";
 import type { AppState } from "./store";
 import { configOptionsCatalogKey, configOptionsSettled } from "./configOptionState";
@@ -7,8 +7,14 @@ export function reconcileBackgroundTaskSnapshot(
   state: AppState,
   incoming: TaskSnapshot,
   replicaEpoch: number,
+  confirmedPermissionPolicy?: TaskPermissionPolicy,
 ): AppState {
-  const reconciliation = reconcileTaskSnapshotDependents(state, incoming, replicaEpoch);
+  const reconciliation = reconcileTaskSnapshotDependents(
+    state,
+    incoming,
+    replicaEpoch,
+    confirmedPermissionPolicy,
+  );
   if (reconciliation.state === state) return state;
   const { snapshot: reconciled } = reconciliation;
   // Navigation snapshots own membership. A late task/open or mutation response
@@ -35,12 +41,19 @@ export function reconcileTaskSnapshotDependents(
   state: AppState,
   incoming: TaskSnapshot,
   replicaEpoch: number,
+  confirmedPermissionPolicy?: TaskPermissionPolicy,
 ): { state: AppState; snapshot: TaskSnapshot } {
   const taskId = incoming.task.task_id;
   const previousSnapshot = state.taskSnapshots[taskId];
   const previousReplicaEpoch = state.taskSnapshotReplicaEpochs[taskId];
   const current = previousReplicaEpoch === replicaEpoch ? previousSnapshot : undefined;
-  const snapshot = reconcileTaskSnapshot(current, incoming);
+  const reconciled = reconcileTaskSnapshot(current, incoming);
+  // Mutation responses and state events travel independently. Preserve newer Task
+  // state while applying the policy value the App Server just acknowledged.
+  const snapshot = confirmedPermissionPolicy !== undefined
+    && reconciled.permission_policy !== confirmedPermissionPolicy
+    ? { ...reconciled, permission_policy: confirmedPermissionPolicy }
+    : reconciled;
   if (snapshot === current) return { state, snapshot };
 
   const activePermissionIds = activeRequestIds(snapshot, "permission");
@@ -185,6 +198,14 @@ export function reconcileTaskSnapshot(
     );
   const historySync = keepCurrent ? currentSync : incomingSync;
   const durableSnapshot = shouldIgnoreStaleTaskSnapshot(current, incoming) ? current : incoming;
+  // Context-free Task responses can only fall back to the custom Agent id. Keep
+  // the resolved collection label until an authoritative mapping supplies another.
+  const task = durableSnapshot === incoming
+    && incoming.task.agent_id === current.task.agent_id
+    && incoming.task.agent_name === incoming.task.agent_id
+    && current.task.agent_name !== current.task.agent_id
+    ? { ...incoming.task, agent_name: current.task.agent_name }
+    : durableSnapshot.task;
   // Request responses and state events are independent transports. The queue has
   // its own durable revision because Agent traffic can advance the Task revision
   // before a queue mutation response arrives.
@@ -195,10 +216,11 @@ export function reconcileTaskSnapshot(
     : currentQueueRevision > incomingQueueRevision
       ? current.message_queue
       : durableSnapshot.message_queue;
-  return durableSnapshot.history_sync === historySync
+  return durableSnapshot.task === task
+    && durableSnapshot.history_sync === historySync
     && durableSnapshot.message_queue === messageQueue
     ? durableSnapshot
-    : { ...durableSnapshot, history_sync: historySync, message_queue: messageQueue };
+    : { ...durableSnapshot, task, history_sync: historySync, message_queue: messageQueue };
 }
 
 function historySyncIsTerminal(sync: TaskSnapshot["history_sync"]) {

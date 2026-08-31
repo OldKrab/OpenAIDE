@@ -11,8 +11,9 @@ use openaide_app_server_protocol::task::{
     TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
     TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
     TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
+    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult,
 };
 use serde_json::Value;
 
@@ -20,6 +21,7 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 
 use super::{responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, RpcGateway};
 
+mod archive_older;
 mod publication;
 
 impl RpcGateway {
@@ -381,6 +383,38 @@ impl RpcGateway {
             id,
             meta,
             TaskSetConfigOptionResult { agent_config },
+        )
+    }
+
+    pub(super) fn handle_task_set_permission_policy(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskSetPermissionPolicyParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for permission policy changes");
+        let task = match self
+            .task_metadata
+            .set_permission_policy_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => task,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<TaskSetPermissionPolicyResult>(
+            connection_id,
+            id,
+            meta,
+            TaskSetPermissionPolicyResult { task },
         )
     }
 

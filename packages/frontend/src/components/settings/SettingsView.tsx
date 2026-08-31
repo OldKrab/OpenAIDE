@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import type {
   AppPreferencesRecord,
   ComposerSubmitShortcut,
@@ -33,6 +33,7 @@ import type { McpServerSaveInput } from "../../intents/mcpSettingsIntents";
 import type { NewTaskViewIntents } from "../NewTaskView";
 import { AgentSettingsTab } from "./AgentSettingsTab";
 import { GeneralSettingsTab } from "./GeneralSettingsTab";
+import { currentFrontendShell, type FrontendShellAppearance } from "../../services/frontendShell";
 import { SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { McpSettingsTab } from "./McpSettingsTab";
 import { WorktreesSettingsTab } from "./WorktreesSettingsTab";
@@ -55,7 +56,12 @@ const tabs: Array<{
 ];
 
 export function SettingsView({
+  appearance = currentFrontendShell()?.appearance,
+  backendConnection,
   desktopNotifications,
+  developerSettingsUnlocked: initialDeveloperSettingsUnlocked = false,
+  frameHeader,
+  frameHeaderPlacement,
   onAuthenticate,
   onBackToApp,
   onCreateCustomAgent,
@@ -84,7 +90,13 @@ export function SettingsView({
   worktreeIntents,
   worktreeRepositories = {},
 }: {
+  appearance?: FrontendShellAppearance;
+  backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   desktopNotifications?: DesktopNotificationSettings;
+  /** Shell-persisted unlock state for local diagnostic controls. */
+  developerSettingsUnlocked?: boolean;
+  frameHeader?: ReactNode;
+  frameHeaderPlacement?: "overlay" | "row";
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onBackToApp?: () => void;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
@@ -123,7 +135,7 @@ export function SettingsView({
   const [navigationQuery, setNavigationQuery] = useState("");
   const [mobileIndexOpen, setMobileIndexOpen] = useState(isNarrowSettingsViewport);
   const [developerUnlockClicks, setDeveloperUnlockClicks] = useState(0);
-  const [developerSettingsUnlocked, setDeveloperSettingsUnlocked] = useState(false);
+  const [developerSettingsUnlocked, setDeveloperSettingsUnlocked] = useState(initialDeveloperSettingsUnlocked);
   const normalizedQuery = navigationQuery.trim().toLowerCase();
   const navigationTabs = visibleTabs.filter((tab) => (
     !normalizedQuery || `${tab.group} ${tab.label}`.toLowerCase().includes(normalizedQuery)
@@ -165,26 +177,25 @@ export function SettingsView({
   const sidebar = (
     <aside className="settings-sidebar">
         <div className="settings-sidebar-heading">
-          {onBackToApp ? (
-            <button
-              aria-label="Back to app"
-              className="settings-back-to-app"
-              onClick={onBackToApp}
-              type="button"
-            >
-              <ArrowLeft size={14} /> Back to app
-            </button>
-          ) : null}
           <header className="settings-header">
+            {onBackToApp ? (
+              <button
+                aria-label="Close settings"
+                className="settings-back-to-app"
+                onClick={onBackToApp}
+                title="Back to tasks"
+                type="button"
+              >
+                <ArrowLeft aria-hidden="true" size={15} />
+              </button>
+            ) : null}
             <span>
               <button className="settings-title-button" onClick={onTitleClick} type="button">
                 Settings
               </button>
-              <small>OpenAIDE</small>
-            </span>
-            <span className="settings-header-actions">
               <button
                 aria-label="Refresh settings"
+                className="settings-refresh-button"
                 disabled={busy}
                 onClick={onRefresh}
                 title="Refresh settings"
@@ -242,16 +253,22 @@ export function SettingsView({
       </aside>
   );
   return (
-    <AppSidebarFrame aria-label="Settings" className="settings-view" sidebar={sidebar}>
+    <AppSidebarFrame
+      aria-label="Settings"
+      className="settings-view"
+      header={frameHeader}
+      headerPlacement={frameHeaderPlacement}
+      sidebar={sidebar}
+    >
       <section className={`settings-mobile-index ${mobileIndexOpen ? "open" : ""}`}>
         {onBackToApp ? (
           <button
-            aria-label="Back to app"
-            className="settings-back-to-app"
+            aria-label="Close settings"
+            className="settings-mobile-back-to-app"
             onClick={onBackToApp}
             type="button"
           >
-            <ArrowLeft size={14} /> Back to app
+            <ArrowLeft size={14} /> Back to tasks
           </button>
         ) : null}
         <header>
@@ -298,6 +315,7 @@ export function SettingsView({
           </button>
           <span>{tabs.find((tab) => tab.id === activeTab)?.group}</span>
           <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
+          {activeTab === "common" ? <p>Choose how OpenAIDE looks and responds while you work.</p> : null}
         </header>
         {state.error ? (
           <section className="settings-error" aria-label="Settings error">
@@ -309,6 +327,8 @@ export function SettingsView({
           <SettingsSkeleton />
         ) : (
           <SettingsTabContent
+            appearance={appearance}
+            backendConnection={backendConnection}
             desktopNotifications={desktopNotifications}
             agents={state.agentDetails ?? []}
             authPending={state.loading}
@@ -357,6 +377,8 @@ function isNarrowSettingsViewport() {
 }
 
 function SettingsTabContent({
+  appearance,
+  backendConnection,
   desktopNotifications,
   onAuthenticate,
   onCreateCustomAgent,
@@ -390,6 +412,8 @@ function SettingsTabContent({
   worktreeIntents,
   worktreeRepositories,
 }: {
+  appearance?: FrontendShellAppearance;
+  backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   desktopNotifications?: DesktopNotificationSettings;
   authPending: boolean;
   agents: AgentSettingsRecord[];
@@ -449,6 +473,8 @@ function SettingsTabContent({
       ) : null}
       {tab === "common" ? (
         <GeneralSettingsTab
+          appearance={appearance}
+          backendConnection={backendConnection}
           developerSettingsUnlocked={developerSettingsUnlocked}
           desktopNotifications={desktopNotifications}
           onSetAcpTrace={onSetAcpTrace}

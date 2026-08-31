@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 use crate::agent::{
     catalog_store::AgentCatalogStore, product_api::AgentProductApi,
-    registry_handle::AgentRegistryHandle, status_cache::AgentStatusCache, AgentRuntime,
+    registry_handle::AgentRegistryHandle, status_cache::AgentStatusCache,
+    status_recording_runtime::AgentStatusRecordingRuntime, AgentRuntime,
 };
 use crate::app_lifecycle::AppLifecycle;
 use crate::client_lifecycle::{ClientHub, ClientLivenessPolicy};
@@ -33,12 +34,16 @@ pub(super) struct GatewayFactoryOutput {
     pub gateway: RpcGateway,
     pub task_updates: TaskUpdateReceiver,
     pub worktree_updates: WorktreeUpdateReceiver,
+    pub agent_status_updates: crate::agent::status_cache::AgentStatusUpdateReceiver,
     pub storage_fatal_events:
         std::sync::mpsc::Receiver<crate::storage::task_journal::TaskStorageFatalFailure>,
     #[cfg(test)]
     pub attachment_runtime: crate::attachment_runtime::AttachmentRuntime,
 }
 
+// This is the protocol-edge composition root; keeping dependencies explicit here
+// makes their ownership clearer than hiding them behind a generic context bag.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn gateway(
     state_root: StateRoot,
     store: Store,
@@ -46,6 +51,8 @@ pub(super) fn gateway(
     agent_runtime: Arc<dyn AgentRuntime>,
     acp_trace_state: crate::agent::acp_trace::AcpTraceState,
     configured_projects: ConfiguredProjectRoots,
+    agent_statuses: AgentStatusCache,
+    agent_status_updates: crate::agent::status_cache::AgentStatusUpdateReceiver,
 ) -> Result<GatewayFactoryOutput, ProtocolEdgeStdioStartError> {
     let storage_fatal_events = store.take_task_storage_fatal_events();
     configured_projects.enable_persistence(store.clone())?;
@@ -62,12 +69,15 @@ pub(super) fn gateway(
     let shell_file_reveals = ShellFileRevealRegistry::new();
     let app_preferences = Arc::new(AppPreferencesService::new(store.clone()));
     let new_task_defaults = Arc::new(NewTaskDefaultsService::new(store.clone()));
-    let runtime_settings = Arc::new(RuntimeSettingsService::new(acp_trace_state.clone()));
+    let runtime_settings = Arc::new(RuntimeSettingsService::new(
+        store.clone(),
+        acp_trace_state.clone(),
+    ));
     let mcp_servers_settings = Arc::new(McpServersSettingsService::new(store.clone()));
     let skills_settings = Arc::new(SkillsSettingsService::with_project_roots(
         configured_projects.clone(),
     ));
-    let agent_statuses = AgentStatusCache::default();
+    let agent_runtime = AgentStatusRecordingRuntime::wrap(agent_runtime, agent_statuses.clone());
     let agent_snapshots = AgentRegistrySnapshotSource::with_status_cache(
         agent_registry.clone(),
         agent_statuses.clone(),
@@ -177,6 +187,7 @@ pub(super) fn gateway(
         gateway,
         task_updates,
         worktree_updates,
+        agent_status_updates,
         storage_fatal_events,
         #[cfg(test)]
         attachment_runtime,

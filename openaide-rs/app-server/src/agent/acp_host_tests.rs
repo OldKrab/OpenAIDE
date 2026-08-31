@@ -1,6 +1,6 @@
 use crate::protocol::host::HostBridge;
 
-use super::initialize_request;
+use super::{initialize_request, initialize_request_with_subagents};
 
 #[test]
 fn form_elicitation_is_advertised_without_shell_host_capabilities() {
@@ -28,4 +28,31 @@ fn terminal_auth_is_advertised_when_the_app_shell_host_is_available() {
     let value = serde_json::to_value(initialize_request(&bridge)).unwrap();
 
     assert_eq!(value["clientCapabilities"]["auth"]["terminal"], true);
+}
+
+#[test]
+fn draft_subagents_are_advertised_only_at_the_explicit_activation_boundary() {
+    let disabled = serde_json::to_value(initialize_request_with_subagents(
+        &HostBridge::disabled(),
+        false,
+    ))
+    .unwrap();
+    let enabled = serde_json::to_value(initialize_request_with_subagents(
+        &HostBridge::disabled(),
+        true,
+    ))
+    .unwrap();
+
+    assert!(disabled["clientCapabilities"].get("subagents").is_none());
+    assert!(disabled["clientCapabilities"]["_meta"]
+        .get("openaide")
+        .is_none());
+    assert_eq!(
+        enabled["clientCapabilities"]["subagents"],
+        serde_json::json!({})
+    );
+    assert_eq!(
+        enabled["clientCapabilities"]["_meta"]["openaide"]["nativeSubagentSessions"],
+        true
+    );
 }

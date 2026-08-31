@@ -198,6 +198,77 @@ describe("app controller callbacks", () => {
     });
   });
 
+  it("keeps the prepared Task when its workspace paths are canonically equivalent", async () => {
+    const selectedWorkspaceRoot = "/workspace/app/./src/..";
+    const projectId = projectIdForWorkspaceRoot(selectedWorkspaceRoot);
+    const attachment = {
+      local_id: "file-1",
+      kind: "file" as const,
+      label: "notes.md",
+      app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
+    };
+    const state = preparedNewTaskState("task_1");
+    state.newTask.selection = {
+      ...state.newTask.selection,
+      projectId,
+      workspaceRoot: selectedWorkspaceRoot,
+    };
+    state.snapshot = {
+      ...state.snapshot as TaskSnapshot,
+      task: {
+        ...(state.snapshot as TaskSnapshot).task,
+        project_id: projectId,
+        workspace_root: "/workspace/app",
+      },
+    };
+    state.taskInputs.task_1 = { prompt: "Inspect this file", context: [attachment] };
+
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [{ taskId: "task_1", handleId: attachment.app_server_handle_id }],
+      mountedTaskId: "task_1",
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      attachmentResources,
+      preparationKey: newTaskPreparationKey(state) as string,
+      snapshot: state.snapshot,
+    });
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_SEND) {
+        return { task: { ...protocolTaskSnapshotForContext("task_1", projectId, "codex"), revision: 4 } };
+      }
+      if (method === TASK_RELEASE) return { discardedTaskId: "task_1" };
+      if (method === TASK_ACQUIRE) {
+        return { task: protocolTaskSnapshotForContext("task_1", projectId, "codex") };
+      }
+      throw new Error(method);
+    });
+
+    callbacks({
+      attachmentResources,
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      newTaskController,
+      state,
+    }).newTask.submit({ prompt: "Inspect this file", context: [attachment] });
+    await settlePromises();
+
+    expect(release).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(TASK_SEND, {
+      taskId: "task_1",
+      message: {
+        text: "Inspect this file",
+        attachments: ["attachment-handle-1"],
+      },
+    });
+  });
+
   it("stops a pre-send startup by discarding its prepared Task", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
@@ -981,6 +1052,20 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith("taskNavigation/refresh", {});
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("requests deeper Project discovery for the Load more target", async () => {
+    const request = vi.fn(async () => ({ accepted: true }));
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+    }).navigation.loadNativeSessions(undefined, "project_1", 30);
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith("taskNavigation/loadMore", {
+      projectId: "project_1",
+      targetRowCount: 30,
+    });
   });
 
   it("routes legacy history-page requests through the Task Navigation coordinator", async () => {
@@ -3928,6 +4013,7 @@ function settlePromises() {
 function snapshot(taskId: string): TaskSnapshot {
   return {
     lifecycle: "open",
+    permission_policy: "ask_every_time",
     task: {
       task_id: taskId,
       title: "Task",
@@ -3988,6 +4074,7 @@ function protocolTaskSnapshot(
   return {
     task: protocolTaskSummary(taskId, title),
     lifecycle,
+    permissionPolicy: "askEveryTime",
     revision: 2,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },
@@ -3995,6 +4082,7 @@ function protocolTaskSnapshot(
     sendCapability: { state: "ready" as const },
     messageQueue: { revision: 0, items: [] },
     historySync: { state: "idle", generation: 0 },
+    subagents: { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
     chat: { items: [], hasMoreBefore: false, hasMessages: true },
   };
 }

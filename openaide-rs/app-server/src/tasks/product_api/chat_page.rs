@@ -49,20 +49,28 @@ impl TaskHistoryWorkflow for TaskProductApi {
         params: TaskChatPageParams,
     ) -> Result<TaskChatPageResult, ProtocolError> {
         self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
-        let page = self
-            .store
-            .page_before(
+        let page = if let Some(subagent_id) = &params.subagent_id {
+            self.store.subagent_page_before(
+                params.task_id.as_str(),
+                subagent_id.as_str(),
+                params.before_cursor.as_str(),
+                params.limit as usize,
+            )
+        } else {
+            self.store.page_before(
                 params.task_id.as_str(),
                 params.before_cursor.as_str(),
                 params.limit as usize,
             )
-            .map_err(protocol_error_from_runtime)?;
+        }
+        .map_err(protocol_error_from_runtime)?;
         let revision = self
             .store
             .max_task_revision()
             .map_err(protocol_error_from_runtime)?;
         Ok(TaskChatPageResult {
             task_id: params.task_id,
+            subagent_id: params.subagent_id,
             items: page
                 .items
                 .iter()

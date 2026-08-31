@@ -123,6 +123,7 @@ impl AgentRuntime for MockAgent {
                     title: "Edit workspace files".to_string(),
                     kind: Some("edit".to_string()),
                 },
+                subagent_native_session_id: None,
                 options: vec![
                     AgentPermissionOption {
                         option_id: "allow-once".to_string(),

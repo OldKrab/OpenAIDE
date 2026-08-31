@@ -11,6 +11,7 @@ import {
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
+import { agentSettingsStatusFromProtocol } from "../intents/agentSettingsRecords";
 import { applyProtocolAgents } from "../state/appServerAgents";
 import {
   createProtocolTaskSnapshotMapper,
@@ -173,6 +174,14 @@ function actionsFromSubscriptionSnapshot(
       if (agents.setAgents) {
         applyProtocolAgents(snapshot.agents, agents.currentAgentId?.() ?? "", agents.setAgents, agents.dispatch);
       }
+      agents.dispatch({
+        type: "settings:agentCollection",
+        agents: snapshot.agents.agents.map((agent) => ({
+          agentId: agent.agentId,
+          status: agentSettingsStatusFromProtocol(agent.status),
+          setupReason: agent.setupReason ?? undefined,
+        })),
+      });
       return remappedTaskNavigationActions(context);
     case "taskNavigation":
       context.taskNavigations = {
@@ -193,6 +202,10 @@ function actionsFromSubscriptionSnapshot(
         artifactId: snapshot.artifactId,
         details: mapProtocolToolDetail(snapshot.details),
       }];
+    case "subagentCatalog":
+    case "subagentHistory":
+      // Focused Task inspection owns these independently ordered replicas.
+      return [];
     case "worktreeRepository":
       return [{ type: "worktreeRepository", repository: snapshot.repository }];
   }

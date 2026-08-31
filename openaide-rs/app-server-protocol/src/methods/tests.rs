@@ -6,6 +6,18 @@ fn client_initialize_uses_slash_method_namespace() {
     assert_eq!(ClientInitialize::METHOD, "client/initialize");
     assert_eq!(ClientDetach::METHOD, "client/detach");
     assert_eq!(
+        ClientUpdateShutdownPrepare::METHOD,
+        "client/updateShutdownPrepare"
+    );
+    assert_eq!(
+        ClientUpdateShutdownCommit::METHOD,
+        "client/updateShutdownCommit"
+    );
+    assert_eq!(
+        ClientUpdateShutdownAbort::METHOD,
+        "client/updateShutdownAbort"
+    );
+    assert_eq!(
         ClientCapabilitiesChanged::METHOD,
         "client/capabilitiesChanged"
     );
@@ -90,4 +102,15 @@ fn task_methods_use_task_namespace() {
     assert_eq!(TaskRelease::METHOD, "task/release");
     assert_eq!(TaskArchive::METHOD, "task/archive");
     assert_eq!(TaskRestore::METHOD, "task/restore");
+}
+
+#[test]
+fn file_viewer_methods_use_file_viewer_namespace() {
+    assert_eq!(FileViewerOpen::METHOD, "fileViewer/open");
+    assert_eq!(
+        FileViewerOpenFromHandle::METHOD,
+        "fileViewer/openFromHandle"
+    );
+    assert_eq!(FileViewerRefresh::METHOD, "fileViewer/refresh");
+    assert_eq!(FileViewerRelease::METHOD, "fileViewer/release");
 }

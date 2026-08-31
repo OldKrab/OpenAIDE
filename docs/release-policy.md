@@ -54,45 +54,49 @@ Before that release:
 
 1. Confirm that `main` contains exactly the changes to release. Choose a new
    OpenAIDE version without a `v` prefix, such as `0.0.2-beta.1` or `0.0.2`.
-2. Write concise user-facing Markdown in `release-notes.md`. Prefer sections
-   such as `## Features`, `## Bug Fixes`, and `## Chores`; describe user impact.
-   Do not add a changelog section because the workflow appends it. These notes
-   become the GitHub Release body for every release, but only stable releases
-   add them to the extension changelog. Alpha, beta, and release-candidate
-   versions never create extension changelog entries. Stable release notes
-   compare against the previous stable release and never name prereleases.
+2. Have the release agent inspect the changes since the previous canonical
+   release and generate concise, user-facing Markdown for this release. Pass
+   the final notes directly to `Version Bump`; they are not prepared, reviewed,
+   or committed as a separate repository file.
 3. Run `Version Bump` on `main` in GitHub Actions, or dispatch it with:
 
    ```sh
    gh workflow run version-bump.yml --ref main \
      -f version=0.0.2-beta.1 \
-     -F release_notes=@release-notes.md
+     -f release_notes="$RELEASE_NOTES"
    ```
 
 4. `Version Bump` is serialized and cannot be cancelled in progress. It checks
    that the exact checked-out `main` commit has a completed successful CI push
-   run, validates the monotonic version, updates the root package and lockfile,
-   updates the extension changelog for stable releases, commits the release
-   notes, creates the explicit tag, and atomically pushes the `main` update and
-   tag.
+   run and validates the monotonic version and generated release notes. The
+   workflow uses those exact notes for the version commit, every GitHub Release,
+   and the stable extension changelog; prereleases do not add changelog entries.
+   It then updates the root package and lockfile, creates the explicit tag, and
+   atomically pushes the `main` update and tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, then
-   builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages while
+   builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
+   self-contained Windows x64 and macOS Apple Silicon desktop installers while
    normal CI validates the exact version commit. Publication requires both to
    succeed; the release workflow does not repeat the CI suite. Prerelease
-   packages carry the registry's native prerelease metadata. Each runner
+   packages carry the registry's native prerelease metadata. Each VSIX runner
    inspects the packaged files and exercises its bundled App Server through
-   startup and graceful JSON-RPC shutdown before the VSIX can be uploaded.
+   startup and graceful JSON-RPC shutdown before upload. Desktop builds verify
+   that Tauri bundled the exact App Server binary built for that platform.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
-   asset set, publishes the draft, and verifies immutability. This GitHub
-   Release is the canonical release. Every release then reconciles the same
-   downloaded bytes with Open VSX; stable releases also reconcile them with the
-   VS Code Marketplace.
+   asset set, publishes the draft, and verifies immutability. Windows Desktop
+   filenames end in `-unsigned` until Authenticode signing is configured. macOS
+   Desktop bundles are ad-hoc signed and end in `-unnotarized` until Developer ID
+   signing and Apple notarization are configured. Users must explicitly approve
+   these preview installers with the operating system. This GitHub Release is
+   the canonical release. Every
+   release then reconciles the same downloaded bytes with Open VSX; stable
+   releases also reconcile them with the VS Code Marketplace.
 7. Confirm that the Release workflow completed successfully. No manual rebuild
    or replacement of its assets is permitted.
 
-The root `package.json` is the release-version source of truth. Package and
-Cargo manifests stamped only during artifact creation stay at `0.0.0` in source
-and must not be updated by hand.
+The root `package.json` is the release-version source of truth. VSIX and Desktop
+package, Cargo, lockfile, and Tauri manifests stamped only during artifact
+creation stay at `0.0.0` in source and must not be updated by hand.
 
 ## Recovery and registry reconciliation
 
@@ -100,8 +104,10 @@ GitHub assets and registry packages are immutable release facts. A bad artifact
 requires a new patch or prerelease version; for example, replace a bad
 `0.0.2-beta.1` with `0.0.2-beta.2`.
 
-If registry publication was merely interrupted, run **Reconcile Release
-Registries** with the existing version. It downloads the immutable GitHub assets
+Tags without a published immutable GitHub Release are failed or incomplete
+release attempts, not changelog baselines. If registry publication was merely
+interrupted, run **Reconcile Release Registries** with the existing version. It
+downloads the immutable GitHub assets
 and handles each applicable target independently. Prereleases reconcile only
 Open VSX; stable releases reconcile both registries:
 

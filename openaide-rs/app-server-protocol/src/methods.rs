@@ -22,10 +22,19 @@ use crate::attachment::{
 use crate::client::{
     ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientDetachParams,
     ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeParams,
-    ClientProbeResult, InitializeParams, InitializeResult,
+    ClientProbeResult, InitializeParams, InitializeResult, UpdateShutdownAbortParams,
+    UpdateShutdownAbortResult, UpdateShutdownCommitParams, UpdateShutdownCommitResult,
+    UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
 };
-use crate::diagnostics::{RuntimeDiagnosticsParams, RuntimeDiagnosticsResult};
+use crate::diagnostics::{
+    RuntimeDiagnosticsParams, RuntimeDiagnosticsResult, SupportExportCreateParams,
+    SupportExportCreateResult, SupportExportListParams, SupportExportListResult,
+};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
+use crate::file_viewer::{
+    FileViewerOpenFromHandleParams, FileViewerOpenParams, FileViewerRefreshParams,
+    FileViewerReleaseParams, FileViewerReleaseResult, FileViewerSnapshot,
+};
 use crate::project::{
     ProjectAddParams, ProjectAddResult, ProjectRefreshParams, ProjectRefreshResult,
     ProjectRemoveParams, ProjectRemoveResult, ProjectRenameParams, ProjectRenameResult,
@@ -51,20 +60,23 @@ use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessi
 use crate::task::{
     ComposerHistoryParams, ComposerHistoryResult, NativeSessionArchiveParams,
     NativeSessionArchiveResult, NativeSessionForkParams, NativeSessionForkResult,
-    NativeSessionRestoreParams, NativeSessionRestoreResult, TaskAcquireInWorktreeParams,
-    TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
-    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
-    TaskClosePlanParams, TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult,
-    TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
-    TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult,
-    TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
-    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
-    TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    NativeSessionRestoreParams, NativeSessionRestoreResult, NativeSessionSetPinnedParams,
+    NativeSessionSetPinnedResult, NativeSessionSetTitleParams, NativeSessionSetTitleResult,
+    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveOlderParams,
+    TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
+    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
+    TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
+    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
+    TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
+    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
+    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -149,6 +161,24 @@ protocol_method!(
     ClientDetachResult
 );
 protocol_method!(
+    ClientUpdateShutdownPrepare,
+    CLIENT_UPDATE_SHUTDOWN_PREPARE,
+    UpdateShutdownPrepareParams,
+    UpdateShutdownPrepareResult
+);
+protocol_method!(
+    ClientUpdateShutdownCommit,
+    CLIENT_UPDATE_SHUTDOWN_COMMIT,
+    UpdateShutdownCommitParams,
+    UpdateShutdownCommitResult
+);
+protocol_method!(
+    ClientUpdateShutdownAbort,
+    CLIENT_UPDATE_SHUTDOWN_ABORT,
+    UpdateShutdownAbortParams,
+    UpdateShutdownAbortResult
+);
+protocol_method!(
     PendingRequestResolve,
     PENDING_REQUEST_RESOLVE,
     PendingRequestResolveParams,
@@ -171,6 +201,18 @@ protocol_method!(
     DIAGNOSTICS_GET_RUNTIME,
     RuntimeDiagnosticsParams,
     RuntimeDiagnosticsResult
+);
+protocol_method!(
+    DiagnosticsListSupportExport,
+    DIAGNOSTICS_LIST_SUPPORT_EXPORT,
+    SupportExportListParams,
+    SupportExportListResult
+);
+protocol_method!(
+    DiagnosticsCreateSupportExport,
+    DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
+    SupportExportCreateParams,
+    SupportExportCreateResult
 );
 protocol_method!(
     SupportRecoverStuckSessions,
@@ -499,6 +541,18 @@ protocol_method!(
     NativeSessionArchiveResult
 );
 protocol_method!(
+    NativeSessionSetTitle,
+    NATIVE_SESSION_SET_TITLE,
+    NativeSessionSetTitleParams,
+    NativeSessionSetTitleResult
+);
+protocol_method!(
+    NativeSessionSetPinned,
+    NATIVE_SESSION_SET_PINNED,
+    NativeSessionSetPinnedParams,
+    NativeSessionSetPinnedResult
+);
+protocol_method!(
     NativeSessionRestore,
     NATIVE_SESSION_RESTORE,
     NativeSessionRestoreParams,
@@ -548,6 +602,12 @@ protocol_method!(
     TaskSetConfigOptionResult
 );
 protocol_method!(
+    TaskSetPermissionPolicy,
+    TASK_SET_PERMISSION_POLICY,
+    TaskSetPermissionPolicyParams,
+    TaskSetPermissionPolicyResult
+);
+protocol_method!(
     TaskSetTitle,
     TASK_SET_TITLE,
     TaskSetTitleParams,
@@ -564,6 +624,30 @@ protocol_method!(
     TASK_TOOL_IMAGE_PREVIEW,
     TaskToolImagePreviewParams,
     TaskToolImagePreviewResult
+);
+protocol_method!(
+    FileViewerOpen,
+    FILE_VIEWER_OPEN,
+    FileViewerOpenParams,
+    FileViewerSnapshot
+);
+protocol_method!(
+    FileViewerOpenFromHandle,
+    FILE_VIEWER_OPEN_FROM_HANDLE,
+    FileViewerOpenFromHandleParams,
+    FileViewerSnapshot
+);
+protocol_method!(
+    FileViewerRefresh,
+    FILE_VIEWER_REFRESH,
+    FileViewerRefreshParams,
+    FileViewerSnapshot
+);
+protocol_method!(
+    FileViewerRelease,
+    FILE_VIEWER_RELEASE,
+    FileViewerReleaseParams,
+    FileViewerReleaseResult
 );
 protocol_method!(TaskCancel, TASK_CANCEL, TaskCancelParams, TaskCancelResult);
 protocol_method!(
@@ -609,6 +693,12 @@ protocol_method!(
     TASK_ARCHIVE,
     TaskArchiveParams,
     TaskArchiveResult
+);
+protocol_method!(
+    TaskArchiveOlder,
+    TASK_ARCHIVE_OLDER,
+    TaskArchiveOlderParams,
+    TaskArchiveOlderResult
 );
 protocol_method!(
     TaskRestore,

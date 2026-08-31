@@ -1,10 +1,10 @@
 pub(super) fn push_method_maps(output: &mut String) {
-    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE;\n");
+    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE;\n");
     // Append new methods outside the legacy monolithic literal so additions remain reviewable.
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION",
+        " | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -12,10 +12,15 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedParams;\n");
     output.push_str("  [CLIENT_HEARTBEAT]: ClientHeartbeatParams;\n");
     output.push_str("  [CLIENT_DETACH]: ClientDetachParams;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_PREPARE]: UpdateShutdownPrepareParams;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_COMMIT]: UpdateShutdownCommitParams;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_ABORT]: UpdateShutdownAbortParams;\n");
     output.push_str("  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveParams;\n");
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeParams;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;\n");
     output.push_str("  [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsParams;\n");
+    output.push_str("  [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListParams;\n");
+    output.push_str("  [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateParams;\n");
     output.push_str("  [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsParams;\n");
     output.push_str("  [AGENT_PROBE]: AgentProbeParams;\n");
     output.push_str("  [AGENT_AUTHENTICATE]: AgentAuthenticateParams;\n");
@@ -80,10 +85,15 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_QUEUE_TAKE]: TaskQueueTakeParams;\n");
     output.push_str("  [TASK_QUEUE_MOVE]: TaskQueueMoveParams;\n");
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;\n");
+    output.push_str("  [TASK_SET_PERMISSION_POLICY]: TaskSetPermissionPolicyParams;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleParams;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedParams;\n");
     output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanParams;\n");
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewParams;\n");
+    output.push_str("  [FILE_VIEWER_OPEN]: FileViewerOpenParams;\n");
+    output.push_str("  [FILE_VIEWER_OPEN_FROM_HANDLE]: FileViewerOpenFromHandleParams;\n");
+    output.push_str("  [FILE_VIEWER_REFRESH]: FileViewerRefreshParams;\n");
+    output.push_str("  [FILE_VIEWER_RELEASE]: FileViewerReleaseParams;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelParams;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenParams;\n");
     output.push_str("  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionParams;\n");
@@ -94,10 +104,12 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshParams;\n");
     output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreParams;\n");
     output.push_str("  [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveParams;\n");
+    output.push_str("  [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleParams;\n");
+    output.push_str("  [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedParams;\n");
     output.push_str("  [NATIVE_SESSION_RESTORE]: NativeSessionRestoreParams;\n");
     output.push_str("  [NATIVE_SESSION_FORK]: NativeSessionForkParams;\n");
     output.push_str("  [TASK_RELEASE]: TaskReleaseParams;\n");
-    output.push_str("  [TASK_ARCHIVE]: TaskArchiveParams;\n  [TASK_RESTORE]: TaskRestoreParams;\n");
+    output.push_str("  [TASK_ARCHIVE]: TaskArchiveParams;\n  [TASK_ARCHIVE_OLDER]: TaskArchiveOlderParams;\n  [TASK_RESTORE]: TaskRestoreParams;\n");
     output.push_str("};\n\n");
     output.push_str("export type ResponseResultByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeResult;\n");
@@ -105,10 +117,15 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedResult;\n");
     output.push_str("  [CLIENT_HEARTBEAT]: ClientHeartbeatResult;\n");
     output.push_str("  [CLIENT_DETACH]: ClientDetachResult;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_PREPARE]: UpdateShutdownPrepareResult;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_COMMIT]: UpdateShutdownCommitResult;\n");
+    output.push_str("  [CLIENT_UPDATE_SHUTDOWN_ABORT]: UpdateShutdownAbortResult;\n");
     output.push_str("  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveResult;\n");
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeResult;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;\n");
     output.push_str("  [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsResult;\n");
+    output.push_str("  [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListResult;\n");
+    output.push_str("  [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateResult;\n");
     output.push_str("  [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsResult;\n");
     output.push_str("  [AGENT_PROBE]: AgentProbeResult;\n");
     output.push_str("  [AGENT_AUTHENTICATE]: AgentAuthenticateResult;\n");
@@ -173,10 +190,15 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_QUEUE_TAKE]: TaskQueueTakeResult;\n");
     output.push_str("  [TASK_QUEUE_MOVE]: TaskQueueMoveResult;\n");
     output.push_str("  [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;\n");
+    output.push_str("  [TASK_SET_PERMISSION_POLICY]: TaskSetPermissionPolicyResult;\n");
     output.push_str("  [TASK_SET_TITLE]: TaskSetTitleResult;\n");
     output.push_str("  [TASK_SET_PINNED]: TaskSetPinnedResult;\n");
     output.push_str("  [TASK_CLOSE_PLAN]: TaskClosePlanResult;\n");
     output.push_str("  [TASK_TOOL_IMAGE_PREVIEW]: TaskToolImagePreviewResult;\n");
+    output.push_str("  [FILE_VIEWER_OPEN]: FileViewerSnapshot;\n");
+    output.push_str("  [FILE_VIEWER_OPEN_FROM_HANDLE]: FileViewerSnapshot;\n");
+    output.push_str("  [FILE_VIEWER_REFRESH]: FileViewerSnapshot;\n");
+    output.push_str("  [FILE_VIEWER_RELEASE]: FileViewerReleaseResult;\n");
     output.push_str("  [TASK_CANCEL]: TaskCancelResult;\n");
     output.push_str("  [TASK_OPEN]: TaskOpenResult;\n");
     output.push_str("  [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionResult;\n");
@@ -187,10 +209,12 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshResult;\n");
     output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreResult;\n");
     output.push_str("  [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveResult;\n");
+    output.push_str("  [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleResult;\n");
+    output.push_str("  [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedResult;\n");
     output.push_str("  [NATIVE_SESSION_RESTORE]: NativeSessionRestoreResult;\n");
     output.push_str("  [NATIVE_SESSION_FORK]: NativeSessionForkResult;\n");
     output.push_str("  [TASK_RELEASE]: TaskReleaseResult;\n");
-    output.push_str("  [TASK_ARCHIVE]: TaskArchiveResult;\n  [TASK_RESTORE]: TaskRestoreResult;\n");
+    output.push_str("  [TASK_ARCHIVE]: TaskArchiveResult;\n  [TASK_ARCHIVE_OLDER]: TaskArchiveOlderResult;\n  [TASK_RESTORE]: TaskRestoreResult;\n");
     output.push_str("};\n\n");
     output.push_str("export type TypedClientRequest<M extends ProtocolMethod> = ClientRequestEnvelope<RequestParamsByMethod[M]> & {\n");
     output.push_str("  method: M;\n");
@@ -206,6 +230,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output
         .push_str("export type ClientDetachRequest = TypedClientRequest<typeof CLIENT_DETACH>;\n");
+    output.push_str("export type ClientUpdateShutdownPrepareRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_PREPARE>;\n");
+    output.push_str("export type ClientUpdateShutdownCommitRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_COMMIT>;\n");
+    output.push_str("export type ClientUpdateShutdownAbortRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_ABORT>;\n");
     output.push_str(
         "export type ClientCapabilitiesChangedRequest = TypedClientRequest<typeof CLIENT_CAPABILITIES_CHANGED>;\n",
     );
@@ -217,6 +244,9 @@ pub(super) fn push_method_maps(output: &mut String) {
         "export type ClientHeartbeatResponse = ResponseEnvelope<ClientHeartbeatResult>;\n",
     );
     output.push_str("export type ClientDetachResponse = ResponseEnvelope<ClientDetachResult>;\n");
+    output.push_str("export type ClientUpdateShutdownPrepareResponse = ResponseEnvelope<UpdateShutdownPrepareResult>;\n");
+    output.push_str("export type ClientUpdateShutdownCommitResponse = ResponseEnvelope<UpdateShutdownCommitResult>;\n");
+    output.push_str("export type ClientUpdateShutdownAbortResponse = ResponseEnvelope<UpdateShutdownAbortResult>;\n");
     output
         .push_str("export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;\n");
     output.push_str(
@@ -361,6 +391,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("export type TaskQueueMoveResponse = ResponseEnvelope<TaskQueueMoveResult>;\n");
     output.push_str(
         "export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionResult>;\n",
+    );
+    output.push_str(
+        "export type TaskSetPermissionPolicyResponse = ResponseEnvelope<TaskSetPermissionPolicyResult>;\n",
     );
     output.push_str("export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;\n");
     output.push_str("export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;\n");

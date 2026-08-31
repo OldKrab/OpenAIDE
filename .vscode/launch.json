@@ -2,6 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "OpenAIDE: Desktop (Development)",
+      "type": "pwa-node",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/desktop/scripts/development-launch.mjs",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": false,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
       "name": "OpenAIDE: Extension Host",
       "type": "extensionHost",
       "request": "launch",

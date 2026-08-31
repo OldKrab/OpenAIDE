@@ -231,6 +231,18 @@ describe("AgentSettingsTab interactions", () => {
     expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false);
   });
 
+  it("toggles Agent availability directly from the catalog", () => {
+    const onSetAgentEnabled = vi.fn();
+    const view = renderAgentSettings({ agents: [builtInAgent("codex")], onSetAgentEnabled, openFirst: false });
+    const availabilityToggle = view.root.findByProps({ "aria-label": "Codex available", type: "checkbox" });
+
+    act(() => {
+      availabilityToggle.props.onChange({ currentTarget: { checked: false } });
+    });
+
+    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false);
+  });
+
   it("describes disabled built-in Agent availability as disabled", () => {
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", { enabled: false, status: "disabled" })],
@@ -252,6 +264,36 @@ describe("AgentSettingsTab interactions", () => {
     expect(textContent(view.root)).not.toContain("Status has not been checked.");
     act(() => buttonByText(view.root, "Try again").props.onClick());
     expect(onRetry).toHaveBeenCalledWith("codex");
+  });
+
+  it("does not present idle disconnected as a broken Agent in the catalog", () => {
+    const view = renderAgentSettings({
+      agents: [
+        builtInAgent("codex", { enabled: true, status: "disconnected" }),
+        builtInAgent("opencode", { enabled: false, status: "disabled" }),
+      ],
+      openFirst: false,
+    });
+
+    expect(textContent(view.root)).not.toContain("disconnected");
+    expect(textContent(view.root)).toContain("Off");
+  });
+
+  it("shows the shared managed integration activity in the catalog and Agent details", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", { status: "installing" })],
+      openFirst: false,
+    });
+
+    const catalogActivity = view.root.findByProps({ className: "agent-library-state installing" });
+    expect(catalogActivity.props["aria-busy"]).toBe(true);
+    expect(textContent(catalogActivity)).toBe("Installing the Codex integration…");
+
+    act(() => view.root.findByProps({ className: "agent-catalog-row" }).props.onClick());
+
+    const detailActivity = view.root.findByProps({ className: "agent-page-status installing" });
+    expect(detailActivity.props["aria-busy"]).toBe(true);
+    expect(textContent(detailActivity)).toBe("Installing the Codex integration…");
   });
 
   it("offers recovery when the selected Agent requires setup", () => {
@@ -395,7 +437,9 @@ function renderAgentSettings({
   });
   if (openFirst && agents.length) {
     act(() => {
-      view!.root.findAllByProps({ className: "agent-catalog-row" })[0].props.onClick();
+      view!.root.findAllByProps({ className: "agent-catalog-row" })
+        .find((button) => textContent(button).includes(agents[0].label))!
+        .props.onClick();
     });
   }
   return view!;

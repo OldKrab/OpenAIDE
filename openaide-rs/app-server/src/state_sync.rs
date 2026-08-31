@@ -118,21 +118,40 @@ impl StateStream {
         ctx: &ClientContext,
         scope: SubscriptionScope,
         snapshot_provider: &impl SnapshotProvider,
-        _now: AppServerTime,
+        now: AppServerTime,
     ) -> Result<StateSubscribeResult, openaide_app_server_protocol::errors::ProtocolError> {
+        self.subscribe_with_membership(ctx, scope, snapshot_provider, now)
+            .map(|(result, _)| result)
+    }
+
+    /// Returns whether this client actually gained the scope, allowing product work to
+    /// distinguish first subscription from a baseline resync of existing membership.
+    pub(crate) fn subscribe_with_membership(
+        &mut self,
+        ctx: &ClientContext,
+        scope: SubscriptionScope,
+        snapshot_provider: &impl SnapshotProvider,
+        _now: AppServerTime,
+    ) -> Result<(StateSubscribeResult, bool), openaide_app_server_protocol::errors::ProtocolError>
+    {
         let token = self.read_token_for_scope(&scope);
         let snapshot = snapshot_provider.snapshot(ctx, &scope, &token)?;
-        if self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone()) {
+        let subscription_added =
+            self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
+        if subscription_added {
             if let SubscriptionScope::Task { task_id } = &scope {
                 self.task_subscription_presence
                     .observe_subscribed(ctx.client_instance_id.clone(), task_id.clone());
             }
         }
-        Ok(StateSubscribeResult {
-            cursor: token.cursor().clone(),
-            scope,
-            snapshot,
-        })
+        Ok((
+            StateSubscribeResult {
+                cursor: token.cursor().clone(),
+                scope,
+                snapshot,
+            },
+            subscription_added,
+        ))
     }
 
     pub fn unsubscribe(
@@ -313,7 +332,12 @@ fn event_matches_subscription(
             state_root_id: event_state_root,
         } => {
             event_state_root == state_root_id
-                && !matches!(subscription_scope, SubscriptionScope::Task { .. })
+                && !matches!(
+                    subscription_scope,
+                    SubscriptionScope::Task { .. }
+                        | SubscriptionScope::SubagentCatalog { .. }
+                        | SubscriptionScope::SubagentHistory { .. }
+                )
         }
         EventScope::Client {
             state_root_id: event_state_root,
@@ -321,7 +345,12 @@ fn event_matches_subscription(
         } => {
             event_state_root == state_root_id
                 && client_instance_id == &subscription.client_instance_id
-                && !matches!(subscription_scope, SubscriptionScope::Task { .. })
+                && !matches!(
+                    subscription_scope,
+                    SubscriptionScope::Task { .. }
+                        | SubscriptionScope::SubagentCatalog { .. }
+                        | SubscriptionScope::SubagentHistory { .. }
+                )
         }
         EventScope::Task {
             state_root_id: event_state_root,
@@ -332,6 +361,8 @@ fn event_matches_subscription(
                     subscription_scope,
                     SubscriptionScope::Task { task_id: subscribed }
                         | SubscriptionScope::ToolDetail { task_id: subscribed, .. }
+                        | SubscriptionScope::SubagentCatalog { task_id: subscribed }
+                        | SubscriptionScope::SubagentHistory { task_id: subscribed, .. }
                         if subscribed == task_id
                 )
         }
@@ -421,6 +452,19 @@ fn payload_matches_subscription(
                 | AppServerEventPayload::TaskHistorySyncUpdated { .. }
                 | AppServerEventPayload::TaskRequestsUpdated { .. }
                 | AppServerEventPayload::RequestUpdated { .. }
+        ),
+        SubscriptionScope::SubagentCatalog { task_id } => matches!(
+            payload,
+            AppServerEventPayload::SubagentCatalogUpdated { catalog }
+                if &catalog.task_id == task_id
+        ),
+        SubscriptionScope::SubagentHistory {
+            task_id,
+            subagent_id,
+        } => matches!(
+            payload,
+            AppServerEventPayload::SubagentHistoryUpdated { history }
+                if &history.task_id == task_id && &history.subagent_id == subagent_id
         ),
         SubscriptionScope::ToolDetail {
             task_id,

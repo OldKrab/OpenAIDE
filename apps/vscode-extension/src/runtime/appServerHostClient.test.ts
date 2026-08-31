@@ -5,6 +5,7 @@ import {
   CLIENT_CAPABILITIES_CHANGED,
   CLIENT_DETACH,
   CLIENT_INITIALIZE,
+  SHELL_RESOLVE_FILE_REVEAL,
   TASK_OPEN,
   type ReliableHttpFetch,
   type RpcMessage,
@@ -80,6 +81,30 @@ describe("AppServerHostClient", () => {
     });
     expect(fetch.mock.calls[0]?.[1].headers["X-OpenAIDE-Connection-Id"])
       .toBe("vscode-connection-host-client-1");
+  });
+
+  it("resolves file handles with the host identity that owns them", async () => {
+    const fetch = fetchSequence([
+      [response("rpc-1", { result: initializeResult() })],
+      [response("rpc-2", { result: { path: "/tmp/support.zip", label: "support.zip" } })],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+    client = new AppServerHostClient(providerReturningConnection());
+
+    await expect(client.resolveOwnFileReveal("file-reveal-1")).resolves.toEqual({
+      path: "/tmp/support.zip",
+      label: "support.zip",
+    });
+
+    expect(jsonRpcCalls(fetch)[1]).toEqual({
+      jsonrpc: "2.0",
+      id: "rpc-2",
+      method: SHELL_RESOLVE_FILE_REVEAL,
+      params: {
+        originatingClientInstanceId: "vscode-host-host-client-1",
+        fileHandleId: "file-reveal-1",
+      },
+    });
   });
 
   it("replaces the workspace roots reported by an initialized host client", async () => {

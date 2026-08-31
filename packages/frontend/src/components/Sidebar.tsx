@@ -1,11 +1,12 @@
 import { memo, useRef, useState } from "react";
-import { Archive, ArrowLeft, FolderPlus, Plus, RefreshCcw, Search, Settings, X } from "lucide-react";
+import { Archive, ArrowLeft, FolderPlus, LoaderCircle, Plus, RefreshCcw, Search, Settings, X } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
+import type { TaskArchiveOlderCutoff, TaskArchiveOlderResult } from "@openaide/app-server-client";
 import type { ProjectOption } from "../state/composerOptions";
 import { taskForkMutationKey, type AppState } from "../state/store";
 import {
   initialTaskNavigationRowsPerProject,
-  TASK_NAVIGATION_PAGE_SIZE,
+  taskNavigationPageSize,
 } from "../state/taskNavigationPolicy";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
@@ -15,6 +16,7 @@ import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
 import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
+import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -24,6 +26,7 @@ type SidebarProps = {
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
   forkableAgentIds?: ReadonlySet<string>;
+  environmentLabel?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
   onForkNativeSession?: (session: AgentListedSession) => void;
   onForkTask?: (taskId: string) => void;
@@ -43,7 +46,10 @@ type SidebarProps = {
   onOpenTask: (taskId: string) => void;
   onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
   onArchiveTask: (taskId: string) => void;
+  onArchiveOlderTasks?: (cutoff: TaskArchiveOlderCutoff, preview: boolean) => Promise<TaskArchiveOlderResult>;
   onRestoreNativeSession: (session: AgentListedSession) => void;
+  onSetNativeSessionPinned?: (session: AgentListedSession, pinned: boolean) => Promise<void>;
+  onSetNativeSessionTitle?: (session: AgentListedSession, title: string) => Promise<void>;
   onRestoreTask: (taskId: string) => void;
   onSetTaskPinned?: (taskId: string, pinned: boolean) => Promise<void>;
   onSetTaskTitle?: (
@@ -54,6 +60,7 @@ type SidebarProps = {
   onSettings: () => void;
   onToggleArchived: () => void;
   searchQuery: string;
+  settingsStatus?: string;
   settingsActive?: boolean;
   showArchived: boolean;
   taskListError?: string;
@@ -66,6 +73,7 @@ type SidebarProps = {
   maxVisibleProjects?: number;
   loadingTasks?: boolean;
   showNativeSessions?: boolean;
+  codexIntegrationInstalling?: boolean;
 };
 
 export const Sidebar = memo(function Sidebar({
@@ -76,6 +84,7 @@ export const Sidebar = memo(function Sidebar({
   nativeSessionAgentName,
   nativeSessionProjectId,
   forkableAgentIds = new Set(),
+  environmentLabel,
   onArchiveNativeSession,
   onForkNativeSession,
   onForkTask,
@@ -90,7 +99,10 @@ export const Sidebar = memo(function Sidebar({
   onOpenTask,
   onRecoverNativeSessions,
   onArchiveTask,
+  onArchiveOlderTasks,
   onRestoreNativeSession,
+  onSetNativeSessionPinned,
+  onSetNativeSessionTitle,
   onRestoreTask,
   onSetTaskPinned,
   onSetTaskTitle,
@@ -98,6 +110,7 @@ export const Sidebar = memo(function Sidebar({
   onSettings,
   onToggleArchived,
   searchQuery,
+  settingsStatus,
   settingsActive = false,
   showArchived,
   taskListError,
@@ -110,6 +123,7 @@ export const Sidebar = memo(function Sidebar({
   maxVisibleProjects = 5,
   loadingTasks = false,
   showNativeSessions = true,
+  codexIntegrationInstalling = false,
 }: SidebarProps) {
   const taskListRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -148,6 +162,7 @@ export const Sidebar = memo(function Sidebar({
   );
   const initialProjectRowLimit = maxTasksPerProject
     ?? initialTaskNavigationRowsPerProject(groups.length);
+  const projectPageSize = taskNavigationPageSize(groups.length);
   const activeProjectKey = activeTask?.project_id;
   const visibleGroups = groupByProject
     ? recentVisibleGroups(groups, Math.max(1, visibleProjectLimit), activeProjectKey)
@@ -158,7 +173,8 @@ export const Sidebar = memo(function Sidebar({
     !groupSearchQuery &&
     nativeSessionProjectId !== undefined &&
     collapsedProjectKeys.has(nativeSessionProjectId);
-  const showEmptyState = !taskListError && (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
+  const showEmptyState = !taskListError && !codexIntegrationInstalling &&
+    (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
   const noProjects = groupByProject && projects.length === 0;
@@ -265,6 +281,15 @@ export const Sidebar = memo(function Sidebar({
             ) : null}
           </div>
         ) : null}
+        {!showWorkspaceSetup && !showArchived && showNativeSessions && codexIntegrationInstalling ? (
+          <div aria-busy={true} className="native-session-activity" role="status">
+            <LoaderCircle aria-hidden="true" className="spin" size={14} />
+            <span>
+              {CODEX_INTEGRATION_INSTALLING_LABEL}
+              <small>This can take a minute.</small>
+            </span>
+          </div>
+        ) : null}
         {!showWorkspaceSetup && (groupByProject
           ? visibleGroups.map((group) => (
               <SidebarProjectTaskGroup
@@ -273,7 +298,7 @@ export const Sidebar = memo(function Sidebar({
                 group={group}
                 key={group.key}
                 maxTasks={projectRowLimits.get(group.key) ?? initialProjectRowLimit}
-                pageSize={TASK_NAVIGATION_PAGE_SIZE}
+                pageSize={projectPageSize}
                 nativeSessionAgentId={nativeSessionAgentId}
                 nativeSessionAgentName={nativeSessionAgentName}
                 nativeSessions={group.nativeSessions}
@@ -287,8 +312,11 @@ export const Sidebar = memo(function Sidebar({
                 }
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
                 forkableAgentIds={forkableAgentIds}
+                environmentLabel={environmentLabel}
                 onArchiveNativeSession={onArchiveNativeSession}
+                onArchiveOlderNativeSessions={onArchiveOlderTasks}
                 onArchiveTask={onArchiveTask}
+                onArchiveOlderTasks={onArchiveOlderTasks}
                 onForkNativeSession={onForkNativeSession}
                 onForkTask={onForkTask}
                 onLoadMore={(visibleIncrement) =>
@@ -314,6 +342,8 @@ export const Sidebar = memo(function Sidebar({
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}
                 onRestoreNativeSession={onRestoreNativeSession}
+                onSetNativeSessionPinned={onSetNativeSessionPinned}
+                onSetNativeSessionTitle={onSetNativeSessionTitle}
                 onRestoreTask={onRestoreTask}
                 onSetTaskPinned={onSetTaskPinned}
                 onSetTaskTitle={onSetTaskTitle}
@@ -344,6 +374,7 @@ export const Sidebar = memo(function Sidebar({
                   canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
                   forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
                   onArchiveTask={onArchiveTask}
+                  onArchiveOlderTasks={onArchiveOlderTasks}
                   onForkTask={onForkTask}
                   onOpenTask={onOpenTask}
                   onRestoreTask={onRestoreTask}
@@ -364,9 +395,12 @@ export const Sidebar = memo(function Sidebar({
                   nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                   nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                   onArchiveNativeSession={onArchiveNativeSession}
+                  onArchiveOlderNativeSessions={onArchiveOlderTasks}
                   onForkNativeSession={onForkNativeSession}
                   onOpenNativeSession={onOpenNativeSession}
                   onRestoreNativeSession={onRestoreNativeSession}
+                  onSetNativeSessionPinned={onSetNativeSessionPinned}
+                  onSetNativeSessionTitle={onSetNativeSessionTitle}
                   session={row.session}
                 />
               ),
@@ -411,7 +445,10 @@ export const Sidebar = memo(function Sidebar({
           onClick={onSettings}
         >
           <Settings size={15} />
-          Settings
+          <span className="settings-button-copy">
+            <span>Settings</span>
+            {settingsStatus ? <small>{settingsStatus}</small> : null}
+          </span>
         </button>
       </div>
     </aside>
@@ -428,6 +465,7 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.forkableAgentIds === next.forkableAgentIds &&
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
+    prev.settingsStatus === next.settingsStatus &&
     prev.settingsActive === next.settingsActive &&
     prev.showArchived === next.showArchived &&
     prev.taskListError === next.taskListError &&
@@ -439,5 +477,6 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.maxTasksPerProject === next.maxTasksPerProject &&
     prev.maxVisibleProjects === next.maxVisibleProjects &&
     prev.loadingTasks === next.loadingTasks &&
-    prev.showNativeSessions === next.showNativeSessions;
+    prev.showNativeSessions === next.showNativeSessions &&
+    prev.codexIntegrationInstalling === next.codexIntegrationInstalling;
 }

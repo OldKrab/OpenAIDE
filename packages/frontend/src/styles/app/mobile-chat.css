@@ -1,6 +1,6 @@
 @media (max-width: 760px) {
   .message-list {
-    padding-inline: 0;
+    padding-inline: var(--oa-chat-inline-gutter);
     scrollbar-gutter: auto;
   }
 
@@ -16,6 +16,18 @@
   .activity-group > .activity-disclosure-trigger,
   .chat-thought-block > .activity-disclosure-trigger {
     min-height: 36px;
+  }
+
+  .agent-boundary-notice > .activity-disclosure-trigger {
+    min-height: 36px;
+  }
+
+  .agent-boundary-label {
+    max-width: calc(100% - 24px);
+  }
+
+  .agent-boundary-explanation {
+    max-width: calc(100% - 24px);
   }
 
   .chat-user-block {
@@ -116,6 +128,11 @@
     min-width: 36px;
     width: 36px;
     height: 36px;
+  }
+
+  .composer-submit-pending {
+    width: auto;
+    padding-inline: 6px;
   }
 
   .new-task-context-controls .composer-pill {

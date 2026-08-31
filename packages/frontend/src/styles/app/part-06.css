@@ -231,7 +231,7 @@
   font-size: 12px;
 }
 
-.composer-file-status svg {
+.composer-file-status:not(.composer-file-error) svg {
   animation: composer-config-spin 900ms linear infinite;
 }
 
@@ -486,13 +486,19 @@
 }
 
 .composer-submit-pending {
-  width: 26px;
+  width: auto;
   min-height: 24px;
   border-radius: var(--oa-radius-sm);
   color: var(--oa-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
+}
+
+.composer-submit-pending > span {
+  color: var(--oa-text);
+  font-size: 11px;
 }
 
 .composer-submit-pending svg {

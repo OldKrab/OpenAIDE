@@ -1251,6 +1251,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         created_at: created_at.to_string(),
         updated_at: created_at.to_string(),
         last_activity: created_at.to_string(),
+        permission_policy: Default::default(),
         composer_history: Default::default(),
         message_queue: Default::default(),
         agent_id: "codex".to_string(),

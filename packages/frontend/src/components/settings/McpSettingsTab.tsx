@@ -5,9 +5,7 @@ import type {
 } from "@openaide/app-shell-contracts";
 import {
   AlertTriangle,
-  ChevronDown,
   ChevronRight,
-  CircleOff,
   FolderGit2,
   Globe2,
   Plus,
@@ -91,15 +89,19 @@ export function McpSettingsTab(props: McpSettingsTabProps) {
 
   return (
     <section className="mcp-settings-page">
-      <div className="settings-catalog-tools">
+      <div className="mcp-library-intro">
+        <p>Connect tools agents can use. Enable a server here; open it only when its connection needs attention.</p>
         <SettingsCatalogSearch
           label="Search MCP servers"
           onChange={setQuery}
-          placeholder="Search MCP servers"
+          placeholder="Search"
           value={query}
         />
+      </div>
+      <div className="mcp-library-heading">
+        <strong>Servers</strong>
         <button className="mcp-action primary" onClick={() => setSelected(newServer())} type="button">
-          <Plus size={14} /> Add server
+          <Plus size={14} /><span>Add server</span>
         </button>
       </div>
       {props.error ? <InlineFailure message={props.error} muted /> : null}
@@ -136,45 +138,38 @@ function McpServerGroup({
   records: McpServerSettingsRecord[];
   scope: "global" | "project";
 }) {
-  const [expanded, setExpanded] = useState(true);
   return (
     <section className="mcp-settings-group">
-      <button className="mcp-settings-group-heading" onClick={() => setExpanded(!expanded)} type="button">
+      <header className="mcp-settings-group-heading">
         {scope === "global" ? <Globe2 size={15} /> : <FolderGit2 size={15} />}
         <strong>{label}</strong>
-        <span>{records.length}</span>
-        <ChevronDown className={expanded ? "expanded" : ""} size={15} />
-      </button>
-      {expanded ? (
-        <div className="mcp-settings-list">
-          {records.map((record) => (
-            <div className="mcp-settings-row" key={record.id}>
-              <button aria-label={`Open ${record.label}`} className="mcp-settings-row-main" onClick={() => onOpen(record)} type="button">
-                <McpTransportIcon transport={record.transport} />
-                <span className="mcp-settings-row-copy">
-                  <strong>{record.label}</strong>
-                  <small>{record.description ?? record.id}</small>
-                </span>
-                <span className="mcp-settings-transport">{record.transport}</span>
-                {record.status === "configured" ? <span /> : <McpStatus status={record.status} />}
-                <ChevronRight size={14} />
-              </button>
-              <McpToggle
-                checked={record.enabled}
-                label={`${record.enabled ? "Disable" : "Enable"} ${record.label}`}
-                onChange={(enabled) => onSetEnabled(record.id, enabled)}
-              />
-            </div>
-          ))}
-        </div>
-      ) : null}
+      </header>
+      <div className="mcp-settings-list">
+        {records.map((record) => (
+          <div className="mcp-settings-row" key={record.id}>
+            <button aria-label={`Open ${record.label}`} className="mcp-settings-row-main" onClick={() => onOpen(record)} type="button">
+              <McpTransportIcon transport={record.transport} />
+              <span className="mcp-settings-row-copy">
+                <strong>{record.label}</strong>
+                <small>{record.description ?? record.id}</small>
+              </span>
+              {record.status === "invalid" ? <McpStatus /> : <span className="mcp-settings-transport">{record.transport.toUpperCase()}</span>}
+              <ChevronRight size={14} />
+            </button>
+            <McpToggle
+              checked={record.enabled}
+              label={`${record.enabled ? "Disable" : "Enable"} ${record.label}`}
+              onChange={(enabled) => onSetEnabled(record.id, enabled)}
+            />
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
 
-function McpStatus({ status }: { status: "invalid" | "disabled" }) {
-  const Icon = status === "invalid" ? AlertTriangle : CircleOff;
-  return <span className={`mcp-status ${status}`}><Icon size={12} />{status === "invalid" ? "Invalid" : "Disabled"}</span>;
+function McpStatus() {
+  return <span className="mcp-status invalid"><AlertTriangle size={12} />Needs attention</span>;
 }
 
 function newServer(): McpServerDefinition {

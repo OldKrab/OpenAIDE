@@ -59,3 +59,9 @@ pub(super) fn known_built_in_launch(agent_id: &str) -> Option<AcpAgentConfig> {
         _ => None,
     }
 }
+
+pub(super) fn is_built_in_id(agent_id: &str) -> bool {
+    BUILT_IN_AGENT_METADATA
+        .iter()
+        .any(|metadata| metadata.id == agent_id)
+}

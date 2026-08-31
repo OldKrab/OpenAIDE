@@ -2,26 +2,14 @@ import type { AgentListedSession, ChatMessage, HistorySyncState, TaskStatus } fr
 import { activityStepCompletedLabel, activityStepProgressLabel } from "../state/activityLabels";
 
 export function newTaskStatusLabel({
-  agentLabel,
-  configOptionsError,
-  configOptionsLoading,
-  configOptionsReady,
-  needsWorkspace,
   openingNativeSession,
   submitting,
 }: {
-  agentLabel: string;
-  configOptionsError?: string;
-  configOptionsLoading?: boolean;
-  configOptionsReady: boolean;
-  needsWorkspace: boolean;
   openingNativeSession?: boolean;
   submitting: boolean;
 }) {
   if (openingNativeSession) return "Opening task";
   if (submitting) return "Starting task";
-  if (needsWorkspace || configOptionsError) return undefined;
-  if (configOptionsLoading || !configOptionsReady) return `Preparing ${agentLabel} options`;
   return undefined;
 }
 

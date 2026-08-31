@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-#[cfg(test)]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -735,7 +733,6 @@ impl TurnRunner {
         self.agent.close_session(session)
     }
 
-    #[cfg(test)]
     pub(crate) fn active_turns(&self) -> HashSet<(String, String)> {
         self.active_turns
             .turns

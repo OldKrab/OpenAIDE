@@ -17,11 +17,17 @@ shell-words = "1.1"
 thiserror = "2.0"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 tempfile = "3.23"
-agent-client-protocol = { version = "1.2.0", features = ["unstable"] }
-agent-client-protocol-schema = { version = "=1.4.0", features = ["unstable_elicitation"] }
+agent-client-protocol = { git = "https://github.com/OldKrab/rust-sdk", rev = "fca6e7168b79961bd12464761f23f0054a8772b8", features = ["unstable"] }
+agent-client-protocol-schema = { version = "1.7.0", features = ["unstable_subagents"] }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time"] }
 fs2 = "0.4"
 base64 = "0.23"
 ignore = "0.4.27"
 notify = "8.2.0"
 nucleo-matcher = "0.3.1"
+zstd = "0.13"
+
+# ACP Subagent Sessions are still an unreleased draft. Keep the exact reviewed
+# PR #1992 commit here so the temporary contract cannot move underneath builds.
+[patch.crates-io]
+agent-client-protocol-schema = { git = "https://github.com/agentclientprotocol/agent-client-protocol", rev = "2fc02e6105baf2a27cc3981a4f46a851fd946d69" }

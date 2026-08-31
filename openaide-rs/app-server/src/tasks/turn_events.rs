@@ -21,6 +21,7 @@ use crate::time::now_string;
 use self::commands::{update_task_commands, CommandsUpdateTarget};
 use self::config::{update_task_config_options, ConfigUpdateTarget};
 use self::text_chunks::{TextChannel, TextChunkRoutes};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -99,6 +100,7 @@ pub(crate) struct TaskSessionEventSink {
     native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     server_requests: ServerRequestRuntime,
     text_chunk_routes: TextChunkRoutes,
+    subagent_text_chunk_routes: Mutex<HashMap<String, TextChunkRoutes>>,
     emission_lock: Mutex<()>,
 }
 
@@ -116,6 +118,7 @@ impl TaskSessionEventSink {
             native_catalog: None,
             server_requests,
             text_chunk_routes: TextChunkRoutes::new(session_id),
+            subagent_text_chunk_routes: Mutex::default(),
             emission_lock: Mutex::new(()),
         }
     }
@@ -177,6 +180,10 @@ impl TaskSessionEventSink {
                 crate::protocol::model::AgentMessageRole::Thought => TextChannel::Thought,
             };
             match channel {
+                TextChannel::User => {
+                    self.finish_anonymous_text_run();
+                    self.finish_anonymous_thought_run();
+                }
                 TextChannel::Agent => self.finish_anonymous_thought_run(),
                 TextChannel::Thought => self.finish_anonymous_text_run(),
             }
@@ -226,8 +233,13 @@ impl TaskSessionEventSink {
                 .get_or_insert_with(|| self.session_id.clone());
             return self.upsert_session_tool(normalize_event(event, &now), &now);
         }
-        if matches!(event, AgentEvent::Subagent(_)) {
-            return self.upsert_session_tool(normalize_event(event, &now), &now);
+        if let AgentEvent::Subagent(subagent) = &event {
+            let target = self.append_codex_subagent_interaction(subagent, "Main Agent", &now)?;
+            self.upsert_session_tool(normalize_event(event, &now), &now)?;
+            if let Some(subagent_id) = target {
+                self.publish_subagent_snapshots(&subagent_id)?;
+            }
+            return Ok(());
         }
         self.append_session_message(normalize_event(event, &now), &now)
     }
@@ -241,9 +253,9 @@ impl TaskSessionEventSink {
             .finish_anonymous(TextChannel::Thought);
     }
 
-    /// Sourced messages need no inferred lifetime. Only anonymous ACP chunks need
-    /// a boundary when another content kind is observed.
-    fn finish_anonymous_text_routes(&self) {
+    /// Sourced messages need no inferred lifetime. Anonymous ACP chunks must also
+    /// stop at accepted User messages, which are persisted outside session/update.
+    pub(super) fn finish_anonymous_text_routes(&self) {
         self.text_chunk_routes.finish_all_anonymous();
     }
 
@@ -324,6 +336,22 @@ impl TaskSessionEventSink {
             crate::protocol::model::AgentMessagePart::Text { text } => Some(text.len()),
             _ => None,
         };
+        if let crate::protocol::model::AgentMessagePart::Text { text } = &part {
+            match self.mutations.stream_agent_message_text(
+                &self.task_id,
+                &self.session_id,
+                role,
+                &message_id,
+                text,
+                now,
+            )? {
+                crate::tasks::mutation::AgentMessageTextStreamOutcome::Admitted
+                | crate::tasks::mutation::AgentMessageTextStreamOutcome::IgnoredStaleSession => {
+                    return Ok(())
+                }
+                crate::tasks::mutation::AgentMessageTextStreamOutcome::NeedsMessageCommit => {}
+            }
+        }
         let message = NormalizedMessage::AgentMessage {
             id: message_id,
             role,

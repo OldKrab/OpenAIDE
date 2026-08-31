@@ -25,6 +25,7 @@ use crate::time::now_string;
 use crate::agent::gateway::AgentGateway;
 
 mod open_recovery;
+mod preparation;
 pub(crate) use open_recovery::{HistoryRefreshRequest, OpenSessionResumeOutcome};
 
 /// Owns Native Session acquisition, binding, update subscription, and prompt startup.
@@ -38,6 +39,7 @@ pub(crate) struct NativeSessionService {
     turn_runner: TurnRunner,
     server_requests: ServerRequestRuntime,
     preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
+    preparation_cancellations: Arc<Mutex<HashMap<String, Arc<TurnCancellation>>>>,
     subscriptions: Arc<Mutex<HashMap<String, NativeSessionSubscription>>>,
 }
 
@@ -66,6 +68,7 @@ impl NativeSessionService {
             turn_runner,
             server_requests,
             preparing_session_ids,
+            preparation_cancellations: Default::default(),
             subscriptions: Default::default(),
         }
     }
@@ -78,42 +81,25 @@ impl NativeSessionService {
             .contains_key(task_id)
     }
 
-    /// Acquires and binds the empty New Task's Native Session before Composer becomes sendable.
-    pub(crate) fn prepare_task(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
-        let started_at = Instant::now();
-        crate::logging::info(
-            "native_session_prepare_started",
-            serde_json::json!({
-                "task_id": task.task_id,
-                "agent_id": task.agent_id,
-                "has_bound_session": task.agent_session_id.is_some(),
-            }),
-        );
-        let result = self.prepare_task_inner(task);
-        match &result {
-            Ok(()) => crate::logging::info(
-                "native_session_prepare_completed",
-                serde_json::json!({
-                    "task_id": task.task_id,
-                    "agent_id": task.agent_id,
-                    "duration_ms": started_at.elapsed().as_millis(),
-                }),
-            ),
-            Err(_) => crate::logging::warn(
-                "native_session_prepare_failed",
-                serde_json::json!({
-                    "task_id": task.task_id,
-                    "agent_id": task.agent_id,
-                    "duration_ms": started_at.elapsed().as_millis(),
-                    "error_kind": "runtime_error",
-                }),
-            ),
+    /// Ends legacy anonymous Agent and Thought messages at the durable User-message
+    /// boundary. ACP chunks with a source message id retain their stable identity.
+    pub(crate) fn user_message_accepted(&self, task_id: &str) {
+        let sink = self
+            .subscriptions
+            .lock()
+            .expect("native session subscriptions poisoned")
+            .get(task_id)
+            .map(|subscription| subscription.sink.clone());
+        if let Some(sink) = sink {
+            sink.finish_anonymous_text_routes();
         }
-        result
     }
 
-    fn prepare_task_inner(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
-        let cancellation = TurnCancellation::new();
+    fn prepare_task_inner(
+        &self,
+        task: &TaskRecord,
+        cancellation: TurnCancellation,
+    ) -> Result<(), RuntimeError> {
         let (session, missing_session_id) = match &task.agent_session_id {
             Some(session_id) => match self.agent_gateway.resume_session(AgentSessionResume {
                 agent_id: task.agent_id.clone(),
@@ -189,13 +175,21 @@ impl NativeSessionService {
                 task.config_options_catalog = config_catalog.clone();
                 task.agent_commands_catalog = commands_catalog.clone();
                 task.model_id = model_id.clone();
+                // A newly started replacement session defines the complete
+                // process-local catalog state, including an authoritative
+                // absence of options or commands.
+                task.native_session_data_freshness = Default::default();
             } else {
                 if config_catalog.is_some() {
                     task.config_options_catalog = config_catalog.clone();
+                    task.native_session_data_freshness.mark_config_fresh();
                     task.model_id = model_id.clone();
                 }
-                if task.agent_commands_catalog.is_none() {
-                    task.agent_commands_catalog = commands_catalog.clone();
+                if commands_catalog.is_some() {
+                    if task.agent_commands_catalog.is_none() {
+                        task.agent_commands_catalog = commands_catalog.clone();
+                    }
+                    task.native_session_data_freshness.mark_commands_fresh();
                 }
             }
             task.updated_at = now.clone();

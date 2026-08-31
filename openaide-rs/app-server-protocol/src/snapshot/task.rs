@@ -6,6 +6,7 @@ use crate::task::TaskNavigationSection;
 
 use super::chat::{ChatSnapshot, RecoverySnapshot};
 use super::pending_request::PendingRequestSnapshot;
+use super::subagent::SubagentOverviewSnapshot;
 
 mod agent;
 mod preparation;
@@ -78,6 +79,8 @@ pub struct NativeSessionSummary {
     pub worktree_id: Option<WorktreeId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_activity: Option<String>,
 }
@@ -169,10 +172,31 @@ pub enum TaskLifecycle {
     Archived,
 }
 
+/// User-owned handling for future ACP permission requests in this Task.
+///
+/// `AutoApprove` deliberately selects only an Agent-provided `allowOnce` option. It never
+/// changes Agent-owned persistent permission configuration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskPermissionPolicy {
+    #[default]
+    AskEveryTime,
+    AutoApprove,
+}
+
+impl TaskPermissionPolicy {
+    pub fn is_ask_every_time(&self) -> bool {
+        matches!(self, Self::AskEveryTime)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    /// Durable user preference that applies to future Task permission requests.
+    #[serde(default)]
+    pub permission_policy: TaskPermissionPolicy,
     /// App Server-authored start of the active turn; absent when no turn is running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<String>,
@@ -190,6 +214,8 @@ pub struct TaskSnapshot {
     pub current_plan: Option<AgentPlanSnapshot>,
     #[serde(default)]
     pub message_queue: TaskMessageQueueSnapshot,
+    #[serde(default)]
+    pub subagents: SubagentOverviewSnapshot,
     pub chat: ChatSnapshot,
     pub history_sync: TaskHistorySyncSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

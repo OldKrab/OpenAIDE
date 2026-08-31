@@ -7,6 +7,7 @@ import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
+import { retainNewTaskProject } from "../services/hostBridge";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
 import type { AppControllerBackendConnection } from "./appControllerBackendLifecycle";
 import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
@@ -24,7 +25,6 @@ type NewTaskWorkspaceOptions = {
   newTaskSnapshot?: import("@openaide/app-shell-contracts").TaskSnapshot;
   pendingPreparation: MutableRefObject<PendingNewTaskPreparation | undefined>;
   replicaEpoch: number;
-  rememberNewTaskProject?: (projectId: string) => void;
   startAttempt: MutableRefObject<NewTaskStartAttempt | undefined>;
   state: AppState;
 };
@@ -42,7 +42,6 @@ export function useNewTaskWorkspace({
   newTaskSnapshot,
   pendingPreparation,
   replicaEpoch,
-  rememberNewTaskProject,
   startAttempt,
   state,
 }: NewTaskWorkspaceOptions) {
@@ -74,10 +73,6 @@ export function useNewTaskWorkspace({
     ? bootstrap.projectId
     : undefined;
   const appliedNewTaskBootstrap = useRef<WebviewBootstrap | undefined>(undefined);
-  const rememberedBootstrapProject = useRef<{
-    bootstrap: WebviewBootstrap;
-    projectId: string;
-  } | undefined>(undefined);
 
   useEffect(() => {
     if (!state.appServerStateRootId) return;
@@ -85,6 +80,9 @@ export function useNewTaskWorkspace({
       projectId: state.newTask.selection.projectId,
       agentId: state.newTask.selection.agentId || undefined,
     });
+    if (state.newTask.selection.projectId) {
+      retainNewTaskProject(state.newTask.selection.projectId);
+    }
   }, [
     clientInstanceId,
     state.appServerStateRootId,
@@ -109,23 +107,6 @@ export function useNewTaskWorkspace({
 
   useEffect(() => {
     if (
-      newTaskBootstrapProjectId
-      && (
-        rememberedBootstrapProject.current?.bootstrap !== bootstrap
-        || rememberedBootstrapProject.current.projectId !== newTaskBootstrapProjectId
-      )
-      && state.projects.some((project) => (
-        project.projectId === newTaskBootstrapProjectId
-        && project.available !== false
-      ))
-    ) {
-      rememberedBootstrapProject.current = {
-        bootstrap,
-        projectId: newTaskBootstrapProjectId,
-      };
-      rememberNewTaskProject?.(newTaskBootstrapProjectId);
-    }
-    if (
       bootstrap.surface === "task"
       && !bootstrap.taskId
       && newTaskBootstrapProjectId
@@ -145,9 +126,7 @@ export function useNewTaskWorkspace({
     bootstrap,
     newTaskBootstrapProjectId,
     newTaskDispatch,
-    rememberNewTaskProject,
     state.newTask.selection.projectId,
-    state.projects,
   ]);
 
   useEffect(() => {

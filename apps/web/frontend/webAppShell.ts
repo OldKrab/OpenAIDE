@@ -16,6 +16,7 @@ import {
 } from "../../../packages/frontend/src/shells/domBootstrap";
 import type { HostChannelMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import { clientInstanceIdForBootstrap } from "../../../packages/frontend/src/services/backendInitialization";
+import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import {
   createRuntimeLogger,
   safeWebviewTelemetryFields,
@@ -29,6 +30,18 @@ const logger = createRuntimeLogger("openaide-webview");
 
 /** Browser-history adapter owned by the Web App composition boundary. */
 export function createWebAppShell(): FrontendShell {
+  const themeStorageKey = "openaide.web.theme";
+  const appearance = createShellAppearance({
+    body: document.body,
+    storage: window.localStorage,
+    storageKey: themeStorageKey,
+    systemTheme: window.matchMedia?.("(prefers-color-scheme: dark)"),
+    subscribeStoredTheme(listener) {
+      window.addEventListener("storage", (event) => {
+        if (event.key === themeStorageKey) listener(event.newValue);
+      });
+    },
+  });
   const bootstrap = () => webBootstrapForLocation();
   const post = (message: HostChannelMessage) => {
     switch (message.type) {
@@ -63,6 +76,7 @@ export function createWebAppShell(): FrontendShell {
     webTaskNotificationEnvironment((taskId) => navigate(`/task/${encodeURIComponent(taskId)}`)),
   );
   return {
+    appearance,
     bootstrap,
     clipboard: { writeText: writeBrowserClipboardText },
     sentFiles: {
@@ -73,6 +87,18 @@ export function createWebAppShell(): FrontendShell {
           clientInstanceId: clientInstanceIdForBootstrap(bootstrap()),
           messageId,
           taskId,
+        });
+        const link = document.createElement("a");
+        link.href = `/__openaide-app-server/download?${search}`;
+        link.download = label;
+        link.click();
+      },
+    },
+    supportExports: {
+      async save({ fileHandleId, label }) {
+        const search = new URLSearchParams({
+          clientInstanceId: clientInstanceIdForBootstrap(bootstrap()),
+          fileHandleId,
         });
         const link = document.createElement("a");
         link.href = `/__openaide-app-server/download?${search}`;
@@ -124,6 +150,7 @@ export function createWebAppShell(): FrontendShell {
       openExternal: (url) => window.open(url, "_blank", "noopener,noreferrer"),
       reload: () => window.location.reload(),
     },
+    fileViewer: true,
     taskNotifications,
   };
 }

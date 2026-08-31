@@ -105,7 +105,11 @@ export function useNewTaskPreparation({
   if (replacementTaskId && preparationKey) {
     completedPreparationKey.current = undefined;
     failedPreparationKey.current = undefined;
-    if (pendingPreparation.current?.key === preparationKey) pendingPreparation.current = undefined;
+    // A render caused by local pending feedback must not clear the replacement
+    // acquire that produced it. Only discard the settled predecessor here.
+    if (pendingPreparation.current?.key === preparationKey && pendingPreparation.current.settled) {
+      pendingPreparation.current = undefined;
+    }
   }
   if (isNewTaskRoute && preparedTaskMatches && preparationKey) {
     completedPreparationKey.current = preparationKey;
@@ -214,6 +218,10 @@ export function useNewTaskPreparation({
     });
     const pending = { key: preparationKey, promise, settled: false };
     pendingPreparation.current = pending;
+    // The options catalog belongs to the Prepared Task response, but the user
+    // already waits for it once acquisition starts. Represent that interval
+    // immediately instead of rendering a false-empty options slot.
+    dispatch({ type: "newTask:configOptions:start" });
 
     void promise.catch((error) => {
       if (error instanceof SupersededPreparation) return;

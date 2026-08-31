@@ -8,16 +8,19 @@ import { renderWebviewHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import {
   VSCODE_SHELL,
+  type SurfaceKind,
   type TaskFocusSource,
   type WebviewBootstrap,
   type WebviewHost,
 } from "./types";
 import { currentWorkspaceRoot, workspaceRoots, type WorkspaceRoot } from "../workspace/roots";
 import { agentTabIcon, newTaskTabIcon, settingsTabIcon } from "./tabIcons";
+import { developerSettingsVisible } from "../settings/snapshot";
 
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
 const MAX_TASK_PANEL_TITLE_LENGTH = 50;
+const RETAINED_NEW_TASK_PROJECT_KEY = "openaide.retainedNewTaskProjectId";
 
 export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFocusSource {
   private readonly taskPanels = new Map<string, vscode.WebviewPanel>();
@@ -28,25 +31,36 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   private settingsPanel: vscode.WebviewPanel | undefined;
   private newTaskPanel: vscode.WebviewPanel | undefined;
   private readonly nativeSessionPanels = new Map<string, vscode.WebviewPanel>();
+  private retainedNewTaskProjectId: string | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly runtime: RuntimeClient,
     private readonly runtimeProcess: RuntimeProcess,
     private readonly logger: ExtensionLogger,
-  ) {}
+  ) {
+    this.retainedNewTaskProjectId = context.workspaceState.get<string>(RETAINED_NEW_TASK_PROJECT_KEY);
+  }
 
   openNewTask(projectId?: string) {
+    const retainedProjectId = this.retainedNewTaskProjectId;
+    const effectiveProjectId = projectId ?? retainedProjectId;
+    if (projectId) this.retainNewTaskProject(projectId);
+    this.logger.info("VS Code New Task Project resolved", {
+      project_id: effectiveProjectId,
+      project_present: effectiveProjectId !== undefined,
+      selection_source: projectId ? "explicit" : retainedProjectId ? "shell_retained" : "app_server_default",
+    });
     if (this.newTaskPanel) {
       this.newTaskPanel.reveal(vscode.ViewColumn.Active);
       this.focusPanel(this.newTaskPanel);
-      if (projectId !== undefined) {
+      if (effectiveProjectId !== undefined) {
         const current = this.panelBootstraps.get(this.newTaskPanel);
         if (current && current.surface === "task" && !current.taskId) {
-          this.panelBootstraps.set(this.newTaskPanel, { ...current, projectId });
+          this.panelBootstraps.set(this.newTaskPanel, { ...current, projectId: effectiveProjectId });
           void this.newTaskPanel.webview.postMessage({
             type: "surface.newTaskChanged",
-            payload: { project_id: projectId },
+            payload: { project_id: effectiveProjectId },
           });
         }
       }
@@ -56,7 +70,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       surface: "task",
       // An omitted Project lets the retained/App Server New Task default win.
       // Sidebar Project actions still pass an explicit hint.
-      projectId,
+      projectId: effectiveProjectId,
     });
     panel.iconPath = newTaskTabIcon(this.context);
     this.newTaskPanel = panel;
@@ -67,6 +81,41 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         this.newTaskPanel = undefined;
       }
     });
+  }
+
+  /** Shell-owned handoff for New Task selections made in independent webviews. */
+  retainNewTaskProject(projectId: string, surface?: SurfaceKind) {
+    if (!projectId) return;
+    this.retainedNewTaskProjectId = projectId;
+    const startedAt = Date.now();
+    this.logger.info("VS Code New Task Project retention started", {
+      project_id: projectId,
+      surface,
+    });
+    try {
+      void Promise.resolve(this.context.workspaceState.update(RETAINED_NEW_TASK_PROJECT_KEY, projectId))
+        .then(() => this.logger.info("VS Code New Task Project retention completed", {
+          duration_ms: Date.now() - startedAt,
+          outcome: "updated",
+          project_id: projectId,
+          surface,
+        }))
+        .catch(() => this.logger.warn("VS Code New Task Project retention completed", {
+          duration_ms: Date.now() - startedAt,
+          error_kind: "workspace_state_update_failed",
+          outcome: "failed",
+          project_id: projectId,
+          surface,
+        }));
+    } catch {
+      this.logger.warn("VS Code New Task Project retention completed", {
+        duration_ms: Date.now() - startedAt,
+        error_kind: "workspace_state_update_failed",
+        outcome: "failed",
+        project_id: projectId,
+        surface,
+      });
+    }
   }
 
   openNativeSession(agentId: string, nativeSessionId: string, projectId?: string) {
@@ -198,12 +247,20 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         this.releaseFocusedPanel(panel);
       }
     });
-    const viewId = `panel-${randomUUID()}`;
+    // VS Code owns the webview lifecycle identity. A fresh panel must not
+    // inherit another panel's sessionStorage-backed New Task selection.
+    const clientInstanceId = randomUUID();
+    const viewId = `panel-${clientInstanceId}`;
+    this.logger.info("VS Code webview client created", {
+      surface: bootstrap.surface,
+      client_identity_source: "shell",
+      extension_version: extensionVersion(this.context),
+    });
     const detachAppServerView = this.runtime.attachAppServerView(viewId, (message) => {
       void panel.webview.postMessage(message);
     });
     panel.onDidDispose(detachAppServerView);
-    this.renderPanel(panel, this.bootstrap(bootstrap));
+    this.renderPanel(panel, this.bootstrap({ ...bootstrap, clientInstanceId }));
     panel.webview.onDidReceiveMessage((message) => {
       if (isAppServerSessionViewMessage(message)) {
         void this.runtime.handleAppServerViewMessage(viewId, message);
@@ -214,6 +271,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         runtimeProcess: this.runtimeProcess,
         post: (payload) => panel.webview.postMessage(payload),
         logger: this.logger,
+        surface: bootstrap.surface,
         developerSettingsStore: this.context.globalState,
         agentSecretStore: this.context.secrets,
         adoptTask: (taskId, taskTitle, agentId) => this.adoptTaskPanel(panel, taskId, taskTitle, agentId),
@@ -308,8 +366,14 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       // Editor surfaces need the same Project scope as Task Navigation so a
       // multi-root VS Code window can change New Task context in place.
       projectIds: workspaceRoots().map(({ projectId }) => projectId),
+      developerSettingsUnlocked: developerSettingsVisible(this.context.globalState),
     };
   }
+}
+
+function extensionVersion(context: vscode.ExtensionContext) {
+  const version = context.extension.packageJSON.version as unknown;
+  return typeof version === "string" ? version : "unknown";
 }
 
 /** Keeps the native VS Code tab navigable while the Task retains its complete title. */
