@@ -102,9 +102,9 @@ jobs:
           for target in linux-x64 win32-x64 darwin-arm64; do
             test -f "release/openaide-vscode-$target-$RELEASE_VERSION.vsix"
           done
-          test -f "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe"
-          test -f "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe.sig"
-          test -f "release/openaide-desktop-darwin-arm64-$RELEASE_VERSION-unnotarized.dmg"
+          test -f "release/openaide-desktop-windows-x64-$RELEASE_VERSION.exe"
+          test -f "release/openaide-desktop-windows-x64-$RELEASE_VERSION.exe.sig"
+          test -f "release/openaide-desktop-macos-arm64-$RELEASE_VERSION.dmg"
           test "$(find release -maxdepth 1 -type f -name '*.vsix' | wc -l)" -eq 3
           test "$(find release -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | wc -l)" -eq 2
       - name: Create draft and attach verified assets
@@ -174,8 +174,8 @@ jobs:
           node scripts/windows-desktop-update-feed.mjs \
             --releases release/github-releases.json \
             --version "$RELEASE_VERSION" \
-            --artifact "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe" \
-            --signature "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe.sig" \
+            --artifact "release/openaide-desktop-windows-x64-$RELEASE_VERSION.exe" \
+            --signature "release/openaide-desktop-windows-x64-$RELEASE_VERSION.exe.sig" \
             --notes release/release-notes.md \
             --output release/update-feed
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
