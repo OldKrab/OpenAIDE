@@ -36,13 +36,15 @@ limited release checks described below:
   Codex integration is version-locked and installed into per-user storage. npm's
   infrastructure receives the ordinary request and network metadata associated
   with these downloads.
-- When production Desktop updates are enabled in a signed build, OpenAIDE may
+- When production Desktop updates are enabled in an update-capable build, OpenAIDE may
   check the canonical update service after startup and when the user explicitly
   checks. The request contains only the update channel, current version,
   platform, and architecture, plus network metadata normally visible to a web
   service such as the IP address. It contains no installation identifier, Task
-  content, workspace data, or product analytics. Current unsigned and
-  unnotarized preview builds do not contact the production update feed.
+  content, workspace data, or product analytics. Windows release builds may use
+  this feed before Authenticode signing is available because updater signatures
+  and operating-system publisher signatures are independent. Current macOS and
+  development builds do not contact the production update feed.
 - Opening a release, documentation, or other external link sends a request to
   that destination through the user's browser.
 
@@ -59,8 +61,8 @@ chooses whether and where to share an exported file.
 ## Third-party services
 
 Depending on the features selected, data may be processed by the selected Agent
-and its provider, npm's package infrastructure, GitHub Releases, and the future
-OpenAIDE update service. OpenAIDE does not control those services' retention or
+and its provider, npm's package infrastructure, GitHub Releases, and the
+OpenAIDE update feed hosted by GitHub Pages. OpenAIDE does not control those services' retention or
 privacy practices.
 
 ## Changes and questions

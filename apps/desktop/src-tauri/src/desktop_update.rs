@@ -32,7 +32,8 @@ pub(crate) struct DesktopUpdateConfig {
 impl DesktopUpdateConfig {
     fn for_build() -> Option<Self> {
         if cfg!(debug_assertions)
-            || option_env!("OPENAIDE_DESKTOP_UPDATE_SIGNED_BUILD") != Some("1")
+            || !cfg!(target_os = "windows")
+            || option_env!("OPENAIDE_DESKTOP_UPDATE_ENABLED_BUILD") != Some("1")
         {
             return None;
         }
@@ -115,7 +116,6 @@ pub(crate) enum DesktopUpdateKind {
 #[serde(rename_all = "camelCase")]
 pub(crate) enum DesktopUpdateUnavailableReason {
     DevelopmentBuild,
-    UnsignedBuild,
     NotConfigured,
     UnsupportedInstallation,
 }
@@ -187,8 +187,8 @@ impl DesktopUpdateState {
             None
         } else if cfg!(debug_assertions) {
             Some(DesktopUpdateUnavailableReason::DevelopmentBuild)
-        } else if option_env!("OPENAIDE_DESKTOP_UPDATE_SIGNED_BUILD") != Some("1") {
-            Some(DesktopUpdateUnavailableReason::UnsignedBuild)
+        } else if !cfg!(target_os = "windows") {
+            Some(DesktopUpdateUnavailableReason::UnsupportedInstallation)
         } else {
             Some(DesktopUpdateUnavailableReason::NotConfigured)
         };

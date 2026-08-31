@@ -50,7 +50,7 @@ export type DesktopUpdateSnapshot = {
   revision: number;
   installedVersion: string;
   kind: DesktopUpdateKind;
-  unavailableReason?: "developmentBuild" | "unsignedBuild" | "notConfigured" | "unsupportedInstallation";
+  unavailableReason?: "developmentBuild" | "notConfigured" | "unsupportedInstallation";
   offer?: {
     version: string;
     notes: string;

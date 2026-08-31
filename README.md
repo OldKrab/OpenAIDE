@@ -85,10 +85,17 @@ Download the package for your platform from
 | Windows x64 | `openaide-desktop-win32-x64-VERSION-unsigned.exe` | Unsigned until SignPath Foundation accepts the project |
 | macOS Apple Silicon | `openaide-desktop-darwin-arm64-VERSION-unnotarized.dmg` | Ad-hoc signed, but not Apple-notarized |
 
-Windows may show an unknown-publisher warning. macOS may require approval in
-**System Settings → Privacy & Security** after the first launch. These packages
-do not yet use the production in-app update feed; install a newer package from
-GitHub Releases to update.
+Windows may show an unknown-publisher warning. Windows releases use a separate
+OpenAIDE updater signature so an installed update is accepted only when its
+bytes were produced by the release workflow and have not changed. Starting with
+the first update-enabled release, Windows can check, download, and apply later
+versions from **Settings → General → Application updates**. This updater
+signature does not suppress SmartScreen; users may still need to allow the new
+version when Windows starts it.
+
+macOS may require approval in **System Settings → Privacy & Security** after the
+first launch. In-app updates remain disabled on macOS until safe replacement of
+an unnotarized application is qualified; install a newer DMG manually.
 
 The Desktop installer adds the application and its bundled OpenAIDE App Server.
 On Windows, selecting a WSL project also installs the bundled Linux App Server
