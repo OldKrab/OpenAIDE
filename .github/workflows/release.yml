@@ -56,9 +56,11 @@ jobs:
   artifacts:
     needs: validate
     uses: ./.github/workflows/build-vsix.yml
+    secrets: inherit
     with:
       artifacts: all
       version: ${{ needs.validate.outputs.version }}
+      enable_windows_updates: true
 
   github-release:
     name: Publish canonical immutable GitHub release
@@ -101,6 +103,7 @@ jobs:
             test -f "release/openaide-vscode-$target-$RELEASE_VERSION.vsix"
           done
           test -f "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe"
+          test -f "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe.sig"
           test -f "release/openaide-desktop-darwin-arm64-$RELEASE_VERSION-unnotarized.dmg"
           test "$(find release -maxdepth 1 -type f -name '*.vsix' | wc -l)" -eq 3
           test "$(find release -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | wc -l)" -eq 2
@@ -114,6 +117,7 @@ jobs:
           files: |
             release/*.vsix
             release/*.exe
+            release/*.exe.sig
             release/*.dmg
       - name: Publish the completed draft
         env:
@@ -129,6 +133,60 @@ jobs:
             echo "GitHub release is not immutable; enable immutable releases in repository settings" >&2
             exit 1
           fi
+
+  desktop-update-feed:
+    name: Publish Windows Desktop update feed
+    needs: [validate, github-release]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: desktop-win32-x64
+          path: release
+          merge-multiple: true
+      - name: Read immutable release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" > release/github-releases.json
+          gh release view "v$RELEASE_VERSION" --json body --jq .body > release/release-notes.md
+      - name: Generate version-aware Windows feed
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          node scripts/windows-desktop-update-feed.mjs \
+            --releases release/github-releases.json \
+            --version "$RELEASE_VERSION" \
+            --artifact "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe" \
+            --signature "release/openaide-desktop-win32-x64-$RELEASE_VERSION-unsigned.exe.sig" \
+            --notes release/release-notes.md \
+            --output release/update-feed
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: release/update-feed
+      - name: Deploy immutable release feed
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
   marketplace:
     name: Reconcile VS Code Marketplace packages
