@@ -14,7 +14,22 @@ fn main() {
         .or_else(read_git_commit)
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=OPENAIDE_BUILD_COMMIT={commit}");
+
+    embed_windows_metadata();
 }
+
+#[cfg(windows)]
+fn embed_windows_metadata() {
+    // SignPath validates these resources on the executable it signs. Keep the
+    // version Cargo-owned so release stamping supplies the same version used by
+    // the Desktop shell and installer.
+    tauri_winres::WindowsResource::new()
+        .compile()
+        .expect("failed to embed OpenAIDE App Server Windows metadata");
+}
+
+#[cfg(not(windows))]
+fn embed_windows_metadata() {}
 
 fn watch_git_revision() {
     let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from) else {

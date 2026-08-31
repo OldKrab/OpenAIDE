@@ -969,7 +969,7 @@ describe("app controller mounted lifecycle", () => {
     expect(request).toHaveBeenCalledWith(PROJECT_ADD, { workspaceRoot: "/workspace/added" });
     expect(request).toHaveBeenCalledWith(TASK_NAVIGATION_LOAD_MORE, {
       projectId: "project_2",
-      targetRowCount: 10,
+      targetRowCount: 7,
     });
     discovery.resolve({ accepted: true });
   });

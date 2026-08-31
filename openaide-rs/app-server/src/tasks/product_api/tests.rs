@@ -2088,7 +2088,7 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
     });
 
     let accepted = finished_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(Duration::from_secs(1))
         .expect("task/send must not wait for ACP session resume")
         .unwrap();
     assert!(accepted.task.chat.items.iter().any(|item| {

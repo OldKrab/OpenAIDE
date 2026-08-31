@@ -39,6 +39,7 @@ pub(crate) struct CodexAcpProvisioner {
     installer: Arc<dyn CodexAcpInstaller>,
     timeout: Duration,
     statuses: AgentStatusCache,
+    windows: bool,
 }
 
 impl CodexAcpProvisioner {
@@ -50,6 +51,7 @@ impl CodexAcpProvisioner {
             }),
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses,
+            windows: cfg!(windows),
         }
     }
 
@@ -63,6 +65,7 @@ impl CodexAcpProvisioner {
             installer,
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses: AgentStatusCache::default(),
+            windows: cfg!(windows),
         }
     }
 
@@ -77,6 +80,7 @@ impl CodexAcpProvisioner {
             installer,
             timeout,
             statuses: AgentStatusCache::default(),
+            windows: cfg!(windows),
         }
     }
 
@@ -91,6 +95,22 @@ impl CodexAcpProvisioner {
             installer,
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses,
+            windows: cfg!(windows),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_installer_for_platform(
+        storage_root: PathBuf,
+        installer: Arc<dyn CodexAcpInstaller>,
+        windows: bool,
+    ) -> Self {
+        Self {
+            storage_root,
+            installer,
+            timeout: DEFAULT_INSTALL_TIMEOUT,
+            statuses: AgentStatusCache::default(),
+            windows,
         }
     }
 
@@ -110,7 +130,7 @@ impl CodexAcpProvisioner {
         let runtimes_root = self.storage_root.join("agent-runtimes").join("codex-acp");
         fs::create_dir_all(&runtimes_root).map_err(provisioning_io_error)?;
         let version_root = runtimes_root.join(CODEX_ACP_VERSION);
-        let cache_hit = valid_installation(&version_root);
+        let cache_hit = valid_installation(&version_root, self.windows);
         let previous_status = (!cache_hit).then(|| self.statuses.begin_installation("codex"));
         let started_at = Instant::now();
         if !cache_hit {
@@ -176,7 +196,7 @@ impl CodexAcpProvisioner {
         lock_exclusive_until(&install_lock, Instant::now() + self.timeout)?;
         cleanup_stale_staging(runtimes_root);
 
-        if !valid_installation(version_root) {
+        if !valid_installation(version_root, self.windows) {
             if version_root.exists() {
                 fs::remove_dir_all(version_root).map_err(provisioning_io_error)?;
             }
@@ -191,6 +211,7 @@ impl CodexAcpProvisioner {
                 .map_err(provisioning_installer_error)
                 .and_then(|_| {
                     validate_package(&staging)?;
+                    validate_platform_runtime(&staging, self.windows)?;
                     fs::write(staging.join(MANAGED_MARKER), managed_marker())
                         .map_err(provisioning_io_error)?;
                     fs::rename(&staging, version_root).map_err(provisioning_io_error)
@@ -206,12 +227,24 @@ impl CodexAcpProvisioner {
         let lease = Arc::new(open_lock_file(&version_root.join(".lease"))?);
         FileExt::lock_shared(lease.as_ref()).map_err(provisioning_io_error)?;
         let entrypoint = package_root(version_root).join("dist/index.js");
+        let mut config = config;
+        config.command = resolved_command_or_name("node");
+        // Rust may preserve Windows' `\\?\` verbatim prefix after the managed
+        // installation is published. Node interprets the slash-normalized
+        // `//?/C:/...` form as a drive-relative `C:` entrypoint, so hand this
+        // process boundary an ordinary Node-compatible Windows path.
+        config.args = vec![process_path_argument(&entrypoint, self.windows)];
+        if self.windows {
+            // The @openai/codex Node launcher can terminate when nested under
+            // codex-acp on Windows. Use its pinned native binary directly.
+            config.env.retain(|(name, _)| name != "CODEX_PATH");
+            config.env.push((
+                "CODEX_PATH".to_string(),
+                process_path_argument(&windows_codex_binary(version_root), true),
+            ));
+        }
         Ok(PreparedCodexAcpLaunch {
-            config: AcpAgentConfig {
-                command: resolved_command_or_name("node"),
-                args: vec![entrypoint.to_string_lossy().into_owned()],
-                ..config
-            },
+            config,
             lease: Some(lease),
         })
     }
@@ -223,6 +256,7 @@ impl CodexAcpProvisioner {
                 .join("agent-runtimes")
                 .join("codex-acp")
                 .join(CODEX_ACP_VERSION),
+            self.windows,
         )
     }
 }
@@ -295,12 +329,45 @@ fn package_root(version_root: &Path) -> PathBuf {
     version_root.join("node_modules/@openaide/codex-acp")
 }
 
-fn valid_installation(version_root: &Path) -> bool {
+fn valid_installation(version_root: &Path, windows: bool) -> bool {
     fs::read_to_string(version_root.join(MANAGED_MARKER))
         .ok()
         .as_deref()
         == Some(managed_marker().as_str())
         && validate_package(version_root).is_ok()
+        && validate_platform_runtime(version_root, windows).is_ok()
+}
+
+fn windows_codex_binary(version_root: &Path) -> PathBuf {
+    version_root
+        .join("node_modules/@openai/codex-win32-x64")
+        .join("vendor/x86_64-pc-windows-msvc/bin/codex.exe")
+}
+
+fn process_path_argument(path: &Path, windows: bool) -> String {
+    let value = path.to_string_lossy();
+    if windows {
+        let normalized = value.replace('\\', "/");
+        if let Some(path) = normalized.strip_prefix("//?/UNC/") {
+            format!("//{path}")
+        } else {
+            normalized
+                .strip_prefix("//?/")
+                .unwrap_or(&normalized)
+                .to_string()
+        }
+    } else {
+        value.into_owned()
+    }
+}
+
+fn validate_platform_runtime(version_root: &Path, windows: bool) -> Result<(), RuntimeError> {
+    if windows && !windows_codex_binary(version_root).is_file() {
+        return Err(provisioning_error(
+            "installed Codex integration did not provide its native Windows runtime".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_package(version_root: &Path) -> Result<(), RuntimeError> {
