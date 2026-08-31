@@ -312,16 +312,10 @@ jobs:
             hdiutil attach "$source_artifact" -nobrowse -readonly -mountpoint "$mount_root"
             trap 'hdiutil detach "$mount_root"' EXIT
             packaged_server="$mount_root/OpenAIDE.app/Contents/MacOS/openaide-app-server"
-            source_server_without_signature="$RUNNER_TEMP/openaide-app-server-source"
-            packaged_server_without_signature="$RUNNER_TEMP/openaide-app-server-packaged"
-            cp "app-server/openaide-app-server" "$source_server_without_signature"
-            cp "$packaged_server" "$packaged_server_without_signature"
-            # Apple Silicon linker output already carries an ad-hoc signature,
-            # which Tauri replaces while sealing the app. Remove both signatures
-            # before proving that bundling preserved the source executable.
-            codesign --remove-signature "$source_server_without_signature"
-            codesign --remove-signature "$packaged_server_without_signature"
-            cmp "$source_server_without_signature" "$packaged_server_without_signature"
+            test -f "$packaged_server"
+            # The pre-bundle cmp above proves the sidecar input. Tauri then
+            # replaces its linker signature while sealing the app, which changes
+            # Mach-O load commands and cannot be reversed for a byte comparison.
             codesign --verify --strict "$packaged_server"
             codesign --verify --deep --strict "$mount_root/OpenAIDE.app"
             codesign --display --verbose=4 "$mount_root/OpenAIDE.app" 2>&1 |
