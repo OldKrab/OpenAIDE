@@ -6,7 +6,7 @@ import type { ProjectOption } from "../state/composerOptions";
 import { taskForkMutationKey, type AppState } from "../state/store";
 import {
   initialTaskNavigationRowsPerProject,
-  TASK_NAVIGATION_PAGE_SIZE,
+  taskNavigationPageSize,
 } from "../state/taskNavigationPolicy";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
@@ -162,6 +162,7 @@ export const Sidebar = memo(function Sidebar({
   );
   const initialProjectRowLimit = maxTasksPerProject
     ?? initialTaskNavigationRowsPerProject(groups.length);
+  const projectPageSize = taskNavigationPageSize(groups.length);
   const activeProjectKey = activeTask?.project_id;
   const visibleGroups = groupByProject
     ? recentVisibleGroups(groups, Math.max(1, visibleProjectLimit), activeProjectKey)
@@ -297,7 +298,7 @@ export const Sidebar = memo(function Sidebar({
                 group={group}
                 key={group.key}
                 maxTasks={projectRowLimits.get(group.key) ?? initialProjectRowLimit}
-                pageSize={TASK_NAVIGATION_PAGE_SIZE}
+                pageSize={projectPageSize}
                 nativeSessionAgentId={nativeSessionAgentId}
                 nativeSessionAgentName={nativeSessionAgentName}
                 nativeSessions={group.nativeSessions}
