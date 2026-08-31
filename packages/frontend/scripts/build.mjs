@@ -1,7 +1,11 @@
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import path from "node:path";
 
-const viteCli = fileURLToPath(new URL("../node_modules/vite/bin/vite.js", import.meta.url));
+const require = createRequire(import.meta.url);
+// npm may hoist Vite out of this workspace; resolve its declared package instead
+// of assuming a private node_modules layout.
+const viteCli = path.join(path.dirname(require.resolve("vite/package.json")), "bin", "vite.js");
 const forwardedArguments = process.argv.slice(2);
 
 await runVite(["build", ...forwardedArguments]);
