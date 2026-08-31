@@ -2046,9 +2046,13 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let deadline = Instant::now() + Duration::from_secs(1);
     let mut navigation_updated = false;
     while Instant::now() < deadline {
-        let committed = notifications
-            .recv_timeout(Duration::from_millis(50))
-            .expect("committed send notification");
+        let committed = match notifications.recv_timeout(Duration::from_millis(50)) {
+            Ok(committed) => committed,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("committed send notification channel disconnected")
+            }
+        };
         navigation_updated = dispatcher
             .handle_task_update(committed)
             .iter()
