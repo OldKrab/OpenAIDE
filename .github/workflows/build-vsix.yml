@@ -25,6 +25,11 @@ on:
         options: [all, win32-x64, darwin-arm64]
         default: all
         required: true
+      enable_windows_updates:
+        description: Build Windows with the production updater identity
+        type: boolean
+        default: false
+        required: true
   workflow_call:
     inputs:
       artifacts:
@@ -45,6 +50,16 @@ on:
         description: Desktop platform to build (all, win32-x64, or darwin-arm64)
         type: string
         default: all
+        required: false
+      enable_windows_updates:
+        description: Build the Windows release with the production updater identity
+        type: boolean
+        default: false
+        required: false
+    secrets:
+      DESKTOP_UPDATE_RELEASE_PRIVATE_KEY:
+        required: false
+      DESKTOP_UPDATE_RELEASE_PRIVATE_KEY_PASSWORD:
         required: false
 
 permissions:
@@ -283,16 +298,38 @@ jobs:
           test "$(od -An -tx1 -N4 apps/desktop/src-tauri/resources/wsl/openaide-app-server | tr -d ' \n')" = "7f454c46"
       - name: Build desktop installer
         shell: bash
+        env:
+          OPENAIDE_DESKTOP_UPDATE_ENABLED_BUILD: ${{ matrix.target == 'win32-x64' && inputs.enable_windows_updates && '1' || '' }}
+          OPENAIDE_DESKTOP_UPDATE_ORIGIN: ${{ matrix.target == 'win32-x64' && inputs.enable_windows_updates && 'https://oldkrab.github.io/OpenAIDE/' || '' }}
+          OPENAIDE_DESKTOP_UPDATE_RELEASE_PUBLIC_KEY: ${{ matrix.target == 'win32-x64' && inputs.enable_windows_updates && vars.DESKTOP_UPDATE_RELEASE_PUBLIC_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ matrix.target == 'win32-x64' && inputs.enable_windows_updates && secrets.DESKTOP_UPDATE_RELEASE_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ matrix.target == 'win32-x64' && inputs.enable_windows_updates && secrets.DESKTOP_UPDATE_RELEASE_PRIVATE_KEY_PASSWORD || '' }}
         run: |
+          if [[ "${{ matrix.target }}" == "win32-x64" && "${{ inputs.enable_windows_updates }}" == "true" ]]; then
+            test -n "$OPENAIDE_DESKTOP_UPDATE_RELEASE_PUBLIC_KEY"
+            test -n "$TAURI_SIGNING_PRIVATE_KEY"
+            test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+            updater_build_config="$RUNNER_TEMP/openaide-tauri-updater-key.json"
+            node scripts/write-desktop-updater-build-config.mjs \
+              "$updater_build_config" \
+              "$OPENAIDE_DESKTOP_UPDATE_RELEASE_PUBLIC_KEY"
+          fi
           build_args=(
             build
             --ci
             --bundles "${{ matrix.bundle }}"
             --config "src-tauri/tauri.release-bundle.conf.json"
           )
-          # macOS release bundles use the configured free ad-hoc identity. Windows
-          # remains explicitly unsigned until the SignPath pipeline is available.
-          if [[ "${{ matrix.target }}" != "darwin-arm64" ]]; then
+          if [[ "${{ matrix.target }}" == "win32-x64" && "${{ inputs.enable_windows_updates }}" == "true" ]]; then
+            build_args+=(
+              --config "src-tauri/tauri.updater-artifacts.conf.json"
+              --config "$updater_build_config"
+            )
+          fi
+          # macOS uses its configured free ad-hoc identity. Update-enabled
+          # Windows builds must let Tauri sign the updater artifact, but no
+          # Authenticode identity is configured until SignPath is available.
+          if [[ "${{ matrix.target }}" == "win32-x64" && "${{ inputs.enable_windows_updates }}" != "true" ]]; then
             build_args+=(--no-sign)
           fi
           npm run tauri --workspace openaide-desktop -- "${build_args[@]}"
@@ -320,7 +357,7 @@ jobs:
             codesign --verify --deep --strict "$mount_root/OpenAIDE.app"
             codesign --display --verbose=4 "$mount_root/OpenAIDE.app" 2>&1 |
               grep -q '^Signature=adhoc$'
-            artifact_trust_suffix="unnotarized"
+            artifact_platform="macos-arm64"
           else
             extraction_root="$RUNNER_TEMP/openaide-desktop-nsis"
             7z x -y "$source_artifact" "-o$extraction_root"
@@ -330,14 +367,51 @@ jobs:
             packaged_wsl_server="$extraction_root/wsl/openaide-app-server"
             test -f "$packaged_wsl_server"
             cmp "wsl-app-server/openaide-app-server" "$packaged_wsl_server"
-            artifact_trust_suffix="unsigned"
+            artifact_platform="windows-x64"
           fi
 
           mkdir -p artifacts
           cp "$source_artifact" \
-            "artifacts/openaide-desktop-${{ matrix.target }}-${{ needs.prepare.outputs.version }}-${artifact_trust_suffix}.${{ matrix.extension }}"
+            "artifacts/openaide-desktop-${artifact_platform}-${{ needs.prepare.outputs.version }}.${{ matrix.extension }}"
+
+          if [[ "${{ matrix.target }}" == "win32-x64" && "${{ inputs.enable_windows_updates }}" == "true" ]]; then
+            test -f "$source_artifact.sig"
+            cp "$source_artifact.sig" \
+              "artifacts/openaide-desktop-windows-x64-${{ needs.prepare.outputs.version }}.exe.sig"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-desktop-smoke:
+    name: Smoke-test packaged win32-x64 desktop app
+    if: >-
+      (inputs.artifacts == 'all' || inputs.artifacts == 'desktop') &&
+      (inputs.desktop_target == 'all' || inputs.desktop_target == 'win32-x64')
+    needs: [prepare, desktop]
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+      # Keep smoke tests downstream from the uploaded installer. A failed smoke
+      # retry then reuses the exact release candidate instead of recompiling it.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-win32-x64${{ needs.prepare.outputs.artifact_suffix }}
+          path: artifacts
+      - name: Extract packaged Windows desktop
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem artifacts -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not found" }
+          $extractionRoot = Join-Path $env:RUNNER_TEMP "openaide-desktop-nsis"
+          7z x -y $installer.FullName "-o$extractionRoot"
       - name: Smoke-test packaged Windows Codex ACP launcher
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $packagedServer = Get-ChildItem `
@@ -365,7 +439,6 @@ jobs:
             $packagedServer.FullName `
             $env:GITHUB_WORKSPACE
       - name: Smoke-test packaged Windows desktop startup
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $desktopExecutable = Join-Path $env:RUNNER_TEMP `
@@ -404,10 +477,7 @@ jobs:
             }
           }
           Assert-AssociatedIconMatches $desktopExecutable $expectedIconPath
-          $installer = Get-ChildItem `
-            "apps/desktop/src-tauri/target/release/bundle/nsis" `
-            -Filter "*.exe" |
-            Select-Object -First 1
+          $installer = Get-ChildItem artifacts -Filter "*.exe" | Select-Object -First 1
           if (-not $installer) { throw "Windows installer was not found" }
           $expectedInstallerIconPath = Join-Path $env:GITHUB_WORKSPACE `
             "apps/desktop/src-tauri/icons/windows/installer.ico"
@@ -433,9 +503,3 @@ jobs:
               $global:LASTEXITCODE = 0
             }
           }
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: desktop-${{ matrix.target }}${{ needs.prepare.outputs.artifact_suffix }}
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 14

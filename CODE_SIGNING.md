@@ -63,9 +63,16 @@ The SignPath private key remains in SignPath's managed hardware and is never
 stored in this repository or GitHub Actions.
 
 The independent Desktop updater signature authenticates update bytes but does
-not replace operating-system code signing. Production in-app updates remain
-disabled for a platform until that platform's signing, recovery, and installed
-upgrade gates pass.
+not replace operating-system code signing. Windows in-app updates may operate
+before Authenticode is available under the explicitly documented experimental
+policy in [ADR-0058](docs/adr/0058-windows-updates-may-launch-before-authenticode.md).
+macOS in-app updates remain disabled until their platform and installed-upgrade
+gates pass.
+
+Maintainers provision the updater Release Key and GitHub Pages with
+`scripts/setup-windows-desktop-updates.sh`. The private key and its password are
+GitHub Actions secrets; only the public verification key is a repository
+variable. The private key must also have an encrypted backup outside GitHub.
 
 Suspected key misuse, compromised build provenance, or an unexpected signature
 must be reported privately through [SECURITY.md](SECURITY.md). Maintainers will

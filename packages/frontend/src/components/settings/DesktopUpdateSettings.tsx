@@ -190,8 +190,6 @@ function updateStatus(snapshot: DesktopUpdateSnapshot): { label: string; detail:
   if (snapshot.kind === "unavailable") {
     const reason = snapshot.unavailableReason === "developmentBuild"
       ? "Updates are disabled in development builds."
-      : snapshot.unavailableReason === "unsignedBuild"
-        ? "Unsigned builds must be updated with a new installer."
       : snapshot.unavailableReason === "unsupportedInstallation"
         ? "This installation must be updated with a new installer."
         : "Updates are not configured for this build.";
