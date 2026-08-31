@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-08-31
+
+### Desktop updates
+
+- Enabled the first production Windows in-app update path for installations running OpenAIDE Desktop 0.4.2.
+
 ## 0.4.2 - 2026-08-31
 
 ### Desktop updates
