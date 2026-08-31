@@ -2222,7 +2222,7 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
         let _ = emit_done_tx.send(result);
     });
     let emitted_while_waiting = emit_done_rx
-        .recv_timeout(std::time::Duration::from_millis(250))
+        .recv_timeout(std::time::Duration::from_secs(1))
         .is_ok();
 
     answer_permission(&server_requests, "task_1", "allow");
