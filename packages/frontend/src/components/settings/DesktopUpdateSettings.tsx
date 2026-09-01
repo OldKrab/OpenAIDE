@@ -42,7 +42,10 @@ export function DesktopUpdateSettings({ capability }: { capability: DesktopUpdat
         <p className="desktop-update-success">
           <CheckCircle2 aria-hidden="true" size={16} />
           <span>Updated to version {snapshot.updatedVersion}.</span>
-          <button onClick={() => capability.openReleaseNotes(snapshot.updatedVersion!)} type="button">
+          <button
+            onClick={() => void run(() => capability.openReleaseNotes(snapshot.updatedVersion!))}
+            type="button"
+          >
             View what&apos;s new
           </button>
         </p>
@@ -87,7 +90,12 @@ export function DesktopUpdateSettings({ capability }: { capability: DesktopUpdat
           <summary>Release notes</summary>
           <div className="desktop-update-notes-body">
             <Markdown
-              allowedElements={["p", "h1", "h2", "h3", "ul", "ol", "li", "pre", "code", "strong", "em"]}
+              allowedElements={["p", "h1", "h2", "h3", "ul", "ol", "li", "pre", "code", "strong", "em", "a"]}
+              components={{
+                a: ({ children, href }) => (
+                  <a href={href} rel="noreferrer" target="_blank">{children}</a>
+                ),
+              }}
               skipHtml
               unwrapDisallowed
             >

@@ -63,9 +63,23 @@ export function createDesktopShell(
   const desktopUpdates = createDesktopUpdates({
     invoke,
     listen,
-    openReleaseNotes: (version) => {
-      if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-        void openUrl(`https://github.com/OldKrab/OpenAIDE/releases/tag/v${version}`);
+    openReleaseNotes: async (version) => {
+      const operationId = `desktop-release-notes-${crypto.randomUUID()}`;
+      const startedAt = performance.now();
+      console.info(`desktop_release_notes_open_started operation_id=${operationId} attempt_count=1`);
+      try {
+        if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+          throw new Error("Desktop release version is invalid.");
+        }
+        await openUrl(`https://github.com/OldKrab/OpenAIDE/releases/tag/v${version}`);
+        console.info(
+          `desktop_release_notes_open_completed operation_id=${operationId} outcome=success duration_ms=${Math.round(performance.now() - startedAt)} attempt_count=1`,
+        );
+      } catch (error) {
+        console.warn(
+          `desktop_release_notes_open_completed operation_id=${operationId} outcome=failure error_kind=external_url_open duration_ms=${Math.round(performance.now() - startedAt)} attempt_count=1`,
+        );
+        throw error;
       }
     },
     reload: () => window.location.reload(),

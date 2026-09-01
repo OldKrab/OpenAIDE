@@ -49,6 +49,43 @@ describe("DesktopUpdateSettings", () => {
     expect(tree.root.findByType("h2").children.join("")).toContain("Faster startup");
   });
 
+  it("opens links in release notes outside the Desktop webview", () => {
+    const { capability } = fakeCapability({
+      revision: 2,
+      installedVersion: "1.0.0",
+      kind: "available",
+      offer: {
+        version: "1.1.0",
+        notes: "[Privacy policy](https://github.com/OldKrab/OpenAIDE/blob/main/PRIVACY.md)",
+        sizeBytes: 10,
+      },
+    });
+
+    const tree = render(capability);
+    const link = tree.root.findByType("a");
+
+    expect(link.props.href).toBe("https://github.com/OldKrab/OpenAIDE/blob/main/PRIVACY.md");
+    expect(link.props.target).toBe("_blank");
+  });
+
+  it("reports when the post-update release page cannot open", async () => {
+    const { capability } = fakeCapability({
+      revision: 3,
+      installedVersion: "1.1.0",
+      updatedVersion: "1.1.0",
+      kind: "idle",
+    });
+    vi.mocked(capability.openReleaseNotes).mockRejectedValueOnce(new Error("opener rejected URL"));
+    const tree = render(capability);
+    const viewNotes = tree.root.findAllByType("button")
+      .find((button) => button.children.includes("View what's new"));
+
+    await act(async () => viewNotes?.props.onClick());
+
+    expect(tree.root.findByProps({ role: "alert" }).children.join(""))
+      .toContain("could not complete");
+  });
+
   it("keeps a ready update available after Not now", () => {
     const { capability } = fakeCapability({
       revision: 3,
@@ -131,7 +168,7 @@ function fakeCapability(initial: DesktopUpdateSnapshot): {
     download: vi.fn(async () => undefined),
     cancelDownload: vi.fn(async () => undefined),
     restartAndUpdate: vi.fn(async () => "started" as const),
-    openReleaseNotes: vi.fn(),
+    openReleaseNotes: vi.fn(async () => undefined),
   };
   return {
     capability,
