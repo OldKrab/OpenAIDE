@@ -2,7 +2,8 @@ use crate::agent::acp_schema::{AuthMethod, InitializeResponse};
 
 use crate::agent::acp_session_lifecycle::auth_method_kind;
 use crate::protocol::model::{
-    AgentAuthMethodSummary, AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus,
+    AgentAuthMethodSummary, AgentAuthVariableSummary, AgentProbeCapabilities, AgentProbeResult,
+    AgentProbeStatus,
 };
 
 pub(super) fn agent_probe_result_from_initialize(
@@ -87,18 +88,50 @@ fn capability_labels(initialize: &InitializeResponse) -> Vec<String> {
 
 fn auth_method_summary(method: &AuthMethod) -> AgentAuthMethodSummary {
     let (variables, link, terminal_args, terminal_env) = match method {
-        AuthMethod::Agent(_) => (Vec::new(), None, Vec::new(), Default::default()),
+        AuthMethod::Agent(method) => (
+            api_key_variable(method.meta.as_ref()).into_iter().collect(),
+            None,
+            Vec::new(),
+            Default::default(),
+        ),
         AuthMethod::Terminal(method) => (Vec::new(), None, method.args.clone(), method.env.clone()),
         _ => (Vec::new(), None, Vec::new(), Default::default()),
+    };
+    let kind = if variables.is_empty() {
+        auth_method_kind(method)
+    } else {
+        "env_var".to_string()
     };
     AgentAuthMethodSummary {
         id: method.id().0.as_ref().to_string(),
         label: method.name().to_string(),
-        kind: auth_method_kind(method),
+        kind,
         description: method.description().map(ToString::to_string),
         variables,
         link,
         terminal_args,
         terminal_env,
     }
+}
+
+/// Projects the ACP `api-key` extension into OpenAIDE's generic secure-input flow.
+/// The provider name determines only the conventional environment variable name;
+/// the secret value remains App Shell-owned and never enters Settings state.
+fn api_key_variable(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<AgentAuthVariableSummary> {
+    let provider = meta?.get("api-key")?.get("provider")?.as_str()?.trim();
+    if provider.is_empty()
+        || !provider
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return None;
+    }
+    Some(AgentAuthVariableSummary {
+        name: format!("{}_API_KEY", provider.to_ascii_uppercase()),
+        label: Some("API Key".to_string()),
+        secret: true,
+        optional: false,
+    })
 }

@@ -41,7 +41,9 @@ impl AcpAgentConfig {
             agent_id: "codex".to_string(),
             command: resolved_command_or_name("npx"),
             args: vec!["-y".to_string(), PRODUCT_CODEX_ACP_SPEC.to_string()],
-            env: Vec::new(),
+            // The managed adapter runs headlessly. Browser authentication must cross ACP URL
+            // elicitation so the active App Shell, rather than the App Server host, opens it.
+            env: vec![("NO_BROWSER".to_string(), "1".to_string())],
             secret_env: Vec::new(),
         }
     }

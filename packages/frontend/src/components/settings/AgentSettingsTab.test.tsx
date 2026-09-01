@@ -372,6 +372,29 @@ describe("AgentSettingsTab interactions", () => {
     expect(onAuthenticate).toHaveBeenCalledWith("codex", "browser", undefined);
   });
 
+  it("explains that connected Agent authentication methods are proactive choices", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        status: "connected",
+        auth_methods: [{ id: "chat-gpt", label: "ChatGPT", kind: "agent" }],
+      })],
+    });
+
+    expect(textContent(view.root)).toContain("Codex is connected. Sign in again to refresh credentials or switch accounts.");
+    expect(textContent(view.root)).not.toContain("Sign-in is required to continue.");
+  });
+
+  it("states explicitly when ACP reports that sign-in is required", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        status: "auth_required",
+        auth_methods: [{ id: "chat-gpt", label: "ChatGPT", kind: "agent" }],
+      })],
+    });
+
+    expect(textContent(view.root)).toContain("Sign-in is required to continue.");
+  });
+
   it("shows confirmation only for the terminal method awaiting the user", () => {
     const agent = builtInAgent("codex", {
       status: "authenticating",

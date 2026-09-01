@@ -45,6 +45,41 @@ fn failed_probe_records_user_visible_status() {
 }
 
 #[test]
+fn auth_required_keeps_previously_advertised_authentication_methods() {
+    let cache = AgentStatusCache::default();
+    cache.record_probe_success(&AgentProbeResult {
+        agent_id: "codex".to_string(),
+        status: AgentProbeStatus::Ready,
+        protocol_version: "1".to_string(),
+        implementation_name: None,
+        implementation_version: None,
+        capabilities: Vec::new(),
+        typed_capabilities: AgentProbeCapabilities::default(),
+        auth_methods: vec![crate::protocol::model::AgentAuthMethodSummary {
+            id: "chat-gpt".to_string(),
+            label: "ChatGPT".to_string(),
+            kind: "agent".to_string(),
+            description: None,
+            variables: Vec::new(),
+            link: None,
+            terminal_args: Vec::new(),
+            terminal_env: Default::default(),
+        }],
+        logout_supported: false,
+    });
+
+    cache.record_probe_error(
+        "codex",
+        &RuntimeError::AuthRequired("Authentication required".to_string()),
+    );
+
+    let snapshot = cache.snapshot("codex");
+    assert_eq!(snapshot.status, AgentStatus::AuthRequired);
+    assert_eq!(snapshot.auth_methods.len(), 1);
+    assert_eq!(snapshot.auth_methods[0].id, "chat-gpt");
+}
+
+#[test]
 fn managed_integration_installation_is_visible_until_agent_launch_begins() {
     let cache = AgentStatusCache::default();
 

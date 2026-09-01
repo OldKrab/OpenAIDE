@@ -121,18 +121,24 @@ impl AgentStatusCache {
     }
 
     pub(crate) fn record_probe_error(&self, agent_id: &str, error: &RuntimeError) {
-        self.record(
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let previous = entries.get(agent_id).cloned().unwrap_or_default();
+        entries.insert(
             agent_id.to_string(),
             AgentStatusSnapshot {
                 status: status_from_probe_error(error),
                 setup_reason: setup_reason_from_probe_error(error),
                 capabilities: AgentCapabilities::default(),
-                auth_methods: Vec::new(),
-                logout_supported: false,
+                // ACP Authentication Methods are available choices, not proof of current
+                // authentication. Keep the last advertised choices actionable during recovery.
+                auth_methods: previous.auth_methods,
+                logout_supported: previous.logout_supported,
                 authenticating_method_id: None,
                 status_before_authentication: None,
             },
         );
+        drop(entries);
+        self.notify();
     }
 
     pub(crate) fn snapshot(&self, agent_id: &str) -> AgentStatusSnapshot {

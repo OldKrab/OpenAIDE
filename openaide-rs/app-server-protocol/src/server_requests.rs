@@ -8,6 +8,7 @@ use crate::ids::{ClientInstanceId, RequestId};
 pub const PERMISSION_REQUEST: &str = "permission/request";
 pub const QUESTION_REQUEST: &str = "question/request";
 pub const SECRET_READ: &str = "secret/read";
+pub const SHELL_OPEN_EXTERNAL: &str = "shell/openExternal";
 pub const SHELL_SHOW_NOTIFICATION: &str = "shell/showNotification";
 pub const SHELL_REVEAL_FILE: &str = "shell/revealFile";
 
@@ -292,6 +293,18 @@ pub struct ShellNotificationAction {
 pub struct ShellShowNotificationResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOpenExternalParams {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellOpenExternalResponse {
+    pub opened: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

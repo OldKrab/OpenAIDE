@@ -3,12 +3,35 @@ import {
   PERMISSION_REQUEST,
   QUESTION_REQUEST,
   SECRET_READ,
+  SHELL_OPEN_EXTERNAL,
   SHELL_SHOW_NOTIFICATION,
   type ServerRequestMethod,
 } from "@openaide/app-server-client";
+import { installFrontendShell } from "./frontendShell";
 import { startAppServerServerRequestBridge } from "./appServerServerRequests";
 
 describe("App Server server-request bridge", () => {
+  it("opens ACP authentication URLs through the active App Shell", async () => {
+    const openExternal = vi.fn();
+    installFrontendShell({ recovery: { openExternal } } as never);
+    const handlers = new Map<ServerRequestMethod, (params: never, context: never) => Promise<unknown>>();
+    const backendConnection = {
+      handleRequest: vi.fn((method, handler) => {
+        handlers.set(method, handler);
+        return vi.fn();
+      }),
+    };
+
+    startAppServerServerRequestBridge({ backendConnection, postHostMessage: vi.fn() });
+    const response = handlers.get(SHELL_OPEN_EXTERNAL)?.(
+      { url: "https://auth.openai.com/device" } as never,
+      { requestId: "server-request-auth", signal: new AbortController().signal } as never,
+    );
+
+    await expect(response).resolves.toEqual({ opened: true });
+    expect(openExternal).toHaveBeenCalledWith("https://auth.openai.com/device");
+  });
+
   it("forwards shell-owned server requests to the App Shell", () => {
     const postHostMessage = vi.fn();
     const handlers = new Map<ServerRequestMethod, (params: never, context: never) => Promise<unknown>>();

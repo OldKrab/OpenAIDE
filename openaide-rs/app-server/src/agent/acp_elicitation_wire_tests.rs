@@ -4,6 +4,25 @@ use serde_json::json;
 use super::ElicitationCreateRequest;
 
 #[test]
+fn url_elicitation_preserves_the_external_destination_and_identity() {
+    let parsed = ElicitationCreateRequest::parse_message(
+        "elicitation/create",
+        &json!({
+            "requestId": 7,
+            "mode": "url",
+            "message": "Sign in to ChatGPT and enter this code: ABCD-EFGH",
+            "elicitationId": "login-1",
+            "url": "https://auth.openai.com/device"
+        }),
+    )
+    .unwrap();
+
+    let serialized = serde_json::to_value(parsed).unwrap();
+    assert_eq!(serialized["elicitationId"], "login-1");
+    assert_eq!(serialized["url"], "https://auth.openai.com/device");
+}
+
+#[test]
 fn dual_scope_is_preserved_for_semantic_rejection() {
     let parsed = ElicitationCreateRequest::parse_message(
         "elicitation/create",

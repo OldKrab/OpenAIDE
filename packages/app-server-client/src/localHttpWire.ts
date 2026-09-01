@@ -14,6 +14,7 @@ import {
   PERMISSION_REQUEST,
   QUESTION_REQUEST,
   SECRET_READ,
+  SHELL_OPEN_EXTERNAL,
   SHELL_REVEAL_FILE,
   SHELL_SHOW_NOTIFICATION,
 } from "./generated/protocol.js";
@@ -99,6 +100,7 @@ function isServerRequestMethod(method: string): method is ServerRequestMethod {
     method === PERMISSION_REQUEST ||
     method === QUESTION_REQUEST ||
     method === SECRET_READ ||
+    method === SHELL_OPEN_EXTERNAL ||
     method === SHELL_SHOW_NOTIFICATION ||
     method === SHELL_REVEAL_FILE
   );
@@ -169,6 +171,10 @@ function validateServerRequestParams(method: ServerRequestMethod, params: unknow
   }
   if (method === SHELL_REVEAL_FILE) {
     requiredString(method, object, "fileHandleId");
+    return;
+  }
+  if (method === SHELL_OPEN_EXTERNAL) {
+    requiredString(method, object, "url");
   }
 }
 

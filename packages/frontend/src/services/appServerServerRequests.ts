@@ -1,5 +1,6 @@
 import {
   SECRET_READ,
+  SHELL_OPEN_EXTERNAL,
   SHELL_REVEAL_FILE,
   SHELL_SHOW_NOTIFICATION,
   type BackendConnection,
@@ -10,6 +11,7 @@ import {
 } from "@openaide/app-server-client";
 import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
 import type { PostHostMessage } from "../state/postHostMessage";
+import { frontendShell } from "./frontendShell";
 
 type ServerRequestConnection = Pick<BackendConnection, "handleRequest">;
 
@@ -36,6 +38,13 @@ export function startAppServerServerRequestBridge({
     params: ServerRequestParamsByMethod[M],
     context: BackendRequestContext,
   ) {
+    if (method === SHELL_OPEN_EXTERNAL) {
+      const request = params as ServerRequestParamsByMethod[typeof SHELL_OPEN_EXTERNAL];
+      const url = trustedExternalUrl(request.url);
+      if (!url) return Promise.resolve({ opened: false }) as Promise<ServerRequestResponseResultByMethod[M]>;
+      frontendShell().recovery.openExternal(url);
+      return Promise.resolve({ opened: true }) as Promise<ServerRequestResponseResultByMethod[M]>;
+    }
     const result = new Promise<ServerRequestResponseResultByMethod[M]>((resolve) => {
       pending.set(context.requestId, { method, resolve: resolve as never });
     });
@@ -71,7 +80,16 @@ export function startAppServerServerRequestBridge({
 }
 
 function shellHandledMethods() {
-  return [SECRET_READ, SHELL_SHOW_NOTIFICATION, SHELL_REVEAL_FILE] as const;
+  return [SECRET_READ, SHELL_OPEN_EXTERNAL, SHELL_SHOW_NOTIFICATION, SHELL_REVEAL_FILE] as const;
+}
+
+function trustedExternalUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function serverRequestResult(

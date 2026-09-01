@@ -32,6 +32,9 @@ fn shell_and_secret_requests_use_protocol_safe_shapes() {
         file_handle_id: "file-handle-1".to_string(),
         label: None,
     };
+    let open_external = ShellOpenExternalParams {
+        url: "https://auth.openai.com/device".to_string(),
+    };
 
     assert_eq!(
         serde_json::to_value(secret).unwrap(),
@@ -51,6 +54,10 @@ fn shell_and_secret_requests_use_protocol_safe_shapes() {
             "originatingClientInstanceId": "client-1",
             "fileHandleId": "file-handle-1"
         })
+    );
+    assert_eq!(
+        serde_json::to_value(open_external).unwrap(),
+        json!({ "url": "https://auth.openai.com/device" })
     );
 }
 
