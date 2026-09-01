@@ -402,7 +402,7 @@ fn lock_exclusive_until(file: &File, deadline: Instant) -> Result<(), RuntimeErr
     loop {
         match file.try_lock_exclusive() {
             Ok(()) => return Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(error) if lock_error_is_contention(&error, cfg!(windows)) => {
                 if Instant::now() >= deadline {
                     return Err(provisioning_error(
                         "another installation did not finish in time".to_string(),
@@ -413,6 +413,13 @@ fn lock_exclusive_until(file: &File, deadline: Instant) -> Result<(), RuntimeErr
             Err(error) => return Err(provisioning_io_error(error)),
         }
     }
+}
+
+fn lock_error_is_contention(error: &std::io::Error, windows: bool) -> bool {
+    // fs2 0.4 surfaces LockFileEx contention as ERROR_LOCK_VIOLATION rather
+    // than WouldBlock. That is a transient owner to wait for, not a storage
+    // failure users should have to retry after provisioning completes.
+    error.kind() == std::io::ErrorKind::WouldBlock || (windows && error.raw_os_error() == Some(33))
 }
 
 fn cleanup_stale_staging(runtimes_root: &Path) {

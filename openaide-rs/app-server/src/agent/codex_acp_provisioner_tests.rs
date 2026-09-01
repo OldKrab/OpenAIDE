@@ -17,6 +17,13 @@ struct RecordingInstaller {
 }
 
 #[test]
+fn windows_lock_violation_is_retryable_contention() {
+    let error = std::io::Error::from_raw_os_error(33);
+
+    assert!(super::lock_error_is_contention(&error, true));
+}
+
+#[test]
 fn explicit_codex_launch_times_out_while_another_process_owns_provisioning() {
     let storage = TempDir::new().expect("temporary storage root");
     let runtime_root = storage.path().join("agent-runtimes/codex-acp");
@@ -73,6 +80,7 @@ impl CodexAcpInstaller for RecordingInstaller {
 struct BlockingInstaller {
     started: std::sync::mpsc::Sender<()>,
     release: Mutex<std::sync::mpsc::Receiver<()>>,
+    recording: RecordingInstaller,
 }
 
 impl CodexAcpInstaller for BlockingInstaller {
@@ -83,8 +91,63 @@ impl CodexAcpInstaller for BlockingInstaller {
             .expect("installer release poisoned")
             .recv()
             .expect("release installation");
-        RecordingInstaller::default().install(destination)
+        self.recording.install(destination)
     }
+}
+
+#[test]
+fn concurrent_explicit_codex_launches_wait_for_one_shared_installation() {
+    let storage = TempDir::new().expect("temporary storage root");
+    let recording = RecordingInstaller::default();
+    let (install_started_tx, install_started_rx) = std::sync::mpsc::channel();
+    let (release_install_tx, release_install_rx) = std::sync::mpsc::channel();
+    let provisioner = Arc::new(CodexAcpProvisioner::with_installer(
+        storage.path().to_path_buf(),
+        Arc::new(BlockingInstaller {
+            started: install_started_tx,
+            release: Mutex::new(release_install_rx),
+            recording: recording.clone(),
+        }),
+    ));
+
+    let owner_provisioner = provisioner.clone();
+    let owner = std::thread::spawn(move || owner_provisioner.prepare(AcpAgentConfig::codex()));
+    install_started_rx
+        .recv()
+        .expect("first launch should own installation");
+
+    let waiter_provisioner = provisioner.clone();
+    let (waiter_completed_tx, waiter_completed_rx) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        waiter_completed_tx
+            .send(waiter_provisioner.prepare(AcpAgentConfig::codex()))
+            .expect("report waiting launch result");
+    });
+    assert!(matches!(
+        waiter_completed_rx.recv_timeout(Duration::from_millis(50)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+
+    release_install_tx
+        .send(())
+        .expect("finish shared installation");
+    owner
+        .join()
+        .expect("installation owner thread")
+        .expect("installation owner launch");
+    waiter_completed_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("waiting launch should finish after installation")
+        .expect("waiting launch should reuse installation");
+    waiter.join().expect("waiting launch thread");
+    assert_eq!(
+        recording
+            .destinations
+            .lock()
+            .expect("installer destinations poisoned")
+            .len(),
+        1,
+    );
 }
 
 #[test]
@@ -98,6 +161,7 @@ fn installation_publishes_one_authoritative_agent_activity() {
         Arc::new(BlockingInstaller {
             started: started_tx,
             release: Mutex::new(release_rx),
+            recording: RecordingInstaller::default(),
         }),
         statuses.clone(),
     );
