@@ -66,7 +66,7 @@ child.stdout.setEncoding("utf8").on("data", (chunk) => {
     if (!waiter) continue;
     pending.delete(String(message.id));
     if (message.error) {
-      const rpcError = new Error(message.error?.error?.message ?? "App Server request failed");
+      const rpcError = new Error(`${waiter.method}: ${message.error?.error?.message ?? "App Server request failed"}`);
       rpcError.code = message.error?.error?.code;
       waiter.reject(rpcError);
     } else waiter.resolve(message.result);
@@ -81,6 +81,7 @@ function request(method, params, timeoutMs = 120_000) {
       reject(new Error(`${method} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     pending.set(id, {
+      method,
       resolve: (value) => { clearTimeout(timeout); resolve(value); },
       reject: (error) => { clearTimeout(timeout); reject(error); },
     });
@@ -96,6 +97,15 @@ try {
     workspaceRoots: [],
   }, 30_000);
   await request("agent/probe", { agentId: "codex" });
+  // This legacy stdio smoke also publishes a local-HTTP endpoint whose real-time
+  // liveness monitor can detach the logical-time stdio client during a slow probe.
+  // Reattach before reading the probe result through the packaged Settings API.
+  await request("client/initialize", {
+    clientInstanceId: "packaged-codex-acp-smoke",
+    shell: { kind: "desktop" },
+    requestedSurface: { kind: "home" },
+    workspaceRoots: [],
+  }, 30_000);
   const detailsEnvelope = await request("settings/getAgentDetails", {});
   const codexDetails = detailsEnvelope?.result?.agents?.find((agent) => agent.agentId === "codex");
   const authMethodIds = codexDetails?.authMethods?.map((method) => method.id) ?? [];
