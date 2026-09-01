@@ -63,6 +63,17 @@ describe("SettingsView custom Agent acknowledgements", () => {
       .toEqual([false, false, true]);
   });
 
+  it("explains the Send with Enter behavior using the familiar newline shortcut", () => {
+    const tree = render(
+      <GeneralSettingsTab
+        onSetComposerSubmitShortcut={() => undefined}
+        preferences={{ composer_submit_shortcut: "enter" }}
+      />,
+    );
+
+    expect(JSON.stringify(tree.toJSON())).toContain("Enter sends messages. Shift+Enter adds a new line.");
+  });
+
   it("omits theme controls when the host owns appearance", () => {
     const tree = render(
       <GeneralSettingsTab
