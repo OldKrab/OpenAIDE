@@ -13,8 +13,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 mod desktop_runtime;
+mod desktop_support_export;
 mod desktop_update;
 mod desktop_update_receipt;
 mod desktop_update_schedule;
@@ -29,6 +31,10 @@ mod wsl_runtime;
 use desktop_runtime::{
     DesktopBootstrapPreferences, DesktopRuntimeEnvironment, DesktopRuntimePaths,
     PreparedProjectFolder, prepare_project_path,
+};
+use desktop_support_export::{
+    download_support_export, remember_export_directory, support_export_download_url,
+    validate_export_label,
 };
 use desktop_update::DesktopUpdateState;
 use wsl_runtime::{discover_wsl_distros, launch_wsl_app_server_handoff, translate_path_with_wsl};
@@ -163,6 +169,7 @@ fn main() {
             set_desktop_runtime_environment,
             desktop_prepare_project_folder,
             desktop_dismiss_path_warning,
+            desktop_save_support_export,
             recover_desktop_runtime_environment,
             desktop_update::desktop_update_snapshot,
             desktop_update::desktop_check_for_update,
@@ -174,6 +181,99 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run OpenAIDE Desktop App");
+}
+
+#[tauri::command]
+async fn desktop_save_support_export(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    file_handle_id: String,
+    label: String,
+) -> Result<bool, String> {
+    validate_export_label(&label)?;
+    let export_directory = state
+        .preferences
+        .lock()
+        .map_err(|_| "Desktop preferences are unavailable.".to_string())?
+        .support_export_directory
+        .clone();
+    let connection = state
+        .connection
+        .lock()
+        .map_err(|_| "Desktop runtime state is unavailable.".to_string())?
+        .clone()
+        .ok_or_else(|| "Desktop runtime is not connected.".to_string())?;
+    let url = support_export_download_url(
+        &connection.endpoint_url,
+        &state.client_instance_id,
+        &file_handle_id,
+    )?;
+    let operation_id = format!("desktop-support-export-{}", uuid::Uuid::new_v4());
+    let started_at = Instant::now();
+    eprintln!("desktop_support_export_save_started operation_id={operation_id} attempt_count=1");
+
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Export OpenAIDE Support Diagnostics")
+        .set_file_name(&label)
+        .add_filter("ZIP archive", &["zip"]);
+    if let Some(directory) = export_directory {
+        dialog = dialog.set_directory(directory);
+    }
+    let Some(destination) = dialog.blocking_save_file() else {
+        eprintln!(
+            "desktop_support_export_save_completed operation_id={operation_id} outcome=cancelled duration_ms={} attempt_count=1",
+            started_at.elapsed().as_millis()
+        );
+        return Ok(false);
+    };
+    let destination = match destination.into_path() {
+        Ok(destination) => destination,
+        Err(_) => {
+            eprintln!(
+                "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=invalid_destination duration_ms={} attempt_count=1",
+                started_at.elapsed().as_millis()
+            );
+            return Err("The selected support export path is invalid.".to_string());
+        }
+    };
+    let bytes = match download_support_export(url, &connection.auth_token).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!(
+                "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=download duration_ms={} attempt_count=1",
+                started_at.elapsed().as_millis()
+            );
+            return Err(error);
+        }
+    };
+    if std::fs::write(&destination, bytes).is_err() {
+        eprintln!(
+            "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=file_write duration_ms={} attempt_count=1",
+            started_at.elapsed().as_millis()
+        );
+        return Err("Unable to save the support export to the selected file.".to_string());
+    }
+
+    match state.preferences.lock() {
+        Ok(mut preferences) => {
+            remember_export_directory(&mut preferences, &destination);
+            if write_bootstrap_preferences(&state.preferences_path, &preferences).is_err() {
+                eprintln!(
+                    "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_write"
+                );
+            }
+        }
+        Err(_) => eprintln!(
+            "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_lock"
+        ),
+    }
+    eprintln!(
+        "desktop_support_export_save_completed operation_id={operation_id} outcome=success duration_ms={} attempt_count=1",
+        started_at.elapsed().as_millis()
+    );
+    Ok(true)
 }
 
 #[tauri::command]

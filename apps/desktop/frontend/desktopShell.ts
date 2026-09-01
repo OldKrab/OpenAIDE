@@ -15,6 +15,7 @@ import { createDesktopProjectPicker } from "./desktopProjectPicker";
 import { createDesktopUpdates } from "./desktopUpdates";
 import type { DesktopBootstrap } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
+import { createDesktopSupportExports } from "./desktopSupportExports";
 
 type DesktopRoute =
   | { surface: "nativeSession"; agentId: string; nativeSessionId: string; projectId?: string }
@@ -211,29 +212,7 @@ export function createDesktopShell(
         return () => messageListeners.delete(listener);
       },
     },
-    supportExports: {
-      async save({ fileHandleId, label }) {
-        const endpoint = new URL(host.connection.endpointUrl);
-        endpoint.pathname = endpoint.pathname.replace(/\/probe\/?$/, "/download");
-        endpoint.search = new URLSearchParams({
-          clientInstanceId: host.clientInstanceId,
-          fileHandleId,
-        }).toString();
-        const response = await fetch(endpoint, {
-          headers: { Authorization: `Bearer ${host.connection.authToken}` },
-        });
-        if (!response.ok) throw new Error("Unable to download support export.");
-        const url = URL.createObjectURL(await response.blob());
-        try {
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = label;
-          link.click();
-        } finally {
-          setTimeout(() => URL.revokeObjectURL(url), 0);
-        }
-      },
-    },
+    supportExports: createDesktopSupportExports(invoke),
     navigation: {
       openNewTask: (projectId) => navigate({ surface: "task", projectId }),
       openNativeSession: (agentId, nativeSessionId, projectId) => navigate({

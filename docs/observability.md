@@ -47,7 +47,7 @@ traces are excluded from the standard selection.
 
 The sensitive selection is explicit and never remembered. Users choose Tasks and source kinds. A selected Task may contribute a materialized OpenAIDE Chat document, every retained ACP trace bound to its Native Session, and an Agent-native transcript when a product-owned provider implementation can resolve it. Failed traces that never acquired a Native Session remain separately selectable by Task. Active JSONL sources are copied only through their last complete record and the manifest marks partial, unavailable, or truncated sources. Referenced workspace files and attachment contents are never copied implicitly.
 
-The picker warns that raw artifacts may contain prompts, responses, paths, tool output, and secrets. App Server builds the bundle and returns only a client-bound opaque handle. The App Shell saves or downloads it locally, then opens GitHub's upload-enabled issue form; OpenAIDE does not upload the bundle itself.
+The picker warns that raw artifacts may contain prompts, responses, paths, tool output, and secrets. App Server builds the bundle and returns only a client-bound opaque handle. Native App Shells use the operating-system Save dialog, allow the ZIP filename and destination to be changed, and remember the last successful export directory locally for the next export. After saving, OpenAIDE offers GitHub's upload-enabled issue form as an optional action; it never opens the form automatically and never uploads the bundle itself.
 
 ## Levels
 

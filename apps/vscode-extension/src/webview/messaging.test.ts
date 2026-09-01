@@ -91,6 +91,7 @@ describe("webview messaging composer routes", () => {
     vi.mocked(vscode.env.clipboard.writeText).mockReset();
     vi.mocked(vscode.env.clipboard.writeText).mockResolvedValue(undefined);
     vi.mocked(vscode.workspace.openTextDocument).mockClear();
+    vi.mocked(vscode.workspace.fs.copy).mockClear();
     vi.mocked(vscode.window.showTextDocument).mockClear();
     vi.mocked(vscode.window.showInformationMessage).mockClear();
     vi.mocked(vscode.window.showOpenDialog).mockReset();
@@ -545,7 +546,7 @@ describe("webview messaging composer routes", () => {
     await handleWebviewMessage({ type: "diagnostics.export" }, context(runtime, posted, undefined, undefined, undefined, { runtimeProcess }));
 
     expect(diagnosticsMocks.collectDiagnostics).toHaveBeenCalledWith(runtime, runtimeProcess);
-    expect(diagnosticsMocks.exportSupportDiagnostics).toHaveBeenCalledWith(runtime, runtimeProcess);
+    expect(diagnosticsMocks.exportSupportDiagnostics).toHaveBeenCalledWith(runtime, runtimeProcess, undefined);
     expect(posted[0]).toMatchObject({ type: "diagnostics.snapshot.result", payload: { runtime: { status: "ready" } } });
   });
 
@@ -832,6 +833,10 @@ describe("webview messaging composer routes", () => {
 
   it("resolves a support export as the extension host client that created it", async () => {
     vi.mocked(vscode.window.showSaveDialog).mockResolvedValue({ fsPath: "/tmp/saved-support.zip" } as vscode.Uri);
+    const supportExportState = {
+      get: vi.fn(() => "/remembered/reports"),
+      update: vi.fn(async () => undefined),
+    };
     const runtime = {
       appServerRequest: vi.fn(),
       resolveOwnAppServerFileReveal: vi.fn().mockResolvedValue({
@@ -849,7 +854,7 @@ describe("webview messaging composer routes", () => {
         label: "openaide-support.zip",
         clientInstanceId: "webview-client-which-did-not-create-the-handle",
       },
-    }, context(runtime, posted));
+    }, context(runtime, posted, undefined, undefined, undefined, { supportExportState }));
 
     expect(runtime.resolveOwnAppServerFileReveal).toHaveBeenCalledWith("file-reveal-1");
     expect(runtime.appServerRequest).not.toHaveBeenCalled();
@@ -858,9 +863,42 @@ describe("webview messaging composer routes", () => {
       { fsPath: "/tmp/saved-support.zip" },
       { overwrite: true },
     );
+    expect(vscode.window.showSaveDialog).toHaveBeenCalledWith(expect.objectContaining({
+      defaultUri: { fsPath: "/remembered/reports/openaide-support.zip" },
+    }));
+    expect(supportExportState.update).toHaveBeenCalledWith(
+      "openaide.supportExport.lastDirectory",
+      "/tmp",
+    );
     expect(posted).toEqual([{
       type: "supportExport.save.result",
-      payload: { requestId: "export-1", ok: true },
+      payload: { requestId: "export-1", ok: true, outcome: "saved" },
+    }]);
+  });
+
+  it("reports a canceled support export without an error", async () => {
+    vi.mocked(vscode.window.showSaveDialog).mockResolvedValue(undefined);
+    const posted: unknown[] = [];
+
+    await handleWebviewMessage({
+      type: "supportExport.save",
+      payload: {
+        requestId: "export-1",
+        fileHandleId: "file-reveal-1",
+        label: "openaide-support.zip",
+        clientInstanceId: "webview-client",
+      },
+    }, context({
+      resolveOwnAppServerFileReveal: vi.fn().mockResolvedValue({
+        path: "/tmp/generated-support.zip",
+        label: "openaide-support.zip",
+      }),
+    }, posted));
+
+    expect(vscode.workspace.fs.copy).not.toHaveBeenCalled();
+    expect(posted).toEqual([{
+      type: "supportExport.save.result",
+      payload: { requestId: "export-1", ok: true, outcome: "cancelled" },
     }]);
   });
 });

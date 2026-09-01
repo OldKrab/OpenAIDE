@@ -1,5 +1,6 @@
 import type * as vscode from "vscode";
 import type { HostToWebviewMessage, WebviewSurfaceKind } from "@openaide/app-shell-contracts";
+import type { SupportExportState } from "../diagnostics/exportLocation";
 import type { ExtensionLogger } from "../logging/logger";
 import type { RuntimeProcess } from "../runtime/process";
 import type { RuntimeClient } from "../runtime/rpcClient";
@@ -11,6 +12,7 @@ export type MessageContext = {
   post: (payload: HostToWebviewMessage) => Thenable<boolean>;
   logger: ExtensionLogger;
   developerSettingsStore?: DeveloperSettingsStore;
+  supportExportState?: SupportExportState;
   agentSecretStore?: vscode.SecretStorage;
   surface?: WebviewSurfaceKind;
   adoptTask?: (taskId: string, title?: string, agentId?: string) => void;

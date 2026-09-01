@@ -23,8 +23,8 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it("preselects the current Task's sensitive sources and saves before opening the bug form", async () => {
-  const save = vi.fn(async () => undefined);
+it("preselects the current Task's sensitive sources and offers the bug form only after saving", async () => {
+  const save = vi.fn(async () => "saved" as const);
   const openExternal = vi.fn();
   const request = vi.fn(async (method: string) => {
     if (method === DIAGNOSTICS_LIST_SUPPORT_EXPORT) {
@@ -90,7 +90,13 @@ it("preselects the current Task's sensitive sources and saves before opening the
     unboundTraceIds: [],
   });
   expect(save).toHaveBeenCalledWith({ fileHandleId: "export-1", label: "openaide-support.zip" });
-  expect(openExternal.mock.invocationCallOrder[0]).toBeGreaterThan(save.mock.invocationCallOrder[0]);
+  expect(openExternal).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain("Diagnostics saved");
+
+  const bugReportButton = [...document.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent === "Open GitHub bug report")!;
+  await act(async () => bugReportButton.click());
+  expect(openExternal).toHaveBeenCalledWith("https://github.com/OldKrab/OpenAIDE/issues/new?template=bug_report.yml");
 });
 
 it("selects sessions in a separate step and preserves them when navigating back", async () => {

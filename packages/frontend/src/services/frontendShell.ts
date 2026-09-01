@@ -172,7 +172,7 @@ export type FrontendShell = {
   sentFiles?: SentFileInteraction;
   /** Saves an App Server-owned export through a client-bound opaque handle. */
   supportExports?: {
-    save(request: { fileHandleId: string; label: string }): Promise<void>;
+    save(request: { fileHandleId: string; label: string }): Promise<"saved" | "cancelled">;
   };
   /** Browser-profile notification integration; omitted by non-Web shells. */
   taskNotifications?: WebTaskNotificationManager;

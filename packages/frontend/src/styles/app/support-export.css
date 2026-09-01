@@ -24,6 +24,11 @@
   width: min(620px, calc(100vw - 24px));
 }
 
+.support-export-dialog.support-export-dialog-saved {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: auto;
+}
+
 .settings-reset-dialog.support-export-dialog header {
   margin-bottom: 14px;
 }
@@ -243,6 +248,34 @@
   gap: 8px;
   margin: 0;
   padding: 10px;
+}
+
+.support-export-saved {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  max-width: 52ch;
+  padding: 10px 2px 18px;
+}
+
+.support-export-saved > svg {
+  color: var(--oa-success);
+  flex: 0 0 auto;
+}
+
+.support-export-saved h2,
+.support-export-saved p {
+  margin: 0;
+}
+
+.support-export-saved h2 {
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.support-export-saved p {
+  color: var(--oa-muted);
+  margin-top: 3px;
 }
 
 @media (max-height: 560px), (max-width: 520px) {

@@ -1,15 +1,22 @@
-import { homedir } from "node:os";
-import * as path from "node:path";
 import * as vscode from "vscode";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
 import { buildSupportBundle } from "./bundle";
 import { collectDiagnostics } from "./snapshot";
+import {
+  rememberSupportExportDirectory,
+  supportExportDefaultPath,
+  type SupportExportState,
+} from "./exportLocation";
 
 const GITHUB_BUG_REPORT_URL = "https://github.com/OldKrab/OpenAIDE/issues/new";
 
 /** Saves a public-safe Support Export and offers the project's bug-report form. */
-export async function exportSupportDiagnostics(runtime: RuntimeClient, runtimeProcess: RuntimeProcess) {
+export async function exportSupportDiagnostics(
+  runtime: RuntimeClient,
+  runtimeProcess: RuntimeProcess,
+  supportExportState?: SupportExportState,
+) {
   const snapshot = await collectDiagnostics(runtime, runtimeProcess);
   const supportHost = runtimeProcess.describeSupportHost();
   const bundle = await buildSupportBundle({
@@ -23,7 +30,10 @@ export async function exportSupportDiagnostics(runtime: RuntimeClient, runtimePr
     },
   });
   const target = await vscode.window.showSaveDialog({
-    defaultUri: vscode.Uri.file(path.join(homedir(), supportBundleFileName(new Date(bundle.manifest.created_at)))),
+    defaultUri: vscode.Uri.file(supportExportDefaultPath(
+      supportExportState,
+      supportBundleFileName(new Date(bundle.manifest.created_at)),
+    )),
     filters: { "ZIP archive": ["zip"] },
     saveLabel: "Save Support Bundle",
     title: "Export OpenAIDE Support Diagnostics",
@@ -31,6 +41,7 @@ export async function exportSupportDiagnostics(runtime: RuntimeClient, runtimePr
   if (!target) return;
 
   await vscode.workspace.fs.writeFile(target, bundle.bytes);
+  await rememberSupportExportDirectory(supportExportState, target.fsPath);
   const action = await vscode.window.showInformationMessage(
     "OpenAIDE support bundle saved. Review it before attaching it to a public issue.",
     "Open GitHub Bug Report",

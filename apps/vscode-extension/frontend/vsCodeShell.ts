@@ -31,7 +31,7 @@ export function createVsCodeShell(): FrontendShell {
   let nextClipboardRequest = 1;
   let nextSupportExportRequest = 1;
   const pendingSupportExportRequests = new Map<string, {
-    resolve: () => void;
+    resolve: (outcome: "saved" | "cancelled") => void;
     reject: (error: Error) => void;
   }>();
   const pendingClipboardRequests = new Map<string, {
@@ -53,7 +53,7 @@ export function createVsCodeShell(): FrontendShell {
       if (!pending) return;
       pendingSupportExportRequests.delete(event.data.payload.requestId);
       if (!event.data.payload.ok) pending.reject(new Error(event.data.payload.error ?? "Unable to save support export."));
-      else pending.resolve();
+      else pending.resolve(event.data.payload.outcome ?? "saved");
     });
     window.addEventListener("message", (event: MessageEvent<HostToWebviewMessage>) => {
       if (event.data?.type !== "shell.clipboard.writeText.result") return;
