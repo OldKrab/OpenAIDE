@@ -357,18 +357,32 @@ export function TaskView({
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
   const [reloadPending, setReloadPending] = useState(false);
   const [reloadError, setReloadError] = useState<string>();
-  const announcedHistoryUpdate = useRef<string | undefined>(undefined);
+  const historyUpdateKey = `${snapshot.task.task_id}:${snapshot.history_sync.generation}`;
+  const initialHistoryUpdateKey = snapshot.history_sync.state === "updated"
+    ? historyUpdateKey
+    : undefined;
+  // A terminal state in the opening baseline describes earlier work. Only a transition
+  // observed by this mounted Task surface should interrupt the live status with a notice.
+  const announcedHistoryUpdate = useRef<string | undefined>(initialHistoryUpdateKey);
+  const observedHistoryTask = useRef(snapshot.task.task_id);
   useEffect(() => {
+    if (observedHistoryTask.current !== snapshot.task.task_id) {
+      observedHistoryTask.current = snapshot.task.task_id;
+      announcedHistoryUpdate.current = snapshot.history_sync.state === "updated"
+        ? historyUpdateKey
+        : undefined;
+      setShowHistoryUpdated(false);
+      return undefined;
+    }
     if (snapshot.history_sync.state !== "updated") {
       setShowHistoryUpdated(false);
       return undefined;
     }
-    const announcementKey = `${snapshot.task.task_id}:${snapshot.history_sync.generation}`;
-    if (announcedHistoryUpdate.current === announcementKey) {
+    if (announcedHistoryUpdate.current === historyUpdateKey) {
       setShowHistoryUpdated(false);
       return undefined;
     }
-    announcedHistoryUpdate.current = announcementKey;
+    announcedHistoryUpdate.current = historyUpdateKey;
     setShowHistoryUpdated(true);
     const timer = window.setTimeout(() => setShowHistoryUpdated(false), 2_000);
     return () => window.clearTimeout(timer);
@@ -401,6 +415,8 @@ export function TaskView({
     if (hasPlan && !seen.hasPlan) onPlanDrawerOpenChange?.(true);
     seen.hasPlan = hasPlan;
   }, [onPlanDrawerOpenChange, visiblePlan, snapshot.task.task_id]);
+  const showCurrentHistoryUpdated = showHistoryUpdated
+    && announcedHistoryUpdate.current === historyUpdateKey;
   const timelineStatusLabel = subagents.selected
     ? subagents.history === undefined
       ? "Loading subagent history"
@@ -411,11 +427,11 @@ export function TaskView({
       chatItems,
       snapshot.task.status,
       inputPending,
-      snapshot.history_sync.state === "updated" && !showHistoryUpdated
+      snapshot.history_sync.state === "updated" && !showCurrentHistoryUpdated
         ? { state: "idle", generation: snapshot.history_sync.generation }
         : snapshot.history_sync,
     );
-  const timelineStatusKind = showHistoryUpdated && snapshot.history_sync.state === "updated"
+  const timelineStatusKind = showCurrentHistoryUpdated && snapshot.history_sync.state === "updated"
     ? "notice"
       : snapshot.task.status === "waiting"
       ? "blocked"
