@@ -410,11 +410,12 @@ pub(super) fn push_method_maps(output: &mut String) {
         "export type TaskArchiveResponse = ResponseEnvelope<TaskArchiveResult>;\nexport type TaskRestoreResponse = ResponseEnvelope<TaskRestoreResult>;\n",
     );
     output.push('\n');
-    output.push_str("export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;\n");
+    output.push_str("export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;\n");
     output.push_str("export type ServerRequestParamsByMethod = {\n");
     output.push_str("  [PERMISSION_REQUEST]: PermissionRequestParams;\n");
     output.push_str("  [QUESTION_REQUEST]: QuestionRequestParams;\n");
     output.push_str("  [SECRET_READ]: SecretReadParams;\n");
+    output.push_str("  [SHELL_OPEN_EXTERNAL]: ShellOpenExternalParams;\n");
     output.push_str("  [SHELL_SHOW_NOTIFICATION]: ShellShowNotificationParams;\n");
     output.push_str("  [SHELL_REVEAL_FILE]: ShellRevealFileParams;\n");
     output.push_str("};\n\n");
@@ -422,6 +423,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [PERMISSION_REQUEST]: PermissionRequestResponse;\n");
     output.push_str("  [QUESTION_REQUEST]: QuestionRequestResponse;\n");
     output.push_str("  [SECRET_READ]: SecretReadResponse;\n");
+    output.push_str("  [SHELL_OPEN_EXTERNAL]: ShellOpenExternalResponse;\n");
     output.push_str("  [SHELL_SHOW_NOTIFICATION]: ShellShowNotificationResponse;\n");
     output.push_str("  [SHELL_REVEAL_FILE]: ShellRevealFileResponse;\n");
     output.push_str("};\n\n");

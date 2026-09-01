@@ -71,8 +71,9 @@ use crate::server_requests::{
     PermissionRequestResponse, PermissionToolCallRef, QuestionField, QuestionOption,
     QuestionRequestParams, QuestionRequestResponse, QuestionStringFormat, QuestionValue,
     SecretReadParams, SecretReadResponse, ShellNotificationAction, ShellNotificationLevel,
-    ShellResolveFileRevealParams, ShellResolveFileRevealResult, ShellRevealFileParams,
-    ShellRevealFileResponse, ShellShowNotificationParams, ShellShowNotificationResponse,
+    ShellOpenExternalParams, ShellOpenExternalResponse, ShellResolveFileRevealParams,
+    ShellResolveFileRevealResult, ShellRevealFileParams, ShellRevealFileResponse,
+    ShellShowNotificationParams, ShellShowNotificationResponse,
 };
 use crate::settings::{
     AppPreferences, AppPreferencesParams, AppPreferencesPatch, AppPreferencesResult,
@@ -426,6 +427,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<QuestionValue>(output, config);
     push_decl::<SecretReadParams>(output, config);
     push_decl::<SecretReadResponse>(output, config);
+    push_decl::<ShellOpenExternalParams>(output, config);
+    push_decl::<ShellOpenExternalResponse>(output, config);
     push_decl::<ShellShowNotificationParams>(output, config);
     push_decl::<ShellNotificationLevel>(output, config);
     push_decl::<ShellNotificationAction>(output, config);

@@ -28,7 +28,8 @@ use crate::methods::{
     WORKTREE_RESOLVE_FOLDER,
 };
 use crate::server_requests::{
-    PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_REVEAL_FILE, SHELL_SHOW_NOTIFICATION,
+    PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_OPEN_EXTERNAL, SHELL_REVEAL_FILE,
+    SHELL_SHOW_NOTIFICATION,
 };
 
 pub(super) fn push_method_constants(output: &mut String) {
@@ -441,6 +442,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const SECRET_READ = {:?} as const;\n",
         SECRET_READ
+    ));
+    output.push_str(&format!(
+        "export const SHELL_OPEN_EXTERNAL = {:?} as const;\n",
+        SHELL_OPEN_EXTERNAL
     ));
     output.push_str(&format!(
         "export const SHELL_SHOW_NOTIFICATION = {:?} as const;\n",

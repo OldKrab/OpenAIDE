@@ -27,6 +27,11 @@ use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::{AgentSessionEventSink, TurnCancellation};
 use crate::logging;
 use crate::protocol::host::HostBridge;
+use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
+
+#[cfg(test)]
+#[path = "acp_host_capabilities_tests.rs"]
+mod tests;
 
 pub(super) type AcpSessionEventSinkMap =
     Arc<Mutex<HashMap<String, Arc<dyn AgentSessionEventSink>>>>;
@@ -177,13 +182,13 @@ impl AcpHostCapabilityHandlers {
         rpc_request_id: WireRequestId,
         request: ElicitationCreateRequest,
     ) -> agent_client_protocol::Result<ElicitationCreateResponse> {
-        if request.mode != ElicitationMode::Form {
-            return Err(invalid_params("only form elicitation is supported"));
-        }
         if request.session_id.is_some() == request.request_id.is_some() {
             return Err(invalid_params(
                 "elicitation must have exactly one sessionId or requestId",
             ));
+        }
+        if request.mode == ElicitationMode::Url {
+            return self.open_elicitation_url(request).await;
         }
         if request.request_id.is_some() {
             return Ok(ElicitationCreateResponse::Cancel);
@@ -249,6 +254,36 @@ impl AcpHostCapabilityHandlers {
             openaide_app_server_protocol::server_requests::QuestionRequestResponse::Cancel => {
                 Ok(ElicitationCreateResponse::Cancel)
             }
+        }
+    }
+
+    async fn open_elicitation_url(
+        &self,
+        request: ElicitationCreateRequest,
+    ) -> agent_client_protocol::Result<ElicitationCreateResponse> {
+        let url = request
+            .url
+            .filter(|url| url.starts_with("https://") && url.len() > "https://".len())
+            .ok_or_else(|| invalid_params("URL elicitation requires an HTTPS URL"))?;
+        if request.elicitation_id.as_deref().is_none_or(str::is_empty) {
+            return Err(invalid_params("URL elicitation requires elicitationId"));
+        }
+        let host_bridge = self.host_bridge.clone();
+        let opened = tokio::task::spawn_blocking(move || {
+            host_bridge.request(SHELL_OPEN_EXTERNAL, Some(serde_json::json!({ "url": url })))
+        })
+        .await
+        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+        .get("opened")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+        if opened {
+            Ok(ElicitationCreateResponse::Accept {
+                content: Default::default(),
+            })
+        } else {
+            Ok(ElicitationCreateResponse::Cancel)
         }
     }
 

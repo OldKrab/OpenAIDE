@@ -104,7 +104,7 @@ fn registry_uses_builtin_codex_launch_policy_for_catalog_codex_record() {
 
     assert_ne!(config.command, "missing-codex-acp");
     assert_ne!(config.args, ["ignored"]);
-    assert!(config.env.is_empty());
+    assert_eq!(config.env, [("NO_BROWSER".to_string(), "1".to_string())]);
 }
 
 #[test]

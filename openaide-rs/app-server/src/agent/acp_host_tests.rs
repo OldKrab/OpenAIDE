@@ -11,6 +11,9 @@ fn form_elicitation_is_advertised_without_shell_host_capabilities() {
         serde_json::json!({})
     );
     assert_eq!(value["clientCapabilities"]["terminal"], false);
+    assert!(value["clientCapabilities"]["elicitation"]
+        .get("url")
+        .is_none());
     assert_eq!(value["clientCapabilities"]["auth"]["terminal"], false);
     assert_eq!(
         value["clientCapabilities"]["session"]["configOptions"]["boolean"],
@@ -28,6 +31,10 @@ fn terminal_auth_is_advertised_when_the_app_shell_host_is_available() {
     let value = serde_json::to_value(initialize_request(&bridge)).unwrap();
 
     assert_eq!(value["clientCapabilities"]["auth"]["terminal"], true);
+    assert_eq!(
+        value["clientCapabilities"]["elicitation"]["url"],
+        serde_json::json!({})
+    );
 }
 
 #[test]

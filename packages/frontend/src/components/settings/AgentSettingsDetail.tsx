@@ -208,7 +208,7 @@ function AgentAttentionSection({
   const recoveryKind = agentSettingsRecoveryKind(agent);
   if (agent.auth_methods.length) {
     return (
-      <AgentPageSection label="Authentication">
+      <AgentPageSection description={authenticationSectionDescription(agent)} label="Authentication">
         <div className="agent-page-surface attention">
           {agent.auth_methods.map((method) => (
             <AgentAuthenticationMethod
@@ -238,6 +238,14 @@ function AgentAttentionSection({
       </div>
     </AgentPageSection>
   );
+}
+
+function authenticationSectionDescription(agent: AgentSettingsRecord) {
+  if (agent.status === "auth_required") return "Sign-in is required to continue.";
+  if (agent.status === "connected" || agent.status === "ready") {
+    return `${agent.label} is connected. Sign in again to refresh credentials or switch accounts.`;
+  }
+  return "Choose a sign-in method to authenticate this Agent.";
 }
 
 function AgentAuthenticationMethod({

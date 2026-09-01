@@ -3,12 +3,12 @@ use std::time::Duration;
 use crate::agent::acp_schema::{
     AuthCapabilities, BooleanConfigOptionCapabilities, ClientCapabilities,
     ClientSessionCapabilities, CreateTerminalRequest, CreateTerminalResponse,
-    ElicitationCapabilities, ElicitationFormCapabilities, FileSystemCapabilities,
-    InitializeRequest, KillTerminalRequest, KillTerminalResponse, ProtocolVersion,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    SessionConfigOptionsCapabilities, SubagentCapabilities, TerminalOutputRequest,
-    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
+    ElicitationCapabilities, ElicitationFormCapabilities, ElicitationUrlCapabilities,
+    FileSystemCapabilities, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
+    ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+    ReleaseTerminalResponse, SessionConfigOptionsCapabilities, SubagentCapabilities,
+    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 
 use crate::agent::acp_trace::AcpTraceSession;
@@ -42,6 +42,12 @@ fn initialize_request_with_subagents(
             serde_json::json!({ "nativeSubagentSessions": true }),
         );
     }
+    let elicitation = ElicitationCapabilities::new().form(ElicitationFormCapabilities::new());
+    let elicitation = if host_bridge.is_enabled() {
+        elicitation.url(ElicitationUrlCapabilities::new())
+    } else {
+        elicitation
+    };
     let capabilities = ClientCapabilities::new()
         // Cursor uses this ACP extension to expose model parameters (such as
         // thinking effort and fast mode) as independent session options.
@@ -49,7 +55,7 @@ fn initialize_request_with_subagents(
         .session(ClientSessionCapabilities::new().config_options(
             SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
         ))
-        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
+        .elicitation(elicitation);
     let capabilities = if native_subagents {
         capabilities.subagents(SubagentCapabilities::new())
     } else {

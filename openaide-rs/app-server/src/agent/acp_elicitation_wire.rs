@@ -24,6 +24,10 @@ pub(super) struct ElicitationCreateRequest {
     pub(super) mode: ElicitationMode,
     pub(super) message: String,
     #[serde(default)]
+    pub(super) elicitation_id: Option<String>,
+    #[serde(default)]
+    pub(super) url: Option<String>,
+    #[serde(default)]
     pub(super) requested_schema: Option<ElicitationSchema>,
     #[serde(default, rename = "_meta")]
     pub(super) meta: Option<serde_json::Map<String, serde_json::Value>>,

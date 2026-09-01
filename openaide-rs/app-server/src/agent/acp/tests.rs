@@ -781,6 +781,31 @@ fn probe_result_normalizes_initialize_without_raw_payloads() {
 }
 
 #[test]
+fn probe_result_projects_api_key_metadata_as_a_secret_authentication_input() {
+    let meta: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_value(serde_json::json!({
+            "api-key": { "provider": "openai" }
+        }))
+        .expect("auth method metadata");
+    let initialize =
+        InitializeResponse::new(ProtocolVersion::V1).auth_methods(vec![AuthMethod::Agent(
+            AuthMethodAgent::new("api-key", "API Key")
+                .description("Use an API key to authenticate")
+                .meta(meta),
+        )]);
+
+    let result = agent_probe_result_from_initialize("codex".to_string(), &initialize);
+
+    let method = &result.auth_methods[0];
+    assert_eq!(method.kind, "env_var");
+    assert_eq!(method.variables.len(), 1);
+    assert_eq!(method.variables[0].name, "OPENAI_API_KEY");
+    assert_eq!(method.variables[0].label.as_deref(), Some("API Key"));
+    assert!(method.variables[0].secret);
+    assert!(!method.variables[0].optional);
+}
+
+#[test]
 fn validate_auth_method_accepts_every_current_acp_v1_method_type() {
     let initialize = InitializeResponse::new(ProtocolVersion::V1).auth_methods(vec![
         AuthMethod::Agent(AuthMethodAgent::new("codex-login", "Codex login")),
