@@ -1,4 +1,4 @@
-import { AlertTriangle, Bug, Download } from "lucide-react";
+import { AlertTriangle, Bug, CircleCheck, Download, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
@@ -24,7 +24,7 @@ export function SupportExportButton({
 }) {
   const shell = currentFrontendShell();
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<"sessions" | "contents">("sessions");
+  const [step, setStep] = useState<"sessions" | "contents" | "saved">("sessions");
   const [catalog, setCatalog] = useState<SupportExportListResult>();
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [selectedUnbound, setSelectedUnbound] = useState<Set<string>>(new Set());
@@ -96,9 +96,9 @@ export function SupportExportButton({
         })),
         unboundTraceIds: [...selectedUnbound],
       });
-      await shell.supportExports.save({ fileHandleId: result.fileHandleId, label: result.label });
-      shell.recovery.openExternal(BUG_REPORT_URL);
-      setOpen(false);
+      const outcome = await shell.supportExports.save({ fileHandleId: result.fileHandleId, label: result.label });
+      if (outcome === "cancelled") return;
+      setStep("saved");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to export diagnostics.");
     } finally {
@@ -116,13 +116,13 @@ export function SupportExportButton({
       >
         <Bug size={14} />{compact ? "Diagnostics" : "Export diagnostics…"}
       </button>
-      <PopupDialog className="settings-reset-dialog support-export-dialog" label="Export diagnostics" onOpenChange={setOpen} open={open}>
+      <PopupDialog className={`settings-reset-dialog support-export-dialog${step === "saved" ? " support-export-dialog-saved" : ""}`} label="Export diagnostics" onOpenChange={setOpen} open={open}>
         <header><Bug size={18} /><div><strong>Export diagnostics</strong></div></header>
-        <section className="support-export-step-heading">
+        {step !== "saved" ? <section className="support-export-step-heading">
           <div><small>Step {step === "sessions" ? "1" : "2"} of 2</small><progress aria-label={`Export progress, step ${step === "sessions" ? "1" : "2"} of 2`} max={2} value={step === "sessions" ? 1 : 2} /></div>
           <h2>{step === "sessions" ? "Choose relevant sessions" : "Choose bundle contents"}</h2>
           <p>{step === "sessions" ? "Activity from the last 15 minutes is preselected. Adjust it to match the problem you saw." : "Standard diagnostics are safe by default. Session sources are raw and may be sensitive."}</p>
-        </section>
+        </section> : null}
         {!catalog && !error ? <div className="support-export-content"><p role="status">Loading available artifacts…</p></div> : null}
         {catalog ? (
           <div className="support-export-content">
@@ -154,7 +154,7 @@ export function SupportExportButton({
                   </fieldset>
                 ) : null}
               </>
-            ) : (
+            ) : step === "contents" ? (
               <>
                 <p className="support-export-selection-summary">{selectionSummary(selectedTasks.size, selectedUnbound.size)}</p>
                 <fieldset>
@@ -173,6 +173,11 @@ export function SupportExportButton({
                   <p className="support-export-warning" role="note"><AlertTriangle size={16} />Selected raw artifacts may contain prompts, responses, paths, tool output, and secrets. Review the ZIP before sharing it.</p>
                 ) : null}
               </>
+            ) : (
+              <div className="support-export-saved" role="status">
+                <CircleCheck size={22} />
+                <div><h2>Diagnostics saved</h2><p>The ZIP is ready. Review it before sharing if you included raw session sources.</p></div>
+              </div>
             )}
             {error ? <p className="settings-reset-error" role="alert">{error}</p> : null}
           </div>
@@ -183,10 +188,15 @@ export function SupportExportButton({
               <button disabled={pending} onClick={() => setOpen(false)} type="button">Cancel</button>
               <button disabled={!catalog} onClick={() => setStep("contents")} type="button">Continue</button>
             </>
-          ) : (
+          ) : step === "contents" ? (
             <>
               <button disabled={pending} onClick={() => setStep("sessions")} type="button">Back</button>
               <button disabled={!canExport} onClick={() => void exportBundle()} type="button"><Download size={14} />{pending ? "Exporting…" : "Export"}</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => shell?.recovery.openExternal(BUG_REPORT_URL)} type="button"><ExternalLink size={14} />Open GitHub bug report</button>
+              <button onClick={() => setOpen(false)} type="button">Done</button>
             </>
           )}
         </footer>

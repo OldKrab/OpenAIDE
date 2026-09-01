@@ -104,6 +104,7 @@ export function createWebAppShell(): FrontendShell {
         link.href = `/__openaide-app-server/download?${search}`;
         link.download = label;
         link.click();
+        return "saved";
       },
     },
     files: {

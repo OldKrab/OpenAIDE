@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as path from "node:path";
 import { exportSupportDiagnostics } from "./export";
 
 const vscodeMocks = vi.hoisted(() => ({
@@ -65,14 +64,22 @@ describe("Support Export command", () => {
         };
       },
     };
+    const supportExportState = {
+      get: vi.fn(() => "/remembered/reports"),
+      update: vi.fn(async () => undefined),
+    };
 
-    await exportSupportDiagnostics(runtime as never, runtimeProcess as never);
+    await exportSupportDiagnostics(runtime as never, runtimeProcess as never, supportExportState);
 
     expect(vscodeMocks.showSaveDialog).toHaveBeenCalledWith(expect.objectContaining({
       filters: { "ZIP archive": ["zip"] },
     }));
     const saveOptions = vscodeMocks.showSaveDialog.mock.calls[0]?.[0];
-    expect(path.isAbsolute(saveOptions.defaultUri.fsPath)).toBe(true);
+    expect(saveOptions.defaultUri.fsPath).toMatch(/^\/remembered\/reports\/openaide-support-.*\.zip$/);
+    expect(supportExportState.update).toHaveBeenCalledWith(
+      "openaide.supportExport.lastDirectory",
+      "/tmp",
+    );
     const bytes = vscodeMocks.writeFile.mock.calls[0]?.[1] as Uint8Array;
     expect(Buffer.from(bytes).readUInt32LE(0)).toBe(0x04034b50);
     expect(vscodeMocks.showInformationMessage).toHaveBeenCalledWith(

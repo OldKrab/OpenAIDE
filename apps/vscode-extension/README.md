@@ -40,7 +40,8 @@ Run **OpenAIDE: Export Support Diagnostics** from the Command Palette or use
 **Export diagnostics** from a Task or Settings. The shared picker can save a
 public-safe runtime/log bundle or add explicitly selected OpenAIDE session
 history, associated ACP traces, and available Agent-native transcripts. It
-then opens the repository's GitHub Bug Report form, where you can attach the ZIP.
+remembers the last successful export folder, and then offers the repository's
+GitHub Bug Report form as an optional action where you can attach the ZIP.
 
 Sensitive sources are unchecked for generic exports and carry a warning because
 they may contain prompts, responses, paths, tool output, and secrets. Referenced

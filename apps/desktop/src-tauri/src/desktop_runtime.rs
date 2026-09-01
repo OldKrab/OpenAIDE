@@ -93,6 +93,9 @@ pub(crate) struct DesktopBootstrapPreferences {
     pub(crate) previous_environment: Option<DesktopRuntimeEnvironment>,
     #[serde(default)]
     pub(crate) dismissed_path_warnings: Vec<String>,
+    /// Native shell convenience only; never exposed through product state or diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) support_export_directory: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

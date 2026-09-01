@@ -14,7 +14,7 @@ export async function routeDiagnosticsCommand(message: WebviewToHostMessage, con
     return true;
   }
   if (message.type === "diagnostics.export") {
-    await exportSupportDiagnostics(context.runtime, context.runtimeProcess);
+    await exportSupportDiagnostics(context.runtime, context.runtimeProcess, context.supportExportState);
     return true;
   }
   return false;

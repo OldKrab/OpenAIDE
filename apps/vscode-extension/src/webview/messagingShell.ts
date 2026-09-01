@@ -1,5 +1,4 @@
 import * as nodePath from "node:path";
-import { homedir } from "node:os";
 import * as vscode from "vscode";
 import {
   SECRET_READ,
@@ -18,6 +17,7 @@ import {
   type WorktreeRepositoryId,
 } from "@openaide/app-server-client";
 import type { WebviewToHostMessage } from "@openaide/app-shell-contracts";
+import { rememberSupportExportDirectory, supportExportDefaultPath } from "../diagnostics/exportLocation";
 import { sanitizeDiagnosticText } from "../logging/logger";
 import { workspaceRoots } from "../workspace/roots";
 import type { MessageContext } from "./messagingContext";
@@ -85,19 +85,29 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     return true;
   }
   if (message.type === "supportExport.save") {
-    const { requestId, fileHandleId, label } = message.payload;
+    const { requestId, fileHandleId } = message.payload;
     try {
       const target = await context.runtime.resolveOwnAppServerFileReveal(fileHandleId);
       if (!nodePath.isAbsolute(target.path)) throw new Error("Support export path is invalid.");
       const destination = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(nodePath.join(homedir(), label)),
+        defaultUri: vscode.Uri.file(supportExportDefaultPath(context.supportExportState, target.label)),
         filters: { "ZIP archive": ["zip"] },
         saveLabel: "Save Support Bundle",
         title: "Export OpenAIDE Support Diagnostics",
       });
-      if (!destination) throw new Error("Save canceled.");
+      if (!destination) {
+        await context.post({
+          type: "supportExport.save.result",
+          payload: { requestId, ok: true, outcome: "cancelled" },
+        });
+        return true;
+      }
       await vscode.workspace.fs.copy(vscode.Uri.file(target.path), destination, { overwrite: true });
-      await context.post({ type: "supportExport.save.result", payload: { requestId, ok: true } });
+      await rememberSupportExportDirectory(context.supportExportState, destination.fsPath);
+      await context.post({
+        type: "supportExport.save.result",
+        payload: { requestId, ok: true, outcome: "saved" },
+      });
     } catch (error) {
       await context.post({
         type: "supportExport.save.result",

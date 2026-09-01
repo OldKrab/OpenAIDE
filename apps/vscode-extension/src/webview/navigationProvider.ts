@@ -82,6 +82,7 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         logger: this.logger,
         surface: "navigation",
         developerSettingsStore: this.context.globalState,
+        supportExportState: this.context.globalState,
         agentSecretStore: this.context.secrets,
         surfaces: this.surfaces,
       });

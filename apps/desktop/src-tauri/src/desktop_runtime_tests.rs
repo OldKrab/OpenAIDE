@@ -47,6 +47,7 @@ fn bootstrap_preferences_keep_backend_os_data_separate() {
         },
         previous_environment: Some(DesktopRuntimeEnvironment::Native),
         dismissed_path_warnings: vec!["windows-folder-in-wsl".to_string()],
+        support_export_directory: None,
     };
     let encoded = serde_json::to_string(&preferences).expect("preferences should serialize");
     let decoded: DesktopBootstrapPreferences =

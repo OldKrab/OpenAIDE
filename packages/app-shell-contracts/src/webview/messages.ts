@@ -73,7 +73,7 @@ export type HostToWebviewMessage =
   | { type: "attachment.pickFiles.result"; payload: { requestId: string; attachments?: Array<{ handleId: string; label: string }>; error?: string } }
   | { type: "project.pickFolder.result"; payload: { requestId: string; folder?: { path: string; label: string }; error?: string } }
   | { type: "shell.clipboard.writeText.result"; payload: { requestId: string; ok: boolean; error?: string } }
-  | { type: "supportExport.save.result"; payload: { requestId: string; ok: boolean; error?: string } }
+  | { type: "supportExport.save.result"; payload: { requestId: string; ok: boolean; outcome?: "saved" | "cancelled"; error?: string } }
   | { type: "surface.workspaceChanged"; payload: { project_ids: string[] } }
   | { type: "surface.newTaskChanged"; payload: { project_id?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }

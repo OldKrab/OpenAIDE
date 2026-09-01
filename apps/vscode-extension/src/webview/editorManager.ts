@@ -273,6 +273,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         logger: this.logger,
         surface: bootstrap.surface,
         developerSettingsStore: this.context.globalState,
+        supportExportState: this.context.globalState,
         agentSecretStore: this.context.secrets,
         adoptTask: (taskId, taskTitle, agentId) => this.adoptTaskPanel(panel, taskId, taskTitle, agentId),
         surfaces: this,
