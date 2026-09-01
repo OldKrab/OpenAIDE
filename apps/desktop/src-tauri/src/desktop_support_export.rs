@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use url::Url;
 
@@ -36,7 +37,13 @@ pub(crate) fn support_export_download_url(
 }
 
 pub(crate) async fn download_support_export(url: Url, auth_token: &str) -> Result<Vec<u8>, String> {
-    let response = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
+        .no_proxy()
+        .build()
+        .map_err(|_| "Unable to prepare the support export download.".to_string())?;
+    let response = client
         .get(url)
         .bearer_auth(auth_token)
         .send()
