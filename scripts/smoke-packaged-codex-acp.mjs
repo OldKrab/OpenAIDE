@@ -97,15 +97,6 @@ try {
     workspaceRoots: [],
   }, 30_000);
   await request("agent/probe", { agentId: "codex" });
-  // This legacy stdio smoke also publishes a local-HTTP endpoint whose real-time
-  // liveness monitor can detach the logical-time stdio client during a slow probe.
-  // Reattach before reading the probe result through the packaged Settings API.
-  await request("client/initialize", {
-    clientInstanceId: "packaged-codex-acp-smoke",
-    shell: { kind: "desktop" },
-    requestedSurface: { kind: "home" },
-    workspaceRoots: [],
-  }, 30_000);
   const detailsEnvelope = await request("settings/getAgentDetails", {});
   const codexDetails = detailsEnvelope?.result?.agents?.find((agent) => agent.agentId === "codex");
   const authMethodIds = codexDetails?.authMethods?.map((method) => method.id) ?? [];

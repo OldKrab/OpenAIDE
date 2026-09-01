@@ -171,6 +171,31 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
 }
 
 #[test]
+fn real_time_liveness_poll_does_not_detach_an_active_stdio_client() {
+    let (_temp, mut dispatcher) = dispatcher();
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    dispatcher
+        .shared_gateway()
+        .expire_inactive_clients(AppServerTime::now());
+
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "settings",
+            "method": SETTINGS_GET_AGENT_DETAILS,
+            "params": {}
+        })
+        .to_string(),
+    );
+    let response = response(&responses[0]);
+    assert!(
+        response["result"]["result"]["agents"].is_array(),
+        "real-time endpoint maintenance must preserve stdio connection authority: {response}"
+    );
+}
+
+#[test]
 fn reset_task_history_removes_local_tasks_without_touching_project_files() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project_file = temp.path().join("project-file.txt");
