@@ -383,7 +383,7 @@ describe("TaskView timeline presentation", () => {
     expect(JSON.stringify(tree.toJSON())).toContain("Opening session");
   });
 
-  it("announces each completed history generation once as a settled notice", async () => {
+  it("announces a completed history generation only when it arrives after Task open", async () => {
     const { TaskView } = await import("./TaskView");
     const updated = snapshotWithAuthoritativeTail(true);
     updated.history_sync = { state: "updated", generation: 3 };
@@ -393,6 +393,19 @@ describe("TaskView timeline presentation", () => {
     act(() => {
       tree = create(<TaskView {...taskViewProps(updated)} />);
     });
+    expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
+
+    const syncing = snapshotWithAuthoritativeTail(true);
+    syncing.history_sync = { state: "syncing", generation: 4 };
+    const nextUpdate = snapshotWithAuthoritativeTail(true);
+    nextUpdate.history_sync = { state: "updated", generation: 4 };
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(syncing)} />);
+    });
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(nextUpdate)} />);
+    });
+
     expect(JSON.stringify(tree.toJSON())).toContain("History updated");
     expect(tree.root.findAllByProps({ className: "working-status working-status-notice" })).toHaveLength(1);
     expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(0);
@@ -403,13 +416,18 @@ describe("TaskView timeline presentation", () => {
     });
     expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
 
-    const stale = snapshotWithAuthoritativeTail(true);
-    stale.history_sync = { state: "idle", generation: 0 };
     act(() => {
-      tree.update(<TaskView {...taskViewProps(stale)} />);
+      tree.update(<TaskView {...taskViewProps(nextUpdate)} />);
     });
+
+    expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
+
+    const openedTask = snapshotWithAuthoritativeTail(true);
+    openedTask.task.task_id = "task-2";
+    openedTask.chat.task_id = "task-2";
+    openedTask.history_sync = { state: "updated", generation: 1 };
     act(() => {
-      tree.update(<TaskView {...taskViewProps(updated)} />);
+      tree.update(<TaskView {...taskViewProps(openedTask)} />);
     });
 
     expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
