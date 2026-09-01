@@ -99,6 +99,55 @@ it("preselects the current Task's sensitive sources and offers the bug form only
   expect(openExternal).toHaveBeenCalledWith("https://github.com/OldKrab/OpenAIDE/issues/new?template=bug_report.yml");
 });
 
+it("admits only one export while the native save operation is pending", async () => {
+  let resolveCreate!: (result: {
+    containsSensitiveData: boolean;
+    fileHandleId: string;
+    label: string;
+    sizeBytes: number;
+  }) => void;
+  const createResult = new Promise<Parameters<typeof resolveCreate>[0]>((resolve) => {
+    resolveCreate = resolve;
+  });
+  const request = vi.fn((method: string) => {
+    if (method === DIAGNOSTICS_LIST_SUPPORT_EXPORT) {
+      return Promise.resolve({ acpTraceEnabled: true, sessions: [], unboundTraces: [] });
+    }
+    if (method === DIAGNOSTICS_CREATE_SUPPORT_EXPORT) return createResult;
+    throw new Error(`Unexpected method ${method}`);
+  });
+  installFrontendShell({
+    recovery: { openExternal: vi.fn() },
+    supportExports: { save: vi.fn(async () => "saved" as const) },
+  } as unknown as FrontendShell);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<SupportExportButton connection={{ request } as never} />));
+
+  await act(async () => document.querySelector<HTMLButtonElement>(".general-support-export")!.click());
+  await act(async () => undefined);
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent === "Continue")!.click());
+  const exportButton = [...document.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent === "Export")!;
+
+  await act(async () => {
+    exportButton.click();
+    exportButton.click();
+    exportButton.click();
+  });
+
+  expect(request.mock.calls.filter(([method]) => method === DIAGNOSTICS_CREATE_SUPPORT_EXPORT)).toHaveLength(1);
+  resolveCreate({
+    containsSensitiveData: false,
+    fileHandleId: "export-1",
+    label: "openaide-support.zip",
+    sizeBytes: 123,
+  });
+  await act(async () => undefined);
+});
+
 it("selects sessions in a separate step and preserves them when navigating back", async () => {
   const request = vi.fn(async (method: string) => {
     if (method !== DIAGNOSTICS_LIST_SUPPORT_EXPORT) throw new Error(`Unexpected method ${method}`);

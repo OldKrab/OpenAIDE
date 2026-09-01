@@ -1,5 +1,5 @@
 import { AlertTriangle, Bug, CircleCheck, Download, ExternalLink } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
   DIAGNOSTICS_LIST_SUPPORT_EXPORT,
@@ -35,6 +35,7 @@ export function SupportExportButton({
   const [includeLogs, setIncludeLogs] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const exportPending = useRef(false);
 
   useEffect(() => {
     if (!open || !connection) return;
@@ -75,13 +76,13 @@ export function SupportExportButton({
     setIncludeNative(taskScoped);
     setIncludeSnapshot(true);
     setIncludeLogs(true);
-    setPending(false);
     setError(undefined);
     setOpen(true);
   };
 
   const exportBundle = async () => {
-    if (!connection || !shell?.supportExports) return;
+    if (!connection || !shell?.supportExports || exportPending.current) return;
+    exportPending.current = true;
     setPending(true);
     setError(undefined);
     try {
@@ -102,6 +103,7 @@ export function SupportExportButton({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to export diagnostics.");
     } finally {
+      exportPending.current = false;
       setPending(false);
     }
   };

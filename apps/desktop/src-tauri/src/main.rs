@@ -186,6 +186,7 @@ fn main() {
 #[tauri::command]
 async fn desktop_save_support_export(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, DesktopState>,
     file_handle_id: String,
     label: String,
@@ -217,6 +218,7 @@ async fn desktop_save_support_export(
         .file()
         .set_title("Export OpenAIDE Support Diagnostics")
         .set_file_name(&label)
+        .set_parent(&window)
         .add_filter("ZIP archive", &["zip"]);
     if let Some(directory) = export_directory {
         dialog = dialog.set_directory(directory);
