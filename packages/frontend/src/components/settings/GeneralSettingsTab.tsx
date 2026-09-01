@@ -27,108 +27,123 @@ import { DesktopUpdateSettings } from "./DesktopUpdateSettings";
 import { SupportExportButton } from "../SupportExportDialog";
 
 export function GeneralSettingsTab({
-  backendConnection,
-  developerSettingsUnlocked = false,
   desktopNotifications,
   appearance,
-  onResetTaskHistory,
-  onSetAcpTrace,
   onSetComposerSubmitShortcut,
   onSetDesktopNotifications,
   preferences,
-  runtimeSettings,
-}: {
-  backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
-  developerSettingsUnlocked?: boolean;
-  desktopNotifications?: DesktopNotificationSettings;
-  appearance?: FrontendShellAppearance;
-  onResetTaskHistory?: () => Promise<void>;
-  onSetAcpTrace: (enabled: boolean) => void;
-  onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
-  onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
-  preferences: AppPreferencesRecord;
-  runtimeSettings?: RuntimeSettingsResult;
-}) {
+}: GeneralSettingsTabProps) {
   const mobileComposerBehavior = usesMobileComposerBehavior();
   const enterSends = preferences.composer_submit_shortcut === "enter";
   const newLineShortcut = enterSends ? "Ctrl/Cmd+Enter" : "Enter";
-  const developerSettings = runtimeSettings?.developer;
+
+  return (
+    <div className="general-settings-panel">
+      {appearance ? (
+        <GeneralSection id="settings-general-appearance" label="Appearance">
+          <ThemePicker appearance={appearance} />
+        </GeneralSection>
+      ) : null}
+
+      {!mobileComposerBehavior || (desktopNotifications && onSetDesktopNotifications) ? (
+        <GeneralSection id="settings-general-behavior" label="Behavior">
+          <div className="general-preference-surface">
+            {!mobileComposerBehavior ? (
+              <GeneralPreferenceRow
+                action={(
+                  <span className="general-preference-action">
+                    <kbd className="general-shortcut-key">{enterSends ? "Enter" : "Ctrl/Cmd+Enter"}</kbd>
+                    <SettingsSwitch
+                      checked={enterSends}
+                      label="Send with Enter"
+                      onChange={(checked) => onSetComposerSubmitShortcut(checked ? "enter" : "mod_enter")}
+                    />
+                  </span>
+                )}
+                detail={`Use ${newLineShortcut} for a new line.`}
+                icon={<Keyboard size={17} />}
+                label="Send with Enter"
+              />
+            ) : null}
+            {desktopNotifications && onSetDesktopNotifications ? (
+              <GeneralPreferenceRow
+                action={(
+                  <SettingsSwitch
+                    checked={desktopNotifications.status === "enabled" || desktopNotifications.status === "blocked"}
+                    disabled={desktopNotifications.status === "unsupported"}
+                    label="Desktop notifications"
+                    onChange={(checked) => { void onSetDesktopNotifications(checked); }}
+                  />
+                )}
+                detail={desktopNotificationDetail(desktopNotifications.status)}
+                icon={<Bell size={17} />}
+                label="Desktop notifications"
+              />
+            ) : null}
+          </div>
+        </GeneralSection>
+      ) : null}
+    </div>
+  );
+}
+
+type GeneralSettingsTabProps = {
+  desktopNotifications?: DesktopNotificationSettings;
+  appearance?: FrontendShellAppearance;
+  onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
+  onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
+  preferences: AppPreferencesRecord;
+};
+
+export function DesktopSettingsTab() {
   const desktopRuntime = currentFrontendShell()?.desktopRuntime;
   const desktopUpdates = currentFrontendShell()?.desktopUpdates;
 
   return (
     <div className="general-settings-panel">
-      {appearance ? (
-        <GeneralSection
-          description="Theme changes apply immediately in this OpenAIDE app."
-          label="Appearance"
-        >
-          <ThemePicker appearance={appearance} />
-        </GeneralSection>
-      ) : null}
-
       {desktopRuntime ? (
         <GeneralSection
-          description="Choose the operating system that owns this OpenAIDE environment. Switching restarts the app."
+          description="Choose whether Windows or WSL owns projects, tools, and Agents. Switching restarts OpenAIDE."
+          id="settings-desktop-environment"
           label="Environment"
         >
           <DesktopRuntimeSettings capability={desktopRuntime} />
         </GeneralSection>
       ) : null}
-
       {desktopUpdates ? (
-        <GeneralSection
-          description="Review, download, and apply signed OpenAIDE Desktop releases."
-          label="Application updates"
-        >
+        <GeneralSection id="settings-desktop-updates" label="Application updates">
           <DesktopUpdateSettings capability={desktopUpdates} />
         </GeneralSection>
       ) : null}
+    </div>
+  );
+}
 
-      {!mobileComposerBehavior ? (
-        <GeneralSection label="Composer">
-          <div className="general-preference-surface">
-            <GeneralPreferenceRow
-              action={(
-                <span className="general-preference-action">
-                  <kbd className="general-shortcut-key">{enterSends ? "Enter" : "Ctrl/Cmd+Enter"}</kbd>
-                  <SettingsSwitch
-                    checked={enterSends}
-                    label="Send with Enter"
-                    onChange={(checked) => onSetComposerSubmitShortcut(checked ? "enter" : "mod_enter")}
-                  />
-                </span>
-              )}
-              detail={`Press ${newLineShortcut} to add a new line.`}
-              icon={<Keyboard size={17} />}
-              label="Send with Enter"
-            />
-          </div>
-        </GeneralSection>
-      ) : null}
+export function DataSupportSettingsTab({
+  backendConnection,
+  developerSettingsUnlocked = false,
+  onResetTaskHistory,
+  onSetAcpTrace,
+  runtimeSettings,
+}: {
+  backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
+  developerSettingsUnlocked?: boolean;
+  onResetTaskHistory?: () => Promise<void>;
+  onSetAcpTrace: (enabled: boolean) => void;
+  runtimeSettings?: RuntimeSettingsResult;
+}) {
+  const developerSettings = runtimeSettings?.developer;
 
-      {desktopNotifications && onSetDesktopNotifications ? (
-        <GeneralSection label="Notifications">
-          <div className="general-preference-surface">
-            <GeneralPreferenceRow
-              action={(
-                <SettingsSwitch
-                  checked={desktopNotifications.status === "enabled" || desktopNotifications.status === "blocked"}
-                  disabled={desktopNotifications.status === "unsupported"}
-                  label="Desktop notifications"
-                  onChange={(checked) => { void onSetDesktopNotifications(checked); }}
-                />
-              )}
-              detail={desktopNotificationDetail(desktopNotifications.status)}
-              icon={<Bell size={17} />}
-              label="Desktop notifications"
-            />
-          </div>
-        </GeneralSection>
-      ) : null}
+  return (
+    <div className="general-settings-panel">
+      <GeneralSection id="settings-data-support" label="Support">
+        <div className="general-preference-surface">
+          <GeneralPreferenceRow action={<SupportExportButton connection={backendConnection} />} detail="Export diagnostics, Agent sessions, and raw traces for troubleshooting." icon={<Bug size={17} />} label="Diagnostics" />
+        </div>
+      </GeneralSection>
 
       {developerSettings && developerSettingsUnlocked ? (
-        <GeneralSection description="Local diagnostic controls for this App Server." label="Developer">
+        <GeneralSection description="Local controls for investigating App Server behavior." id="settings-data-developer" label="Developer">
           <div className="general-preference-surface">
             <GeneralPreferenceRow
               action={(
@@ -155,14 +170,8 @@ export function GeneralSettingsTab({
         </GeneralSection>
       ) : null}
 
-      <GeneralSection description="Create a local troubleshooting bundle for a bug report." label="Support">
-        <div className="general-preference-surface">
-          <GeneralPreferenceRow action={<SupportExportButton connection={backendConnection} />} detail="Choose standard diagnostics, Agent sessions, and raw traces." icon={<Bug size={17} />} label="Diagnostics" />
-        </div>
-      </GeneralSection>
-
       {onResetTaskHistory ? (
-        <GeneralSection description="Manage history stored on this device." label="Local data">
+        <GeneralSection description="Destructive actions only affect data stored on this device." id="settings-data-local" label="Local data">
           <div className="general-danger-surface">
             <GeneralPreferenceRow
               action={<ResetTaskHistoryButton onReset={onResetTaskHistory} />}
@@ -181,15 +190,17 @@ export function GeneralSettingsTab({
 function GeneralSection({
   children,
   description,
+  id,
   label,
 }: {
   children: ReactNode;
   description?: string;
+  id: string;
   label: string;
 }) {
-  const headingId = `general-${label.toLowerCase().replaceAll(" ", "-")}`;
+  const headingId = `${id}-heading`;
   return (
-    <section className="general-settings-section" aria-labelledby={headingId}>
+    <section className="general-settings-section" aria-labelledby={headingId} id={id} tabIndex={-1}>
       <header className="general-settings-section-heading">
         <h2 id={headingId}>{label}</h2>
         {description ? <p>{description}</p> : null}

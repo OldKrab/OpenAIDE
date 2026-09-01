@@ -275,16 +275,24 @@
 .general-settings-panel {
   min-width: 0;
   display: grid;
-  gap: 36px;
+  gap: 28px;
+}
+
+.general-settings-section {
+  scroll-margin-top: 28px;
+}
+
+.general-settings-section:focus {
+  outline: 0;
 }
 
 .general-settings-section-heading {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .general-settings-section-heading h2 {
   margin: 0 0 3px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -297,7 +305,7 @@
 .general-theme-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .desktop-runtime-settings {
@@ -443,17 +451,17 @@
   position: relative;
   min-width: 0;
   border: 1px solid var(--oa-border);
-  border-radius: 12px;
+  border-radius: 9px;
   background: color-mix(in oklch, var(--oa-panel) 68%, var(--oa-bg));
   color: var(--oa-text);
   padding: 10px;
   text-align: left;
-  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 .general-theme-choice:hover {
   border-color: var(--oa-border-strong);
-  transform: translateY(-1px);
+  background: var(--oa-raised);
 }
 
 .general-theme-choice.selected {
@@ -480,7 +488,7 @@
 }
 
 .general-theme-preview {
-  height: 96px;
+  height: 68px;
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--oa-border-strong) 45%, transparent);
   border-radius: 8px;
@@ -509,7 +517,7 @@
   display: grid;
   align-content: start;
   gap: 7px;
-  padding: 13px 10px;
+  padding: 10px 9px;
 }
 
 .general-theme-preview-main i {
@@ -526,7 +534,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-top: 10px;
+  margin-top: 8px;
   padding: 0 2px 1px;
   font-size: 13px;
   font-weight: 600;
@@ -535,18 +543,18 @@
 .general-preference-surface {
   overflow: hidden;
   border: 1px solid var(--oa-border-subtle);
-  border-radius: 12px;
+  border-radius: 9px;
   background: color-mix(in oklch, var(--oa-panel) 62%, var(--oa-bg));
 }
 
 .general-preference-row {
   min-width: 0;
-  min-height: 74px;
+  min-height: 62px;
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 11px 13px;
 }
 
 .general-preference-row + .general-preference-row {
@@ -554,9 +562,9 @@
 }
 
 .general-preference-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   background: var(--oa-raised);
   color: var(--oa-muted);
   display: grid;
@@ -648,7 +656,7 @@
   }
 
   .general-theme-preview {
-    height: 72px;
+    height: 60px;
   }
 
   .general-theme-label {

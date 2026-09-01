@@ -23,9 +23,9 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   align-content: start;
-  gap: 10px;
+  gap: 12px;
   overflow-y: auto;
-  padding: 14px 10px;
+  padding: 16px 12px;
 }
 
 .app-sidebar-frame-with-overlay-header .settings-sidebar {
@@ -197,7 +197,7 @@
 .settings-tabs {
   display: grid;
   align-self: start;
-  gap: 16px;
+  gap: 18px;
 }
 
 .settings-tabs section {
@@ -211,11 +211,13 @@
   padding: 0 8px 2px;
   font-size: 10px;
   font-weight: 650;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
 }
 
 .settings-tabs button {
   width: 100%;
-  min-height: 31px;
+  min-height: 34px;
   border: 0;
   border-radius: var(--oa-radius-sm);
   background: transparent;
@@ -226,6 +228,63 @@
   gap: 7px;
   padding: 5px 8px;
   text-align: left;
+}
+
+.settings-search-results {
+  display: grid;
+  align-self: start;
+  gap: 3px;
+}
+
+.settings-search-results button {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.settings-search-results button:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.settings-search-results button > span,
+.settings-mobile-search-results button > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.settings-search-results strong,
+.settings-mobile-search-results strong {
+  overflow: hidden;
+  color: var(--oa-text);
+  font-size: 12px;
+  font-weight: 580;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-search-results small,
+.settings-mobile-search-results small {
+  color: var(--oa-muted);
+  font-size: 10px;
+}
+
+.settings-search-results > p,
+.settings-mobile-search-results > p {
+  margin: 0;
+  color: var(--oa-muted);
+  padding: 8px;
+  font-size: 12px;
 }
 
 .settings-tabs button:hover {
@@ -256,8 +315,8 @@
 }
 
 .settings-page-heading {
-  width: min(920px, 100%);
-  margin: 0 auto 28px;
+  width: min(880px, 100%);
+  margin: 0 auto 24px;
 }
 
 .settings-page-heading > span {
@@ -268,7 +327,7 @@
 
 .settings-page-heading h1 {
   margin: 3px 0 0;
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 650;
   letter-spacing: -0.02em;
 }
@@ -276,7 +335,8 @@
 .settings-page-heading p {
   margin: 6px 0 0;
   color: var(--oa-muted);
-  font-size: 14px;
+  max-width: 62ch;
+  font-size: 13px;
 }
 
 .settings-content:has(.agent-focused-view) > .settings-page-heading,
@@ -396,7 +456,7 @@
 }
 
 .settings-tab-panel.narrow {
-  width: min(920px, 100%);
+  width: min(880px, 100%);
   margin-inline: auto;
 }
 

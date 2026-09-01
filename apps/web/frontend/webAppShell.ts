@@ -25,7 +25,7 @@ import { uploadFile } from "./fileUpload";
 import { writeBrowserClipboardText } from "../../../packages/frontend/src/shells/browserClipboard";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
-const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "worktrees"]);
+const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "desktop", "data", "worktrees"]);
 const logger = createRuntimeLogger("openaide-webview");
 
 /** Browser-history adapter owned by the Web App composition boundary. */

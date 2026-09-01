@@ -1,4 +1,4 @@
-export type SettingsTabId = "agents" | "mcp" | "skills" | "common" | "worktrees";
+export type SettingsTabId = "agents" | "mcp" | "skills" | "common" | "desktop" | "data" | "worktrees";
 export type SettingsScope = "global" | "workspace";
 export type ComposerSubmitShortcut = "mod_enter" | "enter";
 

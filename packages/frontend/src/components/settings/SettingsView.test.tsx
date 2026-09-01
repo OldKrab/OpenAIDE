@@ -3,7 +3,7 @@ import type { ReactTestInstance } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { shouldConsumeAgentDeleteAck, shouldConsumeAgentSaveAck } from "./AgentSettingsTab";
-import { compactPathForSettings, GeneralSettingsTab } from "./GeneralSettingsTab";
+import { compactPathForSettings, DataSupportSettingsTab, GeneralSettingsTab } from "./GeneralSettingsTab";
 import { SettingsView } from "./SettingsView";
 
 beforeEach(() => {
@@ -33,7 +33,6 @@ describe("SettingsView custom Agent acknowledgements", () => {
     });
     const tree = render(
       <GeneralSettingsTab
-        onSetAcpTrace={() => undefined}
         onSetComposerSubmitShortcut={() => undefined}
         preferences={{ composer_submit_shortcut: "enter" }}
       />,
@@ -48,7 +47,6 @@ describe("SettingsView custom Agent acknowledgements", () => {
     const tree = render(
       <GeneralSettingsTab
         appearance={{ theme: () => "system", setTheme }}
-        onSetAcpTrace={() => undefined}
         onSetComposerSubmitShortcut={() => undefined}
         preferences={{ composer_submit_shortcut: "enter" }}
       />,
@@ -68,7 +66,6 @@ describe("SettingsView custom Agent acknowledgements", () => {
   it("omits theme controls when the host owns appearance", () => {
     const tree = render(
       <GeneralSettingsTab
-        onSetAcpTrace={() => undefined}
         onSetComposerSubmitShortcut={() => undefined}
         preferences={{ composer_submit_shortcut: "enter" }}
       />,
@@ -80,11 +77,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
   it("requires explicit confirmation before resetting Task history", async () => {
     const resetTaskHistory = vi.fn(async () => undefined);
     const tree = render(
-      <GeneralSettingsTab
+      <DataSupportSettingsTab
         onResetTaskHistory={resetTaskHistory}
         onSetAcpTrace={() => undefined}
-        onSetComposerSubmitShortcut={() => undefined}
-        preferences={{ composer_submit_shortcut: "enter" }}
       />,
     );
 
@@ -208,7 +203,7 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
-          activeTab: "common",
+          activeTab: "data",
           loading: false,
           runtimeSettings: {
             developer: { acp_trace: { enabled: true, directory: "/runtime/traces" } },
@@ -218,7 +213,7 @@ describe("SettingsView custom Agent acknowledgements", () => {
     );
 
     expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Search settings")).toBe(false);
-    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Send with Enter")).toBe(true);
+    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Send with Enter")).toBe(false);
     expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "ACP logs")).toBe(false);
     expect(tree.root.findAllByType("code").some((code) => code.props.title === "/runtime/traces")).toBe(false);
   });
@@ -240,7 +235,7 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
-          activeTab: "common",
+          activeTab: "data",
           loading: false,
           runtimeSettings: {
             developer: { acp_trace: { enabled: true, directory: "/runtime/traces" } },
@@ -298,7 +293,7 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onUnlockDeveloperSettings={onUnlockDeveloperSettings}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
-          activeTab: "common",
+          activeTab: "data",
           loading: false,
           runtimeSettings: {
             developer: { acp_trace: { enabled: true, directory: "/runtime/traces" } },
@@ -379,8 +374,65 @@ describe("SettingsView custom Agent acknowledgements", () => {
     );
 
     const tabLabels = tree.root.findAllByProps({ role: "tab" }).map(settingsTabLabel);
-    expect(tabLabels).toEqual(["General", "Agents", "Worktrees"]);
+    expect(tabLabels).toEqual(["General", "Data & support", "Agents", "Worktrees"]);
     expect(tree.root.findByProps({ role: "tabpanel" }).props["aria-labelledby"]).toBe("settings-tab-common");
+  });
+
+  it("finds a setting by control name and opens its page", () => {
+    const onSelectTab = vi.fn();
+    const tree = render(
+      <SettingsView
+        onAuthenticate={() => undefined}
+        onCreateCustomAgent={() => undefined}
+        onDeleteCustomAgent={() => undefined}
+        onRefresh={() => undefined}
+        onReplaceCustomAgent={() => undefined}
+        onResetTaskHistory={async () => undefined}
+        onSelectTab={onSelectTab}
+        onSetAcpTrace={() => undefined}
+        onSetAgentEnabled={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onUpdateCustomAgentMetadata={() => undefined}
+        onUnlockDeveloperSettings={() => undefined}
+        preferences={{ composer_submit_shortcut: "mod_enter" }}
+        state={{ activeTab: "common", loading: false }}
+      />,
+    );
+
+    const search = tree.root.findAllByProps({ "aria-label": "Search Settings" })[0]!;
+    act(() => search.props.onChange({ currentTarget: { value: "reset" } }));
+    const result = tree.root.findAllByType("button").find((button) =>
+      button.findAllByType("strong").some((label) => label.children.includes("Reset task history"))
+    );
+    act(() => result?.props.onClick());
+
+    expect(onSelectTab).toHaveBeenCalledWith("data");
+  });
+
+  it("keeps Desktop settings out of shells without native Desktop capabilities", () => {
+    const tree = render(
+      <SettingsView
+        onAuthenticate={() => undefined}
+        onCreateCustomAgent={() => undefined}
+        onDeleteCustomAgent={() => undefined}
+        onRefresh={() => undefined}
+        onReplaceCustomAgent={() => undefined}
+        onSelectTab={() => undefined}
+        onSetAcpTrace={() => undefined}
+        onSetAgentEnabled={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onUpdateCustomAgentMetadata={() => undefined}
+        onUnlockDeveloperSettings={() => undefined}
+        preferences={{ composer_submit_shortcut: "mod_enter" }}
+        state={{ activeTab: "common", availableTabs: ["common", "desktop", "data"], loading: false }}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ role: "tab" }).map(settingsTabLabel)).toEqual([
+      "General",
+      "Data & support",
+      "Worktrees",
+    ]);
   });
 
   it("moves focus to the active tab when Settings opens", () => {

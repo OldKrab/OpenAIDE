@@ -25,9 +25,9 @@ export function AgentSettingsList({
   return (
     <section className="agent-catalog agent-library">
       <div className="agent-library-intro">
-        <p>Choose the agents available when you start work. Open one to sign in, troubleshoot, or change how it runs.</p>
+        <p>Choose the Agents available when you start work. Open one to sign in, troubleshoot, or change how it runs.</p>
         <SettingsCatalogSearch
-          label="Search agents"
+          label="Search Agents"
           onChange={setQuery}
           placeholder="Search"
           value={query}
@@ -97,7 +97,7 @@ function AgentGroup({
             </label>
           </div>
         ))}
-        {!agents.length ? <p className="agent-library-none">No custom agents yet.</p> : null}
+        {!agents.length ? <p className="agent-library-none">No custom Agents yet.</p> : null}
       </div>
     </section>
   );
