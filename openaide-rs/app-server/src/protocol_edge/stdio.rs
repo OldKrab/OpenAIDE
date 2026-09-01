@@ -181,7 +181,9 @@ impl ProtocolEdgeStdioDispatcher {
             #[cfg(test)]
             attachment_runtime: output.attachment_runtime,
             connection_id: ConnectionId::new("stdio"),
-            next_tick: 1,
+            // The published local-HTTP endpoint expires clients using wall-clock
+            // milliseconds, so stdio activity must use the same time domain.
+            next_tick: AppServerTime::now().0,
             task_updates: Some(output.task_updates),
             worktree_updates: Some(output.worktree_updates),
             agent_status_updates: Some(output.agent_status_updates),
