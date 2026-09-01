@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.6 - 2026-09-01
+
+### Desktop updates
+
+- Fixed View what’s new after an update so it opens the release page in the default browser and reports failures instead of doing nothing.
+- Made links in in-app release notes clickable and opened them outside OpenAIDE.
+
 ## 0.4.5 - 2026-09-01
 
 ### Interface
