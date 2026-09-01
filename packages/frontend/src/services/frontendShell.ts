@@ -82,7 +82,7 @@ export type DesktopUpdateCapability = {
   download(): Promise<void>;
   cancelDownload(): Promise<void>;
   restartAndUpdate(options?: { stopActiveWork?: boolean }): Promise<DesktopUpdateRestartResult>;
-  openReleaseNotes(version: string): void;
+  openReleaseNotes(version: string): Promise<void>;
 };
 
 export type DesktopUpdateRestartResult = "started" | "activeWork" | "otherClients";

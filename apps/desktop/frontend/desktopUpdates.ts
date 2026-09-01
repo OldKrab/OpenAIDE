@@ -50,7 +50,7 @@ export function createDesktopUpdates({
 }: {
   invoke: Invoke;
   listen: Listen;
-  openReleaseNotes(version: string): void;
+  openReleaseNotes(version: string): Promise<void>;
   reload(): void;
   session: AppServerSession;
 }): DesktopUpdateCapability {

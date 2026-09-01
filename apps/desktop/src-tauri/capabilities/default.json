@@ -13,6 +13,7 @@
     "core:webview:allow-set-webview-background-color",
     "dialog:allow-open",
     "notification:default",
+    "opener:allow-default-urls",
     "opener:allow-open-url"
   ]
 }
