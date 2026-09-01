@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.5 - 2026-09-01
+
+### Interface
+
+- Corrected the alignment of the Fast mode indicator in the composer.
+
+### Packaging
+
+- Improved Linux extension portability by sharing one static App Server build between standard Linux and WSL.
+- Reduced release packaging delays by allowing each platform package to start as soon as its required App Server is ready.
+
 ## 0.4.4 - 2026-08-31
 
 ### Desktop updates
