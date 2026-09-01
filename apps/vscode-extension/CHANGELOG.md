@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.7 - 2026-09-01
+
+### Interface
+
+- Redesigned Settings with clearer General and Agents pages, refreshed preference descriptions, and improved navigation across app shells.
+- Support exports now use native save dialogs on Desktop and VS Code, remember the last folder, and confirm that diagnostics were saved before offering to open a bug report.
+
+### Reliability
+
+- Fixed legacy Codex subagent interactions that could terminate an otherwise healthy Task.
+- Fixed concurrent Codex setup on Windows so another OpenAIDE instance waits for installation to finish instead of failing.
+
 ## 0.4.6 - 2026-09-01
 
 ### Desktop updates
