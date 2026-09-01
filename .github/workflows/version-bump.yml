@@ -48,7 +48,7 @@ jobs:
       - name: Require successful CI for the checked-out main commit
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/check-release-main-ci.mjs
+        run: node scripts/check-release-main-ci.mjs --wait
 
       - name: Validate release inputs
         env:
