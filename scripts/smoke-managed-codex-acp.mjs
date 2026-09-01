@@ -24,7 +24,6 @@ const child = spawn(process.execPath, [adapterPath], {
   env: {
     ...process.env,
     CODEX_PATH: codexPath,
-    NO_BROWSER: "1",
   },
   stdio: "pipe",
   windowsHide: true,
@@ -91,6 +90,10 @@ try {
   });
   if (initialized.error || initialized.result?.protocolVersion !== 1) {
     throw new Error(`Codex ACP initialization failed: ${JSON.stringify(initialized.error)}`);
+  }
+  const authMethodIds = initialized.result.authMethods?.map((method) => method.id) ?? [];
+  if (!authMethodIds.includes("chat-gpt")) {
+    throw new Error("Codex ACP did not advertise ChatGPT browser authentication");
   }
 
   // Authentication may legitimately reject listing on a clean runner. The

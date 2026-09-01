@@ -95,6 +95,11 @@ try {
     requestedSurface: { kind: "home" },
     workspaceRoots: [],
   }, 30_000);
+  const probeEnvelope = await request("agent/probe", { agentId: "codex" });
+  const authMethodIds = probeEnvelope?.result?.authMethods?.map((method) => method.id) ?? [];
+  if (!authMethodIds.includes("chat-gpt")) {
+    throw new Error("Packaged Codex did not advertise ChatGPT browser authentication");
+  }
   const added = await request("project/add", { workspaceRoot: path.resolve(workspaceRoot) }, 30_000);
   const project = added?.result?.project;
   if (!project?.projectId) {
