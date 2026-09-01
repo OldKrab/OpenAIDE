@@ -156,6 +156,40 @@ fn subagent_tool_updates_replace_one_durable_activity_by_tool_identity() {
     ));
 }
 
+#[test]
+fn codex_legacy_subagent_interaction_without_native_child_does_not_fail() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+
+    for status in [ActivityStatus::Running, ActivityStatus::Completed] {
+        sink.session_update(AgentEvent::Subagent(AgentSubagent {
+            tool_call_id: "call_interact".to_string(),
+            title: "Interact with subagent correctness".to_string(),
+            thread_id: "thread_correctness".to_string(),
+            path: "/root/review/correctness".to_string(),
+            activity: "interacted".to_string(),
+            status,
+        }))
+        .unwrap();
+    }
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert_eq!(messages.len(), 1);
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Completed,
+            ..
+        }
+    ));
+}
+
 fn agent_message_text(message: &NormalizedMessage) -> Option<&str> {
     match message {
         NormalizedMessage::AgentMessage {

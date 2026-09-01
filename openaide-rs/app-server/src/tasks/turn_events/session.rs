@@ -430,10 +430,18 @@ impl TaskSessionEventSink {
         if subagent.activity != "interacted" {
             return Ok(None);
         }
-        let record = self
+        let record = match self
             .mutations
             .store()
-            .subagent_record_by_native(&self.task_id, &subagent.thread_id)?;
+            .subagent_record_by_native(&self.task_id, &subagent.thread_id)
+        {
+            Ok(record) => record,
+            // Legacy codex-acp clients flatten subagents into Tool calls and never
+            // announce a native child. Keep the parent activity without inventing
+            // child history, and do not terminate the otherwise healthy prompt.
+            Err(RuntimeError::TaskNotFound(_)) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         self.mutations.store().append_subagent_message(
             &self.task_id,
             &record.native_session_id,
