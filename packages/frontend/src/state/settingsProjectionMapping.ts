@@ -13,7 +13,7 @@ import type {
 } from "@openaide/app-server-client";
 
 export function mapSettingsSections(sections: SettingsSection[]) {
-  return sections.map(mapSettingsSection).filter((section) => section !== undefined);
+  return sections.flatMap(mapSettingsSection);
 }
 
 export function mapMcpServersProjection(result: SettingsMcpServersResult) {
@@ -52,13 +52,15 @@ export function mapSkillDetailsProjection(result: SettingsSkillDetailsResult): S
 function mapSettingsSection(section: SettingsSection) {
   switch (section) {
     case "agents":
-      return "agents";
+      return ["agents"] as const;
     case "mcpServers":
-      return "mcp";
+      return ["mcp"] as const;
     case "skills":
-      return "skills";
+      return ["skills"] as const;
     case "commonSettings":
-      return "common";
+      // The App Server owns one common-settings projection; the Frontend presents
+      // its controls as smaller task-oriented pages without duplicating state.
+      return ["common", "desktop", "data"] as const;
   }
 }
 

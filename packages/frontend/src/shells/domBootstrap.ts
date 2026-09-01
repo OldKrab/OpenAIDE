@@ -36,6 +36,8 @@ function settingsTab(): SettingsTabId | undefined {
     || value === "mcp"
     || value === "skills"
     || value === "common"
+    || value === "desktop"
+    || value === "data"
     || value === "worktrees"
     ? value
     : undefined;

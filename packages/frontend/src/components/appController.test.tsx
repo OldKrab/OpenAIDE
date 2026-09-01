@@ -607,7 +607,7 @@ describe("app controller mounted lifecycle", () => {
       enabled: true,
       directory: "/runtime/traces",
     });
-    expect(latestController?.state.settings.availableTabs).toEqual(["agents", "mcp", "skills", "common"]);
+    expect(latestController?.state.settings.availableTabs).toEqual(["agents", "mcp", "skills", "common", "desktop", "data"]);
     expect(latestController?.state.settings.mcpServers).toEqual([]);
     expect(latestController?.state.settings.mcpServersAvailability).toBe("unavailable");
     expect(latestController?.state.settings.skills).toEqual([]);

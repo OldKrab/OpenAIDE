@@ -2,7 +2,9 @@ import {
   AlertTriangle,
   ArrowLeft,
   Bot,
+  Database,
   FolderGit2,
+  MonitorCog,
   Network,
   RefreshCcw,
   Search,
@@ -32,7 +34,7 @@ import type {
 import type { McpServerSaveInput } from "../../intents/mcpSettingsIntents";
 import type { NewTaskViewIntents } from "../NewTaskView";
 import { AgentSettingsTab } from "./AgentSettingsTab";
-import { GeneralSettingsTab } from "./GeneralSettingsTab";
+import { DataSupportSettingsTab, DesktopSettingsTab, GeneralSettingsTab } from "./GeneralSettingsTab";
 import { currentFrontendShell, type FrontendShellAppearance } from "../../services/frontendShell";
 import { SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { McpSettingsTab } from "./McpSettingsTab";
@@ -47,12 +49,26 @@ const tabs: Array<{
   icon: typeof Bot;
   id: SettingsTabId;
   label: string;
+  description: string;
 }> = [
-  { group: "App", icon: SlidersHorizontal, id: "common", label: "General" },
-  { group: "Agent work", icon: Bot, id: "agents", label: "Agents" },
-  { group: "Agent work", icon: Network, id: "mcp", label: "MCP Servers" },
-  { group: "Agent work", icon: Sparkles, id: "skills", label: "Skills" },
-  { group: "Projects", icon: FolderGit2, id: "worktrees", label: "Worktrees" },
+  { group: "App", icon: SlidersHorizontal, id: "common", label: "General", description: "Appearance and everyday interaction preferences." },
+  { group: "App", icon: MonitorCog, id: "desktop", label: "Desktop", description: "Runtime selection and application updates for this device." },
+  { group: "App", icon: Database, id: "data", label: "Data & support", description: "Diagnostics, developer tools, and local history." },
+  { group: "Agent work", icon: Bot, id: "agents", label: "Agents", description: "Configure the Agents available for tasks." },
+  { group: "Agent work", icon: Network, id: "mcp", label: "MCP Servers", description: "Connect tools and data sources to compatible Agents." },
+  { group: "Agent work", icon: Sparkles, id: "skills", label: "Skills", description: "Review reusable instruction packages available to Agents." },
+  { group: "Projects", icon: FolderGit2, id: "worktrees", label: "Worktrees", description: "Manage isolated workspaces for project tasks." },
+];
+
+const searchEntries: Array<{ tab: SettingsTabId; label: string; keywords: string; target?: string }> = [
+  { tab: "common", label: "Appearance", keywords: "theme system light dark", target: "settings-general-appearance" },
+  { tab: "common", label: "Send with Enter", keywords: "composer keyboard shortcut newline", target: "settings-general-behavior" },
+  { tab: "common", label: "Desktop notifications", keywords: "alerts browser os", target: "settings-general-behavior" },
+  { tab: "desktop", label: "Environment", keywords: "windows wsl ubuntu runtime operating system", target: "settings-desktop-environment" },
+  { tab: "desktop", label: "Application updates", keywords: "update release version restart download", target: "settings-desktop-updates" },
+  { tab: "data", label: "Diagnostics", keywords: "support export troubleshooting bundle", target: "settings-data-support" },
+  { tab: "data", label: "Developer", keywords: "acp logs traces directory", target: "settings-data-developer" },
+  { tab: "data", label: "Reset task history", keywords: "local data delete chats prompts", target: "settings-data-local" },
 ];
 
 export function SettingsView({
@@ -125,9 +141,11 @@ export function SettingsView({
   worktreeIntents?: NewTaskViewIntents;
   worktreeRepositories?: Record<string, WorktreeRepositorySnapshot>;
 }) {
+  const shell = currentFrontendShell();
+  const availableTabs = state.availableTabs ?? ["agents", "common", "data"];
   const visibleTabs = tabs.filter((tab) => (
     tab.id === "worktrees"
-    || (state.availableTabs ?? ["agents", "common"]).includes(tab.id)
+    || (availableTabs.includes(tab.id) && (tab.id !== "desktop" || Boolean(shell?.desktopRuntime || shell?.desktopUpdates)))
   ));
   const activeTab = visibleTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : visibleTabs[0]?.id ?? "agents";
   const busy = state.loading || state.mcpServersLoading || state.skillsLoading;
@@ -140,12 +158,24 @@ export function SettingsView({
   const navigationTabs = visibleTabs.filter((tab) => (
     !normalizedQuery || `${tab.group} ${tab.label}`.toLowerCase().includes(normalizedQuery)
   ));
+  const navigationResults = normalizedQuery
+    ? searchEntries.filter((entry) => {
+      const tab = visibleTabs.find((candidate) => candidate.id === entry.tab);
+      if (!tab || (entry.label === "Developer" && !developerSettingsUnlocked)) return false;
+      return `${entry.label} ${entry.keywords} ${tab.label} ${tab.group}`.toLowerCase().includes(normalizedQuery);
+    })
+    : [];
+  const [pendingSearchTarget, setPendingSearchTarget] = useState<{ tab: SettingsTabId; id: string }>();
   const selectTab = (tab: SettingsTabId, focus = false) => {
     onSelectTab(tab);
     setMobileIndexOpen(false);
     if (focus) {
       window.requestAnimationFrame(() => document.getElementById(settingsTabId(tab))?.focus());
     }
+  };
+  const selectSearchResult = (entry: (typeof searchEntries)[number]) => {
+    if (entry.target) setPendingSearchTarget({ tab: entry.tab, id: entry.target });
+    selectTab(entry.tab);
   };
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | undefined;
@@ -173,6 +203,16 @@ export function SettingsView({
     const frame = window.requestAnimationFrame(() => document.getElementById(settingsTabId(activeTab))?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [activeTab, mobileIndexOpen]);
+  useEffect(() => {
+    if (!pendingSearchTarget || pendingSearchTarget.tab !== activeTab) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(pendingSearchTarget.id);
+      target?.scrollIntoView({ block: "start" });
+      target?.focus({ preventScroll: true });
+      setPendingSearchTarget(undefined);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, pendingSearchTarget]);
 
   const sidebar = (
     <aside className="settings-sidebar">
@@ -216,6 +256,30 @@ export function SettingsView({
             value={navigationQuery}
           />
         </label>
+        {normalizedQuery ? (
+          <nav className="settings-search-results" aria-label="Settings search results">
+            {navigationTabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button key={`page-${tab.id}`} onClick={() => selectTab(tab.id)} type="button">
+                  <Icon aria-hidden="true" size={15} />
+                  <span><strong>{tab.label}</strong><small>Page</small></span>
+                </button>
+              );
+            })}
+            {navigationResults.map((entry) => {
+              const tab = tabs.find((candidate) => candidate.id === entry.tab)!;
+              const Icon = tab.icon;
+              return (
+                <button key={`${entry.tab}-${entry.label}`} onClick={() => selectSearchResult(entry)} type="button">
+                  <Icon aria-hidden="true" size={15} />
+                  <span><strong>{entry.label}</strong><small>{tab.label}</small></span>
+                </button>
+              );
+            })}
+            {!navigationTabs.length && !navigationResults.length ? <p>No settings found.</p> : null}
+          </nav>
+        ) : (
         <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
           {(["App", "Agent work", "Projects"] as const).map((group) => {
             const groupTabs = navigationTabs.filter((tab) => tab.group === group);
@@ -250,6 +314,7 @@ export function SettingsView({
           })}
           {!navigationTabs.length ? <p>No settings found.</p> : null}
         </nav>
+        )}
       </aside>
   );
   return (
@@ -287,7 +352,29 @@ export function SettingsView({
             value={navigationQuery}
           />
         </label>
-        <nav aria-label="Settings pages">
+        <nav aria-label={normalizedQuery ? "Settings search results" : "Settings pages"}>
+          {normalizedQuery ? (
+            <section className="settings-mobile-search-results">
+              {[...navigationTabs.map((tab) => ({ tab: tab.id, label: tab.label, page: "Page", entry: undefined })),
+                ...navigationResults.map((entry) => ({ tab: entry.tab, label: entry.label, page: tabs.find((tab) => tab.id === entry.tab)?.label, entry }))]
+                .map((result) => {
+                  const tab = tabs.find((candidate) => candidate.id === result.tab)!;
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={`${result.tab}-${result.label}`}
+                      onClick={() => result.entry ? selectSearchResult(result.entry) : selectTab(result.tab)}
+                      type="button"
+                    >
+                      <Icon aria-hidden="true" size={16} />
+                      <span><strong>{result.label}</strong><small>{result.page}</small></span>
+                    </button>
+                  );
+                })}
+              {!navigationTabs.length && !navigationResults.length ? <p>No settings found.</p> : null}
+            </section>
+          ) : (
+          <>
           {(["App", "Agent work", "Projects"] as const).map((group) => {
             const groupTabs = navigationTabs.filter((tab) => tab.group === group);
             if (!groupTabs.length) return null;
@@ -306,6 +393,8 @@ export function SettingsView({
               </section>
             );
           })}
+          </>
+          )}
         </nav>
       </section>
       <div className={`settings-content ${mobileIndexOpen ? "mobile-index-open" : ""}`}>
@@ -315,7 +404,7 @@ export function SettingsView({
           </button>
           <span>{tabs.find((tab) => tab.id === activeTab)?.group}</span>
           <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
-          {activeTab === "common" ? <p>Choose how OpenAIDE looks and responds while you work.</p> : null}
+          <p>{tabs.find((tab) => tab.id === activeTab)?.description}</p>
         </header>
         {state.error ? (
           <section className="settings-error" aria-label="Settings error">
@@ -358,6 +447,7 @@ export function SettingsView({
             savedAgentId={state.savedAgentId}
             runtimeSettings={state.runtimeSettings}
             settingsState={state}
+            searchActive={Boolean(normalizedQuery)}
             tab={activeTab}
             worktreeIntents={worktreeIntents}
             worktreeRepositories={worktreeRepositories}
@@ -408,6 +498,7 @@ function SettingsTabContent({
   deletedAgentId,
   runtimeSettings,
   settingsState,
+  searchActive,
   tab,
   worktreeIntents,
   worktreeRepositories,
@@ -443,6 +534,7 @@ function SettingsTabContent({
   savedAgentId?: string;
   runtimeSettings?: RuntimeSettingsResult;
   settingsState: SettingsState;
+  searchActive: boolean;
   tab: SettingsTabId;
   worktreeIntents?: NewTaskViewIntents;
   worktreeRepositories: Record<string, WorktreeRepositorySnapshot>;
@@ -452,7 +544,9 @@ function SettingsTabContent({
       className={`settings-tab-panel ${tab === "agents" || tab === "worktrees" ? "wide" : "narrow"}`}
       id={settingsPanelId(tab)}
       role="tabpanel"
-      aria-labelledby={settingsTabId(tab)}
+      {...(searchActive
+        ? { "aria-label": tabs.find((candidate) => candidate.id === tab)?.label }
+        : { "aria-labelledby": settingsTabId(tab) })}
     >
       {tab === "agents" ? (
         <AgentSettingsTab
@@ -474,14 +568,19 @@ function SettingsTabContent({
       {tab === "common" ? (
         <GeneralSettingsTab
           appearance={appearance}
-          backendConnection={backendConnection}
-          developerSettingsUnlocked={developerSettingsUnlocked}
           desktopNotifications={desktopNotifications}
-          onSetAcpTrace={onSetAcpTrace}
-          onResetTaskHistory={onResetTaskHistory}
           onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
           onSetDesktopNotifications={onSetDesktopNotifications}
           preferences={preferences}
+        />
+      ) : null}
+      {tab === "desktop" ? <DesktopSettingsTab /> : null}
+      {tab === "data" ? (
+        <DataSupportSettingsTab
+          backendConnection={backendConnection}
+          developerSettingsUnlocked={developerSettingsUnlocked}
+          onResetTaskHistory={onResetTaskHistory}
+          onSetAcpTrace={onSetAcpTrace}
           runtimeSettings={runtimeSettings}
         />
       ) : null}

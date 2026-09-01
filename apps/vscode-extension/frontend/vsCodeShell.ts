@@ -286,5 +286,7 @@ function isSettingsTab(value: unknown): value is import("@openaide/app-shell-con
     || value === "mcp"
     || value === "skills"
     || value === "common"
+    || value === "desktop"
+    || value === "data"
     || value === "worktrees";
 }
