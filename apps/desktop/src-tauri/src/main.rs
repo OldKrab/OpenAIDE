@@ -223,7 +223,14 @@ async fn desktop_save_support_export(
     if let Some(directory) = export_directory {
         dialog = dialog.set_directory(directory);
     }
-    let Some(destination) = dialog.blocking_save_file() else {
+    let (destination_sender, destination_receiver) = tokio::sync::oneshot::channel();
+    dialog.save_file(move |destination| {
+        let _ = destination_sender.send(destination);
+    });
+    let destination = destination_receiver
+        .await
+        .map_err(|_| "The support export Save dialog closed unexpectedly.".to_string())?;
+    let Some(destination) = destination else {
         eprintln!(
             "desktop_support_export_save_completed operation_id={operation_id} outcome=cancelled duration_ms={} attempt_count=1",
             started_at.elapsed().as_millis()
