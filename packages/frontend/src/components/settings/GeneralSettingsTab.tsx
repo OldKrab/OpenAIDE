@@ -35,9 +35,6 @@ export function GeneralSettingsTab({
 }: GeneralSettingsTabProps) {
   const mobileComposerBehavior = usesMobileComposerBehavior();
   const enterSends = preferences.composer_submit_shortcut === "enter";
-  const shortcutDetail = enterSends
-    ? "Enter sends messages. Shift+Enter adds a new line."
-    : "Ctrl/Cmd+Enter sends messages. Enter adds a new line.";
 
   return (
     <div className="general-settings-panel">
@@ -62,7 +59,7 @@ export function GeneralSettingsTab({
                     />
                   </span>
                 )}
-                detail={shortcutDetail}
+                detail="Send messages with Enter instead of Ctrl/Cmd+Enter."
                 icon={<Keyboard size={17} />}
                 label="Send with Enter"
               />
