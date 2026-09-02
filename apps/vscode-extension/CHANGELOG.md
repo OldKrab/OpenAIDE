@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.8 - 2026-09-02
+
+### Authentication
+
+- Restored Codex browser sign-in and made failed or expired authentication recover cleanly.
+- Agent Settings now verifies Codex authentication against the running agent, including in packaged builds.
+
+### Reliability
+
+- Prevented overlapping Desktop support exports and fixed save dialogs or downloads that could stall.
+- Fixed stale history-update notices after streamed Task output.
+- Kept stdio agent connections alive when activity arrives between health checks.
+
 ## 0.4.7 - 2026-09-01
 
 ### Interface
