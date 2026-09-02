@@ -20,7 +20,8 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/windows/installer.ico",
-        "uninstallerIcon": "icons/windows/installer.ico"
+        "uninstallerIcon": "icons/windows/installer.ico",
+        "installerHooks": "windows/installer-hooks.nsh"
       }
     },
     "resources": {
