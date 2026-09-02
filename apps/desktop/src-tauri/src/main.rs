@@ -159,6 +159,17 @@ fn main() {
         .on_menu_event(|app, event| {
             let _ = app.emit("desktop-command", event.id().as_ref());
         })
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "windows")]
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                // Native close and the custom caption button must cross the same
+                // detach boundary as explicit Quit before this process disappears.
+                api.prevent_close();
+                let _ = window.emit("desktop-command", "quit");
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             desktop_bootstrap,
             desktop_bootstrap_context,
