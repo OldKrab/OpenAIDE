@@ -98,7 +98,7 @@ export function createDesktopShell(
     publishRoute();
   };
 
-  void listen<DesktopCommand>("desktop-command", ({ payload }) => {
+  const handleDesktopCommand = (payload: DesktopCommand) => {
     if (payload === "quit" && !quitInFlight) {
       quitInFlight = true;
       const operationId = `desktop-quit-${crypto.randomUUID()}`;
@@ -117,7 +117,16 @@ export function createDesktopShell(
     } else if (payload !== "quit") {
       for (const listener of commandListeners) listener(payload);
     }
-  });
+  };
+  void listen<DesktopCommand>("desktop-command", ({ payload }) => {
+    handleDesktopCommand(payload);
+  }).then(() => {
+    void invoke<boolean>("desktop_take_pending_quit")
+      .then((pending) => {
+        if (pending) handleDesktopCommand("quit");
+      })
+      .catch(() => undefined);
+  }).catch(() => undefined);
   window.addEventListener("keydown", (event) => {
     const command = desktopCommandForKeyboardEvent(event);
     if (!command) return;
