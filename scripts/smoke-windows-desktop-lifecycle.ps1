@@ -159,6 +159,9 @@ try {
   $desktop = $null
   $orphan = Start-StandaloneAppServer -Executable $installedServer -StateRoot $orphanRoot
   Start-Installer
+  if (-not $orphan.HasExited) {
+    throw "Installer left the installed App Server executable running"
+  }
   if ($decoy.HasExited) {
     throw "Installer fallback terminated an App Server outside its installation directory"
   }
