@@ -6,8 +6,10 @@ param(
 $ErrorActionPreference = "Stop"
 $installRoot = Join-Path $env:RUNNER_TEMP "openaide-desktop-lifecycle"
 $decoyRoot = Join-Path $env:RUNNER_TEMP "openaide-app-server-decoy"
+$orphanRoot = Join-Path $env:RUNNER_TEMP "openaide-app-server-orphan"
 $desktop = $null
 $decoy = $null
+$orphan = $null
 
 Add-Type @"
 using System;
@@ -82,25 +84,29 @@ function Start-InstalledDesktop {
   return $process
 }
 
-function Start-DecoyAppServer {
-  $source = Join-Path $installRoot "openaide-app-server.exe"
-  $destination = Join-Path $decoyRoot "openaide-app-server.exe"
-  New-Item -ItemType Directory -Force -Path $decoyRoot | Out-Null
-  Copy-Item $source $destination
+function Start-StandaloneAppServer {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string] $Executable,
+    [Parameter(Mandatory = $true)]
+    [string] $StateRoot
+  )
+
+  New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
 
   $start = [Diagnostics.ProcessStartInfo]::new()
-  $start.FileName = $destination
+  $start.FileName = $Executable
   $start.UseShellExecute = $false
   $start.CreateNoWindow = $true
   $start.RedirectStandardOutput = $true
   $start.Environment["OPENAIDE_APP_SERVER_PROTOCOL"] = "app-server-handoff"
-  $start.Environment["OPENAIDE_STORAGE_ROOT"] = Join-Path $decoyRoot "state"
-  $start.Environment["OPENAIDE_RUNTIME_ROOT"] = Join-Path $decoyRoot "runtime"
+  $start.Environment["OPENAIDE_STORAGE_ROOT"] = Join-Path $StateRoot "state"
+  $start.Environment["OPENAIDE_RUNTIME_ROOT"] = Join-Path $StateRoot "runtime"
   $process = [Diagnostics.Process]::Start($start)
   $line = $process.StandardOutput.ReadLineAsync()
   if (-not $line.Wait(10000) -or [string]::IsNullOrWhiteSpace($line.Result)) {
     $process.Kill()
-    throw "Decoy App Server did not publish its endpoint"
+    throw "Standalone App Server did not publish its endpoint"
   }
   return $process
 }
@@ -108,6 +114,7 @@ function Start-DecoyAppServer {
 try {
   if (Test-Path $installRoot) { Remove-Item -Recurse -Force $installRoot }
   if (Test-Path $decoyRoot) { Remove-Item -Recurse -Force $decoyRoot }
+  if (Test-Path $orphanRoot) { Remove-Item -Recurse -Force $orphanRoot }
 
   Start-Installer
 
@@ -138,26 +145,19 @@ try {
   # with the same name elsewhere proves the fallback is path-scoped.
   $desktop = Start-InstalledDesktop
   Start-Sleep -Seconds 2
-  $decoy = Start-DecoyAppServer
+  $decoyExecutable = Join-Path $decoyRoot "openaide-app-server.exe"
+  New-Item -ItemType Directory -Force -Path $decoyRoot | Out-Null
+  Copy-Item $installedServer $decoyExecutable
+  $decoy = Start-StandaloneAppServer -Executable $decoyExecutable -StateRoot $decoyRoot
   Start-Installer
   if ($decoy.HasExited) {
     throw "Installer terminated an App Server outside its installation directory"
   }
 
-  # Releases before the native-close fix could exit Desktop without detaching,
-  # leaving the installed App Server locked during the next install. Recreate
-  # that upgrade boundary and require the installer fallback to release it.
-  $desktop = Start-InstalledDesktop
-  Start-Sleep -Seconds 2
-  Stop-Process -Id $desktop.Id -Force
-  if (-not $desktop.WaitForExit(5000)) {
-    throw "Could not recreate the previous Desktop shutdown behavior"
-  }
-  Wait-ForCondition `
-    -TimeoutSeconds 2 `
-    -Failure "Previous Desktop shutdown behavior did not leave its App Server running" `
-    -Condition { (Get-ProcessAtPath $installedServer).Count -eq 1 }
+  # Older or interrupted runs can leave the installed executable alive without
+  # a Desktop process for Tauri's built-in shutdown check to find.
   $desktop = $null
+  $orphan = Start-StandaloneAppServer -Executable $installedServer -StateRoot $orphanRoot
   Start-Installer
   if ($decoy.HasExited) {
     throw "Installer fallback terminated an App Server outside its installation directory"
@@ -170,9 +170,13 @@ try {
   if ($decoy -and -not $decoy.HasExited) {
     Stop-Process -Id $decoy.Id -Force -ErrorAction SilentlyContinue
   }
+  if ($orphan -and -not $orphan.HasExited) {
+    Stop-Process -Id $orphan.Id -Force -ErrorAction SilentlyContinue
+  }
   foreach ($process in Get-ProcessAtPath (Join-Path $installRoot "openaide-app-server.exe")) {
     Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
   }
   if (Test-Path $installRoot) { Remove-Item -Recurse -Force $installRoot }
   if (Test-Path $decoyRoot) { Remove-Item -Recurse -Force $decoyRoot }
+  if (Test-Path $orphanRoot) { Remove-Item -Recurse -Force $orphanRoot }
 }
