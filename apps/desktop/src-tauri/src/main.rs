@@ -175,7 +175,20 @@ fn main() {
                     .state::<DesktopQuitState>()
                     .pending
                     .store(true, Ordering::Release);
-                let _ = window.app_handle().emit("desktop-command", "quit");
+                let app = window.app_handle().clone();
+                let _ = app.emit("desktop-command", "quit");
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_secs(5));
+                    if app
+                        .state::<DesktopQuitState>()
+                        .pending
+                        .swap(false, Ordering::AcqRel)
+                    {
+                        // Startup may not have produced a frontend session that can
+                        // detach. Never leave an unclosable native window behind.
+                        app.exit(0);
+                    }
+                });
             }
         })
         .invoke_handler(tauri::generate_handler![

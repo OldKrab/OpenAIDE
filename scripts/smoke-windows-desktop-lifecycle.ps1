@@ -145,7 +145,7 @@ try {
   }
   $installedServer = Join-Path $installRoot "openaide-app-server.exe"
   Wait-ForCondition `
-    -TimeoutSeconds 5 `
+    -TimeoutSeconds 15 `
     -Failure "Desktop native close left its installed App Server running" `
     -Condition { (Get-ProcessAtPath $installedServer).Count -eq 0 }
   $desktop = $null
