@@ -5,7 +5,10 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -148,6 +151,7 @@ fn main() {
                 app_local_data.join("desktop-update-receipt.json"),
                 app_local_data.join("desktop-update-schedule.json"),
             ));
+            app.manage(DesktopQuitState::default());
             #[cfg(target_os = "macos")]
             install_macos_menu(app)?;
             #[cfg(target_os = "macos")]
@@ -167,12 +171,17 @@ fn main() {
                 // Native close and the custom caption button must cross the same
                 // detach boundary as explicit Quit before this process disappears.
                 api.prevent_close();
+                window
+                    .state::<DesktopQuitState>()
+                    .pending
+                    .store(true, Ordering::Release);
                 let _ = window.app_handle().emit("desktop-command", "quit");
             }
         })
         .invoke_handler(tauri::generate_handler![
             desktop_bootstrap,
             desktop_bootstrap_context,
+            desktop_take_pending_quit,
             complete_desktop_quit,
             record_desktop_telemetry,
             prepare_desktop_native_zoom,
@@ -192,6 +201,18 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run OpenAIDE Desktop App");
+}
+
+#[derive(Default)]
+struct DesktopQuitState {
+    // Native close can arrive before the WebView has registered its command
+    // listener. The WebView consumes this latch after crossing that boundary.
+    pending: AtomicBool,
+}
+
+#[tauri::command]
+fn desktop_take_pending_quit(state: tauri::State<'_, DesktopQuitState>) -> bool {
+    state.pending.swap(false, Ordering::AcqRel)
 }
 
 #[tauri::command]
