@@ -167,7 +167,7 @@ fn main() {
                 // Native close and the custom caption button must cross the same
                 // detach boundary as explicit Quit before this process disappears.
                 api.prevent_close();
-                let _ = window.emit("desktop-command", "quit");
+                let _ = window.app_handle().emit("desktop-command", "quit");
             }
         })
         .invoke_handler(tauri::generate_handler![
