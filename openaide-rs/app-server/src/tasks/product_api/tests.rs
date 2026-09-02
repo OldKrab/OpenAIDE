@@ -3724,6 +3724,54 @@ fn newer_catalog_activity_marks_reload_available_without_loading_the_live_attach
 }
 
 #[test]
+fn listing_does_not_refresh_last_activity_for_an_in_progress_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let api = listing_activity_api(&store);
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    task.status = TaskStatus::Active;
+    task.active_turn_id = Some("turn-active".to_string());
+    store.write_task(&task).unwrap();
+
+    api.reconcile_native_session_activity(
+        "codex",
+        "/tmp/openaide-unit-workspace/app",
+        &[newer_listed_native_session()],
+        &[store.read_task("task-existing").unwrap()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        store.read_task("task-existing").unwrap().last_activity,
+        "2026-01-01T00:00:00.000Z"
+    );
+}
+
+#[test]
+fn listing_advances_last_activity_for_an_idle_owned_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    store.write_task(&task).unwrap();
+    let api = listing_activity_api(&store);
+
+    api.reconcile_native_session_activity(
+        "codex",
+        "/tmp/openaide-unit-workspace/app",
+        &[newer_listed_native_session()],
+        &[store.read_task("task-existing").unwrap()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        store.read_task("task-existing").unwrap().last_activity,
+        "2026-01-02T00:00:00.000Z"
+    );
+}
+
+#[test]
 fn explicit_reload_replaces_history_and_clears_the_captured_requirement() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -9192,6 +9240,27 @@ fn archiving_clears_pinned_state_and_restore_does_not_revive_it() {
     })
     .unwrap();
     assert!(!store.read_task("task-pinned").unwrap().pinned);
+}
+
+fn listing_activity_api(store: &Store) -> TaskProductApi {
+    TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(RecordingAgent::default()),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap()
+}
+
+fn newer_listed_native_session() -> AgentListedSession {
+    AgentListedSession {
+        session_id: "native-session".to_string(),
+        cwd: "/tmp/openaide-unit-workspace/app".to_string(),
+        title: None,
+        last_activity: Some("2026-01-02T00:00:00.000Z".to_string()),
+        updated_at: Some("2026-01-02T00:00:00.000Z".to_string()),
+    }
 }
 
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
