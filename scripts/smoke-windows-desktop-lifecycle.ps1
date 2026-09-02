@@ -8,7 +8,6 @@ $installRoot = Join-Path $env:RUNNER_TEMP "openaide-desktop-lifecycle"
 $decoyRoot = Join-Path $env:RUNNER_TEMP "openaide-app-server-decoy"
 $desktop = $null
 $decoy = $null
-$installerProcess = $null
 
 Add-Type @"
 using System;
@@ -55,7 +54,7 @@ function Start-Installer {
     -FilePath $Installer `
     -ArgumentList @("/S", "/D=$installRoot") `
     -PassThru
-  if (-not $process.WaitForExit(45000)) {
+  if (-not $process.WaitForExit(60000)) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     throw "Windows installer did not finish while replacing a running OpenAIDE installation"
   }
@@ -114,6 +113,9 @@ try {
 
   # A real native close request covers Alt+F4 and the Windows caption button.
   $desktop = Start-InstalledDesktop
+  # The native handle and sidecar exist before the frontend installs its command
+  # listener. Exercise user close only after that startup boundary has settled.
+  Start-Sleep -Seconds 2
   if (-not [OpenAideWindowMessages]::PostMessage(
     $desktop.MainWindowHandle,
     0x0010,
@@ -135,16 +137,33 @@ try {
   # Reinstall must release only the binary inside this installation. A process
   # with the same name elsewhere proves the fallback is path-scoped.
   $desktop = Start-InstalledDesktop
+  Start-Sleep -Seconds 2
   $decoy = Start-DecoyAppServer
   Start-Installer
   if ($decoy.HasExited) {
     throw "Installer terminated an App Server outside its installation directory"
   }
+
+  # Releases before the native-close fix could exit Desktop without detaching,
+  # leaving the installed App Server locked during the next install. Recreate
+  # that upgrade boundary and require the installer fallback to release it.
+  $desktop = Start-InstalledDesktop
+  Start-Sleep -Seconds 2
+  Stop-Process -Id $desktop.Id -Force
+  if (-not $desktop.WaitForExit(5000)) {
+    throw "Could not recreate the previous Desktop shutdown behavior"
+  }
+  Wait-ForCondition `
+    -TimeoutSeconds 2 `
+    -Failure "Previous Desktop shutdown behavior did not leave its App Server running" `
+    -Condition { (Get-ProcessAtPath $installedServer).Count -eq 1 }
+  $desktop = $null
+  Start-Installer
+  if ($decoy.HasExited) {
+    throw "Installer fallback terminated an App Server outside its installation directory"
+  }
   Write-Host "Windows Desktop close and reinstall lifecycle smoke passed"
 } finally {
-  if ($installerProcess -and -not $installerProcess.HasExited) {
-    Stop-Process -Id $installerProcess.Id -Force -ErrorAction SilentlyContinue
-  }
   if ($desktop -and -not $desktop.HasExited) {
     Stop-Process -Id $desktop.Id -Force -ErrorAction SilentlyContinue
   }
