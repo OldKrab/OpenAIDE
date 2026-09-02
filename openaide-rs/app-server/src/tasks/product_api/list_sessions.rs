@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
 use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
+use crate::protocol::model::TaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 
@@ -231,9 +232,11 @@ impl TaskProductApi {
         )
     }
 
-    /// Advances owned Task activity and records possible external changes without replacing
-    /// an active attachment. Catalog timestamps cannot distinguish history from option/title
-    /// changes, so replay remains an explicit Task action.
+    /// Advances idle owned Task activity from listing and records possible external changes
+    /// without replacing an active attachment. In-progress Tasks keep the OpenAIDE-owned
+    /// activity clock: listing often reports "now" as a live heartbeat, and applying it
+    /// reshuffles Navigation among concurrent in-progress Tasks. Catalog timestamps cannot
+    /// distinguish history from option/title changes, so replay remains an explicit Task action.
     pub(super) fn reconcile_native_session_activity(
         &self,
         agent_id: &str,
@@ -296,18 +299,17 @@ impl TaskProductApi {
                     }
                     let mut changed = false;
                     if let Some(native_activity) = &native_activity {
-                        let native_time = crate::time::activity_millis(native_activity);
-                        let task_time = crate::time::activity_millis(&task.last_activity);
-                        if native_time
-                            .zip(task_time)
-                            .is_some_and(|(native, task)| native > task)
+                        if !task_has_live_work(task)
+                            && crate::time::activity_millis(native_activity)
+                                .zip(crate::time::activity_millis(&task.last_activity))
+                                .is_some_and(|(native, current)| native > current)
                         {
                             task.last_activity = native_activity.clone();
                             changed = true;
                         }
                     }
                     if matches!(task.lifecycle, TaskLifecycle::Open)
-                        && matches!(task.status, crate::protocol::model::TaskStatus::Inactive)
+                        && matches!(task.status, TaskStatus::Inactive)
                         && task.active_turn_id.is_none()
                         && deferred_reload_activity.as_ref().is_some_and(|activity| {
                             task.mark_native_session_reload_required(activity.clone())
@@ -472,4 +474,12 @@ impl AgentListSessionsWorkflow for TaskProductApi {
     fn request_native_session_catalog_load_more(&self, project_id: &str, target_row_count: usize) {
         TaskProductApi::request_native_session_catalog_load_more(self, project_id, target_row_count)
     }
+}
+
+fn task_has_live_work(task: &TaskRecord) -> bool {
+    task.active_turn_id.is_some()
+        || matches!(
+            task.status,
+            TaskStatus::Starting | TaskStatus::Active | TaskStatus::Waiting | TaskStatus::Stopping
+        )
 }

@@ -53,12 +53,17 @@ export function groupedTasks(
     group.nativeSessions.push(session);
     groups.set(key, group);
   }
-  return [...groups.values()].sort((left, right) =>
-    compareBooleanDesc(groupHasInProgress(left), groupHasInProgress(right))
-    || compareActivityDesc(newestGroupActivity(left), newestGroupActivity(right))
-    || left.label.localeCompare(right.label)
-    || left.key.localeCompare(right.key),
-  );
+  return [...groups.values()].sort((left, right) => {
+    const leftInProgress = groupHasInProgress(left);
+    const rightInProgress = groupHasInProgress(right);
+    return compareBooleanDesc(leftInProgress, rightInProgress)
+      || compareActivityDesc(
+        groupSortActivity(left, leftInProgress),
+        groupSortActivity(right, rightInProgress),
+      )
+      || left.label.localeCompare(right.label)
+      || left.key.localeCompare(right.key);
+  });
 }
 
 export function projectGroupRows(tasks: TaskSummary[], sessions: AgentListedSession[]): SidebarProjectRow[] {
@@ -101,6 +106,18 @@ function newestGroupActivity(
 ) {
   const sessionActivity = newestSessionActivity(group.nativeSessions);
   return newerActivity(newestActivity(group.tasks), sessionActivity);
+}
+
+function newestInProgressTaskActivity(group: SidebarProjectGroup) {
+  return group.tasks
+    .filter(taskInProgress)
+    .reduce((newest, task) => newerActivity(newest, taskNavigationTimestamp(task)), "");
+}
+
+function groupSortActivity(group: SidebarProjectGroup, inProgress: boolean) {
+  // In-progress groups rank by their live Task clock only. Listing timestamps on
+  // Native Sessions are discovery heartbeats and must not leapfrog another live Project.
+  return inProgress ? newestInProgressTaskActivity(group) : newestGroupActivity(group);
 }
 
 function newestSessionActivity(sessions: AgentListedSession[]) {

@@ -1958,6 +1958,54 @@ describe("Sidebar", () => {
     ).toEqual(["OpenAIDE", "Other"]);
   });
 
+  it("does not let listed native-session activity reorder in-progress project groups", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessionProjectId="project_1"
+        nativeSessions={nativeSessions({
+          items: [
+            nativeSession({
+              session_id: "session_heartbeat",
+              project_id: "project_1",
+              title: "Listed heartbeat",
+              last_activity: "2026-05-22T00:10:00.000Z",
+              updated_at: "2026-05-22T00:10:00.000Z",
+            }),
+          ],
+        })}
+        projects={[
+          { projectId: "project_1", label: "Older live" },
+          { projectId: "project_2", label: "Newer live" },
+        ]}
+        showArchived={false}
+        tasks={[
+          task({
+            task_id: "task_older_live",
+            project_id: "project_1",
+            project_label: "Older live",
+            status: "active",
+            title: "Older live task",
+            last_activity: "2026-05-22T00:01:00.000Z",
+          }),
+          task({
+            task_id: "task_newer_live",
+            project_id: "project_2",
+            project_label: "Newer live",
+            status: "active",
+            title: "Newer live task",
+            last_activity: "2026-05-22T00:04:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    expect(
+      tree.root.findAllByProps({ className: "project-task-group" }).map((group) => group.props["aria-label"]),
+    ).toEqual(["Newer live", "Older live"]);
+  });
+
   it("puts project groups with in-progress tasks before newer idle groups", () => {
     const tree = render(
       <Sidebar
