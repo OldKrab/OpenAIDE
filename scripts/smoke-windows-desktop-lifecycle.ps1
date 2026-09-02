@@ -122,7 +122,7 @@ try {
   $desktop = Start-InstalledDesktop
   # The native handle and sidecar exist before the frontend installs its command
   # listener. Exercise user close only after that startup boundary has settled.
-  Start-Sleep -Seconds 2
+  Start-Sleep -Seconds 10
   if (-not [OpenAideWindowMessages]::PostMessage(
     $desktop.MainWindowHandle,
     0x0010,
@@ -144,7 +144,7 @@ try {
   # Reinstall must release only the binary inside this installation. A process
   # with the same name elsewhere proves the fallback is path-scoped.
   $desktop = Start-InstalledDesktop
-  Start-Sleep -Seconds 2
+  Start-Sleep -Seconds 10
   $decoyExecutable = Join-Path $decoyRoot "openaide-app-server.exe"
   New-Item -ItemType Directory -Force -Path $decoyRoot | Out-Null
   Copy-Item $installedServer $decoyExecutable
