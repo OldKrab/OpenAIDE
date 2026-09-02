@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $installRoot = Join-Path $env:RUNNER_TEMP "openaide-desktop-lifecycle"
+$desktopStateRoot = Join-Path $env:RUNNER_TEMP "openaide-desktop-lifecycle-state"
+$desktopRuntimeRoot = Join-Path $env:RUNNER_TEMP "openaide-desktop-lifecycle-runtime"
 $decoyRoot = Join-Path $env:RUNNER_TEMP "openaide-app-server-decoy"
 $orphanRoot = Join-Path $env:RUNNER_TEMP "openaide-app-server-orphan"
 $desktop = $null
@@ -68,7 +70,12 @@ function Start-Installer {
 function Start-InstalledDesktop {
   $desktopPath = Join-Path $installRoot "openaide-desktop.exe"
   $serverPath = Join-Path $installRoot "openaide-app-server.exe"
-  $process = Start-Process -FilePath $desktopPath -PassThru
+  $start = [Diagnostics.ProcessStartInfo]::new()
+  $start.FileName = $desktopPath
+  $start.UseShellExecute = $false
+  $start.Environment["OPENAIDE_STORAGE_ROOT"] = $desktopStateRoot
+  $start.Environment["OPENAIDE_RUNTIME_ROOT"] = $desktopRuntimeRoot
+  $process = [Diagnostics.Process]::Start($start)
   Wait-ForCondition `
     -TimeoutSeconds 20 `
     -Failure "Installed Desktop did not create its main window" `
@@ -113,6 +120,8 @@ function Start-StandaloneAppServer {
 
 try {
   if (Test-Path $installRoot) { Remove-Item -Recurse -Force $installRoot }
+  if (Test-Path $desktopStateRoot) { Remove-Item -Recurse -Force $desktopStateRoot }
+  if (Test-Path $desktopRuntimeRoot) { Remove-Item -Recurse -Force $desktopRuntimeRoot }
   if (Test-Path $decoyRoot) { Remove-Item -Recurse -Force $decoyRoot }
   if (Test-Path $orphanRoot) { Remove-Item -Recurse -Force $orphanRoot }
 
@@ -180,6 +189,8 @@ try {
     Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
   }
   if (Test-Path $installRoot) { Remove-Item -Recurse -Force $installRoot }
+  if (Test-Path $desktopStateRoot) { Remove-Item -Recurse -Force $desktopStateRoot }
+  if (Test-Path $desktopRuntimeRoot) { Remove-Item -Recurse -Force $desktopRuntimeRoot }
   if (Test-Path $decoyRoot) { Remove-Item -Recurse -Force $decoyRoot }
   if (Test-Path $orphanRoot) { Remove-Item -Recurse -Force $orphanRoot }
 }
