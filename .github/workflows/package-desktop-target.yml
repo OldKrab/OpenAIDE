@@ -299,3 +299,9 @@ jobs:
               $global:LASTEXITCODE = 0
             }
           }
+      - name: Smoke-test Windows Desktop close and reinstall lifecycle
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem artifacts -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not found" }
+          ./scripts/smoke-windows-desktop-lifecycle.ps1 -Installer $installer.FullName
