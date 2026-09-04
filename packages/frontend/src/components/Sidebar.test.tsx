@@ -1158,6 +1158,32 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
   });
 
+  it("offers Sign in and Disable when an Agent needs authentication", () => {
+    const onRecoverNativeSessions = vi.fn();
+    const onDisableRecoveredAgent = vi.fn();
+    const tree = render(
+      <Sidebar
+        nativeSessions={nativeSessions({
+          error: "Codex needs sign-in. Sign in or disable Codex to continue.",
+          recoveryKind: "authRequired",
+          recoveryAgentId: "codex",
+          recoveryAgentLabel: "Codex",
+        })}
+        onDisableRecoveredAgent={onDisableRecoveredAgent}
+        onRecoverNativeSessions={onRecoverNativeSessions}
+        showArchived={false}
+        tasks={[]}
+        {...sidebarCallbacks()}
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Codex needs sign-in. Sign in or disable Codex to continue.");
+    act(() => buttonWithText(tree, "Sign in").props.onClick());
+    expect(onRecoverNativeSessions).toHaveBeenCalledWith("authRequired");
+    act(() => buttonWithText(tree, "Disable Codex").props.onClick());
+    expect(onDisableRecoveredAgent).toHaveBeenCalledWith("codex");
+  });
+
   it("keeps saved rows visible while the Codex integration installs", () => {
     const tree = render(
       <Sidebar

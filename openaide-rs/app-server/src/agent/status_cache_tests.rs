@@ -1,6 +1,6 @@
 use super::*;
 use crate::protocol::model::{AgentProbeCapabilities, AgentProbeStatus};
-use openaide_app_server_protocol::snapshot::AgentStatus;
+use openaide_app_server_protocol::snapshot::{AgentSignInPhase, AgentStatus};
 
 #[test]
 fn successful_probe_records_connected_status_and_capabilities() {
@@ -139,12 +139,97 @@ fn authenticating_status_retains_the_selected_method_until_completion() {
     let authenticating = cache.snapshot("codex");
     assert_eq!(authenticating.status, AgentStatus::Authenticating);
     assert_eq!(
-        authenticating.authenticating_method_id.as_deref(),
+        authenticating.running_sign_in_method_id(),
         Some("browser-login")
+    );
+    assert_eq!(
+        authenticating.sign_in.as_ref().map(|flow| flow.phase),
+        Some(AgentSignInPhase::Starting)
     );
 
     cache.record_authentication_success("codex");
-    assert_eq!(cache.snapshot("codex").authenticating_method_id, None);
+    assert_eq!(cache.snapshot("codex").sign_in, None);
+}
+
+#[test]
+fn sign_in_flow_publishes_the_agent_supplied_url_and_hint_while_running() {
+    let cache = AgentStatusCache::default();
+    cache
+        .begin_authentication("codex", "chat-gpt-device-code", false)
+        .unwrap();
+
+    assert!(cache.record_sign_in_awaiting_user(
+        "codex",
+        "https://auth.example/device".to_string(),
+        Some("Enter code ABCD-EFGH".to_string()),
+    ));
+    let flow = cache.snapshot("codex").sign_in.unwrap();
+    assert_eq!(flow.phase, AgentSignInPhase::AwaitingUser);
+    assert_eq!(flow.url.as_deref(), Some("https://auth.example/device"));
+    assert_eq!(flow.hint.as_deref(), Some("Enter code ABCD-EFGH"));
+
+    // A URL arriving after cancellation must not resurrect the flow.
+    cache.record_authentication_error(
+        "codex",
+        &RuntimeError::NotReady("cancelled".to_string()),
+        None,
+    );
+    assert!(!cache.record_sign_in_awaiting_user(
+        "codex",
+        "https://auth.example/device".to_string(),
+        None,
+    ));
+    assert_eq!(cache.snapshot("codex").sign_in, None);
+}
+
+#[test]
+fn failed_sign_in_stays_visible_until_dismissed_or_restarted() {
+    let cache = AgentStatusCache::default();
+    cache
+        .begin_authentication("codex", "api-key", false)
+        .unwrap();
+    cache.record_authentication_error(
+        "codex",
+        &RuntimeError::Internal("agent said no".to_string()),
+        Some("Codex could not sign in with API Key.".to_string()),
+    );
+
+    let flow = cache.snapshot("codex").sign_in.unwrap();
+    assert_eq!(flow.phase, AgentSignInPhase::Failed);
+    assert_eq!(flow.method_id, "api-key");
+    assert_eq!(
+        flow.failure.as_deref(),
+        Some("Codex could not sign in with API Key.")
+    );
+    assert_eq!(cache.snapshot("codex").running_sign_in_method_id(), None);
+
+    // A probe failure keeps the user's failed attempt visible.
+    cache.record_probe_error(
+        "codex",
+        &RuntimeError::AuthRequired("Authentication required".to_string()),
+    );
+    assert_eq!(
+        cache.snapshot("codex").sign_in.map(|flow| flow.phase),
+        Some(AgentSignInPhase::Failed)
+    );
+
+    // Starting another flow replaces it.
+    cache
+        .begin_authentication("codex", "chat-gpt-device-code", false)
+        .unwrap();
+    assert_eq!(
+        cache.snapshot("codex").sign_in.map(|flow| flow.phase),
+        Some(AgentSignInPhase::Starting)
+    );
+    assert!(!cache.dismiss_failed_sign_in("codex"));
+
+    cache.record_authentication_error(
+        "codex",
+        &RuntimeError::Internal("again".to_string()),
+        Some("failed again".to_string()),
+    );
+    assert!(cache.dismiss_failed_sign_in("codex"));
+    assert_eq!(cache.snapshot("codex").sign_in, None);
 }
 
 #[test]
@@ -183,6 +268,7 @@ fn failed_authentication_restores_the_status_that_required_or_started_it() {
     connected.record_authentication_error(
         "codex",
         &RuntimeError::Internal("Agent auth failed".to_string()),
+        None,
     );
     assert_eq!(connected.snapshot("codex").status, AgentStatus::Connected);
 
@@ -197,6 +283,7 @@ fn failed_authentication_restores_the_status_that_required_or_started_it() {
     required.record_authentication_error(
         "codex",
         &RuntimeError::Internal("Agent auth failed".to_string()),
+        None,
     );
     assert_eq!(required.snapshot("codex").status, AgentStatus::AuthRequired);
 }

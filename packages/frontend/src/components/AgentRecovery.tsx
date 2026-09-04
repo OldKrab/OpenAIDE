@@ -10,6 +10,7 @@ export type AgentRecoveryKind =
   | "nodeJsRequired"
   | "authRequired"
   | "setupRequired"
+  | "connectionCheck"
   | "launchFailed";
 
 export type AgentRecoveryActions = {
@@ -115,6 +116,8 @@ export function AgentRecoveryButtons({
         </>
       ) : kind === "authRequired" ? (
         <button type="button" onClick={() => actions.onOpenAgentSettings(agent.id, returnToNewTask)}>Choose sign-in method</button>
+      ) : kind === "connectionCheck" ? (
+        <button disabled={checking} type="button" onClick={() => void retry()}>{checking ? "Connecting" : "Connect"}</button>
       ) : (
         <>
           <button disabled={checking} type="button" onClick={() => void retry()}>{checking ? "Trying again" : "Try again"}</button>
@@ -145,6 +148,11 @@ function recoveryContent(kind: AgentRecoveryKind, agentLabel: string) {
       return {
         title: `Set up ${agentLabel}`,
         description: `${agentLabel} needs setup before it can start work.`,
+      };
+    case "connectionCheck":
+      return {
+        title: `Connect ${agentLabel}`,
+        description: "Start the Agent and check its connection.",
       };
     case "launchFailed":
       return {

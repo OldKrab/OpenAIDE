@@ -1,4 +1,4 @@
-use openaide_app_server_protocol::methods::CLIENT_HEARTBEAT;
+use openaide_app_server_protocol::methods::{AGENT_AUTHENTICATE, CLIENT_HEARTBEAT};
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -112,16 +112,7 @@ impl LocalHttpProtocolHandler {
                 &self.sessions,
             )
         } else if transport_kind == "send" {
-            let now = AppServerTime::now();
-            let gateway = self.gateway.clone();
-            handle_reliable_session_upload(
-                authorization,
-                &self.auth_token,
-                connection_id,
-                body,
-                &self.sessions,
-                |connection_id, message| gateway.handle_inbound(connection_id, message, now),
-            )
+            self.handle_reliable_session_upload(authorization, connection_id, body)
         } else {
             let now = AppServerTime::now();
             let gateway = self.gateway.clone();
@@ -154,6 +145,83 @@ impl LocalHttpProtocolHandler {
             );
         }
         response
+    }
+
+    fn handle_reliable_session_upload(
+        &self,
+        authorization: Option<&str>,
+        connection_id: Option<&str>,
+        body: &str,
+    ) -> LocalHttpResponse {
+        let accepted = match accept_reliable_session_upload(
+            authorization,
+            &self.auth_token,
+            connection_id,
+            body,
+            &self.sessions,
+        ) {
+            Ok(accepted) => accepted,
+            Err(response) => return response,
+        };
+        if !is_agent_authenticate_request(&accepted.message) {
+            let now = AppServerTime::now();
+            let gateway = self.gateway.clone();
+            return dispatch_reliable_session_upload(
+                authorization,
+                &self.auth_token,
+                connection_id,
+                accepted,
+                &self.sessions,
+                move |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+            );
+        }
+
+        // Authentication can wait indefinitely for the user. The reliable upload ACK means the
+        // frame was accepted, not that its RPC completed; returning it now lets the same ordered
+        // client channel deliver agent/cancelAuthenticate while this work remains in flight.
+        let authorization = authorization.map(str::to_string);
+        let raw_connection_id = connection_id.map(str::to_string);
+        let auth_token = self.auth_token.clone();
+        let gateway = self.gateway.clone();
+        let sessions = self.sessions.clone();
+        let session_id = accepted.session_id.clone();
+        std::thread::spawn(move || {
+            let started_at = std::time::Instant::now();
+            logging::info(
+                "local_http_deferred_request_started",
+                json!({
+                    "connection_id": raw_connection_id,
+                    "session_id": session_id,
+                    "method": AGENT_AUTHENTICATE,
+                }),
+            );
+            let now = AppServerTime::now();
+            let response = dispatch_reliable_session_upload(
+                authorization.as_deref(),
+                &auth_token,
+                raw_connection_id.as_deref(),
+                accepted,
+                &sessions,
+                move |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+            );
+            let outcome = if response.status == 204 {
+                "completed"
+            } else {
+                "failed"
+            };
+            logging::info(
+                "local_http_deferred_request_completed",
+                json!({
+                    "connection_id": raw_connection_id,
+                    "session_id": session_id,
+                    "method": AGENT_AUTHENTICATE,
+                    "outcome": outcome,
+                    "http_status": response.status,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            );
+        });
+        empty_response(204)
     }
 
     fn handle_reliable_upload_chunk(
@@ -489,6 +557,7 @@ fn handle_reliable_session_open(
     )
 }
 
+#[cfg(test)]
 fn handle_reliable_session_upload(
     authorization: Option<&str>,
     expected_token: &str,
@@ -497,49 +566,101 @@ fn handle_reliable_session_upload(
     sessions: &ReliableSessionRegistry,
     dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
 ) -> LocalHttpResponse {
+    let accepted = match accept_reliable_session_upload(
+        authorization,
+        expected_token,
+        connection_id,
+        body,
+        sessions,
+    ) {
+        Ok(accepted) => accepted,
+        Err(response) => return response,
+    };
+    dispatch_reliable_session_upload(
+        authorization,
+        expected_token,
+        connection_id,
+        accepted,
+        sessions,
+        dispatch,
+    )
+}
+
+struct AcceptedReliableUpload {
+    session_id: String,
+    message: Value,
+}
+
+fn accept_reliable_session_upload(
+    authorization: Option<&str>,
+    expected_token: &str,
+    connection_id: Option<&str>,
+    body: &str,
+    sessions: &ReliableSessionRegistry,
+) -> Result<AcceptedReliableUpload, LocalHttpResponse> {
     match auth_status(authorization, expected_token) {
         AuthStatus::Authorized => {}
-        AuthStatus::Missing => return empty_response(401),
-        AuthStatus::Invalid => return empty_response(403),
+        AuthStatus::Missing => return Err(empty_response(401)),
+        AuthStatus::Invalid => return Err(empty_response(403)),
     }
     let raw_connection_id = connection_id;
     let Some(connection_id) = valid_connection_id(raw_connection_id) else {
-        return reliable_upload_rejection("invalid_connection_id", "single");
+        return Err(reliable_upload_rejection("invalid_connection_id", "single"));
     };
     let upload = match serde_json::from_str::<ReliableUpload>(body) {
         Ok(upload) => upload,
-        Err(_) => return reliable_upload_rejection("invalid_upload_envelope", "single"),
+        Err(_) => {
+            return Err(reliable_upload_rejection(
+                "invalid_upload_envelope",
+                "single",
+            ))
+        }
     };
     let session_id = upload.session_id.clone();
-    let mut dispatched = None;
+    let mut accepted_message = None;
     let accepted = sessions.accept_client_frame(
         &session_id,
         &connection_id,
         upload.sequence,
         upload.message,
         |message| {
-            dispatched = Some(handle_local_http_protocol(
-                authorization,
-                expected_token,
-                raw_connection_id,
-                &message.to_string(),
-                dispatch,
-                |_| Vec::new(),
-            ));
+            accepted_message = Some(message);
         },
     );
     match accepted {
-        AcceptClientFrame::Duplicate => return empty_response(204),
+        AcceptClientFrame::Duplicate => return Err(empty_response(204)),
         AcceptClientFrame::Gap { expected } => {
-            return json_response(409, json!({ "expectedSequence": expected }))
+            return Err(json_response(409, json!({ "expectedSequence": expected })))
         }
-        AcceptClientFrame::UnknownSession => return empty_response(410),
-        AcceptClientFrame::WrongConnection => return empty_response(403),
+        AcceptClientFrame::UnknownSession => return Err(empty_response(410)),
+        AcceptClientFrame::WrongConnection => return Err(empty_response(403)),
         AcceptClientFrame::Accepted => {}
     }
-    let Some(response) = dispatched else {
-        return empty_response(500);
+    let Some(message) = accepted_message else {
+        return Err(empty_response(500));
     };
+    Ok(AcceptedReliableUpload {
+        session_id,
+        message,
+    })
+}
+
+fn dispatch_reliable_session_upload(
+    authorization: Option<&str>,
+    expected_token: &str,
+    connection_id: Option<&str>,
+    accepted: AcceptedReliableUpload,
+    sessions: &ReliableSessionRegistry,
+    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+) -> LocalHttpResponse {
+    let response = handle_local_http_protocol(
+        authorization,
+        expected_token,
+        connection_id,
+        &accepted.message.to_string(),
+        dispatch,
+        |_| Vec::new(),
+    );
     if response.status != 200 {
         if response.status == 400 {
             let reason_code =
@@ -550,10 +671,19 @@ fn handle_reliable_session_upload(
     }
     if let Ok(value) = serde_json::from_str::<Value>(&response.body) {
         for message in value.as_array().cloned().unwrap_or_else(|| vec![value]) {
-            sessions.enqueue_server_message(&session_id, message);
+            sessions.enqueue_server_message(&accepted.session_id, message);
         }
     }
     empty_response(204)
+}
+
+fn is_agent_authenticate_request(message: &Value) -> bool {
+    let Ok(request) = serde_json::from_value::<WireRequest>(message.clone()) else {
+        return false;
+    };
+    request.jsonrpc == "2.0"
+        && matches!(request.id, WireRequestId::Request(_))
+        && request.method.as_deref() == Some(AGENT_AUTHENTICATE)
 }
 
 /// Adds a stable, non-sensitive reason to protocol-level HTTP 400 responses.

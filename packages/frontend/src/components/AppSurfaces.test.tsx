@@ -1539,6 +1539,8 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
       },
       settings: {
         authenticateAgent: vi.fn(),
+        cancelAgentAuthentication: vi.fn(),
+        logoutAgent: vi.fn(),
         createCustomAgent: vi.fn(),
         deleteCustomAgent: vi.fn(),
         deleteMcpServer: vi.fn(),

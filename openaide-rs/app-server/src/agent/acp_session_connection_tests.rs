@@ -380,6 +380,7 @@ fn connection_context_with_trace(
         session_event_sinks.clone(),
     );
     AcpSessionConnectionContext {
+        agent_id: "codex".to_string(),
         host_bridge,
         trace,
         current_prompts: Arc::default(),

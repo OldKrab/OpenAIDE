@@ -35,6 +35,14 @@ impl AgentGateway {
         self.agent.authenticate(request)
     }
 
+    pub(crate) fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.agent.cancel_authentication(agent_id)
+    }
+
+    pub(crate) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.agent.logout(agent_id)
+    }
+
     pub(crate) fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

@@ -1,8 +1,9 @@
 use openaide_app_server_protocol::agent::{
-    AgentAuthenticateParams, AgentAuthenticateResult, AgentCreateCustomParams,
-    AgentCreateCustomResult, AgentDeleteCustomParams, AgentDeleteCustomResult,
-    AgentListSessionsParams, AgentListSessionsResult, AgentProbeParams, AgentProbeResult,
-    AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
+    AgentAuthenticateParams, AgentAuthenticateResult, AgentCancelAuthenticateParams,
+    AgentCancelAuthenticateResult, AgentCreateCustomParams, AgentCreateCustomResult,
+    AgentDeleteCustomParams, AgentDeleteCustomResult, AgentListSessionsParams,
+    AgentListSessionsResult, AgentLogoutParams, AgentLogoutResult, AgentProbeParams,
+    AgentProbeResult, AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
     AgentSetEnabledResult, AgentSettingsDetailsParams, AgentSettingsDetailsResult,
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
@@ -19,7 +20,11 @@ use openaide_app_server_protocol::task::{
 use serde_json::Value;
 use std::time::Instant;
 
+use crate::agent::product_api::AgentAuthenticateWorkflow;
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::methods::{AGENT_AUTHENTICATE, AGENT_LOGOUT};
+use std::sync::Arc;
 
 use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
 
@@ -281,18 +286,175 @@ impl RpcGateway {
         meta: RequestMeta,
         now: AppServerTime,
     ) -> GatewayOutcome {
+        match self.prepare_agent_authenticate(
+            connection_id.clone(),
+            id.clone(),
+            params,
+            meta.clone(),
+            now,
+        ) {
+            Err(outcome) => *outcome,
+            Ok((params, workflow)) => self.finish_agent_authenticate(
+                connection_id,
+                id,
+                meta,
+                now,
+                workflow.authenticate(params),
+            ),
+        }
+    }
+
+    /// Admission and parse only. The ChatGPT/device-code ACP call must run without
+    /// holding the protocol lock so heartbeats and host `shell/openExternal` can proceed.
+    pub(crate) fn prepare_agent_authenticate(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> Result<(AgentAuthenticateParams, Arc<dyn AgentAuthenticateWorkflow>), Box<GatewayOutcome>>
+    {
+        if self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .is_none()
+        {
+            return Err(Box::new(self.error(
+                connection_id,
+                id,
+                meta,
+                responses::not_initialized(AGENT_AUTHENTICATE.to_string()),
+            )));
+        }
+        if let Some(client_instance_id) = self
+            .client_hub
+            .observe_connection_activity(&connection_id, now)
+        {
+            self.attachments.keep_alive_for_client(&client_instance_id);
+        }
+        if self.update_shutdown.is_some() {
+            return Err(Box::new(self.error(
+                connection_id,
+                id,
+                meta,
+                responses::update_shutdown_in_progress(AGENT_AUTHENTICATE.to_string()),
+            )));
+        }
         let params = match serde_json::from_value::<AgentAuthenticateParams>(params) {
             Ok(params) => params,
             Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error));
+                return Err(Box::new(self.error(
+                    connection_id,
+                    id,
+                    meta,
+                    responses::invalid_params(error),
+                )));
             }
         };
-        let result = match self.agent_authenticate.authenticate(params) {
+        Ok((params, self.agent_authenticate.clone()))
+    }
+
+    pub(crate) fn finish_agent_authenticate(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        meta: RequestMeta,
+        now: AppServerTime,
+        result: Result<AgentAuthenticateResult, ProtocolError>,
+    ) -> GatewayOutcome {
+        let result = match result {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         let events = self.publish_agent_collection_update(result.agents.clone(), now);
         self.result_with_events::<AgentAuthenticateResult>(connection_id, id, meta, result, events)
+    }
+
+    /// Admission and parse only. ACP logout may wait on the Agent process, so it runs without
+    /// holding the shared protocol lock.
+    pub(crate) fn prepare_agent_logout(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> Result<(AgentLogoutParams, Arc<dyn AgentAuthenticateWorkflow>), Box<GatewayOutcome>> {
+        if self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .is_none()
+        {
+            return Err(Box::new(self.error(
+                connection_id,
+                id,
+                meta,
+                responses::not_initialized(AGENT_LOGOUT.to_string()),
+            )));
+        }
+        if let Some(client_instance_id) = self
+            .client_hub
+            .observe_connection_activity(&connection_id, now)
+        {
+            self.attachments.keep_alive_for_client(&client_instance_id);
+        }
+        if self.update_shutdown.is_some() {
+            return Err(Box::new(self.error(
+                connection_id,
+                id,
+                meta,
+                responses::update_shutdown_in_progress(AGENT_LOGOUT.to_string()),
+            )));
+        }
+        let params = serde_json::from_value::<AgentLogoutParams>(params).map_err(|error| {
+            Box::new(self.error(connection_id, id, meta, responses::invalid_params(error)))
+        })?;
+        Ok((params, self.agent_authenticate.clone()))
+    }
+
+    pub(crate) fn finish_agent_logout(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        meta: RequestMeta,
+        now: AppServerTime,
+        result: Result<AgentLogoutResult, ProtocolError>,
+    ) -> GatewayOutcome {
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let events = self.publish_agent_collection_update(result.agents.clone(), now);
+        self.result_with_events::<AgentLogoutResult>(connection_id, id, meta, result, events)
+    }
+
+    pub(super) fn handle_agent_cancel_authenticate(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<AgentCancelAuthenticateParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error));
+            }
+        };
+        let result = match self.agent_authenticate.cancel_authenticate(params) {
+            Ok(result) => result,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let events = self.publish_agent_collection_update(result.agents.clone(), now);
+        self.result_with_events::<AgentCancelAuthenticateResult>(
+            connection_id,
+            id,
+            meta,
+            result,
+            events,
+        )
     }
 
     pub(super) fn handle_agent_create_custom(

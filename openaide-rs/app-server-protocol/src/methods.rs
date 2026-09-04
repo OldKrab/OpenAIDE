@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{
-    AgentAuthenticateParams, AgentAuthenticateResult, AgentCreateCustomParams,
-    AgentCreateCustomResult, AgentDeleteCustomParams, AgentDeleteCustomResult,
-    AgentListSessionsParams, AgentListSessionsResult, AgentProbeParams, AgentProbeResult,
-    AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
+    AgentAuthenticateParams, AgentAuthenticateResult, AgentCancelAuthenticateParams,
+    AgentCancelAuthenticateResult, AgentCreateCustomParams, AgentCreateCustomResult,
+    AgentDeleteCustomParams, AgentDeleteCustomResult, AgentListSessionsParams,
+    AgentListSessionsResult, AgentLogoutParams, AgentLogoutResult, AgentProbeParams,
+    AgentProbeResult, AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
     AgentSetEnabledResult, AgentSettingsDetailsParams, AgentSettingsDetailsResult,
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
@@ -226,6 +227,18 @@ protocol_method!(
     AGENT_AUTHENTICATE,
     AgentAuthenticateParams,
     AgentAuthenticateResult
+);
+protocol_method!(
+    AgentCancelAuthenticate,
+    AGENT_CANCEL_AUTHENTICATE,
+    AgentCancelAuthenticateParams,
+    AgentCancelAuthenticateResult
+);
+protocol_method!(
+    AgentLogout,
+    AGENT_LOGOUT,
+    AgentLogoutParams,
+    AgentLogoutResult
 );
 protocol_method!(
     AgentListSessions,

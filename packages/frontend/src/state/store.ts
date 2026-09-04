@@ -42,6 +42,8 @@ export type NativeSessionsState = {
     recoverable?: boolean;
   };
   recoveryKind?: "nodeJsRequired" | "authRequired" | "setupRequired" | "launchFailed";
+  recoveryAgentId?: string;
+  recoveryAgentLabel?: string;
   adoptingSessionId?: string;
 };
 

@@ -121,6 +121,14 @@ impl AcpActiveSessionManager {
         Ok(result)
     }
 
+    pub(super) fn cancel_authentication(&self, agent_id: &str) {
+        self.processes.cancel_authentication(agent_id);
+    }
+
+    pub(super) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.processes.logout(agent_id)
+    }
+
     pub(super) fn load_session(
         &self,
         request: AgentSessionLoad,

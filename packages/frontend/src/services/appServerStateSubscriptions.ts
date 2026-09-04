@@ -11,7 +11,7 @@ import {
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
-import { agentSettingsStatusFromProtocol } from "../intents/agentSettingsRecords";
+import { agentSettingsStatusFromProtocol, agentSignInFlowFromProtocol } from "../intents/agentSettingsRecords";
 import { applyProtocolAgents } from "../state/appServerAgents";
 import {
   createProtocolTaskSnapshotMapper,
@@ -180,6 +180,7 @@ function actionsFromSubscriptionSnapshot(
           agentId: agent.agentId,
           status: agentSettingsStatusFromProtocol(agent.status),
           setupReason: agent.setupReason ?? undefined,
+          signIn: agentSignInFlowFromProtocol(agent.signIn),
         })),
       });
       return remappedTaskNavigationActions(context);
@@ -230,6 +231,9 @@ function remappedTaskNavigationActions(context: StateSubscriptionMappingContext)
       loadingProjectIds: mapped.loadingProjectIds,
       refreshing: mapped.refreshing,
       refreshError: mapped.refreshError,
+      recoveryKind: mapped.recoveryKind,
+      recoveryAgentId: mapped.recoveryAgentId,
+      recoveryAgentLabel: mapped.recoveryAgentLabel,
     });
     return actions;
   });

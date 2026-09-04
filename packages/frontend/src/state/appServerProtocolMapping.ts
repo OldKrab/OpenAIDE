@@ -44,6 +44,9 @@ export type ProtocolTaskNavigationMapping = {
   loadingProjectIds: string[];
   refreshing: boolean;
   refreshError?: string;
+  recoveryKind?: "nodeJsRequired" | "authRequired" | "setupRequired" | "launchFailed";
+  recoveryAgentId?: string;
+  recoveryAgentLabel?: string;
   activeTaskId?: string;
   warnings: ProtocolMappingWarning[];
   requiresNativeSurface: boolean;
@@ -116,10 +119,51 @@ export function mapProtocolTaskNavigation(
       .filter((group) => group.loading === true)
       .map((group) => group.projectId),
     refreshing: snapshot.refresh.state === "refreshing",
-    refreshError: snapshot.refresh.state === "failed" ? snapshot.refresh.message : undefined,
+    ...navigationRecovery(snapshot, context),
     activeTaskId: undefined,
     warnings: mapped.flatMap((item) => item.warnings),
     requiresNativeSurface: false,
+  };
+}
+
+function navigationRecovery(
+  snapshot: ProtocolTaskNavigationSnapshot,
+  context: ProtocolMappingContext,
+) {
+  const blocked = context.agents?.find((agent) => (
+    agent.status === "authRequired" || agent.status === "setupRequired" || agent.status === "failed"
+  ));
+  if (blocked?.status === "authRequired") {
+    return {
+      refreshError: `${blocked.label} needs sign-in. Sign in or disable ${blocked.label} to continue.`,
+      recoveryKind: "authRequired" as const,
+      recoveryAgentId: blocked.agentId,
+      recoveryAgentLabel: blocked.label,
+    };
+  }
+  if (blocked?.status === "setupRequired") {
+    return {
+      refreshError: snapshot.refresh.state === "failed"
+        ? snapshot.refresh.message
+        : `${blocked.label} history unavailable`,
+      recoveryKind: blocked.setupReason === "nodeJsRequired" ? "nodeJsRequired" as const : "setupRequired" as const,
+      recoveryAgentId: blocked.agentId,
+      recoveryAgentLabel: blocked.label,
+    };
+  }
+  if (blocked?.status === "failed" || snapshot.refresh.state === "failed") {
+    return {
+      refreshError: snapshot.refresh.state === "failed" ? snapshot.refresh.message : `${blocked?.label ?? "Agent"} history unavailable`,
+      recoveryKind: "launchFailed" as const,
+      recoveryAgentId: blocked?.agentId,
+      recoveryAgentLabel: blocked?.label,
+    };
+  }
+  return {
+    refreshError: undefined,
+    recoveryKind: undefined,
+    recoveryAgentId: undefined,
+    recoveryAgentLabel: undefined,
   };
 }
 

@@ -66,6 +66,7 @@ fn collection_from_registry_summaries_with_statuses(
                     status: status.status,
                     setup_reason: status.setup_reason,
                     capabilities: status.capabilities,
+                    sign_in: status.sign_in,
                 }
             })
             .collect(),

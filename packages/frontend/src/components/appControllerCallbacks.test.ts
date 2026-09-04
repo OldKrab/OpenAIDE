@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import {
   AGENT_AUTHENTICATE,
+  AGENT_CANCEL_AUTHENTICATE,
   AGENT_CREATE_CUSTOM,
   AGENT_DELETE_CUSTOM,
+  AGENT_LOGOUT,
   AGENT_PROBE,
   AGENT_REPLACE_CUSTOM,
   AGENT_SET_ENABLED,
@@ -1950,13 +1952,121 @@ describe("app controller callbacks", () => {
       methodId: "codex-login",
     });
     expect(request).toHaveBeenNthCalledWith(2, SETTINGS_GET_AGENT_DETAILS, {});
-    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "settings:start" });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "settings:error" }));
     expect(dispatch).toHaveBeenCalledWith({
       type: "settings:agentDetailsResult",
       generatedAt: "after-auth",
       agents: [expect.objectContaining({ id: "codex", status: "connected" })],
     });
     expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("cancels an in-flight sign-in before starting another method", async () => {
+    const dispatch = vi.fn();
+    const state = createInitialState();
+    state.settings.agentDetails = [{
+      ...customSettingsAgent("codex"),
+      status: "authenticating",
+      sign_in: { method_id: "chat-gpt", phase: "starting" },
+      auth_methods: [
+        { id: "chat-gpt", label: "ChatGPT", kind: "agent" },
+        { id: "device-code", label: "ChatGPT (device code)", kind: "agent" },
+      ],
+    }];
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_CANCEL_AUTHENTICATE) return { agents: protocolAgents(["codex"]) };
+      if (method === AGENT_AUTHENTICATE) {
+        return { agentId: "codex", methodId: "device-code", status: "awaiting_user" };
+      }
+      if (method === SETTINGS_GET_AGENT_DETAILS) {
+        return { generatedAt: "after-switch", agents: [] };
+      }
+      throw new Error(method);
+    });
+
+    await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).settings.authenticateAgent("codex", "device-code");
+
+    expect(request.mock.calls[0]).toEqual([AGENT_CANCEL_AUTHENTICATE, { agentId: "codex" }]);
+    expect(request).toHaveBeenCalledWith(AGENT_AUTHENTICATE, {
+      agentId: "codex",
+      methodId: "device-code",
+    });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "settings:error" }));
+  });
+
+  it("continues a terminal sign-in awaiting confirmation instead of cancelling it", async () => {
+    const dispatch = vi.fn();
+    const state = createInitialState();
+    state.settings.agentDetails = [{
+      ...customSettingsAgent("codex"),
+      status: "authenticating",
+      sign_in: { method_id: "codex-login", phase: "awaiting_terminal" },
+      auth_methods: [{ id: "codex-login", label: "Codex login", kind: "terminal" }],
+    }];
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_AUTHENTICATE) return { agentId: "codex", methodId: "codex-login", status: "authenticated" };
+      if (method === SETTINGS_GET_AGENT_DETAILS) return { generatedAt: "after-terminal", agents: [] };
+      throw new Error(method);
+    });
+
+    await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).settings.authenticateAgent("codex", "codex-login");
+
+    expect(request).not.toHaveBeenCalledWith(AGENT_CANCEL_AUTHENTICATE, expect.anything());
+    expect(request).toHaveBeenCalledWith(AGENT_AUTHENTICATE, {
+      agentId: "codex",
+      methodId: "codex-login",
+      terminalConfirmed: true,
+    });
+  });
+
+  it("does not report a cancelled sign-in as a failure after Sign in is clicked again", async () => {
+    const dispatch = vi.fn();
+    const state = createInitialState();
+    state.settings.agentDetails = [{
+      ...customSettingsAgent("codex"),
+      label: "Codex",
+      auth_methods: [{ id: "chat-gpt-device-code", label: "ChatGPT (device code)", kind: "agent" }],
+    }];
+    let rejectFirst: ((error: Error) => void) | undefined;
+    let authenticateCalls = 0;
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_CANCEL_AUTHENTICATE) return { agents: protocolAgents(["codex"]) };
+      if (method === AGENT_AUTHENTICATE) {
+        authenticateCalls += 1;
+        if (authenticateCalls === 1) {
+          return new Promise((_, reject) => {
+            rejectFirst = reject;
+          });
+        }
+        return { agentId: "codex", methodId: "chat-gpt-device-code", status: "awaiting_user" };
+      }
+      if (method === SETTINGS_GET_AGENT_DETAILS) return { generatedAt: "after-retry", agents: [] };
+      throw new Error(method);
+    });
+
+    const settings = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).settings;
+
+    const first = settings.authenticateAgent("codex", "chat-gpt-device-code");
+    await settlePromises();
+    await settings.cancelAgentAuthentication("codex");
+    const second = settings.authenticateAgent("codex", "chat-gpt-device-code");
+    rejectFirst?.(new Error("not_ready"));
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
+
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "settings:error" }));
   });
 
   it("keeps terminal authentication in Settings while user confirmation is pending", async () => {
@@ -1996,29 +2106,103 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("does not render backend authentication error details", async () => {
+  it("leaves sign-in failures to the App Server Sign-in Flow and refreshes details", async () => {
     const dispatch = vi.fn();
     const state = createInitialState();
     state.settings.agentDetails = [{ ...customSettingsAgent("codex"),
       auth_methods: [{ id: "api-key", label: "API Key", kind: "agent" }],
     }];
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_AUTHENTICATE) {
+        throw new Error("internal error: CODEX_API_KEY is not set: { vendor metadata }");
+      }
+      if (method === SETTINGS_GET_AGENT_DETAILS) {
+        return {
+          generatedAt: "after-failure",
+          agents: [{
+            agentId: "codex",
+            label: "Codex",
+            enabled: true,
+            sourceKind: "built_in",
+            icon: "sparkles",
+            transport: "stdio",
+            status: "authRequired",
+            launchLabel: "codex",
+            description: "Codex ACP Agent",
+            capabilities: [],
+            authMethods: [],
+            signIn: { methodId: "api-key", phase: "failed", failure: "Codex could not sign in with API Key." },
+          }],
+        };
+      }
+      throw new Error(method);
+    });
 
-    callbacks({
-      backendConnection: {
-        request: vi.fn(async () => {
-          throw new Error("internal error: CODEX_API_KEY is not set: { vendor metadata }");
-        }) as unknown as BackendConnection["request"],
-      },
+    const authenticated = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).settings.authenticateAgent("codex", "api-key");
-    await settlePromises();
 
+    expect(authenticated).toBe(false);
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "settings:error" }));
     expect(dispatch).toHaveBeenCalledWith({
-      type: "settings:error",
-      message: "Authentication failed. Check the Agent's requirements and try again.",
+      type: "settings:agentDetailsResult",
+      generatedAt: "after-failure",
+      agents: [expect.objectContaining({
+        id: "codex",
+        sign_in: { method_id: "api-key", phase: "failed", failure: "Codex could not sign in with API Key." },
+      })],
     });
     expect(JSON.stringify(dispatch.mock.calls)).not.toContain("CODEX_API_KEY");
+  });
+
+  it("signs out through the App Server and removes only the active method credentials", async () => {
+    const dispatch = vi.fn();
+    const commit = vi.fn(async () => undefined);
+    beginAgentSecretTransaction.mockResolvedValue({ commit, rollback: vi.fn(async () => undefined) });
+    const state = createInitialState();
+    state.settings.agentDetails = [{
+      ...customSettingsAgent("codex"),
+      status: "connected",
+      logout_supported: true,
+      last_authentication_method_id: "api-key",
+      auth_methods: [{
+        id: "api-key",
+        label: "API key",
+        kind: "env_var",
+        variables: [
+          { name: "OPENAI_API_KEY", label: "API key", secret: true, optional: false },
+          { name: "OPENAI_BASE_URL", label: "Base URL", secret: false, optional: true },
+        ],
+      }],
+    }];
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_LOGOUT) return { agents: protocolAgents(["codex"]) };
+      if (method === SETTINGS_GET_AGENT_DETAILS) return { generatedAt: "after-logout", agents: [] };
+      throw new Error(method);
+    });
+
+    const signedOut = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).settings.logoutAgent("codex");
+
+    expect(beginAgentSecretTransaction).toHaveBeenCalledWith({
+      writes: [],
+      deletes: [{
+        kind: "agentEnvironment",
+        agentId: "codex.auth.61-70-69-2d-6b-65-79",
+        name: "OPENAI_API_KEY",
+      }],
+    });
+    expect(request).toHaveBeenNthCalledWith(1, AGENT_LOGOUT, {
+      agentId: "codex",
+      expectedMethodId: "api-key",
+    });
+    expect(commit).toHaveBeenCalledOnce();
+    expect(signedOut).toBe(true);
   });
 
   it("updates custom Agent metadata through BackendConnection when launch fields are unchanged", async () => {

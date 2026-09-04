@@ -15,7 +15,8 @@ use crate::agent::attached_native_session::record_terminal_error;
 use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSessionFork,
+    AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSecretResolver,
+    AgentSessionFork,
 };
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
@@ -38,6 +39,7 @@ struct AcpAuthEnvironment {
     env: HashMap<String, String>,
     secret_env: Vec<String>,
     secret_storage_agent_id: String,
+    secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
 }
 
 #[derive(Clone)]
@@ -245,6 +247,7 @@ impl AcpAgentProcessPool {
                     env: request.env.clone(),
                     secret_env: request.secret_env.clone(),
                     secret_storage_agent_id: storage_id,
+                    secret_resolver: request.secret_resolver.clone(),
                 });
         let previous_environment = if let Some(environment) = auth_environment {
             let previous = self
@@ -332,6 +335,37 @@ impl AcpAgentProcessPool {
         is_current
     }
 
+    pub(super) fn cancel_authentication(&self, agent_id: &str) {
+        if let Some(process) = self.existing_process(agent_id) {
+            self.stop_process(agent_id, &process);
+        }
+    }
+
+    pub(super) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        let process = self.get_or_launch_process(agent_id)?;
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        process
+            .control_tx
+            .send(AcpAgentProcessControl::Logout {
+                agent_id: agent_id.to_string(),
+                reply_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::NotReady("ACP agent process ended before logout".to_string())
+            })?;
+        let result = reply_rx.recv().map_err(|_| {
+            RuntimeError::NotReady("ACP agent process ended during logout".to_string())
+        })?;
+        if result.is_ok() {
+            self.auth_environments
+                .lock()
+                .expect("ACP auth environment registry poisoned")
+                .remove(agent_id);
+            self.stop_process(agent_id, &process);
+        }
+        result
+    }
+
     fn stop_process(&self, agent_id: &str, process: &AcpAgentProcessClient) {
         if self.remove_process_if_current(agent_id, process) {
             let _ = process.shutdown_tx.send(true);
@@ -351,6 +385,7 @@ impl AcpAgentProcessPool {
         first_open: Option<AcpAgentProcessOpen>,
     ) -> Result<AcpAgentProcessClient, RuntimeError> {
         let mut config = self.registry.require_acp_config(agent_id)?;
+        let mut secret_resolver = None;
         if let Some(auth) = self
             .auth_environments
             .lock()
@@ -363,6 +398,7 @@ impl AcpAgentProcessPool {
             // Secret storage is namespaced by Agent identity and auth method. The
             // launch identity remains the process-pool key, not this lookup key.
             config.agent_id = auth.secret_storage_agent_id;
+            secret_resolver = auth.secret_resolver;
         }
         let prepared = match &self.codex_provisioner {
             Some(provisioner) => provisioner.prepare(config)?,
@@ -408,6 +444,7 @@ impl AcpAgentProcessPool {
                 shutdown_rx,
                 host_bridge,
                 terminal_registry,
+                secret_resolver,
             }))
             .and_then(|result| result);
             if let Err(error) = result {

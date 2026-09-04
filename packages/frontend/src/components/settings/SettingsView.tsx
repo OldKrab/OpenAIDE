@@ -11,7 +11,7 @@ import {
   SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import type {
   AppPreferencesRecord,
@@ -33,6 +33,7 @@ import type {
 } from "@openaide/app-server-client";
 import type { McpServerSaveInput } from "../../intents/mcpSettingsIntents";
 import type { NewTaskViewIntents } from "../NewTaskView";
+import { agentLeftLaunching } from "./agentSettingsModel";
 import { AgentSettingsTab } from "./AgentSettingsTab";
 import { DataSupportSettingsTab, DesktopSettingsTab, GeneralSettingsTab } from "./GeneralSettingsTab";
 import { currentFrontendShell, type FrontendShellAppearance } from "../../services/frontendShell";
@@ -79,6 +80,8 @@ export function SettingsView({
   frameHeader,
   frameHeaderPlacement,
   onAuthenticate,
+  onCancelAuthentication,
+  onLogout,
   onBackToApp,
   onCreateCustomAgent,
   onDeleteCustomAgent,
@@ -114,6 +117,8 @@ export function SettingsView({
   frameHeader?: ReactNode;
   frameHeaderPlacement?: "overlay" | "row";
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
+  onCancelAuthentication?: (agentId: string) => void | Promise<void>;
+  onLogout?: (agentId: string) => boolean | void | Promise<boolean | void>;
   onBackToApp?: () => void;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
@@ -166,6 +171,7 @@ export function SettingsView({
     })
     : [];
   const [pendingSearchTarget, setPendingSearchTarget] = useState<{ tab: SettingsTabId; id: string }>();
+  const previousAgentStatuses = useRef(state.agentDetails);
   const selectTab = (tab: SettingsTabId, focus = false) => {
     onSelectTab(tab);
     setMobileIndexOpen(false);
@@ -203,6 +209,11 @@ export function SettingsView({
     const frame = window.requestAnimationFrame(() => document.getElementById(settingsTabId(activeTab))?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [activeTab, mobileIndexOpen]);
+  useEffect(() => {
+    const previous = previousAgentStatuses.current;
+    previousAgentStatuses.current = state.agentDetails;
+    if (agentLeftLaunching(previous, state.agentDetails)) onRefresh();
+  }, [onRefresh, state.agentDetails]);
   useEffect(() => {
     if (!pendingSearchTarget || pendingSearchTarget.tab !== activeTab) return;
     const frame = window.requestAnimationFrame(() => {
@@ -420,9 +431,10 @@ export function SettingsView({
             backendConnection={backendConnection}
             desktopNotifications={desktopNotifications}
             agents={state.agentDetails ?? []}
-            authPending={state.loading}
             deletedAgentId={state.deletedAgentId}
             onAuthenticate={onAuthenticate}
+            onCancelAuthentication={onCancelAuthentication}
+            onLogout={onLogout}
             onCreateCustomAgent={onCreateCustomAgent}
             onDeleteCustomAgent={onDeleteCustomAgent}
             onDeleteMcpServer={onDeleteMcpServer}
@@ -471,6 +483,8 @@ function SettingsTabContent({
   backendConnection,
   desktopNotifications,
   onAuthenticate,
+  onCancelAuthentication,
+  onLogout,
   onCreateCustomAgent,
   onDeleteCustomAgent,
   onDeleteMcpServer,
@@ -486,7 +500,6 @@ function SettingsTabContent({
   onSetComposerSubmitShortcut,
   onSetDesktopNotifications,
   onUpdateCustomAgentMetadata,
-  authPending,
   agents,
   developerSettingsUnlocked,
   preferences,
@@ -506,9 +519,10 @@ function SettingsTabContent({
   appearance?: FrontendShellAppearance;
   backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   desktopNotifications?: DesktopNotificationSettings;
-  authPending: boolean;
   agents: AgentSettingsRecord[];
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
+  onCancelAuthentication?: (agentId: string) => void | Promise<void>;
+  onLogout?: (agentId: string) => boolean | void | Promise<boolean | void>;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onDeleteMcpServer: (server: McpServerDefinition) => void;
@@ -551,9 +565,10 @@ function SettingsTabContent({
       {tab === "agents" ? (
         <AgentSettingsTab
           agents={agents}
-          authPending={authPending}
           deletedAgentId={deletedAgentId}
           onAuthenticate={onAuthenticate}
+          onCancelAuthentication={onCancelAuthentication}
+          onLogout={onLogout}
           preferredAgentId={preferredAgentId}
           recoveryActions={recoveryActions}
           onCreateCustomAgent={onCreateCustomAgent}

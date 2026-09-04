@@ -25,6 +25,8 @@ export const SUPPORT_RECOVER_STUCK_SESSIONS = "support/recoverStuckSessions" as 
 export const AGENT_PROBE = "agent/probe" as const;
 
 export const AGENT_AUTHENTICATE = "agent/authenticate" as const;
+export const AGENT_CANCEL_AUTHENTICATE = "agent/cancelAuthenticate" as const;
+export const AGENT_LOGOUT = "agent/logout" as const;
 export const AGENT_LIST_SESSIONS = "agent/listSessions" as const;
 export const AGENT_CREATE_CUSTOM = "agent/createCustom" as const;
 export const AGENT_UPDATE_CUSTOM_METADATA = "agent/updateCustomMetadata" as const;
@@ -340,6 +342,18 @@ export type AgentAuthenticateResult = { agentId: AgentId, methodId: string, stat
 
 export type AgentAuthenticateStatus = "authenticated" | "awaiting_user";
 
+export type AgentCancelAuthenticateParams = { agentId: AgentId, };
+
+export type AgentCancelAuthenticateResult = { agents: AgentCollectionSnapshot, };
+
+export type AgentLogoutParams = { agentId: AgentId,
+/**
+ * Optimistic concurrency check for the non-secret credential-cleanup provenance.
+ */
+expectedMethodId?: string | null, };
+
+export type AgentLogoutResult = { agents: AgentCollectionSnapshot, };
+
 export type AgentListSessionsParams = { agentId: AgentId, projectId: ProjectId, cursor: string | null, };
 
 export type AgentListSessionsResult = { agentId: AgentId, projectId: ProjectId, projectLabel: string, sessions: Array<AgentListedSession>, nextCursor?: string | null, };
@@ -376,7 +390,19 @@ export type AgentSettingsDetailsParams = Record<symbol, never>;
 
 export type AgentSettingsDetailsResult = { generatedAt: string, agents: Array<AgentSettingsDetail>, };
 
-export type AgentSettingsDetail = { agentId: AgentId, label: string, enabled: boolean, sourceKind: AgentSettingsSourceKind, icon: string, transport: AgentSettingsTransport, status: AgentSettingsStatus, setupReason?: AgentSetupReason | null, launchLabel: string, commandLine?: string | null, env?: Array<AgentSettingsEnvRow>, description: string, capabilities?: Array<string>, authMethods?: Array<AgentSettingsAuthMethod>, logoutSupported?: boolean, authenticatingMethodId?: string | null, };
+export type AgentSettingsDetail = { agentId: AgentId, label: string, enabled: boolean, sourceKind: AgentSettingsSourceKind, icon: string, transport: AgentSettingsTransport, status: AgentSettingsStatus, setupReason?: AgentSetupReason | null, launchLabel: string, commandLine?: string | null, env?: Array<AgentSettingsEnvRow>, description: string, capabilities?: Array<string>, authMethods?: Array<AgentSettingsAuthMethod>, logoutSupported?: boolean,
+/**
+ * True when signing out would interrupt a running Task for this Agent.
+ */
+logoutBlockedByRunningTask?: boolean,
+/**
+ * Cleanup provenance only; this does not assert that the Agent is currently authenticated.
+ */
+lastAuthenticationMethodId?: string | null,
+/**
+ * Same flow as `AgentSummary::sign_in`; repeated here so Settings renders one projection.
+ */
+signIn?: AgentSignInFlow | null, };
 
 export type AgentSettingsSourceKind = "builtIn" | "custom";
 
@@ -706,7 +732,11 @@ export type SecretReadParams = { key: string, label?: string | null, };
 
 export type SecretReadResponse = { value?: string | null, };
 
-export type ShellOpenExternalParams = { url: string, };
+export type ShellOpenExternalParams = { url: string,
+/**
+ * Agent-supplied sign-in instructions, such as a device code. Not a secret.
+ */
+message?: string | null, };
 
 export type ShellOpenExternalResponse = { opened: boolean, };
 
@@ -1000,11 +1030,36 @@ export type ProjectSummary = { projectId: ProjectId, label: string, workspaceRoo
 
 export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
-export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities, };
+export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities,
+/**
+ * The one Sign-in Flow App Server is running (or last ran without success) for this Agent.
+ * Absent when no flow is running and the last flow ended in success or cancellation.
+ */
+signIn?: AgentSignInFlow | null, };
 
 export type AgentStatus = "disconnected" | "installing" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed";
 
 export type AgentSetupReason = "nodeJsRequired";
+
+export type AgentSignInFlow = {
+/**
+ * Agent-advertised Authentication Method id the user chose.
+ */
+methodId: string, phase: AgentSignInPhase,
+/**
+ * Verification URL supplied by the Agent while `awaitingUser`. Always HTTPS.
+ */
+url?: string | null,
+/**
+ * Agent-supplied instructions shown next to the URL, such as a one-time device code.
+ */
+hint?: string | null,
+/**
+ * Product-safe failure summary while `failed`. Never carries Agent error text.
+ */
+failure?: string | null, };
+
+export type AgentSignInPhase = "starting" | "awaitingUser" | "awaitingTerminal" | "failed";
 
 export type AgentCapabilities = { resumeTasks?: boolean, deleteNativeSessions?: boolean, forkNativeSessions?: boolean, };
 
@@ -1176,7 +1231,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -1195,6 +1250,8 @@ export type RequestParamsByMethod = {
   [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsParams;
   [AGENT_PROBE]: AgentProbeParams;
   [AGENT_AUTHENTICATE]: AgentAuthenticateParams;
+  [AGENT_CANCEL_AUTHENTICATE]: AgentCancelAuthenticateParams;
+  [AGENT_LOGOUT]: AgentLogoutParams;
   [AGENT_LIST_SESSIONS]: AgentListSessionsParams;
   [AGENT_CREATE_CUSTOM]: AgentCreateCustomParams;
   [AGENT_UPDATE_CUSTOM_METADATA]: AgentUpdateCustomMetadataParams;
@@ -1299,6 +1356,8 @@ export type ResponseResultByMethod = {
   [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsResult;
   [AGENT_PROBE]: AgentProbeResult;
   [AGENT_AUTHENTICATE]: AgentAuthenticateResult;
+  [AGENT_CANCEL_AUTHENTICATE]: AgentCancelAuthenticateResult;
+  [AGENT_LOGOUT]: AgentLogoutResult;
   [AGENT_LIST_SESSIONS]: AgentListSessionsResult;
   [AGENT_CREATE_CUSTOM]: AgentCreateCustomResult;
   [AGENT_UPDATE_CUSTOM_METADATA]: AgentUpdateCustomMetadataResult;
@@ -1413,6 +1472,8 @@ export type DiagnosticsGetRuntimeResponse = ResponseEnvelope<RuntimeDiagnosticsR
 export type SupportRecoverStuckSessionsResponse = ResponseEnvelope<SupportRecoverStuckSessionsResult>;
 export type AgentProbeResponse = ResponseEnvelope<AgentProbeResult>;
 export type AgentAuthenticateResponse = ResponseEnvelope<AgentAuthenticateResult>;
+export type AgentCancelAuthenticateResponse = ResponseEnvelope<AgentCancelAuthenticateResult>;
+export type AgentLogoutResponse = ResponseEnvelope<AgentLogoutResult>;
 export type AgentListSessionsResponse = ResponseEnvelope<AgentListSessionsResult>;
 export type AgentCreateCustomResponse = ResponseEnvelope<AgentCreateCustomResult>;
 export type AgentUpdateCustomMetadataResponse = ResponseEnvelope<AgentUpdateCustomMetadataResult>;

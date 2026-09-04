@@ -45,6 +45,7 @@ type SidebarProps = {
   onOpenWorkspaceFolder?: () => void;
   onOpenTask: (taskId: string) => void;
   onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
+  onDisableRecoveredAgent?: (agentId: string) => void;
   onArchiveTask: (taskId: string) => void;
   onArchiveOlderTasks?: (cutoff: TaskArchiveOlderCutoff, preview: boolean) => Promise<TaskArchiveOlderResult>;
   onRestoreNativeSession: (session: AgentListedSession) => void;
@@ -98,6 +99,7 @@ export const Sidebar = memo(function Sidebar({
   onOpenWorkspaceFolder,
   onOpenTask,
   onRecoverNativeSessions,
+  onDisableRecoveredAgent,
   onArchiveTask,
   onArchiveOlderTasks,
   onRestoreNativeSession,
@@ -273,11 +275,18 @@ export const Sidebar = memo(function Sidebar({
           <div className="native-session-recovery" role="status">
             <span>{nativeSessions.error}</span>
             {nativeSessions.recoveryKind && onRecoverNativeSessions ? (
-              <button type="button" onClick={() => onRecoverNativeSessions(nativeSessions.recoveryKind!)}>
-                {nativeSessions.recoveryKind === "authRequired"
-                  ? "Sign in"
-                  : nativeSessions.recoveryKind === "launchFailed" ? "Try again" : "Set up Codex"}
-              </button>
+              <div className="native-session-recovery-actions">
+                <button type="button" onClick={() => onRecoverNativeSessions(nativeSessions.recoveryKind!)}>
+                  {nativeSessions.recoveryKind === "authRequired"
+                    ? "Sign in"
+                    : nativeSessions.recoveryKind === "launchFailed" ? "Try again" : "Set up Codex"}
+                </button>
+                {nativeSessions.recoveryKind === "authRequired" && nativeSessions.recoveryAgentId && onDisableRecoveredAgent ? (
+                  <button type="button" onClick={() => onDisableRecoveredAgent(nativeSessions.recoveryAgentId!)}>
+                    {`Disable ${nativeSessions.recoveryAgentLabel ?? "this Agent"}`}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : null}

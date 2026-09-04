@@ -65,6 +65,27 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.refreshing).toBe(false);
   });
 
+  it("names the Agent that needs sign-in and offers recovery on Task Navigation", () => {
+    const mapping = mapProtocolTaskNavigation({
+      section: "tasks",
+      refresh: { state: "idle" },
+      groups: [{
+        projectId: "project-1" as ProjectId,
+        projectLabel: "Project",
+        taskCount: 0,
+        entries: [],
+      }],
+    }, {
+      ...mappingContext(),
+      agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "authRequired" as const }],
+    });
+
+    expect(mapping.refreshError).toBe("Codex needs sign-in. Sign in or disable Codex to continue.");
+    expect(mapping.recoveryKind).toBe("authRequired");
+    expect(mapping.recoveryAgentId).toBe("codex");
+    expect(mapping.recoveryAgentLabel).toBe("Codex");
+  });
+
   it("maps Project-scoped discovery independently from the global refresh", () => {
     const mapping = mapProtocolTaskNavigation({
       section: "tasks",

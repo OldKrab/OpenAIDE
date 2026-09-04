@@ -23,13 +23,34 @@ import {
 } from "../src/runtime-logger.mjs";
 import { uploadFile } from "./fileUpload";
 import { writeBrowserClipboardText } from "../../../packages/frontend/src/shells/browserClipboard";
+import { createWebSecretStore } from "./webSecretVault";
+import { createWebSecretMessageHandler } from "./webSecrets";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
 const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "desktop", "data", "worktrees"]);
 const logger = createRuntimeLogger("openaide-webview");
+function openWebExternal(url: string) {
+  usableExternalWindow(window.open(url, "_blank", "noopener,noreferrer"));
+}
+
+function usableExternalWindow(opened: Window | null): Window | null {
+  if (!opened || opened.closed || opened === window) return null;
+  try {
+    if (opened.location.origin === window.location.origin && !opened.location.href.startsWith("about:")) {
+      return null;
+    }
+  } catch {
+    // Cross-origin windows are fine; we only need to navigate them later.
+  }
+  return opened;
+}
 
 /** Browser-history adapter owned by the Web App composition boundary. */
 export function createWebAppShell(): FrontendShell {
+  const handleSecretMessage = createWebSecretMessageHandler(
+    createWebSecretStore(),
+    (event, fields) => logger.info(event, fields),
+  );
   const themeStorageKey = "openaide.web.theme";
   const appearance = createShellAppearance({
     body: document.body,
@@ -51,14 +72,9 @@ export function createWebAppShell(): FrontendShell {
       case "secret.transaction.apply":
       case "secret.transaction.commit":
       case "secret.transaction.rollback":
-        postMessage({
-          type: "secret.transaction.result",
-          payload: {
-            requestId: message.payload.requestId,
-            transactionId: message.payload.transactionId,
-            ok: false,
-            error: "Secure storage is unavailable in the Web App.",
-          },
+      case "appServer.serverRequest":
+        void handleSecretMessage(message).then((result) => {
+          if (result) postMessage(result);
         });
         return;
       default:
@@ -127,11 +143,17 @@ export function createWebAppShell(): FrontendShell {
         navigate(settingsPath(agentId, returnToNewTask, projectId, settingsTab)),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
       replaceSettingsTab(tab) {
-        if (!isSettingsPath(window.location.pathname)) return;
-        const next = `/settings?tab=${encodeURIComponent(tab)}`;
-        if (`${window.location.pathname}${window.location.search}` === next) return;
-        window.history.replaceState(null, "", next);
-        publishRoute();
+        replaceSettingsSearch(publishRoute, (search) => {
+          search.set("tab", tab);
+          if (tab !== "agents") search.delete("agentId");
+        });
+      },
+      replaceSettingsAgent(agentId) {
+        replaceSettingsSearch(publishRoute, (search) => {
+          if (!search.get("tab")) search.set("tab", "agents");
+          if (agentId) search.set("agentId", agentId);
+          else search.delete("agentId");
+        });
       },
       subscribe(listener) {
         const onRoute = (event: Event) => {
@@ -148,7 +170,7 @@ export function createWebAppShell(): FrontendShell {
       },
     },
     recovery: {
-      openExternal: (url) => window.open(url, "_blank", "noopener,noreferrer"),
+      openExternal: openWebExternal,
       reload: () => window.location.reload(),
     },
     fileViewer: true,
@@ -303,6 +325,20 @@ function webBootstrapForLocation(): WebviewBootstrap {
 
 function isSettingsPath(pathname: string) {
   return pathname === "/settings" || pathname.startsWith("/settings/");
+}
+
+function replaceSettingsSearch(
+  publishRoute: () => void,
+  mutate: (search: URLSearchParams) => void,
+) {
+  if (!isSettingsPath(window.location.pathname)) return;
+  const search = new URLSearchParams(window.location.search);
+  mutate(search);
+  const query = search.toString();
+  const next = query ? `/settings?${query}` : "/settings";
+  if (`${window.location.pathname}${window.location.search}` === next) return;
+  window.history.replaceState(null, "", next);
+  publishRoute();
 }
 
 function settingsTabFromSearch() {

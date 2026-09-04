@@ -2,8 +2,9 @@ use std::time::{Duration, Instant};
 
 use openaide_app_server_protocol::ids::{ClientInstanceId, RequestId, TaskId};
 use openaide_app_server_protocol::server_requests::{
-    SecretReadParams, ShellNotificationAction, ShellNotificationLevel, ShellRevealFileParams,
-    ShellShowNotificationParams, SECRET_READ, SHELL_REVEAL_FILE, SHELL_SHOW_NOTIFICATION,
+    SecretReadParams, ShellNotificationAction, ShellNotificationLevel, ShellOpenExternalParams,
+    ShellRevealFileParams, ShellShowNotificationParams, SECRET_READ, SHELL_OPEN_EXTERNAL,
+    SHELL_REVEAL_FILE, SHELL_SHOW_NOTIFICATION,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use serde_json::Value;
@@ -91,6 +92,29 @@ impl ServerRequestRuntime {
         )
     }
 
+    pub fn open_shell_open_external_request(
+        &self,
+        client_instance_id: ClientInstanceId,
+        delivery: Delivery,
+        url: String,
+        message: Option<String>,
+        now: AppServerTime,
+    ) -> Result<OpenWaitableRequest, RuntimeError> {
+        let params = serde_json::to_value(ShellOpenExternalParams {
+            url: url.clone(),
+            message,
+        })
+        .map_err(|error| RuntimeError::Internal(error.to_string()))?;
+        self.open_waitable_client_request(
+            client_instance_id,
+            delivery,
+            SHELL_OPEN_EXTERNAL,
+            url,
+            params,
+            now,
+        )
+    }
+
     pub fn open_shell_reveal_file_request(
         &self,
         client_instance_id: ClientInstanceId,
@@ -125,14 +149,22 @@ impl ServerRequestRuntime {
         params: Value,
         now: AppServerTime,
     ) -> Result<OpenWaitableRequest, RuntimeError> {
-        self.open_waitable_request(
+        let opened = self.open_waitable_request(
             PendingRequestScope::Client { client_instance_id },
             vec![delivery],
             method,
             title,
             params,
             now,
-        )
+        )?;
+        // Client-scoped shell requests never appear in a Task state snapshot, so the transport
+        // must push them on its next poll. Task-scoped requests are rendered from state instead.
+        self.inner
+            .lock()
+            .expect("server request runtime poisoned")
+            .broker
+            .defer_deliveries(&opened.deliveries);
+        Ok(opened)
     }
 
     pub fn open_waitable_request(

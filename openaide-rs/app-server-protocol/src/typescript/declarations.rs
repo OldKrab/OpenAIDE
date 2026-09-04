@@ -2,14 +2,16 @@ use ts_rs::{Config, Dummy, TS};
 
 use crate::agent::{
     AgentAuthenticateParams, AgentAuthenticateResult, AgentAuthenticateStatus,
-    AgentCreateCustomParams, AgentCreateCustomResult, AgentDeleteCustomParams,
-    AgentDeleteCustomResult, AgentListSessionsParams, AgentListSessionsResult, AgentListedSession,
-    AgentProbeParams, AgentProbeResult, AgentReplaceCustomCleanup, AgentReplaceCustomConfirmation,
-    AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams, AgentReplaceCustomResult,
-    AgentSetEnabledParams, AgentSetEnabledResult, AgentSettingsAuthMethod,
-    AgentSettingsAuthVariable, AgentSettingsDetail, AgentSettingsDetailsParams,
-    AgentSettingsDetailsResult, AgentSettingsEnvRow, AgentSettingsSourceKind, AgentSettingsStatus,
-    AgentSettingsTransport, AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
+    AgentCancelAuthenticateParams, AgentCancelAuthenticateResult, AgentCreateCustomParams,
+    AgentCreateCustomResult, AgentDeleteCustomParams, AgentDeleteCustomResult,
+    AgentListSessionsParams, AgentListSessionsResult, AgentListedSession, AgentLogoutParams,
+    AgentLogoutResult, AgentProbeParams, AgentProbeResult, AgentReplaceCustomCleanup,
+    AgentReplaceCustomConfirmation, AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams,
+    AgentReplaceCustomResult, AgentSetEnabledParams, AgentSetEnabledResult,
+    AgentSettingsAuthMethod, AgentSettingsAuthVariable, AgentSettingsDetail,
+    AgentSettingsDetailsParams, AgentSettingsDetailsResult, AgentSettingsEnvRow,
+    AgentSettingsSourceKind, AgentSettingsStatus, AgentSettingsTransport,
+    AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
 use crate::attachment::{
     AttachmentCandidateError, AttachmentCandidateErrorCode, AttachmentConfirmEmbeddedParams,
@@ -94,27 +96,27 @@ use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
     AgentConfigOptionCurrentValue, AgentConfigOptionKind, AgentConfigOptionSnapshot,
     AgentConfigOptionValueSnapshot, AgentPlanEntrySnapshot, AgentPlanPrioritySnapshot,
-    AgentPlanSnapshot, AgentPlanStatusSnapshot, AgentSetupReason, AgentSlashCommandInputSnapshot,
-    AgentSlashCommandSnapshot, AgentStatus, AgentSummary, AttachmentKind, AttachmentSnapshot,
-    ChatItem, ChatItemStatus, ChatRole, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
-    LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
-    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
-    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
-    QuestionMessageAction, QuestionMessageState, QueuedMessageAttachmentSnapshot,
-    QueuedMessageSnapshot, RecoveryAction, RecoverySnapshot, ServerCapabilities, ServerSnapshot,
-    SettingsSnapshot, StateRootSnapshot, SubagentActivitySnapshot, SubagentCapabilitiesSnapshot,
-    SubagentCatalogEntrySnapshot, SubagentCatalogSnapshot, SubagentDetailSnapshot,
-    SubagentHistoryAvailability, SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
-    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
-    TaskMessageQueuePauseSnapshot, TaskMessageQueueSnapshot, TaskNavigationEntry,
-    TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPermissionPolicy,
-    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
-    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost,
-    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
-    ToolPresentationSnapshot, ToolSearchTargetSnapshot,
+    AgentPlanSnapshot, AgentPlanStatusSnapshot, AgentSetupReason, AgentSignInFlow,
+    AgentSignInPhase, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus,
+    AgentSummary, AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole,
+    ChatSnapshot, ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
+    NativeSessionReference, NativeSessionSummary, NewTaskDefaultsSnapshot,
+    PendingAgentConfigChange, PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
+    ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion, QuestionMessageAction,
+    QuestionMessageState, QueuedMessageAttachmentSnapshot, QueuedMessageSnapshot, RecoveryAction,
+    RecoverySnapshot, ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
+    SubagentActivitySnapshot, SubagentCapabilitiesSnapshot, SubagentCatalogEntrySnapshot,
+    SubagentCatalogSnapshot, SubagentDetailSnapshot, SubagentHistoryAvailability,
+    SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus, TaskAgentCommandsSnapshot,
+    TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason, TaskContextUsage,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueuePauseSnapshot,
+    TaskMessageQueueSnapshot, TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState,
+    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationAction, TaskPreparationSnapshot,
+    TaskPreparationStep, TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker,
+    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
+    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
+    TaskTurnUsage, TaskUsageCost, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
+    ToolPresentationActionSnapshot, ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -263,6 +265,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentAuthenticateParams>(output, config);
     push_decl::<AgentAuthenticateResult>(output, config);
     push_decl::<AgentAuthenticateStatus>(output, config);
+    push_decl::<AgentCancelAuthenticateParams>(output, config);
+    push_decl::<AgentCancelAuthenticateResult>(output, config);
+    push_decl::<AgentLogoutParams>(output, config);
+    push_decl::<AgentLogoutResult>(output, config);
     push_decl::<AgentListSessionsParams>(output, config);
     push_decl::<AgentListSessionsResult>(output, config);
     push_decl::<AgentListedSession>(output, config);
@@ -560,6 +566,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentSummary>(output, config);
     push_decl::<AgentStatus>(output, config);
     push_decl::<AgentSetupReason>(output, config);
+    push_decl::<AgentSignInFlow>(output, config);
+    push_decl::<AgentSignInPhase>(output, config);
     push_decl::<AgentCapabilities>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
     push_decl::<TaskNavigationGroup>(output, config);

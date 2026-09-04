@@ -232,6 +232,8 @@ pub struct AgentAuthenticateRequest {
     pub secret_env: Vec<String>,
     pub secret_storage_agent_id: Option<String>,
     pub terminal_confirmed: bool,
+    /// Reads shell-owned values during process launch without moving them into protocol state.
+    pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
 }
 
 #[derive(Clone)]
@@ -324,6 +326,18 @@ pub trait AgentRuntime: Send + Sync {
         Err(RuntimeError::CapabilityMissing(format!(
             "agent_authenticate:{}:{}",
             request.agent_id, request.method_id
+        )))
+    }
+
+    fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        Err(RuntimeError::CapabilityMissing(format!(
+            "agent_cancel_authenticate:{agent_id}"
+        )))
+    }
+
+    fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        Err(RuntimeError::CapabilityMissing(format!(
+            "agent_logout:{agent_id}"
         )))
     }
 

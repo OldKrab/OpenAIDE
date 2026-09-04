@@ -369,6 +369,7 @@ body[data-shell="web"] .task-list {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 4px 8px;
   border: 1px solid var(--oa-border);
@@ -377,6 +378,12 @@ body[data-shell="web"] .task-list {
   padding: 7px 8px;
   color: var(--oa-muted);
   font-size: 12px;
+}
+
+.native-session-recovery-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
 }
 
 .native-session-recovery button {

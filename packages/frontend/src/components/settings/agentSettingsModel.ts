@@ -16,6 +16,10 @@ export type AgentDraft = {
 
 export type AgentAuthMethod = AgentSettingsRecord["auth_methods"][number];
 
+export function authMethodUsesValues(method: AgentAuthMethod) {
+  return method.kind === "env_var" || (method.variables?.length ?? 0) > 0;
+}
+
 export function draftFromAgent(agent: AgentSettingsRecord): AgentDraft {
   return {
     agent_id: agent.id,
@@ -43,6 +47,9 @@ export function agentStatusCopy(agent: AgentSettingsRecord) {
   if (agent.status === "unsupported") return "This process launched, but did not satisfy OpenAIDE's ACP requirements.";
   if (agent.status === "disabled") return "Disabled in settings.";
   if (agent.status === "failed") return "Connection check failed.";
+  if (agent.status === "launching" || agent.status === "installing") {
+    return "Starting the Agent process. Sign-in choices appear when it answers.";
+  }
   return "Status check needed. Run the status check to verify this agent.";
 }
 
@@ -62,6 +69,16 @@ export function shouldConsumeAgentSaveAck({
   return pendingSaveAgentId === "__new__"
     || pendingSaveAgentId === savedAgentId
     || pendingSaveAgentId === removedAgentId;
+}
+
+export function agentLeftLaunching(
+  previous: Array<{ id: string; status: AgentSettingsRecord["status"] }> | undefined,
+  next: Array<{ id: string; status: AgentSettingsRecord["status"] }> | undefined,
+) {
+  return Boolean(next?.some((agent) => (
+    previous?.find((candidate) => candidate.id === agent.id)?.status === "launching"
+    && agent.status !== "launching"
+  )));
 }
 
 export function shouldConsumeAgentDeleteAck({

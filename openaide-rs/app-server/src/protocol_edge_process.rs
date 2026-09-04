@@ -116,7 +116,16 @@ pub(super) fn run_local_http_handoff(
     mut dispatcher: ProtocolEdgeStdioDispatcher,
     wait_for_last_client: impl FnOnce(),
 ) {
-    debug_assert!(dispatcher.take_host_requests().is_none());
+    if let Some(host_requests) = dispatcher.take_host_requests() {
+        let gateway = dispatcher.shared_gateway();
+        let host_bridge = dispatcher.host_bridge();
+        thread::spawn(move || {
+            for request in host_requests {
+                let response = gateway.respond_to_acp_host_request(&request);
+                let _ = host_bridge.try_handle_response(&response);
+            }
+        });
+    }
     if let Some(task_updates) = dispatcher.take_task_updates() {
         let gateway = dispatcher.shared_gateway();
         thread::spawn(move || {

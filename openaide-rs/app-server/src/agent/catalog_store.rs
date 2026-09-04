@@ -17,6 +17,10 @@ impl AgentCatalogStore {
         Self { store }
     }
 
+    pub(super) fn backing_store(&self) -> Store {
+        self.store.clone()
+    }
+
     pub(crate) fn registry(&self) -> Result<AgentRegistry, RuntimeError> {
         AgentRegistry::from_catalog_overlay(self.load_records()?)
     }

@@ -1,6 +1,7 @@
 import type {
   AgentCollectionSnapshot,
   AgentSettingsDetail,
+  AgentSignInFlow,
   AgentStatus,
 } from "@openaide/app-server-client";
 import {
@@ -8,6 +9,7 @@ import {
   normalizedAgentIcon,
   type AgentIconId,
   type AgentSettingsRecord,
+  type AgentSignInFlowRecord,
   type CustomAgentCreateParams,
   type CustomAgentMetadataUpdateParams,
 } from "@openaide/app-shell-contracts";
@@ -47,8 +49,35 @@ export function agentSettingsRecordFromProtocol(agent: AgentSettingsDetail): Age
       terminal_env: method.terminalEnv,
     })) ?? [],
     logout_supported: agent.logoutSupported,
-    authenticating_method_id: agent.authenticatingMethodId ?? undefined,
+    logout_blocked_by_running_task: agent.logoutBlockedByRunningTask,
+    last_authentication_method_id: agent.lastAuthenticationMethodId ?? undefined,
+    sign_in: agentSignInFlowFromProtocol(agent.signIn),
   };
+}
+
+/** Maps the App Server Sign-in Flow projection; `null`/absent means no flow to show. */
+export function agentSignInFlowFromProtocol(
+  flow: AgentSignInFlow | null | undefined,
+): AgentSignInFlowRecord | undefined {
+  if (!flow) return undefined;
+  return {
+    method_id: flow.methodId,
+    phase: agentSignInPhaseFromProtocol(flow.phase),
+    url: flow.url ?? undefined,
+    hint: flow.hint ?? undefined,
+    failure: flow.failure ?? undefined,
+  };
+}
+
+function agentSignInPhaseFromProtocol(phase: AgentSignInFlow["phase"]): AgentSignInFlowRecord["phase"] {
+  switch (phase) {
+    case "awaitingUser":
+      return "awaiting_user";
+    case "awaitingTerminal":
+      return "awaiting_terminal";
+    default:
+      return phase;
+  }
 }
 
 export function settingsRecordFromCustomPayload(
@@ -73,7 +102,6 @@ export function settingsRecordFromCustomPayload(
     capabilities: [],
     auth_methods: [],
     logout_supported: false,
-    authenticating_method_id: undefined,
   };
 }
 
@@ -121,7 +149,6 @@ export function settingsRecordWithEnabled(
     capabilities: [],
     auth_methods: [],
     logout_supported: false,
-    authenticating_method_id: undefined,
   };
 }
 

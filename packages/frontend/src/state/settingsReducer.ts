@@ -1,5 +1,6 @@
 import type {
   AgentSettingsRecord,
+  AgentSignInFlowRecord,
   AppPreferencesRecord,
   McpServerSettingsRecord,
   RuntimeSettingsResult,
@@ -10,11 +11,22 @@ import type {
 import type { AppAction } from "./appReducer";
 import type { AppState } from "./store";
 
+/**
+ * Live Agent status from the App Server `agents` subscription. Sign-in Flow state travels with
+ * it so every client renders the same flow step without Frontend-side guessing.
+ */
+export type SettingsAgentCollectionEntry = {
+  agentId: string;
+  status: AgentSettingsRecord["status"];
+  setupReason?: "nodeJsRequired";
+  signIn?: AgentSignInFlowRecord;
+};
+
 type SettingsAction =
   | { type: "settings:start" }
   | { type: "settings:sections"; tabs: SettingsTabId[] }
   | { type: "settings:agentDetailsResult"; generatedAt: string; agents: AgentSettingsRecord[] }
-  | { type: "settings:agentCollection"; agents: Array<{ agentId: string; status: AgentSettingsRecord["status"]; setupReason?: "nodeJsRequired" }> }
+  | { type: "settings:agentCollection"; agents: SettingsAgentCollectionEntry[] }
   | { type: "settings:mcpServersStart" }
   | { type: "settings:mcpServersResult"; generatedAt: string; availability: SettingsProjectionAvailability; servers: McpServerSettingsRecord[] }
   | { type: "settings:mcpServersError"; message: string }
@@ -60,6 +72,7 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
         },
       };
     case "settings:agentCollection":
+      // The subscription is authoritative for status and Sign-in Flow; details keep the rest.
       return {
         ...state,
         settings: {
@@ -71,6 +84,7 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
               ...agent,
               status: update.status,
               setup_reason: update.setupReason,
+              sign_in: update.signIn,
             };
           }),
         },

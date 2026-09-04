@@ -141,6 +141,44 @@ pub struct AgentSummary {
     pub setup_reason: Option<AgentSetupReason>,
     #[serde(default, skip_serializing_if = "AgentCapabilities::is_empty")]
     pub capabilities: AgentCapabilities,
+    /// The one Sign-in Flow App Server is running (or last ran without success) for this Agent.
+    /// Absent when no flow is running and the last flow ended in success or cancellation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<AgentSignInFlow>,
+}
+
+/// App Server-owned state of an Agent Sign-in Flow. Every connected client observes the same
+/// flow, including the verification URL and hint, so a reloaded tab or second device can finish
+/// a device-code login that another tab started.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSignInFlow {
+    /// Agent-advertised Authentication Method id the user chose.
+    pub method_id: String,
+    pub phase: AgentSignInPhase,
+    /// Verification URL supplied by the Agent while `awaitingUser`. Always HTTPS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Agent-supplied instructions shown next to the URL, such as a one-time device code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// Product-safe failure summary while `failed`. Never carries Agent error text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentSignInPhase {
+    /// The method was accepted and the Agent has not asked the user for anything yet.
+    Starting,
+    /// The Agent asked the user to open a URL (and possibly enter a hint such as a device code).
+    AwaitingUser,
+    /// A terminal-kind method opened a terminal; the user must confirm when it finishes.
+    AwaitingTerminal,
+    /// The flow ended without success. The user dismisses it by starting another flow or
+    /// cancelling.
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

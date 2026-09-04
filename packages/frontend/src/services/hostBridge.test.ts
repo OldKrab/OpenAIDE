@@ -709,6 +709,59 @@ describe("host bridge", () => {
     expect(replaceState).toHaveBeenCalledWith(null, "", "/settings?tab=skills");
     expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
   });
+
+  it("writes the open Agent into the web settings route", async () => {
+    const replaceState = vi.fn();
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "web",
+          navigationMode: "project",
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      history: { replaceState },
+      location: { pathname: "/settings", search: "?tab=agents" },
+      addEventListener: vi.fn(),
+      dispatchEvent,
+      removeEventListener: vi.fn(),
+    });
+
+    const { replaceSettingsAgentRoute } = await installedHostBridge();
+    replaceSettingsAgentRoute("codex");
+
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/settings?tab=agents&agentId=codex");
+    expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
+  });
+
+  it("reads the open Agent from the web settings route", async () => {
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "web",
+          navigationMode: "project",
+          surface: "settings",
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      location: { pathname: "/settings", search: "?tab=agents&agentId=codex" },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const { getBootstrap } = await installedHostBridge();
+
+    expect(getBootstrap()).toMatchObject({
+      surface: "settings",
+      settingsTab: "agents",
+      settingsAgentId: "codex",
+    });
+  });
 });
 
 async function installedHostBridge() {

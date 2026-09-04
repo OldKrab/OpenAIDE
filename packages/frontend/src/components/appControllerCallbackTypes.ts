@@ -71,6 +71,8 @@ export type NavigationCallbacks = {
 
 export type SettingsCallbacks = {
   authenticateAgent: (agentId: string, methodId: string, values?: Record<string, string>) => Promise<boolean>;
+  cancelAgentAuthentication: (agentId: string) => Promise<void>;
+  logoutAgent: (agentId: string) => Promise<boolean>;
   createCustomAgent: (payload: CustomAgentCreateParams) => void;
   deleteCustomAgent: (agentId: string) => void;
   deleteMcpServer: (server: McpServerDefinition) => void;
