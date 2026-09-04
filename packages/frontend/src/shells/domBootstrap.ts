@@ -1,6 +1,7 @@
 import type {
   HostToWebviewMessage,
   SettingsTabId,
+  SettingsIntent,
   WebviewAppServerConnection,
 } from "@openaide/app-shell-contracts";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
@@ -22,12 +23,26 @@ export function datasetBootstrap(): WebviewBootstrap {
     projectId: document.body.dataset.projectId || undefined,
     projectIds: projectIds(),
     settingsTab: settingsTab(),
+    settingsIntent: settingsIntent(),
     settingsAgentId: document.body.dataset.settingsAgentId || undefined,
     returnToNewTask: document.body.dataset.returnToNewTask === "true",
     developerSettingsUnlocked: document.body.dataset.developerSettingsUnlocked === "true",
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };
+}
+
+function settingsIntent(): SettingsIntent | undefined {
+  const value = document.body.dataset.settingsIntent;
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<SettingsIntent> | null;
+    return parsed?.kind === "openSupportExport" && typeof parsed.requestId === "string"
+      ? { kind: parsed.kind, requestId: parsed.requestId }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function settingsTab(): SettingsTabId | undefined {

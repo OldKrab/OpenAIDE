@@ -8,6 +8,7 @@ export function standaloneBootstrap() {
     hasDatasetSurface: Boolean(document.body.dataset.surface),
     hasVsCodeApi: Boolean(window.acquireVsCodeApi),
     pathname: window.location.pathname,
+    search: window.location.search,
   });
 }
 

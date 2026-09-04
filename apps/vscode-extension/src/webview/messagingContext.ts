@@ -20,7 +20,7 @@ export type MessageContext = {
     openNewTask: (projectId?: string) => void;
     retainNewTaskProject: (projectId: string, surface?: WebviewSurfaceKind) => void;
     openNativeSession: (agentId: string, nativeSessionId: string, projectId?: string) => void;
-    openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: import("@openaide/app-shell-contracts").SettingsTabId) => void;
+    openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: import("@openaide/app-shell-contracts").SettingsTabId, settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent) => void;
     openTask: (taskId: string, title?: string, agentId?: string) => void;
     updateTaskTitle?: (taskId: string, title: string) => void;
   };

@@ -38,6 +38,7 @@ export type NewTaskViewState = {
 
 export type NewTaskViewIntents = {
   changePrompt: (prompt: string) => void;
+  dismissError?: () => void;
   reportAttachmentError: (message?: string) => void;
   selectAgent: (agentId: string, agentLabel?: string) => void;
   selectIsolation: (isolation: ComposerSelection["isolation"]) => void;
@@ -260,6 +261,7 @@ export function NewTaskView({
       focusRequestKey={composerFocusKey}
       onCancel={state.newTask.submitting ? onCancelTask : undefined}
       onChange={intents.changePrompt}
+      onDismissError={state.newTask.error ? intents.dismissError : undefined}
       onUnsupportedImageAttachment={intents.reportAttachmentError}
       onRemoveAttachment={onRemoveAttachment}
       onSelectAgent={(agentId) => {

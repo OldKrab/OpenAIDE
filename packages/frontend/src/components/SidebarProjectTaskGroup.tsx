@@ -141,7 +141,10 @@ export function SidebarProjectTaskGroup({
         ref={headerRef}
       >
         {renaming ? <form className="project-rename-form" onSubmit={(event) => { event.preventDefault(); void saveRename(); }}>
-          <input aria-label={`Rename ${group.label}`} autoFocus disabled={renameSaving} maxLength={120} onChange={(event) => setRenameDraft(event.target.value)} value={renameDraft} />
+          <input aria-label={`Rename ${group.label}`} autoFocus disabled={renameSaving} maxLength={120} onChange={(event) => {
+            setRenameDraft(event.target.value);
+            setRenameError(undefined);
+          }} value={renameDraft} />
           <button aria-label="Save Project name" disabled={renameSaving || !renameDraft.trim()} type="submit"><Check size={13} /></button>
           <button aria-label="Cancel Project rename" disabled={renameSaving} onClick={() => { setRenaming(false); setRenameError(undefined); }} type="button"><X size={13} /></button>
           {renameError ? <small role="alert">{renameError}</small> : null}

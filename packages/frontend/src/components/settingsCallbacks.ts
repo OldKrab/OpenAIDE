@@ -50,6 +50,7 @@ export function createSettingsCallbacks({
     state,
   });
   return {
+    dismissError: () => dispatch({ type: "settings:error:clear" }),
     // Sign-in Flow state is App Server-owned and arrives through the agents subscription, so
     // these callbacks only send intents; they never stage optimistic status.
     authenticateAgent: async (agentId, methodId, values) => {

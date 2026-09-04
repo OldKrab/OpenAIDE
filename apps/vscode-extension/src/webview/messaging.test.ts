@@ -731,7 +731,11 @@ describe("webview messaging composer routes", () => {
     );
     await handleWebviewMessage({
       type: "surface.openSettings",
-      payload: { project_id: "project_1", settings_tab: "worktrees" },
+      payload: {
+        project_id: "project_1",
+        settings_tab: "data",
+        settings_intent: { kind: "openSupportExport", requestId: "diagnostics-1" },
+      },
     }, context({}, posted, surfaces));
     await handleWebviewMessage({
       type: "surface.openNativeSession",
@@ -751,7 +755,13 @@ describe("webview messaging composer routes", () => {
     expect(surfaces.openNewTask).toHaveBeenCalledWith("project_1");
     expect(surfaces.openSettings).toHaveBeenCalledTimes(1);
     expect(surfaces.openSettings)
-      .toHaveBeenCalledWith(undefined, undefined, "project_1", "worktrees");
+      .toHaveBeenCalledWith(
+        undefined,
+        undefined,
+        "project_1",
+        "data",
+        { kind: "openSupportExport", requestId: "diagnostics-1" },
+      );
     expect(surfaces.openNativeSession).toHaveBeenCalledWith("codex", "session_1", "project_1");
     expect(adoptTask).toHaveBeenCalledWith("task_1", "Fix ACP", "codex");
     expect(surfaces.openTask).toHaveBeenCalledWith("task_1", "Fix ACP", "codex");

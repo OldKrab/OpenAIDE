@@ -162,7 +162,7 @@ describe("Task Message Queue", () => {
     expect(pendingRow.props["data-extracting"]).toBe("pending");
     expect(tree.root.findAllByProps({ "data-queue-row": true })).toHaveLength(2);
     expect(pendingRow.findByProps({ "aria-label": "Moving queued message to Composer" }).props.disabled).toBe(true);
-    expect(laterRow.findByProps({ "aria-label": "Edit in Composer" }).props.disabled).toBe(false);
+    expect(laterRow.findByProps({ "aria-label": "Edit in Composer" }).props.disabled).toBe(true);
     expect(tree.root.findByProps({ "aria-label": "Reorder Original" }).props.disabled).toBe(true);
   });
 
@@ -207,6 +207,38 @@ describe("Task Message Queue", () => {
     act(() => tree.root.findByProps({ "aria-label": "Send queued message now" }).props.onClick());
 
     expect(onSendNow).toHaveBeenCalledWith("queued-1");
+  });
+
+  it("blocks every revision-sensitive action while a queue mutation is pending", async () => {
+    let resolveRemove!: () => void;
+    const onRemove = vi.fn(() => new Promise<void>((resolve) => { resolveRemove = resolve; }));
+    const onSendNow = vi.fn(async () => undefined);
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskMessageQueueView
+        queue={{ revision: 4, items: [
+          { queued_message_id: "queued-1", text: "First", created_at: "now" },
+          { queued_message_id: "queued-2", text: "Second", created_at: "now" },
+        ] }}
+        onMove={vi.fn(async () => undefined)}
+        onRemove={onRemove}
+        onSendNow={onSendNow}
+        onTake={vi.fn()}
+      />);
+    });
+
+    act(() => tree.root.findAllByProps({ "aria-label": "Delete queued message" })[0].props.onClick());
+
+    expect(tree.root.findAllByProps({ "aria-label": "Delete queued message" }).every((button) => button.props.disabled)).toBe(true);
+    expect(tree.root.findAllByProps({ "aria-label": "Send queued message now" }).every((button) => button.props.disabled)).toBe(true);
+    expect(tree.root.findAllByProps({ "aria-label": "Edit in Composer" }).every((button) => button.props.disabled)).toBe(true);
+    expect(tree.root.findAll((node) => typeof node.props["aria-label"] === "string"
+      && node.props["aria-label"].startsWith("Reorder ")).every((button) => button.props.disabled)).toBe(true);
+    act(() => tree.root.findAllByProps({ "aria-label": "Delete queued message" })[1].props.onClick());
+    expect(onRemove).toHaveBeenCalledOnce();
+
+    await act(async () => resolveRemove());
+    expect(tree.root.findAllByProps({ "aria-label": "Delete queued message" }).every((button) => !button.props.disabled)).toBe(true);
   });
 
   it("keeps a touch row swipe as scrolling unless it starts on the grip", () => {

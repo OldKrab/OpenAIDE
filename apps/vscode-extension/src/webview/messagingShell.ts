@@ -47,6 +47,7 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
       message.payload?.return_to_new_task,
       message.payload?.project_id,
       message.payload?.settings_tab,
+      message.payload?.settings_intent,
     );
     return true;
   }

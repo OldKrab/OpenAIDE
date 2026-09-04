@@ -1794,6 +1794,22 @@ describe("Composer view behavior", () => {
     expect(error.parent?.props.className).toBe("composer-footer");
   });
 
+  it("lets the user dismiss a transient composer error without changing the draft", () => {
+    const onDismissError = vi.fn();
+    const onChange = vi.fn();
+    const renderer = renderComposer({
+      error: "Task Message Queue changed; refresh before removing",
+      onChange,
+      onDismissError,
+      prompt: "Keep this draft",
+    });
+
+    click(buttonByLabel(renderer.root, "Dismiss error"));
+
+    expect(onDismissError).toHaveBeenCalledOnce();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("opens slash command picker with fuzzy results and inserts the selected command", () => {
     const onChange = vi.fn();
     const renderer = renderComposer({
@@ -2039,6 +2055,7 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       onCancel={overrides.onCancel}
       onAddToQueue={overrides.onAddToQueue}
       onChange={overrides.onChange ?? vi.fn()}
+      onDismissError={overrides.onDismissError}
       onUnsupportedImageAttachment={overrides.onUnsupportedImagePaste ?? vi.fn()}
       onRevealAttachment={overrides.onRevealAttachment ?? vi.fn()}
       onRemoveAttachment={overrides.onRemoveAttachment ?? vi.fn()}
@@ -2075,6 +2092,7 @@ type ComposerTestProps = {
   onCancel: () => void;
   onAddToQueue: () => void;
   onChange: (prompt: string) => void;
+  onDismissError: () => void;
   onUnsupportedImagePaste: (message?: string) => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;

@@ -54,7 +54,7 @@ export type NavigationCallbacks = {
   loadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   openNativeSession: (session: AgentListedSession) => void;
   openNewTask: (projectId?: string) => void;
-  openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId) => void;
+  openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId, settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent) => void;
   openTask: (taskId: string) => void;
   retryAgent: (agentId: string) => Promise<boolean>;
   restoreNativeSession: (session: AgentListedSession) => void;
@@ -76,6 +76,7 @@ export type SettingsCallbacks = {
   createCustomAgent: (payload: CustomAgentCreateParams) => void;
   deleteCustomAgent: (agentId: string) => void;
   deleteMcpServer: (server: McpServerDefinition) => void;
+  dismissError?: () => void;
   getMcpServerDetails: (id: string) => Promise<McpServerDefinition>;
   getSkillDetails: (id: string) => Promise<SkillSettingsDetails>;
   replaceCustomAgent: (payload: CustomAgentReplaceParams) => void;
@@ -120,11 +121,11 @@ export type TaskCallbacks = {
   loadToolImagePreview: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   revealAttachment: (attachmentId: string) => Promise<void>;
   removeAttachment: (attachmentId: string) => void;
-  removeQueueMessage: (queuedMessageId: string) => void;
+  removeQueueMessage: (queuedMessageId: string) => Promise<void>;
   reloadNativeSession?: () => Promise<void>;
-  takeQueueMessage: (queuedMessageId: string) => void;
+  takeQueueMessage: (queuedMessageId: string) => Promise<void>;
   moveQueueMessage: (queuedMessageId: string, targetIndex: number) => Promise<void>;
-  sendQueueMessageNow: (queuedMessageId: string) => void;
+  sendQueueMessageNow: (queuedMessageId: string) => Promise<void>;
   respondToPermission: (
     requestId: string,
     optionId: string,

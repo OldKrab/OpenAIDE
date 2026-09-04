@@ -91,6 +91,7 @@ type AppActionPayload =
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
   | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventCursor: string }
   | { type: "prompt"; prompt: string }
+  | { type: "newTask:error:clear" }
   | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
   | { type: "worktreeRepository"; repository: import("@openaide/app-server-client").WorktreeRepositorySnapshot }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
@@ -145,6 +146,7 @@ type AppActionPayload =
   | { type: "taskQueue:take:accepted"; taskId: string; queuedMessageId: string; prompt: string; context: ComposerAttachment[] }
   | { type: "taskQueue:take:error"; taskId: string; queuedMessageId: string; message: string }
   | { type: "taskInput:error"; taskId: string; message?: string }
+  | { type: "taskInput:error:clear"; taskId: string }
   | { type: "taskConfig:result"; taskId: string; catalog: ConfigOptionsCatalog }
   | {
       type: "taskInput:configError";
@@ -183,6 +185,7 @@ type AppActionPayload =
   | { type: "settings:skillsResult"; generatedAt: string; availability: SettingsProjectionAvailability; skills: SkillSettingsRecord[] }
   | { type: "settings:skillsError"; message: string }
   | { type: "settings:error"; message: string }
+  | { type: "settings:error:clear" }
   | { type: "settings:agentSaved"; agentId: string; agent?: AgentSettingsRecord }
   | { type: "settings:agentReplaced"; oldAgentId: string; newAgentId: string; agent?: AgentSettingsRecord }
   | { type: "settings:agentUpdated"; agent: AgentSettingsRecord }

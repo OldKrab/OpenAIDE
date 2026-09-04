@@ -147,7 +147,7 @@ export type FrontendShell = {
     /** Lets an embedding shell carry the selected Project across renderer instances. */
     retainNewTaskProject?(projectId: string): void;
     openNativeSession(agentId: string, nativeSessionId: string, projectId?: string): void;
-    openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId): void;
+    openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId, settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent): void;
     openTask(taskId: string, title?: string, agentId?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;
     /** Writes the open Agent into the Settings route so refresh stays on that detail. */

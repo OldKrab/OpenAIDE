@@ -118,6 +118,23 @@
   margin-bottom: 12px;
 }
 
+.settings-error button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+
+.settings-error button:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
 .settings-empty {
   display: grid;
   gap: 3px;

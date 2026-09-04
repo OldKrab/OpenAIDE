@@ -155,13 +155,17 @@ describe("host bridge", () => {
     ]);
     installFrontendShell(createVsCodeShell());
 
-    openSettingsSurface(undefined, undefined, "project_1", "worktrees");
+    openSettingsSurface(undefined, undefined, "project_1", "data", {
+      kind: "openSupportExport",
+      requestId: "diagnostics-1",
+    });
 
     expect(posted).toContainEqual({
       type: "surface.openSettings",
       payload: {
         project_id: "project_1",
-        settings_tab: "worktrees",
+        settings_tab: "data",
+        settings_intent: { kind: "openSupportExport", requestId: "diagnostics-1" },
       },
     });
   });
@@ -708,6 +712,33 @@ describe("host bridge", () => {
 
     expect(replaceState).toHaveBeenCalledWith(null, "", "/settings?tab=skills");
     expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
+  });
+
+  it("carries a diagnostics wizard intent through web Settings navigation", async () => {
+    const pushState = vi.fn();
+    vi.stubGlobal("document", {
+      body: { dataset: { shell: "web", navigationMode: "project" } },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      history: { pushState },
+      location: { pathname: "/", search: "" },
+      addEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const { openSettingsSurface } = await installedHostBridge();
+    openSettingsSurface(undefined, undefined, undefined, "data", {
+      kind: "openSupportExport",
+      requestId: "diagnostics-1",
+    });
+
+    expect(pushState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/settings?tab=data&intent=openSupportExport&intentRequestId=diagnostics-1",
+    );
   });
 
   it("writes the open Agent into the web settings route", async () => {

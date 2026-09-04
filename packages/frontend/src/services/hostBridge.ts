@@ -5,6 +5,7 @@ import {
 } from "@openaide/app-server-client";
 import type {
   HostToWebviewMessage,
+  SettingsIntent,
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
 import { frontendShell } from "./frontendShell";
@@ -45,8 +46,9 @@ export function openSettingsSurface(
   returnToNewTask?: boolean,
   projectId?: string,
   settingsTab?: SettingsTabId,
+  settingsIntent?: SettingsIntent,
 ) {
-  frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId, settingsTab);
+  frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId, settingsTab, settingsIntent);
 }
 
 export function openTaskSurface(taskId: string, title?: string, agentId?: string) {

@@ -23,6 +23,34 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+it("opens the export wizard when a diagnostics navigation intent arrives", async () => {
+  const request = vi.fn(async () => ({ acpTraceEnabled: true, sessions: [], unboundTraces: [] }));
+  installFrontendShell({
+    recovery: { openExternal: vi.fn() },
+    supportExports: { save: vi.fn(async () => "saved" as const) },
+  } as unknown as FrontendShell);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+
+  await act(async () => root.render(
+    <SupportExportButton connection={{ request } as never} openRequestKey="request-1" />,
+  ));
+
+  expect(document.querySelector('[role="dialog"][aria-label="Export diagnostics"]')).not.toBeNull();
+  expect(request).toHaveBeenCalledWith(DIAGNOSTICS_LIST_SUPPORT_EXPORT, {});
+
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent === "Cancel")!.click());
+  expect(document.querySelector('[role="dialog"][aria-label="Export diagnostics"]')).toBeNull();
+
+  await act(async () => root.render(
+    <SupportExportButton connection={{ request } as never} openRequestKey="request-2" />,
+  ));
+  expect(document.querySelector('[role="dialog"][aria-label="Export diagnostics"]')).not.toBeNull();
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
 it("preselects the current Task's sensitive sources and offers the bug form only after saving", async () => {
   const save = vi.fn(async () => "saved" as const);
   const openExternal = vi.fn();

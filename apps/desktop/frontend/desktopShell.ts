@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CLIENT_DETACH, type AppServerSession } from "@openaide/app-server-client";
-import type { HostToWebviewMessage, SettingsTabId } from "@openaide/app-shell-contracts";
+import type { HostToWebviewMessage, SettingsIntent, SettingsTabId } from "@openaide/app-shell-contracts";
 import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
 import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import type { PostHostMessage } from "../../../packages/frontend/src/state/postHostMessage";
@@ -20,7 +20,7 @@ import { createDesktopSecretMessageHandler } from "./desktopSecrets";
 
 type DesktopRoute =
   | { surface: "nativeSession"; agentId: string; nativeSessionId: string; projectId?: string }
-  | { surface: "settings"; projectId?: string; settingsAgentId?: string; settingsTab?: SettingsTabId; returnToNewTask?: boolean }
+  | { surface: "settings"; projectId?: string; settingsAgentId?: string; settingsTab?: SettingsTabId; settingsIntent?: SettingsIntent; returnToNewTask?: boolean }
   | { surface: "task"; projectId?: string; taskId?: string };
 
 /** Adapts the native Desktop host to the shared Frontend shell seam. */
@@ -242,12 +242,13 @@ export function createDesktopShell(
         nativeSessionId,
         projectId,
       }),
-      openSettings: (settingsAgentId, returnToNewTask, projectId, settingsTab) => navigate({
+      openSettings: (settingsAgentId, returnToNewTask, projectId, settingsTab, settingsIntent) => navigate({
         surface: "settings",
         projectId,
         returnToNewTask,
         settingsAgentId,
         settingsTab,
+        settingsIntent,
       }),
       openTask: (taskId) => navigate({ surface: "task", taskId }),
       replaceSettingsTab(settingsTab) {

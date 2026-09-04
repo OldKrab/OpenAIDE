@@ -27,6 +27,7 @@ type TaskInteractionAction =
   | { type: "taskQueue:take:accepted"; taskId: string; queuedMessageId: string; prompt: string; context: ComposerAttachment[] }
   | { type: "taskQueue:take:error"; taskId: string; queuedMessageId: string; message: string }
   | { type: "taskInput:error"; taskId: string; message?: string }
+  | { type: "taskInput:error:clear"; taskId: string }
   | {
       type: "taskInput:configError";
       taskId: string;
@@ -303,6 +304,17 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
             ...(input ?? { prompt: "", context: [] }),
             error: action.message,
           },
+        },
+      };
+    }
+    case "taskInput:error:clear": {
+      const input = state.taskInputs[action.taskId];
+      if (!input?.error) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: { ...input, error: undefined },
         },
       };
     }

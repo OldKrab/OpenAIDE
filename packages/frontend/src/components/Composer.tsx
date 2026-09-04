@@ -1,4 +1,4 @@
-import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle } from "lucide-react";
+import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
@@ -58,6 +58,7 @@ type ComposerProps = {
   onCancel?: () => void;
   onAddToQueue?: () => void;
   onChange: (prompt: string) => void;
+  onDismissError?: () => void;
   onUnsupportedImageAttachment?: (message?: string) => void;
   onRevealAttachment?: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -94,6 +95,7 @@ export function Composer({
   onCancel,
   onAddToQueue,
   onChange,
+  onDismissError,
   onUnsupportedImageAttachment,
   onRevealAttachment,
   onRemoveAttachment,
@@ -609,6 +611,11 @@ export function Composer({
             <CircleAlert aria-hidden="true" size={13} />
             {error}
             {onRetryError ? <button onClick={onRetryError} type="button">Retry</button> : null}
+            {onDismissError ? (
+              <button aria-label="Dismiss error" onClick={onDismissError} type="button">
+                <X aria-hidden="true" size={13} />
+              </button>
+            ) : null}
           </span>
         ) : blockedStatus?.placement === "footer" ? (
           <span aria-live="polite" className="composer-footer-status" role="status">

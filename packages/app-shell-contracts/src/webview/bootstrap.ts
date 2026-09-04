@@ -18,6 +18,12 @@ export type WebviewAppServerConnection = {
   endpointUrl: string;
 };
 
+/** One-shot presentation request carried by any App Shell into Settings. */
+export type SettingsIntent = {
+  kind: "openSupportExport";
+  requestId: string;
+};
+
 export type WebviewBootstrap = {
   surface: WebviewSurfaceKind;
   /** App Shell-owned presentation and protocol identity. */
@@ -33,6 +39,7 @@ export type WebviewBootstrap = {
   /** Ordered Project Contexts visible in a multi-root App Shell navigation surface. */
   projectIds?: string[];
   settingsTab?: SettingsTabId;
+  settingsIntent?: SettingsIntent;
   /** Agent detail and return intent supplied by a recovery entry point. */
   settingsAgentId?: string;
   returnToNewTask?: boolean;

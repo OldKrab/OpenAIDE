@@ -358,6 +358,31 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[2].reveal).toHaveBeenCalledWith(1);
   });
 
+  it("delivers diagnostics wizard intents to new and existing Settings panels", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+    manager.openSettings(undefined, undefined, undefined, "data", {
+      kind: "openSupportExport",
+      requestId: "diagnostics-1",
+    });
+    const panel = vscodeMocks.panels[0];
+
+    expect(panel.webview.html).toContain(
+      'data-settings-intent="{&quot;kind&quot;:&quot;openSupportExport&quot;,&quot;requestId&quot;:&quot;diagnostics-1&quot;}"',
+    );
+
+    manager.openSettings(undefined, undefined, undefined, "data", {
+      kind: "openSupportExport",
+      requestId: "diagnostics-2",
+    });
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: "surface.settingsChanged",
+      payload: {
+        settings_tab: "data",
+        settings_intent: { kind: "openSupportExport", requestId: "diagnostics-2" },
+      },
+    });
+  });
+
   it("keeps task navigation focused on the active Task editor tab", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
     const view = createViewMock();

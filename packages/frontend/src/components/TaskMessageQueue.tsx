@@ -19,11 +19,11 @@ export function TaskMessageQueueView({
   extractionStage?: "pending" | "collapsing";
   extractingQueuedMessageId?: string;
   queue: TaskMessageQueue;
-  onTake?: (queuedMessageId: string) => void;
+  onTake?: (queuedMessageId: string) => void | Promise<void>;
   onMove?: (queuedMessageId: string, targetIndex: number) => void | Promise<void>;
   onExpanded?: () => void;
-  onRemove: (queuedMessageId: string) => void;
-  onSendNow?: (queuedMessageId: string) => void;
+  onRemove: (queuedMessageId: string) => void | Promise<void>;
+  onSendNow?: (queuedMessageId: string) => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(true);
   const [draggingId, setDraggingId] = useState<string>();
@@ -31,6 +31,11 @@ export function TaskMessageQueueView({
   const [dragOffsetY, setDragOffsetY] = useState(0);
   const [dragSlotHeight, setDragSlotHeight] = useState(0);
   const [optimisticOrder, setOptimisticOrder] = useState<string[]>();
+  const [pendingMutation, setPendingMutation] = useState<{
+    id: string;
+    kind: "move" | "remove" | "send" | "take";
+  }>();
+  const mutationPending = useRef(false);
   const drag = useRef<{ id: string; pointerId: number; startY: number; armed: boolean } | undefined>(undefined);
   const listRef = useRef<HTMLOListElement>(null);
   const previousLayout = useRef<{
@@ -61,6 +66,7 @@ export function TaskMessageQueueView({
   const single = items.length === 1;
   const hasReorderControl = !single && onMove !== undefined;
   const reorderable = hasReorderControl;
+  const queueBusy = Boolean(extractingQueuedMessageId || pendingMutation);
 
   // Leave Chat follow mode before the floating rows can change its scroll range.
   useLayoutEffect(() => {
@@ -116,6 +122,7 @@ export function TaskMessageQueueView({
   if (items.length === 0) return null;
 
   const beginDrag = (event: PointerEvent, id: string, fromGrip: boolean) => {
+    if (queueBusy || mutationPending.current) return;
     if (event.pointerType === "touch" && !fromGrip) return;
     // Reordering owns this pointer; block browser text/native dragging before the movement threshold.
     event.preventDefault();
@@ -158,9 +165,32 @@ export function TaskMessageQueueView({
     event.preventDefault();
   };
   const requestMove = (id: string, targetIndex: number) => {
+    if (queueBusy || mutationPending.current) return;
     setOptimisticOrder(moveQueueItem(items, id, targetIndex).map((item) => item.queued_message_id));
-    const result = onMove?.(id, targetIndex);
-    if (result) void result.catch(() => setOptimisticOrder(undefined));
+    runMutation(id, "move", () => onMove?.(id, targetIndex), () => setOptimisticOrder(undefined));
+  };
+  const runMutation = (
+    id: string,
+    kind: "move" | "remove" | "send" | "take",
+    mutate: () => void | Promise<void>,
+    onFailure?: () => void,
+  ) => {
+    if (mutationPending.current || extractingQueuedMessageId) return;
+    mutationPending.current = true;
+    setPendingMutation({ id, kind });
+    let result: void | Promise<void>;
+    try {
+      result = mutate();
+    } catch {
+      onFailure?.();
+      mutationPending.current = false;
+      setPendingMutation(undefined);
+      return;
+    }
+    void Promise.resolve(result).catch(() => onFailure?.()).finally(() => {
+      mutationPending.current = false;
+      setPendingMutation(undefined);
+    });
   };
   const finishDrag = (event: PointerEvent) => {
     const current = drag.current;
@@ -213,6 +243,7 @@ export function TaskMessageQueueView({
             const visibleIndex = reorderedRows.findIndex((candidate) => candidate.queued_message_id === item.queued_message_id);
             const isLastVisible = visibleIndex === reorderedRows.length - 1;
             const extracting = extractingQueuedMessageId === item.queued_message_id;
+            const mutating = pendingMutation?.id === item.queued_message_id ? pendingMutation.kind : undefined;
             const dropBefore = Boolean(draggingId && visibleIndex >= 0 && dropIndex === visibleIndex);
             const dropAfter = Boolean(
               draggingId
@@ -235,7 +266,7 @@ export function TaskMessageQueueView({
               : undefined;
             return (
             <li
-              aria-busy={extracting || undefined}
+              aria-busy={extracting || Boolean(mutating) || undefined}
               data-drop-before={dropBefore || undefined}
               data-drop-after={dropAfter || undefined}
               data-dragging={draggingId === item.queued_message_id ? true : undefined}
@@ -243,7 +274,7 @@ export function TaskMessageQueueView({
               data-queue-id={item.queued_message_id}
               data-queue-row
               key={item.queued_message_id}
-              onPointerDown={reorderable && !extracting
+              onPointerDown={reorderable && !queueBusy
                 ? (event) => beginDrag(event, item.queued_message_id, false)
                 : undefined}
               style={rowStyle}
@@ -259,9 +290,9 @@ export function TaskMessageQueueView({
                 <button
                   aria-label={`Reorder ${item.text}`}
                   className="task-message-queue-grip"
-                  disabled={extracting}
+                  disabled={queueBusy}
                   onKeyDown={(event) => moveWithKeyboard(event, item.queued_message_id, index)}
-                  onPointerDown={extracting ? undefined : (event) => {
+                  onPointerDown={queueBusy ? undefined : (event) => {
                     event.stopPropagation();
                     beginDrag(event, item.queued_message_id, true);
                   }}
@@ -277,23 +308,27 @@ export function TaskMessageQueueView({
               <div className="task-message-queue-actions" onPointerDown={(event) => event.stopPropagation()}>
                 <IconButton
                   ariaLabel="Send queued message now"
-                  disabled={extracting}
-                  icon={<SendHorizontal size={14} />}
-                  onClick={() => onSendNow?.(item.queued_message_id)}
+                  disabled={queueBusy}
+                  icon={mutating === "send"
+                    ? <LoaderCircle aria-hidden="true" className="task-message-queue-pending" size={14} />
+                    : <SendHorizontal size={14} />}
+                  onClick={() => runMutation(item.queued_message_id, "send", () => onSendNow?.(item.queued_message_id))}
                 />
                 <IconButton
-                  ariaLabel={extracting ? "Moving queued message to Composer" : "Edit in Composer"}
-                  disabled={extracting || editDisabled}
-                  icon={extracting
+                  ariaLabel={extracting || mutating === "take" ? "Moving queued message to Composer" : "Edit in Composer"}
+                  disabled={queueBusy || editDisabled}
+                  icon={extracting || mutating === "take"
                     ? <LoaderCircle aria-hidden="true" className="task-message-queue-pending" size={14} />
                     : <Pencil size={14} />}
-                  onClick={() => onTake?.(item.queued_message_id)}
+                  onClick={() => runMutation(item.queued_message_id, "take", () => onTake?.(item.queued_message_id))}
                 />
                 <IconButton
                   ariaLabel="Delete queued message"
-                  disabled={extracting}
-                  icon={<Trash2 size={14} />}
-                  onClick={() => onRemove(item.queued_message_id)}
+                  disabled={queueBusy}
+                  icon={mutating === "remove"
+                    ? <LoaderCircle aria-hidden="true" className="task-message-queue-pending" size={14} />
+                    : <Trash2 size={14} />}
+                  onClick={() => runMutation(item.queued_message_id, "remove", () => onRemove(item.queued_message_id))}
                 />
               </div>
             </li>
@@ -306,7 +341,7 @@ export function TaskMessageQueueView({
               : queue.pause === "attachmentUnavailable"
                 ? "Paused: attachment unavailable"
                 : "Paused after interrupted work"}</span>
-            <button onClick={() => onSendNow?.(queue.items[0]!.queued_message_id)} type="button">
+            <button disabled={queueBusy} onClick={() => runMutation(queue.items[0]!.queued_message_id, "send", () => onSendNow?.(queue.items[0]!.queued_message_id))} type="button">
               Resume queue
             </button>
           </div>

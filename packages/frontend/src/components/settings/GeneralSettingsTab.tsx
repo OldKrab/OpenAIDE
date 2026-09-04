@@ -123,12 +123,14 @@ export function DataSupportSettingsTab({
   developerSettingsUnlocked = false,
   onResetTaskHistory,
   onSetAcpTrace,
+  supportExportRequestKey,
   runtimeSettings,
 }: {
   backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   developerSettingsUnlocked?: boolean;
   onResetTaskHistory?: () => Promise<void>;
   onSetAcpTrace: (enabled: boolean) => void;
+  supportExportRequestKey?: string;
   runtimeSettings?: RuntimeSettingsResult;
 }) {
   const developerSettings = runtimeSettings?.developer;
@@ -137,7 +139,7 @@ export function DataSupportSettingsTab({
     <div className="general-settings-panel">
       <GeneralSection id="settings-data-support" label="Support">
         <div className="general-preference-surface">
-          <GeneralPreferenceRow action={<SupportExportButton connection={backendConnection} />} detail="Export diagnostics, Agent sessions, and raw traces for troubleshooting." icon={<Bug size={17} />} label="Diagnostics" />
+          <GeneralPreferenceRow action={<SupportExportButton connection={backendConnection} openRequestKey={supportExportRequestKey} />} detail="Export diagnostics, Agent sessions, and raw traces for troubleshooting." icon={<Bug size={17} />} label="Diagnostics" />
         </div>
       </GeneralSection>
 

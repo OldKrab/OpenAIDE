@@ -9,6 +9,43 @@ type PermissionChatMessage = ChatMessage & {
 };
 
 describe("app reducer composer state", () => {
+  it("dismisses a Task composer error without discarding its draft", () => {
+    let state = createInitialState();
+    state = {
+      ...state,
+      taskInputs: {
+        task_1: { prompt: "Keep this draft", context: [], error: "Transient failure" },
+      },
+    };
+
+    state = appReducer(state, { type: "taskInput:error:clear", taskId: "task_1" });
+
+    expect(state.taskInputs.task_1).toMatchObject({ prompt: "Keep this draft", context: [] });
+    expect(state.taskInputs.task_1.error).toBeUndefined();
+  });
+
+  it("clears a New Task error on dismissal or draft correction", () => {
+    let state = createInitialState();
+    state = appReducer(state, { type: "submit:error", message: "Transient failure" });
+    state = appReducer(state, { type: "newTask:error:clear" });
+    expect(state.newTask.error).toBeUndefined();
+
+    state = appReducer(state, { type: "submit:error", message: "Another failure" });
+    state = appReducer(state, { type: "prompt", prompt: "Corrected draft" });
+    expect(state.newTask).toMatchObject({ prompt: "Corrected draft", error: undefined, errorRetryable: undefined });
+  });
+
+  it("dismisses a Settings mutation error without changing loaded settings", () => {
+    let state = createInitialState();
+    state = appReducer(state, { type: "settings:error", message: "Could not save setting." });
+    const activeTab = state.settings.activeTab;
+
+    state = appReducer(state, { type: "settings:error:clear" });
+
+    expect(state.settings.error).toBeUndefined();
+    expect(state.settings.activeTab).toBe(activeTab);
+  });
+
   it("clears live text ownership when a task settles", () => {
     let state = createInitialState();
     state = appReducer(state, {

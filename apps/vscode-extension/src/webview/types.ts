@@ -12,7 +12,7 @@ export type WebviewHost = {
   openNewTask: (projectId?: string) => void;
   retainNewTaskProject: (projectId: string, surface?: WebviewSurfaceKind) => void;
   openNativeSession: (agentId: string, nativeSessionId: string, projectId?: string) => void;
-  openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: WebviewBootstrap["settingsTab"]) => void;
+  openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: WebviewBootstrap["settingsTab"], settingsIntent?: WebviewBootstrap["settingsIntent"]) => void;
   openTask: (taskId: string, title?: string, agentId?: string) => void;
 };
 

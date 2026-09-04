@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
 import { SUPPORT_RECOVER_STUCK_SESSIONS } from "@openaide/app-server-client";
 import { RuntimeClient } from "../runtime/rpcClient";
 import { TaskEditorManager } from "../webview/editorManager";
@@ -29,7 +30,10 @@ export function registerCommands(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("openaide.exportDiagnostics", async () => {
-      taskEditors.openSettings(undefined, undefined, undefined, "common");
+      taskEditors.openSettings(undefined, undefined, undefined, "data", {
+        kind: "openSupportExport",
+        requestId: randomUUID(),
+      });
     }),
   );
 

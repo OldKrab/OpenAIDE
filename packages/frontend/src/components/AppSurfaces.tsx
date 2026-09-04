@@ -435,6 +435,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onCreateCustomAgent={callbacks.settings.createCustomAgent}
         onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
         onDeleteMcpServer={callbacks.settings.deleteMcpServer}
+        onDismissError={callbacks.settings.dismissError}
         onGetMcpServerDetails={callbacks.settings.getMcpServerDetails}
         onGetSkillDetails={callbacks.settings.getSkillDetails}
         onNewTaskInWorktree={newTaskInWorktree}
@@ -452,6 +453,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
         preferences={preferences}
         preferredAgentId={bootstrap.settingsAgentId}
+        supportExportRequestKey={bootstrap.settingsIntent?.kind === "openSupportExport"
+          ? bootstrap.settingsIntent.requestId
+          : undefined}
         projects={navigationProjects}
         recoveryActions={settingsRecoveryActions}
         state={settings}

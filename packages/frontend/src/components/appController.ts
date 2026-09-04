@@ -407,6 +407,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
     intents: {
       newTask: {
         changePrompt: (prompt) => dispatch({ type: "prompt", prompt }),
+        dismissError: () => dispatch({ type: "newTask:error:clear" }),
         reportAttachmentError: (message) => dispatch({
           type: "submit:error",
           message: message ?? "Images can be attached after the Task is open.",
@@ -568,6 +569,9 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         },
         changePrompt: (prompt) => {
           if (routedTaskId) dispatch({ type: "taskInput:prompt", taskId: routedTaskId, prompt });
+        },
+        dismissError: () => {
+          if (routedTaskId) dispatch({ type: "taskInput:error:clear", taskId: routedTaskId });
         },
         recordScroll: (scrollState) => {
           if (routedTaskId) dispatch({ type: "taskScroll:record", taskId: routedTaskId, scrollState });
