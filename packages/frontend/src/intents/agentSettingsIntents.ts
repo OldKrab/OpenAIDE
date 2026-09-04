@@ -1,7 +1,9 @@
 import {
   AGENT_AUTHENTICATE,
+  AGENT_CANCEL_AUTHENTICATE,
   AGENT_CREATE_CUSTOM,
   AGENT_DELETE_CUSTOM,
+  AGENT_LOGOUT,
   AGENT_PROBE,
   AGENT_REPLACE_CUSTOM,
   AGENT_SET_ENABLED,
@@ -17,6 +19,7 @@ import {
   type CustomAgentReplaceParams,
 } from "@openaide/app-shell-contracts";
 import { agentOptionsFromProtocol, fallbackAgentActionFromProtocol } from "../state/appServerAgents";
+import { agentSettingsStatusFromProtocol, agentSignInFlowFromProtocol } from "./agentSettingsRecords";
 import {
   beginAgentSecretTransaction,
   type AgentSecretTransaction,
@@ -126,12 +129,54 @@ export async function authenticateAgentThroughBackend(
       secretStorageAgentId: storageAgentId,
     } : {}),
     ...(method.kind === "terminal" ? {
-      terminalConfirmed: agent.authenticating_method_id === methodId,
+      terminalConfirmed: agent.sign_in?.phase === "awaiting_terminal" && agent.sign_in.method_id === methodId,
     } : {}),
   }));
   await secretTransaction?.commit();
   await refreshAgentSettingsThroughBackend(context);
   return result.status === "authenticated" ? "authenticated" as const : "awaitingUser" as const;
+}
+
+export async function cancelAgentAuthenticationThroughBackend(
+  context: AgentSettingsIntentContext,
+  agentId: string,
+) {
+  const backendConnection = context.backendConnection;
+  if (!backendConnection) return false;
+  const result = await backendConnection.request(AGENT_CANCEL_AUTHENTICATE, { agentId: agentId as AgentId });
+  applyAgentMutationResult(context, result.agents);
+  await refreshAgentSettingsThroughBackend(context);
+  return true;
+}
+
+export async function logoutAgentThroughBackend(
+  context: AgentSettingsIntentContext,
+  agentId: string,
+) {
+  const backendConnection = context.backendConnection;
+  if (!backendConnection) return false;
+  const agent = context.state.settings.agentDetails?.find((candidate) => candidate.id === agentId);
+  if (!agent) throw new Error("Refresh Agent settings before signing out.");
+  const methodId = agent.last_authentication_method_id;
+  const method = agent.auth_methods.find((candidate) => candidate.id === methodId);
+  const secretDeletes = method?.kind === "env_var"
+    ? (method.variables ?? []).filter((variable) => variable.secret).map((variable) => ({
+      kind: "agentEnvironment" as const,
+      agentId: authSecretStorageAgentId(agentId, method.id),
+      name: variable.name,
+    }))
+    : [];
+  const secretTransaction = secretDeletes.length
+    ? await beginAgentSecretTransaction({ writes: [], deletes: secretDeletes })
+    : undefined;
+  const result = await requestWithSecretRollback(secretTransaction, () => backendConnection.request(AGENT_LOGOUT, {
+    agentId: agentId as AgentId,
+    expectedMethodId: methodId,
+  }));
+  await secretTransaction?.commit();
+  applyAgentMutationResult(context, result.agents);
+  await refreshAgentSettingsThroughBackend(context);
+  return true;
 }
 
 function authSecretStorageAgentId(agentId: string, methodId: string) {
@@ -365,6 +410,15 @@ function applyAgentMutationResult(
   agents: AgentCollectionSnapshot,
 ) {
   context.setAgents(agentOptionsFromProtocol(agents));
+  context.dispatch({
+    type: "settings:agentCollection",
+    agents: agents.agents.map((agent) => ({
+      agentId: agent.agentId,
+      status: agentSettingsStatusFromProtocol(agent.status),
+      setupReason: agent.setupReason ?? undefined,
+      signIn: agentSignInFlowFromProtocol(agent.signIn),
+    })),
+  });
   const action = fallbackAgentActionFromProtocol(agents, context.currentAgentId);
   if (action) context.dispatch(action);
 }

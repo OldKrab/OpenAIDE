@@ -119,7 +119,6 @@ function AgentSettingsFlowHarness({ request }: { request: BackendConnection["req
   return (
     <AgentSettingsTab
       agents={state.settings.agentDetails ?? []}
-      authPending={state.settings.loading}
       deletedAgentId={state.settings.deletedAgentId}
       onAuthenticate={callbacks.authenticateAgent}
       onCreateCustomAgent={callbacks.createCustomAgent}

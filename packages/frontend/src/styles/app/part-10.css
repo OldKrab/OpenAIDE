@@ -127,6 +127,13 @@
   color: var(--oa-text);
 }
 
+/* Loading placeholder sits where the section content will render, so it shares the
+   content column width instead of stretching across the full Settings pane. */
+.settings-panel-loading {
+  width: min(880px, 100%);
+  margin-inline: auto;
+}
+
 .settings-skeleton {
   height: 54px;
   border-radius: var(--oa-radius-md);

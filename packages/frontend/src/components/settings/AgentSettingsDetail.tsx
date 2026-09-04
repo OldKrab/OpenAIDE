@@ -1,14 +1,14 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   Bot,
   CircleAlert,
   FileText,
-  KeyRound,
   LoaderCircle,
   Palette,
   Save,
   Terminal,
   Trash2,
+  Unplug,
   X,
 } from "lucide-react";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
@@ -17,18 +17,20 @@ import { CODEX_INTEGRATION_INSTALLING_LABEL } from "../agentActivityPresentation
 import { AgentRecoveryButtons, type AgentRecoveryActions, type AgentRecoveryKind } from "../AgentRecovery";
 import { AgentEnvEditor, AgentIconPicker } from "./AgentCustomFields";
 import type { AgentDraft } from "./agentSettingsModel";
-import { agentStatusCopy, type AgentAuthMethod } from "./agentSettingsModel";
+import { agentStatusCopy } from "./agentSettingsModel";
+import { AgentSignIn } from "./AgentSignIn";
 import { InlineFailure, InlineNotice } from "./settingsPresentation";
 
 export function AgentSettingsDetail({
   activeDraft,
-  authPending,
   confirmDeleteAgentId,
   confirmReplaceAgentId,
   isCreating,
   isCustom,
   isEditing = false,
   onAuthenticate,
+  onCancelAuthentication,
+  onLogout,
   onCancelDraft,
   onDeleteClick,
   onSaveDraft,
@@ -41,13 +43,14 @@ export function AgentSettingsDetail({
   selected,
 }: {
   activeDraft: AgentDraft;
-  authPending: boolean;
   confirmDeleteAgentId?: string;
   confirmReplaceAgentId?: string;
   isCreating: boolean;
   isCustom: boolean;
   isEditing?: boolean;
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+  onCancelAuthentication?: (agentId: string) => void | Promise<void>;
+  onLogout?: (agentId: string) => boolean | void | Promise<boolean | void>;
   onCancelDraft?: () => void;
   onDeleteClick: () => void;
   onSaveDraft: () => void;
@@ -77,7 +80,7 @@ export function AgentSettingsDetail({
         <span className="agent-page-title">
           <strong>{title}</strong>
           <small>{description}</small>
-          {selected ? <AgentStatusText agent={selected} /> : null}
+          {selected && selected.status !== "disconnected" ? <AgentStatusText agent={selected} /> : null}
         </span>
         {!isCreating ? (
           <span className="agent-page-header-toggle">
@@ -87,8 +90,10 @@ export function AgentSettingsDetail({
         ) : null}
       </header>
 
-      {selected && (selected.auth_methods.length > 0 || needsStatusDetail(selected)) ? (
-        <AgentAttentionSection agent={selected} authPending={authPending} onAuthenticate={onAuthenticate} recoveryActions={recoveryActions} />
+      {selected && selected.auth_methods.length > 0 ? (
+        <AgentSignIn agent={selected} onAuthenticate={onAuthenticate} onCancel={onCancelAuthentication} onLogout={onLogout} />
+      ) : selected && needsStatusDetail(selected) ? (
+        <AgentStatusSection agent={selected} recoveryActions={recoveryActions} />
       ) : null}
 
       {isCustom ? (
@@ -122,16 +127,16 @@ export function AgentSettingsDetail({
           <AgentEnvEditor env={activeDraft.env} onChange={(env) => onUpdateDraft({ env })} />
           <footer className="agent-page-footer">
             {activeDraft.agent_id ? (
-              <button className="danger" disabled={authPending} type="button" onClick={onDeleteClick}>
+              <button className="danger" type="button" onClick={onDeleteClick}>
                 <Trash2 size={13} />
                 {confirmDeleteAgentId === activeDraft.agent_id ? "Confirm delete" : "Delete"}
               </button>
             ) : null}
-            {onCancelDraft ? <button disabled={authPending} type="button" onClick={onCancelDraft}><X size={13} /><span>Cancel</span></button> : null}
+            {onCancelDraft ? <button type="button" onClick={onCancelDraft}><X size={13} /><span>Cancel</span></button> : null}
             <button
               aria-busy={savePending}
               className="primary"
-              disabled={authPending || savePending || Boolean(saveBlockedMessage)}
+              disabled={savePending || Boolean(saveBlockedMessage)}
               type="button"
               onClick={onSaveDraft}
             >
@@ -161,7 +166,7 @@ function agentSettingsRecoveryKind(agent: AgentSettingsRecord): AgentRecoveryKin
   if (agent.status === "setup_required") {
     return agent.setup_reason === "nodeJsRequired" ? "nodeJsRequired" : "setupRequired";
   }
-  if (agent.status === "disconnected") return "launchFailed";
+  if (agent.status === "disconnected") return "connectionCheck";
   if (agent.status === "failed") return "launchFailed";
   return undefined;
 }
@@ -194,110 +199,32 @@ function AgentStatusText({ agent }: { agent: AgentSettingsRecord }) {
   </span>;
 }
 
-function AgentAttentionSection({
+function AgentStatusSection({
   agent,
-  authPending,
-  onAuthenticate,
   recoveryActions,
 }: {
   agent: AgentSettingsRecord;
-  authPending: boolean;
-  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
   recoveryActions?: AgentRecoveryActions;
 }) {
   const recoveryKind = agentSettingsRecoveryKind(agent);
-  if (agent.auth_methods.length) {
-    return (
-      <AgentPageSection description={authenticationSectionDescription(agent)} label="Authentication">
-        <div className="agent-page-surface attention">
-          {agent.auth_methods.map((method) => (
-            <AgentAuthenticationMethod
-              key={method.id}
-              agentId={agent.id}
-              agentStatus={agent.status}
-              authenticatingMethodId={agent.authenticating_method_id}
-              authPending={authPending}
-              method={method}
-              onAuthenticate={onAuthenticate}
-            />
-          ))}
-        </div>
-      </AgentPageSection>
-    );
-  }
+  const starting = agent.status === "launching" || agent.status === "installing";
+  const disconnected = agent.status === "disconnected";
   return (
-    <AgentPageSection label="Setup">
-      <div className="agent-page-surface attention">
+    <AgentPageSection label={starting ? "Status" : disconnected ? "Connection" : "Setup"}>
+      <div className={`agent-page-surface${starting || disconnected ? "" : " attention"}${disconnected ? " agent-connection-summary" : ""}`}>
         <AgentPageRow
           action={recoveryActions && recoveryKind ? <AgentRecoveryButtons actions={recoveryActions} agent={agent} kind={recoveryKind} surface="settings" /> : <span />}
-          detail={authPending && agent.status === "authenticating" ? "Authentication is running." : agentStatusCopy(agent)}
-          icon={<CircleAlert size={16} />}
-          label="Action required"
+          detail={disconnected ? undefined : agentStatusCopy(agent)}
+          icon={starting
+            ? <LoaderCircle aria-hidden="true" className="spin" size={16} />
+            : disconnected
+              ? <Unplug aria-hidden="true" size={16} />
+              : <CircleAlert size={16} />}
+          label={starting ? "Starting" : disconnected ? "Not connected" : "Action required"}
         />
         {agent.last_error_summary ? <InlineFailure message={agent.last_error_summary} /> : null}
       </div>
     </AgentPageSection>
-  );
-}
-
-function authenticationSectionDescription(agent: AgentSettingsRecord) {
-  if (agent.status === "auth_required") return "Sign-in is required to continue.";
-  if (agent.status === "connected" || agent.status === "ready") {
-    return `${agent.label} is connected. Sign in again to refresh credentials or switch accounts.`;
-  }
-  return "Choose a sign-in method to authenticate this Agent.";
-}
-
-function AgentAuthenticationMethod({
-  agentId,
-  agentStatus,
-  authenticatingMethodId,
-  authPending,
-  method,
-  onAuthenticate,
-}: {
-  agentId: string;
-  agentStatus: AgentSettingsRecord["status"];
-  authenticatingMethodId?: string;
-  authPending: boolean;
-  method: AgentAuthMethod;
-  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
-}) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const variables = method.variables ?? [];
-  const missingRequired = variables.some((variable) => !variable.optional && !(values[variable.name] ?? "").trim());
-  const awaitingThisTerminal = method.kind === "terminal" && agentStatus === "authenticating" && authenticatingMethodId === method.id;
-  const anotherMethodIsAuthenticating = agentStatus === "authenticating" && !awaitingThisTerminal;
-  return (
-    <div className="agent-page-auth-method">
-      <AgentPageRow
-        action={(
-          <button
-            className="agent-page-row-button"
-            disabled={authPending || anotherMethodIsAuthenticating || (method.kind === "env_var" && missingRequired)}
-            type="button"
-            onClick={() => onAuthenticate(agentId, method.id, method.kind === "env_var" ? values : undefined)}
-          >
-            <KeyRound size={13} /><span>{awaitingThisTerminal ? "I've finished signing in" : method.label}</span>
-          </button>
-        )}
-        detail={method.description}
-        icon={<KeyRound size={16} />}
-        label={method.label}
-      />
-      {variables.map((variable) => (
-        <label className="agent-page-auth-field" key={variable.name}>
-          <span>{variable.label ?? variable.name}{variable.optional ? " (optional)" : ""}</span>
-          <input
-            aria-label={variable.label ?? variable.name}
-            autoComplete="off"
-            type={variable.secret ? "password" : "text"}
-            value={values[variable.name] ?? ""}
-            onChange={(event) => setValues((current) => ({ ...current, [variable.name]: event.currentTarget.value }))}
-          />
-        </label>
-      ))}
-    </div>
   );
 }
 
@@ -315,7 +242,12 @@ function needsAttention(agent: AgentSettingsRecord) {
 }
 
 function needsStatusDetail(agent: AgentSettingsRecord) {
-  return needsAttention(agent) || agent.status === "unprobed" || agent.status === "disconnected" || agent.status === "authenticating";
+  return needsAttention(agent)
+    || agent.status === "unprobed"
+    || agent.status === "disconnected"
+    || agent.status === "authenticating"
+    || agent.status === "launching"
+    || agent.status === "installing";
 }
 
 function shortStatus(status: AgentSettingsRecord["status"]) {
@@ -327,6 +259,7 @@ function shortStatus(status: AgentSettingsRecord["status"]) {
     case "connected": return "Connected";
     case "ready": return "Ready";
     case "installing": return CODEX_INTEGRATION_INSTALLING_LABEL;
+    case "launching": return "Starting";
     default: return status.replaceAll("_", " ");
   }
 }

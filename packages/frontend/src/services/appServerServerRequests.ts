@@ -42,6 +42,8 @@ export function startAppServerServerRequestBridge({
       const request = params as ServerRequestParamsByMethod[typeof SHELL_OPEN_EXTERNAL];
       const url = trustedExternalUrl(request.url);
       if (!url) return Promise.resolve({ opened: false }) as Promise<ServerRequestResponseResultByMethod[M]>;
+      // Agent sign-in URLs never arrive here any more: App Server publishes them as Sign-in Flow
+      // state. Remaining shell/openExternal requests are plain "open this page" asks.
       frontendShell().recovery.openExternal(url);
       return Promise.resolve({ opened: true }) as Promise<ServerRequestResponseResultByMethod[M]>;
     }

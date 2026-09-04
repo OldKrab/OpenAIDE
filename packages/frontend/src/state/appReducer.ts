@@ -27,7 +27,7 @@ import {
 } from "./composerOptions";
 import { reduceNewTaskState } from "./newTaskReducer";
 import { applyAppServerReplica } from "./appServerReplicaState";
-import { reduceSettingsState } from "./settingsReducer";
+import { reduceSettingsState, type SettingsAgentCollectionEntry } from "./settingsReducer";
 import {
   reconcileBackgroundTaskSnapshot,
   reconcileTaskSnapshotDependents,
@@ -52,6 +52,9 @@ type AppActionPayload =
       loadingProjectIds?: string[];
       refreshing: boolean;
       refreshError?: string;
+      recoveryKind?: NativeSessionsState["recoveryKind"];
+      recoveryAgentId?: string;
+      recoveryAgentLabel?: string;
     }
   | {
       type: "nativeSessionArchive:start";
@@ -172,7 +175,7 @@ type AppActionPayload =
   | { type: "settings:start" }
   | { type: "settings:sections"; tabs: SettingsTabId[] }
   | { type: "settings:agentDetailsResult"; generatedAt: string; agents: AgentSettingsRecord[] }
-  | { type: "settings:agentCollection"; agents: Array<{ agentId: string; status: AgentSettingsRecord["status"]; setupReason?: "nodeJsRequired" }> }
+  | { type: "settings:agentCollection"; agents: SettingsAgentCollectionEntry[] }
   | { type: "settings:mcpServersStart" }
   | { type: "settings:mcpServersResult"; generatedAt: string; availability: SettingsProjectionAvailability; servers: McpServerSettingsRecord[] }
   | { type: "settings:mcpServersError"; message: string }
@@ -325,6 +328,9 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         loading: action.refreshing,
         nextCursor: undefined,
         error: action.refreshError,
+        recoveryKind: action.recoveryKind,
+        recoveryAgentId: action.recoveryAgentId,
+        recoveryAgentLabel: action.recoveryAgentLabel,
       };
       if (action.archived) {
         return {

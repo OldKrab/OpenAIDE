@@ -19,6 +19,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 mod desktop_runtime;
+mod desktop_secrets;
 mod desktop_support_export;
 mod desktop_update;
 mod desktop_update_receipt;
@@ -203,6 +204,9 @@ fn main() {
             desktop_prepare_project_folder,
             desktop_dismiss_path_warning,
             desktop_save_support_export,
+            desktop_secrets::desktop_secret_read,
+            desktop_secrets::desktop_secret_write,
+            desktop_secrets::desktop_secret_delete,
             recover_desktop_runtime_environment,
             desktop_update::desktop_update_snapshot,
             desktop_update::desktop_check_for_update,

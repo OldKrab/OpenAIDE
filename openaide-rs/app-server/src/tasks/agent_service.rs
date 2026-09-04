@@ -56,6 +56,7 @@ impl AgentService {
             secret_env: Vec::new(),
             secret_storage_agent_id: None,
             terminal_confirmed: false,
+            secret_resolver: None,
         })
     }
 

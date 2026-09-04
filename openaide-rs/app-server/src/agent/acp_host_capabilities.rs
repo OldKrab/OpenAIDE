@@ -43,6 +43,8 @@ pub(super) type AcpSessionPromptMap = Arc<Mutex<HashMap<String, LivePromptProjec
 
 #[derive(Clone)]
 pub(super) struct AcpHostCapabilityHandlers {
+    /// Owning Agent id; URL elicitations are recorded against this Agent's Sign-in Flow.
+    agent_id: String,
     host_bridge: HostBridge,
     trace: Option<AcpTraceSession>,
     current_prompts: AcpSessionPromptMap,
@@ -54,6 +56,7 @@ pub(super) struct AcpHostCapabilityHandlers {
 }
 
 pub(super) struct AcpHostCapabilityContext {
+    pub(super) agent_id: String,
     pub(super) host_bridge: HostBridge,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) current_prompts: AcpSessionPromptMap,
@@ -67,6 +70,7 @@ pub(super) struct AcpHostCapabilityContext {
 impl AcpHostCapabilityHandlers {
     pub(super) fn new(context: AcpHostCapabilityContext) -> Self {
         Self {
+            agent_id: context.agent_id,
             host_bridge: context.host_bridge,
             trace: context.trace,
             current_prompts: context.current_prompts,
@@ -268,9 +272,20 @@ impl AcpHostCapabilityHandlers {
         if request.elicitation_id.as_deref().is_none_or(str::is_empty) {
             return Err(invalid_params("URL elicitation requires elicitationId"));
         }
+        // The URL is published as Sign-in Flow state for every client rather than opened on the
+        // App Server host or pushed to one arbitrary client; `opened` means a running flow took it.
         let host_bridge = self.host_bridge.clone();
+        let message = request.message;
+        let agent_id = self.agent_id.clone();
         let opened = tokio::task::spawn_blocking(move || {
-            host_bridge.request(SHELL_OPEN_EXTERNAL, Some(serde_json::json!({ "url": url })))
+            host_bridge.request(
+                SHELL_OPEN_EXTERNAL,
+                Some(serde_json::json!({
+                    "agentId": agent_id,
+                    "url": url,
+                    "message": message,
+                })),
+            )
         })
         .await
         .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?

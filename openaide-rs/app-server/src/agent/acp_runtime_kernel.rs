@@ -66,6 +66,20 @@ impl AcpRuntimeKernel {
         self.active_sessions.authenticate(request)
     }
 
+    pub(super) fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.registry.require(agent_id)?;
+        // Authenticate holds the process lock until Codex returns. Stop the
+        // process without taking that lock so Cancel can interrupt device-code login.
+        self.active_sessions.cancel_authentication(agent_id);
+        Ok(())
+    }
+
+    pub(super) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        let _operation = self.lock_agent_process_operations()?;
+        self.registry.require(agent_id)?;
+        self.active_sessions.logout(agent_id)
+    }
+
     pub(super) fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

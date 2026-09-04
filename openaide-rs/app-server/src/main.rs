@@ -171,7 +171,7 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
     };
     let host_request_transport = match startup {
         ProtocolEdgeStartup::Plain => AcpHostRequestTransport::Stdio,
-        ProtocolEdgeStartup::LocalHttpHandoff => AcpHostRequestTransport::Unavailable,
+        ProtocolEdgeStartup::LocalHttpHandoff => AcpHostRequestTransport::Stdio,
     };
     let mut dispatcher = match ProtocolEdgeStdioDispatcher::try_new_with_host_request_transport(
         state_root.clone(),

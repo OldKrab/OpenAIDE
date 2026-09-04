@@ -299,6 +299,9 @@ pub struct ShellShowNotificationResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ShellOpenExternalParams {
     pub url: String,
+    /// Agent-supplied sign-in instructions, such as a device code. Not a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

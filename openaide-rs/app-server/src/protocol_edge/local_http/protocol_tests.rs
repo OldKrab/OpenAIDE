@@ -3,6 +3,9 @@ use openaide_app_server_protocol::envelopes::{
     ErrorEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta,
 };
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::methods::{
+    AGENT_AUTHENTICATE, AGENT_CANCEL_AUTHENTICATE, CLIENT_INITIALIZE,
+};
 use openaide_app_server_protocol::snapshot::{
     ClientSnapshot, ClientSnapshotScope, ProjectCollectionSnapshot, ProtocolVersion,
     ServerCapabilities, ServerSnapshot, StateRootSnapshot,
@@ -403,6 +406,87 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
 }
 
 #[test]
+fn reliable_upload_acknowledges_authenticate_before_cancel_completes_it() {
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let workflow = std::sync::Arc::new(CancelReleasesAuthentication::new(started_tx));
+    let gateway = SharedRpcGateway::new(
+        crate::protocol_edge::tests::gateway_with_agent_authenticate(workflow.clone()),
+    );
+    let handler = LocalHttpProtocolHandler::new(gateway, "token", "server-1");
+    let opened = handler.handle(
+        Some("Bearer token"),
+        Some("client-1"),
+        &json!({ "transport": "open" }).to_string(),
+    );
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap().to_string();
+    let initialized = handler.handle(
+        Some("Bearer token"),
+        Some("client-1"),
+        &reliable_request(
+            &session_id,
+            1,
+            "initialize",
+            CLIENT_INITIALIZE,
+            serde_json::to_value(crate::protocol_edge::tests::init_params("client-1")).unwrap(),
+        ),
+    );
+    assert_eq!(initialized.status, 204);
+
+    let authenticate_handler = handler.clone();
+    let authenticate_session_id = session_id.clone();
+    let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+    let authenticate_upload = std::thread::spawn(move || {
+        let response = authenticate_handler.handle(
+            Some("Bearer token"),
+            Some("client-1"),
+            &reliable_request(
+                &authenticate_session_id,
+                2,
+                "authenticate",
+                AGENT_AUTHENTICATE,
+                json!({ "agentId": "codex", "methodId": "chat-gpt" }),
+            ),
+        );
+        let _ = ack_tx.send(response);
+    });
+    started_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("authentication started");
+
+    let acknowledgement = ack_rx.recv_timeout(std::time::Duration::from_millis(100));
+    if acknowledgement.is_err() {
+        workflow.release();
+    }
+    authenticate_upload
+        .join()
+        .expect("authenticate upload thread");
+    assert_eq!(
+        acknowledgement
+            .expect("authenticate upload was acknowledged while authentication was still running")
+            .status,
+        204,
+    );
+
+    let cancelled = handler.handle(
+        Some("Bearer token"),
+        Some("client-1"),
+        &reliable_request(
+            &session_id,
+            3,
+            "cancel-authenticate",
+            AGENT_CANCEL_AUTHENTICATE,
+            json!({ "agentId": "codex" }),
+        ),
+    );
+    assert_eq!(cancelled.status, 204);
+    workflow
+        .cancelled()
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("cancel reached the authentication workflow");
+}
+
+#[test]
 fn reliable_upload_reports_an_invalid_connection_id() {
     let sessions = ReliableSessionRegistry::new("server-1");
 
@@ -638,6 +722,106 @@ fn request(id: &str, method: &str, params: Value) -> String {
         "meta": RequestMeta::default(),
     })
     .to_string()
+}
+
+fn reliable_request(
+    session_id: &str,
+    sequence: u64,
+    id: &str,
+    method: &str,
+    params: Value,
+) -> String {
+    json!({
+        "transport": "send",
+        "sessionId": session_id,
+        "sequence": sequence,
+        "message": {
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+            "meta": RequestMeta::default(),
+        }
+    })
+    .to_string()
+}
+
+struct CancelReleasesAuthentication {
+    started: std::sync::mpsc::Sender<()>,
+    cancelled_rx: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    cancelled_tx: std::sync::mpsc::Sender<()>,
+    state: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl CancelReleasesAuthentication {
+    fn new(started: std::sync::mpsc::Sender<()>) -> Self {
+        let (cancelled_tx, cancelled_rx) = std::sync::mpsc::channel();
+        Self {
+            started,
+            cancelled_rx: std::sync::Mutex::new(Some(cancelled_rx)),
+            cancelled_tx,
+            state: std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new())),
+        }
+    }
+
+    fn release(&self) {
+        let (cancelled, wake) = self.state.as_ref();
+        *cancelled.lock().expect("cancel state") = true;
+        wake.notify_all();
+    }
+
+    fn cancelled(&self) -> std::sync::mpsc::Receiver<()> {
+        self.cancelled_rx
+            .lock()
+            .expect("cancel receiver")
+            .take()
+            .expect("cancel receiver is read once")
+    }
+}
+
+impl crate::agent::product_api::AgentAuthenticateWorkflow for CancelReleasesAuthentication {
+    fn authenticate(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentAuthenticateParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentAuthenticateResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        let _ = self.started.send(());
+        let (cancelled, wake) = self.state.as_ref();
+        let mut cancelled = cancelled.lock().expect("cancel state");
+        while !*cancelled {
+            cancelled = wake.wait(cancelled).expect("cancel state");
+        }
+        Ok(
+            openaide_app_server_protocol::agent::AgentAuthenticateResult {
+                agent_id: params.agent_id,
+                method_id: params.method_id,
+                status: openaide_app_server_protocol::agent::AgentAuthenticateStatus::AwaitingUser,
+                agents: openaide_app_server_protocol::snapshot::AgentCollectionSnapshot {
+                    agents: Vec::new(),
+                },
+            },
+        )
+    }
+
+    fn cancel_authenticate(
+        &self,
+        _params: openaide_app_server_protocol::agent::AgentCancelAuthenticateParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentCancelAuthenticateResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        self.release();
+        let _ = self.cancelled_tx.send(());
+        Ok(
+            openaide_app_server_protocol::agent::AgentCancelAuthenticateResult {
+                agents: openaide_app_server_protocol::snapshot::AgentCollectionSnapshot {
+                    agents: Vec::new(),
+                },
+            },
+        )
+    }
 }
 
 fn client_snapshot() -> ClientSnapshot {

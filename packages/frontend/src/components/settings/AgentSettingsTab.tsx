@@ -6,6 +6,7 @@ import type {
   CustomAgentMetadataUpdateParams,
   CustomAgentReplaceParams,
 } from "@openaide/app-shell-contracts";
+import { currentFrontendShell } from "../../services/frontendShell";
 import { AgentSettingsDetail } from "./AgentSettingsDetail";
 import { AgentSettingsList } from "./AgentSettingsList";
 import type { AgentRecoveryActions } from "../AgentRecovery";
@@ -22,8 +23,9 @@ export { shouldConsumeAgentDeleteAck, shouldConsumeAgentSaveAck } from "./agentS
 
 export function AgentSettingsTab({
   agents,
-  authPending,
   onAuthenticate,
+  onCancelAuthentication,
+  onLogout,
   onCreateCustomAgent,
   onDeleteCustomAgent,
   onReplaceCustomAgent,
@@ -36,8 +38,9 @@ export function AgentSettingsTab({
   recoveryActions,
 }: {
   agents: AgentSettingsRecord[];
-  authPending: boolean;
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
+  onCancelAuthentication?: (agentId: string) => void | Promise<void>;
+  onLogout?: (agentId: string) => boolean | void | Promise<boolean | void>;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
@@ -101,6 +104,7 @@ export function AgentSettingsTab({
     setConfirmReplaceAgentId(undefined);
     setDraft(undefined);
     setSelectedId(agent.id);
+    currentFrontendShell()?.navigation?.replaceSettingsAgent?.(agent.id);
   };
   const updateDraft = (patch: Partial<AgentDraft>) => {
     setConfirmReplaceAgentId(undefined);
@@ -172,7 +176,10 @@ export function AgentSettingsTab({
           aria-label="Back to Agents"
           className="settings-detail-back agent-detail-back"
           disabled={draft !== undefined && !isCreating}
-          onClick={() => setSelectedId(undefined)}
+          onClick={() => {
+            setSelectedId(undefined);
+            currentFrontendShell()?.navigation?.replaceSettingsAgent?.();
+          }}
           title={draft !== undefined && !isCreating ? "Save or cancel changes first" : undefined}
           type="button"
         >
@@ -180,13 +187,14 @@ export function AgentSettingsTab({
         </button>
         <AgentSettingsDetail
           activeDraft={activeDraft}
-          authPending={authPending}
           confirmDeleteAgentId={confirmDeleteAgentId}
           confirmReplaceAgentId={confirmReplaceAgentId}
           isCreating={isCreating}
           isCustom={isCustom}
           isEditing={draft !== undefined}
           onAuthenticate={onAuthenticate}
+          onCancelAuthentication={onCancelAuthentication}
+          onLogout={onLogout}
           onCancelDraft={draft !== undefined ? cancelDraft : undefined}
           onDeleteClick={deleteDraft}
           onSaveDraft={saveDraft}

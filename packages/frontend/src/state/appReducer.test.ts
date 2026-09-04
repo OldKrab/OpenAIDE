@@ -154,6 +154,69 @@ describe("app reducer composer state", () => {
     expect(state.settings.agentDetails?.[0]).toMatchObject({ id: "codex", status: "connected" });
   });
 
+  it("renders the App Server Sign-in Flow from the live Agent collection", () => {
+    let state = createInitialState();
+    const agents = settingsAgents(["codex"]).map((agent) => ({
+      ...agent,
+      status: "auth_required" as const,
+      auth_methods: [{ id: "chat-gpt", label: "ChatGPT", kind: "agent" as const }],
+    }));
+
+    state = appReducer(state, { type: "settings:agentDetailsResult", generatedAt: "now", agents });
+    state = appReducer(state, {
+      type: "settings:agentCollection",
+      agents: [{
+        agentId: "codex",
+        status: "authenticating",
+        signIn: {
+          method_id: "chat-gpt",
+          phase: "awaiting_user",
+          url: "https://auth.openai.com/device",
+          hint: "Enter this code: ABCD-EFGH",
+        },
+      }],
+    });
+
+    expect(state.settings.loading).toBe(false);
+    expect(state.settings.agentDetails?.[0]).toMatchObject({
+      id: "codex",
+      status: "authenticating",
+      sign_in: { method_id: "chat-gpt", phase: "awaiting_user", url: "https://auth.openai.com/device" },
+    });
+
+    // Cancellation is reported by App Server as the flow disappearing; nothing lingers locally.
+    state = appReducer(state, {
+      type: "settings:agentCollection",
+      agents: [{ agentId: "codex", status: "auth_required" }],
+    });
+
+    expect(state.settings.agentDetails?.[0]).toMatchObject({ id: "codex", status: "auth_required" });
+    expect(state.settings.agentDetails?.[0]?.sign_in).toBeUndefined();
+  });
+
+  it("keeps a failed Sign-in Flow visible until App Server clears it", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "settings:agentDetailsResult",
+      generatedAt: "now",
+      agents: settingsAgents(["codex"]).map((agent) => ({ ...agent, status: "auth_required" as const })),
+    });
+    state = appReducer(state, {
+      type: "settings:agentCollection",
+      agents: [{
+        agentId: "codex",
+        status: "auth_required",
+        signIn: { method_id: "chat-gpt", phase: "failed", failure: "Codex could not sign in with ChatGPT." },
+      }],
+    });
+
+    expect(state.settings.agentDetails?.[0]?.sign_in).toEqual({
+      method_id: "chat-gpt",
+      phase: "failed",
+      failure: "Codex could not sign in with ChatGPT.",
+    });
+  });
+
   it("reconciles Agent mutations into Backend Agent Settings details", () => {
     let state = createInitialState();
     const codex = settingsAgents(["codex"])[0];

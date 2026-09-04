@@ -10,16 +10,16 @@ use openaide_app_server_protocol::ids::{
     AgentId, ClientInstanceId, ClientRequestId, ProjectId, StateRootId, TaskId,
 };
 use openaide_app_server_protocol::methods::{
-    AGENT_AUTHENTICATE, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_REPLACE_CUSTOM,
-    AGENT_SET_ENABLED, AGENT_UPDATE_CUSTOM_METADATA, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
-    CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE,
-    CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT, CLIENT_UPDATE_SHUTDOWN_PREPARE,
-    DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
-    MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
-    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
-    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
-    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY,
-    TASK_SET_CONFIG_OPTION,
+    AGENT_AUTHENTICATE, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_LOGOUT,
+    AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED, AGENT_UPDATE_CUSTOM_METADATA, ATTACHMENT_REVEAL,
+    ATTACHMENT_REVEAL_SENT, CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT,
+    CLIENT_INITIALIZE, CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT,
+    CLIENT_UPDATE_SHUTDOWN_PREPARE, DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER,
+    MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS,
+    SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
+    SETTINGS_UPDATE_NEW_TASK_DEFAULTS, SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME,
+    SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE,
+    TASK_COMPOSER_HISTORY, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -1153,6 +1153,226 @@ fn agent_authenticate_returns_typed_result() {
     assert_eq!(value["result"]["agentId"], json!("codex"));
     assert_eq!(value["result"]["methodId"], json!("codex-login"));
     assert_eq!(value["result"]["status"], json!("authenticated"));
+}
+
+#[test]
+fn agent_logout_returns_typed_result() {
+    let mut gateway = gateway_with_agent_authenticate(Arc::new(LoggingOutAgent));
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let outcome = SharedRpcGateway::new(gateway).handle_inbound(
+        connection_id,
+        request(
+            "2",
+            AGENT_LOGOUT,
+            serde_json::json!({
+                "agentId": "codex",
+                "expectedMethodId": "api-key",
+            }),
+        ),
+        AppServerTime(2),
+    );
+
+    let value = response_value(outcome);
+    assert_eq!(value["result"]["agents"]["agents"], json!([]));
+}
+
+#[test]
+fn agent_authenticate_does_not_block_other_protocol_requests() {
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let mut raw = gateway_with_agent_authenticate(Arc::new(BlockingAuthenticate {
+        started: started_tx,
+        release: Mutex::new(Some(release_rx)),
+    }));
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut raw, connection_id.clone());
+    let gateway = SharedRpcGateway::new(raw);
+
+    let authenticate_gateway = gateway.clone();
+    let authenticate_connection = connection_id.clone();
+    let authenticate = std::thread::spawn(move || {
+        authenticate_gateway.handle_inbound(
+            authenticate_connection,
+            request(
+                "2",
+                AGENT_AUTHENTICATE,
+                serde_json::json!({
+                    "agentId": "codex",
+                    "methodId": "chat-gpt",
+                }),
+            ),
+            AppServerTime(2),
+        )
+    });
+    started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("authenticate started");
+
+    let heartbeat_gateway = gateway.clone();
+    let heartbeat_connection = connection_id;
+    let (heartbeat_tx, heartbeat_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let outcome = heartbeat_gateway.handle_inbound(
+            heartbeat_connection,
+            request("3", CLIENT_HEARTBEAT, json!({})),
+            AppServerTime(3),
+        );
+        let _ = heartbeat_tx.send(outcome);
+    });
+    let heartbeat = heartbeat_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("heartbeat completed while ChatGPT authentication was still running");
+    release_tx.send(()).expect("release authenticate");
+
+    let authenticate_outcome = authenticate.join().expect("authenticate thread");
+    let _ = response_value(heartbeat);
+    assert_eq!(
+        response_value(authenticate_outcome)["result"]["status"],
+        json!("authenticated")
+    );
+}
+
+#[test]
+fn local_http_authentication_reads_secrets_from_the_initiating_client() {
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (resolved_tx, resolved_rx) = std::sync::mpsc::channel();
+    let mut raw = gateway_with_agent_authenticate(Arc::new(ResolvingAuthenticationSecret {
+        started: started_tx,
+        resolved: resolved_tx,
+    }));
+    let connection_id = ConnectionId::new("local-http:client-1");
+    initialize(&mut raw, connection_id.clone());
+    let gateway = SharedRpcGateway::new(raw);
+    let authenticate_gateway = gateway.clone();
+    let authenticate_connection = connection_id.clone();
+    let authenticate = std::thread::spawn(move || {
+        authenticate_gateway.handle_inbound(
+            authenticate_connection,
+            request(
+                "2",
+                AGENT_AUTHENTICATE,
+                serde_json::json!({
+                    "agentId": "codex",
+                    "methodId": "api-key",
+                    "secretEnv": ["OPENAI_API_KEY"],
+                    "secretStorageAgentId": "codex.auth.api-key",
+                }),
+            ),
+            AppServerTime(2),
+        )
+    });
+    started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("secret resolution started");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deliveries = loop {
+        let deliveries =
+            gateway.drain_server_requests_for_connection(&connection_id, AppServerTime(3));
+        if !deliveries.is_empty() {
+            break deliveries;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "secret request delivered"
+        );
+        std::thread::yield_now();
+    };
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].envelope.method, "secret/read");
+    assert_eq!(
+        deliveries[0].envelope.params["key"],
+        "openaide.agent.codex.auth.api-key.env.OPENAI_API_KEY"
+    );
+    gateway.handle_inbound(
+        connection_id,
+        InboundProtocolMessage::ClientResponse {
+            request_id: deliveries[0].envelope.request_id.as_str().to_string(),
+            answer: ServerRequestAnswer::Result(json!({ "value": "secure-token" })),
+        },
+        AppServerTime(4),
+    );
+
+    assert_eq!(
+        resolved_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("secret resolved"),
+        "secure-token"
+    );
+    let value = response_value(authenticate.join().expect("authentication thread"));
+    assert_eq!(value["result"]["status"], "authenticated");
+}
+
+#[test]
+fn sign_in_url_host_request_becomes_sign_in_flow_state_instead_of_a_client_request() {
+    let recorder = Arc::new(RecordingSignInUrls::default());
+    let mut raw = gateway_with_agent_authenticate(recorder.clone());
+    let browser = ConnectionId::new("conn-browser");
+    let mut params = init_params("browser-1");
+    params.capabilities.shell = vec![ShellCapability::OpenExternal];
+    response_value(raw.handle_inbound(
+        browser.clone(),
+        request("1", CLIENT_INITIALIZE, params),
+        AppServerTime(1),
+    ));
+    let gateway = SharedRpcGateway::new(raw);
+
+    let response = gateway.respond_to_acp_host_request(&crate::protocol::host::HostRequest {
+        jsonrpc: "2.0",
+        id: crate::protocol::jsonrpc::RpcId::Number(9),
+        method: "shell/openExternal".to_string(),
+        params: Some(json!({
+            "agentId": "codex",
+            "url": "https://auth.openai.com/device",
+            "message": "Sign in to ChatGPT and enter this code: ABCD-EFGH",
+        })),
+    });
+
+    assert_eq!(response["result"]["opened"], json!(true));
+    assert_eq!(
+        recorder
+            .recorded
+            .lock()
+            .expect("recorded sign-in urls")
+            .as_slice(),
+        &[(
+            "codex".to_string(),
+            "https://auth.openai.com/device".to_string(),
+            Some("Sign in to ChatGPT and enter this code: ABCD-EFGH".to_string()),
+        )]
+    );
+    // No client is singled out: the URL is published through the Agent Sign-in Flow instead.
+    assert!(gateway
+        .drain_server_requests_for_connection(&browser, AppServerTime(2))
+        .is_empty());
+}
+
+#[test]
+fn sign_in_url_host_request_without_a_running_flow_is_not_opened() {
+    let recorder = Arc::new(RecordingSignInUrls {
+        accept: false,
+        ..Default::default()
+    });
+    let raw = gateway_with_agent_authenticate(recorder.clone());
+    let gateway = SharedRpcGateway::new(raw);
+
+    let response = gateway.respond_to_acp_host_request(&crate::protocol::host::HostRequest {
+        jsonrpc: "2.0",
+        id: crate::protocol::jsonrpc::RpcId::Number(9),
+        method: "shell/openExternal".to_string(),
+        params: Some(json!({ "agentId": "codex", "url": "https://auth.openai.com/device" })),
+    });
+    assert_eq!(response["result"]["opened"], json!(false));
+
+    let missing_agent = gateway.respond_to_acp_host_request(&crate::protocol::host::HostRequest {
+        jsonrpc: "2.0",
+        id: crate::protocol::jsonrpc::RpcId::Number(10),
+        method: "shell/openExternal".to_string(),
+        params: Some(json!({ "url": "https://auth.openai.com/device" })),
+    });
+    assert_eq!(missing_agent["error"]["code"], json!(-32602));
 }
 
 #[test]
@@ -3124,7 +3344,7 @@ fn gateway_with_agent_session_listing(
     )
 }
 
-fn gateway_with_agent_authenticate(
+pub(super) fn gateway_with_agent_authenticate(
     agent_authenticate: Arc<dyn AgentAuthenticateWorkflow>,
 ) -> RpcGateway {
     RpcGateway::new(
@@ -3219,6 +3439,38 @@ impl AgentProbeWorkflow for RejectingAgentProbe {
 }
 
 struct RejectingAgentAuthenticate;
+
+struct LoggingOutAgent;
+
+impl AgentAuthenticateWorkflow for LoggingOutAgent {
+    fn authenticate(
+        &self,
+        _params: openaide_app_server_protocol::agent::AgentAuthenticateParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentAuthenticateResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(test_unavailable(
+            "authentication unavailable in logout test",
+        ))
+    }
+
+    fn logout(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentLogoutParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentLogoutResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        assert_eq!(params.agent_id.as_str(), "codex");
+        assert_eq!(params.expected_method_id.as_deref(), Some("api-key"));
+        Ok(openaide_app_server_protocol::agent::AgentLogoutResult {
+            agents: openaide_app_server_protocol::snapshot::AgentCollectionSnapshot {
+                agents: Vec::new(),
+            },
+        })
+    }
+}
 
 impl AgentAuthenticateWorkflow for RejectingAgentAuthenticate {
     fn authenticate(
@@ -3322,6 +3574,102 @@ impl AgentListSessionsWorkflow for RecordingCatalogRefresh {
             .lock()
             .unwrap()
             .push((project_id.to_string(), target_row_count));
+    }
+}
+
+struct BlockingAuthenticate {
+    started: std::sync::mpsc::Sender<()>,
+    release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+struct ResolvingAuthenticationSecret {
+    started: std::sync::mpsc::Sender<()>,
+    resolved: std::sync::mpsc::Sender<String>,
+}
+
+impl AgentAuthenticateWorkflow for ResolvingAuthenticationSecret {
+    fn authenticate(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentAuthenticateParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentAuthenticateResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        AuthenticatingAgent.authenticate(params)
+    }
+
+    fn authenticate_with_secret_resolver(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentAuthenticateParams,
+        resolver: Option<Arc<dyn crate::agent::AgentSecretResolver>>,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentAuthenticateResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        let _ = self.started.send(());
+        let values = resolver
+            .expect("client secret resolver")
+            .resolve_secret_env("codex.auth.api-key", &["OPENAI_API_KEY".to_string()])
+            .expect("resolve auth secret");
+        let _ = self.resolved.send(values["OPENAI_API_KEY"].clone());
+        AuthenticatingAgent.authenticate(params)
+    }
+}
+
+impl AgentAuthenticateWorkflow for BlockingAuthenticate {
+    fn authenticate(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentAuthenticateParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentAuthenticateResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        let _ = self.started.send(());
+        if let Some(release) = self
+            .release
+            .lock()
+            .expect("authenticate release lock poisoned")
+            .take()
+        {
+            release.recv().expect("authenticate released");
+        }
+        AuthenticatingAgent.authenticate(params)
+    }
+}
+
+/// Records Sign-in URLs the way `AgentProductApi` would write them onto the Sign-in Flow.
+struct RecordingSignInUrls {
+    accept: bool,
+    recorded: Mutex<Vec<(String, String, Option<String>)>>,
+}
+
+impl Default for RecordingSignInUrls {
+    fn default() -> Self {
+        Self {
+            accept: true,
+            recorded: Mutex::default(),
+        }
+    }
+}
+
+impl AgentAuthenticateWorkflow for RecordingSignInUrls {
+    fn authenticate(
+        &self,
+        params: openaide_app_server_protocol::agent::AgentAuthenticateParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentAuthenticateResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        AuthenticatingAgent.authenticate(params)
+    }
+
+    fn record_sign_in_url(&self, agent_id: &str, url: String, hint: Option<String>) -> bool {
+        self.recorded.lock().expect("recorded sign-in urls").push((
+            agent_id.to_string(),
+            url,
+            hint,
+        ));
+        self.accept
     }
 }
 
@@ -4389,6 +4737,8 @@ pub(super) fn initialized_gateway(client_id: &str, connection_id: &str) -> RpcGa
     gateway
 }
 
+/// Initialized gateway whose `agent/authenticate` blocks until `release` fires, for
+/// transport tests that must observe the request while sign-in is still running.
 fn client_new_task_record(
     task_id: &str,
     owner_client_instance_id: &str,
@@ -4471,7 +4821,7 @@ fn request_with_meta<T: serde::Serialize>(
     }
 }
 
-fn init_params(client_id: &str) -> InitializeParams {
+pub(super) fn init_params(client_id: &str) -> InitializeParams {
     InitializeParams {
         client_instance_id: ClientInstanceId::from(client_id),
         shell: ShellDescriptor {

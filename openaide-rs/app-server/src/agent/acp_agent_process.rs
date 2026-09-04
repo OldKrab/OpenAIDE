@@ -12,10 +12,8 @@ use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
 use crate::agent::acp_process_diagnostics::acp_connection_terminal_diagnostics;
-use crate::agent::acp_schema::{AuthenticateRequest, CloseSessionRequest, ForkSessionRequest};
-use crate::agent::acp_session_capabilities::{
-    validate_auth_method, validate_session_fork_capabilities,
-};
+use crate::agent::acp_schema::{CloseSessionRequest, ForkSessionRequest};
+use crate::agent::acp_session_capabilities::validate_session_fork_capabilities;
 use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connection};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::{
@@ -27,10 +25,10 @@ use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
 use crate::protocol::model::{
-    AgentAuthenticateResult, AgentAuthenticateStatus, AgentListSessionsResult, AgentProbeResult,
-    NormalizedMessage,
+    AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult, NormalizedMessage,
 };
 
+use crate::agent::acp_agent_authentication::authenticate_on_shared_process;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_session_connection::{
     connect_acp_session_client, AcpSessionConnectionContext,
@@ -122,6 +120,7 @@ pub(super) struct AcpAgentProcessInput {
     pub(super) shutdown_rx: tokio::sync::watch::Receiver<bool>,
     pub(super) host_bridge: HostBridge,
     pub(super) terminal_registry: AcpHostTerminalRegistry,
+    pub(super) secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
 }
 
 pub(super) enum AcpAgentProcessControl {
@@ -132,6 +131,10 @@ pub(super) enum AcpAgentProcessControl {
     Authenticate {
         request: AgentAuthenticateRequest,
         reply_tx: mpsc::Sender<Result<AgentAuthenticateResult, RuntimeError>>,
+    },
+    Logout {
+        agent_id: String,
+        reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
     },
     Fork {
         request: AgentSessionFork,
@@ -157,6 +160,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         mut shutdown_rx,
         host_bridge,
         terminal_registry,
+        secret_resolver,
     } = input;
 
     let current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>> = Arc::default();
@@ -201,7 +205,8 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         &host_bridge,
         first_open
             .as_ref()
-            .and_then(|open| open.request.secret_resolver()),
+            .and_then(|open| open.request.secret_resolver())
+            .or(secret_resolver.as_deref()),
     ) {
         Ok(agent) => agent,
         Err(error) => {
@@ -212,6 +217,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         }
     };
     let connection_context = AcpSessionConnectionContext {
+        agent_id: config.agent_id.clone(),
         host_bridge: host_bridge.clone(),
         trace: first_open.as_ref().and_then(|open| open.trace.clone()),
         current_prompts: current_prompts.clone(),
@@ -365,6 +371,14 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                                 ).await;
                                 let _ = reply_tx.send(result);
                             }
+                            AcpAgentProcessControl::Logout { agent_id, reply_tx } => {
+                                let result = crate::agent::acp_agent_logout::logout_on_shared_process(
+                                    &connection,
+                                    &initialize,
+                                    &agent_id,
+                                ).await;
+                                let _ = reply_tx.send(result);
+                            }
                             AcpAgentProcessControl::Fork { request, reply_tx } => {
                                 let result = fork_session_on_shared_process(
                                     &connection,
@@ -489,72 +503,6 @@ async fn fork_session_on_shared_process(
         session_id,
         close_warning,
     })
-}
-
-async fn authenticate_on_shared_process(
-    connection: &ConnectionTo<Agent>,
-    initialize: &InitializeResponse,
-    config: &AcpAgentConfig,
-    host_bridge: &HostBridge,
-    request: AgentAuthenticateRequest,
-) -> Result<AgentAuthenticateResult, RuntimeError> {
-    validate_auth_method(initialize, &request.method_id)?;
-    let method = initialize
-        .auth_methods
-        .iter()
-        .find(|method| method.id().0.as_ref() == request.method_id)
-        .ok_or_else(|| RuntimeError::InvalidParams("method_id".to_string()))?;
-    if let crate::agent::acp_schema::AuthMethod::Terminal(method) = method {
-        if !request.terminal_confirmed {
-            open_visible_auth_terminal(config, method, host_bridge).await?;
-            return Ok(AgentAuthenticateResult {
-                agent_id: request.agent_id,
-                method_id: request.method_id,
-                status: AgentAuthenticateStatus::AwaitingUser,
-            });
-        }
-    }
-    connection
-        .send_request(AuthenticateRequest::new(request.method_id.clone()))
-        .block_task()
-        .await
-        .map_err(acp_error)?;
-    Ok(AgentAuthenticateResult {
-        agent_id: request.agent_id,
-        method_id: request.method_id,
-        status: AgentAuthenticateStatus::Authenticated,
-    })
-}
-
-async fn open_visible_auth_terminal(
-    config: &AcpAgentConfig,
-    method: &crate::agent::acp_schema::AuthMethodTerminal,
-    host_bridge: &HostBridge,
-) -> Result<(), RuntimeError> {
-    let command = config.command.clone();
-    let args = config
-        .args
-        .iter()
-        .cloned()
-        .chain(method.args.iter().cloned())
-        .collect::<Vec<_>>();
-    let mut env = config.env.iter().cloned().collect::<HashMap<_, _>>();
-    env.extend(method.env.clone());
-    let host_bridge = host_bridge.clone();
-    tokio::task::spawn_blocking(move || {
-        host_bridge.request_with_timeout(
-            "agent/auth_terminal",
-            Some(serde_json::json!({
-                "command": command,
-                "args": args,
-                "env": env,
-            })),
-            None,
-        )
-    })
-    .await
-    .map_err(|error| RuntimeError::Internal(error.to_string()))??;
-    Ok(())
 }
 
 async fn list_sessions_on_shared_process(

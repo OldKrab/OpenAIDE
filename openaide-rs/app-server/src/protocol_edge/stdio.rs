@@ -232,6 +232,10 @@ impl ProtocolEdgeStdioDispatcher {
         self.host_requests.take()
     }
 
+    pub fn host_bridge(&self) -> HostBridge {
+        self.host_bridge.clone()
+    }
+
     /// Transfers root-wide storage supervision to the binary process owner.
     pub fn take_storage_fatal_events(
         &mut self,

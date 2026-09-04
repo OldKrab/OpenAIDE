@@ -64,6 +64,10 @@ export function replaceSettingsTabRoute(tab: SettingsTabId) {
   frontendShell().navigation.replaceSettingsTab(tab);
 }
 
+export function replaceSettingsAgentRoute(agentId?: string) {
+  frontendShell().navigation.replaceSettingsAgent?.(agentId);
+}
+
 export function openRecoveryUrl(url: string) {
   frontendShell().recovery.openExternal(url);
 }

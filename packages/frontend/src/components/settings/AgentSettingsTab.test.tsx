@@ -3,7 +3,9 @@ import type { ReactTestRenderer } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import type { AgentRecoveryActions } from "../AgentRecovery";
+import { agentLeftLaunching } from "./agentSettingsModel";
 import { AgentSettingsTab } from "./AgentSettingsTab";
+import { installFrontendShell } from "../../services/frontendShell";
 
 describe("AgentSettingsTab interactions", () => {
   beforeEach(() => {
@@ -175,7 +177,6 @@ describe("AgentSettingsTab interactions", () => {
       view.update(
         <AgentSettingsTab
           agents={[customAgent("custom.local")]}
-          authPending={false}
           onAuthenticate={vi.fn()}
           onCreateCustomAgent={vi.fn()}
           onDeleteCustomAgent={vi.fn()}
@@ -253,16 +254,18 @@ describe("AgentSettingsTab interactions", () => {
     expect(textContent(view.root)).not.toContain("Agent is available to be selected and used.");
   });
 
-  it("explains enabled Agents whose status has not been checked yet", () => {
+  it("offers a concise connection action for an idle disconnected Agent", () => {
     const onRetry = vi.fn(async () => true);
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", { enabled: true, status: "disconnected" })],
       recoveryActions: recoveryActions({ onRetry }),
     });
 
-    expect(textContent(view.root)).toContain("Status check needed. Run the status check to verify this agent.");
-    expect(textContent(view.root)).not.toContain("Status has not been checked.");
-    act(() => buttonByText(view.root, "Try again").props.onClick());
+    expect(textContent(view.root)).toContain("ConnectionNot connectedConnect");
+    expect(textContent(view.root)).not.toContain("Action required");
+    expect(textContent(view.root)).not.toContain("Status check needed");
+    expect(textContent(view.root)).not.toContain("disconnected");
+    act(() => buttonByText(view.root, "Connect").props.onClick());
     expect(onRetry).toHaveBeenCalledWith("codex");
   });
 
@@ -327,18 +330,16 @@ describe("AgentSettingsTab interactions", () => {
     expect(onOpenExternal).toHaveBeenCalledWith("https://nodejs.org/en/download");
   });
 
-  it("keeps setup status copy while a recovery refresh is pending", () => {
+  it("keeps setup status copy for Agents that need setup", () => {
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", { status: "setup_required" })],
-      authPending: true,
       recoveryActions: recoveryActions(),
     });
 
     expect(textContent(view.root)).toContain("Setup is incomplete.");
-    expect(textContent(view.root)).not.toContain("Authentication is running.");
   });
 
-  it("renders every ACP authentication method in advertised order", () => {
+  it("opens a focused chooser with every ACP authentication method in advertised order", () => {
     const onAuthenticate = vi.fn();
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", {
@@ -360,19 +361,172 @@ describe("AgentSettingsTab interactions", () => {
       onAuthenticate,
     });
 
-    expect(textContent(view.root)).toContain("Browser login");
-    expect(textContent(view.root)).toContain("API key");
-    expect(textContent(view.root)).toContain("Terminal login");
-    expect(view.root.findByProps({ "aria-label": "API key" }).props.type).toBe("password");
-    expect(view.root.findByProps({ "aria-label": "Endpoint" }).props.type).toBe("text");
+    expect(textContent(view.root)).not.toContain("Browser login");
+    expect(view.root.findAllByProps({ "aria-label": "API key" })).toHaveLength(0);
+
+    act(() => {
+      buttonByText(view.root, "Manage").props.onClick();
+    });
+    const methods = view.root.findAllByProps({ className: "agent-sign-in-method" });
+    expect(methods.map(textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining("Browser login"),
+      expect.stringContaining("API key"),
+      expect.stringContaining("Terminal login"),
+    ]));
+    expect(methods.map(textContent).join(" ")).toMatch(/Browser login.*API key.*Terminal login/);
+    expect(view.root.findAllByProps({ "aria-label": "API key" })).toHaveLength(0);
 
     act(() => {
       buttonByText(view.root, "Browser login").props.onClick();
     });
-    expect(onAuthenticate).toHaveBeenCalledWith("codex", "browser", undefined);
+    expect(onAuthenticate).toHaveBeenCalledWith("codex", "browser");
   });
 
-  it("explains that connected Agent authentication methods are proactive choices", () => {
+  it("replaces the chooser with the selected API key step", () => {
+    const onAuthenticate = vi.fn();
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        auth_methods: [{
+          id: "api-key",
+          label: "API key",
+          kind: "env_var",
+          variables: [{ name: "API_KEY", label: "API key", secret: true, optional: false }],
+        }],
+      })],
+      onAuthenticate,
+    });
+
+    act(() => {
+      buttonByText(view.root, "Manage").props.onClick();
+    });
+    act(() => {
+      buttonByText(view.root, "API key").props.onClick();
+    });
+
+    expect(textContent(view.root)).toContain("Enter your API key");
+    expect(buttonByText(view.root, "Back")).toBeTruthy();
+    expect(view.root.findByProps({ "aria-label": "API key" }).props.type).toBe("password");
+    expect(buttonByText(view.root, "Save").props.disabled).toBe(true);
+
+    act(() => {
+      view.root.findByProps({ "aria-label": "API key" }).props.onChange({ currentTarget: { value: "sk-test" } });
+    });
+    act(() => {
+      view.root.findByProps({ className: "agent-page-surface agent-sign-in-value-step" }).props.onSubmit({ preventDefault: vi.fn() });
+    });
+
+    expect(onAuthenticate).toHaveBeenCalledWith("codex", "api-key", { API_KEY: "sk-test" });
+  });
+
+  it("collapses to the awaiting-user step with the App Server URL and hint", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        status: "authenticating",
+        auth_methods: [
+          { id: "chat-gpt", label: "ChatGPT", kind: "agent" },
+          { id: "api-key", label: "API key", kind: "env_var", variables: [{ name: "KEY", secret: true, optional: false }] },
+        ],
+        sign_in: {
+          method_id: "chat-gpt",
+          phase: "awaiting_user",
+          url: "https://auth.openai.com/device",
+          hint: "Sign in to ChatGPT and enter this code: ABCD-EFGH",
+        },
+      })],
+      onCancelAuthentication: vi.fn(),
+    });
+
+    const openUrl = view.root.findByType("a");
+    expect(openUrl.props.href).toBe("https://auth.openai.com/device");
+    expect(openUrl.props.target).toBe("_blank");
+    expect(textContent(openUrl)).toContain("Open sign-in page");
+    expect(textContent(view.root)).toContain("Sign in to ChatGPT and enter this code: ABCD-EFGH");
+    expect(textContent(view.root)).toContain("https://auth.openai.com/device");
+    expect(textContent(view.root)).toContain("Cancel sign-in");
+    // Other methods step aside while one flow runs.
+    expect(buttonsByText(view.root, "Choose method")).toHaveLength(0);
+    expect(view.root.findAllByProps({ "aria-label": "KEY" })).toHaveLength(0);
+  });
+
+  it("shows a starting step that can be cancelled before the Agent answers", () => {
+    const onCancelAuthentication = vi.fn();
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        status: "authenticating",
+        auth_methods: [{ id: "chat-gpt", label: "ChatGPT", kind: "agent" }],
+        sign_in: { method_id: "chat-gpt", phase: "starting" },
+      })],
+      onCancelAuthentication,
+    });
+
+    expect(textContent(view.root)).toContain("Starting ChatGPT");
+    act(() => {
+      buttonByText(view.root, "Cancel sign-in").props.onClick();
+    });
+    expect(onCancelAuthentication).toHaveBeenCalledWith("codex");
+  });
+
+  it("offers retry or another method after App Server reports a failed flow", () => {
+    const onAuthenticate = vi.fn();
+    const onCancelAuthentication = vi.fn();
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        status: "auth_required",
+        auth_methods: [{ id: "chat-gpt", label: "ChatGPT", kind: "agent" }],
+        sign_in: { method_id: "chat-gpt", phase: "failed", failure: "Codex could not sign in with ChatGPT." },
+      })],
+      onAuthenticate,
+      onCancelAuthentication,
+    });
+
+    expect(textContent(view.root)).toContain("Codex could not sign in with ChatGPT.");
+    act(() => {
+      buttonByText(view.root, "Try again").props.onClick();
+    });
+    expect(onAuthenticate).toHaveBeenCalledWith("codex", "chat-gpt");
+
+    act(() => {
+      buttonByText(view.root, "Choose another method").props.onClick();
+    });
+    expect(onCancelAuthentication).toHaveBeenCalledWith("codex");
+  });
+
+  it("does not reserve a browser window when ChatGPT sign-in starts", () => {
+    const reserveExternalOpen = vi.fn();
+    const onAuthenticate = vi.fn();
+    installFrontendShell({ recovery: { openExternal: vi.fn(), reserveExternalOpen } } as never);
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        status: "connected",
+        auth_methods: [{ id: "chat-gpt", label: "ChatGPT", kind: "agent" }],
+      })],
+      onAuthenticate,
+    });
+
+    act(() => {
+      buttonByText(view.root, "Manage").props.onClick();
+    });
+    act(() => {
+      buttonByText(view.root, "ChatGPT").props.onClick();
+    });
+
+    expect(reserveExternalOpen).not.toHaveBeenCalled();
+    expect(onAuthenticate).toHaveBeenCalledWith("codex", "chat-gpt");
+  });
+
+  it("hides Cancel sign-in when no flow is running", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        status: "auth_required",
+        auth_methods: [{ id: "chat-gpt", label: "ChatGPT", kind: "agent" }],
+      })],
+      onCancelAuthentication: vi.fn(),
+    });
+
+    expect(textContent(view.root)).not.toContain("Cancel sign-in");
+  });
+
+  it("presents connected Agent authentication choices without repeating the state", () => {
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", {
         status: "connected",
@@ -380,8 +534,12 @@ describe("AgentSettingsTab interactions", () => {
       })],
     });
 
-    expect(textContent(view.root)).toContain("Codex is connected. Sign in again to refresh credentials or switch accounts.");
-    expect(textContent(view.root)).not.toContain("Sign-in is required to continue.");
+    expect(textContent(view.root)).toContain("AuthenticationManage");
+    expect(view.root.findAllByProps({ "aria-label": "Authentication" })).toHaveLength(1);
+    expect(textContent(view.root)).not.toContain("Sign in");
+    expect(textContent(view.root)).not.toContain("Codex is connected");
+    expect(textContent(view.root)).not.toContain("Authentication available");
+    expect(textContent(view.root)).not.toContain("offered by Codex");
   });
 
   it("states explicitly when ACP reports that sign-in is required", () => {
@@ -392,23 +550,72 @@ describe("AgentSettingsTab interactions", () => {
       })],
     });
 
-    expect(textContent(view.root)).toContain("Sign-in is required to continue.");
+    expect(textContent(view.root)).toContain("Sign in requiredChoose method");
+    expect(view.root.findAllByProps({ "aria-label": "Sign in" })).toHaveLength(1);
+    expect(textContent(view.root)).not.toContain("Authentication required");
+    expect(textContent(view.root)).not.toContain("Sign-in is required to continue.");
   });
 
-  it("shows confirmation only for the terminal method awaiting the user", () => {
+  it("explains launching instead of leaving Codex on a blank connection page", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", { status: "launching" })],
+    });
+
+    expect(textContent(view.root)).toContain("Starting");
+    expect(textContent(view.root)).toContain("Starting the Agent process. Sign-in choices appear when it answers.");
+    expect(textContent(view.root)).not.toContain("Action required");
+  });
+
+  it("writes the selected Agent into the Settings route so refresh stays on that detail", () => {
+    const replaceSettingsAgent = vi.fn();
+    installFrontendShell({ navigation: { replaceSettingsAgent } } as never);
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex"), builtInAgent("opencode", { label: "OpenCode" })],
+      openFirst: false,
+    });
+
+    act(() => {
+      view.root.findAllByProps({ className: "agent-catalog-row" })
+        .find((button) => textContent(button).includes("Codex"))!
+        .props.onClick();
+    });
+    expect(replaceSettingsAgent).toHaveBeenCalledWith("codex");
+
+    act(() => {
+      view.root.findByProps({ "aria-label": "Back to Agents" }).props.onClick();
+    });
+    expect(replaceSettingsAgent).toHaveBeenLastCalledWith();
+  });
+
+  it("detects when a live Agent collection leaves launching", () => {
+    expect(agentLeftLaunching(
+      [{ id: "codex", status: "launching" }],
+      [{ id: "codex", status: "auth_required" }],
+    )).toBe(true);
+    expect(agentLeftLaunching(
+      [{ id: "codex", status: "launching" }],
+      [{ id: "codex", status: "launching" }],
+    )).toBe(false);
+  });
+
+  it("asks for confirmation while a terminal sign-in awaits the user", () => {
+    const onAuthenticate = vi.fn();
     const agent = builtInAgent("codex", {
       status: "authenticating",
-      authenticating_method_id: "terminal-login",
+      sign_in: { method_id: "terminal-login", phase: "awaiting_terminal" },
       auth_methods: [
         { id: "terminal-login", label: "Sign in in terminal", kind: "terminal" },
         { id: "browser-login", label: "Sign in with browser", kind: "agent" },
       ],
     });
 
-    const view = renderAgentSettings({ agents: [agent] });
+    const view = renderAgentSettings({ agents: [agent], onAuthenticate });
 
-    expect(buttonByText(view.root, "I've finished signing in").props.disabled).toBe(false);
-    expect(buttonByText(view.root, "Sign in with browser").props.disabled).toBe(true);
+    expect(buttonsByText(view.root, "Choose method")).toHaveLength(0);
+    act(() => {
+      buttonByText(view.root, "I've finished signing in").props.onClick();
+    });
+    expect(onAuthenticate).toHaveBeenCalledWith("codex", "terminal-login");
   });
 
   it("shows a useful empty Agent catalog", () => {
@@ -421,24 +628,24 @@ describe("AgentSettingsTab interactions", () => {
 
 function renderAgentSettings({
   agents,
-  authPending = false,
   onCreateCustomAgent = vi.fn(),
   onDeleteCustomAgent = vi.fn(),
   onReplaceCustomAgent = vi.fn(),
   onSetAgentEnabled = vi.fn(),
   onUpdateCustomAgentMetadata = vi.fn(),
   onAuthenticate = vi.fn(),
+  onCancelAuthentication,
   openFirst = true,
   recoveryActions,
 }: {
   agents: AgentSettingsRecord[];
-  authPending?: boolean;
   onCreateCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onCreateCustomAgent"];
   onDeleteCustomAgent?: (agentId: string) => void;
   onReplaceCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onReplaceCustomAgent"];
   onSetAgentEnabled?: (agentId: string, enabled: boolean) => void;
   onUpdateCustomAgentMetadata?: Parameters<typeof AgentSettingsTab>[0]["onUpdateCustomAgentMetadata"];
   onAuthenticate?: Parameters<typeof AgentSettingsTab>[0]["onAuthenticate"];
+  onCancelAuthentication?: Parameters<typeof AgentSettingsTab>[0]["onCancelAuthentication"];
   openFirst?: boolean;
   recoveryActions?: AgentRecoveryActions;
 }) {
@@ -447,8 +654,8 @@ function renderAgentSettings({
     view = create(
       <AgentSettingsTab
         agents={agents}
-        authPending={authPending}
         onAuthenticate={onAuthenticate}
+        onCancelAuthentication={onCancelAuthentication}
         onCreateCustomAgent={onCreateCustomAgent}
         onDeleteCustomAgent={onDeleteCustomAgent}
         onReplaceCustomAgent={onReplaceCustomAgent}

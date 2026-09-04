@@ -24,6 +24,19 @@ export type WorkspaceRootSummary = {
   projectId?: string;
 };
 
+export type AgentSignInPhase = "starting" | "awaiting_user" | "awaiting_terminal" | "failed";
+
+export type AgentSignInFlowRecord = {
+  method_id: string;
+  phase: AgentSignInPhase;
+  /** HTTPS verification page the user must open while `awaiting_user`. */
+  url?: string;
+  /** Agent-supplied instructions shown next to the URL, such as a one-time device code. */
+  hint?: string;
+  /** Product-safe failure summary while `failed`. */
+  failure?: string;
+};
+
 export type AgentSettingsRecord = {
   id: string;
   label: string;
@@ -52,7 +65,14 @@ export type AgentSettingsRecord = {
     terminal_env?: Record<string, string>;
   }>;
   logout_supported?: boolean;
-  authenticating_method_id?: string;
+  logout_blocked_by_running_task?: boolean;
+  /** Cleanup provenance only; it does not assert that the Agent is currently signed in. */
+  last_authentication_method_id?: string;
+  /**
+   * App Server-owned Sign-in Flow for this Agent. Present while a flow runs or after it failed;
+   * absent after success or cancellation. Frontend renders it and never derives its own copy.
+   */
+  sign_in?: AgentSignInFlowRecord;
   last_checked_at?: string;
   last_error_summary?: string;
 };

@@ -461,20 +461,6 @@
 
 .agent-page-footer button:disabled { opacity: .45; }
 
-.agent-page-auth-method > .agent-page-row { border: 0; }
-
-.agent-page-auth-field {
-  display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  border-top: 1px solid var(--oa-border-subtle);
-  padding: 12px 14px 12px 60px;
-}
-
-.agent-page-auth-field > span { color: var(--oa-muted); font-size: 12px; }
-.agent-page-auth-field > input { min-height: 34px; border: 1px solid var(--oa-border-subtle); border-radius: 7px; background: var(--oa-bg); color: var(--oa-text); padding: 5px 8px; }
-
 @media (max-width: 700px) {
   .agent-library-intro { display: grid; gap: 16px; margin-bottom: 28px; }
   .agent-library-intro .settings-catalog-search { width: 100%; min-height: 40px; }
@@ -490,7 +476,6 @@
   .agent-page-inline-input { width: 100%; }
   .agent-page-row-button { justify-content: center; }
   .agent-env-row { grid-template-columns: minmax(0, 1fr); }
-  .agent-page-auth-field { grid-template-columns: 1fr; padding-left: 14px; }
   .agent-page-footer { flex-wrap: wrap; }
   .agent-page-footer button { justify-content: center; }
   .agent-page-footer button.danger { flex-basis: 100%; margin-right: 0; justify-content: flex-start; }

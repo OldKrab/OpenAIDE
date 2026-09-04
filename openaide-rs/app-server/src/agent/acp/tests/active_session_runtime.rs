@@ -545,6 +545,7 @@ def initialize_result():
     return {
         "protocolVersion": 1,
         "agentCapabilities": {
+            "auth": {"logout": {}},
             "loadSession": True,
             "sessionCapabilities": session_capabilities,
         },
@@ -646,6 +647,8 @@ for line in sys.stdin:
         if prompt_mode == "pending_prompt_and_slow_list" and pending_prompt_ids:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
     elif method == "authenticate":
+        respond(message, {})
+    elif method == "logout":
         respond(message, {})
     elif method == "session/prompt":
         if log_details:
@@ -1324,6 +1327,7 @@ fn authentication_reuses_the_active_agent_process() {
             secret_env: Vec::new(),
             secret_storage_agent_id: None,
             terminal_confirmed: false,
+            secret_resolver: None,
         })
         .expect("authenticate agent");
 
@@ -1335,6 +1339,31 @@ fn authentication_reuses_the_active_agent_process() {
     // Closing is covered by the session lifecycle tests. Keep teardown from
     // turning close latency into a failure of this process-reuse contract.
     runtime.shutdown().expect("shut down runtime");
+}
+
+#[test]
+fn logout_uses_the_advertised_acp_method_and_stops_the_agent_process() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "logout-session") else {
+        return;
+    };
+    runtime
+        .probe(crate::agent::AgentProbeRequest {
+            agent_id: "codex".to_string(),
+        })
+        .expect("probe agent");
+
+    runtime.logout("codex").expect("logout agent");
+    runtime
+        .probe(crate::agent::AgentProbeRequest {
+            agent_id: "codex".to_string(),
+        })
+        .expect("probe after logout");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "logout", "initialize"]
+    );
 }
 
 #[test]
@@ -1390,6 +1419,7 @@ fn env_var_authentication_relaunches_with_secure_host_values() {
             secret_env: vec!["OPENAIDE_SECRET_TEST".to_string()],
             secret_storage_agent_id: Some("codex.auth.6170692d6b6579".to_string()),
             terminal_confirmed: false,
+            secret_resolver: None,
         })
         .expect("authenticate with env var");
     host.join().expect("secret host");
@@ -1397,6 +1427,58 @@ fn env_var_authentication_relaunches_with_secure_host_values() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["secret:secure-token", "initialize", "authenticate"]
+    );
+}
+
+#[test]
+fn env_var_authentication_relaunches_with_typed_client_secret_resolver() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let runtime = AcpAgentRuntime::new_with_host(
+        AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    "env-auth-resolver".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        },
+        HostBridge::disabled(),
+    );
+
+    runtime
+        .authenticate(crate::agent::AgentAuthenticateRequest {
+            agent_id: "codex".to_string(),
+            method_id: "test-auth".to_string(),
+            env: HashMap::new(),
+            secret_env: vec!["OPENAIDE_SECRET_TEST".to_string()],
+            secret_storage_agent_id: Some("codex.auth.6170692d6b6579".to_string()),
+            terminal_confirmed: false,
+            secret_resolver: Some(Arc::new(StaticSecretResolver {
+                values: HashMap::from([(
+                    "OPENAIDE_SECRET_TEST".to_string(),
+                    "typed-secure-token".to_string(),
+                )]),
+            })),
+        })
+        .expect("authenticate with typed secret resolver");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["secret:typed-secure-token", "initialize", "authenticate"]
     );
 }
 
@@ -1458,6 +1540,7 @@ fn terminal_authentication_waits_for_user_confirmation_before_acp_authenticate()
             secret_env: Vec::new(),
             secret_storage_agent_id: None,
             terminal_confirmed: false,
+            secret_resolver: None,
         })
         .expect("open terminal auth");
     assert!(matches!(
@@ -1475,6 +1558,7 @@ fn terminal_authentication_waits_for_user_confirmation_before_acp_authenticate()
             secret_env: Vec::new(),
             secret_storage_agent_id: None,
             terminal_confirmed: true,
+            secret_resolver: None,
         })
         .expect("confirm terminal auth");
     assert_eq!(

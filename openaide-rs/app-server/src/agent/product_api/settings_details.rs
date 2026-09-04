@@ -33,7 +33,7 @@ impl AgentSettingsDetailsWorkflow for AgentProductApi {
             .map_err(protocol_error_from_runtime)?;
         Ok(AgentSettingsDetailsResult {
             generated_at: generated_at(),
-            agents: details_from_catalog(&records, self),
+            agents: details_from_catalog(&records, self)?,
         })
     }
 }
@@ -41,7 +41,7 @@ impl AgentSettingsDetailsWorkflow for AgentProductApi {
 fn details_from_catalog(
     records: &[AgentCatalogRecord],
     api: &AgentProductApi,
-) -> Vec<AgentSettingsDetail> {
+) -> Result<Vec<AgentSettingsDetail>, ProtocolError> {
     let mut overlays = HashMap::new();
     for record in records {
         if let Ok(id) = record.id() {
@@ -52,25 +52,25 @@ fn details_from_catalog(
     let mut details: Vec<_> = BUILT_IN_AGENT_METADATA
         .iter()
         .map(|metadata| built_in_detail(metadata, overlays.get(metadata.id).copied(), api))
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     for record in records {
         if record.is_custom() {
-            if let Some(detail) = custom_detail(record, api) {
+            if let Some(detail) = custom_detail(record, api)? {
                 details.push(detail);
             }
         }
     }
-    details
+    Ok(details)
 }
 
 fn built_in_detail(
     metadata: &BuiltInAgentMetadata,
     overlay: Option<&AgentCatalogRecord>,
     api: &AgentProductApi,
-) -> AgentSettingsDetail {
+) -> Result<AgentSettingsDetail, ProtocolError> {
     let enabled = overlay.map(AgentCatalogRecord::enabled).unwrap_or(true);
-    AgentSettingsDetail {
+    Ok(AgentSettingsDetail {
         agent_id: AgentId::from(metadata.id.to_string()),
         label: metadata.label.to_string(),
         enabled,
@@ -86,21 +86,30 @@ fn built_in_detail(
         capabilities: base_capabilities(),
         auth_methods: auth_methods_for(metadata.id, api),
         logout_supported: api.statuses.snapshot(metadata.id).logout_supported,
-        authenticating_method_id: api.statuses.snapshot(metadata.id).authenticating_method_id,
-    }
+        logout_blocked_by_running_task: api
+            .has_running_task(metadata.id)
+            .map_err(protocol_error_from_runtime)?,
+        last_authentication_method_id: api
+            .auth_provenance
+            .method(metadata.id)
+            .map_err(protocol_error_from_runtime)?,
+        sign_in: api.statuses.snapshot(metadata.id).sign_in,
+    })
 }
 
 fn custom_detail(
     record: &AgentCatalogRecord,
     api: &AgentProductApi,
-) -> Option<AgentSettingsDetail> {
-    let id = record.id().ok()?;
+) -> Result<Option<AgentSettingsDetail>, ProtocolError> {
+    let Ok(id) = record.id() else {
+        return Ok(None);
+    };
     let command_line = if record.command_line().trim().is_empty() {
         command_line(record.command(), record.args())
     } else {
         record.command_line().to_string()
     };
-    Some(AgentSettingsDetail {
+    Ok(Some(AgentSettingsDetail {
         agent_id: AgentId::from(id.clone()),
         label: trimmed_or_id(record.label(), &id)
             .chars()
@@ -119,8 +128,15 @@ fn custom_detail(
         capabilities: base_capabilities(),
         auth_methods: auth_methods_for(&id, api),
         logout_supported: api.statuses.snapshot(&id).logout_supported,
-        authenticating_method_id: api.statuses.snapshot(&id).authenticating_method_id,
-    })
+        logout_blocked_by_running_task: api
+            .has_running_task(&id)
+            .map_err(protocol_error_from_runtime)?,
+        last_authentication_method_id: api
+            .auth_provenance
+            .method(&id)
+            .map_err(protocol_error_from_runtime)?,
+        sign_in: api.statuses.snapshot(&id).sign_in,
+    }))
 }
 
 fn auth_methods_for(agent_id: &str, api: &AgentProductApi) -> Vec<AgentSettingsAuthMethod> {

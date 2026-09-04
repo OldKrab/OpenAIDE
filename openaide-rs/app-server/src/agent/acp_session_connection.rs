@@ -20,6 +20,7 @@ use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::host::HostBridge;
 
 pub(super) struct AcpSessionConnectionContext {
+    pub(super) agent_id: String,
     pub(super) host_bridge: HostBridge,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) current_prompts: crate::agent::acp_host_capabilities::AcpSessionPromptMap,
@@ -42,6 +43,7 @@ where
 {
     let notification_session_traces = context.session_traces.clone();
     let host_capabilities = AcpHostCapabilityHandlers::new(AcpHostCapabilityContext {
+        agent_id: context.agent_id,
         host_bridge: context.host_bridge,
         trace: context.trace.clone(),
         current_prompts: context.current_prompts,

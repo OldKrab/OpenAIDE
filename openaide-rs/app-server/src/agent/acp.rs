@@ -107,6 +107,14 @@ impl AgentRuntime for AcpAgentRuntime {
         self.kernel.authenticate(request)
     }
 
+    fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.kernel.cancel_authentication(agent_id)
+    }
+
+    fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.kernel.logout(agent_id)
+    }
+
     fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

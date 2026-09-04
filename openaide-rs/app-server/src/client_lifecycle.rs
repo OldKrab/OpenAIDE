@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use openaide_app_server_protocol::client::{ClientCapabilities, RequestedSurface, ShellDescriptor};
+use openaide_app_server_protocol::client::{
+    ClientCapabilities, RequestedSurface, ShellCapability, ShellDescriptor,
+};
 use openaide_app_server_protocol::ids::ClientInstanceId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -378,6 +380,23 @@ impl ClientHub {
             .keys()
             .filter_map(|client_instance_id| self.delivery_for(client_instance_id))
             .filter(|delivery| delivery.supports_method(method))
+            .collect()
+    }
+
+    /// Browser Frontends advertise `openExternal`. The Web Node shell client does not.
+    ///
+    /// Only clients with a live transport qualify. A reloaded or closed tab stays in the hub for
+    /// the reconnect grace window, but nothing polls its old connection, so a request routed
+    /// there would sit unseen until it expired.
+    pub fn deliveries_with_shell_capability(&self, capability: ShellCapability) -> Vec<Delivery> {
+        self.clients
+            .values()
+            .filter(|record| record.context.capabilities.shell.contains(&capability))
+            .filter(|record| {
+                record.reconnect_expires_at.is_none()
+                    && self.connections.contains_key(&record.context.connection_id)
+            })
+            .filter_map(|record| self.delivery_for(&record.context.client_instance_id))
             .collect()
     }
 }

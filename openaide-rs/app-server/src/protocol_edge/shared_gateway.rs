@@ -3,10 +3,14 @@ use std::{
     time::Instant,
 };
 
+use crate::protocol::host::HostRequest;
 use crate::tasks::product_api::ResolvedSentFile;
 use openaide_app_server_protocol::attachment::PreSendAttachment;
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
+use openaide_app_server_protocol::methods::{AGENT_AUTHENTICATE, AGENT_LOGOUT};
+use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
+use serde_json::{json, Value};
 
 use crate::app_lifecycle::{LifecycleState, ShutdownCompletion};
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome, ConnectionId};
@@ -108,6 +112,28 @@ impl SharedRpcGateway {
         now: AppServerTime,
         completion_clock: impl FnOnce() -> AppServerTime,
     ) -> GatewayOutcome {
+        if matches!(
+            &message,
+            InboundProtocolMessage::ClientRequest { method, .. }
+                if method == AGENT_AUTHENTICATE || method == AGENT_LOGOUT
+        ) {
+            return if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if method == AGENT_AUTHENTICATE)
+            {
+                self.handle_agent_authenticate_without_protocol_lock(
+                    connection_id,
+                    message,
+                    now,
+                    completion_clock,
+                )
+            } else {
+                self.handle_agent_logout_without_protocol_lock(
+                    connection_id,
+                    message,
+                    now,
+                    completion_clock,
+                )
+            };
+        }
         let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
         let outcome = gateway.handle_inbound(connection_id.clone(), message, now);
         // An authenticated request that completes after a long Agent operation is fresh
@@ -116,6 +142,105 @@ impl SharedRpcGateway {
         // Attachment leases deliberately remain tied to request-start transport activity;
         // completion must not revive handles already abandoned during the long request.
         gateway
+            .client_hub
+            .observe_connection_activity(&connection_id, completion_clock());
+        outcome
+    }
+
+    fn handle_agent_authenticate_without_protocol_lock(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+        completion_clock: impl FnOnce() -> AppServerTime,
+    ) -> GatewayOutcome {
+        let InboundProtocolMessage::ClientRequest {
+            id, params, meta, ..
+        } = message
+        else {
+            unreachable!("authenticate path only handles client requests");
+        };
+        let prepared = {
+            let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+            gateway.prepare_agent_authenticate(
+                connection_id.clone(),
+                id.clone(),
+                params,
+                meta.clone(),
+                now,
+            )
+        };
+        let outcome = match prepared {
+            Err(outcome) => *outcome,
+            Ok((params, workflow)) => {
+                let secret_resolver = if params.secret_env.is_empty()
+                    || !connection_id.as_str().starts_with("local-http:")
+                {
+                    None
+                } else {
+                    self.client_secret_resolver(&connection_id)
+                };
+                let result = workflow.authenticate_with_secret_resolver(params, secret_resolver);
+                let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+                gateway.finish_agent_authenticate(connection_id.clone(), id, meta, now, result)
+            }
+        };
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .client_hub
+            .observe_connection_activity(&connection_id, completion_clock());
+        outcome
+    }
+
+    fn client_secret_resolver(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Option<Arc<dyn crate::agent::AgentSecretResolver>> {
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        let client_instance_id = gateway
+            .client_hub
+            .context_for_connection(connection_id)?
+            .client_instance_id;
+        let delivery = gateway.client_hub.delivery_for(&client_instance_id)?;
+        Some(Arc::new(crate::agent::ClientSecretResolver::new(
+            gateway.server_requests.clone(),
+            client_instance_id,
+            delivery,
+        )))
+    }
+
+    fn handle_agent_logout_without_protocol_lock(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+        completion_clock: impl FnOnce() -> AppServerTime,
+    ) -> GatewayOutcome {
+        let InboundProtocolMessage::ClientRequest {
+            id, params, meta, ..
+        } = message
+        else {
+            unreachable!("logout path only handles client requests");
+        };
+        let prepared = self
+            .gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .prepare_agent_logout(connection_id.clone(), id.clone(), params, meta.clone(), now);
+        let outcome = match prepared {
+            Err(outcome) => *outcome,
+            Ok((params, workflow)) => {
+                let result = workflow.logout(params);
+                self.gateway
+                    .lock()
+                    .expect("protocol gateway lock poisoned")
+                    .finish_agent_logout(connection_id.clone(), id, meta, now, result)
+            }
+        };
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
         outcome
@@ -266,6 +391,47 @@ impl SharedRpcGateway {
             .lock()
             .expect("protocol gateway lock poisoned")
             .publish_committed_task_update_for_connection(connection_id, update, now)
+    }
+
+    /// Records an Agent's sign-in URL as Sign-in Flow state that every client renders. The URL is
+    /// never opened on the App Server host and never pushed to one arbitrary client.
+    pub fn respond_to_acp_host_request(&self, request: &HostRequest) -> Value {
+        if request.method != SHELL_OPEN_EXTERNAL {
+            return json!({
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "error": { "code": -32601, "message": "host request is not routed on Local HTTP" },
+            });
+        }
+        let param = |key: &str| {
+            request
+                .params
+                .as_ref()
+                .and_then(|params| params.get(key))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        };
+        let (Some(agent_id), Some(url)) = (param("agentId"), param("url")) else {
+            return json!({
+                "jsonrpc": "2.0",
+                "id": request.id,
+                "error": { "code": -32602, "message": "agentId and url are required" },
+            });
+        };
+        let workflow = self
+            .gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .agent_authenticate
+            .clone();
+        // Outside the protocol lock: the workflow notifies the status publisher, which takes it.
+        let opened = workflow.record_sign_in_url(&agent_id, url, param("message"));
+        json!({
+            "jsonrpc": "2.0",
+            "id": request.id,
+            "result": { "opened": opened },
+        })
     }
 
     pub fn drain_server_requests_for_connection(

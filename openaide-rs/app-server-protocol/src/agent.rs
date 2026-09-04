@@ -4,7 +4,7 @@ use ts_rs::TS;
 use std::collections::BTreeMap;
 
 use crate::ids::{AgentId, ProjectId};
-use crate::snapshot::{AgentCollectionSnapshot, AgentSetupReason};
+use crate::snapshot::{AgentCollectionSnapshot, AgentSetupReason, AgentSignInFlow};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +47,33 @@ pub struct AgentAuthenticateResult {
 pub enum AgentAuthenticateStatus {
     Authenticated,
     AwaitingUser,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCancelAuthenticateParams {
+    pub agent_id: AgentId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCancelAuthenticateResult {
+    pub agents: AgentCollectionSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLogoutParams {
+    pub agent_id: AgentId,
+    /// Optimistic concurrency check for the non-secret credential-cleanup provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_method_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLogoutResult {
+    pub agents: AgentCollectionSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -249,8 +276,15 @@ pub struct AgentSettingsDetail {
     pub auth_methods: Vec<AgentSettingsAuthMethod>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub logout_supported: bool,
+    /// True when signing out would interrupt a running Task for this Agent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub logout_blocked_by_running_task: bool,
+    /// Cleanup provenance only; this does not assert that the Agent is currently authenticated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authenticating_method_id: Option<String>,
+    pub last_authentication_method_id: Option<String>,
+    /// Same flow as `AgentSummary::sign_in`; repeated here so Settings renders one projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<AgentSignInFlow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

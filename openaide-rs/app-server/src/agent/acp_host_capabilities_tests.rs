@@ -7,9 +7,11 @@ fn url_elicitation_opens_the_destination_through_the_app_shell() {
     let host = std::thread::spawn(move || {
         let request = requests.recv().expect("open external request");
         assert_eq!(request.method, "shell/openExternal");
+        let params = request.params.as_ref().expect("open external params");
+        assert_eq!(params["url"], "https://auth.openai.com/device");
         assert_eq!(
-            request.params.as_ref().expect("open external params")["url"],
-            "https://auth.openai.com/device"
+            params["message"],
+            "Sign in to ChatGPT and enter this code: ABCD-EFGH"
         );
         assert!(response_bridge.try_handle_response(&serde_json::json!({
             "jsonrpc": "2.0",
@@ -19,6 +21,7 @@ fn url_elicitation_opens_the_destination_through_the_app_shell() {
     });
     let session_event_sinks: AcpSessionEventSinkMap = Arc::default();
     let handlers = AcpHostCapabilityHandlers::new(AcpHostCapabilityContext {
+        agent_id: "codex".to_string(),
         host_bridge: host_bridge.clone(),
         trace: None,
         current_prompts: Arc::default(),

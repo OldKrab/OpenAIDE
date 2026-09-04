@@ -150,11 +150,13 @@ export type FrontendShell = {
     openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId): void;
     openTask(taskId: string, title?: string, agentId?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;
+    /** Writes the open Agent into the Settings route so refresh stays on that detail. */
+    replaceSettingsAgent?(agentId?: string): void;
     subscribe(listener: (bootstrap: WebviewBootstrap) => void): () => void;
   };
   recovery: {
     /** Opens a trusted product-owned recovery URL outside the embedded surface. */
-    openExternal(url: string): void;
+    openExternal(url: string, message?: string): void;
     /** Reloads the owning shell when it exposes that recovery capability. */
     reload?: () => void;
   };

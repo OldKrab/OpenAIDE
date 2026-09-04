@@ -387,7 +387,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onOpenTask={callbacks.navigation.openTask}
           onRecoverNativeSessions={(kind) => kind === "launchFailed"
             ? callbacks.navigation.loadNativeSessions()
-            : callbacks.navigation.openSettings()}
+            : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
+          onDisableRecoveredAgent={(agentId) => callbacks.settings.setAgentEnabled(agentId, false)}
           onRestoreTask={callbacks.navigation.restoreTask}
           onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
@@ -428,6 +429,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         frameHeader={desktopSettingsTitleBar}
         frameHeaderPlacement={desktopSettingsTitleBarPlacement}
         onAuthenticate={authenticateAndReturn}
+        onCancelAuthentication={callbacks.settings.cancelAgentAuthentication}
+        onLogout={callbacks.settings.logoutAgent}
         onBackToApp={backFromSettings}
         onCreateCustomAgent={callbacks.settings.createCustomAgent}
         onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
@@ -508,7 +511,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onOpenTask={closeAfter(callbacks.navigation.openTask)}
         onRecoverNativeSessions={(kind) => kind === "launchFailed"
           ? callbacks.navigation.loadNativeSessions()
-          : callbacks.navigation.openSettings()}
+          : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
+        onDisableRecoveredAgent={(agentId) => callbacks.settings.setAgentEnabled(agentId, false)}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSetTaskPinned={callbacks.navigation.setTaskPinned}
         onSetTaskTitle={callbacks.navigation.setTaskTitle}

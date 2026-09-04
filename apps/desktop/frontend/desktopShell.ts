@@ -16,6 +16,7 @@ import { createDesktopUpdates } from "./desktopUpdates";
 import type { DesktopBootstrap } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
 import { createDesktopSupportExports } from "./desktopSupportExports";
+import { createDesktopSecretMessageHandler } from "./desktopSecrets";
 
 type DesktopRoute =
   | { surface: "nativeSession"; agentId: string; nativeSessionId: string; projectId?: string }
@@ -89,6 +90,7 @@ export function createDesktopShell(
   let route: DesktopRoute = { surface: "task" };
   const routeListeners = new Set<(bootstrap: WebviewBootstrap) => void>();
   const messageListeners = new Set<(message: HostToWebviewMessage) => void>();
+  const handleSecretMessage = createDesktopSecretMessageHandler(invoke);
   const publishRoute = () => {
     const next = routeBootstrap(route, host.clientInstanceId);
     for (const listener of routeListeners) listener(next);
@@ -137,6 +139,16 @@ export function createDesktopShell(
   const post: PostHostMessage = (message) => {
     if (message.type === "webview.telemetry") {
       void invoke("record_desktop_telemetry", { payload: message.payload });
+      return;
+    }
+    if (message.type === "secret.transaction.apply"
+      || message.type === "secret.transaction.commit"
+      || message.type === "secret.transaction.rollback"
+      || message.type === "appServer.serverRequest") {
+      void handleSecretMessage(message).then((result) => {
+        if (!result) return;
+        for (const listener of messageListeners) listener(result);
+      });
     }
   };
 
@@ -240,7 +252,19 @@ export function createDesktopShell(
       openTask: (taskId) => navigate({ surface: "task", taskId }),
       replaceSettingsTab(settingsTab) {
         if (route.surface !== "settings") return;
-        navigate({ ...route, settingsTab });
+        navigate({
+          ...route,
+          settingsTab,
+          settingsAgentId: settingsTab === "agents" ? route.settingsAgentId : undefined,
+        });
+      },
+      replaceSettingsAgent(settingsAgentId) {
+        if (route.surface !== "settings") return;
+        navigate({
+          ...route,
+          settingsTab: route.settingsTab ?? "agents",
+          settingsAgentId,
+        });
       },
       subscribe(listener) {
         routeListeners.add(listener);

@@ -1,0 +1,247 @@
+/* Agent Sign-in: one focused step for the App Server-owned Sign-in Flow. */
+
+.agent-sign-in-summary {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+}
+
+.agent-sign-in-summary-copy,
+.agent-sign-in-panel-heading > span,
+.agent-sign-in-method-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.agent-sign-in-summary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-sign-in-summary-actions > .danger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--oa-danger);
+}
+
+.agent-sign-in-summary-copy > strong,
+.agent-sign-in-panel-heading strong,
+.agent-sign-in-method-copy > strong { font-size: 13px; }
+
+.agent-sign-in-summary-copy > small,
+.agent-sign-in-panel-heading small,
+.agent-sign-in-method-copy > small {
+  color: var(--oa-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-sign-in-chooser,
+.agent-sign-in-value-step { padding: 0; }
+
+.agent-sign-in-panel-heading {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--oa-border-subtle);
+}
+
+.agent-sign-in-methods { display: grid; }
+
+.agent-sign-in-method {
+  width: 100%;
+  min-height: 64px;
+  border: 0;
+  border-bottom: 1px solid var(--oa-border-subtle);
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  text-align: left;
+}
+
+.agent-sign-in-method:last-child { border-bottom: 0; }
+.agent-sign-in-method:hover { background: var(--oa-raised); }
+
+.agent-sign-in-method:focus-visible,
+.agent-sign-in-secondary:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: -2px;
+}
+
+.agent-sign-in-method-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+}
+
+.agent-sign-in-method > svg { color: var(--oa-muted); }
+
+.agent-sign-in-fields {
+  display: grid;
+  gap: 12px;
+  padding: 16px 14px;
+}
+
+.agent-sign-in-fields > label { display: grid; gap: 6px; }
+
+.agent-sign-in-fields > label > span {
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.agent-sign-in-fields input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  padding: 6px 9px;
+}
+
+.agent-sign-in-fields input:focus {
+  border-color: var(--oa-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--oa-focus) 13%, transparent);
+}
+
+.agent-sign-in-value-actions {
+  min-height: 54px;
+  border-top: 1px solid var(--oa-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 14px;
+}
+
+.agent-sign-in-value-actions > a {
+  color: var(--oa-accent);
+  font-size: 12px;
+  text-underline-offset: 2px;
+}
+
+.agent-sign-in-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 6px 14px;
+  padding: 16px 14px;
+}
+
+.agent-sign-in-step-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklch, var(--oa-focus) 14%, var(--oa-raised));
+  color: var(--oa-focus);
+}
+
+.agent-sign-in-step-icon.failed {
+  background: color-mix(in oklch, var(--oa-warning) 13%, var(--oa-raised));
+  color: var(--oa-warning);
+}
+
+.agent-sign-in-step-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.agent-sign-in-step-copy > strong { font-size: 14px; }
+
+.agent-sign-in-step-copy > p {
+  margin: 0;
+  color: var(--oa-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* The hint often carries a one-time code; keep it prominent and selectable. */
+.agent-sign-in-step-copy > .agent-sign-in-hint {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--oa-raised) 80%, transparent);
+  color: var(--oa-text);
+  font-size: 14px;
+  font-weight: 600;
+  user-select: text;
+}
+
+.agent-sign-in-step-copy > .agent-sign-in-url {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.agent-sign-in-step-actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
+
+.agent-sign-in-step-actions > .agent-page-row-button { text-decoration: none; }
+
+.agent-sign-in .agent-page-row-button.primary {
+  border-color: var(--oa-focus);
+  background: var(--oa-focus);
+  color: white;
+  font-weight: 600;
+}
+
+.agent-sign-in .agent-page-row-button:disabled { opacity: .45; }
+
+.agent-sign-in-secondary {
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  padding: 4px 2px;
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agent-sign-in-secondary:hover { color: var(--oa-text); }
+
+@media (max-width: 700px) {
+  .agent-sign-in-summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .agent-sign-in-summary-actions { grid-column: 2; justify-content: flex-end; }
+  .agent-connection-summary .agent-page-row { grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .agent-connection-summary .agent-page-row > :last-child { grid-column: 3; justify-self: end; }
+  .agent-sign-in-panel-heading { align-items: flex-start; }
+  .agent-sign-in-method { min-height: 72px; }
+  .agent-sign-in-step { grid-template-columns: minmax(0, 1fr); }
+  .agent-sign-in-step-icon { display: none; }
+  .agent-sign-in-step-actions { grid-column: 1; }
+  .agent-sign-in-step-actions > .agent-page-row-button { flex: 1 1 100%; justify-content: center; }
+}

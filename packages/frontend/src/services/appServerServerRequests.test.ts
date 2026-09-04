@@ -11,7 +11,30 @@ import { installFrontendShell } from "./frontendShell";
 import { startAppServerServerRequestBridge } from "./appServerServerRequests";
 
 describe("App Server server-request bridge", () => {
-  it("opens ACP authentication URLs through the active App Shell", async () => {
+  it("opens plain shell/openExternal requests through the shell without a host round-trip", async () => {
+    const openExternal = vi.fn();
+    installFrontendShell({ recovery: { openExternal } } as never);
+    const handlers = new Map<ServerRequestMethod, (params: never, context: never) => Promise<unknown>>();
+    const backendConnection = {
+      handleRequest: vi.fn((method, handler) => {
+        handlers.set(method, handler);
+        return vi.fn();
+      }),
+    };
+
+    const postHostMessage = vi.fn();
+    startAppServerServerRequestBridge({ backendConnection, postHostMessage });
+    const response = handlers.get(SHELL_OPEN_EXTERNAL)?.(
+      { url: "https://nodejs.org/en/download" } as never,
+      { requestId: "server-request-open", signal: new AbortController().signal } as never,
+    );
+
+    await expect(response).resolves.toEqual({ opened: true });
+    expect(openExternal).toHaveBeenCalledWith("https://nodejs.org/en/download");
+    expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses non-HTTPS shell/openExternal URLs", async () => {
     const openExternal = vi.fn();
     installFrontendShell({ recovery: { openExternal } } as never);
     const handlers = new Map<ServerRequestMethod, (params: never, context: never) => Promise<unknown>>();
@@ -24,12 +47,12 @@ describe("App Server server-request bridge", () => {
 
     startAppServerServerRequestBridge({ backendConnection, postHostMessage: vi.fn() });
     const response = handlers.get(SHELL_OPEN_EXTERNAL)?.(
-      { url: "https://auth.openai.com/device" } as never,
-      { requestId: "server-request-auth", signal: new AbortController().signal } as never,
+      { url: "javascript:alert(1)" } as never,
+      { requestId: "server-request-open", signal: new AbortController().signal } as never,
     );
 
-    await expect(response).resolves.toEqual({ opened: true });
-    expect(openExternal).toHaveBeenCalledWith("https://auth.openai.com/device");
+    await expect(response).resolves.toEqual({ opened: false });
+    expect(openExternal).not.toHaveBeenCalled();
   });
 
   it("forwards shell-owned server requests to the App Shell", () => {

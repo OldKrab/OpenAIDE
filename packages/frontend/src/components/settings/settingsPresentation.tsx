@@ -36,7 +36,7 @@ export function EmptySettingsState({ detail, title }: { detail: string; title: s
 
 export function SettingsSkeleton() {
   return (
-    <div className="settings-panel" aria-label="Loading settings">
+    <div className="settings-panel settings-panel-loading" aria-label="Loading settings">
       <div className="settings-empty">
         <strong>Loading settings</strong>
         <span>Refreshing this section.</span>

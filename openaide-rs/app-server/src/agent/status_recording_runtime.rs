@@ -11,6 +11,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult, ConfigOptionsCatalog,
 };
+use openaide_app_server_protocol::snapshot::AgentStatus;
 
 /// Records Agent Status from the same ACP process work Tasks already use.
 pub(crate) struct AgentStatusRecordingRuntime {
@@ -52,11 +53,33 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
         self.inner.authenticate(request)
     }
 
+    fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.inner.cancel_authentication(agent_id)
+    }
+
+    fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.inner.logout(agent_id)
+    }
+
     fn list_sessions(
         &self,
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
-        self.inner.list_sessions(request)
+        let agent_id = request.agent_id.clone();
+        let result = self.inner.list_sessions(request);
+        let snapshot = self.statuses.snapshot(&agent_id);
+        if snapshot.auth_methods.is_empty()
+            || matches!(
+                snapshot.status,
+                AgentStatus::Launching | AgentStatus::Installing | AgentStatus::Disconnected
+            )
+        {
+            let _ = self.probe(AgentProbeRequest {
+                agent_id: agent_id.clone(),
+            });
+        }
+        self.record_session_outcome(&agent_id, &result);
+        result
     }
 
     fn set_session_config_option(

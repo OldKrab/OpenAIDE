@@ -36,7 +36,7 @@ fn agent_settings_details_expose_the_structured_setup_reason() {
             capabilities: AgentCapabilities::default(),
             auth_methods: Vec::new(),
             logout_supported: false,
-            authenticating_method_id: None,
+            sign_in: None,
             status_before_authentication: None,
         },
     );
@@ -117,7 +117,7 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
             capabilities: AgentCapabilities::default(),
             auth_methods: Vec::new(),
             logout_supported: false,
-            authenticating_method_id: None,
+            sign_in: None,
             status_before_authentication: None,
         },
     );
@@ -195,7 +195,7 @@ fn agent_settings_details_read_cached_status_without_probing_processes() {
             capabilities: AgentCapabilities::default(),
             auth_methods: Vec::new(),
             logout_supported: false,
-            authenticating_method_id: None,
+            sign_in: None,
             status_before_authentication: None,
         },
     );

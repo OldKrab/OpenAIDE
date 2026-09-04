@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 
-use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentSetupReason, AgentStatus};
+use openaide_app_server_protocol::snapshot::{
+    AgentCapabilities, AgentSetupReason, AgentSignInFlow, AgentSignInPhase, AgentStatus,
+};
 
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentAuthMethodSummary, AgentProbeResult};
 
+/// In-memory truth for one Agent's status and its Sign-in Flow. `sign_in` is the only
+/// representation of a running or failed sign-in; clients never keep their own copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentStatusSnapshot {
     pub(crate) status: AgentStatus,
@@ -13,7 +17,7 @@ pub(crate) struct AgentStatusSnapshot {
     pub(crate) capabilities: AgentCapabilities,
     pub(crate) auth_methods: Vec<AgentAuthMethodSummary>,
     pub(crate) logout_supported: bool,
-    pub(crate) authenticating_method_id: Option<String>,
+    pub(crate) sign_in: Option<AgentSignInFlow>,
     pub(crate) status_before_authentication: Option<AgentStatus>,
 }
 
@@ -25,9 +29,19 @@ impl Default for AgentStatusSnapshot {
             capabilities: AgentCapabilities::default(),
             auth_methods: Vec::new(),
             logout_supported: false,
-            authenticating_method_id: None,
+            sign_in: None,
             status_before_authentication: None,
         }
+    }
+}
+
+impl AgentStatusSnapshot {
+    /// Method id of the flow currently running (not a failed leftover).
+    pub(crate) fn running_sign_in_method_id(&self) -> Option<&str> {
+        self.sign_in
+            .as_ref()
+            .filter(|flow| flow.phase != AgentSignInPhase::Failed)
+            .map(|flow| flow.method_id.as_str())
     }
 }
 
@@ -114,7 +128,7 @@ impl AgentStatusCache {
                 capabilities: capabilities_from_probe(result),
                 auth_methods: result.auth_methods.clone(),
                 logout_supported: result.logout_supported,
-                authenticating_method_id: None,
+                sign_in: None,
                 status_before_authentication: None,
             },
         );
@@ -133,7 +147,10 @@ impl AgentStatusCache {
                 // authentication. Keep the last advertised choices actionable during recovery.
                 auth_methods: previous.auth_methods,
                 logout_supported: previous.logout_supported,
-                authenticating_method_id: None,
+                // A probe failure explains the Agent, not the user's last sign-in attempt.
+                sign_in: previous
+                    .sign_in
+                    .filter(|flow| flow.phase == AgentSignInPhase::Failed),
                 status_before_authentication: None,
             },
         );
@@ -159,7 +176,7 @@ impl AgentStatusCache {
         let mut entries = self.entries.lock().expect("agent status cache poisoned");
         let snapshot = entries.entry(agent_id.to_string()).or_default();
         if snapshot.status == AgentStatus::Authenticating {
-            if continuing && snapshot.authenticating_method_id.as_deref() == Some(method_id) {
+            if continuing && snapshot.running_sign_in_method_id() == Some(method_id) {
                 return Ok(());
             }
             return Err(RuntimeError::Conflict(format!(
@@ -168,22 +185,124 @@ impl AgentStatusCache {
         }
         snapshot.status_before_authentication = Some(snapshot.status);
         snapshot.status = AgentStatus::Authenticating;
-        snapshot.authenticating_method_id = Some(method_id.to_string());
+        snapshot.sign_in = Some(AgentSignInFlow {
+            method_id: method_id.to_string(),
+            phase: AgentSignInPhase::Starting,
+            url: None,
+            hint: None,
+            failure: None,
+        });
+        drop(entries);
+        self.notify();
         Ok(())
+    }
+
+    /// The Agent asked the user to open `url` (with an optional hint such as a device code).
+    /// Ignored unless a flow is running: a late URL from a cancelled flow must not resurrect it.
+    pub(crate) fn record_sign_in_awaiting_user(
+        &self,
+        agent_id: &str,
+        url: String,
+        hint: Option<String>,
+    ) -> bool {
+        self.update_running_flow(agent_id, |flow| {
+            flow.phase = AgentSignInPhase::AwaitingUser;
+            flow.url = Some(url);
+            flow.hint = hint;
+        })
+    }
+
+    /// A terminal-kind method opened its terminal and waits for the user's confirmation.
+    pub(crate) fn record_sign_in_awaiting_terminal(&self, agent_id: &str) -> bool {
+        self.update_running_flow(agent_id, |flow| {
+            flow.phase = AgentSignInPhase::AwaitingTerminal;
+        })
     }
 
     pub(crate) fn record_authentication_success(&self, agent_id: &str) {
         self.update_authentication_result(agent_id, AgentStatus::Connected);
     }
 
-    pub(crate) fn record_authentication_error(&self, agent_id: &str, error: &RuntimeError) {
+    pub(crate) fn record_logout_success(&self, agent_id: &str) {
         let mut entries = self.entries.lock().expect("agent status cache poisoned");
         let snapshot = entries.entry(agent_id.to_string()).or_default();
+        snapshot.status = AgentStatus::AuthRequired;
+        snapshot.sign_in = None;
+        snapshot.status_before_authentication = None;
+        drop(entries);
+        self.notify();
+    }
+
+    /// Ends the running flow. `failure` keeps a product-safe summary visible until the user
+    /// starts another flow or dismisses it; `None` (cancellation) leaves no trace.
+    pub(crate) fn record_authentication_error(
+        &self,
+        agent_id: &str,
+        error: &RuntimeError,
+        failure: Option<String>,
+    ) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        if snapshot.status != AgentStatus::Authenticating {
+            return;
+        }
         snapshot.status = snapshot
             .status_before_authentication
             .take()
             .unwrap_or_else(|| status_from_probe_error(error));
-        snapshot.authenticating_method_id = None;
+        snapshot.sign_in = match (snapshot.sign_in.take(), failure) {
+            (Some(flow), Some(failure)) => Some(AgentSignInFlow {
+                method_id: flow.method_id,
+                phase: AgentSignInPhase::Failed,
+                url: None,
+                hint: None,
+                failure: Some(failure),
+            }),
+            _ => None,
+        };
+        drop(entries);
+        self.notify();
+    }
+
+    /// Removes a failed flow the user acknowledged. No-op while a flow is running.
+    pub(crate) fn dismiss_failed_sign_in(&self, agent_id: &str) -> bool {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let Some(snapshot) = entries.get_mut(agent_id) else {
+            return false;
+        };
+        if snapshot.status == AgentStatus::Authenticating
+            || snapshot
+                .sign_in
+                .as_ref()
+                .is_none_or(|flow| flow.phase != AgentSignInPhase::Failed)
+        {
+            return false;
+        }
+        snapshot.sign_in = None;
+        drop(entries);
+        self.notify();
+        true
+    }
+
+    fn update_running_flow(
+        &self,
+        agent_id: &str,
+        update: impl FnOnce(&mut AgentSignInFlow),
+    ) -> bool {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let Some(snapshot) = entries.get_mut(agent_id) else {
+            return false;
+        };
+        if snapshot.status != AgentStatus::Authenticating {
+            return false;
+        }
+        let Some(flow) = snapshot.sign_in.as_mut() else {
+            return false;
+        };
+        update(flow);
+        drop(entries);
+        self.notify();
+        true
     }
 
     pub(crate) fn clear(&self, agent_id: &str) -> bool {
@@ -213,8 +332,10 @@ impl AgentStatusCache {
         let snapshot = entries.entry(agent_id.to_string()).or_default();
         snapshot.status = status;
         snapshot.setup_reason = None;
-        snapshot.authenticating_method_id = None;
+        snapshot.sign_in = None;
         snapshot.status_before_authentication = None;
+        drop(entries);
+        self.notify();
     }
 
     #[cfg(test)]

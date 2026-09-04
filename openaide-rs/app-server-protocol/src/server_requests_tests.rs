@@ -34,6 +34,7 @@ fn shell_and_secret_requests_use_protocol_safe_shapes() {
     };
     let open_external = ShellOpenExternalParams {
         url: "https://auth.openai.com/device".to_string(),
+        message: None,
     };
 
     assert_eq!(

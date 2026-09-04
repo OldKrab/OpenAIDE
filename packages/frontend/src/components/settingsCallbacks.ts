@@ -3,14 +3,17 @@ import {
   SETTINGS_UPDATE_PREFERENCES,
   SETTINGS_UPDATE_RUNTIME,
 } from "@openaide/app-server-client";
+import { currentFrontendShell } from "../services/frontendShell";
 import { postHostMessage, replaceSettingsTabRoute } from "../services/hostBridge";
 import { mapProtocolAppPreferences, protocolComposerSubmitShortcut } from "../state/appPreferencesMapping";
 import { mapProtocolRuntimeSettings } from "../state/runtimeSettingsMapping";
 import type { AppCallbacksDependencies, SettingsCallbacks } from "./appControllerCallbackTypes";
 import {
   authenticateAgentThroughBackend,
+  cancelAgentAuthenticationThroughBackend,
   createCustomAgentThroughBackend,
   deleteCustomAgentThroughBackend,
+  logoutAgentThroughBackend,
   refreshAgentSettingsThroughBackend,
   replaceCustomAgentThroughBackend,
   setAgentEnabledThroughBackend,
@@ -47,17 +50,49 @@ export function createSettingsCallbacks({
     state,
   });
   return {
-    authenticateAgent: (agentId, methodId, values) => {
-      dispatch({ type: "settings:start" });
-      return authenticateAgentThroughBackend(agentSettingsContext(), agentId, methodId, values)
-        .then((outcome) => {
-          if (!outcome) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
-          return outcome === "authenticated";
-        })
-        .catch(() => {
-          dispatch({ type: "settings:error", message: authenticationFailedMessage() });
+    // Sign-in Flow state is App Server-owned and arrives through the agents subscription, so
+    // these callbacks only send intents; they never stage optimistic status.
+    authenticateAgent: async (agentId, methodId, values) => {
+      const agent = state.settings.agentDetails?.find((candidate) => candidate.id === agentId);
+      const running = agent?.sign_in && agent.sign_in.phase !== "failed" ? agent.sign_in : undefined;
+      const continuesTerminal = running?.phase === "awaiting_terminal" && running.method_id === methodId;
+      if (running && !continuesTerminal) {
+        // App Server admits one flow per Agent; switching methods ends the running one first.
+        try {
+          await cancelAgentAuthenticationThroughBackend(agentSettingsContext(), agentId);
+        } catch {
+          dispatch({ type: "settings:error", message: "Could not cancel sign-in." });
           return false;
-        });
+        }
+      }
+      try {
+        const outcome = await authenticateAgentThroughBackend(agentSettingsContext(), agentId, methodId, values);
+        if (!outcome) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        return outcome === "authenticated";
+      } catch {
+        // The failure (or nothing, after a cancel) is already on the Agent's Sign-in Flow. Refresh
+        // details so the projection catches up even if the subscription update is still in flight.
+        await refreshAgentSettingsThroughBackend(agentSettingsContext()).catch(() => undefined);
+        return false;
+      }
+    },
+    cancelAgentAuthentication: async (agentId) => {
+      try {
+        const handled = await cancelAgentAuthenticationThroughBackend(agentSettingsContext(), agentId);
+        if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+      } catch {
+        dispatch({ type: "settings:error", message: "Could not cancel sign-in." });
+      }
+    },
+    logoutAgent: async (agentId) => {
+      try {
+        const handled = await logoutAgentThroughBackend(agentSettingsContext(), agentId);
+        if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        return handled;
+      } catch (error) {
+        dispatch({ type: "settings:error", message: safeErrorMessage(error) });
+        return false;
+      }
     },
     createCustomAgent: (payload) => {
       dispatch({ type: "settings:start" });
@@ -174,10 +209,6 @@ function safeErrorMessage(error: unknown) {
 
 function appServerRequiredMessage() {
   return "Agent catalog changes require the App Server.";
-}
-
-function authenticationFailedMessage() {
-  return "Authentication failed. Check the Agent's requirements and try again.";
 }
 
 function settingsReadRequiredMessage() {
