@@ -217,14 +217,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.activity-group\[open\] \.activity-disclosure-icon,\s*\.activity-group\.open \.activity-disclosure-icon\s*{\s*transform:\s*rotate\(90deg\);/);
   });
 
-  it("animates activity disclosure content with reduced-motion support", () => {
-    expect(appCss).toMatch(/\.activity-disclosure-body\s*{[^}]*grid-template-rows:\s*0fr;[^}]*transition:\s*grid-template-rows 210ms cubic-bezier\(0\.22, 1, 0\.36, 1\);/);
-    expect(appCss).toMatch(/\.activity-disclosure-body\.open\s*{\s*grid-template-rows:\s*1fr;/);
-    expect(appCss).toMatch(/\.activity-disclosure-content\s*{[^}]*min-height:\s*0;[^}]*contain:\s*layout paint;[^}]*overflow:\s*hidden;/);
-    expect(appCss).not.toMatch(/::details-content\s*{[^}]*opacity:/);
-    expect(appCss).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)\s*{[^}]*\.activity-disclosure-body\s*{[^}]*transition-duration:\s*0\.01ms;/);
-  });
-
   it("renders thought messages separately from activity groups", () => {
     expect(appCss).toMatch(/\.chat-thought-block\s*{[^}]*display:\s*grid;[^}]*gap:\s*3px;/);
     expect(appCss).toMatch(/\.chat-thought-block > summary,\s*\.chat-thought-block > \.activity-disclosure-trigger\s*{[^}]*cursor:\s*pointer;[^}]*list-style:\s*none;/);

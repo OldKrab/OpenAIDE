@@ -9,6 +9,7 @@ import type {
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskLiveTextPresentation } from "../state/store";
+import { ChatContentSizeChangeContext } from "./ChatActivityView";
 import { ChatRow } from "./ChatMessageView";
 import { QuoteSelectionAction } from "./QuoteSelectionAction";
 import {
@@ -93,6 +94,15 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   }, [chatScroll.messageListRef]);
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   const virtualItems = chatScroll.virtualizer.getVirtualItems();
+  const measureChangedChatContent = useCallback((content: HTMLElement) => {
+    const row = content.closest<HTMLElement>(".message-list-virtual-row");
+    if (!row) return;
+    const index = Number(row.dataset.index);
+    if (!Number.isInteger(index)) return;
+    // Disclosure state commits before paint. Measure here too so the next
+    // absolute row moves in the same frame instead of awaiting ResizeObserver.
+    chatScroll.virtualizer.resizeItem(index, row.offsetHeight);
+  }, [chatScroll.virtualizer]);
   return (
     <div className="message-list-shell" data-more-below={String(chatScroll.moreBelow)}>
       <div
@@ -105,12 +115,13 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
         onWheel={chatScroll.onWheel}
         ref={setMessageListRef}
         >
-        <div className="message-list-virtualizer" ref={chatScroll.virtualizer.containerRef}>
-          {virtualItems.map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            if (!row) return null;
-            const previousRow = rows[virtualRow.index - 1];
-            return (
+        <ChatContentSizeChangeContext.Provider value={measureChangedChatContent}>
+          <div className="message-list-virtualizer" ref={chatScroll.virtualizer.containerRef}>
+            {virtualItems.map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              if (!row) return null;
+              const previousRow = rows[virtualRow.index - 1];
+              return (
               <div
                 className="message-list-virtual-row"
                 data-after-activity={String(
@@ -186,9 +197,10 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                   />
                 ) : null}
               </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </ChatContentSizeChangeContext.Provider>
       </div>
       <UserMessageNavigator navigation={chatScroll.userMessageNavigation} />
       {onQuote && messageListElement ? (

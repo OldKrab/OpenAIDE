@@ -1,5 +1,5 @@
 import { ArrowRight, Bot, Brain, ChevronRight, CircleX, Check, Info, Terminal, Wrench } from "lucide-react";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityStep, ActivityToolDetails, NormalizedMessage } from "@openaide/app-shell-contracts";
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { toolDetailCacheKey } from "../state/store";
@@ -23,6 +23,9 @@ import { ChatToolDetails } from "./ChatToolDetailsView";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { toolKindIcon } from "./chatToolIcons";
 import { presentThoughtMarkdown } from "./thoughtPresentation";
+
+/** Lets disclosure commits synchronously update an enclosing measured Chat row. */
+export const ChatContentSizeChangeContext = createContext<((element: HTMLElement) => void) | undefined>(undefined);
 
 export function ChatActivityView({
   activity,
@@ -623,9 +626,13 @@ function AnimatedDisclosure({
   trigger: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const notifyContentSizeChange = useContext(ChatContentSizeChangeContext);
+  const disclosureRef = useCallback((element: HTMLDivElement | null) => {
+    if (element) notifyContentSizeChange?.(element);
+  }, [notifyContentSizeChange, open]);
   const rootClassName = [className, open ? "open" : ""].filter(Boolean).join(" ");
   return (
-    <div className={rootClassName} data-step-id={stepId}>
+    <div className={rootClassName} data-step-id={stepId} ref={disclosureRef}>
       <button
         aria-expanded={open}
         className="activity-disclosure-trigger"
