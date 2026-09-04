@@ -127,7 +127,13 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   expect(userMessageAlignment).toBeCloseTo(0, 0);
   await expect(chat.getByText("Smoke answer", { exact: true })).toBeVisible();
   await expect(chat.locator(".task-header-title > strong")).toHaveText("Smoke task");
-  await page.getByRole("button", { name: "Read file, thought" }).click();
+  const activitySummary = page.getByRole("button", { name: "Read once, thought" });
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await expect(activitySummary).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(activitySummary).toBeVisible();
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await activitySummary.click();
   const readStep = chat.locator(".activity-step").filter({
     has: page.locator(".activity-step-semantic-action", { hasText: /^Read$/ }),
   }).filter({

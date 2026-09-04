@@ -247,7 +247,7 @@ describe("ChatRow", () => {
       />,
     );
 
-    expect(html).toContain("Read file, thought");
+    expect(html).toContain("Read once, thought");
     expect(html).not.toContain('class="activity-reasoning-toggle"');
     expect(html).toContain("activity-thought-block");
     expect(html).toContain("Check current files first.");
@@ -277,7 +277,7 @@ describe("ChatRow", () => {
       />,
     );
 
-    expect(html).toContain("Read file");
+    expect(html).toContain("Read once");
     expect(html).not.toContain("activity-tool-details");
   });
 
@@ -305,7 +305,7 @@ describe("ChatRow", () => {
       />,
     );
 
-    expect(html).toContain("Read file");
+    expect(html).toContain("Read once");
     expect(html).not.toContain("activity-tool-details");
 
     const editHtml = renderToStaticMarkup(
@@ -330,7 +330,7 @@ describe("ChatRow", () => {
       />,
     );
 
-    expect(editHtml).toContain("Updated file");
+    expect(editHtml).toContain("Updated once");
     expect(editHtml).toContain("Editing files");
     expect(editHtml).not.toContain("activity-tool-details");
   });
@@ -708,7 +708,7 @@ describe("ChatRow", () => {
     );
 
     expect(html).toContain("Ran command");
-    expect(html).not.toContain("Called tool");
+    expect(html).not.toContain("Called a tool once");
     expect(html).toContain('class="activity-step tool-execute completed"');
     expect(html).toContain("lucide-terminal activity-kind-icon");
     expect(html).toContain("activity-tool-execute-detail completed");

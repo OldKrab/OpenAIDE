@@ -162,7 +162,28 @@ description: Read-only review
       activitySummary(
         activity("write_stdin", "completed", [{ kind: "tool", name: "other", status: "completed" }]),
       ),
-    ).toBe("Called tool");
+    ).toBe("Called a tool once");
+  });
+
+  it.each([
+    ["read", 1, "Read once"],
+    ["read", 2, "Read 2 times"],
+    ["edit", 1, "Updated once"],
+    ["edit", 2, "Updated 2 times"],
+    ["delete", 1, "Deleted once"],
+    ["delete", 2, "Deleted 2 times"],
+    ["skill", 1, "Activated a skill once"],
+    ["skill", 2, "Activated a skill 2 times"],
+    ["other", 1, "Called a tool once"],
+    ["other", 2, "Called a tool 2 times"],
+  ])("describes %s tool-call volume without implying unique objects", (name, count, expected) => {
+    const steps = Array.from({ length: count }, () => ({
+      kind: "tool" as const,
+      name,
+      status: "completed" as const,
+    }));
+
+    expect(activitySummary(activity("Tool activity", "completed", steps))).toBe(expected);
   });
 
   it("keeps protocol kinds readable for non-command tools", () => {
@@ -202,7 +223,7 @@ description: Read-only review
       "Switch mode to Plan",
     ]);
     expect(activitySummary(activity("Tool activity", "completed", steps))).toBe(
-      "Deleted file, updated file, ran search, thought, called tool",
+      "Deleted once, updated once, ran search, thought, called a tool once",
     );
   });
 
@@ -364,7 +385,7 @@ description: Read-only review
       input_summary: "rg -n activityLabels frontend",
     };
 
-    expect(activitySummary(activity("Commands", "completed", [skill]))).toBe("Activated skill");
+    expect(activitySummary(activity("Commands", "completed", [skill]))).toBe("Activated a skill once");
     expect(activityStepLabel(skill)).toBe("Activated tdd, diagnosing-bugs, and impeccable skills");
     expect(activityStepProgressLabel({ ...skill, status: "running" })).toBe(
       "Activating tdd, diagnosing-bugs, and impeccable skills",
@@ -390,7 +411,7 @@ description: Read-only review
       },
       input_summary: "zsh -lc ...",
     };
-    expect(activitySummary(activity("Commands", "completed", [inspect]))).toBe("Ran search, read file");
+    expect(activitySummary(activity("Commands", "completed", [inspect]))).toBe("Ran search, read once");
     expect(activityStepLabel(inspect)).toBe(
       "Read agent-settings-catalog.css and mcp-settings.css; "
       + "Search “skill” in part-09.css, part-10.css, and settings-shell.css",
@@ -398,7 +419,7 @@ description: Read-only review
     expect(activityStepProgressLabel({ ...inspect, status: "running" })).toBe("Inspecting files");
     expect(activityStepCompletedLabel(inspect)).toBe("Inspected files");
     expect(activitySummary(activity("Commands", "completed", [inspect, inspect]))).toBe(
-      "Ran 2 searches, read 2 files",
+      "Ran 2 searches, read 2 times",
     );
 
     const skillSearch = {
@@ -415,7 +436,7 @@ description: Read-only review
         ],
       },
     };
-    expect(activitySummary(activity("Commands", "completed", [skillSearch]))).toBe("Activated skill, ran search");
+    expect(activitySummary(activity("Commands", "completed", [skillSearch]))).toBe("Activated a skill once, ran search");
   });
 
   it("summarizes mixed grouped tool activity by work type", () => {
@@ -428,7 +449,7 @@ description: Read-only review
           { kind: "tool", name: "execute", status: "completed", input_summary: "npm run check" },
         ]),
       ),
-    ).toBe("Updated file, ran command, read 2 files");
+    ).toBe("Updated once, ran command, read 2 times");
   });
 
   it("orders grouped activity by user impact instead of event arrival", () => {
@@ -447,8 +468,8 @@ description: Read-only review
         ]),
       ),
     ).toBe(
-      "Deleted file, updated file, ran command, activated skill, interacted with subagent, "
-      + "ran search, read file, thought, called tool",
+      "Deleted once, updated once, ran command, activated a skill once, interacted with subagent, "
+      + "ran search, read once, thought, called a tool once",
     );
   });
 
@@ -462,7 +483,7 @@ description: Read-only review
       { kind: "tool" as const, name: "edit", status: "completed" as const, input_summary: "app.ts" },
     ],
   ])("keeps each Tool's kind authoritative in a mixed activity group", (...steps) => {
-    expect(activitySummary(activity("Updated file", "completed", steps))).toBe("Updated file, ran search");
+    expect(activitySummary(activity("Updated file", "completed", steps))).toBe("Updated once, ran search");
   });
 
   it("summarizes skill activation events while keeping their detail", () => {
@@ -473,7 +494,7 @@ description: Read-only review
       { kind: "tool", name: "execute", status: "completed", input_summary: "npm test" },
     ]);
 
-    expect(activitySummary(message)).toBe("Ran command, activated 2 skills, read file");
+    expect(activitySummary(message)).toBe("Ran command, activated a skill 2 times, read once");
     expect(activityStepLabel(message.steps[0])).toBe("Activated tdd skill");
     expect(activityStepProgressLabel(message.steps[0])).toBe("Activating tdd skill");
     expect(activityStepCompletedLabel(message.steps[0])).toBe("Activated tdd skill");
@@ -485,7 +506,7 @@ description: Read-only review
       status: "completed" as const,
       input_summary: "tdd",
     }));
-    expect(activitySummary(activity("Tool activity", "completed", repeatedActivations))).toBe("Activated 5 skills");
+    expect(activitySummary(activity("Tool activity", "completed", repeatedActivations))).toBe("Activated a skill 5 times");
   });
 
   it("classifies generic tool rows from their visible summaries", () => {
@@ -498,7 +519,7 @@ description: Read-only review
           { kind: "tool", name: "other", status: "completed", input_summary: "Updated src/activity.ts" },
         ]),
       ),
-    ).toBe("Updated file, ran search, read 2 files");
+    ).toBe("Updated once, ran search, read 2 times");
   });
 
   it("classifies tool-like text rows from their visible labels", () => {
@@ -510,9 +531,9 @@ description: Read-only review
           { kind: "text", text: "/usr/bin/zsh -lc \"sed -n '1,180p' packages/frontend/src/state/activityLabels.ts\"" },
         ]),
       ),
-    ).toBe("Ran command, read 2 files");
+    ).toBe("Ran command, read 2 times");
 
-    expect(activitySummary(activity("Editing files", "completed", [{ kind: "text", text: "Editing files" }]))).toBe("Updated file");
+    expect(activitySummary(activity("Editing files", "completed", [{ kind: "text", text: "Editing files" }]))).toBe("Updated once");
   });
 
   it("omits the count for single grouped actions and places thoughts after concrete work", () => {
@@ -524,7 +545,7 @@ description: Read-only review
           { kind: "tool", name: "search", status: "completed", input_summary: "tool activity" },
         ]),
       ),
-    ).toBe("Ran search, read file, thought");
+    ).toBe("Ran search, read once, thought");
 
     expect(
       activitySummary(
@@ -534,7 +555,7 @@ description: Read-only review
           { kind: "thought", text: "No LLM summary." },
         ]),
       ),
-    ).toBe("Read file, thought twice");
+    ).toBe("Read once, thought twice");
 
     expect(
       activitySummary(
