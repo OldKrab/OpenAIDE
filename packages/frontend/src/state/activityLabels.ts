@@ -395,24 +395,36 @@ function stepSearchText(step: Extract<ActivityStep, { kind: "tool" }>) {
 
 function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boolean) {
   if (count === 0) return undefined;
-  const labels: Record<ActivitySummaryKind, { verb?: string; single: string; plural: string }> = {
-    thought: { single: "thought", plural: "thoughts" },
-    skill: { verb: "activated", single: "skill", plural: "skills" },
-    read: { verb: "read", single: "file", plural: "files" },
-    edit: { verb: "updated", single: "file", plural: "files" },
-    delete: { verb: "deleted", single: "file", plural: "files" },
-    run: { verb: "ran", single: "command", plural: "commands" },
-    search: { verb: "ran", single: "search", plural: "searches" },
-    subagentInteraction: { single: "subagent interaction", plural: "subagent interactions" },
-    other: { verb: "called", single: "tool", plural: "tools" },
-  };
-  const label = labels[kind];
   if (kind === "subagentInteraction") {
-    const phrase = count === 1 ? "interacted with subagent" : `${count} ${label.plural}`;
+    const phrase = count === 1 ? "interacted with subagent" : `${count} subagent interactions`;
     return sentenceStart ? capitalize(phrase) : phrase;
   }
   if (kind === "thought") {
     const phrase = count === 1 ? "thought" : count === 2 ? "thought twice" : `thought ${count} times`;
+    return sentenceStart ? capitalize(phrase) : phrase;
+  }
+
+  const labels = {
+    skill: { style: "frequency", verb: "activated", subject: "skill" },
+    read: { style: "frequency", verb: "read" },
+    edit: { style: "frequency", verb: "updated" },
+    delete: { style: "frequency", verb: "deleted" },
+    run: { style: "quantity", verb: "ran", single: "command", plural: "commands" },
+    search: { style: "quantity", verb: "ran", single: "search", plural: "searches" },
+    other: { style: "frequency", verb: "called", subject: "tool" },
+  } as const satisfies Record<Exclude<ActivitySummaryKind, "thought" | "subagentInteraction">, {
+    style: "frequency" | "quantity";
+    verb: string;
+    subject?: string;
+    single?: string;
+    plural?: string;
+  }>;
+  const label = labels[kind];
+  // Object-backed categories count Tool invocations, not distinct subjects.
+  if (label.style === "frequency") {
+    const frequency = count === 1 ? "once" : `${count} times`;
+    const subject = "subject" in label ? ` a ${label.subject}` : "";
+    const phrase = `${label.verb}${subject} ${frequency}`;
     return sentenceStart ? capitalize(phrase) : phrase;
   }
   const noun = count === 1 ? label.single : label.plural;
