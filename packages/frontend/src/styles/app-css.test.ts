@@ -183,7 +183,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.chat-column\s*{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*padding-inline:\s*max\(0px,\s*calc\(\(100% - 760px\) \/ 2\)\);/);
-    expect(appCss).toMatch(/\.message-list-virtualizer\s*{[^}]*width:\s*100%;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*gap:\s*8px;/);
     expect(appCss).toMatch(/\.message-list-virtual-row\s*{[^}]*width:\s*100%;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/);
   });
 

@@ -298,7 +298,9 @@ describe("useTaskChatScroll", () => {
     });
     act(() => messageListView(tree).props.onScroll({ currentTarget: messageList }));
     expect(onScrollState).not.toHaveBeenCalled();
-    act(() => vi.runAllTimers());
+    act(() => {
+      vi.runAllTimers();
+    });
     expect(onScrollState).toHaveBeenLastCalledWith({ ownership: "reading", scrollTop: 576 });
     act(() => tree.unmount());
     vi.useRealTimers();

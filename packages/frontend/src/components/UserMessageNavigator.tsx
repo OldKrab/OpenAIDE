@@ -109,7 +109,11 @@ export function UserMessageNavigator({
   }, [anchors.length, mobileExpanded, updateScrollEdges]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (
+      typeof window === "undefined"
+      || typeof window.addEventListener !== "function"
+      || typeof window.removeEventListener !== "function"
+    ) return;
     const reposition = () => {
       positionPreview(previewIndex);
       updateScrollEdges();
