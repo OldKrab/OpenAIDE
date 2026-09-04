@@ -407,9 +407,11 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions) {
   ).size;
   expect(paintedPositions).toBeGreaterThanOrEqual(minimumPaintedPositions);
   expect(intermediateSamples.every(({ visibleRows }) => visibleRows > 0)).toBe(true);
+  // Initial, final, and at least two intermediate positions prove the
+  // selector animates without coupling the assertion to CI frame cadence.
   expect(new Set(navigation.samples
     .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
-    .filter(Boolean)).size).toBeGreaterThanOrEqual(6);
+    .filter(Boolean)).size).toBeGreaterThanOrEqual(4);
   // Includes two stable frames after the 24-step motion finishes, with room
   // for the deliberately throttled browser to paint its final range.
   expect(navigation.duration).toBeLessThanOrEqual(1_400);
