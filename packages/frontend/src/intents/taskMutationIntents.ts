@@ -298,8 +298,8 @@ export function removeTaskQueueMessageIntent(
   dependencies: TaskMutationIntentDependencies,
   snapshot: TaskSnapshot | undefined,
   queuedMessageId: string,
-) {
-  if (!snapshot) return;
+): Promise<void> {
+  if (!snapshot) return Promise.resolve();
   const taskId = snapshot.task.task_id;
   if (!dependencies.backendConnection?.request) {
     dependencies.dispatch({
@@ -307,9 +307,10 @@ export function removeTaskQueueMessageIntent(
       taskId,
       message: "App Server connection unavailable.",
     });
-    return;
+    return Promise.resolve();
   }
-  void dependencies.backendConnection.request(TASK_QUEUE_REMOVE, {
+  dependencies.dispatch({ type: "taskInput:error:clear", taskId });
+  return dependencies.backendConnection.request(TASK_QUEUE_REMOVE, {
     taskId: taskId as TaskId,
     queuedMessageId: queuedMessageId as QueuedMessageId,
     queueRevision: snapshot.message_queue?.revision ?? 0,
@@ -335,8 +336,8 @@ export function takeTaskQueueMessageIntent(
   snapshot: TaskSnapshot | undefined,
   input: TaskComposerInput,
   queuedMessageId: string,
-) {
-  if (!snapshot) return;
+): Promise<void> {
+  if (!snapshot) return Promise.resolve();
   const taskId = snapshot.task.task_id;
   if (input.pending || input.queueTake || input.prompt.length > 0 || input.context.length > 0) {
     dependencies.dispatch({
@@ -344,7 +345,7 @@ export function takeTaskQueueMessageIntent(
       taskId,
       message: "Clear Composer before editing a queued message.",
     });
-    return;
+    return Promise.resolve();
   }
   const queue = snapshot.message_queue;
   const index = queue?.items.findIndex((item) => item.queued_message_id === queuedMessageId) ?? -1;
@@ -352,13 +353,13 @@ export function takeTaskQueueMessageIntent(
   const request = dependencies.backendConnection?.request;
   if (!item || !request) {
     dependencies.dispatch({ type: "taskInput:error", taskId, message: "Queued message is no longer available." });
-    return;
+    return Promise.resolve();
   }
 
   const adoption = dependencies.attachmentResources?.beginAdoption(taskId);
-  if (dependencies.attachmentResources && !adoption) return;
+  if (dependencies.attachmentResources && !adoption) return Promise.resolve();
   dependencies.dispatch({ type: "taskQueue:take:start", taskId, item, index });
-  void request(TASK_QUEUE_TAKE, {
+  return request(TASK_QUEUE_TAKE, {
     taskId: taskId as TaskId,
     queuedMessageId: queuedMessageId as QueuedMessageId,
     queueRevision: queue?.revision ?? 0,
@@ -419,16 +420,17 @@ export function sendTaskQueueMessageNowIntent(
   dependencies: TaskMutationIntentDependencies,
   snapshot: TaskSnapshot | undefined,
   queuedMessageId: string,
-) {
-  if (!snapshot) return;
+): Promise<void> {
+  if (!snapshot) return Promise.resolve();
   const taskId = snapshot.task.task_id;
   const item = snapshot.message_queue?.items.find((candidate) => candidate.queued_message_id === queuedMessageId);
   const request = dependencies.backendConnection?.request;
   if (!item || !request) {
     dependencies.dispatch({ type: "taskInput:error", taskId, message: "Queued message is no longer available." });
-    return;
+    return Promise.resolve();
   }
-  void request(TASK_SEND, {
+  dependencies.dispatch({ type: "taskInput:error:clear", taskId });
+  return request(TASK_SEND, {
     taskId: taskId as TaskId,
     message: { text: item.text },
     queueSelection: {
@@ -466,6 +468,7 @@ function mutateTaskQueue(
     dependencies.dispatch({ type: "taskInput:error", taskId, message: error.message });
     return Promise.reject(error);
   }
+  dependencies.dispatch({ type: "taskInput:error:clear", taskId });
   const shared = {
     taskId: taskId as TaskId,
     queueRevision: snapshot.message_queue?.revision ?? 0,

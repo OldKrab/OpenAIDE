@@ -139,8 +139,8 @@ export function createWebAppShell(): FrontendShell {
     navigation: {
       openNewTask: (projectId) => navigate(newTaskPath(projectId)),
       openNativeSession: (agentId, nativeSessionId) => navigate(nativeSessionPath(agentId, nativeSessionId)),
-      openSettings: (agentId, returnToNewTask, projectId, settingsTab) =>
-        navigate(settingsPath(agentId, returnToNewTask, projectId, settingsTab)),
+      openSettings: (agentId, returnToNewTask, projectId, settingsTab, settingsIntent) =>
+        navigate(settingsPath(agentId, returnToNewTask, projectId, settingsTab, settingsIntent)),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
       replaceSettingsTab(tab) {
         replaceSettingsSearch(publishRoute, (search) => {
@@ -293,6 +293,7 @@ function webBootstrapForLocation(): WebviewBootstrap {
     return {
       surface: "settings",
       settingsTab: settingsTabFromSearch(),
+      settingsIntent: settingsIntentFromSearch(search),
       settingsAgentId: search.get("agentId") ?? undefined,
       returnToNewTask: search.get("returnToNewTask") === "true",
       projectId: search.get("projectId") ?? undefined,
@@ -359,14 +360,26 @@ function settingsPath(
   returnToNewTask?: boolean,
   projectId?: string,
   settingsTab?: SettingsTabId,
+  settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent,
 ) {
   const search = new URLSearchParams();
   if (settingsTab) search.set("tab", settingsTab);
   if (agentId) search.set("agentId", agentId);
   if (returnToNewTask) search.set("returnToNewTask", "true");
   if (projectId) search.set("projectId", projectId);
+  if (settingsIntent?.kind === "openSupportExport") {
+    search.set("intent", settingsIntent.kind);
+    search.set("intentRequestId", settingsIntent.requestId);
+  }
   const query = search.toString();
   return query ? `/settings?${query}` : "/settings";
+}
+
+function settingsIntentFromSearch(search: URLSearchParams): import("@openaide/app-shell-contracts").SettingsIntent | undefined {
+  const requestId = search.get("intentRequestId");
+  return search.get("intent") === "openSupportExport" && requestId
+    ? { kind: "openSupportExport", requestId }
+    : undefined;
 }
 
 function isWebviewBootstrap(value: unknown): value is WebviewBootstrap {

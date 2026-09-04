@@ -8,7 +8,7 @@ import type {
   WorkspaceRootSummary,
 } from "./settings.js";
 import type { SettingsTabId } from "./preferences.js";
-import type { WebviewAppServerConnection } from "./bootstrap.js";
+import type { SettingsIntent, WebviewAppServerConnection } from "./bootstrap.js";
 import type { WebviewTelemetryPayload } from "./telemetry.js";
 
 export type RuntimeErrorPayload = {
@@ -53,7 +53,7 @@ export type WebviewToHostMessage =
   | { type: "surface.retainNewTaskProject"; payload: { project_id: string } }
   | { type: "surface.openNativeSession"; payload: { agent_id: string; native_session_id: string; project_id?: string } }
   | { type: "surface.openArchive" }
-  | { type: "surface.openSettings"; payload?: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId } }
+  | { type: "surface.openSettings"; payload?: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId; settings_intent?: SettingsIntent } }
   | { type: "surface.openTask"; payload: { task_id: string; title?: string; agent_id?: string } }
   | { type: "surface.updateTaskTitle"; payload: { task_id: string; title: string } }
   | { type: "shell.openExternal"; payload: { url: string } }
@@ -77,7 +77,7 @@ export type HostToWebviewMessage =
   | { type: "surface.workspaceChanged"; payload: { project_ids: string[] } }
   | { type: "surface.newTaskChanged"; payload: { project_id?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }
-  | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId } }
+  | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId; settings_intent?: SettingsIntent } }
   | { type: "diagnostics.snapshot.result"; payload: DiagnosticsSnapshot }
   | { type: "workspace.roots.result"; payload: { roots: WorkspaceRootSummary[] } }
   | { type: "runtime.settings.result"; payload: RuntimeSettingsResult }

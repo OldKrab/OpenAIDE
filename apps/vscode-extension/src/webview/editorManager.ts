@@ -170,6 +170,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     returnToNewTask?: boolean,
     projectId?: string,
     settingsTab?: WebviewBootstrap["settingsTab"],
+    settingsIntent?: WebviewBootstrap["settingsIntent"],
   ) {
     if (this.settingsPanel) {
       this.settingsPanel.reveal(vscode.ViewColumn.Active);
@@ -181,6 +182,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
           ...(returnToNewTask ? { return_to_new_task: true } : {}),
           ...(projectId ? { project_id: projectId } : {}),
           ...(settingsTab ? { settings_tab: settingsTab } : {}),
+          ...(settingsIntent ? { settings_intent: settingsIntent } : {}),
         },
       });
       return;
@@ -191,6 +193,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       returnToNewTask,
       projectId,
       settingsTab,
+      settingsIntent,
     });
     panel.iconPath = settingsTabIcon(this.context);
     this.settingsPanel = panel;

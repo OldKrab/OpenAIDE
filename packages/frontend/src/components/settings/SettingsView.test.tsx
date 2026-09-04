@@ -5,6 +5,7 @@ import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { shouldConsumeAgentDeleteAck, shouldConsumeAgentSaveAck } from "./AgentSettingsTab";
 import { compactPathForSettings, DataSupportSettingsTab, GeneralSettingsTab } from "./GeneralSettingsTab";
 import { SettingsView } from "./SettingsView";
+import { SupportExportButton } from "../SupportExportDialog";
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -420,6 +421,50 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(onSelectTab).toHaveBeenCalledWith("data");
   });
 
+  it("lets the user dismiss a transient Settings error", () => {
+    const onDismissError = vi.fn();
+    const tree = render(
+      <SettingsView
+        onAuthenticate={() => undefined}
+        onCreateCustomAgent={() => undefined}
+        onDeleteCustomAgent={() => undefined}
+        onDismissError={onDismissError}
+        onRefresh={() => undefined}
+        onReplaceCustomAgent={() => undefined}
+        onSelectTab={() => undefined}
+        onSetAcpTrace={() => undefined}
+        onSetAgentEnabled={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onUpdateCustomAgentMetadata={() => undefined}
+        onUnlockDeveloperSettings={() => undefined}
+        preferences={{ composer_submit_shortcut: "mod_enter" }}
+        state={{ activeTab: "common", error: "Could not save setting.", loading: false }}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Dismiss error" }).props.onClick());
+
+    expect(onDismissError).toHaveBeenCalledOnce();
+  });
+
+  it("opens the diagnostics wizard from the Settings search result", () => {
+    vi.stubGlobal("window", {
+      cancelAnimationFrame: vi.fn(),
+      matchMedia: vi.fn(() => ({ matches: false })),
+      requestAnimationFrame: vi.fn(() => 1),
+    });
+    const tree = renderSettingsView("data");
+    const search = tree.root.findAllByProps({ "aria-label": "Search Settings" })[0]!;
+    act(() => search.props.onChange({ currentTarget: { value: "diagnostics" } }));
+    const result = tree.root.findAllByType("button").find((button) =>
+      button.findAllByType("strong").some((label) => label.children.includes("Diagnostics"))
+    );
+
+    act(() => result?.props.onClick());
+
+    expect(tree.root.findByType(SupportExportButton).props.openRequestKey).toEqual(expect.any(String));
+  });
+
   it("keeps Desktop settings out of shells without native Desktop capabilities", () => {
     const tree = render(
       <SettingsView
@@ -633,7 +678,7 @@ function render(element: React.ReactElement) {
   return tree!;
 }
 
-function renderSettingsView() {
+function renderSettingsView(activeTab: "common" | "data" = "common") {
   return render(
     <SettingsView
       onAuthenticate={() => undefined}
@@ -648,7 +693,7 @@ function renderSettingsView() {
       onUpdateCustomAgentMetadata={() => undefined}
       onUnlockDeveloperSettings={() => undefined}
       preferences={{ composer_submit_shortcut: "mod_enter" }}
-      state={{ activeTab: "common", loading: false }}
+      state={{ activeTab, loading: false }}
     />,
   );
 }

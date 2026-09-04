@@ -719,6 +719,34 @@ describe("SidebarNativeSessionRow", () => {
     expect(onSetNativeSessionPinned).toHaveBeenCalledWith(session, true);
   });
 
+  it("automatically clears a failed Native Session pin notice", async () => {
+    vi.useFakeTimers();
+    try {
+      const session = nativeSession({ session_id: "session_pin_error", title: "Existing session", pinned: false });
+      const tree = render(
+        <SidebarNativeSessionRow
+          {...nativeSessionRowCallbacks()}
+          archived={false}
+          nativeSessionAgentId="codex"
+          nativeSessionAgentName="Codex"
+          onSetNativeSessionPinned={vi.fn().mockRejectedValue(new Error("Unable to save pin"))}
+          session={session}
+        />,
+      );
+
+      act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+      await act(async () => buttonWithText(tree, "Pin task").props.onClick());
+      expect(tree.root.findByProps({ role: "alert" }).children.join("")).toBe("Unable to save pin");
+
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(tree.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses a Native Session as the in-menu Project cleanup cutoff", async () => {
     const session = nativeSession({ agent_id: "codex", session_id: "session_1", title: "Existing session" });
     const cutoff = {

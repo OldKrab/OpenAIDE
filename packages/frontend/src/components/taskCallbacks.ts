@@ -219,7 +219,7 @@ export function createTaskCallbacks({
       );
     },
     removeQueueMessage: (queuedMessageId) => {
-      removeTaskQueueMessageIntent({
+      return removeTaskQueueMessageIntent({
         attachmentResources,
         backendConnection,
         clientInstanceId,
@@ -240,8 +240,8 @@ export function createTaskCallbacks({
     }, state.snapshot),
     takeQueueMessage: (queuedMessageId) => {
       const taskId = state.snapshot?.task.task_id;
-      if (!taskId) return;
-      takeTaskQueueMessageIntent({
+      if (!taskId) return Promise.resolve();
+      return takeTaskQueueMessageIntent({
         attachmentResources, backendConnection, clientInstanceId, createSnapshotRequestId,
         dispatch, postHostMessage, stateRootId: state.appServerStateRootId,
       }, state.snapshot, state.taskInputs[taskId] ?? { prompt: "", context: [] }, queuedMessageId);
@@ -253,7 +253,7 @@ export function createTaskCallbacks({
       }, state.snapshot, queuedMessageId, targetIndex);
     },
     sendQueueMessageNow: (queuedMessageId) => {
-      sendTaskQueueMessageNowIntent({
+      return sendTaskQueueMessageNowIntent({
         attachmentResources, backendConnection, clientInstanceId, createSnapshotRequestId,
         dispatch, postHostMessage, stateRootId: state.appServerStateRootId,
       }, state.snapshot, queuedMessageId);

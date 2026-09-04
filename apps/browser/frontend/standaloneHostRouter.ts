@@ -45,13 +45,22 @@ function routeStandaloneHostMessage(message: WebviewToHostMessage, output: Stand
         : "/new-task");
       return;
     case "surface.openSettings":
-      output.navigate(message.payload?.settings_tab
-        ? `/settings?tab=${encodeURIComponent(message.payload.settings_tab)}`
-        : "/settings");
+      output.navigate(standaloneSettingsPath(message.payload));
       return;
     default:
       return;
   }
+}
+
+function standaloneSettingsPath(payload: Extract<WebviewToHostMessage, { type: "surface.openSettings" }>["payload"]) {
+  const search = new URLSearchParams();
+  if (payload?.settings_tab) search.set("tab", payload.settings_tab);
+  if (payload?.settings_intent?.kind === "openSupportExport") {
+    search.set("intent", payload.settings_intent.kind);
+    search.set("intentRequestId", payload.settings_intent.requestId);
+  }
+  const query = search.toString();
+  return query ? `/settings?${query}` : "/settings";
 }
 
 function isWebviewMessage(message: unknown): message is WebviewToHostMessage {

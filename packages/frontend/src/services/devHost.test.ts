@@ -34,6 +34,16 @@ describe("standalone dev host", () => {
       surface: "settings",
       taskId: undefined,
     });
+    expect(standaloneBootstrapFrom({
+      hasDatasetSurface: false,
+      hasVsCodeApi: false,
+      pathname: "/settings",
+      search: "?tab=data&intent=openSupportExport&intentRequestId=diagnostics-1",
+    })).toMatchObject({
+      surface: "settings",
+      settingsTab: "data",
+      settingsIntent: { kind: "openSupportExport", requestId: "diagnostics-1" },
+    });
   });
 
   it("ignores invalid messages", () => {
@@ -79,10 +89,21 @@ describe("standalone dev host", () => {
     handleStandaloneHostMessage({ type: "surface.openTask", payload: { task_id: "demo_task" } }, output);
     handleStandaloneHostMessage({ type: "surface.openNewTask" }, output);
     handleStandaloneHostMessage({ type: "surface.openSettings" }, output);
+    handleStandaloneHostMessage({
+      type: "surface.openSettings",
+      payload: {
+        settings_tab: "data",
+        settings_intent: { kind: "openSupportExport", requestId: "diagnostics-1" },
+      },
+    }, output);
 
     expect(output.navigate).toHaveBeenNthCalledWith(1, "/task");
     expect(output.navigate).toHaveBeenNthCalledWith(2, "/new-task");
     expect(output.navigate).toHaveBeenNthCalledWith(3, "/settings");
+    expect(output.navigate).toHaveBeenNthCalledWith(
+      4,
+      "/settings?tab=data&intent=openSupportExport&intentRequestId=diagnostics-1",
+    );
     expect(output.post).not.toHaveBeenCalled();
   });
 

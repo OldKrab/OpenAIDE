@@ -164,13 +164,14 @@ export function createVsCodeShell(): FrontendShell {
           ...(projectId ? { project_id: projectId } : {}),
         },
       }),
-      openSettings: (agentId, returnToNewTask, projectId, settingsTab) => vscode?.postMessage({
+      openSettings: (agentId, returnToNewTask, projectId, settingsTab, settingsIntent) => vscode?.postMessage({
         type: "surface.openSettings",
         payload: {
           ...(agentId ? { agent_id: agentId } : {}),
           ...(returnToNewTask ? { return_to_new_task: true } : {}),
           ...(projectId ? { project_id: projectId } : {}),
           ...(settingsTab ? { settings_tab: settingsTab } : {}),
+          ...(settingsIntent ? { settings_intent: settingsIntent } : {}),
         },
       }),
       openTask: (taskId, title, agentId) => vscode?.postMessage({
@@ -215,7 +216,7 @@ export function createVsCodeShell(): FrontendShell {
 
 function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): WebviewBootstrap | undefined {
   if (!message || typeof message !== "object") return undefined;
-  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown; agent_id?: unknown; return_to_new_task?: unknown; project_id?: unknown; project_ids?: unknown; settings_tab?: unknown } };
+  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown; agent_id?: unknown; return_to_new_task?: unknown; project_id?: unknown; project_ids?: unknown; settings_tab?: unknown; settings_intent?: unknown } };
   if (candidate.type === "surface.workspaceChanged") {
     const projectIds = candidate.payload?.project_ids;
     if (!Array.isArray(projectIds) || projectIds.some((projectId) => typeof projectId !== "string")) return undefined;
@@ -227,6 +228,7 @@ function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): 
       surface: "settings",
       settingsAgentId: typeof candidate.payload?.agent_id === "string" ? candidate.payload.agent_id : undefined,
       settingsTab: isSettingsTab(candidate.payload?.settings_tab) ? candidate.payload.settings_tab : undefined,
+      settingsIntent: isSettingsIntent(candidate.payload?.settings_intent) ? candidate.payload.settings_intent : undefined,
       returnToNewTask: candidate.payload?.return_to_new_task === true,
       projectId: typeof candidate.payload?.project_id === "string" ? candidate.payload.project_id : undefined,
       taskId: undefined,
@@ -261,6 +263,12 @@ function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): 
         settingsTab: undefined,
         archived: undefined,
       };
+}
+
+function isSettingsIntent(value: unknown): value is import("@openaide/app-shell-contracts").SettingsIntent {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { kind?: unknown; requestId?: unknown };
+  return candidate.kind === "openSupportExport" && typeof candidate.requestId === "string";
 }
 
 function bootstrapWithCurrentDocument(current: WebviewBootstrap): WebviewBootstrap {

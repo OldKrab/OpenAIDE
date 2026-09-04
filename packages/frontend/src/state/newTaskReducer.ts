@@ -20,6 +20,7 @@ import { newTaskPreparationKey } from "./newTaskPreparationContext";
 
 type NewTaskAction =
   | { type: "prompt"; prompt: string }
+  | { type: "newTask:error:clear" }
   | { type: "submit:start"; prompt?: string; context?: AppState["newTask"]["context"] }
   | { type: "submit:cancel" }
   | { type: "submit:error"; message: string }
@@ -56,7 +57,15 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
   if (!isNewTaskAction(action)) return undefined;
   switch (action.type) {
     case "prompt":
-      return { ...state, newTask: { ...state.newTask, prompt: action.prompt } };
+      return {
+        ...state,
+        newTask: { ...state.newTask, prompt: action.prompt, error: undefined, errorRetryable: undefined },
+      };
+    case "newTask:error:clear":
+      return {
+        ...state,
+        newTask: { ...state.newTask, error: undefined, errorRetryable: undefined },
+      };
     case "submit:start": {
       const submittedPrompt = action.prompt ?? state.newTask.prompt;
       const submittedContext = action.context ?? state.newTask.context;

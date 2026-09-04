@@ -1,5 +1,5 @@
 import { AlertCircle, Archive, ArrowLeft, Check, GitFork, Info, ListFilter, MoreHorizontal, Pencil, Pin, RotateCcw, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { PopupMenu } from "./Popup";
@@ -91,6 +91,11 @@ export function SidebarNativeSessionRow({
     setTitleError(undefined);
     setEditingTitle(true);
   };
+  const cancelRename = () => {
+    if (titleSaving) return;
+    setEditingTitle(false);
+    setTitleError(undefined);
+  };
   const saveTitle = async () => {
     if (!onSetNativeSessionTitle || titleSaving) return;
     setTitleSaving(true);
@@ -117,6 +122,11 @@ export function SidebarNativeSessionRow({
       setPinSaving(false);
     }
   };
+  useEffect(() => {
+    if (!pinError) return undefined;
+    const timeout = setTimeout(() => setPinError(undefined), 5_000);
+    return () => clearTimeout(timeout);
+  }, [pinError]);
   const changeMenuOpen = (open: boolean) => {
     if (open) preview?.dismiss();
     else {
@@ -143,17 +153,20 @@ export function SidebarNativeSessionRow({
             autoFocus
             disabled={titleSaving}
             maxLength={200}
-            onChange={(event) => setTitleDraft(event.target.value)}
+            onChange={(event) => {
+              setTitleDraft(event.target.value);
+              setTitleError(undefined);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
-                if (!titleSaving) setEditingTitle(false);
+                cancelRename();
               }
             }}
             value={titleDraft}
           />
           <button aria-label="Save task title" disabled={titleSaving} type="submit"><Check size={13} /></button>
-          <button aria-label="Cancel task rename" disabled={titleSaving} onClick={() => setEditingTitle(false)} type="button"><X size={13} /></button>
+          <button aria-label="Cancel task rename" disabled={titleSaving} onClick={cancelRename} type="button"><X size={13} /></button>
           {titleError ? <small role="alert">{titleError}</small> : null}
         </form>
       ) : archived ? (

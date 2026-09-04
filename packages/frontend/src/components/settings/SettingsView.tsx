@@ -10,6 +10,7 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
@@ -61,13 +62,13 @@ const tabs: Array<{
   { group: "Projects", icon: FolderGit2, id: "worktrees", label: "Worktrees", description: "Manage isolated workspaces for project tasks." },
 ];
 
-const searchEntries: Array<{ tab: SettingsTabId; label: string; keywords: string; target?: string }> = [
+const searchEntries: Array<{ tab: SettingsTabId; label: string; keywords: string; target?: string; action?: "openSupportExport" }> = [
   { tab: "common", label: "Appearance", keywords: "theme system light dark", target: "settings-general-appearance" },
   { tab: "common", label: "Send with Enter", keywords: "composer keyboard shortcut newline", target: "settings-general-behavior" },
   { tab: "common", label: "Desktop notifications", keywords: "alerts browser os", target: "settings-general-behavior" },
   { tab: "desktop", label: "Environment", keywords: "windows wsl ubuntu runtime operating system", target: "settings-desktop-environment" },
   { tab: "desktop", label: "Application updates", keywords: "update release version restart download", target: "settings-desktop-updates" },
-  { tab: "data", label: "Diagnostics", keywords: "support export troubleshooting bundle", target: "settings-data-support" },
+  { tab: "data", label: "Diagnostics", keywords: "support export troubleshooting bundle", target: "settings-data-support", action: "openSupportExport" },
   { tab: "data", label: "Developer", keywords: "acp logs traces directory", target: "settings-data-developer" },
   { tab: "data", label: "Reset task history", keywords: "local data delete chats prompts", target: "settings-data-local" },
 ];
@@ -96,6 +97,7 @@ export function SettingsView({
   onUpdateCustomAgentMetadata,
   onUnlockDeveloperSettings,
   onRefresh,
+  onDismissError,
   onNewTaskInWorktree,
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
@@ -103,6 +105,7 @@ export function SettingsView({
   onSetDesktopNotifications,
   preferences,
   preferredAgentId,
+  supportExportRequestKey,
   projects = [],
   recoveryActions,
   state,
@@ -134,12 +137,14 @@ export function SettingsView({
   onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
   onUnlockDeveloperSettings: () => void;
   onRefresh: () => void;
+  onDismissError?: () => void;
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSelectTab: (tab: SettingsTabId) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
   preferences: AppPreferencesRecord;
   preferredAgentId?: string;
+  supportExportRequestKey?: string;
   projects?: ProjectOption[];
   recoveryActions?: AgentRecoveryActions;
   state: SettingsState;
@@ -159,6 +164,11 @@ export function SettingsView({
   const [mobileIndexOpen, setMobileIndexOpen] = useState(isNarrowSettingsViewport);
   const [developerUnlockClicks, setDeveloperUnlockClicks] = useState(0);
   const [developerSettingsUnlocked, setDeveloperSettingsUnlocked] = useState(initialDeveloperSettingsUnlocked);
+  const [searchSupportExportRequestKey, setSearchSupportExportRequestKey] = useState<string>();
+  const searchActionSequence = useRef(0);
+  const effectiveSupportExportRequestKey = supportExportRequestKey || searchSupportExportRequestKey
+    ? `${supportExportRequestKey ?? ""}:${searchSupportExportRequestKey ?? ""}`
+    : undefined;
   const normalizedQuery = navigationQuery.trim().toLowerCase();
   const navigationTabs = visibleTabs.filter((tab) => (
     !normalizedQuery || `${tab.group} ${tab.label}`.toLowerCase().includes(normalizedQuery)
@@ -181,6 +191,10 @@ export function SettingsView({
   };
   const selectSearchResult = (entry: (typeof searchEntries)[number]) => {
     if (entry.target) setPendingSearchTarget({ tab: entry.tab, id: entry.target });
+    if (entry.action === "openSupportExport") {
+      searchActionSequence.current += 1;
+      setSearchSupportExportRequestKey(`settings-search-${searchActionSequence.current}`);
+    }
     selectTab(entry.tab);
   };
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -418,9 +432,14 @@ export function SettingsView({
           <p>{tabs.find((tab) => tab.id === activeTab)?.description}</p>
         </header>
         {state.error ? (
-          <section className="settings-error" aria-label="Settings error">
+          <section className="settings-error" aria-label="Settings error" role="alert">
             <AlertTriangle size={14} />
             <span>{state.error}</span>
+            {onDismissError ? (
+              <button aria-label="Dismiss error" onClick={onDismissError} type="button">
+                <X aria-hidden="true" size={14} />
+              </button>
+            ) : null}
           </section>
         ) : null}
         {showAgentSkeleton ? (
@@ -459,6 +478,7 @@ export function SettingsView({
             savedAgentId={state.savedAgentId}
             runtimeSettings={state.runtimeSettings}
             settingsState={state}
+            supportExportRequestKey={effectiveSupportExportRequestKey}
             searchActive={Boolean(normalizedQuery)}
             tab={activeTab}
             worktreeIntents={worktreeIntents}
@@ -511,6 +531,7 @@ function SettingsTabContent({
   deletedAgentId,
   runtimeSettings,
   settingsState,
+  supportExportRequestKey,
   searchActive,
   tab,
   worktreeIntents,
@@ -548,6 +569,7 @@ function SettingsTabContent({
   savedAgentId?: string;
   runtimeSettings?: RuntimeSettingsResult;
   settingsState: SettingsState;
+  supportExportRequestKey?: string;
   searchActive: boolean;
   tab: SettingsTabId;
   worktreeIntents?: NewTaskViewIntents;
@@ -597,6 +619,7 @@ function SettingsTabContent({
           onResetTaskHistory={onResetTaskHistory}
           onSetAcpTrace={onSetAcpTrace}
           runtimeSettings={runtimeSettings}
+          supportExportRequestKey={supportExportRequestKey}
         />
       ) : null}
       {tab === "mcp" ? (

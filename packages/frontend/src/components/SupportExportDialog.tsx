@@ -1,5 +1,5 @@
 import { AlertTriangle, Bug, CircleCheck, Download, ExternalLink } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
   DIAGNOSTICS_LIST_SUPPORT_EXPORT,
@@ -17,10 +17,13 @@ export function SupportExportButton({
   connection,
   taskId,
   compact = false,
+  openRequestKey,
 }: {
   connection?: Pick<BackendConnection, "request">;
   taskId?: string;
   compact?: boolean;
+  /** Opens once for each new shell or Settings navigation request. */
+  openRequestKey?: string;
 }) {
   const shell = currentFrontendShell();
   const [open, setOpen] = useState(false);
@@ -36,6 +39,7 @@ export function SupportExportButton({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const exportPending = useRef(false);
+  const consumedOpenRequest = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!open || !connection) return;
@@ -65,7 +69,7 @@ export function SupportExportButton({
   const selectedSessions = useMemo(() => catalog?.sessions.filter((session) => selectedTasks.has(session.taskId)) ?? [], [catalog, selectedTasks]);
   const unboundTraceGroups = useMemo(() => groupUnboundTraces(catalog), [catalog]);
 
-  const openDialog = () => {
+  const openDialog = useCallback(() => {
     const taskScoped = Boolean(taskId);
     setStep("sessions");
     setCatalog(undefined);
@@ -78,7 +82,13 @@ export function SupportExportButton({
     setIncludeLogs(true);
     setError(undefined);
     setOpen(true);
-  };
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!openRequestKey || consumedOpenRequest.current === openRequestKey) return;
+    consumedOpenRequest.current = openRequestKey;
+    openDialog();
+  }, [openDialog, openRequestKey]);
 
   const exportBundle = async () => {
     if (!connection || !shell?.supportExports || exportPending.current) return;

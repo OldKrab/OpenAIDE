@@ -177,7 +177,10 @@ export function SidebarTaskRow({
             autoFocus
             disabled={titleSaving}
             maxLength={200}
-            onChange={(event) => setTitleDraft(event.target.value)}
+            onChange={(event) => {
+              setTitleDraft(event.target.value);
+              setTitleError(undefined);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();

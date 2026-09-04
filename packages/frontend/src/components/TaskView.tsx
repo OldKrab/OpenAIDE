@@ -60,6 +60,7 @@ export { chatRowKey, formatElapsedDuration } from "./TaskChatTimeline";
 
 export type TaskViewIntents = {
   changePrompt: (prompt: string) => void;
+  dismissError?: () => void;
   refreshWorkspace: () => Promise<void>;
   recordScroll: (scrollState: TaskChatScrollState) => void;
   reportAttachmentError: (message?: string) => void;
@@ -696,6 +697,7 @@ export function TaskView({
               }
               onAddToQueue={!archived && queueAvailable ? onAddToQueue : undefined}
               onChange={intents.changePrompt}
+              onDismissError={taskInput.error ? intents.dismissError : undefined}
               onUnsupportedImageAttachment={intents.reportAttachmentError}
               onRevealAttachment={onRevealAttachment}
               onRemoveAttachment={onRemoveAttachment}
