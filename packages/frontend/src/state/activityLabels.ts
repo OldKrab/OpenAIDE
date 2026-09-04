@@ -406,9 +406,9 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
 
   const labels = {
     skill: { style: "frequency", verb: "activated", subject: "skill" },
-    read: { style: "frequency", verb: "read" },
-    edit: { style: "frequency", verb: "updated" },
-    delete: { style: "frequency", verb: "deleted" },
+    read: { style: "frequency", verb: "read", target: "files" },
+    edit: { style: "frequency", verb: "updated", target: "files" },
+    delete: { style: "frequency", verb: "deleted", target: "files" },
     run: { style: "quantity", verb: "ran", single: "command", plural: "commands" },
     search: { style: "quantity", verb: "ran", single: "search", plural: "searches" },
     other: { style: "frequency", verb: "called", subject: "tool" },
@@ -416,6 +416,7 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
     style: "frequency" | "quantity";
     verb: string;
     subject?: string;
+    target?: string;
     single?: string;
     plural?: string;
   }>;
@@ -423,8 +424,10 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
   // Object-backed categories count Tool invocations, not distinct subjects.
   if (label.style === "frequency") {
     const frequency = count === 1 ? "once" : `${count} times`;
-    const subject = "subject" in label ? ` a ${label.subject}` : "";
-    const phrase = `${label.verb}${subject} ${frequency}`;
+    const target = "target" in label
+      ? ` ${label.target}`
+      : "subject" in label ? ` a ${label.subject}` : "";
+    const phrase = `${label.verb}${target} ${frequency}`;
     return sentenceStart ? capitalize(phrase) : phrase;
   }
   const noun = count === 1 ? label.single : label.plural;
