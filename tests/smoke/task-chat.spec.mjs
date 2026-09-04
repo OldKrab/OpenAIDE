@@ -138,6 +138,284 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("scrubs User messages from the quiet rail at wide and constrained widths", async ({ page }) => {
+  await page.setViewportSize({ width: 1_440, height: 760 });
+  await openPreparedNewTask(page);
+  const prompts = Array.from(
+    { length: 21 },
+    (_, index) => index === 14
+      ? `smoke:navigation-long-message ${"This is a deliberately oversized User message for preview coverage. ".repeat(60)}`
+      : index === 0
+        ? "update it"
+        : `Navigation question ${index + 1}: preserve the reader's place in this long Task Chat.`,
+  );
+  for (const prompt of prompts.slice(0, 5)) {
+    await send(page, prompt);
+    await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  }
+
+  const rail = page.locator(".user-message-navigator");
+  await expect(rail).toBeVisible();
+  const shortRailAlignment = await rail.evaluate((element) => {
+    const markers = [...element.querySelectorAll(".user-message-position-marker")];
+    const firstMarker = markers.at(0)?.getBoundingClientRect();
+    const lastMarker = markers.at(-1)?.getBoundingClientRect();
+    const railBounds = element.getBoundingClientRect();
+    if (!firstMarker || !lastMarker) throw new Error("User-message markers are missing.");
+    return {
+      markerCenter: (firstMarker.top + lastMarker.bottom) / 2,
+      railCenter: (railBounds.top + railBounds.bottom) / 2,
+    };
+  });
+  expect(shortRailAlignment.markerCenter).toBeCloseTo(shortRailAlignment.railCenter, 0);
+
+  for (const prompt of prompts.slice(5)) {
+    await send(page, prompt);
+    await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  }
+
+  await expect(rail.locator(".user-message-position-marker")).toHaveCount(prompts.length);
+  const railScroll = rail.locator(".user-message-navigator-scroll");
+  await railScroll.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(railScroll).toHaveAttribute("data-at-scroll-start", "true");
+  await railScroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(railScroll).toHaveAttribute("data-at-scroll-end", "true");
+  const railAndChat = await page.locator(".message-list-shell").evaluate((shell) => {
+    const railBounds = shell.querySelector(".user-message-navigator")?.getBoundingClientRect();
+    const firstMessageBounds = shell.querySelector(".chat-agent-block, .chat-user-block")?.getBoundingClientRect();
+    const messageListBounds = shell.querySelector(".message-list")?.getBoundingClientRect();
+    if (!railBounds || !firstMessageBounds || !messageListBounds) {
+      throw new Error("User-message navigation geometry is incomplete.");
+    }
+    return {
+      messageRight: firstMessageBounds.right,
+      railLeft: railBounds.left,
+      railRight: railBounds.right,
+      railTop: railBounds.top,
+      scrollRight: messageListBounds.right,
+    };
+  });
+  expect(railAndChat.railLeft).toBeGreaterThanOrEqual(railAndChat.messageRight);
+  expect(railAndChat.railRight).toBeLessThan(railAndChat.scrollRight - 12);
+  expect(railAndChat.railTop).toBeGreaterThanOrEqual(0);
+
+  const markers = rail.locator(".user-message-position-marker");
+  await page.locator(".task-header").hover();
+  const restingWidth = (await markers.first().locator("span").boundingBox())?.width;
+  await markers.first().hover();
+  const preview = rail.locator(".user-message-navigator-preview");
+  await expect.poll(async () => Number.parseFloat(await preview.evaluate(
+    (element) => getComputedStyle(element).opacity,
+  ))).toBeGreaterThan(0.9);
+  await expect(preview).toContainText(prompts[0]);
+  const shortPreviewBounds = await preview.boundingBox();
+  const shortMarkerBounds = await markers.first().locator("span").boundingBox();
+  expect(shortPreviewBounds).toBeDefined();
+  expect(shortMarkerBounds).toBeDefined();
+  expect(shortPreviewBounds.x + shortPreviewBounds.width)
+    .toBeLessThan(shortMarkerBounds.x + shortMarkerBounds.width);
+  expect(shortMarkerBounds.y + shortMarkerBounds.height / 2)
+    .toBeGreaterThan(shortPreviewBounds.y);
+  expect(shortMarkerBounds.y + shortMarkerBounds.height / 2)
+    .toBeLessThan(shortPreviewBounds.y + shortPreviewBounds.height);
+
+  await markers.nth(14).hover();
+  await expect(preview).toContainText("deliberately oversized User message");
+  const longPreviewBounds = await preview.boundingBox();
+  expect(longPreviewBounds).toBeDefined();
+  expect(longPreviewBounds.width).toBeGreaterThan(shortPreviewBounds.width);
+  expect(await preview.locator(".user-message-navigator-preview-content").evaluate(
+    (element) => element.scrollHeight > element.clientHeight,
+  )).toBe(true);
+
+  await markers.first().hover();
+  const expandedWidth = (await markers.first().locator("span").boundingBox())?.width;
+  const railCursorStates = await rail.evaluate((element) => ({
+    gap: getComputedStyle(element.querySelector(".user-message-position-track")).cursor,
+    line: getComputedStyle(element.querySelector(".user-message-position-marker > span")).cursor,
+    marker: getComputedStyle(element.querySelector(".user-message-position-marker")).cursor,
+    scrollSurface: getComputedStyle(element.querySelector(".user-message-navigator-scroll")).cursor,
+  }));
+  expect(new Set(Object.values(railCursorStates))).toEqual(new Set(["pointer"]));
+  expect(restingWidth).toBeDefined();
+  expect(expandedWidth).toBeGreaterThan(restingWidth);
+  await page.locator(".task-header").hover();
+  await expect.poll(async () => Number.parseFloat(await preview.evaluate(
+    (element) => getComputedStyle(element).opacity,
+  ))).toBeLessThan(0.1);
+  await expect.poll(async () => (await markers.first().locator("span").boundingBox())?.width)
+    .toBeCloseTo(restingWidth, 0);
+
+  await page.reload();
+  await expect(rail.locator(".user-message-position-marker")).toHaveCount(prompts.length);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 2 });
+  await prepareUserMessageNavigationObservation(page, 0);
+  await markers.first().click();
+  const distantNavigation = await page.evaluate(() => window.__openaideNavigationFinished);
+  const distantPaintedPositions = expectSmoothNavigation(distantNavigation, 18);
+
+  await prepareUserMessageNavigationObservation(page, 1);
+  await markers.nth(1).click();
+  const adjacentNavigation = await page.evaluate(() => window.__openaideNavigationFinished);
+  const adjacentPaintedPositions = expectSmoothNavigation(adjacentNavigation, 12);
+  // Navigation uses the same painted-step budget for nearby and distant
+  // messages. Under throttling, a costly range may stretch a frame instead
+  // of skipping it and exposing an empty virtualized viewport.
+  expect(Math.abs(adjacentPaintedPositions - distantPaintedPositions)).toBeLessThanOrEqual(2);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+
+  const fourthMarker = markers.nth(3);
+  await fourthMarker.click();
+  await expect(page.locator(
+    '.message-list-virtual-row[data-user-message-navigation-target="true"] .chat-user',
+  )).toHaveText(prompts[3]);
+  await fourthMarker.press("ArrowUp");
+  await expect(page.locator(
+    '.message-list-virtual-row[data-user-message-navigation-target="true"] .chat-user',
+  )).toHaveText(prompts[2]);
+  await expect(fourthMarker).toBeFocused();
+  await fourthMarker.press("End");
+  await expect(rail.locator('.user-message-position-marker[aria-current="true"]')).toHaveAttribute(
+    "aria-label",
+    new RegExp(`User message 21 of 21: ${prompts.at(-1)}`),
+  );
+
+  await page.setViewportSize({ width: 390, height: 760 });
+  await expect(rail).toBeVisible();
+  const constrained = await page.locator(".task-surface").evaluate((surface) => {
+    const railBounds = surface.querySelector(".user-message-navigator")?.getBoundingClientRect();
+    const messageListBounds = surface.querySelector(".message-list")?.getBoundingClientRect();
+    const messageBounds = surface.querySelector(".chat-agent-block, .chat-user-block")?.getBoundingClientRect();
+    const composerBounds = surface.querySelector(".composer")?.getBoundingClientRect();
+    if (!railBounds || !messageListBounds || !messageBounds || !composerBounds) {
+      throw new Error("Constrained User-message navigation geometry is incomplete.");
+    }
+    return {
+      messageRight: messageBounds.right,
+      railBottom: railBounds.bottom,
+      railLeft: railBounds.left,
+      railRight: railBounds.right,
+      railTop: railBounds.top,
+      composerTop: composerBounds.top,
+      scrollRight: messageListBounds.right,
+      overflow: surface.scrollWidth - surface.clientWidth,
+    };
+  });
+  expect(constrained.railTop).toBeGreaterThanOrEqual(0);
+  expect(constrained.railBottom).toBeLessThanOrEqual(constrained.composerTop);
+  expect(constrained.composerTop - constrained.railBottom).toBeLessThan(constrained.railTop);
+  expect(constrained.messageRight).toBeGreaterThan(constrained.railLeft);
+  expect(constrained.railRight).toBeLessThanOrEqual(constrained.scrollRight);
+  expect(constrained.overflow).toBeLessThanOrEqual(0);
+
+  const mobileToggle = rail.locator(".user-message-navigator-mobile-toggle");
+  await expect(mobileToggle).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => Number.parseFloat(await railScroll.evaluate(
+    (element) => getComputedStyle(element).opacity,
+  ))).toBeLessThan(0.1);
+  await mobileToggle.click();
+  await expect(mobileToggle).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(async () => Number.parseFloat(await railScroll.evaluate(
+    (element) => getComputedStyle(element).opacity,
+  ))).toBeGreaterThan(0.9);
+  await markers.nth(2).click();
+  await expect(mobileToggle).toHaveAttribute("aria-expanded", "false");
+});
+
+async function prepareUserMessageNavigationObservation(page, markerIndex) {
+  await page.evaluate((index) => {
+    const messageList = document.querySelector(".message-list");
+    const destinationMarker = document.querySelectorAll(".user-message-position-marker")[index];
+    if (!messageList || !destinationMarker) throw new Error("Task Chat navigation surface is missing.");
+    destinationMarker.addEventListener("click", () => {
+      const startedAt = performance.now();
+      const initialScrollTop = messageList.scrollTop;
+      const samples = [{
+        at: 0,
+        indicatorTop: currentIndicatorTop(),
+        scrollTop: initialScrollTop,
+        visibleRows: visibleChatRowCount(messageList),
+      }];
+      window.__openaideNavigationFinished = new Promise((resolve) => {
+        let hasMoved = false;
+        let previousScrollTop = initialScrollTop;
+        let stableFrames = 0;
+        const observeDestination = () => {
+          samples.push({
+            at: performance.now() - startedAt,
+            indicatorTop: currentIndicatorTop(),
+            scrollTop: messageList.scrollTop,
+            visibleRows: visibleChatRowCount(messageList),
+          });
+          hasMoved ||= Math.abs(messageList.scrollTop - initialScrollTop) > 0.5;
+          const target = messageList.querySelector(
+            '.message-list-virtual-row[data-user-message-navigation-target="true"]',
+          );
+          const listBounds = messageList.getBoundingClientRect();
+          const targetBounds = target?.getBoundingClientRect();
+          const destinationVisible = targetBounds
+            && targetBounds.bottom > listBounds.top
+            && targetBounds.top < listBounds.bottom;
+          stableFrames = hasMoved && destinationVisible && Math.abs(messageList.scrollTop - previousScrollTop) < 0.5
+            ? stableFrames + 1
+            : 0;
+          previousScrollTop = messageList.scrollTop;
+          if (stableFrames >= 2) {
+            resolve({
+              duration: performance.now() - startedAt,
+              finalScrollTop: messageList.scrollTop,
+              initialScrollTop,
+              samples,
+            });
+          } else {
+            requestAnimationFrame(observeDestination);
+          }
+        };
+        requestAnimationFrame(observeDestination);
+      });
+    }, { capture: true, once: true });
+
+    function visibleChatRowCount(viewport) {
+      const bounds = viewport.getBoundingClientRect();
+      return [...viewport.querySelectorAll(".message-list-virtual-row")].filter((row) => {
+        const rowBounds = row.getBoundingClientRect();
+        return rowBounds.bottom > bounds.top && rowBounds.top < bounds.bottom;
+      }).length;
+    }
+
+    function currentIndicatorTop() {
+      return document.querySelector(".user-message-current-indicator")?.getBoundingClientRect().top;
+    }
+  }, markerIndex);
+}
+
+function expectSmoothNavigation(navigation, minimumPaintedPositions) {
+  const lowerBound = Math.min(navigation.initialScrollTop, navigation.finalScrollTop);
+  const upperBound = Math.max(navigation.initialScrollTop, navigation.finalScrollTop);
+  const intermediateSamples = navigation.samples.filter(
+    ({ scrollTop }) => scrollTop > lowerBound + 1 && scrollTop < upperBound - 1,
+  );
+  const paintedPositions = new Set(
+    intermediateSamples.map(({ scrollTop }) => Math.round(scrollTop)),
+  ).size;
+  expect(paintedPositions).toBeGreaterThanOrEqual(minimumPaintedPositions);
+  expect(intermediateSamples.every(({ visibleRows }) => visibleRows > 0)).toBe(true);
+  expect(new Set(navigation.samples
+    .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
+    .filter(Boolean)).size).toBeGreaterThanOrEqual(6);
+  // Includes two stable frames after the 24-step motion finishes, with room
+  // for the deliberately throttled browser to paint its final range.
+  expect(navigation.duration).toBeLessThanOrEqual(1_400);
+  return paintedPositions;
+}
+
 test("keeps an Agent link clickable while its message is streaming", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:streaming-link-click");

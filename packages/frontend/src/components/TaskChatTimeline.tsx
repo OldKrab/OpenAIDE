@@ -17,6 +17,7 @@ import {
 } from "./taskChatPresentation";
 import { timestampMillis } from "./taskSurfaceHelpers";
 import { useTaskChatScroll } from "./useTaskChatScroll";
+import { UserMessageNavigator } from "./UserMessageNavigator";
 
 export type TaskChatTimelineRow =
   | { key: "archived"; kind: "archived" }
@@ -92,8 +93,6 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   }, [chatScroll.messageListRef]);
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   const virtualItems = chatScroll.virtualizer.getVirtualItems();
-  const firstVirtualItem = virtualItems[0];
-  const lastVirtualItem = virtualItems.at(-1);
   return (
     <div className="message-list-shell" data-more-below={String(chatScroll.moreBelow)}>
       <div
@@ -105,17 +104,8 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
         onScroll={chatScroll.onScroll}
         onWheel={chatScroll.onWheel}
         ref={setMessageListRef}
-      >
-        <div
-          className="message-list-virtualizer"
-          style={{
-            paddingBlockStart: firstVirtualItem?.start ?? 0,
-            paddingBlockEnd: Math.max(
-              0,
-              chatScroll.virtualizer.getTotalSize() - (lastVirtualItem?.end ?? 0),
-            ),
-          }}
         >
+        <div className="message-list-virtualizer" ref={chatScroll.virtualizer.containerRef}>
           {virtualItems.map((virtualRow) => {
             const row = rows[virtualRow.index];
             if (!row) return null;
@@ -129,8 +119,16 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                 data-index={virtualRow.index}
                 data-row-key={row.key}
                 data-row-kind={row.kind}
+                data-user-message-navigation-target={
+                  row.kind === "message"
+                  && row.message.message.kind === "user"
+                  && chatScroll.userMessageNavigation.targetKey === row.key
+                    ? "true"
+                    : undefined
+                }
                 key={virtualRow.key}
                 ref={chatScroll.virtualizer.measureElement}
+                style={{ position: "absolute", top: 0, left: 0 }}
               >
                 {row.kind === "archived" ? (
                   <div className="archived-task-notice" role="status">
@@ -192,6 +190,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
           })}
         </div>
       </div>
+      <UserMessageNavigator navigation={chatScroll.userMessageNavigation} />
       {onQuote && messageListElement ? (
         <QuoteSelectionAction key={taskId} onQuote={onQuote} root={messageListElement} />
       ) : null}
