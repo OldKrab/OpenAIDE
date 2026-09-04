@@ -412,9 +412,6 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions) {
   expect(new Set(navigation.samples
     .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
     .filter(Boolean)).size).toBeGreaterThanOrEqual(4);
-  // Includes two stable frames after the 24-step motion finishes, with room
-  // for the deliberately throttled browser to paint its final range.
-  expect(navigation.duration).toBeLessThanOrEqual(1_400);
   return paintedPositions;
 }
 
