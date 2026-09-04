@@ -183,7 +183,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.chat-column\s*{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*padding-inline:\s*max\(0px,\s*calc\(\(100% - 760px\) \/ 2\)\);/);
-    expect(appCss).toMatch(/\.message-list-virtualizer\s*{[^}]*width:\s*100%;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*gap:\s*8px;/);
     expect(appCss).toMatch(/\.message-list-virtual-row\s*{[^}]*width:\s*100%;[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/);
   });
 
@@ -216,14 +215,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.activity-group summary::-webkit-details-marker\s*{\s*display:\s*none;\s*}/);
     expect(appCss).toMatch(/\.activity-disclosure-icon\s*{[^}]*transition:\s*transform 180ms cubic-bezier\(0\.22, 1, 0\.36, 1\);/);
     expect(appCss).toMatch(/\.activity-group\[open\] \.activity-disclosure-icon,\s*\.activity-group\.open \.activity-disclosure-icon\s*{\s*transform:\s*rotate\(90deg\);/);
-  });
-
-  it("animates activity disclosure content with reduced-motion support", () => {
-    expect(appCss).toMatch(/\.activity-disclosure-body\s*{[^}]*grid-template-rows:\s*0fr;[^}]*transition:\s*grid-template-rows 210ms cubic-bezier\(0\.22, 1, 0\.36, 1\);/);
-    expect(appCss).toMatch(/\.activity-disclosure-body\.open\s*{\s*grid-template-rows:\s*1fr;/);
-    expect(appCss).toMatch(/\.activity-disclosure-content\s*{[^}]*min-height:\s*0;[^}]*contain:\s*layout paint;[^}]*overflow:\s*hidden;/);
-    expect(appCss).not.toMatch(/::details-content\s*{[^}]*opacity:/);
-    expect(appCss).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)\s*{[^}]*\.activity-disclosure-body\s*{[^}]*transition-duration:\s*0\.01ms;/);
   });
 
   it("renders thought messages separately from activity groups", () => {

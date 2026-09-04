@@ -443,6 +443,22 @@ export function TaskView({
     [archived, chat, chatItems, timelineStatusLabel],
   );
   const timelineRowKeys = useMemo(() => timelineRows.map((row) => row.key), [timelineRows]);
+  const userMessageAnchors = useMemo(() => (
+    subagents.selected
+      ? []
+      : timelineRows.flatMap((row, rowIndex) => (
+          row.kind === "message" && row.message.message.kind === "user"
+            ? [{
+                key: row.key,
+                rowIndex,
+                text: userMessageNavigationPreview(
+                  row.message.message.text,
+                  row.message.message.attachments,
+                ),
+              }]
+            : []
+        ))
+  ), [subagents.selected, timelineRows]);
   const taskSelection = {
     agentId: snapshot.task.agent_id,
     agentLabel: activeTask?.agent_name ?? snapshot.task.agent_name,
@@ -466,6 +482,7 @@ export function TaskView({
     taskId: subagents.selected
       ? `${snapshot.task.task_id}:${subagents.selected.subagentId}`
       : snapshot.task.task_id,
+    userMessageAnchors,
   });
   const loadToolImagePreview = useCurrentCallback(onLoadToolImagePreview ?? unavailableToolImagePreview);
   const subscribeToolDetail = useCurrentCallback(onSubscribeToolDetail);
@@ -768,6 +785,16 @@ export function TaskView({
 
 async function unavailableToolImagePreview() {
   return undefined;
+}
+
+function userMessageNavigationPreview(
+  text: string,
+  attachments?: readonly { kind: string; label: string }[],
+) {
+  const attachmentLines = attachments?.map(
+    (attachment) => `[${attachment.kind}] ${attachment.label}`,
+  ) ?? [];
+  return [text.trim(), ...attachmentLines].filter(Boolean).join("\n");
 }
 
 /** Keeps a callback interface stable while routing calls to the latest controller closure. */

@@ -6,6 +6,7 @@ import type { TaskChatScrollState } from "../state/store";
 
 const virtualizerOptions = vi.hoisted(() => ({
   latest: undefined as { anchorTo?: "end" | "start" } | undefined,
+  scrollToIndex: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-virtual", async () => {
@@ -55,6 +56,11 @@ vi.mock("@tanstack/react-virtual", async () => {
         const viewport = element();
         if (viewport) viewport.scrollTop = offset;
       },
+      scrollToIndex: (index: number, options?: { align?: string; behavior?: ScrollBehavior }) => {
+        virtualizerOptions.scrollToIndex(index, options);
+        const viewport = element();
+        if (viewport) viewport.scrollTop = index * 72;
+      },
       scrollBy: (delta: number) => {
         const viewport = element();
         if (viewport) viewport.scrollTop += delta;
@@ -64,11 +70,13 @@ vi.mock("@tanstack/react-virtual", async () => {
 });
 
 import { useTaskChatScroll } from "./useTaskChatScroll";
+import type { UserMessageAnchor } from "./useTaskChatScroll";
 
 describe("useTaskChatScroll", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     virtualizerOptions.latest = undefined;
+    virtualizerOptions.scrollToIndex.mockClear();
   });
 
   afterEach(() => {
@@ -252,6 +260,150 @@ describe("useTaskChatScroll", () => {
     expect(messageList.scrollTop).toBe(399);
     expect(retainedRow.getBoundingClientRect().top).toBe(100);
   });
+
+  it("smoothly navigates between loaded User messages and announces the destination", () => {
+    vi.useFakeTimers();
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const onScrollState = vi.fn();
+    const tree = renderHarness(messageList, {
+      itemKeys: [
+        "message:user-1",
+        "message:agent-1",
+        "message:agent-2",
+        "message:agent-3",
+        "message:agent-4",
+        "message:agent-5",
+        "message:agent-6",
+        "message:agent-7",
+        "message:user-2",
+      ],
+      onScrollState,
+      savedScrollState: { ownership: "reading", scrollTop: 0 },
+      userMessageAnchors: [
+        { key: "message:user-1", rowIndex: 0, text: "First question" },
+        { key: "message:user-2", rowIndex: 8, text: "Second question" },
+      ],
+    });
+
+    act(() => tree.root.findByProps({ className: "next-user-message-test" }).props.onClick());
+
+    expect(virtualizerOptions.scrollToIndex).toHaveBeenCalledWith(8, {
+      align: "start",
+      behavior: "smooth",
+    });
+    expect(tree.root.findByProps({ className: "user-message-navigation-state" }).props).toMatchObject({
+      "data-announcement": "User message 2 of 2.",
+      "data-current-index": 1,
+      "data-target-key": "message:user-2",
+    });
+    act(() => messageListView(tree).props.onScroll({ currentTarget: messageList }));
+    expect(onScrollState).not.toHaveBeenCalled();
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(onScrollState).toHaveBeenLastCalledWith({ ownership: "reading", scrollTop: 576 });
+    act(() => tree.unmount());
+    vi.useRealTimers();
+  });
+
+  it("selects a visible User message near the viewport center over an invisible predecessor", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1000 });
+    const tree = renderHarness(messageList, {
+      itemKeys: [
+        "message:user-1",
+        "message:agent-1",
+        "message:agent-2",
+        "message:agent-3",
+        "message:user-2",
+      ],
+      savedScrollState: { ownership: "reading", scrollTop: 100 },
+      userMessageAnchors: [
+        { key: "message:user-1", rowIndex: 0, text: "Invisible preceding question" },
+        { key: "message:user-2", rowIndex: 4, text: "Visible centered question" },
+      ],
+    });
+
+    expect(tree.root.findByProps({ className: "user-message-navigation-state" }).props)
+      .toMatchObject({ "data-current-index": 1 });
+    act(() => tree.unmount());
+  });
+
+  it("keeps sequential navigation relative to the selected message while smooth scrolling", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const tree = renderHarness(messageList, {
+      itemKeys: [
+        "message:user-1",
+        "message:agent-1",
+        "message:user-2",
+        "message:agent-2",
+        "message:user-3",
+      ],
+      userMessageAnchors: [
+        { key: "message:user-1", rowIndex: 0, text: "First question" },
+        { key: "message:user-2", rowIndex: 2, text: "Second question" },
+        { key: "message:user-3", rowIndex: 4, text: "Third question" },
+      ],
+    });
+    const previous = tree.root.findByProps({ className: "previous-user-message-test" });
+
+    act(() => previous.props.onClick());
+    act(() => {
+      messageList.scrollTop = 1000;
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+    });
+    act(() => previous.props.onClick());
+
+    expect(virtualizerOptions.scrollToIndex.mock.calls.map(([index]) => index)).toEqual([2, 0]);
+    act(() => tree.unmount());
+  });
+
+  it("loads one earlier page at the boundary and continues to the nearest new User message", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const onLoadEarlier = vi.fn(() => 41);
+    let tree!: ReactTestRenderer;
+    const initialProps: React.ComponentProps<typeof Harness> = {
+      beforeCursor: "cursor-before",
+      hasEarlier: true,
+      itemKeys: ["load-earlier", "message:retained"],
+      onLoadEarlier,
+      pendingPrepend: false,
+      savedScrollState: { ownership: "reading", scrollTop: 0 },
+      userMessageAnchors: [
+        { key: "message:retained", rowIndex: 1, text: "Retained question" },
+      ],
+    };
+    act(() => {
+      tree = create(<Harness {...initialProps} />, { createNodeMock: () => messageList });
+    });
+
+    act(() => tree.root.findByProps({ className: "previous-user-message-test" }).props.onClick());
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+    expect(onLoadEarlier).toHaveBeenCalledWith("cursor-before");
+
+    act(() => tree.update(<Harness {...initialProps} pendingPrepend />));
+    act(() => tree.update(
+      <Harness
+        {...initialProps}
+        itemKeys={["load-earlier", "message:older", "message:retained"]}
+        pendingPrepend={false}
+        userMessageAnchors={[
+          { key: "message:older", rowIndex: 1, text: "Newly loaded question" },
+          { key: "message:retained", rowIndex: 2, text: "Retained question" },
+        ]}
+      />,
+    ));
+
+    expect(virtualizerOptions.scrollToIndex).toHaveBeenLastCalledWith(1, {
+      align: "start",
+      behavior: "smooth",
+    });
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+    expect(tree.root.findByProps({ className: "user-message-navigation-state" }).props).toMatchObject({
+      "data-current-index": 0,
+      "data-target-key": "message:older",
+    });
+    act(() => tree.unmount());
+  });
 });
 
 function Harness({
@@ -260,16 +412,20 @@ function Harness({
   itemKeys = ["message:1", "timeline-status"],
   onLoadEarlier = () => undefined,
   onScrollState,
+  pendingPrepend = false,
   savedScrollState,
   taskId = "task_1",
+  userMessageAnchors = [],
 }: {
   beforeCursor?: string;
   hasEarlier?: boolean;
   itemKeys?: string[];
   onLoadEarlier?: (cursor: string) => number | undefined;
   onScrollState?: (state: TaskChatScrollState) => void;
+  pendingPrepend?: boolean;
   savedScrollState?: TaskChatScrollState;
   taskId?: string;
+  userMessageAnchors?: UserMessageAnchor[];
 }) {
   const [savedState, setSavedState] = useState(savedScrollState);
   const chatScroll = useTaskChatScroll({
@@ -282,9 +438,10 @@ function Harness({
       setSavedState(state);
       onScrollState?.(state);
     },
-    pendingPrepend: false,
+    pendingPrepend,
     savedScrollState: savedState,
     taskId,
+    userMessageAnchors,
   });
   return (
     <>
@@ -300,6 +457,15 @@ function Harness({
       />
       <button className="load-earlier-test" onClick={() => chatScroll.loadEarlier("cursor-before")} />
       <button className="pause-follow-test" onClick={chatScroll.pauseFollowing} />
+      <button className="previous-user-message-test" onClick={chatScroll.userMessageNavigation.goPrevious} />
+      <button className="next-user-message-test" onClick={chatScroll.userMessageNavigation.goNext} />
+      <output
+        className="user-message-navigation-state"
+        data-announcement={chatScroll.userMessageNavigation.announcement}
+        data-current-index={chatScroll.userMessageNavigation.currentIndex}
+        data-pending={chatScroll.userMessageNavigation.pendingPrevious}
+        data-target-key={chatScroll.userMessageNavigation.targetKey}
+      />
     </>
   );
 }

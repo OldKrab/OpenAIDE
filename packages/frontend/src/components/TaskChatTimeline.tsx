@@ -9,6 +9,7 @@ import type {
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskLiveTextPresentation } from "../state/store";
+import { ChatContentSizeChangeContext } from "./ChatActivityView";
 import { ChatRow } from "./ChatMessageView";
 import { QuoteSelectionAction } from "./QuoteSelectionAction";
 import {
@@ -17,6 +18,7 @@ import {
 } from "./taskChatPresentation";
 import { timestampMillis } from "./taskSurfaceHelpers";
 import { useTaskChatScroll } from "./useTaskChatScroll";
+import { UserMessageNavigator } from "./UserMessageNavigator";
 
 export type TaskChatTimelineRow =
   | { key: "archived"; kind: "archived" }
@@ -92,8 +94,15 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   }, [chatScroll.messageListRef]);
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   const virtualItems = chatScroll.virtualizer.getVirtualItems();
-  const firstVirtualItem = virtualItems[0];
-  const lastVirtualItem = virtualItems.at(-1);
+  const measureChangedChatContent = useCallback((content: HTMLElement) => {
+    const row = content.closest<HTMLElement>(".message-list-virtual-row");
+    if (!row) return;
+    const index = Number(row.dataset.index);
+    if (!Number.isInteger(index)) return;
+    // Disclosure state commits before paint. Measure here too so the next
+    // absolute row moves in the same frame instead of awaiting ResizeObserver.
+    chatScroll.virtualizer.resizeItem(index, row.offsetHeight);
+  }, [chatScroll.virtualizer]);
   return (
     <div className="message-list-shell" data-more-below={String(chatScroll.moreBelow)}>
       <div
@@ -105,22 +114,14 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
         onScroll={chatScroll.onScroll}
         onWheel={chatScroll.onWheel}
         ref={setMessageListRef}
-      >
-        <div
-          className="message-list-virtualizer"
-          style={{
-            paddingBlockStart: firstVirtualItem?.start ?? 0,
-            paddingBlockEnd: Math.max(
-              0,
-              chatScroll.virtualizer.getTotalSize() - (lastVirtualItem?.end ?? 0),
-            ),
-          }}
         >
-          {virtualItems.map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            if (!row) return null;
-            const previousRow = rows[virtualRow.index - 1];
-            return (
+        <ChatContentSizeChangeContext.Provider value={measureChangedChatContent}>
+          <div className="message-list-virtualizer" ref={chatScroll.virtualizer.containerRef}>
+            {virtualItems.map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              if (!row) return null;
+              const previousRow = rows[virtualRow.index - 1];
+              return (
               <div
                 className="message-list-virtual-row"
                 data-after-activity={String(
@@ -129,8 +130,16 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                 data-index={virtualRow.index}
                 data-row-key={row.key}
                 data-row-kind={row.kind}
+                data-user-message-navigation-target={
+                  row.kind === "message"
+                  && row.message.message.kind === "user"
+                  && chatScroll.userMessageNavigation.targetKey === row.key
+                    ? "true"
+                    : undefined
+                }
                 key={virtualRow.key}
                 ref={chatScroll.virtualizer.measureElement}
+                style={{ position: "absolute", top: 0, left: 0 }}
               >
                 {row.kind === "archived" ? (
                   <div className="archived-task-notice" role="status">
@@ -188,10 +197,12 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                   />
                 ) : null}
               </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </ChatContentSizeChangeContext.Provider>
       </div>
+      <UserMessageNavigator navigation={chatScroll.userMessageNavigation} />
       {onQuote && messageListElement ? (
         <QuoteSelectionAction key={taskId} onQuote={onQuote} root={messageListElement} />
       ) : null}
