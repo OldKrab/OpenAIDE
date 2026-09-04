@@ -15,7 +15,7 @@ use crate::agent::acp_agent_config::{
 use crate::agent::status_cache::AgentStatusCache;
 use crate::protocol::errors::RuntimeError;
 
-pub(crate) const CODEX_ACP_VERSION: &str = "1.1.5";
+pub(crate) const CODEX_ACP_VERSION: &str = "1.1.6";
 const CODEX_ACP_PACKAGE: &str = "@openaide/codex-acp";
 const MANAGED_MARKER: &str = ".openaide-managed";
 const DEFAULT_INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
