@@ -15,10 +15,13 @@ use crate::agent::acp_agent_config::{
 use crate::agent::status_cache::AgentStatusCache;
 use crate::protocol::errors::RuntimeError;
 
-pub(crate) const CODEX_ACP_VERSION: &str = "1.1.5";
+pub(crate) const CODEX_ACP_VERSION: &str = "1.1.6";
 const CODEX_ACP_PACKAGE: &str = "@openaide/codex-acp";
 const MANAGED_MARKER: &str = ".openaide-managed";
 const DEFAULT_INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
+// The manifest overrides the adapter's older Codex range so its model catalog
+// includes Astra. Bump the adapter version when changing the locked runtime;
+// managed installations are reused by adapter version.
 const INSTALLER_PACKAGE_JSON: &str = include_str!("../../assets/codex-acp-runtime/package.json");
 const INSTALLER_PACKAGE_LOCK: &str =
     include_str!("../../assets/codex-acp-runtime/package-lock.json");
