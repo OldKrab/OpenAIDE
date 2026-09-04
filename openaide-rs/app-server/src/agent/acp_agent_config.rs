@@ -13,7 +13,7 @@ use crate::protocol::host::HostBridge;
 #[path = "acp_agent_config_tests.rs"]
 mod tests;
 
-const PRODUCT_CODEX_ACP_SPEC: &str = "@openaide/codex-acp@1.1.6";
+const PRODUCT_CODEX_ACP_SPEC: &str = "@openaide/codex-acp@1.2.0";
 
 #[derive(Debug, Clone)]
 pub struct AcpAgentConfig {

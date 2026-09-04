@@ -2,6 +2,6 @@
   "name": "openaide-codex-acp-runtime",
   "private": true,
   "dependencies": {
-    "@openaide/codex-acp": "1.1.6"
+    "@openaide/codex-acp": "1.2.0"
   }
 }

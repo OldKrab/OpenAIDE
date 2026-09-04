@@ -12,7 +12,7 @@ fn built_in_codex_uses_the_product_pinned_adapter() {
 
     assert_eq!(config.agent_id, "codex");
     assert_eq!(config.command, "npx");
-    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.1.6"]);
+    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.2.0"]);
     assert!(config.env.is_empty());
     assert_eq!(config.diagnostic_launcher_kind(), "managed_package");
 }
@@ -74,7 +74,7 @@ fn windows_command_extensions_follow_pathext_and_ignore_unsupported_scripts() {
 fn windows_batch_launcher_is_invoked_through_cmd_exe() {
     let args = process_args(
         r"C:\Program Files\nodejs\npx.cmd",
-        &["-y".to_string(), "@openaide/codex-acp@1.1.6".to_string()],
+        &["-y".to_string(), "@openaide/codex-acp@1.2.0".to_string()],
         &[("AGENT_TOKEN".to_string(), "secret".to_string())],
         true,
     );
@@ -88,7 +88,7 @@ fn windows_batch_launcher_is_invoked_through_cmd_exe() {
             "/C",
             r"C:\Program Files\nodejs\npx.cmd",
             "-y",
-            "@openaide/codex-acp@1.1.6",
+            "@openaide/codex-acp@1.2.0",
         ]
     );
 }
