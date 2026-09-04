@@ -110,6 +110,23 @@ test("keeps wrapped Plan entries readable at desktop and narrow widths", async (
   expectPlanEntriesReadable(await planEntryLayout(narrowPlan));
 });
 
+test("keeps User message navigation clear of the persistent Plan", async ({ page }) => {
+  await page.setViewportSize({ width: 1_800, height: 900 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:long-plan-layout");
+  await expect(page.getByText("Long Plan rendered", { exact: true })).toBeVisible();
+  await send(page, "A second User message makes navigation available beside Plan.");
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+
+  const geometry = await page.locator(".task-conversation").evaluate((conversation) => {
+    const railBounds = conversation.querySelector(".user-message-navigator")?.getBoundingClientRect();
+    const planBounds = conversation.querySelector(".task-plan-column .agent-plan")?.getBoundingClientRect();
+    if (!railBounds || !planBounds) throw new Error("Wide Chat ancillary geometry is incomplete.");
+    return { planLeft: planBounds.left, railRight: railBounds.right };
+  });
+  expect(geometry.railRight).toBeLessThanOrEqual(geometry.planLeft);
+});
+
 test("creates a New Task, sends once, streams Chat, tools, and Agent title", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");

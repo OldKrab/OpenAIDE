@@ -1,5 +1,8 @@
 .task-work-stack {
   --oa-chat-scrollbar-edge-gap: 4px;
+  --oa-chat-readable-half-width: 380px;
+  /* Keeps the 42px message navigator and an 8px visual gap before Plan's padded card. */
+  --oa-chat-ancillary-lane: 54px;
   position: relative;
   container-name: task-work-stack;
   container-type: inline-size;
@@ -209,15 +212,19 @@
   }
 }
 
-@container task-work-stack (min-width: 1360px) {
+@container task-work-stack (min-width: 1440px) {
   .task-plan-column {
-    width: min(400px, calc(50% - 408px));
+    width: min(400px, calc(
+      50% - var(--oa-chat-readable-half-width) - var(--oa-chat-ancillary-lane) - var(--oa-chat-scrollbar-edge-gap)
+    ));
     min-width: 0;
     position: absolute;
     z-index: 10;
     top: 0;
     bottom: 0;
-    right: calc(max(0px, calc(50% - 808px)) + var(--oa-chat-scrollbar-edge-gap));
+    right: calc(max(0px, calc(
+      50% - var(--oa-chat-readable-half-width) - var(--oa-chat-ancillary-lane) - 400px
+    )) + var(--oa-chat-scrollbar-edge-gap));
     display: flex;
     align-items: flex-start;
     padding: 14px 12px;
