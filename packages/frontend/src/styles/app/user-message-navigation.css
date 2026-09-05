@@ -283,7 +283,7 @@ body[data-input-modality="keyboard"] .user-message-navigator:focus-within:not([d
     height: 44px;
     inset-block-start: auto;
     inset-block-end: 8px;
-    inset-inline-end: 0;
+    inset-inline-end: 8px;
     transform: none;
     transition: height 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -300,7 +300,7 @@ body[data-input-modality="keyboard"] .user-message-navigator:focus-within:not([d
     z-index: 2;
     inset: 0;
     display: grid;
-    place-items: center end;
+    place-items: center;
     padding: 0 5px;
     background: transparent;
     color: var(--oa-muted);
@@ -310,14 +310,13 @@ body[data-input-modality="keyboard"] .user-message-navigator:focus-within:not([d
 
   .user-message-navigator-mobile-toggle::before {
     content: "";
-    width: 28px;
+    width: 36px;
     height: 32px;
     position: absolute;
     z-index: -1;
-    inset-inline-end: 0;
+    inset-inline-end: 4px;
     border: 1px solid color-mix(in oklch, var(--oa-border) 72%, transparent);
-    border-inline-end: 0;
-    border-radius: var(--oa-radius-sm) 0 0 var(--oa-radius-sm);
+    border-radius: var(--oa-radius-sm);
     background: color-mix(in oklch, var(--oa-panel) 94%, transparent);
   }
 
