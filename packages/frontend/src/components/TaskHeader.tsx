@@ -13,7 +13,7 @@ const STATUS_PRESENTATION = {
   waiting: { label: "Waiting", Icon: CircleAlert },
   failed: { label: "Failed", Icon: CircleX },
   completed: { label: "Completed", Icon: CircleCheck },
-  inactive: { label: "Ready", Icon: Circle },
+  inactive: { label: "Idle", Icon: Circle },
 } satisfies Record<TaskStatus, { label: string; Icon: typeof Circle }>;
 
 export function taskStatusLabel(status: TaskStatus) {

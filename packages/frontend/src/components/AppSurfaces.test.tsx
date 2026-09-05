@@ -701,7 +701,7 @@ describe("AppSurfaces callback wiring", () => {
     const tree = render(controller);
     const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
 
-    expect(header.findByType("small").children.join("")).toBe("Ready · OpenAIDE");
+    expect(header.findByType("small").children.join("")).toBe("Idle · OpenAIDE");
     expect(header.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
   });
 
