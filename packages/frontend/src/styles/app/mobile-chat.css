@@ -13,16 +13,17 @@
     min-height: 36px;
   }
 
-  /* Text can share its last line with Copy; media endings need a separate touch row. */
+  /* Paragraphs can share their ending with Copy. Code, diagrams, and media keep
+     a separate touch row so their own controls and full-width layouts stay intact. */
   .chat-agent-block:has(> .chat-message-actions) {
     padding-block-end: 36px;
   }
 
-  .chat-agent-block:has(> .chat-agent:nth-last-child(2) + .chat-message-actions) {
+  .chat-agent-block:has(> .chat-agent:nth-last-child(2) > p:last-child) {
     padding-block-end: 12px;
   }
 
-  .chat-agent-block > .chat-agent:nth-last-child(2) > :last-child {
+  .chat-agent-block > .chat-agent:nth-last-child(2) > p:last-child {
     padding-inline-end: 44px;
   }
 
