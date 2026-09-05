@@ -116,7 +116,7 @@ test("keeps User message navigation clear of the persistent Plan", async ({ page
   await send(page, "smoke:long-plan-layout");
   await expect(page.getByText("Long Plan rendered", { exact: true })).toBeVisible();
   await send(page, "A second User message makes navigation available beside Plan.");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const geometry = await page.locator(".task-conversation").evaluate((conversation) => {
     const railBounds = conversation.querySelector(".user-message-navigator")?.getBoundingClientRect();
@@ -157,7 +157,7 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
     has: page.locator(".activity-step-semantic-subject", { hasText: /^README\.md$/ }),
   });
   await expect(readStep).toBeVisible();
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
@@ -174,7 +174,7 @@ test("scrubs User messages from the quiet rail at wide and constrained widths", 
   );
   for (const prompt of prompts.slice(0, 5)) {
     await send(page, prompt);
-    await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+    await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   }
 
   const rail = page.locator(".user-message-navigator");
@@ -194,7 +194,7 @@ test("scrubs User messages from the quiet rail at wide and constrained widths", 
 
   for (const prompt of prompts.slice(5)) {
     await send(page, prompt);
-    await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+    await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   }
 
   await expect(rail.locator(".user-message-position-marker")).toHaveCount(prompts.length);
@@ -597,7 +597,7 @@ test("copies fenced Markdown code independently at desktop and constrained width
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
   await openPreparedNewTask(page);
   await send(page, "smoke:code-block-copy");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const codeBlocks = page.locator(".agent-markdown-code-block");
   await expect(codeBlocks).toHaveCount(2);
@@ -638,7 +638,7 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   await page.setViewportSize({ width: 1_200, height: 800 });
   await openPreparedNewTask(page);
   await send(page, "smoke:mermaid-preview");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const diagram = page.locator(".agent-mermaid");
   await expect(diagram.locator(".agent-mermaid-image")).toBeVisible({ timeout: 30_000 });
@@ -744,7 +744,7 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
 test("waits for the Agent message to complete before rendering Mermaid", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:mermaid-preview");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   const chat = page.getByLabel("Task chat");
   await expect(chat.locator(".agent-mermaid")).toHaveCount(1, { timeout: 30_000 });
 
@@ -752,7 +752,7 @@ test("waits for the Agent message to complete before rendering Mermaid", async (
 
   await expect(chat.locator("code.language-mermaid")).toBeVisible();
   await expect(chat.locator(".agent-mermaid")).toHaveCount(1);
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible({ timeout: 10_000 });
   await expect(chat.locator(".agent-mermaid")).toHaveCount(2, { timeout: 30_000 });
 });
 
@@ -773,7 +773,7 @@ test("quotes selected rendered Chat text into the Composer at desktop and narrow
   await page.setViewportSize({ width: 1_200, height: 800 });
   await openPreparedNewTask(page);
   await send(page, "smoke:quote-selection");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const chat = page.getByLabel("Task chat");
   const agent = chat.locator('[data-quote-source="agent"]').filter({ hasText: "linked text" });
@@ -814,7 +814,7 @@ test("quotes selected rendered Chat text into the Composer at desktop and narrow
 test("keeps a Task actions popup interactive after the pointer leaves its row", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const row = page.getByRole("listitem").filter({ hasText: "Smoke task" }).first();
   await page.evaluate(() => {
@@ -864,7 +864,7 @@ test("shows a complete long Task title in a compact hover preview", async ({ pag
   const title = "A deliberately long task title segment that remains readable in the compact hover preview. ".repeat(12).trim();
   await openPreparedNewTask(page);
   await send(page, "smoke:long-title");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   await page.setViewportSize({ width: 1_662, height: 215 });
 
   const row = page.getByRole("listitem").filter({ hasText: title }).first();
@@ -911,7 +911,7 @@ test("recovers an open Task composer once after client liveness expires", async 
   await send(page, "smoke:basic");
 
   const editor = page.getByRole("textbox", { name: "Message" });
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   await editor.fill("draft survives recovery");
   await startComposerConnectionTrace(page);
   const stopExpiryFault = await reportClientLivenessExpiredOnNextHeartbeat(page);
@@ -941,7 +941,7 @@ test("keeps a live permission visible while later ACP updates arrive and resolve
 
   await expect(permission).toBeHidden();
   await expect(page.getByLabel("Task chat").locator(".chat-agent").last()).toContainText("Permission result: allow-once");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 });
 
 test("redelivers a pending permission after a page reload", async ({ page }) => {
@@ -967,7 +967,7 @@ test("settles the task when an accepted steering message ends", async ({ page })
   await send(page, "follow up");
   await expect(page.getByLabel("Task chat").locator("p.chat-user").filter({ hasText: "follow up" })).toHaveText("follow up");
   await expect(page.getByLabel("Task chat").getByText("Steering received: follow up", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   await expect(page.getByLabel("Stop task")).toBeHidden();
 });
 
@@ -1052,7 +1052,7 @@ test("sends an attachment-only first message through the real resolver boundary"
   await page.getByLabel("Send message").click();
   await expect(page).toHaveURL(/\/task\/task_/);
   await expect(page.getByLabel("Task chat").getByLabel("Open Image")).toBeVisible();
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 });
 
 test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
@@ -1081,7 +1081,7 @@ test("uploads a 2 MiB file and sends it with the first New Task message", async 
   await expect(page).toHaveURL(/\/task\/task_/);
   await expect(page.getByLabel("Task chat").locator("p.chat-user")).toHaveText("smoke:file attachment");
   await expect(page.getByText("Reselect attachments from the file browser before sending.")).toHaveCount(0);
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download two-megabytes.bin" }).click();
@@ -1158,7 +1158,7 @@ test("renders, validates, submits, and persists an Agent question", async ({ pag
   await expect(answered).toBeVisible();
   await expect(answered).toContainText("Alpha");
   await expect(page.getByLabel("Task chat").locator(".chat-agent").last()).toContainText("Question result: Alpha");
-  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 });
 
 async function measureContextEdge(meterEdge, radius) {
