@@ -12,7 +12,11 @@ const execute = promisify(execFile);
 /** Actual adapter/native restart coverage; its isolated provider never contacts a model. */
 export async function smokeCodexNativeRecovery(binary, adapter) {
   for (const scenario of ["readOnly", "workspace", "worktree", "named-extra-root"]) {
-    await verifyRecovery(binary, adapter, scenario);
+    try {
+      await verifyRecovery(binary, adapter, scenario);
+    } catch (error) {
+      throw new Error(`native_recovery_failed: scenario=${scenario}; ${error.message}`);
+    }
   }
 }
 
@@ -166,7 +170,12 @@ async function rpcClient(binary, root, adapter) {
     if (message.id !== undefined) {
       const waiter = pending.get(message.id);
       pending.delete(message.id);
-      if (message.error) waiter?.reject(new Error(`native_rpc_error: code=${message.error.code}`));
+      if (message.error) {
+        const kind = typeof message.error.message === "string"
+          && message.error.message.includes("No permissions to create a new namespace")
+          ? "linux_namespace_unavailable" : "rpc_error";
+        waiter?.reject(new Error(`native_rpc_error: code=${message.error.code}, kind=${kind}`));
+      }
       else waiter?.resolve(message.result);
     } else {
       const waiter = notifications.get(message.method);
@@ -187,7 +196,9 @@ async function rpcClient(binary, root, adapter) {
   });
   const request = (method, params) => {
     const id = ++sequence;
-    const result = wait(pending, id);
+    const result = wait(pending, id).catch((error) => {
+      throw new Error(`native_request_failed: method=${method}; ${error.message}`);
+    });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     return result;
   };
