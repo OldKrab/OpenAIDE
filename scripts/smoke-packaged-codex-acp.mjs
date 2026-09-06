@@ -68,6 +68,18 @@ const closed = new Promise((resolve) => {
   });
 });
 
+async function waitForClose(timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      closed.then(() => true),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
 child.once("error", (error) => {
   for (const waiter of pending.values()) waiter.reject(error);
@@ -179,10 +191,27 @@ try {
   throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
 } finally {
   if (!child.stdin.destroyed) child.stdin.end();
-  await Promise.race([
-    closed,
-    new Promise((resolve) => setTimeout(resolve, 10_000)),
-  ]);
-  if (child.exitCode === null) child.kill();
+  if (!await waitForClose(10_000)) {
+    // Windows keeps the temporary cwd locked until the process exits. Kill the
+    // owned tree on timeout, then observe closure before removing its state.
+    if (child.exitCode === null && child.signalCode === null) {
+      if (process.platform === "win32") {
+        await new Promise((resolve, reject) => {
+          const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+            stdio: "ignore", windowsHide: true, timeout: 5_000,
+          });
+          killer.once("error", reject);
+          // A nonzero exit can mean the App Server exited concurrently; the
+          // close observation below remains the authority for safe cleanup.
+          killer.once("close", resolve);
+        });
+      } else {
+        child.kill("SIGKILL");
+      }
+    }
+    if (!await waitForClose(5_000)) {
+      throw new Error("App Server shutdown timed out; temporary smoke state was retained");
+    }
+  }
   await rm(stateParent, { recursive: true, force: true });
 }
