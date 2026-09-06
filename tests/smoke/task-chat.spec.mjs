@@ -898,7 +898,7 @@ test("shows a complete long Task title in a compact hover preview", async ({ pag
   expect(geometry.titleScrollHeight).toBeGreaterThan(geometry.titleClientHeight);
   const titleWrap = preview.locator(".task-preview-title-wrap");
   await expect(titleWrap).toHaveAttribute("data-more-below", "true");
-  expect(await titleWrap.evaluate((element) => getComputedStyle(element, "::after").opacity)).toBe("1");
+  await expect.poll(() => titleWrap.evaluate((element) => getComputedStyle(element, "::after").opacity)).toBe("1");
   await preview.locator(".task-preview-title").evaluate((element) => {
     element.scrollTop = element.scrollHeight;
     element.dispatchEvent(new Event("scroll"));
