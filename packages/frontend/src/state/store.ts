@@ -100,8 +100,11 @@ export type TaskComposerInput = {
   queueTake?: {
     item: import("@openaide/app-shell-contracts").QueuedMessage;
     index: number;
-    stage: "pending" | "collapsing";
-  };
+  } & ({ stage: "pending" } | {
+    stage: "collapsing";
+    /** Queue extraction already transferred these resources into the local draft. */
+    context: ComposerAttachment[];
+  });
   /** Refocuses Composer after one queued item becomes the ordinary draft. */
   acceptedQueueTakeId?: string;
 };

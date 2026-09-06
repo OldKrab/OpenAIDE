@@ -18,6 +18,9 @@ use crate::storage::task_journal::frame::{FaultInjector, FaultPoint, FramedRecor
 use crate::storage::task_journal::model::{JournalFrame, TaskOperation};
 use crate::storage::task_journal::{TaskProjection, TaskWrite};
 
+#[path = "crash_recovery_tests.rs"]
+mod crash_recovery;
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct LegacyJournalFrame {
     format_version: u16,

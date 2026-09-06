@@ -20,6 +20,7 @@ export type ComposerAttachmentAdoption = {
   generation: number;
   stateRootGeneration: number;
   taskId: string;
+  lifetime: "composer" | "draft";
 };
 
 export type ComposerAttachmentAdoptionStatus = "current" | "expired" | "replacedReplica";
@@ -33,7 +34,7 @@ export type ComposerAttachmentResourceFrame = {
   taskSurfaceMounted: boolean;
 };
 
-/** Derives resolver ownership from the one composer currently mounted by the Task surface. */
+/** Draft ownership survives routing; mounting only controls new selection adoption. */
 export function composerAttachmentResourceFrame(
   state: AppState,
   taskSurfaceMounted: boolean,
@@ -52,11 +53,11 @@ export function composerAttachmentResourceFrame(
   }
 
   const retainedResources = new Map<string, ComposerAttachmentResource>();
-  if (newTaskId) {
-    for (const resource of resourcesFromAttachments(
-      newTaskId,
-      state.taskInputs[newTaskId]?.context ?? [],
-    )) {
+  for (const [taskId, input] of Object.entries(state.taskInputs)) {
+    const context = input.queueTake?.stage === "collapsing"
+      ? [...input.context, ...input.queueTake.context]
+      : input.context;
+    for (const resource of resourcesFromAttachments(taskId, context)) {
       retainedResources.set(resourceKey(resource), resource);
     }
   }
@@ -79,11 +80,6 @@ export function composerAttachmentResourceFrame(
     : state.newTask.submitting
       ? state.newTask.pending?.context ?? taskInput?.pending?.context ?? []
       : taskInput?.context ?? state.newTask.context;
-  for (const [taskId, input] of Object.entries(state.taskInputs)) {
-    for (const resource of resourcesFromAttachments(taskId, input.context)) {
-      retainedResources.set(resourceKey(resource), resource);
-    }
-  }
   for (const resource of resourcesFromAttachments(snapshotTaskId, mountedContext)) {
     retainedResources.set(resourceKey(resource), resource);
   }
@@ -128,7 +124,7 @@ export class ComposerAttachmentResourceOwner {
     return true;
   }
 
-  beginAdoption(taskId: string): ComposerAttachmentAdoption | undefined {
+  beginAdoption(taskId: string, lifetime: ComposerAttachmentAdoption["lifetime"] = "composer"): ComposerAttachmentAdoption | undefined {
     if (this.disposed || this.adoptionsLocked || this.mountedTaskId !== taskId) {
       console.warn("[OpenAIDE] Composer attachment adoption unavailable", {
         adoptionsLocked: this.adoptionsLocked,
@@ -143,6 +139,7 @@ export class ComposerAttachmentResourceOwner {
       generation: this.adoptionGeneration,
       stateRootGeneration: this.stateRootGeneration,
       taskId,
+      lifetime,
     };
   }
 
@@ -156,7 +153,9 @@ export class ComposerAttachmentResourceOwner {
     const adoptionExpired = adoptionStatus === "expired" || (
       adoption !== undefined && adoption.taskId !== resource.taskId
     );
-    if (this.disposed || this.adoptionsLocked || adoptionExpired || this.mountedTaskId !== resource.taskId) {
+    const composerUnavailable = adoption?.lifetime !== "draft"
+      && (this.adoptionsLocked || this.mountedTaskId !== resource.taskId);
+    if (this.disposed || adoptionExpired || composerUnavailable) {
       this.dependencies.release(resource.taskId, [resource.handleId]);
       return false;
     }
@@ -172,6 +171,7 @@ export class ComposerAttachmentResourceOwner {
 
   adoptionStatus(adoption: ComposerAttachmentAdoption): ComposerAttachmentAdoptionStatus {
     if (adoption.stateRootGeneration !== this.stateRootGeneration) return "replacedReplica";
+    if (adoption.lifetime === "draft") return this.disposed ? "expired" : "current";
     if (
       this.disposed
       || this.adoptionsLocked

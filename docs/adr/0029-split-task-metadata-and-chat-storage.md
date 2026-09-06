@@ -13,23 +13,51 @@ explicit user preferences. A `chat.snapshot.<generation>` file owns the material
 Chat projection and its `chat.journal.<generation>` file owns normalized Chat deltas
 and Tool-artifact visibility references accepted since that snapshot. The initial
 generation uses the unsuffixed names. Generation pointers distinguish a committed
-delta ahead of metadata from an obsolete pre-compaction tail left by a crash. Agent command and Configuration Option
-catalogs, pending requests, and active runtime controls are Transient Task Runtime
-State and are never durable.
+delta ahead of metadata from an obsolete pre-compaction tail left by a crash.
+Agent command and Configuration Option catalogs may persist as last-known display
+data; their live freshness and pending mutations are process-owned. Persisted
+catalogs never establish an active Agent attachment after restart.
 
 Recovery follows one-way authority instead of cross-file transactions. Artifact
-content is synced before its Chat reference. Chat is committed before updating
-derived Task metadata. A crash before the Chat reference leaves an invisible
-artifact; a crash after Chat but before `task.json` leaves metadata that can be
-repaired from Chat. Process-owned active state is recovered as interrupted or
-inactive rather than restored as live. Independent metadata facts are changed by
-atomic file replacement.
+content is synced before its Chat reference. A Chat-changing transaction commits
+its Chat operations and changed durable Task fields in one checksummed journal
+frame before replacing `task.json`. This includes first-Send promotion, queue
+consumption, Composer History, and Task revisions; recovery must never expose an
+accepted User message while retaining its Prepared lifecycle or pending queue
+item. Unchanged Task fields, including queued attachments and Agent catalogs,
+are not repeated in ordinary Chat delta frames. A crash before the Chat reference
+leaves an invisible artifact; a crash after the frame but before `task.json`
+rolls forward both Chat and those Task facts. Process-owned active state is
+recovered as interrupted or inactive rather than restored as live. Independent
+metadata facts are changed by atomic file replacement.
+
+Task metadata records the committed Chat journal byte length. Startup checks this
+small checkpoint and replays only Tasks with additional journal bytes before
+publishing Navigation or running Prepared-Task and queue recovery. A complete
+newer frame rolls forward; an incomplete final frame is discarded. Frames already
+covered by the metadata checkpoint cannot override later title, Archive, or queue
+edits from `task.json`. Existing snapshots and journals remain readable: the byte
+checkpoint and changed-field recovery payload are additive optional fields, and
+files without a byte checkpoint retain their existing lazy hydration behavior.
+Their first hydration durably establishes the checkpoint before any new Chat
+frame can commit, so the upgrade itself cannot reopen the crash window.
 
 Existing ADR-0028 journals migrate lazily on first Task access. Migration replays
 the old journal once, writes and validates all replacement files, publishes them
 atomically, and removes the old journal only after the new store is authoritative.
 Startup and Task Navigation do not migrate or replay unopened Chat. A failed or
 interrupted migration leaves the old journal authoritative and retryable.
+
+The earlier file-backed `<state-root>/tasks` format is imported once at startup
+through the current Task durability boundary. Its Task record, materialized Chat
+checkpoint, complete append-journal records, Chat metadata, and Tool artifacts are
+read and verified before the original directory moves into the current Task's
+`legacy-files` backup. This preserves exact previous bytes while letting Task
+deletion, retention, and Reset task history own the backup too. A restart between
+the import commit and source move completes the move only when the destination
+still matches the imported Task and artifacts. A conflicting destination,
+malformed source, or unsupported shape remains intact and fails startup explicitly;
+no existing history is overwritten or treated as an empty store.
 
 ## Schema Evolution
 

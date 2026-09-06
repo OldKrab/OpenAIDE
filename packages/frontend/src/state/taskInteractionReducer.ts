@@ -21,9 +21,14 @@ type TaskInteractionAction =
       userMessageId: import("@openaide/app-server-client").MessageId;
       snapshot?: import("@openaide/app-shell-contracts").TaskSnapshot;
     }
+  | {
+      type: "newTaskSend:accepted";
+      taskId: string;
+      userMessageId: import("@openaide/app-server-client").MessageId;
+    }
   | { type: "taskQueue:accepted"; taskId: string; queueRevision: number }
   | { type: "taskQueue:take:start"; taskId: string; item: import("@openaide/app-shell-contracts").QueuedMessage; index: number }
-  | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string }
+  | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string; context: ComposerAttachment[] }
   | { type: "taskQueue:take:accepted"; taskId: string; queuedMessageId: string; prompt: string; context: ComposerAttachment[] }
   | { type: "taskQueue:take:error"; taskId: string; queuedMessageId: string; message: string }
   | { type: "taskInput:error"; taskId: string; message?: string }
@@ -186,7 +191,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
           ...state.taskInputs,
           [action.taskId]: {
             ...input,
-            queueTake: { ...input.queueTake, stage: "collapsing" },
+            queueTake: { ...input.queueTake, stage: "collapsing", context: action.context },
           },
         },
       };
@@ -234,11 +239,13 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
         },
       };
     }
+    case "newTaskSend:accepted":
     case "taskSend:accepted": {
       const input = state.taskInputs[action.taskId];
       const hasAcceptedMessage = typeof action.userMessageId === "string" && action.userMessageId.length > 0;
       const acceptedTaskInput = input?.pending !== undefined && hasAcceptedMessage;
-      const acceptedNewTask = state.newTask.pending !== undefined && hasAcceptedMessage;
+      const acceptedNewTask = action.type === "newTaskSend:accepted"
+        && state.newTask.pending !== undefined && hasAcceptedMessage;
       if (!acceptedTaskInput && !acceptedNewTask) return state;
       const selectedProject = state.projects.find(
         (project) => project.projectId === state.newTask.selection.projectId,
@@ -506,6 +513,7 @@ function isTaskInteractionAction(action: AppAction): action is TaskInteractionAc
   return action.type === "taskConfig:result"
     || action.type.startsWith("taskInput:")
     || action.type === "taskSend:accepted"
+    || action.type === "newTaskSend:accepted"
     || action.type === "taskQueue:accepted"
     || action.type.startsWith("taskQueue:take:")
     || action.type === "taskOpen:start"

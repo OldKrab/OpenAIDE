@@ -53,6 +53,9 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
       );
     },
     removeAttachment: (attachmentId) => {
+      // Failed first Send can restore the same row into both draft sources;
+      // removal must clear the client copy as well as the prepared-Task copy.
+      dispatch({ type: "newTask:attachment:remove", attachmentId });
       const taskId = state.snapshot && !state.snapshot.task.has_messages
         ? state.snapshot.task.task_id
         : undefined;
@@ -74,7 +77,6 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
         );
         return;
       }
-      dispatch({ type: "newTask:attachment:remove", attachmentId });
     },
     selectConfigOption: (configId, value) => {
       const operation = asyncOperations.claim("new-task-config", configContext);

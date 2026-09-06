@@ -4,12 +4,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::protocol::errors::RuntimeError;
+use crate::storage::atomic::{replace_file as durable_replace, sync_directory};
 use crate::storage::records::{MessageMeta, StoredMessage, TaskRecord};
 
-use super::frame::{self, FaultInjector, JournalKind, ReplayedFrames};
+use super::frame::{self, FaultInjector, FramedRecord, JournalKind, ReplayedFrames};
 use super::model::{JournalFrame, TaskOperation, TaskProjection};
 use super::store::RecoveredTask;
 
@@ -27,6 +28,10 @@ struct DurableTaskFile {
     chat_sequence: u64,
     chat_snapshot: String,
     chat_journal: String,
+    /// Optional for stores written before interrupted Chat commits were detected
+    /// at Navigation startup. A length check avoids replaying healthy cold Chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chat_journal_bytes: Option<u64>,
     task: TaskRecord,
 }
 
@@ -36,6 +41,7 @@ pub(super) struct TaskMetadata {
     pub(super) chat_sequence: u64,
     pub(super) chat_snapshot: String,
     pub(super) chat_journal: String,
+    chat_journal_bytes: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -45,6 +51,102 @@ struct ChatSnapshotFile {
     messages: Vec<StoredMessage>,
     message_meta: MessageMeta,
     artifact_heads: HashMap<String, u64>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ChatFrame {
+    #[serde(flatten)]
+    journal: JournalFrame,
+    #[serde(default)]
+    task_patch: TaskMetadataPatch,
+}
+
+impl FramedRecord for ChatFrame {
+    fn decode(payload: &[u8]) -> Result<Self, RuntimeError> {
+        // Keep released Chat migrations at their existing boundary. The added
+        // recovery facts are optional on all previously written journal frames.
+        let journal = JournalFrame::decode(payload)?;
+        let mut value: Value = serde_json::from_slice(payload)?;
+        let task_patch = match value
+            .as_object_mut()
+            .and_then(|fields| fields.remove("task_patch"))
+        {
+            Some(patch) => serde_json::from_value(patch)?,
+            None => TaskMetadataPatch::default(),
+        };
+        Ok(Self {
+            journal,
+            task_patch,
+        })
+    }
+
+    fn format_version(&self) -> u16 {
+        self.journal.format_version
+    }
+
+    fn sequence(&self) -> u64 {
+        self.journal.sequence
+    }
+}
+
+/// Only Task fields changed by this Chat commit need a recovery copy. Repeating
+/// complete metadata would journal queued Images and Composer History on every
+/// Agent chunk. Removed fields stay distinct from fields explicitly set to null.
+#[derive(Default, Deserialize, Serialize)]
+struct TaskMetadataPatch {
+    #[serde(default)]
+    fields: Map<String, Value>,
+    #[serde(default)]
+    removed_fields: Vec<String>,
+}
+
+impl TaskMetadataPatch {
+    fn between(before: &TaskRecord, after: &TaskRecord) -> Result<Self, RuntimeError> {
+        let before = serde_json::to_value(before)?;
+        let mut after = after.clone();
+        after.clear_process_local_agent_state();
+        let after = serde_json::to_value(after)?;
+        let before = before
+            .as_object()
+            .expect("Task metadata serializes as an object");
+        let after = after
+            .as_object()
+            .expect("Task metadata serializes as an object");
+        Ok(Self {
+            fields: after
+                .iter()
+                .filter(|(key, value)| before.get(*key) != Some(*value))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            removed_fields: before
+                .keys()
+                .filter(|key| !after.contains_key(*key))
+                .cloned()
+                .collect(),
+        })
+    }
+
+    fn apply(self, task: &mut TaskRecord) -> Result<(), RuntimeError> {
+        if self.fields.is_empty() && self.removed_fields.is_empty() {
+            return Ok(());
+        }
+        let mut value = serde_json::to_value(&*task)?;
+        let fields = value
+            .as_object_mut()
+            .expect("Task metadata serializes as an object");
+        for key in self.removed_fields {
+            fields.remove(&key);
+        }
+        fields.extend(self.fields);
+        let recovered: TaskRecord = serde_json::from_value(value)?;
+        if recovered.task_id != task.task_id {
+            return Err(RuntimeError::Storage(
+                "Chat recovery metadata changes Task identity".to_string(),
+            ));
+        }
+        *task = recovered;
+        Ok(())
+    }
 }
 
 pub(super) fn exists(task_dir: &Path) -> bool {
@@ -65,7 +167,39 @@ pub(super) fn load_task(task_dir: &Path) -> Result<Option<TaskMetadata>, Runtime
         chat_sequence: file.chat_sequence,
         chat_snapshot: file.chat_snapshot,
         chat_journal: file.chat_journal,
+        chat_journal_bytes: file.chat_journal_bytes,
     }))
+}
+
+/// Startup must recover Send promotion and queue consumption before a metadata
+/// reader can dispose a Prepared Task or offer accepted work for delivery again.
+/// Prior files without a checkpoint retain their existing lazy hydration path.
+pub(super) fn load_catalog_task(task_dir: &Path) -> Result<Option<TaskMetadata>, RuntimeError> {
+    let Some(metadata) = load_task(task_dir)? else {
+        return Ok(None);
+    };
+    if let Some(committed_bytes) = metadata.chat_journal_bytes {
+        let journal_bytes = file_length_or_zero(&task_dir.join(&metadata.chat_journal))?;
+        if journal_bytes > committed_bytes {
+            let started = std::time::Instant::now();
+            crate::logging::info(
+                "task_metadata_recovery_started",
+                serde_json::json!({ "task_id": metadata.task.task_id, "chat_sequence": metadata.chat_sequence }),
+            );
+            let recovery = load_projection(task_dir);
+            crate::logging::info(
+                "task_metadata_recovery_finished",
+                serde_json::json!({
+                    "task_id": metadata.task.task_id,
+                    "outcome": if recovery.is_ok() { "recovered" } else { "unavailable" },
+                    "duration_ms": started.elapsed().as_millis(),
+                }),
+            );
+            recovery?;
+            return load_task(task_dir);
+        }
+    }
+    Ok(Some(metadata))
 }
 
 pub(super) fn load_projection(
@@ -83,8 +217,17 @@ pub(super) fn load_projection(
         artifact_heads: snapshot.artifact_heads.clone(),
     };
     let journal = task_dir.join(&metadata.chat_journal);
+    if metadata.chat_sequence == 0
+        && journal.is_file()
+        && fs::metadata(&journal)?.len() < frame::FILE_HEADER_LEN as u64
+    {
+        // A crash can interrupt creation before even the first frame header.
+        // No committed reference exists, so this empty generation is disposable.
+        fs::remove_file(&journal)?;
+        sync_directory(task_dir)?;
+    }
     if journal.is_file() {
-        let replayed: ReplayedFrames<JournalFrame> = frame::replay(&journal)?;
+        let replayed: ReplayedFrames<ChatFrame> = frame::replay(&journal)?;
         let recovered_chat_sequence = replayed.frame_count as u64;
         if recovered_chat_sequence < metadata.chat_sequence {
             return Err(RuntimeError::Storage(
@@ -99,13 +242,33 @@ pub(super) fn load_projection(
                 journal_sequence: 0,
             },
         )]);
-        for frame in replayed.frames {
+        for ChatFrame {
+            journal: frame,
+            task_patch,
+        } in replayed.frames
+        {
+            let is_checkpoint = frame.sequence == metadata.chat_sequence;
+            let needs_recovery = frame.sequence > metadata.chat_sequence;
             super::projection::apply_operations(
                 &mut state,
                 &task_id,
                 frame.operations,
                 frame.sequence,
             )?;
+            if is_checkpoint || needs_recovery {
+                // Later metadata-only changes (Archive, title, queue edits) own
+                // their facts even when an older Chat frame contains Task state.
+                let RecoveredTask::Available { projection, .. } =
+                    state.get_mut(&task_id).expect("split replay retains Task")
+                else {
+                    unreachable!("split replay cannot quarantine Task")
+                };
+                if is_checkpoint {
+                    projection.task = metadata.task.clone();
+                } else {
+                    task_patch.apply(&mut projection.task)?;
+                }
+            }
         }
         let RecoveredTask::Available {
             projection: replayed,
@@ -115,9 +278,22 @@ pub(super) fn load_projection(
             unreachable!("split replay cannot quarantine Task")
         };
         projection = *replayed;
-        projection.task = metadata.task;
         projection.task.message_history_version = projection.message_meta.version;
-        if recovered_chat_sequence > metadata.chat_sequence {
+        let journal_bytes = if recovered_chat_sequence == 0 {
+            // A complete file header can survive an interrupted first frame.
+            // The next first append uses create_new, so an empty generation must
+            // disappear just like a partially written header above.
+            fs::remove_file(&journal)?;
+            sync_directory(task_dir)?;
+            0
+        } else {
+            fs::metadata(&journal)?.len()
+        };
+        if recovered_chat_sequence > metadata.chat_sequence
+            || metadata
+                .chat_journal_bytes
+                .is_some_and(|bytes| bytes != journal_bytes)
+        {
             let repaired_storage_sequence = metadata
                 .storage_sequence
                 .saturating_add(recovered_chat_sequence - metadata.chat_sequence);
@@ -150,6 +326,20 @@ pub(super) fn load_projection(
             &snapshot_path,
             &snapshot,
             JournalKind::Task,
+            &FaultInjector::disabled(),
+        )?;
+    }
+    if metadata.chat_journal_bytes.is_none() {
+        // Upgrade at the normal hydration seam before any new Chat write can
+        // enter the worker. A crash after its first new frame must leave an
+        // already-durable old-byte checkpoint for metadata-only startup readers.
+        publish_task(
+            task_dir,
+            &projection.task,
+            metadata.storage_sequence,
+            metadata.chat_sequence,
+            &metadata.chat_snapshot,
+            &metadata.chat_journal,
             &FaultInjector::disabled(),
         )?;
     }
@@ -206,11 +396,14 @@ pub(super) fn append(
             .chat_sequence
             .checked_add(1)
             .ok_or_else(|| RuntimeError::Storage("Chat journal sequence overflow".to_string()))?;
-        let frame = JournalFrame {
-            format_version: 1,
-            schema_version: CHAT_SCHEMA_VERSION,
-            sequence: next,
-            operations: chat_operations,
+        let frame = ChatFrame {
+            journal: JournalFrame {
+                format_version: 1,
+                schema_version: CHAT_SCHEMA_VERSION,
+                sequence: next,
+                operations: chat_operations,
+            },
+            task_patch: TaskMetadataPatch::between(&metadata.task, &projection.task)?,
         };
         let journal = task_dir.join(&metadata.chat_journal);
         if next == 1 {
@@ -378,11 +571,20 @@ fn publish_task(
             chat_sequence,
             chat_snapshot: chat_snapshot.to_string(),
             chat_journal: chat_journal.to_string(),
+            chat_journal_bytes: Some(file_length_or_zero(&task_dir.join(chat_journal))?),
             task,
         },
         JournalKind::Task,
         faults,
     )
+}
+
+fn file_length_or_zero(path: &Path) -> Result<u64, RuntimeError> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn durable_replace_json<T: Serialize>(
@@ -428,72 +630,6 @@ fn temporary_path(path: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         .unwrap_or("task");
     path.with_file_name(format!(".{name}.{}", uuid::Uuid::new_v4()))
-}
-
-#[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), RuntimeError> {
-    std::fs::File::open(path)?.sync_all()?;
-    Ok(())
-}
-
-#[cfg(windows)]
-fn sync_directory(_path: &Path) -> Result<(), RuntimeError> {
-    // FlushFileBuffers on each file above persists its data and metadata.
-    // Windows has no portable directory fsync; opening a directory as a File
-    // instead fails with ERROR_ACCESS_DENIED and must not reject the commit.
-    Ok(())
-}
-
-#[cfg(all(not(unix), not(windows)))]
-fn sync_directory(_path: &Path) -> Result<(), RuntimeError> {
-    Err(RuntimeError::Storage(
-        "split Task directory sync is unsupported on this platform".to_string(),
-    ))
-}
-
-#[cfg(unix)]
-fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
-    fs::rename(temporary, path)?;
-    Ok(())
-}
-
-#[cfg(windows)]
-fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let destination = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let source = temporary
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    // SAFETY: both owned UTF-16 buffers are NUL terminated and remain alive
-    // through the call. Replacement is required after the initial Task write.
-    if unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        return Err(RuntimeError::from(std::io::Error::last_os_error()));
-    }
-    Ok(())
-}
-
-#[cfg(all(not(unix), not(windows)))]
-fn durable_replace(_temporary: &Path, _path: &Path) -> Result<(), RuntimeError> {
-    Err(RuntimeError::Storage(
-        "split Task replacement is unsupported on this platform".to_string(),
-    ))
 }
 
 fn remove_if_present(path: &Path) -> Result<(), RuntimeError> {

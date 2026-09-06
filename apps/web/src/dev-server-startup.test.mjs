@@ -51,6 +51,44 @@ test("Web stays live while a slow App Server handoff becomes ready", { timeout: 
   await waitUntilReady(`${origin}/readyz`, 8_000);
 });
 
+test("Web survives a malformed handoff and can retry a repaired App Server", { timeout: 8_000 }, async (t) => {
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), "openaide-web-invalid-handoff-"));
+  const staticRoot = path.join(fixtureRoot, "static");
+  const fakeAppServerPath = path.join(fixtureRoot, "app-server.mjs");
+  mkdirSync(staticRoot);
+  writeFileSync(path.join(staticRoot, "index.html"), "<html><body>OpenAIDE recovery</body></html>");
+  writeFileSync(fakeAppServerPath, '#!/usr/bin/env node\nconsole.log("invalid handoff");\n');
+  chmodSync(fakeAppServerPath, 0o755);
+
+  const port = await availablePort();
+  const webServer = spawn(process.execPath, ["src/dev-server.mjs"], {
+    cwd: new URL("..", import.meta.url),
+    env: {
+      ...process.env,
+      OPENAIDE_APP_SERVER_PATH: fakeAppServerPath,
+      OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
+      OPENAIDE_WEB_HOST: "127.0.0.1",
+      OPENAIDE_WEB_PORT: String(port),
+      OPENAIDE_WEB_RUNTIME_ROOT: path.join(fixtureRoot, "runtime"),
+      OPENAIDE_WEB_STATE_ROOT: path.join(fixtureRoot, "state"),
+      OPENAIDE_WEB_STATIC_ROOT: staticRoot,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    await stopProcess(webServer);
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  await waitForOutput(webServer, "app_server_handoff_failed", 2_000);
+  const origin = `http://127.0.0.1:${port}`;
+  assert.equal((await fetch(`${origin}/livez`)).status, 200);
+  assert.match(await (await fetch(origin)).text(), /OpenAIDE recovery/);
+
+  writeFileSync(fakeAppServerPath, slowAppServerSource(0));
+  await waitUntilReady(`${origin}/readyz`, 3_000);
+});
+
 function availablePort() {
   const server = http.createServer();
   return new Promise((resolve, reject) => {
@@ -75,9 +113,20 @@ function waitForOutput(child, expected, timeoutMs) {
       clearTimeout(timeout);
       resolve();
     });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`Web server exited with ${code}: ${stderr}`)));
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (!stderr.includes(expected)) return;
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`Web server exited with ${code}: ${stderr}`));
+    });
   });
 }
 
@@ -102,7 +151,7 @@ function stopProcess(child) {
   });
 }
 
-function slowAppServerSource() {
+function slowAppServerSource(delayMs = 5_500) {
   return `#!/usr/bin/env node
 import http from "node:http";
 const authToken = "test-token-that-is-long-enough-for-handoff";
@@ -119,7 +168,7 @@ setTimeout(() => server.listen(0, "127.0.0.1", () => console.log(JSON.stringify(
   kind: "localHttp",
   endpointUrl: \`http://127.0.0.1:\${server.address().port}/rpc\`,
   authToken,
-}))), 5_500);
+}))), ${delayMs});
 process.once("SIGTERM", () => server.close(() => process.exit(0)));
 `;
 }

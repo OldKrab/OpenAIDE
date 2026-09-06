@@ -35,12 +35,10 @@ The worker drafts only the affected Task and does not hold the root projection
 lock during file I/O; unrelated reads and commit cost do not scale with every
 stored Chat history.
 
-Existing file-backed Tasks are not migrated. After the journal store opens
-successfully, App Server removes the unsupported `<state-root>/tasks` store
-without deleting Agents, settings, worktrees, diagnostics, or Agent-owned
-Native Sessions. Cleanup failure is logged without blocking startup and is
-retried whenever the legacy directory is present on a later start. Native
-Sessions may still appear as unadopted sessions and be adopted into fresh Tasks.
+Existing file-backed Tasks migrate under the compatibility rules in
+[ADR-0029](0029-split-task-metadata-and-chat-storage.md). Opening a newer store
+must not silently discard previous Task or Chat files. Unsupported or conflicting
+history remains intact and produces an explicit migration failure.
 
 ## Normalized Operations And Admission
 

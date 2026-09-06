@@ -1,0 +1,4 @@
+{"record_type":"message_base","journal_sequence":1}
+{"sequence":1,"chat":{"cursor":"1","identity":"user-1","message_type":"user","message_id":"user-1","message":{"kind":"user","id":"user-1","text":"Check the project","created_at":"1750000000001","attachments":[{"kind":"file","label":"reference.txt","path":"/workspace/project/reference.txt"}]}}}
+{"sequence":2,"chat":{"cursor":"2","identity":"agent-1","message_type":"agent_message","message_id":"agent-1","message":{"kind":"agent_message","id":"agent-1","role":"agent","parts":[{"kind":"text","text":"Hello"}],"created_at":"1750000000002"}}}
+{"sequence":3,"chat":{"cursor":"3","identity":"tool-1","message_type":"activity","message_id":"tool-1","message":{"kind":"activity","id":"tool-1","title":"Read file","status":"completed","created_at":"1750000000003","collapsed":true,"steps":[{"kind":"tool","tool_call_id":"tool-call-1","name":"read","status":"completed","detail_artifact_id":"tool-1_0","permission_outcomes":[]}]}}}

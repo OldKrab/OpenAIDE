@@ -348,7 +348,10 @@ test("scrubs User messages from the quiet rail at wide and constrained widths", 
   await expect.poll(async () => Number.parseFloat(await railScroll.evaluate(
     (element) => getComputedStyle(element).opacity,
   ))).toBeGreaterThan(0.9);
+  await prepareUserMessageNavigationObservation(page, 2);
   await markers.nth(2).click();
+  const narrowNavigation = await page.evaluate(() => window.__openaideNavigationFinished);
+  expectSmoothNavigation(narrowNavigation, 18);
   await expect(mobileToggle).toHaveAttribute("aria-expanded", "false");
 });
 
@@ -429,7 +432,8 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions) {
     intermediateSamples.map(({ scrollTop }) => Math.round(scrollTop)),
   ).size;
   expect(paintedPositions).toBeGreaterThanOrEqual(minimumPaintedPositions);
-  expect(intermediateSamples.every(({ visibleRows }) => visibleRows > 0)).toBe(true);
+  expect(intermediateSamples.filter(({ visibleRows }) => visibleRows === 0),
+    "Every intermediate navigation frame must contain Chat rows").toEqual([]);
   // Initial, final, and at least two intermediate positions prove the
   // selector animates without coupling the assertion to CI frame cadence.
   expect(new Set(navigation.samples
@@ -1343,6 +1347,8 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
   const probePattern = "**/__openaide-app-server/probe";
   let pendingError;
   let expiredSessionId;
+  let injectionEnabled = false;
+  let injectedSequence;
   let resolveHeartbeat;
   let resolveInjected;
   const observed = [];
@@ -1353,6 +1359,11 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
     if (request.method() === "POST") {
       const body = request.postDataJSON();
       observed.push(`POST:${body?.transport ?? "unknown"}:${body?.message?.method ?? "no-method"}`);
+      if (expiredSessionId && body?.sessionId !== expiredSessionId && body?.message?.method === "client/initialize") {
+        // The replacement initialize proves the client consumed the expiry;
+        // fulfilling a receive alone does not prove its body survived a wake.
+        resolveInjected();
+      }
       if (
         !expiredSessionId
         && body?.transport === "send"
@@ -1374,23 +1385,26 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
         resolveHeartbeat();
         return;
       }
-      if (body?.sessionId === expiredSessionId) {
+      if (body?.sessionId === expiredSessionId && body?.transport !== "close") {
         // The synthetic response did not reach the real server, so quarantine this obsolete session.
         await route.fulfill({ status: 204, body: "" });
         return;
       }
     }
-    if (request.method() === "GET" && pendingError) {
+    if (request.method() === "GET"
+      && request.headers()["x-openaide-session-id"] === expiredSessionId
+      && injectionEnabled
+      && pendingError) {
       observed.push("GET:inject");
       const after = Number(request.headers()["x-openaide-after"] ?? "0");
-      const message = pendingError;
-      pendingError = undefined;
+      injectedSequence ??= after + 1;
+      // Match reliable HTTP replay: an aborted response does not acknowledge
+      // the frame. Keep its sequence stable until the old session is replaced.
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ frames: [{ sequence: after + 1, message }] }),
+        body: JSON.stringify({ frames: after < injectedSequence ? [{ sequence: injectedSequence, message: pendingError }] : [] }),
       });
-      resolveInjected();
       return;
     }
     if (
@@ -1402,22 +1416,36 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
     }
     await route.continue();
   };
+  const removeFault = async () => {
+    if (page.isClosed()) return;
+    try {
+      await page.unroute(probePattern, injectExpiry);
+    } catch (error) {
+      if (!page.isClosed()) throw error;
+    }
+  };
+  const waitForBoundary = async (boundary, describeFailure) => {
+    let timeout;
+    try {
+      await Promise.race([
+        boundary,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(describeFailure())), 10_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
   await page.route(probePattern, injectExpiry);
   try {
-    await Promise.race([
-      heartbeat,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Heartbeat was not observed")), 10_000)),
-    ]);
+    await waitForBoundary(heartbeat, () => "Heartbeat was not observed");
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
-    await Promise.race([
-      injected,
-      new Promise((_, reject) => setTimeout(() => reject(new Error(
-        `Heartbeat expiry was not injected: ${observed.slice(-20).join(", ")}`,
-      )), 10_000)),
-    ]);
-    return () => page.unroute(probePattern, injectExpiry);
+    injectionEnabled = true;
+    await waitForBoundary(injected, () => `Heartbeat expiry was not consumed: ${observed.slice(-20).join(", ")}`);
+    return removeFault;
   } catch (error) {
-    await page.unroute(probePattern, injectExpiry);
+    await removeFault();
     throw error;
   }
 }

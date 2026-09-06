@@ -1,4 +1,5 @@
 import {
+  APP_SERVER_HANDOFF_TIMEOUT_MS,
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
 } from "@openaide/app-server-client";
@@ -15,6 +16,7 @@ export function createAppServerManager({
   requestAppServer = defaultRequestAppServer,
   logger = createRuntimeLogger(),
   shellHeartbeatIntervalMs = DEFAULT_SHELL_HEARTBEAT_INTERVAL_MS,
+  shellRequestTimeoutMs = APP_SERVER_HANDOFF_TIMEOUT_MS,
   spawnAppServer,
 }) {
   let appServer;
@@ -95,7 +97,12 @@ export function createAppServerManager({
         shell: [],
       },
     });
+    // Slow polls have one owner per connection; they must not accumulate while
+    // the endpoint is stalled or manufacture out-of-order health observations.
+    let heartbeatPending = false;
     shellHeartbeat = setInterval(() => {
+      if (heartbeatPending) return;
+      heartbeatPending = true;
       void sendShellRequest(connection, CLIENT_HEARTBEAT, {})
         .then(() => {
           if (appServerConnection !== connection) return;
@@ -123,7 +130,8 @@ export function createAppServerManager({
             heartbeat_failure_count: consecutiveHeartbeatFailures,
           });
           clearConnection("heartbeat_failures");
-        });
+        })
+        .finally(() => { heartbeatPending = false; });
     }, shellHeartbeatIntervalMs);
     shellHeartbeat.unref?.();
   }
@@ -148,6 +156,13 @@ export function createAppServerManager({
   async function sendShellRequest(connection, method, params) {
     const startedAt = Date.now();
     const shouldLog = method !== CLIENT_HEARTBEAT;
+    // A socket that stays open without responding is still a failed liveness
+    // check. Abort its I/O so it cannot retain startup or heartbeat ownership.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort(new DOMException("App Server shell request timed out", "TimeoutError"));
+    }, shellRequestTimeoutMs);
+    timeout.unref?.();
     if (shouldLog) {
       logger.info("app_server_shell_request_started", { method });
     }
@@ -157,7 +172,7 @@ export function createAppServerManager({
         id: `web-shell-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         method,
         params,
-      });
+      }, { signal: controller.signal });
       if (shouldLog) {
         logger.info("app_server_shell_request_completed", {
           method,
@@ -174,6 +189,8 @@ export function createAppServerManager({
         });
       }
       throw error;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -194,7 +211,7 @@ function defaultConnectionUrl(connection) {
   return new URL(connection.endpointUrl);
 }
 
-async function defaultRequestAppServer(connection, connectionId, body) {
+async function defaultRequestAppServer(connection, connectionId, body, { signal }) {
   const response = await fetch(connection.endpointUrl, {
     method: "POST",
     headers: {
@@ -203,6 +220,7 @@ async function defaultRequestAppServer(connection, connectionId, body) {
       "X-OpenAIDE-Connection-Id": connectionId,
     },
     body: JSON.stringify(body),
+    signal,
   });
   const text = await response.text();
   if (!response.ok) {

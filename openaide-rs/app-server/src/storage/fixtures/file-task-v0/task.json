@@ -1,0 +1,23 @@
+{
+  "task_id": "task-legacy",
+  "title": { "value": "Keep this history", "source": "user" },
+  "status": "inactive",
+  "task_version": 9,
+  "message_history_version": 7,
+  "unread": true,
+  "created_at": "1750000000000",
+  "updated_at": "1750000000010",
+  "last_activity": "1750000000010",
+  "agent_id": "agent-legacy",
+  "agent_name": "Agent",
+  "isolation": "local",
+  "workspace_root": "/workspace/project",
+  "project_root": "/workspace/project",
+  "lifecycle": { "state": "visible" },
+  "agent_session_id": "native-session-legacy",
+  "archived": true,
+  "tombstoned": false,
+  "revision": 9,
+  "model_id": null,
+  "supports_image_input": true
+}

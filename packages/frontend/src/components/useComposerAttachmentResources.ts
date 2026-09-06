@@ -18,7 +18,7 @@ type ComposerAttachmentResourceOptions = {
   taskSurfaceMounted: boolean;
 };
 
-/** Keeps App Server resolver lifetime aligned with the mounted Frontend composer. */
+/** Keeps resolvers alive for retained drafts until acceptance, removal, or Frontend disposal. */
 export function useComposerAttachmentResources({
   backendConnection,
   clientInstanceId,
@@ -33,7 +33,6 @@ export function useComposerAttachmentResources({
   const latestFrame = useRef(frame);
   latestFrame.current = frame;
   const previousStateRootId = useRef(state.appServerStateRootId);
-  const previousTaskSurfaceMounted = useRef(taskSurfaceMounted);
   const owner = useRef<ComposerAttachmentResourceOwner | undefined>(undefined);
   if (!owner.current) {
     owner.current = new ComposerAttachmentResourceOwner({
@@ -53,23 +52,6 @@ export function useComposerAttachmentResources({
       // the connection switches roots, the old resources cannot be released safely.
       owner.current?.replaceStateRoot();
       previousStateRootId.current = state.appServerStateRootId;
-    }
-    const taskSurfaceUnmounted = previousTaskSurfaceMounted.current && !taskSurfaceMounted;
-    previousTaskSurfaceMounted.current = taskSurfaceMounted;
-    if (taskSurfaceUnmounted && dispatch) {
-      // The owner releases resolver resources below. Remove their rows in the
-      // same commit so a later route cannot render a handle that was released.
-      for (const [taskId, input] of Object.entries(state.taskInputs)) {
-        if (taskId === newTaskId) continue;
-        for (const attachment of input.context) {
-          if (!attachment.app_server_handle_id) continue;
-          dispatch({
-            type: "taskInput:attachment:remove",
-            taskId,
-            attachmentId: attachment.local_id,
-          });
-        }
-      }
     }
     owner.current?.reconcile(frame);
   }, [dispatch, frame, newTaskId, state.appServerStateRootId, state.taskInputs, taskSurfaceMounted]);

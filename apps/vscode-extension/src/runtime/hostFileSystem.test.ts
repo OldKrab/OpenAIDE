@@ -15,6 +15,7 @@ const vscodeMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
+  lstat: vi.fn(async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); }),
   realpath: fsMocks.realpath,
 }));
 

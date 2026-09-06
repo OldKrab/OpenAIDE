@@ -19,6 +19,92 @@ use crate::protocol::model::{
 };
 use crate::storage::Store;
 use openaide_app_server_protocol::agent::{AgentSettingsDetailsParams, AgentSettingsStatus};
+use openaide_app_server_protocol::snapshot::{AgentSignInPhase, AgentStatus};
+
+#[test]
+fn catalog_list_finishing_after_sign_in_starts_preserves_the_running_flow() {
+    for list_fails in [true, false] {
+        let (started, observed) = std::sync::mpsc::channel();
+        let (release, resumed) = std::sync::mpsc::channel();
+        let statuses = AgentStatusCache::default();
+        let runtime = AgentStatusRecordingRuntime::wrap(
+            Arc::new(BlockedListRuntime {
+                started,
+                release: std::sync::Mutex::new(resumed),
+                list_fails,
+            }),
+            statuses.clone(),
+        );
+        let listing = std::thread::spawn(move || {
+            runtime.list_sessions(AgentListSessionsRequest {
+                agent_id: "codex".to_string(),
+                cwd: Some("/fixture-workspace".to_string()),
+                cursor: None,
+            })
+        });
+        observed
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        statuses
+            .begin_authentication("codex", "chatgpt", false)
+            .unwrap();
+        statuses.record_sign_in_awaiting_terminal("codex");
+        let running = statuses.snapshot("codex");
+
+        release.send(()).unwrap();
+        assert_eq!(listing.join().unwrap().is_err(), list_fails);
+
+        assert_eq!(statuses.snapshot("codex"), running);
+        assert_eq!(running.status, AgentStatus::Authenticating);
+        assert_eq!(
+            running.sign_in.unwrap().phase,
+            AgentSignInPhase::AwaitingTerminal
+        );
+        statuses.record_authentication_success("codex");
+        assert_eq!(statuses.snapshot("codex").status, AgentStatus::Connected);
+    }
+}
+
+struct BlockedListRuntime {
+    started: std::sync::mpsc::Sender<()>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    list_fails: bool,
+}
+
+impl AgentRuntime for BlockedListRuntime {
+    fn probe(&self, request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
+        AuthRequiredListRuntime.probe(request)
+    }
+
+    fn list_sessions(
+        &self,
+        request: AgentListSessionsRequest,
+    ) -> Result<crate::protocol::model::AgentListSessionsResult, RuntimeError> {
+        self.started.send(()).unwrap();
+        self.release.lock().unwrap().recv().unwrap();
+        if self.list_fails {
+            AuthRequiredListRuntime.list_sessions(request)
+        } else {
+            Ok(crate::protocol::model::AgentListSessionsResult {
+                agent_id: request.agent_id,
+                sessions: Vec::new(),
+                next_cursor: None,
+            })
+        }
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        unreachable!("catalog listing must not start sessions")
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        unreachable!("catalog listing must not prompt")
+    }
+}
 
 #[test]
 fn logout_reaches_the_wrapped_agent_runtime() {

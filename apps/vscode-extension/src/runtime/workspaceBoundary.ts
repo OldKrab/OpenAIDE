@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import * as vscode from "vscode";
 
 export async function validatedWorkspacePath(filePath: string, mode: "existing" | "write-target") {
@@ -49,6 +49,16 @@ async function realExistingPathOrNearestParent(filePath: string) {
       if (!isFileNotFound(error)) {
         throw error;
       }
+      // realpath reports ENOENT for dangling symlinks as well as absent paths.
+      // Falling back to their lexical parent would authorize creation through
+      // an unresolved link whose target can be outside every workspace root.
+      const entry = await lstat(candidate).catch((statError: unknown) => {
+        if (isFileNotFound(statError)) return undefined;
+        throw statError;
+      });
+      if (entry?.isSymbolicLink()) {
+        throw new Error("Cannot write through an unresolved symbolic link.");
+      }
       const parent = path.dirname(candidate);
       if (parent === candidate) {
         throw new Error("path does not exist");
@@ -60,5 +70,7 @@ async function realExistingPathOrNearestParent(filePath: string) {
 
 function isInsideRoot(filePath: string, rootPath: string) {
   const relative = path.relative(path.resolve(rootPath), filePath);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return relative === "" || (
+    relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+  );
 }
