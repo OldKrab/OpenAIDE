@@ -103,6 +103,9 @@ jobs:
         if: inputs.target == 'linux-x64'
         shell: bash
         run: |
+          # Named deny-rule profiles use the native filesystem helper's user
+          # namespace, blocked by Ubuntu's default on this disposable runner.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           extraction_root="$RUNNER_TEMP/openaide-vsix-${{ inputs.target }}"
           node scripts/smoke-packaged-codex-acp.mjs \
             "$extraction_root/extension/dist/app-server/${{ steps.target.outputs.binary }}" \

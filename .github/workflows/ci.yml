@@ -131,7 +131,10 @@ jobs:
       # Exercise the pinned native recovery contract before a release tag exists,
       # on the same Linux image used by packaged VSIX smoke tests.
       - name: Smoke-test Linux managed Codex recovery
-        run: >-
-          node scripts/smoke-packaged-codex-acp.mjs
-          target/debug/openaide-app-server
-          ${{ github.workspace }}
+        run: |
+          # Ubuntu's AppArmor default blocks the native filesystem helper's
+          # user namespace. This disposable runner must exercise deny rules.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          node scripts/smoke-packaged-codex-acp.mjs \
+            target/debug/openaide-app-server \
+            "$GITHUB_WORKSPACE"

@@ -170,7 +170,12 @@ async function rpcClient(binary, root, adapter) {
     if (message.id !== undefined) {
       const waiter = pending.get(message.id);
       pending.delete(message.id);
-      if (message.error) waiter?.reject(new Error(`native_rpc_error: code=${message.error.code}`));
+      if (message.error) {
+        const kind = typeof message.error.message === "string"
+          && message.error.message.includes("No permissions to create a new namespace")
+          ? "linux_namespace_unavailable" : "rpc_error";
+        waiter?.reject(new Error(`native_rpc_error: code=${message.error.code}, kind=${kind}`));
+      }
       else waiter?.resolve(message.result);
     } else {
       const waiter = notifications.get(message.method);
