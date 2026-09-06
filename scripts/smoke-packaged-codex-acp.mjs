@@ -68,6 +68,18 @@ const closed = new Promise((resolve) => {
   });
 });
 
+async function waitForClose(timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      closed.then(() => true),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
 child.once("error", (error) => {
   for (const waiter of pending.values()) waiter.reject(error);
@@ -178,11 +190,26 @@ try {
 } catch (error) {
   throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
 } finally {
-  if (!child.stdin.destroyed) child.stdin.end();
-  await Promise.race([
-    closed,
-    new Promise((resolve) => setTimeout(resolve, 10_000)),
-  ]);
-  if (child.exitCode === null) child.kill();
+  // EOF can let the Windows parent exit before its native descendants release
+  // inherited pipes and the temporary cwd. Terminate the owned tree while its
+  // parent is still addressable; taskkill cannot find a tree after parent exit.
+  if (process.platform === "win32" && child.exitCode === null && child.signalCode === null) {
+    await new Promise((resolve, reject) => {
+      const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore", windowsHide: true, timeout: 5_000,
+      });
+      killer.once("error", reject);
+      // A concurrent exit may produce a nonzero result; observe closure below.
+      killer.once("close", resolve);
+    });
+  } else if (!child.stdin.destroyed) child.stdin.end();
+  if (!await waitForClose(10_000)) {
+    if (process.platform !== "win32" && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+    if (!await waitForClose(5_000)) {
+      throw new Error(`App Server shutdown timed out (exit=${child.exitCode}, signal=${child.signalCode}); temporary smoke state was retained`);
+    }
+  }
   await rm(stateParent, { recursive: true, force: true });
 }

@@ -11,8 +11,8 @@ const smoke = fileURLToPath(new URL("./smoke-packaged-codex-acp.mjs", import.met
 // Exercise the CLI's actual App Server -> native child environment boundary.
 // The fixture models preparation failing through the adapter's logout handler;
 // every credential here is synthetic and both possible homes are test-owned.
-for (const explicitCodexHome of [false, true]) {
-  test(`packaged preparation failure preserves caller auth (${explicitCodexHome ? "CODEX_HOME" : "HOME fallback"})`,
+for (const [explicitCodexHome, stalledShutdown] of [[false, false], [true, false], [true, true]]) {
+  test(`packaged preparation failure preserves caller auth (${explicitCodexHome ? "CODEX_HOME" : "HOME fallback"}${stalledShutdown ? "; stalled shutdown" : ""})`,
     { skip: process.platform === "win32", timeout: 30_000 }, async (t) => {
       const root = await mkdtemp(path.join(os.tmpdir(), "openaide-package-auth-test-"));
       try {
@@ -24,7 +24,9 @@ for (const explicitCodexHome of [false, true]) {
         await mkdir(workspace);
         await writeFile(path.join(callerCodex, "auth.json"), "synthetic caller credential");
         const fixture = path.join(root, "app-server.mjs");
-        await writeFile(fixture, fixtureSource);
+        await writeFile(fixture, fixtureSource + (stalledShutdown
+          ? '\nprocess.on("SIGTERM", () => {}); setInterval(() => {}, 1_000);\n'
+          : ""));
         await chmod(fixture, 0o700);
         const env = {
           ...process.env, HOME: callerHome, USERPROFILE: callerHome,
@@ -57,6 +59,8 @@ for (const explicitCodexHome of [false, true]) {
         assert.match(stderr, /fixture_finished/);
         assert.equal(await readFile(path.join(callerCodex, "auth.json"), "utf8"), "synthetic caller credential");
         const observed = JSON.parse(await readFile(report, "utf8"));
+        assert.throws(() => process.kill(observed.processId, 0), { code: "ESRCH" },
+          "the owned App Server must exit before temporary state is removed");
         assert.deepEqual(observed.overrides, [], "caller authentication/configuration must not reach the native child");
         for (const candidate of [observed.codexHome, observed.sqliteHome, observed.adapterLogs, observed.config.log_dir]) {
           assert.ok(candidate && !candidate.startsWith(callerHome + path.sep));
@@ -90,7 +94,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       { env: process.env, stdio: "pipe" });
     if (logout.status !== 0) throw new Error("fixture native child failed");
     writeFileSync(process.env.OPENAIDE_PACKAGE_FIXTURE_REPORT, JSON.stringify({
-      codexHome, cwd: process.cwd(), projectRoot, sqliteHome: process.env.CODEX_SQLITE_HOME,
+      processId: process.pid, codexHome, cwd: process.cwd(), projectRoot, sqliteHome: process.env.CODEX_SQLITE_HOME,
       adapterLogs: process.env.APP_SERVER_LOGS, config: JSON.parse(process.env.CODEX_CONFIG || "{}"),
       overrides: ["CODEX_PATH", "DEFAULT_AUTH_REQUEST", "MODEL_PROVIDER", "INITIAL_AGENT_MODE", "CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"].filter((name) => process.env[name] !== undefined),
     }));
