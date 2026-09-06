@@ -75,6 +75,7 @@ export function createAppServerSession(
   const session: AppServerSession = {
     async initialize(params, meta) {
       const startedAt = Date.now();
+      const initialGeneration = generation;
       logger.info("app_server_session_initialize_started", {
         generation,
         has_client_request_id: Boolean(meta?.clientRequestId),
@@ -83,16 +84,21 @@ export function createAppServerSession(
         const result = await (meta === undefined
           ? connection.initialize(params)
           : connection.initialize(params, meta));
-        initialization = result;
+        if (generation === initialGeneration) initialization = result;
         initialized = true;
-        await refreshCurrentReplicas();
-        updateStatus({ status: "ready", generation });
+        await refreshCurrentReplicas(initialGeneration);
+        // Initialization can lose its transport while installing observed scopes.
+        // Only the current generation may publish readiness or its baseline.
+        while (recoveryGate) await recoveryGate.promise;
+        if (closed) throw new Error("App Server session closed during initialization");
+        if (status.status === "unavailable") throw status.error;
+        if (generation === initialGeneration) updateStatus({ status: "ready", generation });
         logger.info("app_server_session_initialize_completed", {
           generation,
           duration_ms: Date.now() - startedAt,
           replica_count: replicas.size,
         });
-        return result;
+        return initialization ?? result;
       } catch (error) {
         logger.error("app_server_session_initialize_failed", {
           generation,
@@ -195,9 +201,13 @@ export function createAppServerSession(
   return session;
 
   function beginRecovery(event: BackendGenerationInvalidation) {
-    if (closed || recoveryGate) return;
+    if (closed) return;
+    const previousGate = recoveryGate;
     generation += 1;
     recoveryGate = deferredGate(generation, Date.now());
+    // A replacement transport may expire before all of its baselines arrive.
+    // Earlier waiters remain blocked until the newest recovery settles.
+    if (previousGate) void recoveryGate.promise.then(previousGate.resolve);
     logger.warn("app_server_session_recovery_started", {
       generation,
       reason: event.reason,
@@ -219,7 +229,7 @@ export function createAppServerSession(
     });
     initialization = baseline.result;
     notifyListeners(recoveryBaselineListeners, baseline, logger, "recovery_baseline");
-    await refreshCurrentReplicas();
+    await refreshCurrentReplicas(gate.generation);
     if (closed || recoveryGate !== gate) return;
     recoveryGate = undefined;
     gate.resolve();
@@ -247,24 +257,25 @@ export function createAppServerSession(
     updateStatus({ status: "unavailable", generation, error: failure.error });
   }
 
-  async function refreshCurrentReplicas() {
+  async function refreshCurrentReplicas(targetGeneration = generation) {
     const startedAt = Date.now();
     const observedCount = [...replicas.values()].filter((replica) => replica.observers.size > 0).length;
     logger.info("app_server_state_baselines_refresh_started", {
       generation,
       observed_replica_count: observedCount,
     });
-    while (!closed) {
+    while (!closed && generation === targetGeneration) {
       // Frontend effects may replace an observed scope while recovery baselines arrive.
       // Converge only stale replicas so a newly observed scope cannot invalidate ready peers.
       const stale = [...replicas.values()].filter((replica) => (
         replica.observers.size > 0
-        && (replica.refreshGeneration !== generation || replica.refreshing)
+        && (replica.refreshGeneration !== targetGeneration || replica.refreshing)
       ));
-      await Promise.all(stale.map((replica) => refreshReplica(replica, generation)));
+      await Promise.all(stale.map((replica) => refreshReplica(replica, targetGeneration)));
+      if (closed || generation !== targetGeneration) return;
       const active = [...replicas.values()].filter((replica) => replica.observers.size > 0);
       if (active.every((replica) => (
-        replica.refreshGeneration === generation
+        replica.refreshGeneration === targetGeneration
         && !replica.refreshing
       ))) {
         logger.info("app_server_state_baselines_refresh_completed", {
@@ -314,6 +325,9 @@ export function createAppServerSession(
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
         notifyReplica(replica, "onSnapshot", logger, replica.state.snapshot);
         replayPendingEvents(replica);
+        // Replay can invalidate the baseline while this refresh still owns the
+        // promise. Keep that owner running until the buffered stream is coherent.
+        if (replica.refreshing) continue;
         notifyReplica(replica, "onBaselineReady", logger);
         logger.info("app_server_state_baseline_ready", {
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
@@ -367,6 +381,12 @@ export function createAppServerSession(
       return true;
     }
     if (result.kind === "resyncRequired") {
+      logger.warn("app_server_state_event_rejected", {
+        ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+        generation,
+        reason: result.reason,
+      });
+      invalidateReplica(replica);
       void refreshReplica(replica, generation);
       return false;
     }

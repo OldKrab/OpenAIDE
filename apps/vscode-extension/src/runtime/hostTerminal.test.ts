@@ -5,6 +5,7 @@ import { TerminalHostManager, registerTerminalHostHandlers } from "./hostTermina
 
 const spawnMocks = vi.hoisted(() => ({
   spawn: vi.fn(),
+  execFile: vi.fn(),
 }));
 
 const fsMocks = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ const workspaceMocks = vi.hoisted(() => ({
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMocks.spawn,
+  execFile: spawnMocks.execFile,
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -59,12 +61,16 @@ vi.mock("../workspace/roots", () => ({
 }));
 
 class FakeChild extends EventEmitter {
+  pid: number | undefined;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   stdout = new PassThrough();
   stderr = new PassThrough();
   killed = false;
   kill = vi.fn(() => {
     this.killed = true;
     this.emit("exit", null, "SIGTERM");
+    this.emit("close", null, "SIGTERM");
     return true;
   });
 }
@@ -72,6 +78,7 @@ class FakeChild extends EventEmitter {
 describe("ACP host terminal handlers", () => {
   beforeEach(() => {
     spawnMocks.spawn.mockReset();
+    spawnMocks.execFile.mockReset();
     fsMocks.realpath.mockReset().mockImplementation(async (filePath: string) => filePath);
     fsSyncMocks.existsSync.mockReset().mockReturnValue(false);
     fsSyncMocks.readdirSync.mockReset().mockImplementation(() => {
@@ -80,6 +87,23 @@ describe("ACP host terminal handlers", () => {
     fsSyncMocks.statSync.mockReset().mockReturnValue({ isDirectory: () => false });
     workspaceMocks.workspaceFolders = [{ uri: { fsPath: "/workspace/app" }, name: "App" }];
     workspaceMocks.terminalEnv = undefined;
+  });
+
+  it("rejects a pending terminal create when its owner is disposed during path validation", async () => {
+    let resolvePath!: (value: string) => void;
+    fsMocks.realpath.mockImplementationOnce(() => new Promise<string>((resolve) => {
+      resolvePath = resolve;
+    }));
+    spawnMocks.spawn.mockReturnValue(new FakeChild());
+    const manager = new TerminalHostManager();
+    const pending = manager.create({ sessionId: "session_1", command: "node", args: [] });
+
+    manager.dispose();
+    resolvePath("/workspace/app");
+
+    await expect(pending).rejects.toThrow(/disposed/i);
+    await expect(manager.create({ sessionId: "session_1", command: "node" })).rejects.toThrow(/disposed/i);
+    expect(spawnMocks.spawn).not.toHaveBeenCalled();
   });
 
   it("registers all terminal handlers", () => {
@@ -208,6 +232,7 @@ describe("ACP host terminal handlers", () => {
     const created = await manager.create({ sessionId: "session_1", command: "npm", cwd: "/workspace/app" });
     const wait = manager.waitForExit(terminalRef(created));
     child.emit("exit", 0, null);
+    child.emit("close", 0, null);
 
     await expect(wait).resolves.toEqual({ exitCode: 0, signal: null });
     expect(manager.output(terminalRef(created))).toMatchObject({
@@ -240,6 +265,38 @@ describe("ACP host terminal handlers", () => {
 
     await manager.release(terminalRef(created));
     expect(() => manager.output(terminalRef(created))).toThrow("terminal not found");
+  });
+
+  it.each(["success", "failure"])("uses Windows taskkill for the active process tree and handles %s", async (outcome) => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const child = new FakeChild();
+    child.pid = 23456;
+    spawnMocks.spawn.mockReturnValue(child);
+    spawnMocks.execFile.mockReturnValue(new FakeChild());
+    const manager = new TerminalHostManager();
+    try {
+      const created = await manager.create({ sessionId: "session_1", command: "node", cwd: "/workspace/app" });
+      manager.kill(terminalRef(created));
+
+      expect(spawnMocks.spawn).toHaveBeenCalledWith("node", [], expect.objectContaining({ detached: false }));
+      expect(spawnMocks.execFile).toHaveBeenCalledWith(
+        expect.stringMatching(/\\System32\\taskkill\.exe$/i),
+        ["/PID", "23456", "/T", "/F"],
+        expect.objectContaining({ windowsHide: true, timeout: 2_000 }),
+        expect.any(Function),
+      );
+      manager.kill(terminalRef(created));
+      expect(spawnMocks.execFile).toHaveBeenCalledTimes(1);
+      expect(child.kill).not.toHaveBeenCalled();
+      const complete = spawnMocks.execFile.mock.calls[0][3];
+      complete(outcome === "failure" ? Object.assign(new Error("unavailable"), { code: "ENOENT" }) : null);
+      expect(child.kill).toHaveBeenCalledTimes(outcome === "failure" ? 1 : 0);
+      child.emit("close", 0, null);
+    } finally {
+      manager.dispose();
+      Object.defineProperty(process, "platform", platform);
+    }
   });
 
   it("does not allow another session to control a terminal id", async () => {
@@ -277,6 +334,7 @@ describe("ACP host terminal handlers", () => {
       expect(() => manager.output(terminalRef(created))).not.toThrow();
 
       child.emit("exit", null, "SIGKILL");
+      child.emit("close", null, "SIGKILL");
       await expect(wait).resolves.toEqual({ exitCode: null, signal: "SIGKILL" });
       expect(manager.output(terminalRef(created))).toMatchObject({
         exitStatus: { exitCode: null, signal: "SIGKILL" },
@@ -307,6 +365,7 @@ describe("ACP host terminal handlers", () => {
       expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
 
       child.emit("exit", null, "SIGTERM");
+      child.emit("close", null, "SIGTERM");
       expect(() => manager.output(terminalRef(created))).toThrow("terminal not found");
     } finally {
       vi.useRealTimers();

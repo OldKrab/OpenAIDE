@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import http from "node:http";
 import test from "node:test";
 import { createAppServerManager } from "./app-server-manager.mjs";
 
@@ -226,9 +227,70 @@ test("failed heartbeat invalidates the connection so a later start hands off aga
   assert.equal(manager.currentConnection(), undefined);
 });
 
+test("a stalled shell initialization releases its handoff for a later retry", { timeout: 3_000 }, async (t) => {
+  let accept = false;
+  const server = http.createServer((request, response) => {
+    if (!accept) return;
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      const message = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      response.end(JSON.stringify({ id: message.id, result: {} }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const children = [];
+  const manager = createAppServerManager({
+    readHandoffConnection: async () => ({
+      authToken: "test-token",
+      endpointUrl: `http://127.0.0.1:${server.address().port}/rpc`,
+    }),
+    shellRequestTimeoutMs: 50,
+    spawnAppServer: () => {
+      const child = childProcess();
+      children.push(child);
+      return child;
+    },
+  });
+  t.after(() => manager.clearConnection());
+
+  await assert.rejects(manager.startAppServer(), { name: "TimeoutError" });
+  assert.equal(manager.currentConnection(), undefined);
+  assert.equal(children[0].killed, true);
+  accept = true;
+  await manager.startAppServer();
+  assert.ok(manager.currentConnection());
+});
+
+test("a slow heartbeat never overlaps another heartbeat for the same connection", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const pending = deferred();
+  let heartbeats = 0;
+  const manager = createAppServerManager({
+    readHandoffConnection: async () => ({ authToken: "token", endpointUrl: "http://127.0.0.1:1234/rpc" }),
+    requestAppServer: async (_connection, _connectionId, body) => {
+      if (body.method !== "client/heartbeat") return {};
+      heartbeats += 1;
+      return pending.promise;
+    },
+    shellHeartbeatIntervalMs: 5,
+    spawnAppServer: childProcess,
+  });
+  t.after(() => manager.clearConnection());
+  await manager.startAppServer();
+  t.mock.timers.tick(30);
+  assert.equal(heartbeats, 1);
+  pending.resolve({});
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(5);
+  assert.equal(heartbeats, 2);
+});
+
 test("late heartbeat failures from an old connection do not invalidate its replacement", async () => {
   const children = [];
   const oldHeartbeats = [];
+  let replacementFailures = 0;
   const manager = createAppServerManager({
     connectionUrl: (connection) => new URL(connection.endpointUrl),
     readHandoffConnection: async () => ({
@@ -236,7 +298,14 @@ test("late heartbeat failures from an old connection do not invalidate its repla
       endpointUrl: `http://127.0.0.1:${1000 + children.length}/probe`,
     }),
     requestAppServer: async (connection, _connectionId, body) => {
-      if (body.method !== "client/heartbeat" || connection.authToken !== "token-1") return {};
+      if (body.method !== "client/heartbeat") return {};
+      if (connection.authToken !== "token-1") {
+        if (replacementFailures < 2) {
+          replacementFailures += 1;
+          throw new TypeError("replacement briefly unavailable");
+        }
+        return deferred().promise;
+      }
       const heartbeat = deferred();
       oldHeartbeats.push(heartbeat);
       return heartbeat.promise;
@@ -250,9 +319,10 @@ test("late heartbeat failures from an old connection do not invalidate its repla
   });
 
   await manager.startAppServer();
-  await waitFor(() => oldHeartbeats.length >= 3);
+  await waitFor(() => oldHeartbeats.length === 1);
   manager.clearConnection();
   await manager.startAppServer();
+  await waitFor(() => replacementFailures === 2);
   oldHeartbeats.forEach((heartbeat) => heartbeat.reject(new TypeError("old connection closed")));
   await new Promise((resolve) => setImmediate(resolve));
 

@@ -430,6 +430,46 @@ describe("ReliableBackendConnection", () => {
     connection.close();
   });
 
+  it("returns replacement initialization when the old pending initialize is rejected by peer closure", async () => {
+    const transport = createExpiringSessionTransport("transport", "task", true);
+    let replaceEndpoint: ((endpoint: { endpointUrl: string; authToken: string }) => void) | undefined;
+    let firstInitializeUploaded = false;
+    const connection = createReliableLocalHttpBackendConnection({
+      endpointUrl: "http://app-server-one.test/rpc",
+      authToken: "token-1",
+      connectionId: "connection-1",
+      fetch: async (input, init) => {
+        const body = JSON.parse(init.body ?? "{}") as { sessionId?: string; message?: { method?: string } };
+        if (body.sessionId === "session-1" && body.message?.method === CLIENT_INITIALIZE) {
+          firstInitializeUploaded = true;
+          // Upload succeeded, but the old process never returns its RPC response.
+          return response(204, "");
+        }
+        return transport.fetch(input, init);
+      },
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+      subscribeToReplacement(listener) {
+        replaceEndpoint = listener;
+        return () => { replaceEndpoint = undefined; };
+      },
+    });
+    const initializing = connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    void initializing.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(firstInitializeUploaded).toBe(true));
+      replaceEndpoint?.({ endpointUrl: "http://app-server-two.test/rpc", authToken: "token-2" });
+      await expect(initializing).resolves.toEqual(initializeResult("cursor-2", "server-2"));
+    } finally {
+      connection.close();
+    }
+  });
+
   it("replaces the App Server process endpoint behind one logical session", async () => {
     const transport = createExpiringSessionTransport("transport", "task", true);
     let replaceEndpoint: ((endpoint: {

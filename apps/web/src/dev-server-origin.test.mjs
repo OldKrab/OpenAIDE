@@ -44,6 +44,42 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
   assert.equal(rejected.status, 403);
   assert.equal(await rejected.text(), "Origin not allowed");
   assert.equal(accepted.status, 200);
+
+  await t.test("rejects oversized JSON requests before buffering the declared body", async () => {
+    const status = await new Promise((resolve, reject) => {
+      const request = http.request(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": 11 * 1024 * 1024 },
+      }, (response) => {
+        response.resume();
+        resolve(response.statusCode);
+        request.destroy();
+      });
+      request.once("error", reject);
+      request.setTimeout(1_000, () => request.destroy(new Error("Web waited for the oversized body")));
+      request.flushHeaders();
+    });
+    assert.equal(status, 413);
+  });
+
+  await t.test("bounds JSON bodies sent without a content length", async () => {
+    const status = await new Promise((resolve, reject) => {
+      const request = http.request(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      }, (response) => {
+        response.resume();
+        resolve(response.statusCode);
+        request.destroy();
+      });
+      request.once("error", reject);
+      request.setTimeout(1_000, () => request.destroy(new Error("Web failed to bound a chunked body")));
+      request.write('{"id":"large","method":"client/probe","params":{"text":"');
+      request.write("x".repeat(11 * 1024 * 1024));
+      request.end('"}}');
+    });
+    assert.equal(status, 413);
+  });
 });
 
 function proxyRequest(endpoint, origin, id) {

@@ -5,7 +5,6 @@ import type { AppState } from "./store";
 type PreparedTaskIdentity = {
   agentId: string;
   projectId?: string;
-  workspaceRoot?: string;
   worktreeId?: string;
 };
 
@@ -36,15 +35,9 @@ export function preparedTaskMatchesNewTaskContext(
   return context !== undefined
     && task.projectId === context.projectId
     && task.agentId === context.agentId
-    && task.worktreeId === context.worktreeId
-    // The protocol Task summary omits workspaceRoot; derived Project identity
-    // already binds that root. App-shell paths can use different equivalent
-    // spellings because the App Server returns the canonical workspace root.
-    && (
-      context.workspaceRoot === undefined
-      || task.workspaceRoot === undefined
-      || projectIdForWorkspaceRoot(task.workspaceRoot) === projectIdForWorkspaceRoot(context.workspaceRoot)
-    );
+    // Project/worktree IDs own workspace identity. Protocol Task summaries omit
+    // paths, so their app-shell display path is empty even for a matching Task.
+    && task.worktreeId === context.worktreeId;
 }
 
 export function taskCreateParams(state: Pick<AppState, "newTask">, projectId: string) {

@@ -751,6 +751,10 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     userMessageTargetKey,
   ]);
 
+  // The virtualizer instance is mutable and stable. Carry its current rows
+  // across the memoized timeline boundary so a range update renders the new
+  // rows even while navigation deliberately leaves reading state unchanged.
+  const virtualItems = virtualizer.getVirtualItems();
   return useMemo(() => ({
     jumpToLatest,
     loadEarlier,
@@ -765,6 +769,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     pauseFollowing,
     showJumpToLatest,
     userMessageNavigation,
+    virtualItems,
     virtualizer,
   }), [
     finishPointerGesture,
@@ -778,6 +783,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     pauseFollowing,
     showJumpToLatest,
     userMessageNavigation,
+    virtualItems,
     virtualizer,
   ]);
 }

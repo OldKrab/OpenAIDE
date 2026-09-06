@@ -49,6 +49,10 @@ const webPresentation = {
   title: process.env.OPENAIDE_WEB_TITLE?.trim() || (instanceLabel ? `OpenAIDE ${instanceLabel}` : "OpenAIDE"),
 };
 const logger = createRuntimeLogger("openaide-web-server");
+// Match the App Server JSON ceiling before buffering at the Web boundary.
+// General-file uploads use the streaming path and remain exempt.
+const MAX_RPC_BODY_BYTES = 10 * 1024 * 1024;
+class RequestBodyTooLarge extends Error {}
 
 if (prototypePort !== undefined && (!Number.isInteger(prototypePort) || prototypePort < 1 || prototypePort > 65_535)) {
   throw new Error("OPENAIDE_WEB_PROTOTYPE_PORT must be a valid TCP port.");
@@ -145,7 +149,12 @@ const server = http.createServer(async (req, res) => {
       await mainViteProxy.request(req, res, url);
     }
   } catch (error) {
-    writeText(res, 502, error instanceof Error ? error.message : String(error));
+    if (error instanceof RequestBodyTooLarge) {
+      res.setHeader("connection", "close");
+      writeText(res, 413, "Request body is too large");
+    } else {
+      writeText(res, 502, error instanceof Error ? error.message : String(error));
+    }
   }
 });
 server.on("upgrade", (req, socket, head) => {
@@ -374,8 +383,24 @@ function spawnAppServer() {
 
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
+    if (Number(req.headers["content-length"]) > MAX_RPC_BODY_BYTES) {
+      reject(new RequestBodyTooLarge());
+      return;
+    }
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let bytes = 0;
+    req.on("data", (chunk) => {
+      bytes += chunk.byteLength;
+      if (bytes > MAX_RPC_BODY_BYTES) {
+        // Stop retaining chunks immediately; the 413 response closes the
+        // connection, including requests sent with chunked transfer encoding.
+        chunks.length = 0;
+        req.pause();
+        reject(new RequestBodyTooLarge());
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.once("end", () => resolve(Buffer.concat(chunks)));
     req.once("error", reject);
   });
@@ -451,29 +476,41 @@ function writeFavicon(res) {
 function readHandoffConnection(child) {
   return new Promise((resolve, reject) => {
     let buffer = "";
-    const timeout = setTimeout(
-      () => reject(new Error("App Server handoff timed out")),
-      APP_SERVER_HANDOFF_TIMEOUT_MS,
-    );
-    child.stdout.on("data", (chunk) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.stdout.off("data", onData);
+      child.off("exit", onExit);
+      child.off("error", fail);
+    };
+    const fail = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onExit = () => fail(new Error("App Server exited before handoff"));
+    const onData = (chunk) => {
       buffer += chunk.toString("utf8");
       if (Buffer.byteLength(buffer, "utf8") > APP_SERVER_HANDOFF_MAX_LINE_BYTES) {
-        clearTimeout(timeout);
-        reject(new Error("App Server handoff connection info is too large"));
+        fail(new Error("App Server handoff connection info is too large"));
         return;
       }
       const newline = buffer.indexOf("\n");
       if (newline < 0) return;
-      clearTimeout(timeout);
-      resolve(parseAppServerHandoffConnection(buffer.slice(0, newline)));
-    });
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      reject(new Error("App Server exited before handoff"));
-    });
-    child.once("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
+      // Parse errors occur in a stream callback, outside the Promise executor.
+      // Reject the handoff so the manager can clean up and offer a later retry.
+      try {
+        const connection = parseAppServerHandoffConnection(buffer.slice(0, newline));
+        cleanup();
+        resolve(connection);
+      } catch (error) {
+        fail(error);
+      }
+    };
+    const timeout = setTimeout(
+      () => fail(new Error("App Server handoff timed out")),
+      APP_SERVER_HANDOFF_TIMEOUT_MS,
+    );
+    child.stdout.on("data", onData);
+    child.once("exit", onExit);
+    child.once("error", fail);
   });
 }

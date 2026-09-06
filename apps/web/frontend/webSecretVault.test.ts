@@ -55,4 +55,19 @@ describe("Web encrypted secret store", () => {
     await store.delete("first");
     await expect(store.get("first")).resolves.toBeUndefined();
   });
+
+  it("retries key acquisition after a failed save instead of caching its rejection", async () => {
+    const persistence = memoryPersistence();
+    const acquireKey = vi.spyOn(persistence, "encryptionKey")
+      .mockRejectedValueOnce(new DOMException("Transaction aborted", "AbortError"));
+    const store = createEncryptedSecretStore(webcrypto as unknown as Crypto, persistence);
+
+    await expect(store.store("credential", "first attempt")).rejects.toMatchObject({ name: "AbortError" });
+    expect(persistence.records.size).toBe(0);
+    await store.store("credential", "retried");
+
+    expect(acquireKey).toHaveBeenCalledTimes(2);
+    await expect(createEncryptedSecretStore(webcrypto as unknown as Crypto, persistence).get("credential"))
+      .resolves.toBe("retried");
+  });
 });
