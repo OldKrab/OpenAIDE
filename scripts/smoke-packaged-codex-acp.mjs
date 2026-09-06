@@ -190,27 +190,25 @@ try {
 } catch (error) {
   throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
 } finally {
-  if (!child.stdin.destroyed) child.stdin.end();
+  // EOF can let the Windows parent exit before its native descendants release
+  // inherited pipes and the temporary cwd. Terminate the owned tree while its
+  // parent is still addressable; taskkill cannot find a tree after parent exit.
+  if (process.platform === "win32" && child.exitCode === null && child.signalCode === null) {
+    await new Promise((resolve, reject) => {
+      const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore", windowsHide: true, timeout: 5_000,
+      });
+      killer.once("error", reject);
+      // A concurrent exit may produce a nonzero result; observe closure below.
+      killer.once("close", resolve);
+    });
+  } else if (!child.stdin.destroyed) child.stdin.end();
   if (!await waitForClose(10_000)) {
-    // Windows keeps the temporary cwd locked until the process exits. Kill the
-    // owned tree on timeout, then observe closure before removing its state.
-    if (child.exitCode === null && child.signalCode === null) {
-      if (process.platform === "win32") {
-        await new Promise((resolve, reject) => {
-          const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-            stdio: "ignore", windowsHide: true, timeout: 5_000,
-          });
-          killer.once("error", reject);
-          // A nonzero exit can mean the App Server exited concurrently; the
-          // close observation below remains the authority for safe cleanup.
-          killer.once("close", resolve);
-        });
-      } else {
-        child.kill("SIGKILL");
-      }
+    if (process.platform !== "win32" && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
     }
     if (!await waitForClose(5_000)) {
-      throw new Error("App Server shutdown timed out; temporary smoke state was retained");
+      throw new Error(`App Server shutdown timed out (exit=${child.exitCode}, signal=${child.signalCode}); temporary smoke state was retained`);
     }
   }
   await rm(stateParent, { recursive: true, force: true });
