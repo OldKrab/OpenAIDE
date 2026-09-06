@@ -128,3 +128,10 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: npm ci
       - run: npm run build
+      # Exercise the pinned native recovery contract before a release tag exists,
+      # on the same Linux image used by packaged VSIX smoke tests.
+      - name: Smoke-test Linux managed Codex recovery
+        run: >-
+          node scripts/smoke-packaged-codex-acp.mjs
+          target/debug/openaide-app-server
+          ${{ github.workspace }}

@@ -12,7 +12,11 @@ const execute = promisify(execFile);
 /** Actual adapter/native restart coverage; its isolated provider never contacts a model. */
 export async function smokeCodexNativeRecovery(binary, adapter) {
   for (const scenario of ["readOnly", "workspace", "worktree", "named-extra-root"]) {
-    await verifyRecovery(binary, adapter, scenario);
+    try {
+      await verifyRecovery(binary, adapter, scenario);
+    } catch (error) {
+      throw new Error(`native_recovery_failed: scenario=${scenario}; ${error.message}`);
+    }
   }
 }
 
@@ -187,7 +191,9 @@ async function rpcClient(binary, root, adapter) {
   });
   const request = (method, params) => {
     const id = ++sequence;
-    const result = wait(pending, id);
+    const result = wait(pending, id).catch((error) => {
+      throw new Error(`native_request_failed: method=${method}; ${error.message}`);
+    });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     return result;
   };
