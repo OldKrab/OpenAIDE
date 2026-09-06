@@ -23,6 +23,15 @@
   max-height: 50dvh;
 }
 
+.task-surface:not(.new-task-surface) .composer:has(.composer-attachments) {
+  --composer-attachment-height: min(144px, 20dvh);
+}
+
+/* The attachment tray and editor share the Task Composer's viewport budget. */
+.task-surface:not(.new-task-surface) .composer:has(.composer-attachments) .composer-editor {
+  max-height: calc(50dvh - 76px - var(--composer-attachment-height));
+}
+
 .composer textarea,
 .composer-editor {
   width: 100%;
