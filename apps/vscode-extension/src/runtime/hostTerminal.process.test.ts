@@ -132,7 +132,9 @@ async function isRunning(pid: number) {
     const status = await readFile(`/proc/${pid}/status`, "utf8");
     return !/^State:\s+Z/m.test(status);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    // The process may disappear after /proc opens the file but before it reads.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ESRCH") return false;
     throw error;
   }
 }
