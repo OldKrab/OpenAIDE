@@ -74,6 +74,40 @@ fn safe_log_fields(fields: &serde_json::Map<String, Value>) -> serde_json::Map<S
     fields
         .iter()
         .filter_map(|(name, value)| {
+            // These boundary fields are enums/numbers, not arbitrary safe-looking
+            // strings: agent error content must stay in opt-in sensitive traces.
+            let diagnostic_field = match name.as_str() {
+                "operation" => Some(matches!(
+                    value.as_str(),
+                    Some("session/new" | "session/load" | "session/resume")
+                )),
+                "error_kind" => Some(matches!(
+                    value.as_str(),
+                    Some(
+                        "validation_failed"
+                            | "task_not_found"
+                            | "not_ready"
+                            | "conflict"
+                            | "auth_required"
+                            | "setup_required"
+                            | "node_js_required"
+                            | "unsupported"
+                            | "capability_missing"
+                            | "method_not_found"
+                            | "storage_error"
+                            | "internal_error"
+                            | "protocol_error"
+                            | "acp_error"
+                            | "runtime_error"
+                            | "transport_error"
+                    )
+                )),
+                "error_code" => Some(value.as_i64().is_some()),
+                _ => None,
+            };
+            if let Some(allowed) = diagnostic_field {
+                return allowed.then(|| (name.clone(), value.clone()));
+            }
             let allowed = matches!(
                 name.as_str(),
                 "event"
