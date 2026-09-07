@@ -85,10 +85,19 @@ async function verifyRecovery(binary, adapter, scenario) {
     const started = await client.request("thread/resume", { threadId, cwd: workspace });
     const historyPath = started.thread.path;
     await client.close();
-    const history = async () => (await readFile(historyPath, "utf8")).trim().split("\n").map(JSON.parse);
+    const damagedRecord = "openaide fixture: damaged historical record";
+    const history = async () => (await readFile(historyPath, "utf8")).trim().split("\n")
+      .filter(line => line !== damagedRecord).map(JSON.parse);
     const initialHistory = await history();
     const expected = initialHistory.filter((entry) => entry.payload?.type === "thread_settings_applied").at(-1).payload.thread_settings;
     const workspaceRoots = initialHistory.filter((entry) => entry.type === "turn_context").at(-1).payload.workspace_roots;
+    if (scenario === "workspace") {
+      // Only this disposable native rollout is damaged. A later full context
+      // must still restore exact permissions across resume, load, and new turns.
+      const lines = initialHistory.map(entry => JSON.stringify(entry));
+      lines.splice(initialHistory.findLastIndex(entry => entry.type === "turn_context"), 0, damagedRecord);
+      await writeFile(historyPath, lines.join("\n") + "\n");
+    }
     // Entry order is not native precedence: specificity and access decide it.
     // Compare every rule/field while allowing native configuration to sort them.
     const canonical = (value) => {

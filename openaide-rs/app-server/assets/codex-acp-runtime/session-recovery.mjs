@@ -27,7 +27,7 @@ export async function resumeNativeSession(client, params, { log = writeRecoveryL
   if (thread?.id !== params.threadId || typeof thread.path !== "string" || !path.isAbsolute(thread.path)) {
     throw unsupported();
   }
-  const saved = await readNativePolicy(thread.path, params.threadId);
+  const saved = await readNativePolicy(thread.path, params.threadId, log);
   if (!saved) {
     // Prepared sessions with no accepted turn have no prior policy to recover.
     // The adapter's ordinary initial mode and New Task options still own them.
@@ -102,7 +102,12 @@ async function applyWorkspaceSettings(client, params) {
   finally { clearTimeout(timer); for (const observer of observers) observer.dispose(); }
 }
 
-async function readNativePolicy(filename, sessionId) {
+async function readNativePolicy(filename, sessionId, log) {
+  const started = Date.now();
+  const fields = { operation: "codex.native_policy_read", session_id: sessionId, attempt: 1 };
+  let malformedRecords = 0;
+  let needsFullSnapshot = false;
+  log({ ...fields, phase: "start" });
   let identity = false;
   let interaction = false;
   let latest;
@@ -127,19 +132,41 @@ async function readNativePolicy(filename, sessionId) {
       }
       if (parts.length) consume(decoder.decode(Buffer.concat(parts)));
     } finally { input.destroy(); }
-  } catch { throw unsupported(); }
-  if (!identity || (interaction && latest === undefined)) throw unsupported();
+    if (!identity || needsFullSnapshot || (interaction && latest === undefined)) throw unsupported();
+  } catch {
+    log({ ...fields, phase: "terminal", outcome: "failure", duration_ms: Date.now() - started,
+      malformed_record_count: malformedRecords, error_code: "invalid_history" });
+    throw unsupported();
+  }
+  log({ ...fields, phase: "terminal", outcome: "success", duration_ms: Date.now() - started,
+    malformed_record_count: malformedRecords });
   return latest;
 
   function consume(line) {
     if (!line.trim()) return;
-    const entry = JSON.parse(line);
+    let entry;
+    try { entry = JSON.parse(line); }
+    catch {
+      if (!identity) throw unsupported();
+      // A damaged old record cannot authorize fallback to an earlier policy.
+      // Only a later complete native turn snapshot can establish policy again;
+      // settings-only deltas and a corrupt tail leave recovery blocked.
+      malformedRecords += 1;
+      needsFullSnapshot = true;
+      latest = undefined;
+      return;
+    }
     if (!record(entry) || typeof entry.type !== "string" || !record(entry.payload)) throw unsupported();
     if (entry.type === "session_meta") {
       if (entry.payload.id !== sessionId) throw unsupported();
       identity = true;
     } else if (entry.type === "response_item") interaction = true;
-    else if (entry.type === "turn_context") latest = entry.payload;
+    else if (entry.type === "turn_context") {
+      latest = entry.payload;
+      if (record(latest.permission_profile) && latest.approval_policy !== undefined
+        && latest.approvals_reviewer !== undefined && typeof latest.cwd === "string"
+        && Array.isArray(latest.workspace_roots)) needsFullSnapshot = false;
+    }
     else if (entry.type === "event_msg" && entry.payload.type === "thread_settings_applied") {
       if (entry.payload.thread_id !== undefined && entry.payload.thread_id !== sessionId) throw unsupported();
       if (!record(entry.payload.thread_settings)) throw unsupported();

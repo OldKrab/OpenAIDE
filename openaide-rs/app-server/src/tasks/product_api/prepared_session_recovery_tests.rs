@@ -18,13 +18,19 @@ fn acquiring_after_restart_recovers_an_unloaded_empty_codex_session() {
     // error emitted after a native process restart.
     let script = temp.path().join("agent.mjs");
     std::fs::write(&script, EMPTY_SESSION_AGENT).unwrap();
-    let agent = Arc::new(AcpAgentRuntime::new(AcpAgentConfig {
-        agent_id: "codex".to_string(),
-        command: "node".to_string(),
-        args: vec![script.to_string_lossy().to_string()],
-        env: Vec::new(),
-        secret_env: Vec::new(),
-    }));
+    let traces = crate::agent::acp_trace::AcpTraceState::disabled(&state_root);
+    traces.set_enabled(true).unwrap();
+    let trace_directory = traces.status().directory;
+    let agent = Arc::new(
+        AcpAgentRuntime::new(AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "node".to_string(),
+            args: vec![script.to_string_lossy().to_string()],
+            env: Vec::new(),
+            secret_env: Vec::new(),
+        })
+        .with_trace_state(traces),
+    );
     let store = Store::open(state_root).unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -68,6 +74,25 @@ fn acquiring_after_restart_recovers_an_unloaded_empty_codex_session() {
         assert!(Instant::now() < deadline, "preparation did not finish");
         std::thread::sleep(Duration::from_millis(10));
     }
+    let events: Vec<serde_json::Value> = std::fs::read_dir(trace_directory)
+        .unwrap()
+        .flat_map(|entry| {
+            std::fs::read_to_string(entry.unwrap().path())
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect::<Vec<serde_json::Value>>()
+        })
+        .collect();
+    let failure = events
+        .iter()
+        .find(|event| event["event"] == "session/resume.error")
+        .expect("failed resume must leave a terminal ACP trace before recovery");
+    assert_eq!(failure["payload"]["code"], -32603);
+    assert_eq!(
+        failure["payload"]["data"]["details"],
+        "thread not loaded: empty-native-session"
+    );
 }
 
 const EMPTY_SESSION_AGENT: &str = r#"

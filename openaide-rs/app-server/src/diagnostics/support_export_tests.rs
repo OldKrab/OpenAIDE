@@ -100,3 +100,39 @@ fn trace_identity_uses_raw_acp_session_id_instead_of_recency() {
         ),
     );
 }
+
+#[test]
+fn safe_log_snapshot_preserves_acp_failure_metadata_without_error_content() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("runtime.jsonl");
+    let records = [
+        json!({"event":"acp_session_request_failed","fields":{
+            "operation":"session/resume", "error_kind":"task_not_found",
+            "error_code":-32603, "task_id":"task-safe", "duration_ms":157,
+            "error_message":"private message", "data":{"details":"private details"}
+        }}),
+        json!({"event":"acp_session_request_failed","fields":{
+            "operation":"private-value", "error_kind":"private-value", "error_code":"private-value"
+        }}),
+    ];
+    fs::write(
+        &path,
+        records
+            .iter()
+            .map(|r| r.to_string() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
+    let snapshot = String::from_utf8(safe_log_snapshot(&path).unwrap()).unwrap();
+    let rows: Vec<serde_json::Value> = snapshot
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows[0]["fields"]["operation"], "session/resume");
+    assert_eq!(rows[0]["fields"]["error_kind"], "task_not_found");
+    assert_eq!(rows[0]["fields"]["error_code"], -32603);
+    assert_eq!(rows[0]["fields"]["duration_ms"], 157);
+    assert_eq!(rows[0]["fields"]["task_id"], "task-safe");
+    assert!(!snapshot.contains("private"));
+    assert_eq!(rows[1]["fields"], json!({}));
+}
