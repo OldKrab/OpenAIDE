@@ -26,6 +26,9 @@ pub(super) fn acp_request_error(error: &agent_client_protocol::Error) -> Runtime
         // Codex can create an empty session identity before its first durable rollout.
         // After a restart, that identity is explicitly reported as missing this way.
         || normalized.contains("no rollout found for thread id")
+        // The managed recovery adapter reads before resuming. Native thread/read
+        // reports the same absent empty session with this different wording.
+        || normalized.contains("thread not loaded:")
     {
         return RuntimeError::TaskNotFound(message);
     }
