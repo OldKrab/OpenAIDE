@@ -646,6 +646,10 @@ for line in sys.stdin:
         if session_id == "idle-session":
             notify_title("Title after idle resume")
     elif method == "session/list":
+        if prompt_mode == "blocked_list":
+            deadline = time.monotonic() + 10
+            while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
+                time.sleep(0.01)
         if prompt_mode == "pending_prompt_and_slow_list":
             time.sleep(0.2)
         respond(message, {"sessions": []})
@@ -1208,6 +1212,76 @@ fn listing_sessions_reuses_the_active_agent_process() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/list", "session/close"]
+    );
+}
+
+#[test]
+fn attached_session_resume_does_not_wait_for_discovery() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "live-during-discovery", "blocked_list")
+    else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-live-during-discovery", cwd_string()))
+        .expect("start session");
+    let discovery = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.list_sessions(AgentListSessionsRequest {
+                agent_id: "codex".to_string(),
+                cwd: Some(cwd_string()),
+                cursor: None,
+            })
+        }
+    });
+    wait_for_method(&log_path, "session/list");
+    let (resumed_tx, resumed_rx) = mpsc::channel();
+    let resume = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = session.session_id.clone();
+        move || {
+            let _ = resumed_tx.send(runtime.resume_session(AgentSessionResume {
+                agent_id: "codex".to_string(),
+                task_id: "task-live-during-discovery".to_string(),
+                session_id,
+                cwd: cwd_string(),
+                model_id: None,
+                cancellation: TurnCancellation::new(),
+                secret_resolver: None,
+            }));
+        }
+    });
+    let early_result = resumed_rx.recv_timeout(Duration::from_secs(2));
+    let reused_during_discovery = early_result.is_ok();
+    // Release the real ACP request before asserting so a regression cannot leave
+    // blocked threads or child processes behind.
+    fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+    discovery
+        .join()
+        .expect("discovery thread")
+        .expect("discovery");
+    let resumed = early_result
+        .unwrap_or_else(|_| {
+            resumed_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("resume after discovery")
+        })
+        .expect("resume session");
+    resume.join().expect("resume thread");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+    assert_eq!(resumed.session_id, session.session_id);
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new", "session/list", "session/close"]
+    );
+    assert!(
+        reused_during_discovery,
+        "an attached session must be reusable before discovery completes"
     );
 }
 

@@ -144,6 +144,16 @@ impl AcpRuntimeKernel {
         &self,
         request: AgentSessionResume,
     ) -> Result<AgentSession, RuntimeError> {
+        // Reading a live attachment is session-local: background discovery must
+        // not hold its controls behind the Agent process lifecycle lock. A missing
+        // attachment still acquires that lock and rechecks before opening, so
+        // concurrent resumes cannot create duplicate attachments.
+        if let Some(snapshot) = self
+            .active_sessions
+            .snapshot_attached_session(&request.session_key())
+        {
+            return snapshot;
+        }
         self.with_agent_process_operation(&request.agent_id.clone(), || {
             self.active_sessions.resume_session(request)
         })
