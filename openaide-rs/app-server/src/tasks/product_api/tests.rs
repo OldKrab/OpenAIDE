@@ -59,6 +59,9 @@ use std::time::{Duration, Instant};
 #[path = "native_catalog_refresh_tests.rs"]
 mod native_catalog_refresh_tests;
 
+#[path = "prepared_session_recovery_tests.rs"]
+mod prepared_session_recovery_tests;
+
 fn protocol_config_id(value: &str) -> AgentConfigOptionCurrentValue {
     AgentConfigOptionCurrentValue::Id {
         value: value.to_string(),
