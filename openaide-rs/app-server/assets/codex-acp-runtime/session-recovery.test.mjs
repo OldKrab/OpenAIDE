@@ -74,7 +74,7 @@ test("a rejected settings update releases the native subscription before reporti
   await withHistory([workspaceSettings()], async (client, calls) => {
     client.threadSettingsUpdate = async () => { throw Object.assign(new Error("fixture RPC rejection"), { code: -32602 }); };
     const events = [];
-    await assert.rejects(recovery.resumeNativeSession(client, { threadId: "session" }, { log: (event) => events.push(event) }), /Reopen.*retry/);
+    await assert.rejects(recovery.resumeNativeSession(client, { threadId: "session" }, { log: (event) => { if (event.operation === "codex.workspace_policy_restore") events.push(event); } }), /Reopen.*retry/);
     assert.deepEqual(calls.map((call) => call.method), ["read", "resume", "unsubscribe"]);
     assert.equal(client.observerCount(), 0);
     assert.deepEqual(events.map((event) => event.phase), ["start", "terminal"]);
@@ -325,3 +325,60 @@ for (const code of [-32099, undefined]) {
     });
   });
 }
+
+
+test("a complete later turn context supersedes historical malformed records without widening policy", async () => {
+  const saved = workspaceSettings().payload.thread_settings;
+  saved.approvals_reviewer = "auto_review";
+  saved.workspace_roots = [saved.cwd];
+  await withHistory([
+    settings({ type: "disabled" }),
+    "malformed historical record",
+    { type: "turn_context", payload: saved },
+  ], async (client, calls) => {
+    const events = [];
+    const result = await recovery.resumeNativeSession(client, { threadId: "session", cwd: saved.cwd }, { log: event => events.push(event) });
+    const readEvents = events.filter(event => event.operation === "codex.native_policy_read");
+    assert.deepEqual(readEvents.map(event => event.phase), ["start", "terminal"]);
+    assert.equal(readEvents[1].malformed_record_count, 1);
+    assert.equal(readEvents[1].outcome, "success");
+    assert.equal(JSON.stringify(events).includes(saved.cwd), false);
+    assert.deepEqual(calls.map(call => call.method), ["read", "resume", "update"]);
+    assert.equal(calls[1].params.sandbox, "read-only");
+    assert.equal(result.approvalsReviewer, "auto_review");
+    assert.deepEqual(calls[2].params.sandboxPolicy, {
+      type: "workspaceWrite", writableRoots: [], networkAccess: false,
+      excludeTmpdirEnvVar: false, excludeSlashTmp: false,
+    });
+  });
+});
+
+
+for (const [name, later] of [
+  ["settings-only update", settings()],
+  ["legacy snapshot", { type: "turn_context", payload: {
+    cwd: path.resolve(os.tmpdir(), "native-cwd"), approval_policy: "never", sandbox_policy: { type: "danger-full-access" },
+  } }],
+  ["unknown full profile", { type: "turn_context", payload: {
+    ...workspaceSettings().payload.thread_settings, workspace_roots: [], permission_profile: { type: "future" },
+  } }],
+]) {
+  test(`historical corruption cannot fall back through ${name}`, async () => {
+    await withHistory([settings(), "malformed", later], async (client, calls) => {
+      await assert.rejects(recovery.resumeNativeSession(client, { threadId: "session" }), /Cannot safely restore/);
+      assert.deepEqual(calls.map(call => call.method), ["read"]);
+    });
+  });
+}
+
+test("a damaged tail reports failure metadata and cannot reuse earlier permissions", async () => {
+  await withHistory([settings(), "malformed"], async (client, calls) => {
+    const events = [];
+    await assert.rejects(recovery.resumeNativeSession(client, { threadId: "session" }, { log: event => events.push(event) }), /Cannot safely restore/);
+    assert.deepEqual(calls.map(call => call.method), ["read"]);
+    assert.deepEqual(events.map(event => event.phase), ["start", "terminal"]);
+    assert.equal(events[1].outcome, "failure");
+    assert.equal(events[1].error_code, "invalid_history");
+    assert.equal(events[1].malformed_record_count, 1);
+  });
+});
