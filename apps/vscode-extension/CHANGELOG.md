@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.2 - 2026-09-07
+
+OpenAIDE 0.5.2
+
+### Fixes
+
+- Reopen Codex conversations with old malformed history records when a later complete permission snapshot is available, preserving the saved restrictions.
+- Recover empty prepared Codex sessions after restart without requiring a manual retry.
+- Fix desktop diagnostics export getting stuck after choosing a destination.
+- Avoid delaying reuse of a live session while background session discovery is running.
+
+### Diagnostics
+
+- Capture failed ACP session responses in opt-in traces and retain safe operation, error-code, and failure-classification metadata in support exports.
+- Record native permission-history recovery outcomes to make future failures easier to diagnose.
+
 ## 0.5.1 - 2026-09-06
 
 OpenAIDE 0.5.1
