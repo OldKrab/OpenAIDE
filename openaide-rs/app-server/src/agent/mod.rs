@@ -24,6 +24,7 @@ pub(crate) mod acp_live_prompt_projection;
 pub(crate) mod acp_message_identity;
 pub(crate) mod acp_native_subagents;
 mod acp_process_diagnostics;
+mod acp_process_lifetime;
 pub(crate) mod acp_prompt_runner;
 pub(crate) mod acp_replay_projection;
 pub(crate) mod acp_response_boundary;

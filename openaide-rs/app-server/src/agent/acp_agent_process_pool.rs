@@ -10,6 +10,9 @@ use crate::agent::acp_agent_process::{
     AcpAgentProcessOpen,
 };
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwner};
+use crate::agent::acp_process_lifetime::{
+    AcpProcessLifetime, ProcessIdleTimeouts, ProcessOperation,
+};
 use crate::agent::acp_runtime_threading::block_on_new_runtime;
 use crate::agent::attached_native_session::record_terminal_error;
 use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
@@ -28,7 +31,8 @@ const LIST_REPLY_TIMEOUT_GRACE: Duration = Duration::from_secs(1);
 pub(super) struct AcpAgentProcessPool {
     registry: AgentRegistryHandle,
     host_bridge: HostBridge,
-    processes: Mutex<HashMap<String, AcpAgentProcessClient>>,
+    processes: Arc<Mutex<HashMap<String, AcpAgentProcessClient>>>,
+    idle_timeouts: ProcessIdleTimeouts,
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
     list_timeout: Duration,
     codex_provisioner: Option<CodexAcpProvisioner>,
@@ -51,9 +55,12 @@ struct AcpAgentProcessClient {
     terminal_registry: AcpHostTerminalRegistry,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
     _runtime_lease: Option<Arc<std::fs::File>>,
+    lifetime: AcpProcessLifetime,
 }
 
 pub(super) struct AcpAgentProcessSession {
+    pub(super) lifetime: AcpProcessLifetime,
+    _startup_operation: ProcessOperation,
     process: AcpAgentProcessClient,
     pub(super) terminal_error: Arc<Mutex<Option<String>>>,
     pub(super) terminal_owner: AcpTerminalOwner,
@@ -64,7 +71,8 @@ impl AcpAgentProcessPool {
         Self {
             registry,
             host_bridge,
-            processes: Mutex::new(HashMap::new()),
+            processes: Arc::default(),
+            idle_timeouts: ProcessIdleTimeouts::default(),
             auth_environments: Mutex::new(HashMap::new()),
             list_timeout: DEFAULT_LIST_TIMEOUT,
             codex_provisioner: None,
@@ -84,6 +92,11 @@ impl AcpAgentProcessPool {
     }
 
     #[cfg(test)]
+    pub(super) fn with_process_idle_timeouts(&mut self, short: Duration, long: Duration) {
+        self.idle_timeouts = ProcessIdleTimeouts { short, long };
+    }
+
+    #[cfg(test)]
     pub(super) fn with_list_timeout(&mut self, timeout: Duration) {
         self.list_timeout = timeout;
     }
@@ -93,11 +106,18 @@ impl AcpAgentProcessPool {
         agent_id: &str,
         mut open: AcpAgentProcessOpen,
     ) -> Result<AcpAgentProcessSession, RuntimeError> {
-        if let Some(process) = self.existing_process(agent_id) {
+        if let Some((process, operation)) = self.existing_process(agent_id).and_then(|process| {
+            process
+                .lifetime
+                .acquire()
+                .map(|operation| (process, operation))
+        }) {
             let owner_id = open.terminal_owner_id;
             match process.open_tx.send(open) {
                 Ok(()) => {
                     return Ok(AcpAgentProcessSession {
+                        lifetime: process.lifetime.clone(),
+                        _startup_operation: operation,
                         process: process.clone(),
                         terminal_error: process.terminal_error.clone(),
                         terminal_owner: process.terminal_registry.owner(owner_id),
@@ -111,8 +131,10 @@ impl AcpAgentProcessPool {
         }
 
         let owner_id = open.terminal_owner_id;
-        let process = self.launch_process(agent_id, Some(open))?;
+        let (process, operation) = self.launch_process(agent_id, Some(open))?;
         Ok(AcpAgentProcessSession {
+            lifetime: process.lifetime.clone(),
+            _startup_operation: operation,
             process: process.clone(),
             terminal_error: process.terminal_error.clone(),
             terminal_owner: process.terminal_registry.owner(owner_id),
@@ -130,7 +152,7 @@ impl AcpAgentProcessPool {
     ) -> Result<crate::protocol::model::AgentListSessionsResult, RuntimeError> {
         let agent_id = request.agent_id.clone();
         for attempt in 1..=2 {
-            let process = self.get_or_launch_process(&agent_id)?;
+            let (process, _operation) = self.get_or_launch_process(&agent_id)?;
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let sent = process.list_tx.send(AcpAgentProcessList {
                 request: request.clone(),
@@ -193,7 +215,7 @@ impl AcpAgentProcessPool {
         &self,
         request: AgentSessionFork,
     ) -> Result<AgentForkedSession, RuntimeError> {
-        let process = self.get_or_launch_process(&request.agent_id)?;
+        let (process, _operation) = self.get_or_launch_process(&request.agent_id)?;
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         process
             .control_tx
@@ -211,7 +233,7 @@ impl AcpAgentProcessPool {
         agent_id: &str,
         timeout: std::time::Duration,
     ) -> Result<crate::protocol::model::AgentProbeResult, RuntimeError> {
-        let process = self.get_or_launch_process(agent_id)?;
+        let (process, _operation) = self.get_or_launch_process(agent_id)?;
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         process
             .control_tx
@@ -262,7 +284,7 @@ impl AcpAgentProcessPool {
         } else {
             None
         };
-        let process = match self.get_or_launch_process(&request.agent_id) {
+        let (process, _operation) = match self.get_or_launch_process(&request.agent_id) {
             Ok(process) => process,
             Err(error) => {
                 if has_auth_environment {
@@ -310,6 +332,7 @@ impl AcpAgentProcessPool {
             .lock()
             .expect("ACP process registry poisoned")
             .get(agent_id)
+            .filter(|process| !process.lifetime.is_stopping() && !process.open_tx.is_closed())
             .cloned()
     }
 
@@ -342,7 +365,7 @@ impl AcpAgentProcessPool {
     }
 
     pub(super) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
-        let process = self.get_or_launch_process(agent_id)?;
+        let (process, _operation) = self.get_or_launch_process(agent_id)?;
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         process
             .control_tx
@@ -372,18 +395,23 @@ impl AcpAgentProcessPool {
         }
     }
 
-    fn get_or_launch_process(&self, agent_id: &str) -> Result<AcpAgentProcessClient, RuntimeError> {
-        match self.existing_process(agent_id) {
-            Some(process) => Ok(process),
-            None => self.launch_process(agent_id, None),
+    fn get_or_launch_process(
+        &self,
+        agent_id: &str,
+    ) -> Result<(AcpAgentProcessClient, ProcessOperation), RuntimeError> {
+        if let Some(process) = self.existing_process(agent_id) {
+            if let Some(operation) = process.lifetime.acquire() {
+                return Ok((process, operation));
+            }
         }
+        self.launch_process(agent_id, None)
     }
 
     fn launch_process(
         &self,
         agent_id: &str,
         first_open: Option<AcpAgentProcessOpen>,
-    ) -> Result<AcpAgentProcessClient, RuntimeError> {
+    ) -> Result<(AcpAgentProcessClient, ProcessOperation), RuntimeError> {
         let mut config = self.registry.require_acp_config(agent_id)?;
         let mut secret_resolver = None;
         if let Some(auth) = self
@@ -416,6 +444,8 @@ impl AcpAgentProcessPool {
         let (control_tx, control_rx) = tokio_mpsc::unbounded_channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let terminal_error = Arc::new(Mutex::new(None));
+        let lifetime = AcpProcessLifetime::new(self.idle_timeouts);
+        let operation = lifetime.acquire().expect("new process admits startup");
         let process = AcpAgentProcessClient {
             open_tx: open_tx.clone(),
             list_tx: list_tx.clone(),
@@ -424,6 +454,7 @@ impl AcpAgentProcessPool {
             terminal_registry: terminal_registry.clone(),
             shutdown_tx,
             _runtime_lease: prepared.lease.clone(),
+            lifetime: lifetime.clone(),
         };
         self.processes
             .lock()
@@ -433,6 +464,7 @@ impl AcpAgentProcessPool {
         let worker_agent_id = agent_id.to_string();
         let worker_terminal_error = terminal_error.clone();
         let worker_runtime_lease = prepared.lease;
+        let processes = Arc::downgrade(&self.processes);
         thread::spawn(move || {
             let _runtime_lease = worker_runtime_lease;
             let result = block_on_new_runtime(run_acp_agent_process(AcpAgentProcessInput {
@@ -445,8 +477,19 @@ impl AcpAgentProcessPool {
                 host_bridge,
                 terminal_registry,
                 secret_resolver,
+                lifetime: lifetime.clone(),
             }))
             .and_then(|result| result);
+            // Remove only this generation; a concurrent demand may already have replaced it.
+            if let Some(processes) = processes.upgrade() {
+                let mut processes = processes.lock().expect("ACP process registry poisoned");
+                if processes
+                    .get(&worker_agent_id)
+                    .is_some_and(|process| process.lifetime.same_process(&lifetime))
+                {
+                    processes.remove(&worker_agent_id);
+                }
+            }
             if let Err(error) = result {
                 record_terminal_error(&worker_terminal_error, &error);
                 logging::warn(
@@ -461,6 +504,6 @@ impl AcpAgentProcessPool {
         drop(open_tx);
         drop(list_tx);
         drop(control_tx);
-        Ok(process)
+        Ok((process, operation))
     }
 }

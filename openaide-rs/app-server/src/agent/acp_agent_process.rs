@@ -12,6 +12,7 @@ use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
 use crate::agent::acp_process_diagnostics::acp_connection_terminal_diagnostics;
+use crate::agent::acp_process_lifetime::AcpProcessLifetime;
 use crate::agent::acp_schema::{CloseSessionRequest, ForkSessionRequest};
 use crate::agent::acp_session_capabilities::validate_session_fork_capabilities;
 use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connection};
@@ -121,6 +122,7 @@ pub(super) struct AcpAgentProcessInput {
     pub(super) host_bridge: HostBridge,
     pub(super) terminal_registry: AcpHostTerminalRegistry,
     pub(super) secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
+    pub(super) lifetime: AcpProcessLifetime,
 }
 
 pub(super) enum AcpAgentProcessControl {
@@ -161,6 +163,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         host_bridge,
         terminal_registry,
         secret_resolver,
+        lifetime,
     } = input;
 
     let current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>> = Arc::default();
@@ -234,6 +237,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     logging::info(
         "acp_agent_connection_started",
         serde_json::json!({
+            "operation_id": lifetime.operation_id(),
             "agent_id": agent_id,
             "has_initial_session": has_initial_session,
             "launcher_kind": launcher_kind,
@@ -242,7 +246,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         }),
     );
     let connection = connect_acp_session_client(
-        agent,
+        lifetime.transport(agent),
         connection_context,
         |connection: ConnectionTo<Agent>| async move {
             let initialize = initialize_shared_process_connection(
@@ -400,9 +404,10 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
             Ok(())
         },
     );
-    let (result, selected_shutdown) = tokio::select! {
-        result = connection => (result.map_err(acp_error), false),
-        _ = shutdown_rx.changed() => (Ok(()), true),
+    let (result, selected_shutdown, idle_timeout) = tokio::select! {
+        result = connection => (result.map_err(acp_error), false, None),
+        _ = shutdown_rx.changed() => (Ok(()), true, None),
+        timeout = lifetime.expired() => (Ok(()), true, Some(timeout)),
     };
     // Shutdown and transport completion can become ready in the same scheduler turn. The
     // authoritative control signal wins even when `select!` observes the connection first.
@@ -415,16 +420,21 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         .lock()
         .expect("ACP current prompt registry poisoned")
         .len();
-    let terminal = acp_connection_terminal_diagnostics(
+    let mut terminal = acp_connection_terminal_diagnostics(
         &result,
         requested_shutdown,
         active_session_count,
         active_prompt_count,
     );
+    if idle_timeout.is_some() {
+        terminal.outcome_kind = "idle_timeout";
+    }
     match &result {
         Ok(()) => logging::info(
             "acp_agent_connection_completed",
             serde_json::json!({
+                "operation_id": lifetime.operation_id(),
+                "idle_timeout_ms": idle_timeout.map(|timeout| timeout.as_millis()),
                 "agent_id": agent_id,
                 "duration_ms": connection_started_at.elapsed().as_millis(),
                 "outcome_kind": terminal.outcome_kind,
@@ -439,6 +449,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         Err(_) => logging::warn(
             "acp_agent_connection_failed",
             serde_json::json!({
+                "operation_id": lifetime.operation_id(),
                 "agent_id": agent_id,
                 "duration_ms": connection_started_at.elapsed().as_millis(),
                 "error_kind": "transport_error",

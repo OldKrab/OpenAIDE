@@ -432,6 +432,12 @@ Expiration sends `session/close`, ends the local worker, and releases its live r
 
 Agents that do not advertise `sessionCapabilities.close` are not idle-expired because ACP forbids Clients from sending `session/close`; those sessions retain process-lifetime cleanup. Ordinary navigation never closes a Native Session directly.
 
+### Agent process idle retention
+
+App Server shares one process per Agent launch identity. A new process has a one-minute idle timeout. Creating a Native Session or performing session work promotes that process to a thirty-minute idle timeout for the rest of its lifetime. Listing sessions, probing, and merely loading or resuming an existing session do not promote it. Every ACP request or notification in either direction renews retention, including automatic discovery and Agent-initiated traffic. In-flight requests suspend expiration; their deadlines and cancellation remain request-owned concerns rather than process lifetime limits. This is an inactivity limit, not an absolute process lifespan.
+
+Idle process termination releases its attachments and process resources as expected cleanup, without publishing an Agent failure, altering Task history, or losing a Composer draft. It applies even when an Agent does not support session close or retains an empty session only in memory. Existing confirmed-missing empty-session recovery handles preparation and initial Send; established sessions retain their history and identity recovery rules. No automatic reconnect follows termination: the next actual request, including scheduled discovery, may launch a fresh process with short retention and restore the required session on demand.
+
 ## Task Attention And Shell Notifications
 
 App Server owns one latest outstanding Task Attention Event for each Task. The event has a stable identity, reason, and occurrence time and is included in authoritative Task snapshots and ordered Task changes. It is distinct from generic Task status and `unread`: clients never infer notification-worthy work from a `waiting`, idle, failed, or unread transition alone.

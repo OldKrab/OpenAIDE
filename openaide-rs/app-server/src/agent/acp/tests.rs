@@ -69,6 +69,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod active_session_runtime;
+#[cfg(unix)]
+mod process_idle_runtime;
 mod task_chat_runtime;
 
 fn agent_message_text(message: &NormalizedMessage, role: AgentMessageRole) -> Option<&str> {

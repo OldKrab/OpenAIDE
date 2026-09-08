@@ -21,6 +21,7 @@ fn stopped_attachment() -> AttachedNativeSession {
         close_tx,
         terminal_error,
         terminals.owner(owner_id),
+        crate::agent::acp_process_lifetime::AcpProcessLifetime::new(Default::default()),
     )
 }
 
@@ -42,6 +43,7 @@ fn disconnected_attachment() -> AttachedNativeSession {
         close_tx,
         Arc::new(Mutex::new(None)),
         terminals.owner(owner_id),
+        crate::agent::acp_process_lifetime::AcpProcessLifetime::new(Default::default()),
     )
 }
 
