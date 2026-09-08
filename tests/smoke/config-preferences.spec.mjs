@@ -6,7 +6,9 @@ import { startFullStackHarness } from "./full-stack-harness.mjs";
 
 let harness;
 test.setTimeout(180_000);
-test.beforeAll(async () => {
+test.beforeAll(async ({}, info) => {
+  // Building the real stack can exceed Playwright's default hook timeout in CI.
+  info.setTimeout(120_000);
   harness = await startFullStackHarness({ agentFixture: fileURLToPath(new URL("./fixtures/preferences-acp-agent.mjs", import.meta.url)) });
 });
 test.afterEach(async ({}, info) => {
