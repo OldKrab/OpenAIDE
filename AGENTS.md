@@ -34,7 +34,7 @@ Read the narrow source of truth before changing its area:
 
 ## Prove
 
-Before writing or changing tests, or choosing validation checks, read [the testing guide](docs/testing.md).
+Tests and verification: read [the testing guide](docs/testing.md) when writing tests, diagnosing test failures, or validating changes.
 
 ## Hand off
 
