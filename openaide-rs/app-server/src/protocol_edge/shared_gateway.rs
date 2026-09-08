@@ -8,7 +8,10 @@ use crate::tasks::product_api::ResolvedSentFile;
 use openaide_app_server_protocol::attachment::PreSendAttachment;
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
-use openaide_app_server_protocol::methods::{AGENT_AUTHENTICATE, AGENT_LOGOUT};
+use openaide_app_server_protocol::methods::{
+    AGENT_AUTHENTICATE, AGENT_LOGOUT, FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE,
+    FILE_VIEWER_REFRESH,
+};
 use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
 use serde_json::{json, Value};
 
@@ -32,6 +35,19 @@ pub struct SharedRpcGateway {
 }
 
 impl SharedRpcGateway {
+    /// Resolve only a live client's own viewer capability, without holding the gateway during I/O.
+    pub(crate) fn file_viewer_download_path(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        handle: &str,
+    ) -> Option<std::path::PathBuf> {
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        gateway.client_hub.client_by_instance(client_instance_id)?;
+        gateway
+            .file_viewer
+            .download_path(client_instance_id, &handle.into())
+    }
+
     pub(crate) fn consume_file_handle(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -112,6 +128,16 @@ impl SharedRpcGateway {
         now: AppServerTime,
         completion_clock: impl FnOnce() -> AppServerTime,
     ) -> GatewayOutcome {
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. }
+            if matches!(method.as_str(), FILE_VIEWER_OPEN | FILE_VIEWER_OPEN_FROM_HANDLE | FILE_VIEWER_REFRESH))
+        {
+            return self.handle_file_viewer_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
+        }
         if matches!(
             &message,
             InboundProtocolMessage::ClientRequest { method, .. }
@@ -145,6 +171,72 @@ impl SharedRpcGateway {
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
         outcome
+    }
+
+    fn handle_file_viewer_without_protocol_lock(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+        completion_clock: impl FnOnce() -> AppServerTime,
+    ) -> GatewayOutcome {
+        let read = {
+            let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+            // Keep routing's initialization/shutdown rejection and lease activity semantics.
+            if gateway.update_shutdown.is_some()
+                || gateway
+                    .client_hub
+                    .context_for_connection(&connection_id)
+                    .is_none()
+            {
+                return gateway.handle_inbound(connection_id, message, now);
+            }
+            if let Some(client) = gateway
+                .client_hub
+                .observe_connection_activity(&connection_id, now)
+            {
+                gateway.attachments.keep_alive_for_client(&client);
+            }
+            let InboundProtocolMessage::ClientRequest {
+                id,
+                method,
+                params,
+                meta,
+            } = &message
+            else {
+                unreachable!()
+            };
+            match gateway.prepare_file_viewer_read(&connection_id, method, params.clone()) {
+                Ok(read) => read,
+                Err(error) => return gateway.error(connection_id, id.clone(), meta.clone(), error),
+            }
+        };
+        let InboundProtocolMessage::ClientRequest {
+            id, method, meta, ..
+        } = message
+        else {
+            unreachable!()
+        };
+        let snapshot = read.run(&id);
+        let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        // A reconnect or detach while decoding must not deliver old contents to a new owner.
+        if !gateway
+            .client_hub
+            .context_for_connection(&connection_id)
+            .is_some_and(|client| client.client_instance_id == read.owner)
+        {
+            gateway.file_viewer.release(&read.owner, &snapshot.handle);
+            return gateway.error(
+                connection_id,
+                id,
+                meta,
+                super::responses::not_initialized(method),
+            );
+        }
+        gateway
+            .client_hub
+            .observe_connection_activity(&connection_id, completion_clock());
+        gateway.result(connection_id, id, meta, snapshot)
     }
 
     fn handle_agent_authenticate_without_protocol_lock(

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, Copy, FileCode2, FileText, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, Reply, X } from "lucide-react";
+import { ArrowLeft, Copy, Download, FileCode2, FileText, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, Reply, X } from "lucide-react";
 import type { FileViewerError, FileViewerSnapshot } from "@openaide/app-server-client";
 import type { FileViewerTab } from "./useTaskFileViewer";
 import { AgentMarkdown } from "./AgentMarkdown";
@@ -7,9 +7,12 @@ import { copyText } from "./clipboard";
 import { ImagePreviewViewport } from "./ImagePreviewViewport";
 import { highlightFileViewerLines } from "./fileViewerHighlight";
 import { applyTaskPanelRatio, setLayoutResizing } from "./layoutResize";
+import { currentFrontendShell, type FileViewerDownloads } from "../services/frontendShell";
+import { useFileViewerDownload } from "./useFileViewerDownload";
 
 export function FileViewerPanel({
   collapsed,
+  downloads = currentFrontendShell()?.fileViewerDownloads,
   onClose,
   onOpenFromHandle,
   onQuote,
@@ -22,6 +25,7 @@ export function FileViewerPanel({
   tabs,
 }: {
   collapsed: boolean;
+  downloads?: FileViewerDownloads;
   onClose: (handle: string) => void;
   onOpenFromHandle: (handle: string, href: string) => void;
   onQuote: (text: string) => void;
@@ -33,6 +37,7 @@ export function FileViewerPanel({
   tab?: FileViewerTab;
   tabs: FileViewerTab[];
 }) {
+  const download = useFileViewerDownload(tab, downloads);
   const dragRef = useRef<{
     latest: number;
     pointerId: number;
@@ -140,11 +145,18 @@ export function FileViewerPanel({
         </div>
         {tab ? (
           <FileViewerChromeActions
+            download={download}
             onRefresh={() => onRefresh(tab.handle)}
             tab={tab}
           />
         ) : null}
         </div>
+        {download.available && download.error ? (
+          <div className="file-viewer-download-error" role="alert">
+            <span>{download.error}</span>
+            <button aria-label="Retry download" className="file-viewer-header-action" disabled={download.disabled} onClick={download.start} type="button">Retry</button>
+          </div>
+        ) : null}
         {tab ? (
           <ViewerBody
             markdownRaw={markdownRaw}
@@ -189,14 +201,21 @@ export function TaskPanelToggle({
 }
 
 function FileViewerChromeActions({
+  download,
   onRefresh,
   tab,
 }: {
+  download: ReturnType<typeof useFileViewerDownload>;
   onRefresh: () => void;
   tab: FileViewerTab;
 }) {
   return (
     <div className="file-viewer-chrome-actions">
+      {download.available ? (
+        <button aria-label="Download file" aria-busy={download.busy} className="file-viewer-icon-btn" disabled={download.disabled} onClick={download.start} title="Download file" type="button">
+          {download.busy ? <LoaderCircle size={13} /> : <Download size={13} />}
+        </button>
+      ) : null}
       <button
         aria-label="Copy path"
         className="file-viewer-icon-btn"
@@ -278,7 +297,7 @@ function ViewerBody({
             <span>Reading a bounded snapshot.</span>
           </div>
         ) : null}
-        {tab.truncated ? <p className="file-viewer-truncated">Showing the first 1 MiB. Refresh still uses that bound.</p> : null}
+        {tab.truncated && tab.kind !== "image" ? <p className="file-viewer-truncated">Showing the first 1 MiB. Refresh still uses that bound.</p> : null}
         {tab.kind === "markdown" && tab.text && !markdownRaw ? (
           <div className="file-viewer-markdown">
             <AgentMarkdown
@@ -290,7 +309,12 @@ function ViewerBody({
         ) : null}
         {tab.kind === "image" && tab.preview ? (
           <div className="file-viewer-image">
-            <ImagePreviewViewport image={{ label: tab.preview.label, url: tab.preview.dataUrl }} />
+            <ImagePreviewViewport
+              image={{ label: tab.preview.label, url: tab.preview.dataUrl }}
+              toolbarActions={tab.truncated ? (
+                <span className="file-viewer-preview-note" title="Resized preview; animations show their first frame.">Reduced image preview</span>
+              ) : undefined}
+            />
           </div>
         ) : null}
         {tab.kind === "source" && tab.text ? (

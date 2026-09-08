@@ -105,6 +105,13 @@ export type SentFileInteraction = {
   openSentFile(request: SentFileOpenRequest): void;
 };
 
+export type FileViewerDownloadResult = "started" | "notFound" | "permissionDenied" | "notAFile" | "unavailable";
+
+/** The shell checks readability, then hands the current file to its download manager. */
+export type FileViewerDownloads = {
+  save(request: { handle: string; label: string; operationId: string }, signal: AbortSignal): Promise<FileViewerDownloadResult>;
+};
+
 export type FrontendFileAcquisition =
   | {
       kind: "webUpload";
@@ -180,6 +187,8 @@ export type FrontendShell = {
   taskNotifications?: WebTaskNotificationManager;
   /** Opens Agent File References in the Task Panel File Viewer. Omitted by VS Code. */
   fileViewer?: true;
+  /** Web-only download affordance; omitted shells keep their existing file-link behavior. */
+  fileViewerDownloads?: FileViewerDownloads;
 };
 
 let installedShell: FrontendShell | undefined;

@@ -174,6 +174,38 @@ export function createWebAppShell(): FrontendShell {
       reload: () => window.location.reload(),
     },
     fileViewer: true,
+    fileViewerDownloads: {
+      async save({ handle, label, operationId }, signal) {
+        const search = new URLSearchParams({
+          clientInstanceId: clientInstanceIdForBootstrap(bootstrap()),
+          fileViewerHandle: handle,
+          operationId,
+        });
+        const url = `/__openaide-app-server/download?${search}`;
+        // Only a metadata check uses fetch: file bytes stream directly to the browser's
+        // download manager, without buffering a potentially large artifact in the renderer.
+        const ready = await fetch(`${url}&check=1`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+        });
+        if (ready.status !== 204) {
+          switch (ready.status) {
+            case 400: return "notAFile";
+            case 401:
+            case 403: return "permissionDenied";
+            case 404: return "notFound";
+            default: return "unavailable";
+          }
+        }
+        signal.throwIfAborted();
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = label;
+        link.click();
+        return "started";
+      },
+    },
     taskNotifications,
   };
 }

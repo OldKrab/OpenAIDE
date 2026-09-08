@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BackendConnection, FileViewerHandleId, FileViewerSnapshot } from "@openaide/app-server-client";
 import {
   openFileViewer,
@@ -20,7 +20,7 @@ export type FileViewerPendingTab = {
 export type FileViewerTab = FileViewerSnapshot | FileViewerPendingTab;
 
 export function useTaskFileViewer({
-  connection,
+  connection: connectionInput,
   enabled,
   taskId,
 }: {
@@ -28,6 +28,10 @@ export function useTaskFileViewer({
   enabled: boolean;
   taskId: string;
 }) {
+  const request = connectionInput?.request;
+  // Parent callbacks recreate the wrapper on render. Only a new request transport
+  // changes capability ownership and warrants releasing this viewer's handles.
+  const connection = useMemo(() => request ? { request } : undefined, [request]);
   const [tabs, setTabs] = useState<FileViewerTab[]>([]);
   const [activeHandle, setActiveHandle] = useState<string>();
   const [collapsed, setCollapsed] = useState(false);

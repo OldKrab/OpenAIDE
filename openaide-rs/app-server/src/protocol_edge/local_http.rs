@@ -170,6 +170,20 @@ impl LocalHttpAppHandler {
             .ok_or_else(|| empty_response(404))
     }
 
+    /// HTTP retains the viewer's client ownership and never accepts a raw filesystem path.
+    pub(crate) fn resolve_file_viewer_download(
+        &self,
+        authorization: Option<&str>,
+        client_instance_id: Option<&str>,
+        handle: &str,
+    ) -> Result<std::path::PathBuf, LocalHttpResponse> {
+        let client = self.authorize_upload(authorization, client_instance_id)?;
+        self.probe
+            .gateway
+            .file_viewer_download_path(&client, handle)
+            .ok_or_else(|| empty_response(404))
+    }
+
     pub(crate) fn resolve_sent_file(
         &self,
         authorization: Option<&str>,

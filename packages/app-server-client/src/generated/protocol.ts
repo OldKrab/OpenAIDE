@@ -858,7 +858,11 @@ export type FileViewerReleaseParams = { handle: FileViewerHandleId, };
 
 export type FileViewerReleaseResult = Record<symbol, never>;
 
-export type FileViewerSnapshot = { handle: FileViewerHandleId, displayPath: string, basename: string, kind: FileViewerKind, text?: string | null, language?: string | null, preview?: ToolImagePreview | null, truncated: boolean, error?: FileViewerError | null, focusLine?: number | null, };
+export type FileViewerSnapshot = { handle: FileViewerHandleId, displayPath: string, basename: string, kind: FileViewerKind, text?: string | null, language?: string | null, preview?: ToolImagePreview | null,
+/**
+ * True for a bounded text prefix or a reduced-resolution/static image preview.
+ */
+truncated: boolean, error?: FileViewerError | null, focusLine?: number | null, };
 
 export type FileViewerKind = "markdown" | "source" | "image" | "binary" | "error";
 

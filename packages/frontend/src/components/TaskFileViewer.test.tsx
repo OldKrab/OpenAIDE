@@ -8,6 +8,39 @@ describe("Task File Viewer", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
+  it("offers Download independently of preview and retries a failed start", async () => {
+    const save = vi.fn().mockResolvedValueOnce("notFound").mockResolvedValue("started");
+    const tab = sourceSnapshot("", { kind: "binary", error: "unsupported", basename: "build.vsix" });
+    let tree: ReturnType<typeof create>;
+    const renderPanel = (downloads?: { save: typeof save }) => (
+      <FileViewerPanel collapsed={false} downloads={downloads} onClose={vi.fn()}
+        onOpenFromHandle={vi.fn()} onQuote={vi.fn()} onRefresh={vi.fn()}
+        onSelect={vi.fn()} onSplitRatio={vi.fn()} splitRatio={0.45} tab={tab} tabs={[tab]} />
+    );
+    act(() => { tree = create(renderPanel()); });
+    expect(tree!.root.findAllByProps({ "aria-label": "Download file" })).toHaveLength(0);
+    act(() => { tree!.update(renderPanel({ save })); });
+    await act(async () => { await tree!.root.findByProps({ "aria-label": "Download file" }).props.onClick(); });
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ handle: "handle-1", label: "build.vsix" }), expect.any(AbortSignal));
+    expect(JSON.stringify(tree!.toJSON())).toContain("File not found");
+    await act(async () => { await tree!.root.findByProps({ "aria-label": "Retry download" }).props.onClick(); });
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(tree!.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+    expect(JSON.stringify(tree!.toJSON())).toContain("Unsupported file");
+  });
+
+  it("labels a reduced image preview without showing the text-file truncation message", () => {
+    const tab = sourceSnapshot("", { kind: "image", truncated: true, preview: {
+      label: "photo.jpg", mediaType: "image/jpeg", dataUrl: "data:image/jpeg;base64,/9j/",
+    } });
+    let tree: ReturnType<typeof create>;
+    act(() => { tree = create(<FileViewerPanel collapsed={false} onClose={vi.fn()}
+      onOpenFromHandle={vi.fn()} onQuote={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()}
+      onSplitRatio={vi.fn()} splitRatio={0.45} tab={tab} tabs={[tab]} />); });
+    expect(JSON.stringify(tree!.toJSON())).toContain("Reduced image preview");
+    expect(JSON.stringify(tree!.toJSON())).not.toContain("first 1 MiB");
+  });
+
   it("opens a clicked path through fileViewer/open and shows the File Tab", async () => {
     const snapshot = sourceSnapshot("#!/bin/sh\necho hi\n");
     const request = vi.fn(async (method: string) => {
@@ -30,6 +63,19 @@ describe("Task File Viewer", () => {
     expect(tree!.root.findByProps({ "aria-label": "File Viewer" })).toBeTruthy();
     expect(JSON.stringify(tree!.toJSON())).toContain("local-web.sh");
     expect(JSON.stringify(tree!.toJSON())).toContain("echo hi");
+  });
+
+  it("keeps the file capability live across parent renders until the tab closes", async () => {
+    const request = vi.fn(async (method: string) => method === FILE_VIEWER_OPEN ? sourceSnapshot("ok") : {});
+    let tree: ReturnType<typeof create>;
+    act(() => { tree = create(<FileViewerHarness request={request} />); });
+    await act(async () => {
+      await tree!.root.findByProps({ "aria-label": "Open sample path" }).props.onClick();
+    });
+    act(() => { tree!.update(<FileViewerHarness request={request} />); });
+    expect(request.mock.calls.filter(([method]) => method === FILE_VIEWER_RELEASE)).toHaveLength(0);
+    act(() => { tree!.unmount(); });
+    expect(request).toHaveBeenCalledWith(FILE_VIEWER_RELEASE, { handle: "handle-1" });
   });
 
   it("shows the Task Panel before the snapshot returns", async () => {
