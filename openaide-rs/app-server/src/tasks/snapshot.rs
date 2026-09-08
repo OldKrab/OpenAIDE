@@ -52,6 +52,7 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
                 requested_value: pending.requested_value.clone(),
             }
         }),
+        config_preferences: task.config_mutation.preferences.clone(),
         agent_commands_catalog: task.agent_commands_catalog.clone(),
         lifecycle: task.lifecycle.clone(),
         message_queue: task.message_queue.clone(),

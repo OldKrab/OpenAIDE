@@ -1,3 +1,4 @@
+use openaide_app_server_protocol::methods::TASK_RESOLVE_CONFIG_PREFERENCES;
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_CANCEL_AUTHENTICATE, AGENT_CREATE_CUSTOM, AGENT_DELETE_CUSTOM,
     AGENT_LIST_SESSIONS, AGENT_LOGOUT, AGENT_PROBE, AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED,
@@ -341,6 +342,9 @@ impl RpcGateway {
             TASK_CHAT_PAGE => self.handle_task_chat_page(connection_id, id, params, meta),
             TASK_COMPOSER_HISTORY => {
                 self.handle_task_composer_history(connection_id, id, params, meta)
+            }
+            TASK_RESOLVE_CONFIG_PREFERENCES => {
+                self.handle_task_resolve_config_preferences(connection_id, id, params, meta, now)
             }
             TASK_SET_CONFIG_OPTION => {
                 self.handle_task_set_config_option(connection_id, id, params, meta, now)

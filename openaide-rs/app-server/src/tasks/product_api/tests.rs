@@ -1186,7 +1186,7 @@ fn changing_a_preference_retires_a_free_prepared_task_with_stale_options() {
 }
 
 #[test]
-fn reopened_prepared_task_applies_preferences_after_runtime_restart() {
+fn reopened_prepared_task_keeps_agent_options_after_runtime_restart() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let workspace = "/tmp/openaide-unit-workspace/app";
@@ -1232,12 +1232,9 @@ fn reopened_prepared_task_applies_preferences_after_runtime_restart() {
     assert_eq!(reopened.task.task_id.as_str(), "task-prepared");
     assert_eq!(
         task_config_id(&store.read_task("task-prepared").unwrap(), "mode"),
-        Some("agent-full-access")
+        Some("agent")
     );
-    assert_eq!(
-        agent.config_updates.lock().unwrap().as_slice(),
-        [("task-prepared".to_string(), "agent-full-access".to_string())]
-    );
+    assert!(agent.config_updates.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -4431,7 +4428,7 @@ fn open_known_session_does_not_wait_for_catalog_listing() {
 }
 
 #[test]
-fn open_marks_last_known_agent_catalogs_loading_while_resume_is_running() {
+fn open_hides_old_agent_options_while_resume_is_running() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -4461,10 +4458,7 @@ fn open_marks_last_known_agent_catalogs_loading_while_resume_is_running() {
         .expect("open task while resume is running");
 
     assert_eq!(opened.agent_config.state, LiveSessionDataState::Loading);
-    assert_eq!(
-        protocol_value_id(&opened.agent_config.options[0].current_value),
-        Some("gpt-5")
-    );
+    assert!(opened.agent_config.options.is_empty());
     assert_eq!(opened.agent_commands.state, LiveSessionDataState::Loading);
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
 
@@ -8155,7 +8149,7 @@ fn config_recovery_loads_when_the_agent_does_not_support_resume() {
 }
 
 #[test]
-fn restart_shows_persisted_agent_controls_as_loading_until_native_session_recovery() {
+fn restart_hides_persisted_agent_options_until_native_session_recovery() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -8180,10 +8174,7 @@ fn restart_shows_persisted_agent_controls_as_loading_until_native_session_recove
         .unwrap();
 
     assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Loading);
-    assert_eq!(
-        protocol_value_id(&snapshot.agent_config.options[0].current_value),
-        Some("gpt-5")
-    );
+    assert!(snapshot.agent_config.options.is_empty());
     assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Loading);
     assert_eq!(snapshot.agent_commands.commands[0].name, "web");
 }
@@ -10415,3 +10406,6 @@ fn wait_until(condition: impl Fn() -> bool) {
     }
     assert!(condition());
 }
+
+#[path = "config_preferences_tests.rs"]
+mod config_preferences_tests;

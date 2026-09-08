@@ -452,7 +452,25 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
             openaide_app_server_protocol::snapshot::TaskLifecycle::Archived
         }
     };
-    let send_capability = send_capability_for_task(snapshot.task.status, &snapshot.preparation);
+    let mut send_capability = send_capability_for_task(snapshot.task.status, &snapshot.preparation);
+    if let Some(preferences) = &snapshot.config_preferences {
+        use openaide_app_server_protocol::snapshot::{
+            AgentConfigPreferencesState, TaskSendBlocker, TaskSendBlockerKind,
+            TaskSendCapabilityState,
+        };
+        if preferences.state != AgentConfigPreferencesState::Settled {
+            send_capability.state = TaskSendCapabilityState::Blocked;
+            send_capability.blockers = vec![TaskSendBlocker {
+                kind: TaskSendBlockerKind::TaskPreparing,
+                message: if preferences.state == AgentConfigPreferencesState::Applying {
+                    "Applying your preferences…"
+                } else {
+                    "Couldn’t apply your preferences."
+                }
+                .to_string(),
+            }];
+        }
+    }
     let agent_config = agent_config_snapshot(&snapshot);
     let agent_commands = agent_commands_snapshot(&snapshot);
     let projected_status =

@@ -522,9 +522,9 @@ describe("NewTaskView", () => {
     );
 
     const status = tree.root.findByProps({ className: "composer-options-status" });
-    expect(status.children).toContain("Loading options…");
+    expect(status.children).toContain("Connecting to Codex…");
     expect(status.parent?.props.className).toContain("composer-adaptive-options");
-    expect(textContent(tree)).not.toContain("Preparing Codex options");
+    expect(textContent(tree)).toContain("Connecting to Codex…");
     expect(textContent(tree)).not.toContain("Preparing task");
   });
 
@@ -650,7 +650,7 @@ describe("NewTaskView", () => {
     expect(status.findAllByType("button")).toHaveLength(0);
   });
 
-  it("keeps settled Agent controls visible while a replacement Prepared Task catches up", () => {
+  it("hides old Agent controls while a replacement Prepared Task connects", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -684,8 +684,8 @@ describe("NewTaskView", () => {
       />,
     );
 
-    expect(composerControlLabels(tree)).toContain("Preserved model");
-    expect(textContent(tree)).not.toContain("Preparing Codex options");
+    expect(composerControlLabels(tree)).not.toContain("Preserved model");
+    expect(textContent(tree)).toContain("Connecting to Codex…");
   });
 
   it("preserves typed new-task text after the New Task is prepared", () => {

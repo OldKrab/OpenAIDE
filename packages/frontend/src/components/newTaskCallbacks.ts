@@ -1,3 +1,4 @@
+import { resolveConfigPreferencesIntent } from "../intents/configPreferencesIntents";
 import {
   TASK_SET_CONFIG_OPTION,
   type AgentConfigOptionId,
@@ -43,6 +44,11 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
   asyncOperations.scope("new-task-config", configContext);
   return {
     ...createNewTaskStartCallbacks(dependencies),
+    resolveConfigPreferences: async (action) => {
+      const taskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
+      if (!taskId || !backendConnection?.request) throw new Error("App Server connection unavailable.");
+      await resolveConfigPreferencesIntent({ request: backendConnection.request, dispatch }, taskId as TaskId, action);
+    },
     ...createNewTaskBrowserCallbacks(dependencies),
     loadComposerHistory: () => {
       const projectId = state.newTask.selection.projectId;

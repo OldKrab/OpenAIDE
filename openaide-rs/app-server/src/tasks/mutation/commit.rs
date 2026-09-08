@@ -290,6 +290,14 @@ fn is_reusable_prepared_task(target: &TaskMutations, task: &TaskRecord) -> bool 
             task.preparation,
             crate::storage::records::TaskPreparationRecord::Ready
         )
+        && task
+            .config_mutation
+            .preferences
+            .as_ref()
+            .is_none_or(|preferences| {
+                preferences.state
+                    == openaide_app_server_protocol::snapshot::AgentConfigPreferencesState::Settled
+            })
         && task.status == crate::protocol::model::TaskStatus::Inactive
         && task.active_turn_id.is_none()
         && target
