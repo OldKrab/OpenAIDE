@@ -259,7 +259,13 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 .subagents
                 .is_some();
             let negotiated = client_enabled && agent_advertised;
-            native_subagents.set_negotiated(negotiated);
+            native_subagents.set_negotiated(
+                negotiated,
+                initialize
+                    .agent_info
+                    .as_ref()
+                    .map(|info| info.name.as_str()),
+            );
             crate::logging::info(
                 "acp_native_subagents_negotiated",
                 serde_json::json!({

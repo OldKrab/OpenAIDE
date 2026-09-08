@@ -24,6 +24,7 @@ pub(super) struct AcpNativeSubagentRouter {
 #[derive(Default)]
 struct RouterState {
     negotiated: bool,
+    codex_adapter: bool,
     children: HashMap<String, ChildRoute>,
 }
 
@@ -50,9 +51,16 @@ impl AcpNativeSubagentRouter {
         }
     }
 
-    pub(super) fn set_negotiated(&self, negotiated: bool) {
+    pub(super) fn set_negotiated(&self, negotiated: bool, implementation_name: Option<&str>) {
         let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
         state.negotiated = negotiated;
+        // Implementation identity selects transcript compatibility, not the user's
+        // configured Agent id or display label. This never grants capabilities.
+        state.codex_adapter = self.agent_id == "codex"
+            || matches!(
+                implementation_name,
+                Some("@openaide/codex-acp" | "codex-acp")
+            );
         if !negotiated {
             state.children.clear();
         }
@@ -142,10 +150,15 @@ impl AcpNativeSubagentRouter {
         let (root_session_id, root_sink) = self.root_for_parent(&parent_session_id)?;
         let details = codex_details(spawned.meta.as_ref());
         let child_name = spawned.name.clone();
-        let delegated_task = (self.agent_id != "codex").then_some(spawned.task);
+        let codex_adapter = self
+            .inner
+            .lock()
+            .expect("ACP Subagent router poisoned")
+            .codex_adapter;
+        let delegated_task = (!codex_adapter).then_some(spawned.task);
         // Codex ACP re-announces an already routed child when the parent sends it
         // another message. The draft protocol currently has no separate event for it.
-        let parent_interaction = self.agent_id == "codex"
+        let parent_interaction = codex_adapter
             && self
                 .inner
                 .lock()
@@ -170,7 +183,8 @@ impl AcpNativeSubagentRouter {
             root_session_id: root_session_id.clone(),
             sinks: self.sinks.clone(),
         });
-        let projection = LivePromptProjection::for_native_subagent(&self.agent_id, event_sink);
+        let projection =
+            LivePromptProjection::for_native_subagent(&self.agent_id, event_sink, codex_adapter);
         let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
         if !state.negotiated {
             return Err(RuntimeError::InvalidParams(
