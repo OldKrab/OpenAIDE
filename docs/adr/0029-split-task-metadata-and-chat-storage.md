@@ -14,9 +14,12 @@ Chat projection and its `chat.journal.<generation>` file owns normalized Chat de
 and Tool-artifact visibility references accepted since that snapshot. The initial
 generation uses the unsuffixed names. Generation pointers distinguish a committed
 delta ahead of metadata from an obsolete pre-compaction tail left by a crash.
-Agent command and Configuration Option catalogs may persist as last-known display
-data; their live freshness and pending mutations are process-owned. Persisted
-catalogs never establish an active Agent attachment after restart.
+Configuration Option catalogs and preference-application progress are process-owned and
+excluded from durable Task writes. Hydration discards legacy persisted option catalogs;
+the live Native Session supplies fresh controls. The separate per-Agent preference store
+contains only confirmed identifiers and values for initializing new sessions. Agent command
+catalogs may persist as last-known data; their live freshness and pending mutations are
+process-owned. Persisted data never establishes an active Agent attachment after restart.
 
 Recovery follows one-way authority instead of cross-file transactions. Artifact
 content is synced before its Chat reference. A Chat-changing transaction commits

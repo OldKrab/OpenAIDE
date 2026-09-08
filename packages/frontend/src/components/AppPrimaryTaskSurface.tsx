@@ -226,6 +226,7 @@ export function AppPrimaryTaskSurface({
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onRemoveProject={onRemoveProject}
       onRetryPreparation={() => callbacks.newTask.submit()}
+      onResolveConfigPreferences={callbacks.newTask.resolveConfigPreferences}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={canSelectNewTaskProject ? "selectable" : "fixed"}

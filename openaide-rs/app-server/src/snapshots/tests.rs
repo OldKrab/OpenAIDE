@@ -367,6 +367,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 state: LiveSessionDataState::Unavailable,
                 options: Vec::new(),
                 pending_change: None,
+                preferences: None,
                 error: None,
             },
             agent_commands: TaskAgentCommandsSnapshot {

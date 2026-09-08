@@ -57,6 +57,7 @@ mod prepare;
 mod queue;
 mod reload_native_session;
 mod reset_task_history;
+mod resolve_config_preferences;
 mod retention;
 pub(crate) mod secret_resolver;
 pub(crate) mod send;
@@ -572,6 +573,14 @@ impl TaskCancelWorkflow for TaskProductApi {
 }
 
 impl TaskSetConfigOptionWorkflow for TaskProductApi {
+    fn resolve_config_preferences_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskResolveConfigPreferencesParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.resolve_config_preferences(client_instance_id, params)
+    }
+
     fn set_config_option_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

@@ -361,3 +361,10 @@
 .composer-overflow-menu-row:focus-visible .composer-menu-end-icon {
   color: var(--oa-text);
 }
+
+.composer-preferences-status.composer-footer-status {
+  max-width: 100%;
+  width: 100%;
+  flex-wrap: wrap;
+  margin-block: 8px;
+}

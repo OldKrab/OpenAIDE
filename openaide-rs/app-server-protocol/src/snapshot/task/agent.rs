@@ -12,6 +12,9 @@ pub struct TaskAgentConfigSnapshot {
     pub options: Vec<AgentConfigOptionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_change: Option<PendingAgentConfigChange>,
+    /// Current-session initialization only; saved values are never a display catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferences: Option<AgentConfigPreferencesSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
 }
@@ -94,4 +97,20 @@ pub enum LiveSessionDataState {
     Stale,
     Unavailable,
     Failed,
+}
+
+/// App Server owns preference application and blocks Send until it settles or is accepted.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConfigPreferencesSnapshot {
+    pub state: AgentConfigPreferencesState,
+    pub skipped_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentConfigPreferencesState {
+    Applying,
+    Failed,
+    Settled,
 }

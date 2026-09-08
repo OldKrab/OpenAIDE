@@ -146,7 +146,7 @@ fn legacy_archived_flag_migrates_into_the_archived_lifecycle() {
 }
 
 #[test]
-fn legacy_select_config_option_without_kind_remains_readable() {
+fn option_catalogs_are_live_only_and_legacy_catalogs_are_not_restored() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let mut task = task_record("task-legacy-config", TaskStatus::Inactive, "1");
@@ -165,17 +165,31 @@ fn legacy_select_config_option_without_kind_remains_readable() {
     });
     store.write_task(&task).unwrap();
 
-    let mut persisted = serde_json::to_value(&task).unwrap();
-    persisted["config_options_catalog"]["options"][0]
-        .as_object_mut()
+    assert!(store
+        .read_task("task-legacy-config")
         .unwrap()
-        .remove("kind");
-    let loaded: TaskRecord = serde_json::from_value(persisted).unwrap();
-
-    assert_eq!(
-        loaded.config_options_catalog.unwrap().options[0].kind,
-        ConfigOptionKind::Select
-    );
+        .config_options_catalog
+        .is_some());
+    let task_path = dir
+        .path()
+        .join("task-store-v1/tasks/task-legacy-config/task.json");
+    let mut persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&task_path).unwrap()).unwrap();
+    assert!(persisted["task"].get("config_options_catalog").is_none());
+    // An older release may have serialized a catalog without option kinds.
+    persisted["task"]["config_options_catalog"] = serde_json::json!({
+        "agent_id": "codex", "status": "ready", "options": [{
+            "id": "model", "label": "Model", "current_value": "gpt-5", "values": []
+        }]
+    });
+    drop(store);
+    std::fs::write(&task_path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+    let reopened = Store::open(dir.path().to_path_buf()).unwrap();
+    assert!(reopened
+        .read_task("task-legacy-config")
+        .unwrap()
+        .config_options_catalog
+        .is_none());
 }
 
 #[test]

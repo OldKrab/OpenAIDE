@@ -1,3 +1,4 @@
+use crate::methods::TASK_RESOLVE_CONFIG_PREFERENCES;
 use crate::methods::{
     AGENT_AUTHENTICATE, AGENT_CANCEL_AUTHENTICATE, AGENT_CREATE_CUSTOM, AGENT_DELETE_CUSTOM,
     AGENT_LIST_SESSIONS, AGENT_LOGOUT, AGENT_PROBE, AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED,
@@ -333,6 +334,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const TASK_QUEUE_MOVE = {:?} as const;\n",
         TASK_QUEUE_MOVE
+    ));
+    output.push_str(&format!(
+        "export const TASK_RESOLVE_CONFIG_PREFERENCES = {:?} as const;\n",
+        TASK_RESOLVE_CONFIG_PREFERENCES
     ));
     output.push_str(&format!(
         "export const TASK_SET_CONFIG_OPTION = {:?} as const;\n",

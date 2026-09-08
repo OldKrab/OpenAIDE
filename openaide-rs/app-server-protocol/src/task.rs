@@ -801,6 +801,27 @@ pub struct TaskLifecycleChanged {
     pub task: TaskSummary,
 }
 
+/// Resolves failed preference initialization for the caller's leased Prepared Task.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskResolveConfigPreferencesParams {
+    pub task_id: TaskId,
+    pub action: ConfigPreferencesResolution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfigPreferencesResolution {
+    Retry,
+    UseCurrentSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskResolveConfigPreferencesResult {
+    pub task: TaskSnapshot,
+}
+
 #[cfg(test)]
 #[path = "task_tests.rs"]
 mod tests;

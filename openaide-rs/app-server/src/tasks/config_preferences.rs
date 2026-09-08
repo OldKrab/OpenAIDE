@@ -17,22 +17,10 @@ pub(crate) fn apply_to_prepared_session(
     store: &Store,
     agent_gateway: &AgentGateway,
     mut session: AgentSession,
-) -> AgentSession {
-    let preferences = match store.read_agent_config_preferences(&session.agent_id) {
-        Ok(preferences) => preferences,
-        Err(error) => {
-            crate::logging::warn(
-                "agent_config_preferences_read_failed",
-                serde_json::json!({
-                    "agent_id": session.agent_id,
-                    "error": error.to_string(),
-                }),
-            );
-            return session;
-        }
-    };
+) -> Result<AgentSession, crate::protocol::errors::RuntimeError> {
+    let preferences = store.read_agent_config_preferences(&session.agent_id)?;
     if preferences.options.is_empty() || session.config_catalog.is_none() {
-        return session;
+        return Ok(session);
     }
 
     let mut failed_options = HashSet::new();
@@ -48,7 +36,7 @@ pub(crate) fn apply_to_prepared_session(
             break;
         }
     }
-    if !preferences_match_session(&preferences, &session) {
+    if !failed_options.is_empty() || !preferences_match_session(&preferences, &session) {
         crate::logging::warn(
             "agent_config_preferences_not_settled",
             serde_json::json!({
@@ -56,8 +44,11 @@ pub(crate) fn apply_to_prepared_session(
                 "session_id": session.session_id,
             }),
         );
+        return Err(crate::protocol::errors::RuntimeError::NotReady(
+            "Couldn’t apply your preferences.".into(),
+        ));
     }
-    session
+    Ok(session)
 }
 
 fn apply_pass(
@@ -101,7 +92,7 @@ fn apply_pass(
                         "agent_id": session.agent_id,
                         "session_id": session.session_id,
                         "config_id": option_id,
-                        "error": error.to_string(),
+                        "error_code": error.code(),
                     }),
                 );
             }
@@ -109,7 +100,7 @@ fn apply_pass(
     }
 }
 
-fn ordered_option_ids(catalog: Option<&ConfigOptionsCatalog>) -> Vec<String> {
+pub(crate) fn ordered_option_ids(catalog: Option<&ConfigOptionsCatalog>) -> Vec<String> {
     let Some(catalog) = catalog else {
         return Vec::new();
     };
@@ -139,7 +130,10 @@ fn current_option<'a>(session: &'a AgentSession, option_id: &str) -> Option<&'a 
         .find(|option| option.id == option_id)
 }
 
-fn supports_preference(option: &ConfigOption, preference: &AgentConfigPreference) -> bool {
+pub(crate) fn supports_preference(
+    option: &ConfigOption,
+    preference: &AgentConfigPreference,
+) -> bool {
     match (&option.kind, &preference.value) {
         (ConfigOptionKind::Select, ConfigOptionCurrentValue::Id { value }) => {
             option.values.iter().any(|candidate| candidate.id == *value)
@@ -154,5 +148,38 @@ fn preferences_match_session(preferences: &AgentConfigPreferences, session: &Age
         current_option(session, &preference.id)
             .filter(|option| supports_preference(option, preference))
             .is_none_or(|option| option.current_value == preference.value)
+    })
+}
+
+/// Computes only from the current Agent catalog; matching values require no mutation.
+pub(crate) fn initial_state(
+    preferences: &AgentConfigPreferences,
+    catalog: Option<&ConfigOptionsCatalog>,
+) -> Option<openaide_app_server_protocol::snapshot::AgentConfigPreferencesSnapshot> {
+    use openaide_app_server_protocol::snapshot::{
+        AgentConfigPreferencesSnapshot, AgentConfigPreferencesState,
+    };
+    let mut differs = false;
+    let mut skipped_count = 0;
+    for preference in &preferences.options {
+        match catalog.and_then(|catalog| {
+            catalog
+                .options
+                .iter()
+                .find(|option| option.id == preference.id)
+        }) {
+            Some(option) if supports_preference(option, preference) => {
+                differs |= option.current_value != preference.value
+            }
+            _ => skipped_count += 1,
+        }
+    }
+    (differs || skipped_count > 0).then_some(AgentConfigPreferencesSnapshot {
+        state: if differs {
+            AgentConfigPreferencesState::Applying
+        } else {
+            AgentConfigPreferencesState::Settled
+        },
+        skipped_count,
     })
 }

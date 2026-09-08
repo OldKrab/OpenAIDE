@@ -99,6 +99,17 @@ impl TaskProductApi {
 }
 
 pub(super) fn reject_if_preparation_not_ready(task: &TaskRecord) -> Result<(), ProtocolError> {
+    if task
+        .config_mutation
+        .preferences
+        .as_ref()
+        .is_some_and(|preferences| {
+            preferences.state
+                != openaide_app_server_protocol::snapshot::AgentConfigPreferencesState::Settled
+        })
+    {
+        return Err(super::conflict_error("Agent preferences have not settled"));
+    }
     match &task.preparation {
         TaskPreparationRecord::Ready => Ok(()),
         TaskPreparationRecord::Needed | TaskPreparationRecord::Preparing => Err(ProtocolError {

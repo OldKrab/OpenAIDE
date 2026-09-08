@@ -73,8 +73,9 @@ use crate::task::{
     TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
     TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
     TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
-    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskResolveConfigPreferencesParams, TaskResolveConfigPreferencesResult, TaskRestoreParams,
+    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
     TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
     TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
     TaskToolImagePreviewResult,
@@ -607,6 +608,12 @@ protocol_method!(
     TASK_QUEUE_MOVE,
     TaskQueueMoveParams,
     TaskQueueMoveResult
+);
+protocol_method!(
+    TaskResolveConfigPreferences,
+    TASK_RESOLVE_CONFIG_PREFERENCES,
+    TaskResolveConfigPreferencesParams,
+    TaskResolveConfigPreferencesResult
 );
 protocol_method!(
     TaskSetConfigOption,

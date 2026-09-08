@@ -8,7 +8,7 @@ Configuration Options are live Agent/session state, not durable authoritative Op
 
 OpenAIDE stores a per-Agent preference overlay containing only Configuration Option identifiers and typed current values from the complete catalog confirmed by a successful user-initiated change. Labels, descriptions, available values, pending state, and Agent-initiated updates are not preferences. Mode, model, reasoning, boolean, and unknown future options follow the same rule.
 
-Prepared Task setup applies preferences one option at a time. Before every request OpenAIDE validates the saved value against the latest complete Agent catalog; after every response it replaces the catalog and re-evaluates the remaining preferences. Model-like dependencies may therefore change later choices without making a stale snapshot authoritative. Missing, retired, type-changed, or rejected values are skipped and do not block New Task preparation. Reconciliation is bounded so conflicting Agent options cannot loop forever.
+Prepared Task setup applies preferences one option at a time. Before every request OpenAIDE validates the saved value against the latest complete Agent catalog; after every response it replaces the catalog and re-evaluates the remaining preferences. Model-like dependencies may therefore change later choices without making a stale snapshot authoritative. Values that already match cause no request. Missing, retired, or type-changed values are skipped with a brief notice. An Agent rejection or other application failure blocks Send and offers explicit Retry or Use current settings; it never silently accepts unexpected settings. Reconciliation is bounded so conflicting Agent options cannot loop forever.
 
 When a confirmed preference changes, OpenAIDE retires free Prepared Tasks for that Agent because their already-live Native Sessions may still hold the prior values. Leased Prepared Tasks are never replaced underneath another client.
 
@@ -18,4 +18,11 @@ User-initiated Configuration Option changes use a Task-scoped App Server Protoco
 
 OpenAIDE allows user-initiated Configuration Option changes while a Task turn is running because ACP explicitly allows it. UI must show pending, confirmed, or failed state and must not imply that an already-running turn used a new value unless Backend or Agent state proves it.
 
-After reload or App Server restart, OpenAIDE refreshes Configuration Options from the Agent through `session/load` or `session/resume` when supported. Any last-known option render data is stale until refreshed and must not become the source of truth. Preference reconciliation applies to Prepared Tasks used as New Task surfaces; opening or resuming an existing visible Task preserves its Native Session state.
+After reload or App Server restart, OpenAIDE refreshes Configuration Options from the Agent through `session/load` or `session/resume` when supported. Old option controls disappear until the live catalog arrives; catalogs are neither persisted nor used as a display fallback. Preference reconciliation applies only to newly created Native Sessions, including replacements for confirmed-missing empty sessions. Restoring any existing session, including an empty Prepared Task, preserves its own settings.
+
+App Server publishes a newly created session's actual catalog before applying preferences.
+While differing values are applied, controls show confirmed → pending values and remain locked
+along with Send; composing text remains available. An all-matching catalog skips this stage.
+`task/resolveConfigPreferences` scopes Retry and Use current settings to the caller's leased
+Prepared Task. Recovery publishes authoritative Task state and never rewrites preferences merely
+because the user accepts the session's current settings after a failure.
