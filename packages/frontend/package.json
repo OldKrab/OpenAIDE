@@ -15,7 +15,7 @@
     "@openaide/app-server-client": "*",
     "@openaide/app-shell-contracts": "*",
     "@tanstack/react-virtual": "^3.14.9",
-    "@vitejs/plugin-react": "^6.0.5",
+    "@vitejs/plugin-react": "^6.1.1",
     "fuzzysort": "^3.1.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.39.0",
