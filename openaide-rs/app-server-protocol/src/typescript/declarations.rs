@@ -1,4 +1,9 @@
 use crate::project_files::*;
+use crate::snapshot::{AgentConfigPreferencesSnapshot, AgentConfigPreferencesState};
+use crate::task::{
+    ConfigPreferencesResolution, TaskResolveConfigPreferencesParams,
+    TaskResolveConfigPreferencesResult,
+};
 use ts_rs::{Config, Dummy, TS};
 
 use crate::agent::{
@@ -468,6 +473,11 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TakenQueuedMessage>(output, config);
     push_decl::<TaskQueueMoveParams>(output, config);
     push_decl::<TaskQueueMoveResult>(output, config);
+    push_decl::<TaskResolveConfigPreferencesParams>(output, config);
+    push_decl::<TaskResolveConfigPreferencesResult>(output, config);
+    push_decl::<ConfigPreferencesResolution>(output, config);
+    push_decl::<AgentConfigPreferencesSnapshot>(output, config);
+    push_decl::<AgentConfigPreferencesState>(output, config);
     push_decl::<TaskSetConfigOptionParams>(output, config);
     push_decl::<TaskSetConfigOptionResult>(output, config);
     push_decl::<TaskSetPermissionPolicyParams>(output, config);

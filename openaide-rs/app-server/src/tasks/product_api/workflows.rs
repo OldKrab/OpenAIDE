@@ -144,6 +144,19 @@ pub(crate) trait TaskCancelWorkflow: Send + Sync {
 }
 
 pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
+    fn resolve_config_preferences_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskResolveConfigPreferencesParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Preference recovery is unavailable".into(),
+            recoverable: false,
+            target: None,
+        })
+    }
+
     fn set_config_option_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

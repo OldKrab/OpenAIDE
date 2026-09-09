@@ -34,6 +34,8 @@ export type ConfigOptionsCatalog = {
   agent_id: string;
   status: ConfigOptionsStatus;
   options: ConfigOption[];
+  /** Initialization progress for this live session, never remembered display values. */
+  preferences?: { state: "applying" | "failed" | "settled"; skippedCount: number };
   pending_change?: {
     mutation_id: string;
     option_id: string;

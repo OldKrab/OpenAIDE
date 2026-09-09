@@ -1,3 +1,4 @@
+import { ComposerPreferencesStatus } from "./ComposerPreferencesStatus";
 import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
@@ -65,6 +66,7 @@ type ComposerProps = {
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
   onRetryConfigOptions?: () => void;
+  onResolveConfigPreferences?: (action: "retry" | "useCurrentSettings") => Promise<void>;
   onRetryError?: () => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   onSubmit: (prompt: string) => void;
@@ -102,6 +104,7 @@ export function Composer({
   onSelectAgent,
   onSelectConfigOption,
   onRetryConfigOptions,
+  onResolveConfigPreferences,
   onRetryError,
   onSelectIsolation,
   onSubmit,
@@ -136,7 +139,7 @@ export function Composer({
     : configOptions;
   const configLoadingLabel = agents.find((agent) => agent.id === selection.agentId)?.status === "installing"
     ? CODEX_INTEGRATION_INSTALLING_LABEL
-    : undefined;
+    : `Connecting to ${selection.agentLabel}…`;
   const configMutationId = presentedConfigChange?.mutation_id;
   const [configChangeStage, setConfigChangeStage] = useState<{ index: number; mutationId: string }>();
   const configChangeStatus = configMutationId && configChangeStage?.mutationId === configMutationId
@@ -145,7 +148,7 @@ export function Composer({
   const changingConfigOption = presentedConfigChange
     ? presentedConfigOptions?.options.find((option) => option.id === presentedConfigChange.option_id)
     : undefined;
-  const configChangeLabel = changingConfigOption && configChangeStatus !== undefined
+  const configChangeLabel = (configOptions?.preferences === undefined || configOptions.preferences.state === "settled") && changingConfigOption && configChangeStatus !== undefined
     ? slowConfigChangeLabel(
         selection.agentLabel,
         changingConfigOption.label.trim() || changingConfigOption.id,
@@ -163,7 +166,9 @@ export function Composer({
   const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
   const uploadPending = fileUploads.some((upload) => upload.state !== "error");
-  const canSubmit = composerCanSubmit(availability, editorText, attachments.length) && !uploadPending;
+  const canSubmit = composerCanSubmit(availability, editorText, attachments.length) && !uploadPending
+    && !presentedConfigChange
+    && (!configOptions?.preferences || configOptions.preferences.state === "settled");
   const canAddToQueue = availability.canEdit
     && hasDraftContent
     && !uploadPending
@@ -579,6 +584,10 @@ export function Composer({
         />
       ) : null}
       {filePicker ? <FileMentionPicker id={`${completionId}-files`} onSelect={selectFileMention} state={filePicker} /> : null}
+      <ComposerPreferencesStatus
+        preferences={configOptions?.preferences}
+        onResolve={onResolveConfigPreferences}
+      />
       <div className="composer-footer">
         <ComposerControls
           agentLocked={agentLocked}

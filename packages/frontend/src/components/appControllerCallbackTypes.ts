@@ -93,6 +93,7 @@ export type SettingsCallbacks = {
 };
 
 export type NewTaskCallbacks = {
+  resolveConfigPreferences?: (action: "retry" | "useCurrentSettings") => Promise<void>;
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   loadComposerHistory?: () => Promise<string[]>;

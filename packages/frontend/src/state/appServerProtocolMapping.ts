@@ -345,6 +345,7 @@ export function mapProtocolConfigOptions(
     agent_id: agentId,
     status: snapshot.state === "ready" ? (options.length ? "ready" : "empty") : snapshot.state,
     options,
+    preferences: snapshot.preferences ?? undefined,
     pending_change: snapshot.pendingChange ? {
       mutation_id: snapshot.pendingChange.clientMutationId,
       option_id: snapshot.pendingChange.configId,

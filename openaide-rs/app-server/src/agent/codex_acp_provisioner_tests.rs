@@ -66,7 +66,7 @@ impl CodexAcpInstaller for RecordingInstaller {
         fs::create_dir_all(package_root.join("dist")).expect("create managed package fixture");
         fs::write(
             package_root.join("package.json"),
-            r#"{"name":"@openaide/codex-acp","version":"1.2.0"}"#,
+            r#"{"name":"@openaide/codex-acp","version":"1.2.2"}"#,
         )
         .expect("write managed package manifest");
         fs::write(package_root.join("dist/index.js"), INDEX_FIXTURE)
@@ -250,7 +250,7 @@ fn patched_runtime_uses_a_separate_cache_and_preserves_the_leased_upstream_runti
     let launch = provisioner.prepare(AcpAgentConfig::codex()).unwrap();
 
     assert!(std::path::Path::new(&launch.config.args[0])
-        .starts_with(runtime_root.join("1.2.0-openaide.3")));
+        .starts_with(runtime_root.join("1.2.2-openaide.1")));
     assert_eq!(installer.destinations.lock().unwrap().len(), 1);
     assert_eq!(
         fs::read(upstream.join("node_modules/@openaide/codex-acp/dist/index.js")).unwrap(),

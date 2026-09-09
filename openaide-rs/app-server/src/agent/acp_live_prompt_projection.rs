@@ -106,11 +106,12 @@ impl LivePromptProjection {
     pub(super) fn for_native_subagent(
         agent_id: impl Into<String>,
         sink: Arc<dyn AgentEventSink>,
+        codex_adapter: bool,
     ) -> Self {
         let mut projection = Self::for_prompt(agent_id, sink, TurnCancellation::new(), None);
         // Codex currently projects an encrypted causal-root placeholder as a child User
         // message. It is not the delegated prompt, so presenting it invents transcript data.
-        projection.project_user_messages = projection.agent_id != "codex";
+        projection.project_user_messages = !codex_adapter;
         projection
     }
 

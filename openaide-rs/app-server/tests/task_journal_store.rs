@@ -46,7 +46,7 @@ fn a_committed_task_survives_store_restart() {
 }
 
 #[test]
-fn durable_task_metadata_chat_and_last_known_agent_catalogs_survive_store_reopen() {
+fn durable_metadata_chat_and_commands_survive_reopen_without_live_option_catalogs() {
     let root = TempDir::new().expect("create state root");
     let mut projection = task_projection("task_split_authority");
     projection
@@ -101,7 +101,8 @@ fn durable_task_metadata_chat_and_last_known_agent_catalogs_survive_store_reopen
             .map(|catalog| catalog.commands[0].name.as_str()),
         Some("review")
     );
-    assert!(loaded.task.config_options_catalog.is_some());
+    // Configuration controls must come from the next live Agent session.
+    assert!(loaded.task.config_options_catalog.is_none());
     reopened.shutdown().unwrap();
 }
 

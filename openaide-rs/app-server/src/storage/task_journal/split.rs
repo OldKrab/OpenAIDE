@@ -159,7 +159,10 @@ pub(super) fn load_task(task_dir: &Path) -> Result<Option<TaskMetadata>, Runtime
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    let file: DurableTaskFile = serde_json::from_slice(&bytes)?;
+    let mut file: DurableTaskFile = serde_json::from_slice(&bytes)?;
+    // Older releases persisted option catalogs. Never hydrate those as live controls.
+    file.task.config_options_catalog = None;
+    file.task.config_mutation.preferences = None;
     validate_schema("Task metadata", file.schema_version, TASK_SCHEMA_VERSION)?;
     Ok(Some(TaskMetadata {
         task: file.task,
