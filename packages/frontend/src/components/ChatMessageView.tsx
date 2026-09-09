@@ -249,6 +249,7 @@ function AgentMessageParts({
   return parts.map((part, index) => part.kind === "text" ? (
     <AgentMarkdown
       className={contentProps.muted ? "chat-thought" : "chat-agent"}
+      onOpenImage={contentProps.onOpenImage}
       key={index}
       quoteSource={contentProps.muted ? undefined : "agent"}
       renderDiagrams={!contentProps.muted && renderDiagrams}
