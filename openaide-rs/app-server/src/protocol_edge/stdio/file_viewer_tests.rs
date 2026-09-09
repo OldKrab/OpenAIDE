@@ -589,3 +589,43 @@ fn image_preview_bytes(snapshot: &Value) -> Vec<u8> {
         )
         .unwrap()
 }
+
+#[test]
+fn project_files_requires_initialized_client_and_uses_task_workspace() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("selected-worktree");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::write(workspace.join("selected.txt"), "selected").unwrap();
+    std::fs::write(temp.path().join("outside.txt"), "outside").unwrap();
+    Store::open(temp.path().to_path_buf())
+        .unwrap()
+        .write_task(&task_record(
+            "task-project-files",
+            workspace.to_string_lossy().into_owned(),
+        ))
+        .unwrap();
+    let mut dispatcher =
+        ProtocolEdgeStdioDispatcher::new_for_test(StateRoot::resolve(temp.path()).unwrap());
+    let request = |task: &str, path: &str| {
+        json!({
+            "jsonrpc": "2.0", "id": "browse", "method": "fileViewer/listDirectory",
+            "params": {"taskId": task, "path": path}
+        })
+        .to_string()
+    };
+    let denied = dispatcher.handle_line(&request("task-project-files", ""));
+    assert!(response(&denied[0]).get("error").is_some());
+    dispatcher.handle_line(&init_request("init", "project-files-client"));
+    let missing = dispatcher.handle_line(&request("task-missing", ""));
+    assert!(response(&missing[0]).get("error").is_some());
+    let replies = dispatcher.handle_line(&request("task-project-files", ""));
+    let reply = response(&replies[0]);
+    let result = &reply["result"]["result"];
+    assert_eq!(result["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(result["entries"][0]["path"], "selected.txt");
+    let escaped = dispatcher.handle_line(&request("task-project-files", "../"));
+    assert_eq!(
+        response(&escaped[0])["result"]["result"]["error"],
+        "outsideWorkspace"
+    );
+}

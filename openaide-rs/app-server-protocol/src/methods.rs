@@ -1,3 +1,4 @@
+use crate::project_files::{ProjectFilesParams, ProjectFilesResult};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{
@@ -722,3 +723,28 @@ protocol_method!(
 
 #[cfg(test)]
 mod tests;
+
+protocol_method!(
+    FileViewerListDirectory,
+    FILE_VIEWER_LIST_DIRECTORY,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
+    FileViewerSearch,
+    FILE_VIEWER_SEARCH,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
+    FileViewerChanges,
+    FILE_VIEWER_CHANGES,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
+    FileViewerDiff,
+    FILE_VIEWER_DIFF,
+    ProjectFilesParams,
+    ProjectFilesResult
+);

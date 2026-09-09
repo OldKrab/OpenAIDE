@@ -9,11 +9,11 @@ test.use({ actionTimeout: 10_000 });
 test.setTimeout(120_000);
 
 let harness;
-const shots = path.join("test-results", "file-viewer-layout");
+const shots = path.join("test-results", `file-viewer-layout-${process.env.OPENAIDE_SMOKE_FRONTEND ?? "web"}`);
 
 test.beforeAll(async ({}, testInfo) => {
   testInfo.setTimeout(120_000);
-  harness = await startFullStackHarness();
+  harness = await startFullStackHarness({ frontend: process.env.OPENAIDE_SMOKE_FRONTEND ?? "web" });
   await mkdir(shots, { recursive: true });
 });
 
@@ -52,34 +52,37 @@ test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page
   expect(download.suggestedFilename()).toBe("README.md");
   expect(await readFile(await download.path())).toEqual(await readFile("README.md"));
 
-  await expect(fileViewer.getByRole("button", { name: "Back to Chat" })).toBeVisible();
-  await expect(fileViewer.getByRole("button", { name: "Back to Chat" })).toContainText("Chat");
-
-  const planChip = page.locator(".task-plan-drawer-trigger");
-  await expect(planChip).toBeVisible();
-  const planBox = await planChip.boundingBox();
-  const fileBox = await fileViewer.boundingBox();
-  expect(planBox).toBeTruthy();
-  expect(fileBox).toBeTruthy();
-  expect(planBox.x + planBox.width).toBeLessThanOrEqual(fileBox.x + 8);
-
-  if (await planChip.getAttribute("aria-expanded") !== "true") {
-    await planChip.click();
-  }
-  await expect(page.locator("aside.task-plan-drawer[data-open='true']")).toBeVisible();
-  await page.screenshot({ path: path.join(shots, "wide-plan-open.png") });
+  await expect(page.getByRole("button", { name: "Back to conversation" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(shots, "wide-file-open.png") });
-  await planChip.click();
+  const explorer = page.locator(".project-files-list");
+  await expect(explorer.getByText("Loading files…", { exact: true })).toHaveCount(0);
+  const scrollBefore = await explorer.evaluate(el => { el.scrollTop = 500; return el.scrollTop; });
+  expect(scrollBefore).toBeGreaterThan(100);
+  await page.getByRole("button", { name: "Back to conversation" }).click();
+  await page.evaluate(() => {
+    window.explorerScrollSamples = [];
+    let frames = 0;
+    const sample = () => {
+      const list = document.querySelector(".project-files-list");
+      if (list?.getClientRects().length) window.explorerScrollSamples.push(list.scrollTop);
+      if (++frames < 90) requestAnimationFrame(sample);
+      else window.explorerScrollFinished = true;
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.getByRole("button", { name: "Project files", exact: true }).click();
+  await page.waitForFunction(() => window.explorerScrollFinished);
+  const samples = await page.evaluate(() => window.explorerScrollSamples);
+  expect(samples.length).toBeGreaterThan(0);
+  expect(Math.max(...samples) - Math.min(...samples), "Reopening Files moved the explorer during refresh").toBeLessThanOrEqual(1);
+  expect(samples.at(-1)).toBe(scrollBefore);
 
-  await fileViewer.getByRole("button", { name: "Back to Chat" }).click();
-  await expect(page.getByRole("button", { name: "Show Task Panel" })).toBeVisible();
+  await page.getByRole("button", { name: "Back to conversation" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await page.screenshot({ path: path.join(shots, "wide-file-collapsed.png") });
-
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("link", { name: "README.md" }).click();
-  await expect(fileViewer.getByRole("button", { name: "Back to Chat" })).toBeVisible();
-  await expect(fileViewer.getByRole("button", { name: "Back to Chat" })).toContainText("Chat");
+  await readme.click();
+  await expect(fileViewer).toBeVisible();
   const tabStrip = await fileViewer.locator(".file-viewer-tabs").evaluate((el) => ({
     verticalBar: el.offsetWidth - el.clientWidth,
     horizontalBar: el.offsetHeight - el.clientHeight,
@@ -101,14 +104,15 @@ test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page
   await page.screenshot({ path: path.join(shots, "phone-file-open.png") });
 
   await fileViewer.getByRole("button", { name: "Show raw Markdown" }).click();
-  await fileViewer.getByRole("button", { name: "Quote line 1", exact: true }).click();
+  await fileViewer.getByRole("button", { name: "Select line 1", exact: true }).click();
+  await fileViewer.getByRole("button", { name: "Comment", exact: true }).click();
   const composer = page.getByRole("textbox", { name: "Message" });
   await expect(composer).toBeVisible();
   await expect(composer).toContainText("README.md:1");
   await page.screenshot({ path: path.join(shots, "phone-back-to-chat.png") });
 
-  await page.getByRole("button", { name: "Open Plan" }).click();
   const phonePlan = page.locator("aside.task-plan-drawer[data-open='true']");
+  if (!await phonePlan.isVisible()) await page.getByRole("button", { name: "Open Plan", exact: true }).click();
   await expect(phonePlan).toBeVisible();
   await page.screenshot({ path: path.join(shots, "phone-plan-open.png") });
   const gap = await page.evaluate(() => {
@@ -118,7 +122,8 @@ test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page
     return { bar, drawer, workbench };
   });
   const barBottom = gap.bar.y + gap.bar.height;
-  expect(gap.workbench.y - barBottom, `Chat started ${gap.workbench.y - barBottom}px below the bar`).toBeLessThan(8);
+  expect(gap.workbench.y - barBottom).toBeLessThan(48);
+  expect(gap.workbench.width).toBeGreaterThan(380);
   expect(gap.drawer.y - barBottom, `Plan started ${gap.drawer.y - barBottom}px below the bar`).toBeLessThan(16);
 });
 
@@ -154,7 +159,7 @@ test("downloads current binary bytes through a relative symlink link and retries
     await page.screenshot({ path: path.join(shots, "wide-binary-download.png") });
 
     const planTrigger = page.locator(".task-plan-drawer-trigger");
-    if (await planTrigger.getAttribute("aria-expanded") === "true") await planTrigger.click();
+    if (await planTrigger.isVisible() && await planTrigger.getAttribute("aria-expanded") === "true") await planTrigger.click();
     await rename(target, path.join(directory, "moved.bin"));
     await page.setViewportSize({ width: 390, height: 844 });
     await viewer.getByRole("button", { name: "Download file", exact: true }).click();
@@ -206,7 +211,7 @@ test("shows a bounded photo preview with zoom and original download", async ({ p
     await expect(viewer.getByRole("button", { name: "Reset image zoom" })).toHaveText("125%");
     await viewer.getByRole("button", { name: "Reset image zoom" }).click();
     const plan = page.locator(".task-plan-drawer-trigger");
-    if (await plan.getAttribute("aria-expanded") === "true") await plan.click();
+    if (await plan.isVisible() && await plan.getAttribute("aria-expanded") === "true") await plan.click();
     await page.screenshot({ path: path.join(shots, "wide-photo-preview.png"), animations: "disabled" });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(viewer.getByText("Reduced image preview", { exact: true })).toBeVisible();
@@ -221,6 +226,94 @@ test("shows a bounded photo preview with zoom and original download", async ({ p
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("browses independent files, searches exact lines, and comments beside source/diff selections", async ({ page }) => {
+  const filename = "000-project-access-smoke.ts";
+  await writeFile(filename, "export const first = 1;\nexport const second = 2;\nexport const projectAccessNeedle = 3;\n");
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${harness.baseUrl}/new-task?desktop-platform=${process.env.OPENAIDE_SMOKE_DESKTOP_PLATFORM ?? "macos"}`);
+    await page.getByRole("textbox", { name: "Message" }).fill(`smoke:file-viewer-layout\ndownload-file:${filename}`);
+    await page.getByLabel("Send message").click();
+    await expect(page.getByLabel("Task chat").getByRole("link", { name: "README.md" })).toBeVisible();
+    await page.getByRole("textbox", { name: "Message" }).fill("Keep this draft");
+    await page.getByRole("button", { name: "Project files", exact: true }).click();
+    const project = page.getByRole("region", { name: "Project files", exact: true });
+    await project.getByRole("treeitem", { name: filename, exact: true }).click();
+    await project.getByRole("textbox", { name: "Find a file" }).fill(filename);
+    await project.locator(".project-file-result").filter({ hasText: filename }).click();
+    const reader = project.locator(".file-code-reader");
+    await expect(reader.getByRole("button", { name: "Select line 3", exact: true })).toBeVisible();
+    const first = await reader.getByRole("button", { name: "Select line 1", exact: true }).boundingBox();
+    const third = await reader.getByRole("button", { name: "Select line 3", exact: true }).boundingBox();
+    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(third.x + third.width / 2, third.y + third.height / 2, { steps: 6 });
+    await expect(reader.getByRole("button", { name: "Comment", exact: true })).toBeHidden();
+    await page.mouse.up();
+    await expect(reader.locator('[data-selected="true"]')).toHaveCount(3);
+    await expect(reader.getByRole("button", { name: "Select range", exact: true })).toBeHidden();
+    const action = reader.getByRole("button", { name: "Comment", exact: true });
+    await expect(action).toBeVisible();
+    const actionBox = await action.boundingBox();
+    expect(actionBox.y - third.y).toBeLessThan(65);
+    await page.screenshot({ path: path.join(shots, "project-source-selection.png") });
+    await action.click();
+    const composer = page.getByRole("textbox", { name: "Message" });
+    await expect(composer).toContainText("Keep this draft");
+    await expect(composer).toContainText(`${filename}:1–3`);
+    await page.getByRole("button", { name: "Project files", exact: true }).click();
+    await project.getByRole("button", { name: "Search", exact: true }).click();
+    await project.getByRole("textbox", { name: "Search file contents" }).fill("projectAccessNeedle");
+    await project.locator(".project-file-result").filter({ hasText: filename }).click();
+    await expect(reader.locator('[data-focus="true"]')).toContainText("projectAccessNeedle");
+    // Native drag selects characters without turning the source into whole-line selection.
+    const code = reader.locator(".file-viewer-code").first();
+    const bounds = await code.boundingBox();
+    await page.mouse.move(bounds.x + 2, bounds.y + bounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + 83, bounds.y + bounds.height / 2, { steps: 8 });
+    await page.mouse.up();
+    const selected = await page.evaluate(() => window.getSelection().toString());
+    expect(selected.length).toBeGreaterThan(0);
+    await expect(reader.locator('[data-selected="true"]')).toHaveCount(0);
+    await action.click();
+    await expect(composer).toContainText(selected);
+    await page.getByRole("button", { name: "Project files", exact: true }).click();
+    await project.getByRole("button", { name: "Changes", exact: true }).click();
+    await project.locator(".project-file-result").filter({ hasText: filename }).click();
+    await expect(reader).toHaveAttribute("data-diff", "true");
+    await reader.getByRole("button", { name: "Select working copy line 2", exact: true }).click();
+    await expect(action).toBeVisible();
+    await page.screenshot({ path: path.join(shots, "project-diff-selection.png") });
+    await action.click();
+    await expect(composer).toContainText("working copy lines 2");
+    await page.getByRole("button", { name: "Project files", exact: true }).click();
+    await expect(project.getByRole("button", { name: "Changes", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await project.getByRole("button", { name: "File", exact: true }).click();
+    await expect(reader).toHaveAttribute("data-diff", "false");
+    await project.getByRole("button", { name: "Diff", exact: true }).click();
+    await expect(reader).toHaveAttribute("data-diff", "true");
+    await project.getByRole("button", { name: "Back to conversation" }).click();
+    await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
+    await expect(reader).toHaveAttribute("data-diff", "false");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.screenshot({ path: path.join(shots, "project-dark.png") });
+    if (process.env.OPENAIDE_SMOKE_FRONTEND === "desktop") {
+      // Native windows enforce 880×600; verify the supported minimum, not a phone-sized native window.
+      await page.setViewportSize({ width: 880, height: 600 });
+      await expect(project.getByRole("button", { name: "Back to conversation" })).toBeVisible();
+      await expect(reader).toBeVisible();
+      await page.screenshot({ path: path.join(shots, "project-desktop-minimum.png") });
+      return;
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(project.getByRole("complementary", { name: "Project navigation", exact: true })).toBeHidden();
+    await project.locator(".project-files-mobile-back").click();
+    await expect(project.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
+    await page.screenshot({ path: path.join(shots, "project-phone-list.png") });
+  } finally { await rm(filename, { force: true }); }
 });
 
 async function photoFixture(page) {

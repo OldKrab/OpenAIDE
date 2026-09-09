@@ -28,12 +28,31 @@ use crate::methods::{
     WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE, WORKTREE_RENAME,
     WORKTREE_RESOLVE_FOLDER,
 };
+use crate::methods::{
+    FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_SEARCH,
+};
 use crate::server_requests::{
     PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_OPEN_EXTERNAL, SHELL_REVEAL_FILE,
     SHELL_SHOW_NOTIFICATION,
 };
 
 pub(super) fn push_method_constants(output: &mut String) {
+    output.push_str(&format!(
+        "export const FILE_VIEWER_LIST_DIRECTORY = {:?} as const;\n",
+        FILE_VIEWER_LIST_DIRECTORY
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_SEARCH = {:?} as const;\n",
+        FILE_VIEWER_SEARCH
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_CHANGES = {:?} as const;\n",
+        FILE_VIEWER_CHANGES
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_DIFF = {:?} as const;\n",
+        FILE_VIEWER_DIFF
+    ));
     output.push_str(&format!(
         "export const CLIENT_PROBE = {:?} as const;\n",
         CLIENT_PROBE

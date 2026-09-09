@@ -181,7 +181,10 @@ describe("Task File Viewer", () => {
     });
 
     act(() => {
-      tree!.root.findByProps({ "aria-label": "Quote line 2" }).props.onClick();
+      tree!.root.findByProps({ "aria-label": "Select line 2" }).props.onClick({ detail: 0 });
+    });
+    act(() => {
+      tree!.root.findByProps({ "aria-label": "Comment" }).props.onClick();
     });
 
     expect(onQuote).toHaveBeenCalledWith("deploy/local-web.sh:2\nquoted line");
@@ -217,7 +220,10 @@ describe("Task File Viewer", () => {
       });
 
       act(() => {
-        tree!.root.findByProps({ "aria-label": "Quote line 1" }).props.onClick();
+        tree!.root.findByProps({ "aria-label": "Select line 1" }).props.onClick({ detail: 0 });
+      });
+      act(() => {
+        tree!.root.findByProps({ "aria-label": "Comment" }).props.onClick();
       });
 
       expect(onQuote).toHaveBeenCalledWith("deploy/local-web.sh:1\nquoted line");
@@ -275,7 +281,7 @@ describe("Task File Viewer", () => {
     expect(preview).toContain("Heading");
     expect(preview).toContain("bold");
     expect(preview).not.toContain("**bold**");
-    expect(tree!.root.findAllByProps({ "aria-label": "Quote line 1" })).toHaveLength(0);
+    expect(tree!.root.findAllByProps({ "aria-label": "Select line 1" })).toHaveLength(0);
 
     act(() => {
       tree!.root.findByProps({ "aria-label": "Show raw Markdown" }).props.onClick();
@@ -283,7 +289,7 @@ describe("Task File Viewer", () => {
 
     const raw = JSON.stringify(tree!.toJSON());
     expect(raw).toContain("**bold**");
-    expect(tree!.root.findByProps({ "aria-label": "Quote line 3" })).toBeTruthy();
+    expect(tree!.root.findByProps({ "aria-label": "Select line 3" })).toBeTruthy();
 
     act(() => {
       tree!.root.findByProps({ "aria-label": "Show Markdown preview" }).props.onClick();

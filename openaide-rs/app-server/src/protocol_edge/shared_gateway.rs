@@ -9,8 +9,9 @@ use openaide_app_server_protocol::attachment::PreSendAttachment;
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::methods::{
-    AGENT_AUTHENTICATE, AGENT_LOGOUT, FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE,
-    FILE_VIEWER_REFRESH,
+    AGENT_AUTHENTICATE, AGENT_LOGOUT, FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF,
+    FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE,
+    FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH,
 };
 use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
 use serde_json::{json, Value};
@@ -129,6 +130,16 @@ impl SharedRpcGateway {
         completion_clock: impl FnOnce() -> AppServerTime,
     ) -> GatewayOutcome {
         if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. }
+            if matches!(method.as_str(), FILE_VIEWER_LIST_DIRECTORY | FILE_VIEWER_SEARCH | FILE_VIEWER_CHANGES | FILE_VIEWER_DIFF))
+        {
+            return self.handle_project_files_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
+        }
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. }
             if matches!(method.as_str(), FILE_VIEWER_OPEN | FILE_VIEWER_OPEN_FROM_HANDLE | FILE_VIEWER_REFRESH))
         {
             return self.handle_file_viewer_without_protocol_lock(
@@ -171,6 +182,66 @@ impl SharedRpcGateway {
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
         outcome
+    }
+
+    fn handle_project_files_without_protocol_lock(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+        completion_clock: impl FnOnce() -> AppServerTime,
+    ) -> GatewayOutcome {
+        let read = {
+            let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+            if gateway.update_shutdown.is_some()
+                || gateway
+                    .client_hub
+                    .context_for_connection(&connection_id)
+                    .is_none()
+            {
+                return gateway.handle_inbound(connection_id, message, now);
+            }
+            gateway
+                .client_hub
+                .observe_connection_activity(&connection_id, now);
+            let InboundProtocolMessage::ClientRequest {
+                id,
+                method,
+                params,
+                meta,
+            } = &message
+            else {
+                unreachable!()
+            };
+            match gateway.prepare_project_files(&connection_id, method, params.clone()) {
+                Ok(read) => read,
+                Err(error) => return gateway.error(connection_id, id.clone(), meta.clone(), error),
+            }
+        };
+        let InboundProtocolMessage::ClientRequest {
+            id, method, meta, ..
+        } = message
+        else {
+            unreachable!()
+        };
+        let result = read.run(&id, &meta);
+        let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        if !gateway
+            .client_hub
+            .context_for_connection(&connection_id)
+            .is_some_and(|client| client.client_instance_id == read.owner)
+        {
+            return gateway.error(
+                connection_id,
+                id,
+                meta,
+                super::responses::not_initialized(method),
+            );
+        }
+        gateway
+            .client_hub
+            .observe_connection_activity(&connection_id, completion_clock());
+        gateway.result(connection_id, id, meta, result)
     }
 
     fn handle_file_viewer_without_protocol_lock(

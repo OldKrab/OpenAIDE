@@ -1,17 +1,18 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, Copy, Download, FileCode2, FileText, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, Reply, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { ArrowLeft, Copy, Download, FileCode2, FileText, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, X } from "lucide-react";
 import type { FileViewerError, FileViewerSnapshot } from "@openaide/app-server-client";
 import type { FileViewerTab } from "./useTaskFileViewer";
+import { FileCodeReader } from "./FileCodeReader";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { copyText } from "./clipboard";
 import { ImagePreviewViewport } from "./ImagePreviewViewport";
-import { highlightFileViewerLines } from "./fileViewerHighlight";
 import { applyTaskPanelRatio, setLayoutResizing } from "./layoutResize";
 import { currentFrontendShell, type FileViewerDownloads } from "../services/frontendShell";
 import { useFileViewerDownload } from "./useFileViewerDownload";
 
 export function FileViewerPanel({
   collapsed,
+  content,
   downloads = currentFrontendShell()?.fileViewerDownloads,
   onClose,
   onOpenFromHandle,
@@ -25,10 +26,12 @@ export function FileViewerPanel({
   tabs,
 }: {
   collapsed: boolean;
+  /** A diff body shares the active file capability, tabs, refresh, and download chrome. */
+  content?: ReactNode;
   downloads?: FileViewerDownloads;
   onClose: (handle: string) => void;
   onOpenFromHandle: (handle: string, href: string) => void;
-  onQuote: (text: string) => void;
+  onQuote?: (text: string) => void;
   onRefresh: (handle: string) => void;
   onSelect: (handle: string) => void;
   onSplitRatio: (ratio: number) => void;
@@ -135,7 +138,7 @@ export function FileViewerPanel({
             <div className="file-viewer-tab" data-selected={item.handle === tab?.handle} key={item.handle}>
               <button aria-selected={item.handle === tab?.handle} onClick={() => onSelect(item.handle)} role="tab" type="button">
                 {tabIcon(item)}
-                {item.basename}
+                <span className="file-viewer-tab-name" title={item.displayPath}>{item.basename}</span>
               </button>
               <button aria-label={`Close ${item.basename}`} className="file-viewer-tab-close" onClick={() => onClose(item.handle)} type="button">
                 <X size={12} />
@@ -157,21 +160,21 @@ export function FileViewerPanel({
             <button aria-label="Retry download" className="file-viewer-header-action" disabled={download.disabled} onClick={download.start} type="button">Retry</button>
           </div>
         ) : null}
-        {tab ? (
+        {content ?? (tab ? (
           <ViewerBody
             markdownRaw={markdownRaw}
             onClose={onClose}
             onOpenFromHandle={onOpenFromHandle}
-            onQuote={(text) => {
+            onQuote={onQuote ? (text) => {
               onQuote(text);
               // Phone File Viewer covers Composer; return to Chat so the Quote is visible.
               if (!collapsed && onToggleCollapsed && narrowTaskPage()) onToggleCollapsed();
-            }}
+            } : undefined}
             onRawChange={(raw) => setRawByHandle((current) => ({ ...current, [tab.handle]: raw }))}
             onRefresh={onRefresh}
             tab={tab}
           />
-        ) : <div className="file-viewer-fallback">No file selected.</div>}
+        ) : <div className="file-viewer-fallback">No file selected.</div>)}
     </aside>
   );
 }
@@ -277,7 +280,7 @@ function ViewerBody({
   markdownRaw: boolean;
   onClose: (handle: string) => void;
   onOpenFromHandle: (handle: string, href: string) => void;
-  onQuote: (text: string) => void;
+  onQuote?: (text: string) => void;
   onRawChange: (raw: boolean) => void;
   onRefresh: (handle: string) => void;
   tab: FileViewerTab;
@@ -345,60 +348,9 @@ function ViewerBody({
   );
 }
 
-function SourceView({ onQuote, tab }: { onQuote: (text: string) => void; tab: FileViewerSnapshot }) {
-  const text = tab.text ?? "";
-  const lines = useMemo(() => text.split("\n"), [text]);
-  const highlighted = useMemo(() => highlightFileViewerLines(text, tab.language), [tab.language, text]);
-  useEffect(() => {
-    if (!tab.focusLine) return;
-    document.querySelector(".file-viewer-line[data-focus='true']")?.scrollIntoView({ block: "center" });
-  }, [tab.focusLine, tab.handle]);
-  return (
-    <div className="file-viewer-source" data-language={tab.language}>
-      {lines.map((line, index) => {
-        const lineNumber = index + 1;
-        return (
-          <div className="file-viewer-line" data-focus={tab.focusLine === lineNumber} key={lineNumber}>
-            <span className="file-viewer-gutter">
-              {lineNumber}
-              <QuoteLineButton displayPath={tab.displayPath} lineNumber={lineNumber} lineText={line} onQuote={onQuote} />
-            </span>
-            <span className="file-viewer-code">
-              {highlighted[index]?.map((span, spanIndex) => (
-                span.className
-                  ? <span className={span.className} key={spanIndex}>{span.text}</span>
-                  : <Fragment key={spanIndex}>{span.text}</Fragment>
-              ))}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function QuoteLineButton({
-  displayPath,
-  lineNumber,
-  lineText,
-  onQuote,
-}: {
-  displayPath: string;
-  lineNumber: number;
-  lineText: string;
-  onQuote: (text: string) => void;
-}) {
-  return (
-    <button
-      aria-label={`Quote line ${lineNumber}`}
-      className="file-viewer-quote"
-      onClick={() => onQuote(`${displayPath}:${lineNumber}\n${lineText}`)}
-      title="Quote line"
-      type="button"
-    >
-      <Reply aria-hidden="true" size={11} />
-    </button>
-  );
+function SourceView({ onQuote, tab }: { onQuote?: (text: string) => void; tab: FileViewerSnapshot }) {
+  const lines = useMemo(() => (tab.text ?? "").split("\n").map((text, index) => ({ kind: "context", text, oldLine: null, newLine: index + 1 })), [tab.text]);
+  return <FileCodeReader lines={lines} path={tab.displayPath} language={tab.language} focusLine={tab.focusLine} onQuote={onQuote} />;
 }
 
 function narrowTaskPage() {
