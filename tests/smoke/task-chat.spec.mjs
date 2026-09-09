@@ -1282,6 +1282,11 @@ async function openPreparedNewTask(page) {
   }
   await expect(page.getByRole("textbox", { name: "Message" }))
     .toHaveAttribute("contenteditable", "plaintext-only");
+  // Drafting is allowed before preparation finishes. Wait for the fixture's live
+  // session catalog before clicking controls whose capabilities are still loading.
+  const mode = page.getByRole("button", { name: /^(Balanced|Verbose)$/ });
+  await expect(mode).toBeVisible();
+  await expect(mode).toBeEnabled();
   await expect(page.getByLabel("Send message")).toBeDisabled();
 }
 
