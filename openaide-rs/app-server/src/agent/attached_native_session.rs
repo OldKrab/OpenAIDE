@@ -6,6 +6,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_active_prompt::PromptSettlementState;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwner;
+use crate::agent::acp_process_lifetime::{AcpProcessLifetime, ProcessOperation};
 use crate::agent::acp_schema::InitializeResponse;
 use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
 use crate::agent::acp_session_opening::OpenedAcpSession;
@@ -38,6 +39,7 @@ pub(super) struct AttachedNativeSessionRunInput {
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
     pub(super) session_idle_timeout: Duration,
+    pub(super) process_lifetime: AcpProcessLifetime,
 }
 
 /// Process-local handle to one live Native Session attachment.
@@ -52,6 +54,7 @@ pub(super) struct AttachedNativeSession {
     close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
     terminal_error: Arc<Mutex<Option<String>>>,
     terminal_owner: AcpTerminalOwner,
+    process_lifetime: AcpProcessLifetime,
     prompt_lifecycle: Arc<PromptLifecycle>,
 }
 
@@ -63,6 +66,7 @@ impl AttachedNativeSession {
         close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
         terminal_error: Arc<Mutex<Option<String>>>,
         terminal_owner: AcpTerminalOwner,
+        process_lifetime: AcpProcessLifetime,
     ) -> Self {
         Self {
             command_tx,
@@ -71,6 +75,7 @@ impl AttachedNativeSession {
             close_tx,
             terminal_error,
             terminal_owner,
+            process_lifetime,
             prompt_lifecycle: Arc::default(),
         }
     }
@@ -99,6 +104,7 @@ impl AttachedNativeSession {
     /// This does not contact the Agent. The session event loop owns the snapshot
     /// and serializes it with updates from the shared ACP connection.
     pub(super) fn snapshot(&self) -> Result<AgentSession, RuntimeError> {
+        let _process_operation = self.acquire_process()?;
         if self.has_terminal_error() {
             return Err(self.attachment_stopped_error());
         }
@@ -116,6 +122,7 @@ impl AttachedNativeSession {
         &self,
         request: AgentSessionLoad,
     ) -> Result<AgentLoadedSession, RuntimeError> {
+        let _process_operation = self.acquire_process()?;
         if request.cancellation.is_cancelled() {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
         }
@@ -151,6 +158,7 @@ impl AttachedNativeSession {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<AgentPromptOutcome, RuntimeError> {
+        let process_operation = self.acquire_process()?;
         let cancellation = prompt.cancellation.clone();
         let task_id = prompt.task_id.clone();
         let session_id = prompt.session_id.clone();
@@ -288,7 +296,7 @@ impl AttachedNativeSession {
                 prompt,
                 sink,
                 done_tx,
-                request_guard: admission.request,
+                request_guard: admission.request.with_process_operation(process_operation),
             })
             .is_err()
         {
@@ -391,7 +399,11 @@ impl AttachedNativeSession {
         if self.has_terminal_error() {
             return Err(self.attachment_stopped_error());
         }
-        let request_guard = self.prompt_lifecycle.register_steering_request()?;
+        let operation = self.acquire_process()?;
+        let request_guard = self
+            .prompt_lifecycle
+            .register_steering_request()?
+            .with_process_operation(operation);
         self.command_tx
             .send(AcpSessionCommand::Steer {
                 prompt,
@@ -408,6 +420,7 @@ impl AttachedNativeSession {
         value: ConfigOptionCurrentValue,
         operation_id: String,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
+        let _process_operation = self.acquire_process()?;
         let started_at = Instant::now();
         let (reply_tx, reply_rx) = mpsc::channel();
         let queued_at = Instant::now();
@@ -470,6 +483,7 @@ impl AttachedNativeSession {
     }
 
     pub(super) fn close(&self) -> Result<(), RuntimeError> {
+        let _process_operation = self.acquire_process()?;
         let cleanup_result = self.terminal_owner.close();
         let (reply_tx, reply_rx) = mpsc::channel();
         self.close_tx
@@ -482,6 +496,7 @@ impl AttachedNativeSession {
     }
 
     pub(super) fn delete(&self) -> Result<(), RuntimeError> {
+        let _process_operation = self.acquire_process()?;
         let cleanup_result = self.terminal_owner.close();
         let (reply_tx, reply_rx) = mpsc::channel();
         self.command_tx
@@ -493,6 +508,12 @@ impl AttachedNativeSession {
         cleanup_result.and(delete_result)
     }
 
+    fn acquire_process(&self) -> Result<ProcessOperation, RuntimeError> {
+        self.process_lifetime
+            .acquire()
+            .ok_or_else(|| self.attachment_stopped_error())
+    }
+
     fn attachment_stopped_error(&self) -> RuntimeError {
         attachment_stopped_error(&self.terminal_error)
     }
@@ -502,7 +523,9 @@ impl AttachedNativeSession {
     /// Individual Native Session attachments share an Agent process, so their receiver can disappear
     /// without setting the process-wide terminal error.
     pub(super) fn is_running(&self) -> bool {
-        !self.has_terminal_error() && !self.command_tx.is_closed()
+        !self.process_lifetime.is_stopping()
+            && !self.has_terminal_error()
+            && !self.command_tx.is_closed()
     }
 
     fn has_terminal_error(&self) -> bool {
@@ -555,6 +578,7 @@ impl PromptLifecycle {
                             lifecycle: self.clone(),
                             generation_id,
                             settlement,
+                            process_operation: None,
                         },
                     }));
                 }
@@ -598,6 +622,7 @@ impl PromptLifecycle {
             lifecycle: self.clone(),
             generation_id: generation.id,
             settlement: generation.settlement.clone(),
+            process_operation: None,
         })
     }
 
@@ -655,12 +680,18 @@ impl Drop for PromptSettlementGuard {
 
 /// Tags an ACP response waiter so a late response cannot mutate a newer prompt generation.
 pub(super) struct PromptRequestGuard {
+    process_operation: Option<ProcessOperation>,
     lifecycle: Arc<PromptLifecycle>,
     generation_id: u64,
     settlement: Arc<PromptSettlementState>,
 }
 
 impl PromptRequestGuard {
+    fn with_process_operation(mut self, operation: ProcessOperation) -> Self {
+        self.process_operation = Some(operation);
+        self
+    }
+
     pub(super) fn settlement_state(&self) -> Arc<PromptSettlementState> {
         self.settlement.clone()
     }

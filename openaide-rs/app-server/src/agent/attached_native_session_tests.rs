@@ -70,6 +70,7 @@ fn prompt_returns_terminal_error_while_attachment_reply_is_pending() {
         close_tx,
         terminal_error.clone(),
         terminal_owner(),
+        crate::agent::acp_process_lifetime::AcpProcessLifetime::new(Default::default()),
     );
     let error_writer = terminal_error.clone();
 

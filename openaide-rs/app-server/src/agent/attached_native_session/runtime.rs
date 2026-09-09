@@ -44,6 +44,7 @@ pub(super) async fn run(
         trace,
         session_event_sinks,
         session_idle_timeout,
+        process_lifetime,
     } = runtime;
     let OpenedAcpSession {
         mut active_session,
@@ -319,6 +320,9 @@ pub(super) async fn run(
                 );
             }
             () = &mut idle_deadline, if supports_session_close && idle_close_eligible => {
+                // Autonomous cleanup has no external caller guard. Retain the
+                // process until this request completes or its own deadline expires.
+                let Some(_operation) = process_lifetime.acquire() else { break };
                 config_requests.abandon();
                 let idle_session_id = active_session.session_id().clone();
                 crate::logging::info(

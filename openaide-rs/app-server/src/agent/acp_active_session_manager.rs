@@ -75,6 +75,11 @@ impl AcpActiveSessionManager {
     }
 
     #[cfg(test)]
+    pub(super) fn with_process_idle_timeouts(&mut self, short: Duration, long: Duration) {
+        self.processes.with_process_idle_timeouts(short, long);
+    }
+
+    #[cfg(test)]
     pub(super) fn with_list_timeout(&mut self, timeout: Duration) {
         self.processes.with_list_timeout(timeout);
     }
@@ -314,6 +319,7 @@ impl AcpActiveSessionManager {
                 close_tx,
                 process_session.terminal_error,
                 process_session.terminal_owner,
+                process_session.lifetime,
             );
             self.sessions
                 .insert_started_session(started.session.key(), session_attachment)?;

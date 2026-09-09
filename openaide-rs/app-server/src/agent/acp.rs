@@ -89,6 +89,16 @@ impl AcpAgentRuntime {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_process_idle_timeouts(
+        mut self,
+        short: std::time::Duration,
+        long: std::time::Duration,
+    ) -> Self {
+        self.kernel.with_process_idle_timeouts(short, long);
+        self
+    }
+
+    #[cfg(test)]
     fn with_list_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.kernel.with_list_timeout(timeout);
         self
