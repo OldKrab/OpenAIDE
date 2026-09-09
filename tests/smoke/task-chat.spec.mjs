@@ -118,7 +118,11 @@ test("keeps User message navigation clear of the persistent Plan", async ({ page
   await send(page, "A second User message makes navigation available beside Plan.");
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
-  const geometry = await page.locator(".task-conversation").evaluate((conversation) => {
+  const conversation = page.locator(".task-conversation");
+  // Idle may still describe the previous turn before the second Send is projected.
+  await expect(conversation.locator(".user-message-navigator")).toBeVisible();
+  await expect(conversation.locator(".task-plan-column .agent-plan")).toBeVisible();
+  const geometry = await conversation.evaluate((conversation) => {
     const railBounds = conversation.querySelector(".user-message-navigator")?.getBoundingClientRect();
     const planBounds = conversation.querySelector(".task-plan-column .agent-plan")?.getBoundingClientRect();
     if (!railBounds || !planBounds) throw new Error("Wide Chat ancillary geometry is incomplete.");
