@@ -8895,8 +8895,9 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
     record.agent_session_id = Some("session-a".to_string());
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
+    let response_barrier = Arc::new(std::sync::Barrier::new(2));
     let agent = Arc::new(RecordingAgent {
-        block_set_config: AtomicBool::new(true),
+        set_config_response_barrier: Some(response_barrier.clone()),
         ..RecordingAgent::default()
     });
     let api = TaskProductApi::new(
@@ -8909,21 +8910,16 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
     .unwrap();
     set_live_config_catalog(&store, "task-existing", config_catalog("gpt-5"));
     let setting_api = api.clone();
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-
-    std::thread::spawn(move || {
-        result_tx
-            .send(
-                setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
-                    task_id: "task-existing".into(),
-                    config_id: "model".into(),
-                    value: protocol_config_id("gpt-5.5"),
-                    client_mutation_id: "superseded-change".into(),
-                }),
-            )
-            .unwrap();
+    let setting = std::thread::spawn(move || {
+        setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
+            task_id: "task-existing".into(),
+            config_id: "model".into(),
+            value: protocol_config_id("gpt-5.5"),
+            client_mutation_id: "superseded-change".into(),
+        })
     });
-    wait_until(|| agent.session_config_updates.lock().unwrap().len() == 1);
+    // The response catalog is captured; hold its return until both newer events land.
+    response_barrier.wait();
     let session_events = crate::tasks::turn_events::TaskSessionEventSink::new(
         api.mutations.clone(),
         "task-existing".to_string(),
@@ -8936,12 +8932,8 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
     session_events
         .config_options_changed(config_catalog("gpt-5.2"))
         .unwrap();
-    agent.block_set_config.store(false, Ordering::SeqCst);
-
-    let snapshot = result_rx
-        .recv_timeout(Duration::from_millis(250))
-        .expect("the superseded config request should reconcile")
-        .unwrap();
+    response_barrier.wait();
+    let snapshot = setting.join().expect("config worker panicked").unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
     assert_eq!(
@@ -9442,6 +9434,7 @@ struct RecordingAgent {
     block_close: AtomicBool,
     block_resume: AtomicBool,
     block_set_config: AtomicBool,
+    set_config_response_barrier: Option<Arc<std::sync::Barrier>>,
     config_requires_active_session: bool,
     resumed_session_active: AtomicBool,
     config_catalog: Option<ConfigOptionsCatalog>,
@@ -9877,6 +9870,11 @@ impl AgentRuntime for RecordingAgent {
             }
             ConfigOptionCurrentValue::Boolean { value } => boolean_config_catalog(value),
         };
+        if let Some(barrier) = &self.set_config_response_barrier {
+            // Rendezvous after capturing the response, then wait for the test to release it.
+            barrier.wait();
+            barrier.wait();
+        }
         while self.block_set_config.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }

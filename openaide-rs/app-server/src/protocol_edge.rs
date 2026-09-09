@@ -513,3 +513,5 @@ fn probe_lifecycle(state: LifecycleState) -> ClientProbeLifecycle {
 
 #[cfg(test)]
 mod tests;
+
+mod project_file_handlers;

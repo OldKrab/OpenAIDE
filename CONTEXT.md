@@ -77,7 +77,7 @@ An editable `>`-prefixed quotation inserted into the Composer from selected visi
 _Avoid_: Reply, Reply Reference, source metadata
 
 **File Quote**:
-An editable `>`-prefixed quotation inserted into the Composer from a selected File Viewer line, including that file's display path, line location, and captured line text as ordinary User text.
+An editable `>`-prefixed quotation inserted into the Composer from selected File Viewer text or lines, including the file display path, source line range or HEAD/working-copy diff locations, and captured text as ordinary User text.
 _Avoid_: Persisted Comment, review thread, live line anchor
 
 **Queued Message**:
@@ -157,15 +157,18 @@ A lightweight OpenAIDE record for a user work area, such as a folder, workspace,
 _Avoid_: Git remote or shell-specific workspace identity as the primary identity
 
 **Task Page**:
-The main user-facing page for one Task's Chat, composer, permissions, folded activity, and Task Panel.
+The main user-facing page for one Task's Chat, Composer, permissions, folded activity, and Project files destination.
 _Avoid_: Squeezing the main work surface into Task Navigation
 
 **Task Panel**:
-The Task Page column beside Chat for inspectable surfaces. File Viewer is the v1 occupant; later surfaces can use the same column without becoming a separate Task Page.
+The former Task Page column beside Chat. Project files replaces its File Viewer presentation; it is not a second simultaneous file surface.
 _Avoid_: Files panel as the column name, treating File Viewer as that column's only possible occupant, a second Task Page
 
+**Project files**:
+The Web/Desktop Task Page destination for workspace directory browsing, filename/content search, and read-only working-change review through the existing File Viewer. VS Code uses its native file navigation and editor.
+
 **File Viewer**:
-A read-only surface in the Task Panel that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface. On a wide Task Page it shares the page with Chat and Composer; on a narrow Task Page the Task Panel occupies the page until Chat is restored.
+A read-only reader in Project files that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface. It shares the wide Project files destination with the navigator. On narrow screens users move between list and reader. Back to conversation restores the mounted Chat and Composer draft.
 _Avoid_: Treating a browser download or file-manager reveal as the File Viewer, live editor, global editor pane, naming the Task Panel after files
 
 **File Tab**:

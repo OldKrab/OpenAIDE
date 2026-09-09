@@ -10,7 +10,8 @@ use openaide_app_server_protocol::methods::{
     CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE, CLIENT_UPDATE_SHUTDOWN_ABORT,
     CLIENT_UPDATE_SHUTDOWN_COMMIT, CLIENT_UPDATE_SHUTDOWN_PREPARE,
     DIAGNOSTICS_CREATE_SUPPORT_EXPORT, DIAGNOSTICS_GET_RUNTIME, DIAGNOSTICS_LIST_SUPPORT_EXPORT,
-    FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE,
+    FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN,
+    FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE, FILE_VIEWER_SEARCH,
     MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED,
     MCP_UPDATE_SERVER, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_FORK, NATIVE_SESSION_RESTORE,
     NATIVE_SESSION_SET_PINNED, NATIVE_SESSION_SET_TITLE, PENDING_REQUEST_RESOLVE, PROJECT_ADD,
@@ -357,6 +358,18 @@ impl RpcGateway {
             TASK_CLOSE_PLAN => self.handle_task_close_plan(connection_id, id, params, meta),
             TASK_TOOL_IMAGE_PREVIEW => {
                 self.handle_task_tool_image_preview(connection_id, id, params, meta)
+            }
+            FILE_VIEWER_LIST_DIRECTORY
+            | FILE_VIEWER_SEARCH
+            | FILE_VIEWER_CHANGES
+            | FILE_VIEWER_DIFF => {
+                match self.prepare_project_files(&connection_id, &method, params) {
+                    Ok(read) => {
+                        let result = read.run(&id, &meta);
+                        self.result(connection_id, id, meta, result)
+                    }
+                    Err(error) => self.error(connection_id, id, meta, error),
+                }
             }
             FILE_VIEWER_OPEN => self.handle_file_viewer_open(connection_id, id, params, meta),
             FILE_VIEWER_OPEN_FROM_HANDLE => {
