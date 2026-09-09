@@ -101,6 +101,30 @@ test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page
     && tabBox.y < previewBox.y + previewBox.height
     && previewBox.y < tabBox.y + tabBox.height;
   expect(overlap, "Preview overlapped the File Tab").toBe(false);
+  // Measure actual wrapped text boxes: preview prose needs visible leading between lines.
+  for (const tag of ["p", "li"]) {
+    const gaps = await fileViewer.locator(`.file-viewer-markdown ${tag}`).evaluateAll(elements => {
+      return elements.filter(element => !element.childElementCount).flatMap(element => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const lines = new Map();
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          for (let offset = 0; offset < node.textContent.length; offset++) {
+            if (!node.textContent[offset].trim()) continue;
+            const range = document.createRange();
+            range.setStart(node, offset);
+            range.setEnd(node, offset + 1);
+            const rect = range.getBoundingClientRect();
+            if (rect.height) lines.set(rect.top, Math.max(lines.get(rect.top) ?? 0, rect.bottom));
+          }
+        }
+        const rows = [...lines].sort((a, b) => a[0] - b[0]);
+        return rows.slice(1).map((row, index) => row[0] - rows[index][1]);
+      });
+    });
+    expect(gaps.length, `Expected wrapped ${tag} text`).toBeGreaterThan(0);
+    expect(Math.min(...gaps), `Cramped Markdown ${tag} lines`).toBeGreaterThanOrEqual(3);
+  }
   await page.screenshot({ path: path.join(shots, "phone-file-open.png") });
 
   await fileViewer.getByRole("button", { name: "Show raw Markdown" }).click();
