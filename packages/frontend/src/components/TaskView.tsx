@@ -35,9 +35,9 @@ import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
 import { AgentFileOpenContext } from "./agentFileOpen";
+import { ProjectFileWorkspace } from "./ProjectFileWorkspace";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
-import { FileViewerPanel, TaskPanelToggle } from "./FileViewerPanel";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
 import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
 import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
@@ -228,15 +228,33 @@ export function TaskView({
 }) {
   const quoteRequestSequence = useRef(0);
   const [quoteRequest, setQuoteRequest] = useState<{ id: number; taskId: string; text: string }>();
+  const [projectFilesOpen, setProjectFilesOpen] = useState(false);
+  const [projectFileRequest, setProjectFileRequest] = useState<{ taskId: string; path: string; line?: number; sequence: number }>();
+  const [projectFilesShortcut, setProjectFilesShortcut] = useState<{ mode: "files" | "search"; sequence: number }>();
+  useEffect(() => setProjectFilesOpen(false), [snapshot.task.task_id]);
   const fileViewerEnabled = currentFrontendShell()?.fileViewer === true && fileViewerConnection !== undefined;
   const fileViewer = useTaskFileViewer({
     connection: fileViewerEnabled ? fileViewerConnection : undefined,
     enabled: fileViewerEnabled,
+    workspaceRoot: snapshot.task.workspace_root,
     taskId: snapshot.task.task_id,
   });
+  useEffect(() => {
+    if (!fileViewerEnabled || projectFilesOpen) return;
+    const openFiles = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() !== "p" && !(event.shiftKey && event.key.toLowerCase() === "f")) return;
+      event.preventDefault();
+      setProjectFilesShortcut(previous => ({ mode: event.key.toLowerCase() === "p" ? "files" : "search", sequence: (previous?.sequence ?? 0) + 1 }));
+      setProjectFilesOpen(true);
+    };
+    window.addEventListener("keydown", openFiles);
+    return () => window.removeEventListener("keydown", openFiles);
+  }, [fileViewerEnabled, projectFilesOpen]);
   const openAgentFile = useCallback((path: string, line?: number) => {
-    void fileViewer.openPath(path, line);
-  }, [fileViewer.openPath]);
+    setProjectFilesOpen(true);
+    setProjectFileRequest(previous => ({ taskId: snapshot.task.task_id, path, line, sequence: (previous?.sequence ?? 0) + 1 }));
+  }, [snapshot.task.task_id]);
   const queueOverlayRef = useCallback((node: HTMLDivElement | null) => (
     node ? installTaskQueueOverlayClearance(node) : undefined
   ), []);
@@ -526,10 +544,7 @@ export function TaskView({
       aria-label="Task chat"
       className="task-surface task-work-stack"
       data-desktop-window={desktopWindow?.platform}
-      data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
-      style={fileViewer.visible
-        ? { ["--task-panel-ratio" as string]: String(fileViewer.splitRatio) }
-        : undefined}
+      data-project-files={projectFilesOpen}
     >
       <div className="task-work-stack-header">
         <TaskHeader
@@ -573,17 +588,10 @@ export function TaskView({
               <small>{completedPlanSteps}/{visiblePlan.entries.length}</small>
             </button>
           ) : null}
-          <TaskPanelToggle
-            collapsed={fileViewer.collapsed}
-            onToggle={() => fileViewer.setCollapsed(!fileViewer.collapsed)}
-            visible={fileViewer.visible && fileViewer.collapsed}
-          />
+          {fileViewerEnabled && <button className="project-files-entry" aria-expanded={projectFilesOpen} onClick={() => setProjectFilesOpen(true)}>Project files</button>}
         </div>
       </div>
-      <div
-        className="task-workbench"
-        data-file-viewer={fileViewer.visible ? (fileViewer.collapsed ? "collapsed" : "open") : undefined}
-      >
+      <div className="task-workbench">
         <div className="chat-column task-conversation">
         {visiblePlan ? (
           <aside aria-label="Current plan" className="task-plan-column">
@@ -733,19 +741,16 @@ export function TaskView({
         )}
         </div>
       </div>
-      <FileViewerPanel
-        collapsed={fileViewer.collapsed}
-        onClose={fileViewer.closeTab}
-        onOpenFromHandle={fileViewer.openFromHandle}
-        onQuote={quoteAvailable ? requestQuote : () => undefined}
-        onRefresh={(handle) => void fileViewer.refresh(handle)}
-        onSelect={fileViewer.selectTab}
-        onSplitRatio={fileViewer.setSplitRatio}
-        onToggleCollapsed={() => fileViewer.setCollapsed(!fileViewer.collapsed)}
-        splitRatio={fileViewer.splitRatio}
-        tab={fileViewer.activeTab}
-        tabs={fileViewer.tabs}
-      />
+      {fileViewerEnabled && fileViewerConnection && <ProjectFileWorkspace
+        key={`${snapshot.task.task_id}:${snapshot.task.workspace_root}`}
+        connection={fileViewerConnection} taskId={snapshot.task.task_id} workspaceRoot={snapshot.task.workspace_root}
+        worktreeName={snapshot.task.worktree_name} gitRef={snapshot.task.git_ref}
+        viewer={fileViewer} visible={projectFilesOpen} shortcutMode={projectFilesShortcut}
+        fileRequest={projectFileRequest?.taskId === snapshot.task.task_id ? projectFileRequest : undefined}
+        onBack={() => { setProjectFilesOpen(false); requestAnimationFrame(() => document.querySelector<HTMLElement>(".project-files-entry")?.focus()); }}
+        onQuote={quoteAvailable ? text => { requestQuote(text); setProjectFilesOpen(false); requestAnimationFrame(() => document.querySelector<HTMLElement>(".task-conversation [role=textbox]")?.focus()); } : undefined}
+      />}
+
       {visiblePlan ? (
         <>
           <div

@@ -11,6 +11,7 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_millis(750);
 
 mod http;
 mod uploads;
+mod viewer_downloads;
 
 use http::{
     read_http_request, write_event_stream_data, write_event_stream_headers,
@@ -281,6 +282,9 @@ fn handle_file_download(
     request: LocalHttpRequest,
 ) -> Result<(), LocalHttpProbeListenerError> {
     let target = request.target.as_str();
+    if let Some(handle) = query_value(target, "fileViewerHandle") {
+        return viewer_downloads::download(stream, handler, &request, &handle);
+    }
     if let Some(file_handle_id) = query_value(target, "fileHandleId") {
         let resolved = match handler.resolve_file_handle(
             request.authorization.as_deref(),

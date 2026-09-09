@@ -12,6 +12,11 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+/* Markdown keeps the same reading rhythm in Chat and in file previews. */
+.chat-agent,
+.file-viewer-markdown {
   font-family: var(--oa-chat-font);
   font-size: 15px;
   line-height: 1.5;
@@ -138,42 +143,42 @@
   .chat-streaming-caret { animation: none; }
 }
 
-.chat-agent > :first-child {
+:is(.chat-agent, .file-viewer-markdown) > :first-child {
   margin-top: 0;
 }
 
-.chat-agent > :last-child {
+:is(.chat-agent, .file-viewer-markdown) > :last-child {
   margin-bottom: 0;
 }
 
-.chat-agent p,
-.chat-agent ul,
-.chat-agent ol,
-.chat-agent blockquote,
-.chat-agent pre,
-.chat-agent table {
+:is(.chat-agent, .file-viewer-markdown) p,
+:is(.chat-agent, .file-viewer-markdown) ul,
+:is(.chat-agent, .file-viewer-markdown) ol,
+:is(.chat-agent, .file-viewer-markdown) blockquote,
+:is(.chat-agent, .file-viewer-markdown) pre,
+:is(.chat-agent, .file-viewer-markdown) table {
   margin: 0 0 7px;
 }
 
-.chat-agent ul {
+:is(.chat-agent, .file-viewer-markdown) ul {
   padding-inline-start: 20px;
 }
 
-.chat-agent ol {
+:is(.chat-agent, .file-viewer-markdown) ol {
   /* Keep multi-digit counters inside the horizontally scrollable transcript. */
   padding-inline-start: 2.4em;
 }
 
-.chat-agent li {
+:is(.chat-agent, .file-viewer-markdown) li {
   margin: 2px 0;
 }
 
-.chat-agent a {
+:is(.chat-agent, .file-viewer-markdown) a {
   color: var(--oa-focus);
   text-decoration: none;
 }
 
-.chat-agent a:hover {
+:is(.chat-agent, .file-viewer-markdown) a:hover {
   text-decoration: underline;
 }
 
@@ -351,12 +356,12 @@
   font-family: var(--oa-ui-font);
 }
 
-.chat-agent strong {
+:is(.chat-agent, .file-viewer-markdown) strong {
   color: var(--oa-text);
   font-weight: 600;
 }
 
-.chat-agent code {
+:is(.chat-agent, .file-viewer-markdown) code {
   border-radius: var(--oa-radius-sm);
   background: color-mix(in oklch, var(--oa-panel) 82%, var(--oa-bg));
   color: var(--oa-text);
@@ -365,11 +370,11 @@
   padding: 1px 4px;
 }
 
-.chat-agent :not(pre) > code {
+:is(.chat-agent, .file-viewer-markdown) :not(pre) > code {
   overflow-wrap: anywhere;
 }
 
-.chat-agent pre {
+:is(.chat-agent, .file-viewer-markdown) pre {
   max-width: 100%;
   overflow: auto;
   overflow-wrap: anywhere;
@@ -379,7 +384,7 @@
   white-space: pre-wrap;
 }
 
-.chat-agent pre code {
+:is(.chat-agent, .file-viewer-markdown) pre code {
   background: transparent;
   padding: 0;
 }
@@ -434,7 +439,7 @@
   padding-right: 30px;
 }
 
-.chat-agent blockquote {
+:is(.chat-agent, .file-viewer-markdown) blockquote {
   border-left: 1px solid var(--oa-border);
   /* Keep quotes secondary without inheriting an unreadably dim host description color. */
   background: transparent;
@@ -442,22 +447,22 @@
   padding-left: 10px;
 }
 
-.chat-agent table {
+:is(.chat-agent, .file-viewer-markdown) table {
   width: 100%;
   max-width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-.chat-agent th,
-.chat-agent td {
+:is(.chat-agent, .file-viewer-markdown) th,
+:is(.chat-agent, .file-viewer-markdown) td {
   border: 1px solid var(--oa-border);
   padding: 4px 7px;
   text-align: left;
   overflow-wrap: anywhere;
 }
 
-.chat-agent th {
+:is(.chat-agent, .file-viewer-markdown) th {
   background: color-mix(in oklch, var(--oa-panel) 86%, var(--oa-bg));
   font-weight: 600;
 }

@@ -134,13 +134,14 @@ describe("task list row styles", () => {
   });
 
   it("lets agent markdown use the full readable chat lane", () => {
-    expect(appCss).toMatch(/\.chat-agent\s*{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*min-width:\s*0;[^}]*font-family:\s*var\(--oa-chat-font\);[^}]*font-size:\s*15px;[^}]*line-height:\s*1\.5;/);
-    expect(appCss).toMatch(/\.chat-agent a\s*{\s*color:\s*var\(--oa-focus\);/);
-    expect(appCss).toMatch(/\.chat-agent code\s*{[^}]*font-family:\s*var\(--oa-mono-font\);/);
-    expect(appCss).toMatch(/\.chat-agent :not\(pre\) > code\s*{[^}]*overflow-wrap:\s*anywhere;/);
-    expect(appCss).toMatch(/\.chat-agent blockquote\s*{[^}]*background:\s*transparent;/);
-    expect(appCss).toMatch(/\.chat-agent table\s*{[^}]*width:\s*100%;[^}]*table-layout:\s*fixed;/);
-    expect(appCss).toMatch(/\.chat-agent th,\s*\.chat-agent td\s*{[^}]*overflow-wrap:\s*anywhere;/);
+    expect(appCss).toMatch(/\.chat-agent\s*{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*min-width:\s*0;/);
+    expect(appCss).toMatch(/\.chat-agent,\s*\.file-viewer-markdown\s*{[^}]*font-family:\s*var\(--oa-chat-font\);[^}]*font-size:\s*15px;[^}]*line-height:\s*1\.5;/);
+    expect(appCss).toMatch(/:is\(\.chat-agent, \.file-viewer-markdown\) a\s*{\s*color:\s*var\(--oa-focus\);/);
+    expect(appCss).toMatch(/:is\(\.chat-agent, \.file-viewer-markdown\) code\s*{[^}]*font-family:\s*var\(--oa-mono-font\);/);
+    expect(appCss).toMatch(/:is\(\.chat-agent, \.file-viewer-markdown\) :not\(pre\) > code\s*{[^}]*overflow-wrap:\s*anywhere;/);
+    expect(appCss).toMatch(/:is\(\.chat-agent, \.file-viewer-markdown\) blockquote\s*{[^}]*background:\s*transparent;/);
+    expect(appCss).toMatch(/:is\(\.chat-agent, \.file-viewer-markdown\) table\s*{[^}]*width:\s*100%;[^}]*table-layout:\s*fixed;/);
+    expect(appCss).toMatch(/:is\(\.chat-agent, \.file-viewer-markdown\) th,\s*:is\(\.chat-agent, \.file-viewer-markdown\) td\s*{[^}]*overflow-wrap:\s*anywhere;/);
   });
 
   it("keeps authored messages distinct on the right side of the chat column", () => {

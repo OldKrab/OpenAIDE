@@ -1,3 +1,4 @@
+use crate::project_files::*;
 use crate::snapshot::{AgentConfigPreferencesSnapshot, AgentConfigPreferencesState};
 use crate::task::{
     ConfigPreferencesResolution, TaskResolveConfigPreferencesParams,
@@ -490,6 +491,12 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskClosePlanResult>(output, config);
     push_decl::<TaskToolImagePreviewParams>(output, config);
     push_decl::<TaskToolImagePreviewResult>(output, config);
+    push_decl::<ProjectFilesParams>(output, config);
+    push_decl::<ProjectFilesResult>(output, config);
+    push_decl::<ProjectFileEntry>(output, config);
+    push_decl::<ProjectFileDiff>(output, config);
+    push_decl::<ProjectDiffHunk>(output, config);
+    push_decl::<ProjectDiffLine>(output, config);
     push_decl::<FileViewerOpenParams>(output, config);
     push_decl::<FileViewerOpenFromHandleParams>(output, config);
     push_decl::<FileViewerRefreshParams>(output, config);
