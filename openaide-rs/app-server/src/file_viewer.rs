@@ -11,7 +11,14 @@ use openaide_app_server_protocol::task::ToolImagePreview;
 use uuid::Uuid;
 
 const TEXT_PREFIX_BYTES: u64 = 1024 * 1024;
-const IMAGE_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+#[path = "file_viewer_image.rs"]
+mod image_preview;
+
+#[cfg(test)]
+pub(crate) fn pause_image_previews_for_test() -> std::sync::MutexGuard<'static, ()> {
+    image_preview::IMAGE_PREVIEW_GATE.lock().unwrap()
+}
 
 #[derive(Clone, Default)]
 pub struct FileViewerRegistry {
@@ -91,6 +98,15 @@ impl FileViewerRegistry {
     pub fn release_client(&self, owner: &ClientInstanceId) {
         let mut inner = self.inner.lock().expect("file viewer registry poisoned");
         inner.targets.retain(|_, target| &target.owner != owner);
+    }
+
+    /// Download resolves the selected path afresh; preview bytes are never the artifact.
+    pub(crate) fn download_path(
+        &self,
+        owner: &ClientInstanceId,
+        handle: &FileViewerHandleId,
+    ) -> Option<PathBuf> {
+        self.target_for(owner, handle).map(|target| target.path)
     }
 
     fn target_for(
@@ -187,6 +203,7 @@ enum LoadedFile {
         label: String,
         media_type: &'static str,
         bytes: Vec<u8>,
+        reduced: bool,
     },
     Binary,
 }
@@ -203,13 +220,7 @@ fn load_path(path: &Path) -> Result<LoadedFile, FileViewerError> {
         .read_to_end(&mut probe)
         .map_err(|_| FileViewerError::Unreadable)?;
     if let Some(media_type) = image_media_type(&probe) {
-        let mut bytes = probe;
-        file.take(IMAGE_MAX_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| FileViewerError::Unreadable)?;
-        if bytes.is_empty() || bytes.len() as u64 > IMAGE_MAX_BYTES {
-            return Err(FileViewerError::Unsupported);
-        }
+        let preview = image_preview::load(file, probe, metadata.len(), media_type)?;
         let label = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -217,8 +228,9 @@ fn load_path(path: &Path) -> Result<LoadedFile, FileViewerError> {
             .to_string();
         return Ok(LoadedFile::Image {
             label,
-            media_type,
-            bytes,
+            media_type: preview.media_type,
+            bytes: preview.bytes,
+            reduced: preview.reduced,
         });
     }
     let mut bytes = probe;
@@ -258,9 +270,11 @@ fn apply_loaded(snapshot: &mut FileViewerSnapshot, loaded: LoadedFile) {
             label,
             media_type,
             bytes,
+            reduced,
         } => {
             let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
             snapshot.kind = FileViewerKind::Image;
+            snapshot.truncated = reduced;
             snapshot.preview = Some(ToolImagePreview {
                 label,
                 media_type: media_type.to_string(),

@@ -38,11 +38,21 @@ export function relativeMarkdownHref(href: string | undefined): string | undefin
 }
 
 /** Chat markdown file links: absolute paths or workspace-relative hrefs, not URLs or fragments. */
-export function chatMarkdownFileLocation(href: string | undefined): AgentFileLocation | undefined {
+export function chatMarkdownFileLocation(href: string | undefined, allFileTypes = false): AgentFileLocation | undefined {
+  if (allFileTypes && href?.startsWith("//")) return undefined;
   const absolute = markdownFileLocation(href);
   if (absolute) return absolute;
   const relative = relativeMarkdownHref(href);
   if (!relative || relative.startsWith("#")) return undefined;
+  // Explicit Web links are user-selected paths, not extension-based guesses as inline code is.
+  if (allFileTypes) {
+    try {
+      const location = splitLineSuffix(decodeURIComponent(relative));
+      return location.path ? location : undefined;
+    } catch {
+      return undefined;
+    }
+  }
   return pathLikeFileLocation(relative);
 }
 

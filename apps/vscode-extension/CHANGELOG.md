@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.2 - 2026-09-07
+
+OpenAIDE 0.5.2
+
+### Fixes
+
+- Reopen Codex conversations with old malformed history records when a later complete permission snapshot is available, preserving the saved restrictions.
+- Recover empty prepared Codex sessions after restart without requiring a manual retry.
+- Fix desktop diagnostics export getting stuck after choosing a destination.
+- Avoid delaying reuse of a live session while background session discovery is running.
+
+### Diagnostics
+
+- Capture failed ACP session responses in opt-in traces and retain safe operation, error-code, and failure-classification metadata in support exports.
+- Record native permission-history recovery outcomes to make future failures easier to diagnose.
+
+## 0.5.1 - 2026-09-06
+
+OpenAIDE 0.5.1
+
+### Agents and sessions
+
+- Sign in and out using supported ACP Agent authentication methods across OpenAIDE apps.
+- Update built-in Codex support for Astra models and Agent-generated Task titles.
+- Preserve native Codex model, reasoning effort, and permissions when reopening or adopting sessions. Unsupported custom permission profiles now stop with an explicit error instead of changing access.
+
+### Chat and navigation
+
+- Jump between User messages with the Chat navigator, with smoother scrolling and fixes for blank frames and narrow-screen layout.
+- Keep the composer usable with many attachments, and preserve drafts and queued attachments through Settings, retries, and interrupted work.
+- Clarify Task status and activity summaries, keep Plan clear of message navigation, and repair diagnostics navigation.
+
+### Reliability and safety
+
+- Recover interrupted Task and Chat writes, migrate older histories without discarding messages or tool details, and reduce child-history write overhead.
+- Fix Agent configuration deadlocks, cancellation and reconnect races, and repeated discovery failures while signed out.
+- Tighten filesystem and process cleanup boundaries, improve credential-storage reliability, and fix Windows App Server file locking during reinstall.
+
 ## 0.4.8 - 2026-09-02
 
 ### Authentication

@@ -1,0 +1,458 @@
+.task-work-stack[data-project-files="true"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.task-work-stack[data-project-files="true"] > .task-workbench {
+  display: none;
+}
+.project-files-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-md);
+  background: transparent;
+  color: var(--oa-text);
+  font: 12px var(--oa-ui-font);
+  cursor: pointer;
+}
+.project-files-entry[aria-expanded="true"] {
+  background: var(--oa-selected);
+  border-color: transparent;
+}
+.project-file-workspace {
+  grid-column: 1/-1;
+  grid-row: 2;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--oa-text);
+  background: var(--oa-bg);
+  font: 13px var(--oa-ui-font);
+}
+.project-file-workspace[hidden] {
+  display: none;
+}
+.project-file-workspace button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.project-file-workspace button:focus-visible,
+.project-file-workspace input:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: -2px;
+}
+.project-files-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  height: 42px;
+  flex: none;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--oa-border);
+}
+.project-files-header button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  padding: 6px;
+  border-radius: var(--oa-radius-sm);
+  font-size: 12px;
+}
+.project-files-header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 30ch;
+  font-size: 13px;
+}
+.project-files-header > span {
+  display: flex;
+  gap: 5px;
+  color: var(--oa-muted);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.project-files-refresh {
+  margin-left: auto;
+}
+.project-files-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+}
+.project-files-navigation {
+  flex: 0 0 var(--project-navigation-width);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--oa-panel);
+}
+.project-files-navigation nav {
+  display: flex;
+  padding: 10px 8px;
+  gap: 2px;
+}
+.project-files-navigation nav button {
+  flex: 1;
+  border: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 3px;
+  background: transparent;
+  border-radius: var(--oa-radius-md);
+  font-size: 12px;
+}
+.project-files-navigation nav button[aria-pressed="true"] {
+  background: var(--oa-selected);
+}
+.project-files-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 10px;
+  padding: 0 7px;
+  height: 32px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-md);
+  color: var(--oa-muted);
+  background: var(--oa-bg);
+}
+.project-files-input input {
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: 12px var(--oa-ui-font);
+  color: var(--oa-text);
+}
+.project-files-input button {
+  border: 0;
+  background: transparent;
+  padding: 2px;
+  font-size: 11px;
+}
+.project-files-input button[aria-pressed="true"] {
+  background: var(--oa-selected);
+}
+.project-files-options {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--oa-muted);
+  margin: 0 10px 8px;
+}
+.project-files-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 12px;
+}
+.project-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 29px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font-size: 12px !important;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.project-file-row svg {
+  flex: none;
+  color: var(--oa-muted);
+}
+.project-file-indent {
+  width: 13px;
+  flex: none;
+}
+.project-file-row[aria-current="page"] {
+  background: var(--oa-selected);
+}
+.project-file-row:hover,
+.project-file-result:hover {
+  background: var(--oa-raised);
+}
+.project-file-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 12px !important;
+}
+.project-file-result > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-file-result small {
+  display: block;
+  color: var(--oa-muted);
+  margin-top: 5px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-files-note,
+.project-files-error {
+  margin: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--oa-muted);
+}
+.project-files-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.project-files-error button,
+.project-files-more {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-sm);
+  padding: 5px 10px;
+}
+.project-files-more {
+  margin: 8px 12px;
+}
+.project-files-resizer {
+  width: 4px;
+  flex: none;
+  cursor: col-resize;
+  border-left: 1px solid var(--oa-border);
+  touch-action: none;
+}
+.project-files-resizer:hover,
+.project-files-resizer:focus-visible {
+  background: var(--oa-focus);
+}
+.project-files-reader {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.project-files-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  flex: none;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--oa-border);
+}
+.project-files-toolbar > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+.project-files-toolbar button {
+  border: 0;
+  background: transparent;
+  border-radius: var(--oa-radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.project-files-toolbar button[aria-pressed="true"] {
+  background: var(--oa-selected);
+}
+.project-files-mobile-back {
+  display: none;
+  align-items: center;
+  gap: 5px;
+}
+.project-files-reader .file-viewer {
+  position: relative !important;
+  inset: auto !important;
+  transform: none !important;
+  contain: none !important;
+  will-change: auto !important;
+  width: 100% !important;
+  height: auto !important;
+  flex: 1;
+  min-height: 0;
+  border: 0 !important;
+  visibility: visible !important;
+  overflow: visible;
+}
+.project-files-reader .task-panel-splitter {
+  display: none;
+}
+.project-files-reader .file-viewer-header:not(:has(.file-viewer-view-mode)) {
+  display: none;
+}
+.project-files-reader .file-viewer-path {
+  display: none;
+}
+.project-files-reader .file-viewer-header:has(.file-viewer-view-mode) {
+  justify-content: flex-end;
+}
+.file-viewer-body:has(> .file-code-reader) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.project-files-diff {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.project-files-diff > p {
+  padding: 12px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+.project-files-empty {
+  margin: auto;
+  text-align: center;
+  max-width: 340px;
+  padding: 30px;
+  color: var(--oa-muted);
+}
+.project-files-empty strong {
+  display: block;
+  color: var(--oa-text);
+  margin-top: 12px;
+}
+@media (max-width: 759px) {
+  .task-work-stack:has(.project-file-workspace) > .task-work-stack-header {
+    display: flex !important;
+  }
+  body[data-shell="web"] .task-work-stack:has(.project-file-workspace) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) !important;
+  }
+  body[data-shell="web"] .task-work-stack:has(.project-file-workspace) > .task-workbench {
+    grid-row: 2;
+    grid-column: 1;
+  }
+  body[data-shell="web"] .task-work-stack:has(.project-file-workspace) > .task-work-stack-header {
+    justify-content: flex-end;
+    min-height: 36px;
+  }
+  body[data-shell="web"] .task-work-stack:has(.project-file-workspace) > .task-work-stack-header .task-header {
+    display: none !important;
+  }
+  .project-files-header {
+    gap: 6px;
+    padding: 0 6px;
+  }
+  .project-files-header strong {
+    max-width: 12ch;
+  }
+  .project-files-header > span {
+    font-size: 10px;
+  }
+  .project-files-body[data-mobile-page="list"] .project-files-reader {
+    display: none;
+  }
+  .project-files-body[data-mobile-page="file"] .project-files-navigation {
+    display: none;
+  }
+  .project-files-navigation {
+    flex: 1;
+  }
+  .project-files-resizer {
+    display: none;
+  }
+  .project-files-mobile-back {
+    display: inline-flex;
+  }
+  .project-file-row {
+    min-height: 36px;
+  }
+  .project-files-input {
+    height: 38px;
+  }
+  .project-files-toolbar {
+    padding: 0 6px;
+  }
+  .project-files-toolbar > span {
+    font-size: 11px;
+  }
+}
+.project-files-toolbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+@media (max-width: 759px) {
+  .project-files-history {
+    display: none;
+  }
+}
+/* Plan belongs to the mounted conversation; retain its disclosure state while browsing. */
+.task-work-stack[data-project-files="true"] > .task-plan-drawer,
+.task-work-stack[data-project-files="true"] > .task-plan-drawer-backdrop {
+  display: none;
+}
+
+.task-work-stack[data-project-files="true"] .task-plan-drawer-trigger {
+  display: none;
+}
+.project-files-reader .file-viewer-frame {
+  display: flex;
+  flex-direction: column;
+}
+.project-files-reader .file-viewer-body {
+  flex: 1;
+}
+.project-files-reader .file-viewer-tab {
+  flex-shrink: 0;
+  max-width: 240px;
+}
+.project-files-reader .file-viewer-tab svg {
+  flex-shrink: 0;
+}
+.project-files-reader .file-viewer-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 759px) {
+  body[data-shell="web"] .task-work-stack[data-project-files="true"] > .task-work-stack-header {
+    display: none !important;
+  }
+  .project-files-header > button:first-child {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .project-files-header > span {
+    display: none;
+  }
+  .project-files-header strong {
+    min-width: 0;
+    max-width: none;
+    flex: 1;
+  }
+}

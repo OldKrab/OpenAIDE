@@ -13,7 +13,7 @@ describe("composer attachment resource lifecycle", () => {
     vi.unstubAllGlobals();
   });
 
-  it("releases the visible draft when navigation unmounts the Task surface", async () => {
+  it("retains the visible draft when navigation unmounts the Task surface", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({ outcomes: [] }));
     const state = stateWithDraft();
@@ -26,15 +26,9 @@ describe("composer attachment resource lifecycle", () => {
       renderer.update(<Probe dispatch={dispatch} request={request as unknown as BackendConnection["request"]} state={state} taskSurfaceMounted={false} />);
     });
 
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
-      taskId: "task-1",
-      resources: [{ kind: "handle", id: "handle-1" }],
-    });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:attachment:remove",
-      taskId: "task-1",
-      attachmentId: "local-handle-1",
-    });
+    expect(request).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    await act(async () => renderer.unmount());
   });
 
   it("retains the hidden New Task attachment across ordinary navigation", async () => {

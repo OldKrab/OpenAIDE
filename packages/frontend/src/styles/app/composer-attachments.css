@@ -1,5 +1,9 @@
 .composer-attachments {
   min-width: 0;
+  min-height: 0;
+  /* Keep large selections scrollable without displacing the editor and Send. */
+  max-height: var(--composer-attachment-height, min(144px, 20dvh));
+  overflow-y: auto;
   display: grid;
   gap: 5px;
 }

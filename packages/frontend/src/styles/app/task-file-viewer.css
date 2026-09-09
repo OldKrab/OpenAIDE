@@ -152,6 +152,20 @@
   padding-inline-end: 2px;
 }
 
+.file-viewer-download-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--oa-text);
+  font-size: 13px;
+}
+
+.file-viewer-download-error span {
+  flex: 1;
+  min-width: 0;
+}
+
 .file-viewer-tabs {
   min-width: 0;
   flex: 1;
@@ -341,6 +355,11 @@
 
 .file-viewer-image .attachment-preview-chrome {
   padding-inline: 8px;
+}
+
+.file-viewer-preview-note {
+  color: var(--oa-muted);
+  font-size: 12px;
 }
 
 .file-viewer-fallback,

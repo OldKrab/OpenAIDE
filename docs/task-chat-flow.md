@@ -329,6 +329,8 @@ Protocol-to-view mapping preserves object identity for unchanged Chat items and 
 
 Thought presentation separates adjacent complete bold Markdown chunks that ACP delivered without whitespace. During Codex `session/load`, the adapter discards an anonymous Agent or Thought text chunk when the identical chunk was already replayed with a native message id. Frontend also hides those anonymous replay copies when presenting history persisted before this normalization.
 
+Web/Desktop also expose **Project files** on the Task Page, independently of Agent output. Its Files, Search, and Changes navigator shares the existing read-only file/tab lifecycle. Opening this destination keeps Chat and the Composer draft mounted; Back to conversation restores them. Wide screens retain navigator and reader; narrow screens navigate list → reader → list. Source/diff text or gutter line selections expose Comment beside the completed selection and insert an editable File Quote into Composer without sending. Archived Tasks remain readable with no Comment action. This accepted expansion is specified in [the Project file access plan](plans/project-file-access.md) and ADRs 0033, 0035, 0038, and 0039.
+
 Agent Markdown links whose targets are absolute filesystem paths, optionally followed by a one-based `:line` suffix, are explicit file-open actions rather than browser navigation. The VS Code App Shell opens a clicked path in the current window and selects the requested line, including when the file is outside the current workspace. This user-triggered editor action does not expand the workspace boundary applied to ACP filesystem or terminal operations. Web URLs retain ordinary external-link behavior.
 
 Task snapshots may contain a bounded Chat tail whose raw Tool and Thought rows collapse into little visible content. On initial presentation, Frontend automatically requests earlier pages while the rendered Chat does not fill the viewport and a bounded automatic-load budget remains. It stops when the viewport is filled, history is exhausted, or that budget is reached; remaining history stays available through **Load earlier**. A failed automatic request is never silently retried against the same cursor.
@@ -471,7 +473,7 @@ App Server persists a deferred reload requirement only when a complete Native Se
 
 While the Task remains open, Frontend presents a persistent inline notice directly above Composer: **This Task may have changed elsewhere.** It explains **Reload to refresh Chat and Agent options.** and offers **Reload**. Composer and Configuration Options remain usable until the user selects that action. The click is explicit approval for a whole-session replacement; no confirmation dialog is required. The user action shares one per-Task lifecycle gate with prompts, steering, Configuration Option mutations, commands, cancellation, Archive, and other session operations. If another operation owns that gate first, Reload does not touch the attachment.
 
-Reload marks controls recovering, detaches the current attachment, sends ACP `session/close` when supported, and creates one replacement attachment through `session/load`. The Agent-returned Chat replay, Configuration Options, commands, title, capabilities, and other session metadata are authoritative and become visible in one Task update. While load runs, Frontend keeps stored Chat and last-known controls visible, locks session controls, and shows **Reloading session**. A successful load clears only the deferred requirement captured when it began and briefly shows `History updated`. A failed load preserves stored Chat and the requirement, marks controls stale when needed, and leaves an explicit retry available.
+Reload marks controls recovering, detaches the current attachment, sends ACP `session/close` when supported, and creates one replacement attachment through `session/load`. The Agent-returned Chat replay, Configuration Options, commands, title, capabilities, and other session metadata are authoritative and become visible in one Task update. While load runs, Frontend keeps stored Chat visible, hides unconfirmed option controls, locks session controls, and shows **Reloading session**. A successful load clears only the deferred requirement captured when it began and briefly shows `History updated`. A failed load preserves stored Chat and the requirement, marks controls stale when needed, and leaves an explicit retry available.
 
 On a later Task open with a deferred reload requirement, App Server uses `session/load` before exposing editable controls. That recovery attempt does not resume first, so it still performs exactly one restore operation. A failed or unsupported load preserves the requirement and never silently falls through to a misleading resume.
 
@@ -559,7 +561,28 @@ The composer and persisted User messages style this syntax without adding click 
 
 ## Options And Slash Commands
 
-Agent-provided catalogs are authoritative Task projections. Frontend caches them for rendering and sends dedicated option-change intents; `task/send` contains neither catalogs nor selected option values. Catalog publication follows [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md).
+Agent-provided catalogs are authoritative Task projections. Frontend holds only the live session catalog for rendering and sends dedicated option-change intents; `task/send` contains neither catalogs nor selected option values. Catalog publication follows [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md).
+
+Option catalogs are process-local and excluded from durable Task storage; legacy stored option catalogs are discarded on hydration. Remembered Agent preferences contain only the last confirmed option values. They are inputs
+for newly created Native Sessions, never a cached catalog or a display fallback. Restoring an
+existing session preserves its own Agent-confirmed settings. A replacement for a confirmed-missing
+empty session is a newly created session and receives preferences.
+
+New Task keeps drafting available while connecting and shows `Connecting to <Agent>…` in the
+option row until the current session supplies its catalog. On recovery, old controls disappear
+until fresh session data arrives. App Server publishes the fresh catalog before applying saved
+preferences. It skips matching values without an Agent mutation and serializes only differing,
+supported values against each latest complete catalog. While applying, the current confirmed
+value remains visible alongside the explicitly pending target (`Medium → High`), every option
+selector and Send stays locked, and the row says `Applying your preferences…`. If all values
+already match, the applying stage is skipped.
+
+Unsupported saved options or values are skipped with a brief notice; session preparation continues.
+A genuine application failure preserves the live confirmed catalog, blocks Send, and offers
+`Retry` or `Use current settings`. These are explicit App Server intents scoped to the client's
+leased Prepared Task; Retry applies only remaining differences, while Use current settings accepts
+the confirmed values without rewriting global preferences. Both actions publish authoritative
+state. No preference application state is restored as a live catalog after restart.
 
 Option changes follow one ordering model:
 
@@ -570,7 +593,7 @@ Option changes follow one ordering model:
 5. A user request superseded by newer Agent state resolves to the newest catalog without a race-only user error.
 6. Visible errors are reserved for genuine transport, setup, authorization, unsupported-operation, or Agent failures.
 
-While an option mutation is pending, Frontend renders the requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and Image actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
+While an option mutation is pending, Frontend renders the confirmed value and the explicitly pending requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and Image actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
 
 Frontend preserves the Agent catalog order in the Composer. It renders the largest leading set of Configuration Options that fits the measured control row and moves only the trailing suffix into a `More · N` menu. Task Workspace is selected in the start-context row with Project and Agent; the old user-selected Isolation control is removed. Narrower App Shells progressively move more Agent controls into the menu instead of replacing the catalog at a fixed breakpoint. Clicking a grouped row opens its value selector in place, while hover only supplies visual affordance. Direct and grouped selectors send the same option-change intent, and a control disappears whenever the next authoritative Agent catalog no longer exposes it.
 

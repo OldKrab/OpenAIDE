@@ -15,12 +15,12 @@ use crate::agent::acp_agent_config::{
 use crate::agent::status_cache::AgentStatusCache;
 use crate::protocol::errors::RuntimeError;
 
-pub(crate) const CODEX_ACP_VERSION: &str = "1.2.0";
-const CODEX_ACP_PACKAGE: &str = "@openaide/codex-acp";
+mod runtime_patch;
+use runtime_patch::{manifest as runtime_manifest, ArtifactDigests};
 const MANAGED_MARKER: &str = ".openaide-managed";
 const DEFAULT_INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
-// Managed installations are reused by adapter version; update that version
-// with the installer manifests when advancing the bundled runtime.
+// The package remains pinned by npm; the embedded patch manifest separately
+// identifies the immutable runtime cache so live upstream installations survive.
 const INSTALLER_PACKAGE_JSON: &str = include_str!("../../assets/codex-acp-runtime/package.json");
 const INSTALLER_PACKAGE_LOCK: &str =
     include_str!("../../assets/codex-acp-runtime/package-lock.json");
@@ -42,6 +42,7 @@ pub(crate) struct CodexAcpProvisioner {
     timeout: Duration,
     statuses: AgentStatusCache,
     windows: bool,
+    artifacts: ArtifactDigests,
 }
 
 impl CodexAcpProvisioner {
@@ -54,6 +55,7 @@ impl CodexAcpProvisioner {
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses,
             windows: cfg!(windows),
+            artifacts: ArtifactDigests::default(),
         }
     }
 
@@ -68,6 +70,7 @@ impl CodexAcpProvisioner {
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses: AgentStatusCache::default(),
             windows: cfg!(windows),
+            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -83,6 +86,7 @@ impl CodexAcpProvisioner {
             timeout,
             statuses: AgentStatusCache::default(),
             windows: cfg!(windows),
+            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -98,6 +102,7 @@ impl CodexAcpProvisioner {
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses,
             windows: cfg!(windows),
+            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -113,6 +118,7 @@ impl CodexAcpProvisioner {
             timeout: DEFAULT_INSTALL_TIMEOUT,
             statuses: AgentStatusCache::default(),
             windows,
+            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -131,8 +137,8 @@ impl CodexAcpProvisioner {
 
         let runtimes_root = self.storage_root.join("agent-runtimes").join("codex-acp");
         fs::create_dir_all(&runtimes_root).map_err(provisioning_io_error)?;
-        let version_root = runtimes_root.join(CODEX_ACP_VERSION);
-        let cache_hit = valid_installation(&version_root, self.windows);
+        let version_root = runtimes_root.join(&runtime_manifest().runtime_id);
+        let cache_hit = valid_installation(&version_root, self.windows, &self.artifacts);
         let previous_status = (!cache_hit).then(|| self.statuses.begin_installation("codex"));
         let started_at = Instant::now();
         if !cache_hit {
@@ -140,7 +146,8 @@ impl CodexAcpProvisioner {
                 "codex_acp_provision_started",
                 json!({
                     "agent_id": "codex",
-                    "version": CODEX_ACP_VERSION,
+                    "version": runtime_manifest().package_version,
+                    "runtime_id": runtime_manifest().runtime_id,
                     "attempt": 1,
                     "cache_hit": false,
                 }),
@@ -156,7 +163,8 @@ impl CodexAcpProvisioner {
                         "codex_acp_provision_completed",
                         json!({
                             "agent_id": "codex",
-                            "version": CODEX_ACP_VERSION,
+                            "version": runtime_manifest().package_version,
+                            "runtime_id": runtime_manifest().runtime_id,
                             "attempt": 1,
                             "cache_hit": false,
                             "outcome_kind": "installed",
@@ -174,7 +182,8 @@ impl CodexAcpProvisioner {
                         "codex_acp_provision_failed",
                         json!({
                             "agent_id": "codex",
-                            "version": CODEX_ACP_VERSION,
+                            "version": runtime_manifest().package_version,
+                            "runtime_id": runtime_manifest().runtime_id,
                             "attempt": 1,
                             "cache_hit": false,
                             "outcome_kind": error.reason(),
@@ -198,12 +207,13 @@ impl CodexAcpProvisioner {
         lock_exclusive_until(&install_lock, Instant::now() + self.timeout)?;
         cleanup_stale_staging(runtimes_root);
 
-        if !valid_installation(version_root, self.windows) {
+        if !valid_installation(version_root, self.windows, &self.artifacts) {
             if version_root.exists() {
-                fs::remove_dir_all(version_root).map_err(provisioning_io_error)?;
+                remove_invalid_installation(version_root)?;
             }
             let staging = runtimes_root.join(format!(
-                ".{CODEX_ACP_VERSION}.installing-{}",
+                ".{}.installing-{}",
+                runtime_manifest().runtime_id,
                 uuid::Uuid::new_v4()
             ));
             fs::create_dir_all(&staging).map_err(provisioning_io_error)?;
@@ -213,6 +223,7 @@ impl CodexAcpProvisioner {
                 .map_err(provisioning_installer_error)
                 .and_then(|_| {
                     validate_package(&staging)?;
+                    self.artifacts.validate(&staging)?;
                     validate_platform_runtime(&staging, self.windows)?;
                     fs::write(staging.join(MANAGED_MARKER), managed_marker())
                         .map_err(provisioning_io_error)?;
@@ -223,11 +234,12 @@ impl CodexAcpProvisioner {
             }
             result?;
         }
-        prune_old_versions(runtimes_root, CODEX_ACP_VERSION);
-        FileExt::unlock(&install_lock).map_err(provisioning_io_error)?;
-
+        // Acquire the running owner's lease before allowing a newer provisioner
+        // to prune this directory. Publication and ownership share the install lock.
         let lease = Arc::new(open_lock_file(&version_root.join(".lease"))?);
         FileExt::lock_shared(lease.as_ref()).map_err(provisioning_io_error)?;
+        prune_old_versions(runtimes_root, &runtime_manifest().runtime_id);
+        FileExt::unlock(&install_lock).map_err(provisioning_io_error)?;
         let entrypoint = package_root(version_root).join("dist/index.js");
         let mut config = config;
         config.command = resolved_command_or_name("node");
@@ -257,8 +269,9 @@ impl CodexAcpProvisioner {
                 .storage_root
                 .join("agent-runtimes")
                 .join("codex-acp")
-                .join(CODEX_ACP_VERSION),
+                .join(&runtime_manifest().runtime_id),
             self.windows,
+            &self.artifacts,
         )
     }
 }
@@ -295,7 +308,7 @@ impl CodexAcpInstaller for NpmCodexAcpInstaller {
         let deadline = Instant::now() + self.timeout;
         loop {
             match child.try_wait() {
-                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(Some(status)) if status.success() => break,
                 Ok(Some(_)) => return Err("npm installation failed".to_string()),
                 Ok(None) if Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(50));
@@ -305,9 +318,14 @@ impl CodexAcpInstaller for NpmCodexAcpInstaller {
                     let _ = child.wait();
                     return Err("npm installation timed out".to_string());
                 }
-                Err(_) => return Err("npm installation status was unavailable".to_string()),
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("npm installation status was unavailable".to_string());
+                }
             }
         }
+        runtime_patch::apply(destination, deadline)
     }
 }
 
@@ -320,23 +338,29 @@ fn write_installer_manifest(destination: &Path) -> Result<(), String> {
     let mut lock = File::create(destination.join("package-lock.json"))
         .map_err(|_| "installer lockfile could not be created".to_string())?;
     lock.write_all(INSTALLER_PACKAGE_LOCK.as_bytes())
-        .map_err(|_| "installer lockfile could not be written".to_string())
+        .map_err(|_| "installer lockfile could not be written".to_string())?;
+    runtime_patch::write_assets(destination)
 }
 
 fn managed_marker() -> String {
-    format!("{CODEX_ACP_PACKAGE}@{CODEX_ACP_VERSION}\n")
+    format!(
+        "{}@{}\n",
+        runtime_manifest().package_name,
+        runtime_manifest().runtime_id
+    )
 }
 
 fn package_root(version_root: &Path) -> PathBuf {
     version_root.join("node_modules/@openaide/codex-acp")
 }
 
-fn valid_installation(version_root: &Path, windows: bool) -> bool {
+fn valid_installation(version_root: &Path, windows: bool, artifacts: &ArtifactDigests) -> bool {
     fs::read_to_string(version_root.join(MANAGED_MARKER))
         .ok()
         .as_deref()
         == Some(managed_marker().as_str())
         && validate_package(version_root).is_ok()
+        && artifacts.validate(version_root).is_ok()
         && validate_platform_runtime(version_root, windows).is_ok()
 }
 
@@ -378,8 +402,10 @@ fn validate_package(version_root: &Path) -> Result<(), RuntimeError> {
         fs::read_to_string(package_root.join("package.json")).map_err(provisioning_io_error)?;
     let manifest: serde_json::Value = serde_json::from_str(&manifest)
         .map_err(|_| provisioning_error("installed package manifest is invalid".to_string()))?;
-    if manifest.get("name").and_then(serde_json::Value::as_str) != Some(CODEX_ACP_PACKAGE)
-        || manifest.get("version").and_then(serde_json::Value::as_str) != Some(CODEX_ACP_VERSION)
+    if manifest.get("name").and_then(serde_json::Value::as_str)
+        != Some(runtime_manifest().package_name.as_str())
+        || manifest.get("version").and_then(serde_json::Value::as_str)
+            != Some(runtime_manifest().package_version.as_str())
         || !package_root.join("dist/index.js").is_file()
     {
         return Err(provisioning_error(
@@ -398,6 +424,23 @@ fn open_lock_file(path: &Path) -> Result<File, RuntimeError> {
         .write(true)
         .open(path)
         .map_err(provisioning_io_error)
+}
+
+fn remove_invalid_installation(version_root: &Path) -> Result<(), RuntimeError> {
+    let lease = open_lock_file(&version_root.join(".lease"))?;
+    match lease.try_lock_exclusive() {
+        Ok(()) => {
+            // Windows cannot delete an open lease file. The caller still holds
+            // the install lock, so no new launch can acquire a shared lease here.
+            drop(lease);
+            fs::remove_dir_all(version_root).map_err(provisioning_io_error)
+        }
+        Err(error) if lock_error_is_contention(&error, cfg!(windows)) => Err(provisioning_error(
+            "the managed runtime is in use and cannot be repaired until its owner stops"
+                .to_string(),
+        )),
+        Err(error) => Err(provisioning_io_error(error)),
+    }
 }
 
 fn lock_exclusive_until(file: &File, deadline: Instant) -> Result<(), RuntimeError> {

@@ -1,0 +1,4 @@
+# Managed runtime integrity pins hash these source assets across every build OS.
+openaide-rs/app-server/assets/codex-acp-runtime/*.mjs text eol=lf
+openaide-rs/app-server/assets/codex-acp-runtime/session-recovery-manifest.json text eol=lf
+scripts/fixtures/codex-session-recovery-native.mjs text eol=lf

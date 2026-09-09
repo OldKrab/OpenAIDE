@@ -1,3 +1,4 @@
+use crate::project_files::{ProjectFilesParams, ProjectFilesResult};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{
@@ -73,8 +74,9 @@ use crate::task::{
     TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
     TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
     TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
-    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskResolveConfigPreferencesParams, TaskResolveConfigPreferencesResult, TaskRestoreParams,
+    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
     TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
     TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
     TaskToolImagePreviewResult,
@@ -609,6 +611,12 @@ protocol_method!(
     TaskQueueMoveResult
 );
 protocol_method!(
+    TaskResolveConfigPreferences,
+    TASK_RESOLVE_CONFIG_PREFERENCES,
+    TaskResolveConfigPreferencesParams,
+    TaskResolveConfigPreferencesResult
+);
+protocol_method!(
     TaskSetConfigOption,
     TASK_SET_CONFIG_OPTION,
     TaskSetConfigOptionParams,
@@ -722,3 +730,28 @@ protocol_method!(
 
 #[cfg(test)]
 mod tests;
+
+protocol_method!(
+    FileViewerListDirectory,
+    FILE_VIEWER_LIST_DIRECTORY,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
+    FileViewerSearch,
+    FILE_VIEWER_SEARCH,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
+    FileViewerChanges,
+    FILE_VIEWER_CHANGES,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
+    FileViewerDiff,
+    FILE_VIEWER_DIFF,
+    ProjectFilesParams,
+    ProjectFilesResult
+);

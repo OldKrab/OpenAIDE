@@ -3,6 +3,67 @@ use crate::protocol::model::{AgentProbeCapabilities, AgentProbeStatus};
 use openaide_app_server_protocol::snapshot::{AgentSignInPhase, AgentStatus};
 
 #[test]
+fn probe_notifications_preserve_capability_authentication_and_other_agent_changes() {
+    let (cache, updates) = AgentStatusCache::channel();
+    let mut probe = AgentProbeResult {
+        agent_id: "codex".to_string(),
+        status: AgentProbeStatus::Ready,
+        protocol_version: "fixture".to_string(),
+        implementation_name: None,
+        implementation_version: None,
+        capabilities: Vec::new(),
+        typed_capabilities: AgentProbeCapabilities::default(),
+        auth_methods: Vec::new(),
+        logout_supported: false,
+    };
+    cache.record_probe_success(&probe);
+    assert!(updates.try_recv().is_ok());
+    cache.record_probe_success(&probe);
+    assert!(
+        updates.try_recv().is_err(),
+        "identical observations stay quiet"
+    );
+
+    probe.typed_capabilities.resume_sessions = true;
+    cache.record_probe_success(&probe);
+    assert!(
+        updates.try_recv().is_ok(),
+        "capability changes wake discovery"
+    );
+    assert!(cache.snapshot("codex").capabilities.resume_tasks);
+
+    probe.auth_methods.push(AgentAuthMethodSummary {
+        id: "fixture-sign-in".to_string(),
+        label: "Fixture sign-in".to_string(),
+        kind: "agent".to_string(),
+        description: None,
+        variables: Vec::new(),
+        link: None,
+        terminal_args: Vec::new(),
+        terminal_env: Default::default(),
+    });
+    cache.record_probe_success(&probe);
+    assert!(
+        updates.try_recv().is_ok(),
+        "new sign-in choices wake discovery"
+    );
+    let codex = cache.snapshot("codex");
+    assert_eq!(codex.auth_methods, probe.auth_methods);
+
+    cache.record_probe_error(
+        "opencode",
+        &RuntimeError::AuthRequired("Fixture".to_string()),
+    );
+    assert!(
+        updates.try_recv().is_ok(),
+        "another Agent remains independent"
+    );
+    assert_eq!(cache.snapshot("codex"), codex);
+    assert_eq!(cache.snapshot("opencode").status, AgentStatus::AuthRequired);
+    assert!(updates.try_recv().is_err());
+}
+
+#[test]
 fn successful_probe_records_connected_status_and_capabilities() {
     let cache = AgentStatusCache::default();
 

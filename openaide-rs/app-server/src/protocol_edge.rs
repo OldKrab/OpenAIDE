@@ -20,6 +20,7 @@ mod shared_gateway;
 mod shell_handlers;
 pub mod stdio;
 mod support_handlers;
+mod task_config_handlers;
 mod task_handlers;
 mod worktree_handlers;
 
@@ -512,3 +513,5 @@ fn probe_lifecycle(state: LifecycleState) -> ClientProbeLifecycle {
 
 #[cfg(test)]
 mod tests;
+
+mod project_file_handlers;

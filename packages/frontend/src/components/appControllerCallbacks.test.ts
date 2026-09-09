@@ -61,6 +61,7 @@ import { createInitialState, type AppState } from "../state/store";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { NewTaskController } from "./newTaskController";
+import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 
 const postHostMessage = vi.fn();
 const beginAgentSecretTransaction = vi.fn();
@@ -734,6 +735,60 @@ describe("app controller callbacks", () => {
     });
   });
 
+  it("keeps a removed expired New Task file removed when its replacement uploads", async () => {
+    let state = preparedNewTaskState("task_ready");
+    const draft = {
+      prompt: "Inspect this",
+      context: [{
+        local_id: "file-1",
+        kind: "file" as const,
+        label: "context.txt",
+        app_server_handle_id: "expired-handle" as AttachmentHandleId,
+      }],
+    };
+    state.taskInputs.task_ready = draft;
+    const dispatch = vi.fn((action) => { state = appReducer(state, action); });
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      preparationKey: newTaskPreparationKey(state) as string,
+      snapshot: state.snapshot as TaskSnapshot,
+    });
+    const request = vi.fn((method: string) => {
+      if (method === TASK_SEND) return Promise.reject(new AppServerProtocolError({
+        error: { code: "attachmentHandleInvalid", message: "Attachment handle expired.", recoverable: true },
+      }));
+      if (method === ATTACHMENT_RELEASE) return Promise.resolve({ outcomes: [] });
+      if (method === CLIENT_HEARTBEAT) return Promise.resolve({});
+      return Promise.reject(new Error(method));
+    });
+    frontendShellState.files = {
+      kind: "webUpload",
+      upload: vi.fn(async () => ({ handleId: "replacement-handle", label: "context.txt" })),
+    };
+    const options = {
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      newTaskController,
+    };
+    callbacks({ ...options, state }).newTask.submit(draft);
+    await settlePromises();
+    expect(state.newTask.error).toBe("Attachment handle expired.");
+
+    callbacks({ ...options, state }).newTask.removeAttachment("file-1");
+    await callbacks({ ...options, state }).newTask.fileBrowser?.attachFiles?.(
+      [new File(["context"], "context.txt")],
+      { maxFiles: 1, onProgress: vi.fn(), signal: new AbortController().signal },
+    );
+
+    // The view combines client-owned draft rows with prepared-Task uploads.
+    // Neither source may bring a removed row back after failed-Send restoration.
+    expect(state.newTask.context).toEqual([]);
+    expect(state.taskInputs.task_ready?.context).toEqual([
+      expect.objectContaining({ app_server_handle_id: "replacement-handle", label: "context.txt" }),
+    ]);
+    expect(state.newTask.prompt).toBe(draft.prompt);
+  });
+
   it("discards a Task prepared after its file picker context was superseded", async () => {
     const created = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const dispatch = vi.fn();
@@ -885,7 +940,7 @@ describe("app controller callbacks", () => {
       }),
     }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "taskSend:accepted",
+      type: "newTaskSend:accepted",
       taskId: "task_1",
       userMessageId: "user-message",
     }));
@@ -944,10 +999,10 @@ describe("app controller callbacks", () => {
     const submitted = dispatch.mock.calls
       .map(([action]) => action)
       .find((action) => action.type === "taskInput:submit");
-    const acceptedIndex = dispatch.mock.calls.findIndex(([action]) => action.type === "taskSend:accepted");
+    const acceptedIndex = dispatch.mock.calls.findIndex(([action]) => action.type === "newTaskSend:accepted");
     const cancelIndex = request.mock.calls.findIndex(([method]) => method === TASK_CANCEL);
     expect(dispatch.mock.calls[acceptedIndex]?.[0]).toEqual({
-      type: "taskSend:accepted",
+      type: "newTaskSend:accepted",
       taskId: "task_1",
       userMessageId: "message-1",
     });
@@ -985,6 +1040,70 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(newTaskController.currentLease()).toBe(leaseB);
+  });
+
+  it.each(["accepted", "cleanupFailed"])("keeps a newer New Task draft pending when a superseded first Send is %s", async (outcome) => {
+    type SendResult = { task: ProtocolTaskSnapshot; turnId: string; userMessageId: string };
+    const first = deferred<SendResult>();
+    const second = deferred<SendResult>();
+    let acquired = 0;
+    const request = vi.fn((method: string, params: unknown) => {
+      if (method === TASK_ACQUIRE) {
+        return Promise.resolve({ task: protocolTaskSnapshot(++acquired === 1 ? "task_a" : "task_b", "New task") });
+      }
+      if (method === TASK_SEND) return (params as { taskId: string }).taskId === "task_a" ? first.promise : second.promise;
+      if (method === TASK_CANCEL) return Promise.resolve({});
+      if (method === TASK_RELEASE) return Promise.reject(new Error("Cleanup A failed"));
+      return Promise.reject(new Error(method));
+    });
+    let renderedState = preparedNewTaskState();
+    const dispatch = vi.fn((action) => { renderedState = appReducer(renderedState, action); });
+    const newTaskController = new NewTaskController();
+    const newTaskStartAttempt = { current: undefined };
+    const asyncOperations = new AsyncOperationOwner();
+    const currentCallbacks = () => callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      newTaskController,
+      newTaskStartAttempt,
+      asyncOperations,
+      dispatch,
+      state: renderedState,
+    }).newTask;
+    currentCallbacks().submit({ prompt: "Send A", context: [] });
+    await settlePromises();
+    // The Task subscription can confirm promotion before its Send response arrives.
+    newTaskController.confirmSentTask("task_a");
+    currentCallbacks().cancel();
+    const draftB = {
+      prompt: "Keep B until its own acknowledgement",
+      context: [{ local_id: "file-b", kind: "context" as const, label: "B", app_server_handle_id: "handle-b" as AttachmentHandleId }],
+    };
+    currentCallbacks().submit(draftB);
+    await settlePromises();
+    expect(renderedState.newTask.pending).toMatchObject(draftB);
+    expect(renderedState.taskInputs.task_b.pending).toMatchObject(draftB);
+
+    if (outcome === "accepted") {
+      first.resolve({ task: protocolTaskSnapshot("task_a", "Accepted A", "open"), turnId: "turn-a", userMessageId: "message-a" });
+    } else {
+      first.reject(new Error("Send A failed"));
+    }
+    await settlePromises();
+
+    expect(renderedState.newTask.pending).toMatchObject(draftB);
+    expect(renderedState.newTask.submitting).toBe(true);
+    expect(renderedState.newTask.error).toBeUndefined();
+    expect(renderedState.taskInputs.task_b.pending).toMatchObject(draftB);
+    if (outcome === "accepted") {
+      expect(renderedState.taskInputs.task_a.acceptedUserMessageId).toBe("message-a");
+      expect(renderedState.taskSnapshots.task_a.lifecycle).toBe("open");
+    } else {
+      expect(renderedState.taskInputs.task_a.error).toBe("Cleanup A failed");
+      expect(renderedState.taskInputs.task_a.pending).toBeUndefined();
+    }
+    second.resolve({ task: protocolTaskSnapshot("task_b", "Accepted B", "open"), turnId: "turn-b", userMessageId: "message-b" });
+    await settlePromises();
+    expect(renderedState.newTask.pending).toBeUndefined();
   });
 
   it("routes existing tasks for the destination surface to open", async () => {
@@ -1163,6 +1282,58 @@ describe("app controller callbacks", () => {
     });
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:error", message: "send failed" });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
+  });
+
+  it.each([undefined, "worktree_1"])("reuses the uploaded-file owner on first Send with a real Project identity and worktree %s", async (worktreeId) => {
+    let state = preparedNewTaskState();
+    const projectId = projectIdForWorkspaceRoot(state.newTask.selection.workspaceRoot);
+    state.newTask.selection = { ...state.newTask.selection, projectId, worktreeId };
+    const prepared = protocolTaskSnapshotForContext("task_ready", projectId, "codex");
+    prepared.task = { ...prepared.task, hasMessages: false, worktreeId: worktreeId as never };
+    prepared.chat.hasMessages = false;
+    state.snapshot = mapProtocolTaskSnapshot(prepared).snapshot;
+    const draft = {
+      prompt: "Inspect the uploaded context",
+      context: [{
+        local_id: "file-1",
+        kind: "file" as const,
+        label: "context.txt",
+        app_server_handle_id: "uploaded-handle" as AttachmentHandleId,
+      }],
+    };
+    state.taskInputs.task_ready = draft;
+    const dispatch = vi.fn((action) => { state = appReducer(state, action); });
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      preparationKey: newTaskPreparationKey(state) as string,
+      snapshot: state.snapshot,
+    });
+    const request = vi.fn((method: string) => {
+      if (method === TASK_SEND) return Promise.resolve({
+        task: { ...prepared, lifecycle: "open", task: { ...prepared.task, hasMessages: true } },
+        turnId: "turn-1", userMessageId: "message-1",
+      });
+      return Promise.reject(new Error(`Unexpected ${method}`));
+    });
+    const options = {
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      newTaskController,
+    };
+
+    callbacks({ ...options, state }).navigation.openSettings();
+    // A settled preparation promise is cleared on route return; the retained
+    // snapshot, mapped from the path-free protocol, must still own the upload.
+    callbacks({ ...options, state }).newTask.submit();
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(TASK_SEND, {
+      taskId: "task_ready",
+      message: { text: draft.prompt, attachments: ["uploaded-handle"] },
+    });
+    expect(request).not.toHaveBeenCalledWith(TASK_ACQUIRE, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
+    expect(state.newTask.error).toBeUndefined();
   });
 
   it("sends immediately when the prepared Task already owns the selected config options", async () => {

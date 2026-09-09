@@ -122,11 +122,15 @@ fn copy_one(
 ) -> Result<Option<u64>, RuntimeError> {
     validate_relative(relative)?;
     let source = source_root.join(relative);
-    let destination = destination_root.join(relative);
     let metadata = fs::symlink_metadata(&source)?;
     if !metadata.file_type().is_file() {
         return Ok(None);
     }
+    // Git validates path syntax, but the destination's selected branch may have
+    // checked out a symlink at an ancestor of an otherwise ordinary source file.
+    // Resolve from canonical roots and reject links before even creating parents.
+    let source = contained_copy_path(source_root, relative)?;
+    let destination = contained_copy_path(destination_root, relative)?;
     if destination.exists() {
         if files_equal(&source, &destination)? {
             return Ok(None);
@@ -140,6 +144,8 @@ fn copy_one(
         .parent()
         .ok_or_else(|| RuntimeError::Storage("Destination has no parent".to_string()))?;
     fs::create_dir_all(parent)?;
+    // Recheck the now-existing ancestors before opening the temporary sibling.
+    contained_copy_path(destination_root, relative)?;
     let temporary = parent.join(format!(".openaide-copy-{}.tmp", Uuid::new_v4()));
     let copied = fs::copy(&source, &temporary)?;
     fs::set_permissions(&temporary, metadata.permissions())?;
@@ -148,6 +154,31 @@ fn copy_one(
         return Err(error.into());
     }
     Ok(Some(copied))
+}
+
+/// Only regular files below the two worktree roots participate in include-copy.
+/// A dangling link must fail too: `exists`/`canonicalize` alone report it as a
+/// missing destination and would allow its lexical parent to authorize a write.
+fn contained_copy_path(root: &Path, relative: &Path) -> Result<PathBuf, RuntimeError> {
+    let canonical_root = fs::canonicalize(root)?;
+    let mut candidate = canonical_root.clone();
+    for component in relative.components() {
+        candidate.push(component);
+        match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink()
+                    || !fs::canonicalize(&candidate)?.starts_with(&canonical_root)
+                {
+                    return Err(RuntimeError::Conflict(
+                        "Worktree local-file copy cannot traverse a symbolic link or leave its root".to_string(),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(candidate)
 }
 
 fn validate_relative(path: &Path) -> Result<(), RuntimeError> {

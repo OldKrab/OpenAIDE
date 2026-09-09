@@ -1,3 +1,4 @@
+import { resolveConfigPreferencesIntent } from "../intents/configPreferencesIntents";
 import {
   TASK_SET_CONFIG_OPTION,
   type AgentConfigOptionId,
@@ -43,6 +44,11 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
   asyncOperations.scope("new-task-config", configContext);
   return {
     ...createNewTaskStartCallbacks(dependencies),
+    resolveConfigPreferences: async (action) => {
+      const taskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
+      if (!taskId || !backendConnection?.request) throw new Error("App Server connection unavailable.");
+      await resolveConfigPreferencesIntent({ request: backendConnection.request, dispatch }, taskId as TaskId, action);
+    },
     ...createNewTaskBrowserCallbacks(dependencies),
     loadComposerHistory: () => {
       const projectId = state.newTask.selection.projectId;
@@ -53,6 +59,9 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
       );
     },
     removeAttachment: (attachmentId) => {
+      // Failed first Send can restore the same row into both draft sources;
+      // removal must clear the client copy as well as the prepared-Task copy.
+      dispatch({ type: "newTask:attachment:remove", attachmentId });
       const taskId = state.snapshot && !state.snapshot.task.has_messages
         ? state.snapshot.task.task_id
         : undefined;
@@ -74,7 +83,6 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
         );
         return;
       }
-      dispatch({ type: "newTask:attachment:remove", attachmentId });
     },
     selectConfigOption: (configId, value) => {
       const operation = asyncOperations.claim("new-task-config", configContext);

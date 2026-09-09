@@ -51,6 +51,7 @@ pub struct FileViewerSnapshot {
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<ToolImagePreview>,
+    /// True for a bounded text prefix or a reduced-resolution/static image preview.
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<FileViewerError>,

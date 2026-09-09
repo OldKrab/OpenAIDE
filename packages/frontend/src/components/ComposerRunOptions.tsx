@@ -536,17 +536,19 @@ function controlDescription(
   selection: ComposerSelection,
 ) {
   if (control.kind === "isolation") return `Current: ${isolationLabel(selection.isolation)}`;
-  const displayedValue = pendingChange?.option_id === control.option.id
-    ? pendingChange.requested_value
-    : control.option.current_value;
-  if (displayedValue.type === "boolean") return `Current: ${displayedValue.value ? "On" : "Off"}`;
-  const selected = control.option.values.find((value) => value.id === displayedValue.value);
-  return `Current: ${normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(displayedValue.value) ?? displayedValue.value}`;
+  const label = (value: ConfigOptionCurrentValue) => value.type === "boolean"
+    ? value.value ? "On" : "Off"
+    : configOptionLabel(control.option, value);
+  const current = `Current: ${label(control.option.current_value)}`;
+  return pendingChange?.option_id === control.option.id
+    ? `${current}; requested: ${label(pendingChange.requested_value)}` : current;
 }
 
 function controlDirectLabel(control: RunControl, displayedValue: ConfigOptionCurrentValue | undefined, selection: ComposerSelection) {
   return control.kind === "config"
-    ? configOptionLabel(control.option, displayedValue)
+    ? displayedValue && (displayedValue.type !== control.option.current_value.type || displayedValue.value !== control.option.current_value.value)
+      ? `${configOptionLabel(control.option)} → ${configOptionLabel(control.option, displayedValue)}`
+      : configOptionLabel(control.option)
     : isolationLabel(selection.isolation);
 }
 
@@ -617,15 +619,15 @@ function BooleanConfigControl({
   option: ConfigOption;
   pendingValue?: boolean;
 }) {
-  const displayedValue = pendingValue
-    ?? (option.current_value.type === "boolean" ? option.current_value.value : false);
+  const displayedValue = option.current_value.type === "boolean" ? option.current_value.value : false;
+  const valueLabel = `${displayedValue ? "On" : "Off"}${pendingValue !== undefined ? ` → ${pendingValue ? "On" : "Off"}` : ""}`;
   const pending = pendingValue !== undefined;
   return (
     <button
       aria-busy={pending || undefined}
       aria-checked={displayedValue}
       aria-describedby={describedBy}
-      aria-label={`${option.label}: ${displayedValue ? "On" : "Off"}${pending ? ", updating Agent option" : ""}`}
+      aria-label={`${option.label}: ${valueLabel}${pending ? ", updating Agent option" : ""}`}
       className={`${compact ? "composer-boolean-control" : "composer-overflow-boolean-control"}${pending ? " pending" : ""}`}
       disabled={disabled}
       title={lockedTitle}
@@ -635,14 +637,14 @@ function BooleanConfigControl({
     >
       {compact ? (
         <span className="composer-boolean-control-content">
-          <span className="composer-boolean-label">{option.label}</span>
+          <span className="composer-boolean-label">{option.label}{pending ? `: ${valueLabel}` : ""}</span>
           <span aria-hidden="true" className={`composer-boolean-indicator${displayedValue ? " checked" : ""}`} />
         </span>
       ) : (
         <>
           <span className="composer-boolean-copy">
             <span className="composer-boolean-heading">
-              <strong>{option.label}</strong>
+              <strong>{option.label}{pending ? `: ${valueLabel}` : ""}</strong>
               <span aria-hidden="true" className={`composer-boolean-indicator${displayedValue ? " checked" : ""}`} />
             </span>
             {option.description ? <small>{option.description}</small> : null}

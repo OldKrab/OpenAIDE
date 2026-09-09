@@ -110,6 +110,7 @@ fn main() {
         native_session_data_freshness: Default::default(),
         native_session_reload_requirement: None,
         pending_config_change: None,
+        config_preferences: None,
         agent_commands_catalog: None,
         preparation: TaskPreparationRecord::Ready,
         supports_image_input: false,

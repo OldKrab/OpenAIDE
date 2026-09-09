@@ -163,6 +163,12 @@ function createReliableHttpBackendConnection(
         // Expiry can race the first initialization response. In that case the
         // caller observes the replacement initialization, not a stale failure.
         if (recoveryPromise) return recoveryPromise;
+        if (terminalError) throw terminalError;
+        if (!closed && active !== generation) {
+          // Closing the old peer can reject through several async wrappers after
+          // recovery has completed. This is the replacement's cached result.
+          return active.connection.initialize(params, meta);
+        }
         logger.warn("backend_initialize_failed", {
           connection_id: options.connectionId,
           duration_ms: Date.now() - startedAt,

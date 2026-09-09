@@ -33,7 +33,12 @@ export function createEncryptedSecretStore(
   let encryptionKey: Promise<CryptoKey> | undefined;
   const key = () => encryptionKey ??= browserCrypto.subtle
     .generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"])
-    .then((candidate) => persistence.encryptionKey(candidate));
+    .then((candidate) => persistence.encryptionKey(candidate))
+    .catch((error) => {
+      // A failed transaction must not poison this vault or cache an uncommitted key.
+      encryptionKey = undefined;
+      throw error;
+    });
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
@@ -80,17 +85,21 @@ function indexedDbPersistence(indexedDb: IDBFactory): WebSecretVaultPersistence 
       const db = await getDatabase();
       return new Promise<CryptoKey>((resolve, reject) => {
         const transaction = db.transaction(KEY_STORE, "readwrite");
+        let key = candidate;
+        // Concurrent vaults choose the same key inside one read/write transaction.
+        // Its request can succeed before the browser commits or aborts the write.
+        transaction.oncomplete = () => resolve(key);
+        transaction.onabort = () => reject(transaction.error ?? transactionAborted());
         const store = transaction.objectStore(KEY_STORE);
         const read = store.get(ENCRYPTION_KEY);
         read.onerror = () => reject(read.error ?? new Error("Secure storage key could not be read."));
         read.onsuccess = () => {
           if (read.result instanceof CryptoKey) {
-            resolve(read.result);
+            key = read.result;
             return;
           }
           const write = store.add(candidate, ENCRYPTION_KEY);
           write.onerror = () => reject(write.error ?? new Error("Secure storage key could not be saved."));
-          write.onsuccess = () => resolve(candidate);
         };
       });
     },
@@ -132,8 +141,16 @@ async function databaseRequest<T = undefined>(
 ) {
   const db = await database;
   return new Promise<T>((resolve, reject) => {
-    const operation = request(db.transaction(storeName, mode).objectStore(storeName));
+    const transaction = db.transaction(storeName, mode);
+    let result: T;
+    transaction.oncomplete = () => resolve(result);
+    transaction.onabort = () => reject(transaction.error ?? transactionAborted());
+    const operation = request(transaction.objectStore(storeName));
     operation.onerror = () => reject(operation.error ?? new Error("Secure storage operation failed."));
-    operation.onsuccess = () => resolve(operation.result as T);
+    operation.onsuccess = () => { result = operation.result as T; };
   });
+}
+
+function transactionAborted() {
+  return new DOMException("Secure storage transaction was aborted.", "AbortError");
 }

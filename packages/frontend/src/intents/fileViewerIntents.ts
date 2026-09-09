@@ -8,8 +8,29 @@ import {
   type FileViewerSnapshot,
   type TaskId,
 } from "@openaide/app-server-client";
+import type { FileViewerDownloads, FileViewerDownloadResult } from "../services/frontendShell";
 
 type FileViewerConnection = Pick<BackendConnection, "request">;
+
+/** Download is explicit user intent; only the shell owns browser transfer/navigation. */
+export async function downloadFileViewer(
+  downloads: FileViewerDownloads,
+  handle: string,
+  label: string,
+  signal: AbortSignal,
+): Promise<FileViewerDownloadResult> {
+  const operationId = crypto.randomUUID();
+  const startedAt = performance.now();
+  console.info(`file_viewer_download_started operation_id=${operationId} attempt=1`);
+  let result: FileViewerDownloadResult = "unavailable";
+  try {
+    result = await downloads.save({ handle, label, operationId }, signal);
+  } catch {
+    // Shell/network errors are classified here; free-form error text never reaches diagnostics.
+  }
+  console.info(`file_viewer_download_completed operation_id=${operationId} attempt=1 outcome=${signal.aborted ? "cancelled" : result} duration_ms=${Math.round(performance.now() - startedAt)}`);
+  return result;
+}
 
 export async function openFileViewer(
   connection: FileViewerConnection,

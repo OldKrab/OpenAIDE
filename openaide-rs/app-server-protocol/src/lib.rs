@@ -20,3 +20,5 @@ pub mod task;
 pub mod typescript;
 pub mod workspace;
 pub mod worktree;
+
+pub mod project_files;

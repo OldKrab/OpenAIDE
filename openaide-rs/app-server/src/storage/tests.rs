@@ -10,6 +10,9 @@ use crate::storage::records::{StoredMessage, TaskPreparationRecord, TaskRecord};
 use crate::storage_runtime::RecoveryClassification;
 use std::path::{Path, PathBuf};
 
+#[path = "legacy_task_migration_tests.rs"]
+mod legacy_migration;
+
 #[test]
 fn second_store_open_is_blocked_while_first_store_lives() {
     let dir = tempfile::tempdir().unwrap();
@@ -143,7 +146,7 @@ fn legacy_archived_flag_migrates_into_the_archived_lifecycle() {
 }
 
 #[test]
-fn legacy_select_config_option_without_kind_remains_readable() {
+fn option_catalogs_are_live_only_and_legacy_catalogs_are_not_restored() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let mut task = task_record("task-legacy-config", TaskStatus::Inactive, "1");
@@ -162,17 +165,31 @@ fn legacy_select_config_option_without_kind_remains_readable() {
     });
     store.write_task(&task).unwrap();
 
-    let mut persisted = serde_json::to_value(&task).unwrap();
-    persisted["config_options_catalog"]["options"][0]
-        .as_object_mut()
+    assert!(store
+        .read_task("task-legacy-config")
         .unwrap()
-        .remove("kind");
-    let loaded: TaskRecord = serde_json::from_value(persisted).unwrap();
-
-    assert_eq!(
-        loaded.config_options_catalog.unwrap().options[0].kind,
-        ConfigOptionKind::Select
-    );
+        .config_options_catalog
+        .is_some());
+    let task_path = dir
+        .path()
+        .join("task-store-v1/tasks/task-legacy-config/task.json");
+    let mut persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&task_path).unwrap()).unwrap();
+    assert!(persisted["task"].get("config_options_catalog").is_none());
+    // An older release may have serialized a catalog without option kinds.
+    persisted["task"]["config_options_catalog"] = serde_json::json!({
+        "agent_id": "codex", "status": "ready", "options": [{
+            "id": "model", "label": "Model", "current_value": "gpt-5", "values": []
+        }]
+    });
+    drop(store);
+    std::fs::write(&task_path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+    let reopened = Store::open(dir.path().to_path_buf()).unwrap();
+    assert!(reopened
+        .read_task("task-legacy-config")
+        .unwrap()
+        .config_options_catalog
+        .is_none());
 }
 
 #[test]
@@ -208,7 +225,7 @@ fn blocked_store_open_does_not_create_product_dirs() {
 }
 
 #[test]
-fn successful_journal_start_removes_only_unsupported_legacy_task_storage() {
+fn unsupported_legacy_task_storage_is_preserved_and_fails_startup_explicitly() {
     let dir = tempfile::tempdir().unwrap();
     let legacy_task = dir.path().join("tasks/task-old");
     std::fs::create_dir_all(legacy_task.join("tool-artifacts")).unwrap();
@@ -223,9 +240,18 @@ fn successful_journal_start_removes_only_unsupported_legacy_task_storage() {
     std::fs::create_dir_all(agent_sentinel.parent().unwrap()).unwrap();
     std::fs::write(&agent_sentinel, b"preserve agent state").unwrap();
 
-    let _store = Store::open(dir.path().to_path_buf()).unwrap();
-
-    assert!(!dir.path().join("tasks").exists());
+    let error = Store::open(dir.path().to_path_buf())
+        .err()
+        .expect("unsupported legacy data is reported");
+    assert!(error.to_string().contains("original files were preserved"));
+    assert_eq!(
+        std::fs::read(legacy_task.join("task.json")).unwrap(),
+        b"legacy task"
+    );
+    assert_eq!(
+        std::fs::read(legacy_task.join("messages.jsonl")).unwrap(),
+        b"legacy chat"
+    );
     assert_eq!(
         std::fs::read(agent_sentinel).unwrap(),
         b"preserve agent state"
@@ -235,7 +261,7 @@ fn successful_journal_start_removes_only_unsupported_legacy_task_storage() {
 
 #[cfg(unix)]
 #[test]
-fn legacy_cleanup_failure_does_not_block_journal_start() {
+fn unreadable_legacy_storage_is_preserved_instead_of_starting_with_empty_history() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = tempfile::tempdir().unwrap();
@@ -247,10 +273,13 @@ fn legacy_cleanup_failure_does_not_block_journal_start() {
     let opened = Store::open(dir.path().to_path_buf());
 
     assert!(
-        opened.is_ok(),
-        "obsolete-file permissions must not block startup"
+        opened.is_err(),
+        "unreadable previous history must not be silently replaced with an empty store"
     );
-    assert!(legacy_tasks.exists(), "failed cleanup is retried later");
+    assert!(
+        legacy_tasks.exists(),
+        "previous files remain available for recovery"
+    );
     std::fs::set_permissions(&legacy_tasks, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 

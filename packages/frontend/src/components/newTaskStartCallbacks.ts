@@ -94,7 +94,10 @@ function cancelNewTaskStart({
     }).catch((error) => {
       newTaskController.settleSend(taskId);
       if (lease) newTaskController.reclaim(lease, attachmentResources);
-      dispatch({ type: "submit:error", message: submitErrorMessage(error) });
+      const message = submitErrorMessage(error);
+      dispatch(newTaskStartAttempt.current === attempt
+        ? { type: "submit:error", message }
+        : { type: "taskInput:error", taskId, message });
     }).finally(() => {
       if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
     });
@@ -149,6 +152,11 @@ async function submitNewTask({
   let createdTaskId: TaskId | undefined;
   let newTaskLease: NewTaskLease | undefined;
   let sendStarted = false;
+  const reportError = (message: string) => {
+    // A newer first Send owns the shared draft; late failures stay with their Task.
+    if (newTaskStartAttempt.current === attempt) dispatch({ type: "submit:error", message });
+    else if (createdTaskId) dispatch({ type: "taskInput:error", taskId: createdTaskId, message });
+  };
   const discardNewTask = (taskId: TaskId) => newTaskController.discard({
     attachmentResources,
     dispatch,
@@ -187,7 +195,7 @@ async function submitNewTask({
       && preparedTaskMatchesNewTaskContext(state, {
         agentId: cachedSnapshot.task.agent_id,
         projectId: cachedSnapshot.task.project_id,
-        workspaceRoot: cachedSnapshot.task.workspace_root,
+        worktreeId: cachedSnapshot.task.worktree_id,
       })
       ? cachedSnapshot
       : undefined;
@@ -230,7 +238,7 @@ async function submitNewTask({
           settleDiscardedTask(taskId);
         }
       } catch (cleanupError) {
-        dispatch({ type: "submit:error", message: submitErrorMessage(cleanupError) });
+        reportError(submitErrorMessage(cleanupError));
       }
       if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
       return;
@@ -264,7 +272,7 @@ async function submitNewTask({
       activate: asyncOperations.owns(operation),
     });
     dispatch({
-      type: "taskSend:accepted",
+      type: newTaskStartAttempt.current === attempt ? "newTaskSend:accepted" : "taskSend:accepted",
       taskId,
       userMessageId: sent.userMessageId,
     });
@@ -282,6 +290,7 @@ async function submitNewTask({
     attempt.sendInFlight = false;
     if (attempt.cancelled) {
       if (createdTaskId) {
+        dispatch({ type: "taskInput:sendError", taskId: createdTaskId, message: submitErrorMessage(error) });
         try {
           const lease = newTaskLease ?? attempt.newTaskLease;
           if (!lease) throw new Error("New Task lease unavailable during cancellation.");
@@ -290,7 +299,7 @@ async function submitNewTask({
             settleDiscardedTask(createdTaskId);
           }
         } catch (cleanupError) {
-          dispatch({ type: "submit:error", message: submitErrorMessage(cleanupError) });
+          reportError(submitErrorMessage(cleanupError));
         }
       }
       if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
@@ -308,7 +317,7 @@ async function submitNewTask({
           taskId: createdTaskId,
         });
         dispatch({
-          type: "submit:attachments:invalidate",
+          type: newTaskStartAttempt.current === attempt ? "submit:attachments:invalidate" : "taskInput:attachments:invalidate",
           taskId: createdTaskId,
           message: error.message,
         });
@@ -326,11 +335,11 @@ async function submitNewTask({
       } else {
         dispatch({ type: "taskInput:error", taskId: createdTaskId, message });
       }
-      dispatch({ type: "submit:error", message });
+      reportError(message);
       if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
       return;
     }
-    dispatch({ type: "submit:error", message });
+    reportError(message);
     if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
   }
 }

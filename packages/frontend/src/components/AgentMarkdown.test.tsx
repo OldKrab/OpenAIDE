@@ -6,11 +6,14 @@ const postHostMessage = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/hostBridge", () => ({ postHostMessage }));
 
+import * as shell from "../services/frontendShell";
+
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AgentFileOpenContext } from "./agentFileOpen";
 
 describe("AgentMarkdown", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     postHostMessage.mockClear();
     vi.unstubAllGlobals();
   });
@@ -40,6 +43,23 @@ describe("AgentMarkdown", () => {
     expect(html).toContain('href="https://www.cloudflare.com/"');
     expect(html).toContain('rel="noreferrer"');
     expect(html).toContain('target="_blank"');
+  });
+
+  it("opens explicit Web file links of any type without changing other shells", () => {
+    const openFile = vi.fn();
+    const currentShell = vi.spyOn(shell, "currentFrontendShell").mockReturnValue(undefined);
+    const text = "[package](dist/build.vsix) [report](<reports/annual report.pdf>) [license](LICENSE) [web](https://example.com)";
+    const renderMarkdown = () => <AgentFileOpenContext.Provider value={openFile}><AgentMarkdown text={text} /></AgentFileOpenContext.Provider>;
+    let tree: ReturnType<typeof create>;
+    act(() => { tree = create(renderMarkdown()); });
+    expect(tree!.root.findAllByType("a").every((link) => !link.props.onClick)).toBe(true);
+    act(() => { tree!.unmount(); });
+    currentShell.mockReturnValue({ fileViewerDownloads: { save: vi.fn() } } as unknown as shell.FrontendShell);
+    act(() => { tree = create(renderMarkdown()); });
+    const links = tree!.root.findAllByType("a");
+    act(() => { for (const link of links.slice(0, 3)) link.props.onClick({ preventDefault: vi.fn() }); });
+    expect(openFile.mock.calls).toEqual([["dist/build.vsix", undefined], ["reports/annual report.pdf", undefined], ["LICENSE", undefined]]);
+    expect(links[3].props.onClick).toBeUndefined();
   });
 
   it("opens an absolute filesystem link at its line through the App Shell", () => {

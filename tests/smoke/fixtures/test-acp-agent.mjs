@@ -146,6 +146,8 @@ async function runPrompt(message) {
   session.activePrompts.set(String(message.id), prompt);
 
   if (text.includes("smoke:file-viewer-layout")) {
+    const downloadPath = text.split("\n")
+      .find((line) => line.startsWith("download-file:"))?.slice("download-file:".length);
     update(sessionId, {
       sessionUpdate: "plan",
       entries: [
@@ -157,7 +159,8 @@ async function runPrompt(message) {
     textUpdate(
       sessionId,
       "agent_message_chunk",
-      "Open [README.md](README.md) to inspect the file.",
+      "Open [README.md](README.md) to inspect the file."
+        + (downloadPath ? `\n\n[Build](<${downloadPath}>)` : ""),
       `agent-${promptNumber}`,
     );
     respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });

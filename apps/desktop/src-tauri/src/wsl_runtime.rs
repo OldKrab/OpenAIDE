@@ -16,6 +16,8 @@ use std::time::Duration;
 use crate::CREATE_NO_WINDOW;
 #[cfg(target_os = "windows")]
 use crate::desktop_runtime::decode_wsl_list;
+#[cfg(target_os = "windows")]
+use crate::startup_process::StartupChild;
 use crate::{HandoffFailure, LocalHttpConnection, failure, read_handoff_line, validate_connection};
 
 #[cfg(target_os = "windows")]
@@ -86,14 +88,15 @@ pub(crate) fn launch_wsl_app_server_handoff(
     );
     let launch_id = uuid::Uuid::new_v4().to_string();
     let mut child = launch_runtime(distro, &installed, &launch_id)?;
-    let stdout = child.stdout.take().ok_or_else(|| {
+    let mut startup = StartupChild::new(&mut child);
+    let stdout = startup.take_stdout().ok_or_else(|| {
         failure(
             "wsl_stdout_missing",
             "The WSL runtime did not provide startup information.",
         )
     })?;
     let connection = (|| {
-        let line = read_handoff_line(stdout, &mut child)?;
+        let line = read_handoff_line(stdout)?;
         let connection: LocalHttpConnection = serde_json::from_str(line.trim()).map_err(|_| {
             failure(
                 "wsl_json_invalid",
@@ -113,11 +116,12 @@ pub(crate) fn launch_wsl_app_server_handoff(
     let connection = match connection {
         Ok(connection) => connection,
         Err(error) => {
-            let _ = child.kill();
+            drop(startup);
             terminate_failed_runtime(distro, &launch_id);
             return Err(error);
         }
     };
+    startup.accept();
     thread::spawn(move || {
         let _ = child.wait();
     });

@@ -6,15 +6,25 @@ product
 
 ## Users
 
-Developers and engineering teams using OpenAIDE as a dedicated desktop workspace on macOS and Windows. They need to start and organize agent work, follow execution, inspect terminal and tool activity, respond to permission requests, manage projects and worktrees, and return to previous task history without losing context.
+Developers and engineering teams using OpenAIDE to manage agent work, primarily inside VS Code for now. They need to start and organize agent work, follow execution, inspect terminal and tool activity, respond to permission requests, manage projects and worktrees, and return to previous task history without losing context.
 
-OpenAIDE may also run in web and VS Code shells. Those shells adapt the same product to their host; they do not define the desktop application's visual identity.
+OpenAIDE also provides desktop and web shells. Each shell adapts the same product to its host. Desktop on macOS and Windows should provide a useful workflow for inspecting and directing agent work while retaining a clear path to VS Code for substantial manual development.
 
 ## Product Purpose
 
-OpenAIDE is a modern cross-platform desktop application for managing agent tasks from the first prompt through execution and history. Success means the user can understand what the agent is doing, move confidently between projects and tasks, recover previous work, and notice runtime problems without assembling several developer tools by hand.
+OpenAIDE is an agent workbench for managing tasks from the first prompt through execution and history across VS Code, desktop, and web shells. Success means the user can understand what the agent is doing, move confidently between projects and tasks, recover previous work, and notice runtime problems without losing the context needed to act.
 
 The desktop application must use platform capabilities where they improve the experience, including native menus, keyboard shortcuts, file and folder pickers, notifications, window behavior, and secure credential storage. It must not be a web page merely wrapped in a desktop window.
+
+## Current Priorities And Desktop Scope
+
+VS Code is the current product and feature-planning priority. Its existing editor, project navigation, and development tools are part of the user's workflow. Desktop improvements should address concrete gaps in completing agent work without assuming feature parity with VS Code is the goal.
+
+The initial desktop scope is independent access to the project: browse its directory structure, open and read any project file, search across file contents and open a matching line, and inspect changed files and their diffs. These actions must be available without waiting for an Agent to mention a file. Agent File References are additional entry points into the same reading experience. File access and change review use the current Task Workspace so an isolated worktree is not confused with its Project root.
+
+Users should be able to inspect code and request corrections while preserving their conversation and unsent draft. Project files opens a Task Page destination with a persistent navigator beside the reader on wide screens and list/reader navigation on narrow screens. Back to conversation restores the mounted Chat and unsent draft. Substantial manual coding remains a handoff to VS Code. Browsing, content search, change review, and text/range comments share the existing File Viewer capability lifecycle, as specified in the accepted Project file access integration plan.
+
+Small manual edits and Git actions remain separate product decisions, justified by specific interruptions in that workflow. A full editor, debugger, conflict-resolution interface, or general Git client is outside this initial scope. Add controls where the user needs them and judge their value by the workflow they complete and the complexity they introduce.
 
 ## Brand Personality
 
@@ -33,8 +43,8 @@ Design guidance describes failure modes, not forbidden components or aesthetics.
 ## Design Principles
 
 - Best UI/UX is the primary product constraint. Architecture, protocol, runtime, and shell decisions must preserve immediate feedback, clear progress, recoverable errors, and responsiveness under local Agent or App Server latency.
-- Design for desktop first. Use the space, pointer precision, keyboard, window model, and operating-system capabilities of macOS and Windows intentionally.
-- Build one recognizable OpenAIDE product. Desktop owns the visual standard; web and VS Code adapt behavior and tokens where their hosts require it.
+- Prioritize the VS Code experience for now. Use its editor, navigation, and development capabilities where they support the agent workflow; give desktop and web users deliberate alternatives for the workflows those shells support.
+- Build one recognizable OpenAIDE product. Share product behavior and design language while adapting layout, tokens, keyboard interaction, and platform capabilities to each host.
 - Make agent work inspectable. Chat messages, folded tool activity, terminal output, permission state, and runtime errors must be visible and attributable when relevant.
 - Choose hierarchy, containers, typography, alignment, spacing, and grouping according to the relationship being communicated. A container is valuable when it makes that relationship clearer.
 - Match control treatment to meaning. Different roles may need different treatments, while shared treatment is valuable when it communicates a genuine relationship.

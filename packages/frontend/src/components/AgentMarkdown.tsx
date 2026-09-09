@@ -23,6 +23,7 @@ import {
 import { useAgentFileOpen, type OpenAgentFileReference } from "./agentFileOpen";
 import { copyText } from "./clipboard";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { currentFrontendShell } from "../services/frontendShell";
 
 type AgentMarkdownProps = {
   className?: string;
@@ -122,7 +123,7 @@ function AgentMarkdownAnchor({ children, href, node: _node, ...props }: Componen
       </a>
     );
   }
-  const fileLocation = chatMarkdownFileLocation(href);
+  const fileLocation = chatMarkdownFileLocation(href, Boolean(currentFrontendShell()?.fileViewerDownloads));
   if (fileLocation) {
     return (
       <a

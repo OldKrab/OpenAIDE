@@ -4,7 +4,7 @@ pub mod atomic;
 pub mod composer_history;
 pub mod cursor;
 pub mod id;
-mod legacy_task_cleanup;
+mod legacy_task_migration;
 pub mod mcp_servers;
 pub mod message_store;
 pub mod new_task_defaults;
@@ -93,7 +93,8 @@ impl Store {
         let (task_journal, initial_commit_events) =
             task_journal::TaskJournalStore::open(root.clone())
                 .map_err(|error| StoreOpenError::TaskStorage(error.to_string()))?;
-        legacy_task_cleanup::remove_after_journal_start(&root);
+        legacy_task_migration::import(&root, &task_journal)
+            .map_err(|error| StoreOpenError::TaskStorage(error.to_string()))?;
         let task_commit_handler = Arc::new(RwLock::new(None::<TaskCommitHandler>));
         let task_commit_dispatch_stop = Arc::new(RuntimeAtomicBool::new(false));
         let worker_handler = task_commit_handler.clone();

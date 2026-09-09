@@ -4416,6 +4416,7 @@ impl TaskSetConfigOptionWorkflow for FixedTaskSetConfigOption {
                 state: openaide_app_server_protocol::snapshot::LiveSessionDataState::Ready,
                 options: Vec::new(),
                 pending_change: None,
+                preferences: None,
                 error: None,
             },
         )

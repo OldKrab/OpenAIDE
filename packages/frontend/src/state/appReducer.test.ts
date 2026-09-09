@@ -552,7 +552,7 @@ describe("app reducer composer state", () => {
     });
     state = appReducer(state, { type: "submit:start", prompt: "Build it", context: [] });
     state = appReducer(state, {
-      type: "taskSend:accepted",
+      type: "newTaskSend:accepted",
       taskId: "task-1",
       userMessageId: "message-1" as never,
     });
@@ -1081,6 +1081,7 @@ describe("app reducer composer state", () => {
       type: "taskQueue:take:collapse",
       taskId: "task_1",
       queuedMessageId: "queued-1",
+      context: [],
     });
     expect(state.taskInputs.task_1.queueTake?.stage).toBe("collapsing");
 
@@ -1460,7 +1461,7 @@ describe("app reducer composer state", () => {
     expect(state.newTask.context).toHaveLength(1);
 
     state = appReducer(state, {
-      type: "taskSend:accepted",
+      type: "newTaskSend:accepted",
       taskId: "task_new",
       userMessageId: "user_1" as never,
     });
@@ -1468,6 +1469,31 @@ describe("app reducer composer state", () => {
     expect(state.newTask.prompt).toBe("");
     expect(state.newTask.context).toEqual([]);
     expect(state.newTask.pending).toBeUndefined();
+  });
+
+  it.each(["composer", "queue"])("preserves a pending New Task when a different Task accepts a %s message", (source) => {
+    let state = createInitialState();
+    state.newTask.prompt = "Keep this first message";
+    state = appReducer(state, { type: "submit:start" });
+    if (source === "composer") {
+      state = appReducer(state, {
+        type: "taskInput:submit",
+        taskId: "other_task",
+        input: { prompt: "Accepted follow-up", context: [] },
+      });
+    }
+    state = appReducer(state, {
+      type: "taskSend:accepted",
+      taskId: "other_task",
+      userMessageId: "other-message" as never,
+      snapshot: snapshot("other_task", [userMessage("other-message", "Accepted follow-up")]),
+    });
+
+    expect(state.taskInputs.other_task?.pending).toBeUndefined();
+    expect(state.newTask.pending?.prompt).toBe("Keep this first message");
+    expect(state.newTask.submitting).toBe(true);
+    state = appReducer(state, { type: "submit:error", message: "First message rejected" });
+    expect(state.newTask.prompt).toBe("Keep this first message");
   });
 
   it("restores the submitted draft without an error when startup is stopped", () => {

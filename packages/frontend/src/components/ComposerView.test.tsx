@@ -547,6 +547,26 @@ describe("Composer view behavior", () => {
     expect(menusByLabel(renderer.root, "Agent")).toHaveLength(0);
   });
 
+  it("keeps drafting available and Send blocked while preferences await explicit recovery", async () => {
+    const onResolveConfigPreferences = vi.fn(async () => {});
+    const renderer = renderComposer({
+      prompt: "Draft stays editable",
+      configOptions: {
+        ...configOptions(),
+        preferences: { state: "failed", skippedCount: 0 },
+      },
+      onResolveConfigPreferences,
+    });
+    expect(text(renderer.root)).toContain("Couldn’t apply your preferences.");
+    expect(buttonByLabel(renderer.root, "Send message").props.disabled).toBe(true);
+    const editor = renderer.root.findByProps({ role: "textbox", "aria-label": "Message" });
+    expect(editor.props.contentEditable).toBe("plaintext-only");
+    await act(async () => { buttonByText(renderer.root, "Retry").props.onClick(); });
+    expect(onResolveConfigPreferences).toHaveBeenCalledWith("retry");
+    await act(async () => { buttonByText(renderer.root, "Use current settings").props.onClick(); });
+    expect(onResolveConfigPreferences).toHaveBeenCalledWith("useCurrentSettings");
+  });
+
   it("renders config and isolation menus with selected values and callbacks", () => {
     const onSelectConfigOption = vi.fn();
     const onSelectIsolation = vi.fn();
@@ -565,9 +585,9 @@ describe("Composer view behavior", () => {
     click(menuButtonByStrongLabel(renderer.root, "High"));
     expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", { type: "id", value: "high" });
     const pendingControl = renderer.root.findByProps({
-      "aria-label": "High, updating Agent option",
+      "aria-label": "Balanced → High, updating Agent option",
     });
-    expect(text(pendingControl)).toBe("High");
+    expect(text(pendingControl)).toBe("Balanced → High");
     expect(pendingControl.props["aria-busy"]).toBe(true);
 
     click(buttonByText(renderer.root, "Worktree"));
@@ -715,8 +735,8 @@ describe("Composer view behavior", () => {
       showIsolationSelector: false,
     });
 
-    const pendingControl = renderer.root.findByProps({ "aria-label": "On, updating Agent option" });
-    expect(text(pendingControl)).toBe("On");
+    const pendingControl = renderer.root.findByProps({ "aria-label": "Off → On, updating Agent option" });
+    expect(text(pendingControl)).toBe("Off → On");
     expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(1);
     expect(text(renderer.root)).not.toContain("Changing Fast mode…");
     const lockedSibling = renderer.root.findAllByProps({ "aria-disabled": true })
@@ -851,7 +871,7 @@ describe("Composer view behavior", () => {
 
     click(configControlButtonsByText(renderer.root, "Balanced")[0]);
     click(menuButtonByStrongLabel(renderer.root, "High"));
-    expect(renderer.root.findAllByProps({ "aria-label": "High, updating Agent option" })).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ "aria-label": "Balanced → High, updating Agent option" })).toHaveLength(1);
 
     act(() => {
       renderer.update(composerElement({
@@ -875,7 +895,7 @@ describe("Composer view behavior", () => {
       configOptions: { ...configOptions(), status: "loading" },
       showIsolationSelector: false,
     });
-    expect(text(loading.root)).toContain("Loading options…");
+    expect(text(loading.root)).toContain("Connecting to Codex…");
     expect(loading.root.findAllByProps({ role: "status", "aria-busy": true })).toHaveLength(1);
     expect(configControlButtonsByText(loading.root, "Balanced")).toHaveLength(0);
     expect(loading.root.findAllByProps({ className: "composer-adaptive-options is-unavailable" })).toHaveLength(1);
@@ -909,7 +929,7 @@ describe("Composer view behavior", () => {
     expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(0);
   });
 
-  it("shows a pending boolean's requested state without changing its content width", () => {
+  it("distinguishes a pending boolean target from the confirmed switch state", () => {
     const catalog = booleanConfigOptions();
     const renderer = renderComposer({
       configLocked: true,
@@ -924,11 +944,11 @@ describe("Composer view behavior", () => {
       showIsolationSelector: false,
     });
 
-    const control = buttonByLabel(renderer.root, "Brave mode: On, updating Agent option");
-    expect(control.props["aria-checked"]).toBe(true);
+    const control = buttonByLabel(renderer.root, "Brave mode: Off → On, updating Agent option");
+    expect(control.props["aria-checked"]).toBe(false);
     expect(control.props["aria-busy"]).toBe(true);
     expect(control.props.className).toContain("pending");
-    expect(text(control)).toBe("Brave mode");
+    expect(text(control)).toBe("Brave mode: Off → On");
     expect(control.findAllByType("svg")).toHaveLength(0);
   });
 
@@ -2062,6 +2082,7 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       onSelectAgent={overrides.onSelectAgent ?? vi.fn()}
       onSelectConfigOption={overrides.onSelectConfigOption ?? vi.fn()}
       onRetryConfigOptions={overrides.onRetryConfigOptions}
+      onResolveConfigPreferences={overrides.onResolveConfigPreferences}
       onSelectIsolation={overrides.onSelectIsolation ?? vi.fn()}
       onSubmit={overrides.onSubmit ?? vi.fn()}
       prompt={overrides.prompt ?? ""}
@@ -2099,6 +2120,7 @@ type ComposerTestProps = {
   onSelectAgent: (agentId: string) => void;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onRetryConfigOptions: () => void;
+  onResolveConfigPreferences: (action: "retry" | "useCurrentSettings") => Promise<void>;
   onSelectIsolation: (isolation: ComposerSelection["isolation"]) => void;
   onSubmit: (prompt: string) => void;
   placeholder: string;

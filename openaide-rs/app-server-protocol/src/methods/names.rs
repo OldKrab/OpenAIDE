@@ -1,3 +1,7 @@
+pub const FILE_VIEWER_LIST_DIRECTORY: &str = "fileViewer/listDirectory";
+pub const FILE_VIEWER_SEARCH: &str = "fileViewer/search";
+pub const FILE_VIEWER_CHANGES: &str = "fileViewer/changes";
+pub const FILE_VIEWER_DIFF: &str = "fileViewer/diff";
 pub const CLIENT_PROBE: &str = "client/probe";
 pub const CLIENT_INITIALIZE: &str = "client/initialize";
 pub const CLIENT_CAPABILITIES_CHANGED: &str = "client/capabilitiesChanged";
@@ -73,6 +77,7 @@ pub const TASK_QUEUE_REMOVE: &str = "task/queueRemove";
 pub const TASK_QUEUE_TAKE: &str = "task/queueTake";
 pub const TASK_QUEUE_MOVE: &str = "task/queueMove";
 pub const TASK_SEND: &str = "task/send";
+pub const TASK_RESOLVE_CONFIG_PREFERENCES: &str = "task/resolveConfigPreferences";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
 pub const TASK_SET_PERMISSION_POLICY: &str = "task/setPermissionPolicy";
 pub const TASK_SET_TITLE: &str = "task/setTitle";
@@ -179,11 +184,16 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_QUEUE_MOVE,
     TASK_SEND,
     TASK_SET_CONFIG_OPTION,
+    TASK_RESOLVE_CONFIG_PREFERENCES,
     TASK_SET_PERMISSION_POLICY,
     TASK_SET_TITLE,
     TASK_SET_PINNED,
     TASK_CLOSE_PLAN,
     TASK_TOOL_IMAGE_PREVIEW,
+    FILE_VIEWER_LIST_DIRECTORY,
+    FILE_VIEWER_SEARCH,
+    FILE_VIEWER_CHANGES,
+    FILE_VIEWER_DIFF,
     FILE_VIEWER_OPEN,
     FILE_VIEWER_OPEN_FROM_HANDLE,
     FILE_VIEWER_REFRESH,
