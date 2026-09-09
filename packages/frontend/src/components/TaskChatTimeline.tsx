@@ -93,7 +93,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
     setMessageListElement(element);
   }, [chatScroll.messageListRef]);
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
-  const virtualItems = chatScroll.virtualizer.getVirtualItems();
+  const virtualItems = chatScroll.virtualItems;
   const measureChangedChatContent = useCallback((content: HTMLElement) => {
     const row = content.closest<HTMLElement>(".message-list-virtual-row");
     if (!row) return;

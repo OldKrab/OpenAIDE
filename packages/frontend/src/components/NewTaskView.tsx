@@ -73,6 +73,7 @@ export function NewTaskView({
   onManageWorktrees,
   onRemoveProject,
   onRetryPreparation,
+  onResolveConfigPreferences,
   submitShortcut,
   fileBrowser,
   focusRequestKey,
@@ -91,6 +92,7 @@ export function NewTaskView({
   onManageWorktrees?: (projectId: string) => void;
   onRemoveProject?: (projectId: string) => void;
   onRetryPreparation?: () => void;
+  onResolveConfigPreferences?: (action: "retry" | "useCurrentSettings") => Promise<void>;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -129,17 +131,15 @@ export function NewTaskView({
     : "No isolation";
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
-  // Liveness recovery can publish the replacement Task's loading snapshot
-  // before its catalog catches up. Keep the last settled controls visible.
-  const currentConfigOptions = preparedTaskId
-    ? configOptionsSettled(preparedConfigOptions)
-      ? preparedConfigOptions
-      : configOptionsSettled(state.newTask.configOptions)
-        ? state.newTask.configOptions
-        : preparedConfigOptions
-    : state.newTask.configOptions;
-  const configOptionsLoading = state.newTask.configOptionsLoading
-    && !configOptionsSettled(currentConfigOptions);
+  // Only the currently leased session can supply displayed controls.
+  const currentConfigOptions = preparedConfigOptions ?? {
+    agent_id: state.newTask.selection.agentId,
+    options: [],
+    status: state.newTask.configOptionsError || state.newTask.configOptions?.status === "failed" ? "failed" as const : "loading" as const,
+    error: state.newTask.configOptionsError ?? (state.newTask.configOptions?.status === "failed" ? state.newTask.configOptions.error : undefined),
+  };
+  const configOptionsLoading = !configOptionsSettled(currentConfigOptions)
+    && currentConfigOptions.status !== "failed";
   const composerConfigOptionsError = currentConfigOptions?.status === "failed"
     ? currentConfigOptions.error
     : preparedTaskId ? undefined : state.newTask.configOptionsError;
@@ -250,6 +250,7 @@ export function NewTaskView({
       availability={availability}
       configLocked={configOptionsLoading || !configOptionsMutable(currentConfigOptions)}
       configOptions={composerConfigOptions}
+      onResolveConfigPreferences={onResolveConfigPreferences}
       commandCatalog={preparedTaskId ? state.snapshot?.agent_commands : undefined}
       error={state.newTask.error}
       fileBrowser={composerFileBrowser}

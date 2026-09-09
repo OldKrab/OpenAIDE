@@ -140,9 +140,15 @@ type AppActionPayload =
       /** Canonical Task state returned with an existing-Task Send acceptance. */
       snapshot?: TaskSnapshot;
     }
+  | {
+      /** Only the first-Send owner may settle the retained New Task composer. */
+      type: "newTaskSend:accepted";
+      taskId: string;
+      userMessageId: import("@openaide/app-server-client").MessageId;
+    }
   | { type: "taskQueue:accepted"; taskId: string; queueRevision: number }
   | { type: "taskQueue:take:start"; taskId: string; item: import("@openaide/app-shell-contracts").QueuedMessage; index: number }
-  | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string }
+  | { type: "taskQueue:take:collapse"; taskId: string; queuedMessageId: string; context: ComposerAttachment[] }
   | { type: "taskQueue:take:accepted"; taskId: string; queuedMessageId: string; prompt: string; context: ComposerAttachment[] }
   | { type: "taskQueue:take:error"; taskId: string; queuedMessageId: string; message: string }
   | { type: "taskInput:error"; taskId: string; message?: string }

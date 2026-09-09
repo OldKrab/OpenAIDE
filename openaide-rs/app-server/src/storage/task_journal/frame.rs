@@ -11,7 +11,7 @@ use crate::protocol::errors::RuntimeError;
 
 const MAGIC: &[u8; 8] = b"OAIDETJ\0";
 const FORMAT_VERSION: u16 = 1;
-const FILE_HEADER_LEN: usize = MAGIC.len() + size_of::<u16>();
+pub(super) const FILE_HEADER_LEN: usize = MAGIC.len() + size_of::<u16>();
 const FRAME_LENGTH_LEN: usize = size_of::<u64>();
 const FRAME_CHECKSUM_LEN: usize = size_of::<u32>();
 const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;

@@ -53,11 +53,15 @@ it("restores the trigger on Escape", async () => {
   await act(async () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
   });
-  expect(document.querySelector<HTMLElement>('[role="menu"]')?.style.opacity).toBe("0");
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 60));
-  });
-  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  // Escape may finish the close transition before act returns on a busy runner.
+  // Observe dismissal rather than requiring an intermediate animation frame.
+  await expect.poll(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return document.querySelector('[role="menu"]');
+  }).toBeNull();
   expect(document.activeElement).toBe(trigger);
 });
 

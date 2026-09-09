@@ -1,0 +1,3 @@
+{"sequence":1,"operation":"append_text","identity":"agent-1","text":"Hello"}
+{"sequence":2,"operation":"append_text","identity":"agent-1","text":" world"}
+{"sequence":3,"operation":"append_message","message":{"sequence":4,"chat":{"cursor":"4","identity":"agent-2","message_type":"agent_message","message_id":"agent-2","message":{"kind":"agent_message","id":"agent-2","role":"agent","parts":[{"kind":"text","text":"Finished"}],"created_at":"1750000000010"}}}}

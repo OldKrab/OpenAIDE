@@ -10,7 +10,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 use crate::agent::acp_active_prompt::{
     cancel_active_prompt, send_steering_prompt_request, ActivePrompt, PromptSettlementKind,
 };
-use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
+use crate::agent::acp_config_options_apply::SessionConfigRequests;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_response_boundary::take_preceding_session_updates;
@@ -54,6 +54,7 @@ pub(super) async fn run_prompt(
     request_guard: crate::agent::attached_native_session::PromptRequestGuard,
     command_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionCommand>,
     config_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
+    config_requests: &mut SessionConfigRequests,
     config_catalog: &mut ConfigOptionsCatalog,
     commands_catalog: &mut Option<AgentCommandsCatalog>,
     session_snapshot: &AgentSession,
@@ -136,6 +137,8 @@ pub(super) async fn run_prompt(
                 let Some(reply_tx) = close else {
                     break Err(RuntimeError::NotReady("ACP close channel stopped".to_string()));
                 };
+                active_prompt.retire();
+                config_requests.abandon();
                 if !context.supports_session_close && !cancel_sent {
                     let _ = dispatch_prompt_cancel(
                         active_session,
@@ -223,6 +226,8 @@ pub(super) async fn run_prompt(
                         }
                     }
                     AcpSessionCommand::Delete { reply_tx } => {
+                        active_prompt.retire();
+                        config_requests.abandon();
                         let connection = active_session.connection();
                         let result = delete_active_session(
                             connection,
@@ -236,20 +241,28 @@ pub(super) async fn run_prompt(
                     }
                 }
             }
-            config = config_rx.recv() => {
+            config = config_rx.recv(), if config_requests.can_dispatch() => {
                 let Some(config) = config else {
                     break Err(RuntimeError::NotReady("ACP config channel stopped".to_string()));
                 };
-                handle_prompt_config_command(
+                config_requests.dispatch(active_session, config);
+            }
+            response = config_requests.next_response() => {
+                let Some(response) = response else { continue; };
+                project_preceding_session_updates(
                     active_session,
-                    config_catalog,
-                    commands_catalog,
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
                     session_projection.clone(),
                     session_event_sink.clone(),
                     pending_session_catalogs,
-                    config,
-                )
-                .await?;
+                    config_catalog,
+                    commands_catalog,
+                ).await?;
+                if let Some(catalog) = response.finish_with_session_sink(session_event_sink.as_deref()) {
+                    *config_catalog = catalog;
+                }
             }
             completion = active_prompt.next_completion() => {
                 let Some(completion) = completion else {
@@ -488,89 +501,6 @@ fn runtime_result_name(result: &Result<AgentPromptOutcome, RuntimeError>) -> &'s
         Ok(AgentPromptOutcome::Other(_)) => "other",
         Err(_) => "error",
     }
-}
-
-async fn handle_prompt_config_command(
-    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
-    catalog: &mut ConfigOptionsCatalog,
-    commands_catalog: &mut Option<AgentCommandsCatalog>,
-    projection: Option<LivePromptProjection>,
-    session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
-    pending_session_catalogs: &mut PendingSessionCatalogs,
-    command: AcpSessionConfigCommand,
-) -> Result<(), RuntimeError> {
-    match command {
-        AcpSessionConfigCommand::SetConfigOption {
-            agent_id,
-            session_id,
-            config_id,
-            value,
-            operation_id,
-            queued_at,
-            reply_tx,
-        } => {
-            logging::info(
-                "acp_config_option_command_received",
-                json!({
-                    "session_id": session_id,
-                    "operation_id": operation_id,
-                    "queue_wait_ms": queued_at.elapsed().as_millis(),
-                }),
-            );
-            let connection = active_session.connection().clone();
-            let mut response = match set_task_config_option_after_prior_updates(
-                &connection,
-                active_session,
-                config_id,
-                value,
-                &agent_id,
-                &operation_id,
-            )
-            .await
-            {
-                Ok(response) => response,
-                Err(error) => {
-                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
-                    return Err(error);
-                }
-            };
-            for update in response.take_prior_updates() {
-                let SessionMessage::SessionMessage(dispatch) = update else {
-                    continue;
-                };
-                let catalogs = match dispatch_session_notification(
-                    &agent_id,
-                    dispatch,
-                    projection.clone(),
-                    session_event_sink.clone(),
-                    pending_session_catalogs,
-                )
-                .await
-                {
-                    Ok(catalogs) => catalogs,
-                    Err(error) => {
-                        let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
-                        return Err(error);
-                    }
-                };
-                apply_session_catalogs(catalogs, catalog, commands_catalog);
-            }
-            let result = response.finish_with_session_sink(session_event_sink.as_deref());
-            logging::info(
-                "acp_config_option_catalog_published",
-                json!({
-                    "session_id": session_id,
-                    "operation_id": operation_id,
-                    "result_status": if result.is_ok() { "ok" } else { "error" },
-                }),
-            );
-            if let Ok(next_catalog) = &result {
-                *catalog = next_catalog.clone();
-            }
-            let _ = reply_tx.send(result);
-        }
-    }
-    Ok(())
 }
 
 pub(super) async fn dispatch_session_notification(

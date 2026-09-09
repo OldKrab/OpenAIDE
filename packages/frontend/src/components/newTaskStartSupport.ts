@@ -38,7 +38,7 @@ export function newTaskDraftInput(state: AppState, draft?: NewTaskDraftInput) {
     && preparedTaskMatchesNewTaskContext(state, {
       agentId: preparedTask.agent_id,
       projectId: preparedTask.project_id,
-      workspaceRoot: preparedTask.workspace_root,
+      worktreeId: preparedTask.worktree_id,
     })
     ? preparedTask.task_id
     : undefined;

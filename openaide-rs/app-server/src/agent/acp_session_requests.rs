@@ -78,15 +78,7 @@ async fn send_new_session_request(
     let response = match connection.send_request(request).block_task().await {
         Ok(response) => response,
         Err(error) => {
-            logging::warn(
-                "acp_session_request_failed",
-                serde_json::json!({
-                    "operation": "session/new",
-                    "task_id": trace.map(AcpTraceSession::task_id),
-                    "duration_ms": started_at.elapsed().as_millis(),
-                    "error_kind": "protocol_error",
-                }),
-            );
+            record_session_failure("session/new", trace, started_at, &error);
             return Err(error);
         }
     };
@@ -132,15 +124,7 @@ async fn send_load_session_request(
     let response = match connection.send_request(request).block_task().await {
         Ok(response) => response,
         Err(error) => {
-            logging::warn(
-                "acp_session_request_failed",
-                serde_json::json!({
-                    "operation": "session/load",
-                    "task_id": trace.map(AcpTraceSession::task_id),
-                    "duration_ms": started_at.elapsed().as_millis(),
-                    "error_kind": "protocol_error",
-                }),
-            );
+            record_session_failure("session/load", trace, started_at, &error);
             return Err(error);
         }
     };
@@ -186,15 +170,7 @@ async fn send_resume_session_request(
     let response = match connection.send_request(request).block_task().await {
         Ok(response) => response,
         Err(error) => {
-            logging::warn(
-                "acp_session_request_failed",
-                serde_json::json!({
-                    "operation": "session/resume",
-                    "task_id": trace.map(AcpTraceSession::task_id),
-                    "duration_ms": started_at.elapsed().as_millis(),
-                    "error_kind": "protocol_error",
-                }),
-            );
+            record_session_failure("session/resume", trace, started_at, &error);
             return Err(error);
         }
     };
@@ -228,4 +204,27 @@ async fn send_session_list_request(
         None => request,
     };
     connection.send_request(request).block_task().await
+}
+
+/// Keep full agent errors only in the existing opt-in sensitive trace. Standard
+/// diagnostics use fixed classifications so paths and provider text cannot leak.
+fn record_session_failure(
+    operation: &str,
+    trace: Option<&AcpTraceSession>,
+    started_at: Instant,
+    error: &agent_client_protocol::Error,
+) {
+    if let Some(trace) = trace {
+        trace.record("agent_to_client", &format!("{operation}.error"), error);
+    }
+    logging::warn(
+        "acp_session_request_failed",
+        serde_json::json!({
+            "operation": operation,
+            "task_id": trace.map(AcpTraceSession::task_id),
+            "duration_ms": started_at.elapsed().as_millis(),
+            "error_code": error.code,
+            "error_kind": crate::agent::acp_errors::acp_request_error(error).reason(),
+        }),
+    );
 }

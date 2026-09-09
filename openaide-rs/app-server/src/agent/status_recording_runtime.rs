@@ -30,7 +30,7 @@ impl AgentStatusRecordingRuntime {
     fn record_session_outcome<T>(&self, agent_id: &str, result: &Result<T, RuntimeError>) {
         match result {
             Ok(_) => self.statuses.record_connected(agent_id),
-            Err(error) => self.statuses.record_session_error(agent_id, error),
+            Err(error) => self.statuses.record_session_error(agent_id, error, None),
         }
     }
 }
@@ -68,17 +68,33 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
         let agent_id = request.agent_id.clone();
         let result = self.inner.list_sessions(request);
         let snapshot = self.statuses.snapshot(&agent_id);
-        if snapshot.auth_methods.is_empty()
+        let probe = if snapshot.auth_methods.is_empty()
             || matches!(
                 snapshot.status,
                 AgentStatus::Launching | AgentStatus::Installing | AgentStatus::Disconnected
-            )
-        {
-            let _ = self.probe(AgentProbeRequest {
-                agent_id: agent_id.clone(),
-            });
+            ) {
+            self.inner
+                .probe(AgentProbeRequest {
+                    agent_id: agent_id.clone(),
+                })
+                .ok()
+        } else {
+            None
+        };
+        match &result {
+            Ok(_) => {
+                if let Some(probe) = probe {
+                    self.statuses.record_probe_success(&probe);
+                }
+                self.statuses.record_connected(&agent_id);
+            }
+            // Initialize advertises sign-in choices; it does not overrule the
+            // listing's known auth failure. Publish one final observation so a
+            // methodless Agent cannot oscillate Connected -> AuthRequired.
+            Err(error) => self
+                .statuses
+                .record_session_error(&agent_id, error, probe.as_ref()),
         }
-        self.record_session_outcome(&agent_id, &result);
         result
     }
 

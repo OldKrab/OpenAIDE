@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Read};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{
     Mutex,
     atomic::{AtomicBool, Ordering},
@@ -30,6 +30,7 @@ mod desktop_update_shutdown;
 mod desktop_update_tests;
 #[cfg(target_os = "macos")]
 mod macos_webview_resize;
+mod startup_process;
 mod wsl_runtime;
 
 use desktop_runtime::{
@@ -41,6 +42,7 @@ use desktop_support_export::{
     validate_export_label,
 };
 use desktop_update::DesktopUpdateState;
+use startup_process::StartupChild;
 use wsl_runtime::{discover_wsl_distros, launch_wsl_app_server_handoff, translate_path_with_wsl};
 
 const HANDOFF_TIMEOUT: Duration = Duration::from_secs(60);
@@ -670,13 +672,14 @@ fn launch_app_server_handoff(
     let mut child = command
         .spawn()
         .map_err(|_| failure("process_spawn", "OpenAIDE could not start its App Server."))?;
-    let stdout = child.stdout.take().ok_or_else(|| {
+    let mut startup = StartupChild::new(&mut child);
+    let stdout = startup.take_stdout().ok_or_else(|| {
         failure(
             "stdout_missing",
             "The App Server did not provide startup information.",
         )
     })?;
-    let line = read_handoff_line(stdout, &mut child)?;
+    let line = read_handoff_line(stdout)?;
     let connection: LocalHttpConnection = serde_json::from_str(line.trim()).map_err(|_| {
         failure(
             "json_invalid",
@@ -684,16 +687,14 @@ fn launch_app_server_handoff(
         )
     })?;
     validate_connection(&connection)?;
+    startup.accept();
     thread::spawn(move || {
         let _ = child.wait();
     });
     Ok(connection)
 }
 
-fn read_handoff_line(
-    stdout: impl Read + Send + 'static,
-    child: &mut Child,
-) -> Result<String, HandoffFailure> {
+fn read_handoff_line(stdout: impl Read + Send + 'static) -> Result<String, HandoffFailure> {
     let (sender, receiver) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let mut line = String::new();
@@ -705,27 +706,18 @@ fn read_handoff_line(
     });
     match receiver.recv_timeout(HANDOFF_TIMEOUT) {
         Ok(Ok(line)) if !line.trim().is_empty() && line.len() <= MAX_HANDOFF_LINE_BYTES => Ok(line),
-        Ok(Ok(_)) => {
-            let _ = child.kill();
-            Err(failure(
-                "line_invalid",
-                "The App Server returned invalid startup information.",
-            ))
-        }
-        Ok(Err(_)) => {
-            let _ = child.kill();
-            Err(failure(
-                "line_read",
-                "OpenAIDE could not read App Server startup information.",
-            ))
-        }
-        Err(_) => {
-            let _ = child.kill();
-            Err(failure(
-                "timeout",
-                "The App Server did not become ready in time.",
-            ))
-        }
+        Ok(Ok(_)) => Err(failure(
+            "line_invalid",
+            "The App Server returned invalid startup information.",
+        )),
+        Ok(Err(_)) => Err(failure(
+            "line_read",
+            "OpenAIDE could not read App Server startup information.",
+        )),
+        Err(_) => Err(failure(
+            "timeout",
+            "The App Server did not become ready in time.",
+        )),
     }
 }
 

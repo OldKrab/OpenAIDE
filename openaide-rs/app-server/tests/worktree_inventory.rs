@@ -192,6 +192,56 @@ fn excludes_prepared_tasks_from_linked_task_counts_and_results() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn included_files_cannot_escape_through_a_destination_branch_symlink() {
+    let fixture = GitFixture::new();
+    let outside = TempDir::new().expect("outside destination");
+    git(fixture.repository(), &["checkout", "-b", "symlink-base"]);
+    std::os::unix::fs::symlink(outside.path(), fixture.repository().join("cache"))
+        .expect("tracked destination symlink");
+    git(fixture.repository(), &["add", "cache"]);
+    git(
+        fixture.repository(),
+        &["commit", "-m", "destination contains a directory symlink"],
+    );
+    git(fixture.repository(), &["checkout", "main"]);
+    fixture.write_and_commit(
+        &[(".gitignore", "cache/\n"), (".worktreeinclude", "cache/\n")],
+        "include local cache files",
+    );
+    fs::create_dir_all(fixture.repository().join("cache/nested")).unwrap();
+    let source = fixture.repository().join("cache/nested/local.env");
+    fs::write(&source, "fixture local credentials").unwrap();
+    let state = TempDir::new().expect("state root");
+    let manager = WorktreeManager::new(Store::open(state.path().to_path_buf()).unwrap());
+    let repository = manager
+        .refresh_project(fixture.repository())
+        .unwrap()
+        .unwrap();
+
+    let result = manager.create(CreateWorktree {
+        repository_id: repository.repository.repository_id,
+        source_project_root: fixture.repository().to_path_buf(),
+        name: "Unsafe destination".to_string(),
+        base: WorktreeBase::LocalBranch("symlink-base".to_string()),
+        branch: None,
+    });
+
+    assert!(
+        !outside.path().join("nested").exists(),
+        "include-copy must not create files or directories outside the destination worktree"
+    );
+    assert!(
+        result.is_err(),
+        "unsafe selected files must fail worktree preparation"
+    );
+    assert_eq!(
+        fs::read_to_string(source).unwrap(),
+        "fixture local credentials"
+    );
+}
+
 #[test]
 fn creates_detached_managed_worktree_and_copies_included_ignored_files() {
     let fixture = GitFixture::new();

@@ -2,10 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::agent::acp_active_prompt::{cancel_active_prompt, send_steering_prompt_request};
-use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
+use crate::agent::acp_config_options_apply::SessionConfigRequests;
 use crate::agent::acp_prompt_runner::{
     dispatch_session_notification, run_prompt, PromptRunContext,
 };
+use crate::agent::acp_response_boundary::take_preceding_session_updates;
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_with_catalog_snapshot, session_with_catalog_snapshots,
     PendingSessionCatalogs,
@@ -20,11 +21,11 @@ use crate::agent::{
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentCommandsCatalog, ConfigOptionsCatalog, ConfigOptionsStatus};
-use agent_client_protocol::{Agent, SessionMessage};
+use agent_client_protocol::SessionMessage;
 
 const IDLE_SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
-use super::{AcpSessionCommand, AcpSessionConfigCommand, AttachedNativeSessionRunInput};
+use super::{AcpSessionCommand, AttachedNativeSessionRunInput};
 
 pub(super) async fn run(
     runtime: AttachedNativeSessionRunInput,
@@ -62,6 +63,7 @@ pub(super) async fn run(
     let mut pending_session_catalogs = PendingSessionCatalogs::default();
     let mut config_catalog = active_session_config_catalog(&started_session);
     let mut commands_catalog = started_session.commands_catalog.clone();
+    let mut config_requests = SessionConfigRequests::new();
     let session_id = active_session.session_id().to_string();
     let sink_registration = SessionSinkRegistration {
         session_id,
@@ -77,6 +79,7 @@ pub(super) async fn run(
                 let Some(reply_tx) = close else {
                     break;
                 };
+                config_requests.abandon();
                 let connection = active_session.connection();
                 close_active_session(
                     connection,
@@ -122,6 +125,12 @@ pub(super) async fn run(
                         ));
                     }
                     AcpSessionCommand::Load { request, reply_tx } => {
+                        if !config_requests.can_replace_attachment() {
+                            let _ = reply_tx.send(Err(RuntimeError::NotReady(
+                                "ACP session is updating configuration".to_string(),
+                            )));
+                            continue;
+                        }
                         let mcp_servers = match request.secret_resolver.as_deref() {
                             Some(resolver) => resolver.resolve_mcp_servers(
                                 &initialize.agent_capabilities.mcp_capabilities,
@@ -209,6 +218,7 @@ pub(super) async fn run(
                             request_guard,
                             &mut command_rx,
                             &mut config_rx,
+                            &mut config_requests,
                             &mut config_catalog,
                             &mut commands_catalog,
                             &session_snapshot,
@@ -247,6 +257,7 @@ pub(super) async fn run(
                         }
                     }
                     AcpSessionCommand::Delete { reply_tx } => {
+                        config_requests.abandon();
                         let connection = active_session.connection();
                         let result = delete_active_session(
                             connection,
@@ -260,25 +271,32 @@ pub(super) async fn run(
                     }
                 }
             }
-            config = config_rx.recv() => {
-                let Some(config) = config else {
-                    break;
-                };
-                handle_session_config_command(
-                    &mut active_session,
-                    &mut config_catalog,
-                    &mut commands_catalog,
-                    session_event_sink.as_ref(),
-                    session_projection.clone(),
-                    &mut pending_session_catalogs,
-                    config,
-                )
-                .await
-                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+            config = config_rx.recv(), if config_requests.can_dispatch() => {
+                let Some(config) = config else { break; };
+                config_requests.dispatch(&active_session, config);
+            }
+            response = config_requests.next_response() => {
+                let Some(response) = response else { continue; };
+                for update in take_preceding_session_updates(&mut active_session)
+                    .await
+                    .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+                {
+                    apply_opened_session_message(
+                        &request_agent_id,
+                        update,
+                        &mut config_catalog,
+                        &mut commands_catalog,
+                        session_event_sink.as_ref(),
+                        session_projection.clone(),
+                        &mut pending_session_catalogs,
+                    ).await
+                    .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                }
+                if let Some(catalog) = response.finish_with_session_sink(session_event_sink.as_deref()) {
+                    config_catalog = catalog;
+                }
                 session_snapshot = session_with_catalog_snapshots(
-                    &session_snapshot,
-                    &config_catalog,
-                    &commands_catalog,
+                    &session_snapshot, &config_catalog, &commands_catalog,
                 );
             }
             update = active_session.read_update() => {
@@ -301,6 +319,7 @@ pub(super) async fn run(
                 );
             }
             () = &mut idle_deadline, if supports_session_close && idle_close_eligible => {
+                config_requests.abandon();
                 let idle_session_id = active_session.session_id().clone();
                 crate::logging::info(
                     "acp_session_idle_timeout",
@@ -398,85 +417,6 @@ async fn apply_opened_session_message(
     )
     .await?;
     apply_session_catalogs(catalogs, config_catalog, commands_catalog);
-    Ok(())
-}
-
-async fn handle_session_config_command(
-    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
-    catalog: &mut ConfigOptionsCatalog,
-    commands_catalog: &mut Option<AgentCommandsCatalog>,
-    session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
-    session_projection: Option<LivePromptProjection>,
-    pending_session_catalogs: &mut PendingSessionCatalogs,
-    command: AcpSessionConfigCommand,
-) -> Result<(), RuntimeError> {
-    match command {
-        AcpSessionConfigCommand::SetConfigOption {
-            agent_id,
-            session_id,
-            config_id,
-            value,
-            operation_id,
-            queued_at,
-            reply_tx,
-        } => {
-            crate::logging::info(
-                "acp_config_option_command_received",
-                serde_json::json!({
-                    "session_id": session_id,
-                    "operation_id": operation_id,
-                    "queue_wait_ms": queued_at.elapsed().as_millis(),
-                }),
-            );
-            let connection = active_session.connection().clone();
-            let mut response = match set_task_config_option_after_prior_updates(
-                &connection,
-                active_session,
-                config_id,
-                value,
-                &agent_id,
-                &operation_id,
-            )
-            .await
-            {
-                Ok(response) => response,
-                Err(error) => {
-                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
-                    return Err(error);
-                }
-            };
-            for update in response.take_prior_updates() {
-                if let Err(error) = apply_opened_session_message(
-                    &agent_id,
-                    update,
-                    catalog,
-                    commands_catalog,
-                    session_event_sink,
-                    session_projection.clone(),
-                    pending_session_catalogs,
-                )
-                .await
-                {
-                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
-                    return Err(error);
-                }
-            }
-            let result =
-                response.finish_with_session_sink(session_event_sink.map(|sink| sink.as_ref()));
-            crate::logging::info(
-                "acp_config_option_catalog_published",
-                serde_json::json!({
-                    "session_id": session_id,
-                    "operation_id": operation_id,
-                    "result_status": if result.is_ok() { "ok" } else { "error" },
-                }),
-            );
-            if let Ok(next_catalog) = &result {
-                *catalog = next_catalog.clone();
-            }
-            let _ = reply_tx.send(result);
-        }
-    }
     Ok(())
 }
 

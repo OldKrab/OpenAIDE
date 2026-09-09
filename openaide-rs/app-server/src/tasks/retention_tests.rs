@@ -238,8 +238,11 @@ fn a_legacy_task_without_a_usage_marker_gets_one_tracked_grace_period() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_failed_usage_marker_replacement_preserves_the_previous_complete_value() {
+    use std::os::unix::fs::PermissionsExt;
+
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -263,12 +266,15 @@ fn a_failed_usage_marker_replacement_preserves_the_previous_complete_value() {
         .unwrap();
     api.mark_task_used_at_for_test("atomic-marker", old)
         .unwrap();
-    std::fs::create_dir(state_root.join("task-store-v1/tasks/atomic-marker/last-used.tmp"))
-        .unwrap();
+    let task_directory = state_root.join("task-store-v1/tasks/atomic-marker");
+    let original_permissions = std::fs::metadata(&task_directory).unwrap().permissions();
+    // Fail at the filesystem boundary without depending on the atomic writer's
+    // private temporary filename. Restore access before asserting or cleanup.
+    std::fs::set_permissions(&task_directory, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let replacement = api.mark_task_used_at_for_test("atomic-marker", old + 1);
+    std::fs::set_permissions(&task_directory, original_permissions).unwrap();
 
-    assert!(api
-        .mark_task_used_at_for_test("atomic-marker", old + 1)
-        .is_err());
+    assert!(replacement.is_err());
     assert_eq!(
         store
             .task_journal()

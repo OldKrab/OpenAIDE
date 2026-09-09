@@ -6,7 +6,8 @@ export function configOptionsSettled(catalog: ConfigOptionsCatalog | undefined) 
 }
 
 export function configOptionsMutable(catalog: ConfigOptionsCatalog | undefined) {
-  return configOptionsSettled(catalog) && catalog?.pending_change === undefined;
+  return configOptionsSettled(catalog) && catalog?.pending_change === undefined
+    && (!catalog?.preferences || catalog.preferences.state === "settled");
 }
 
 /** Identifies the complete Agent-owned catalog while excluding transient mutation presentation. */

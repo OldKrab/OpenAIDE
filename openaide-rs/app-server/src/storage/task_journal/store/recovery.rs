@@ -38,7 +38,7 @@ pub(super) fn open_catalog(tasks_root: &Path) -> Result<OpenedCatalog, RuntimeEr
         // Journals created before fail-closed status bytes must gain the marker
         // even when their new Navigation catalog lets startup skip replay.
         failure::ensure_status(&task_dir)?;
-        match split::load_task(&task_dir) {
+        match split::load_catalog_task(&task_dir) {
             Ok(Some(metadata)) if metadata.task.task_id == task_id => {
                 if let Err(error) = split::remove_legacy_files(&task_dir) {
                     crate::logging::warn(

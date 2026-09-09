@@ -101,7 +101,6 @@ export function preparedSnapshotMatchesSelection(state: AppState) {
     && preparedTaskMatchesNewTaskContext(state, {
       agentId: task.agent_id,
       projectId: task.project_id,
-      workspaceRoot: task.workspace_root,
       worktreeId: task.worktree_id,
     }),
   );

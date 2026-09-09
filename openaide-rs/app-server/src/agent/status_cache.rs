@@ -112,11 +112,18 @@ impl AgentStatusCache {
         self.notify();
     }
 
-    pub(crate) fn record_session_error(&self, agent_id: &str, error: &RuntimeError) {
+    /// Enriches a failed session observation with Initialize's sign-in choices
+    /// without publishing its Ready handshake as a successful session outcome.
+    pub(crate) fn record_session_error(
+        &self,
+        agent_id: &str,
+        error: &RuntimeError,
+        probe: Option<&AgentProbeResult>,
+    ) {
         if !session_error_updates_agent_status(error) {
             return;
         }
-        self.record_probe_error(agent_id, error);
+        self.record_error(agent_id, error, probe);
     }
 
     pub(crate) fn record_probe_success(&self, result: &AgentProbeResult) {
@@ -135,25 +142,40 @@ impl AgentStatusCache {
     }
 
     pub(crate) fn record_probe_error(&self, agent_id: &str, error: &RuntimeError) {
+        self.record_error(agent_id, error, None);
+    }
+
+    fn record_error(&self, agent_id: &str, error: &RuntimeError, probe: Option<&AgentProbeResult>) {
         let mut entries = self.entries.lock().expect("agent status cache poisoned");
-        let previous = entries.get(agent_id).cloned().unwrap_or_default();
-        entries.insert(
-            agent_id.to_string(),
-            AgentStatusSnapshot {
-                status: status_from_probe_error(error),
-                setup_reason: setup_reason_from_probe_error(error),
-                capabilities: AgentCapabilities::default(),
-                // ACP Authentication Methods are available choices, not proof of current
-                // authentication. Keep the last advertised choices actionable during recovery.
-                auth_methods: previous.auth_methods,
-                logout_supported: previous.logout_supported,
-                // A probe failure explains the Agent, not the user's last sign-in attempt.
-                sign_in: previous
-                    .sign_in
-                    .filter(|flow| flow.phase == AgentSignInPhase::Failed),
-                status_before_authentication: None,
-            },
-        );
+        let previous = entries.entry(agent_id.to_string()).or_default();
+        // Passive work may finish after Sign-in starts. Only the flow's own
+        // completion/cancellation may release its status and continuation data.
+        if previous.status == AgentStatus::Authenticating {
+            return;
+        }
+        let snapshot = AgentStatusSnapshot {
+            status: status_from_probe_error(error),
+            setup_reason: setup_reason_from_probe_error(error),
+            capabilities: AgentCapabilities::default(),
+            // ACP Authentication Methods are available choices, not proof of current
+            // authentication. Keep the last advertised choices actionable during recovery.
+            auth_methods: probe
+                .map(|probe| &probe.auth_methods)
+                .unwrap_or(&previous.auth_methods)
+                .clone(),
+            logout_supported: probe
+                .map_or(previous.logout_supported, |probe| probe.logout_supported),
+            // A probe failure explains the Agent, not the user's last sign-in attempt.
+            sign_in: previous
+                .sign_in
+                .clone()
+                .filter(|flow| flow.phase == AgentSignInPhase::Failed),
+            status_before_authentication: None,
+        };
+        if *previous == snapshot {
+            return;
+        }
+        *previous = snapshot;
         drop(entries);
         self.notify();
     }
@@ -314,10 +336,20 @@ impl AgentStatusCache {
     }
 
     fn record(&self, agent_id: String, snapshot: AgentStatusSnapshot) {
-        self.entries
-            .lock()
-            .expect("agent status cache poisoned")
-            .insert(agent_id, snapshot);
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        if entries
+            .get(&agent_id)
+            .is_some_and(|previous| previous.status == AgentStatus::Authenticating)
+        {
+            return;
+        }
+        // Observations wake catalog discovery through the status receiver. Only
+        // changed product state may publish, or listing feeds its own next scan.
+        if entries.get(&agent_id) == Some(&snapshot) {
+            return;
+        }
+        entries.insert(agent_id, snapshot);
+        drop(entries);
         self.notify();
     }
 

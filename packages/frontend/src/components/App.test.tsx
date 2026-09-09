@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActivityStep, ChatMessage } from "@openaide/app-shell-contracts";
+import { firstToolPath } from "../state/toolDetailsViewModel";
+import { newTaskStatusLabel, relativeTime, taskWorkingStatusLabel } from "./taskSurfaceHelpers";
 
 describe("new task surface", () => {
-  it("reserves the New Task status for task-level progress", async () => {
-    vi.stubGlobal("window", { acquireVsCodeApi: undefined });
-    const { newTaskStatusLabel } = await import("./App");
-
+  it("reserves the New Task status for task-level progress", () => {
     expect(
       newTaskStatusLabel({
         openingNativeSession: true,
@@ -21,12 +20,7 @@ describe("new task surface", () => {
 });
 
 describe("tool detail rendering helpers", () => {
-  beforeEach(() => {
-    vi.stubGlobal("window", { acquireVsCodeApi: undefined });
-  });
-
-  it("accepts tool details without optional location or content arrays", async () => {
-    const { firstToolPath } = await import("./App");
+  it("accepts tool details without optional location or content arrays", () => {
     const details = {
       input: {
         command: ["zsh", "-lc", "find . -iname '*readme*' -print"],
@@ -42,8 +36,7 @@ describe("tool detail rendering helpers", () => {
     expect(firstToolPath(details)).toBeUndefined();
   });
 
-  it("falls back to input path when no explicit location exists", async () => {
-    const { firstToolPath } = await import("./App");
+  it("falls back to input path when no explicit location exists", () => {
     const details = {
       input: {
         command: [],
@@ -60,13 +53,7 @@ describe("tool detail rendering helpers", () => {
 });
 
 describe("task working status label", () => {
-  beforeEach(() => {
-    vi.stubGlobal("window", { acquireVsCodeApi: undefined });
-  });
-
-  it("describes the latest concrete activity with state-aware wording", async () => {
-    const { taskWorkingStatusLabel } = await import("./App");
-
+  it("describes the latest concrete activity with state-aware wording", () => {
     expect(taskWorkingStatusLabel([], "active", false)).toBe("Starting");
     expect(taskWorkingStatusLabel([runningToolActivity("m1", "npm test")], "active", false)).toBe("Running npm test");
     expect(taskWorkingStatusLabel([
@@ -81,8 +68,7 @@ describe("task working status label", () => {
     expect(taskWorkingStatusLabel([completedCommandAndThoughtActivity("m5")], "active", false)).toBe("Thought");
   });
 
-  it("advances from a tool group to the active Agent response", async () => {
-    const { taskWorkingStatusLabel } = await import("./App");
+  it("advances from a tool group to the active Agent response", () => {
     const activity = completedToolGroupActivity("m6");
 
     expect(taskWorkingStatusLabel([activity], "active", false)).toBe("Read README.md");
@@ -91,14 +77,11 @@ describe("task working status label", () => {
     );
   });
 
-  it("shows a standalone Thought as the latest active work", async () => {
-    const { taskWorkingStatusLabel } = await import("./App");
-
+  it("shows a standalone Thought as the latest active work", () => {
     expect(taskWorkingStatusLabel([thoughtMessage("m8")], "active", false)).toBe("Thinking");
   });
 
-  it("starts a new turn instead of reusing work from before the latest user message", async () => {
-    const { taskWorkingStatusLabel } = await import("./App");
+  it("starts a new turn instead of reusing work from before the latest user message", () => {
     const previousResponse = agentMessage("m8", "The first turn is complete.");
     const nextPrompt = userMessage("m9", "Now generate a prototype.");
 
@@ -112,8 +95,7 @@ describe("task working status label", () => {
     ).toBe("Reading DESIGN.md");
   });
 
-  it("does not expose ACP collaboration metadata while waiting for a subagent", async () => {
-    const { taskWorkingStatusLabel } = await import("./App");
+  it("does not expose ACP collaboration metadata while waiting for a subagent", () => {
     const label = taskWorkingStatusLabel([collaborationWaitActivity("m6")], "active", false);
 
     expect(label).toBe("Waiting for subagent");
@@ -121,9 +103,7 @@ describe("task working status label", () => {
     expect(label).not.toContain("inProgress");
   });
 
-  it("keeps Shell sending state out of Chat and labels blocked states", async () => {
-    const { taskWorkingStatusLabel } = await import("./App");
-
+  it("keeps Shell sending state out of Chat and labels blocked states", () => {
     expect(taskWorkingStatusLabel([], "inactive", true)).toBeUndefined();
     expect(taskWorkingStatusLabel([], "waiting", false)).toBe("Permission needed");
     expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "waiting", false)).toBe("Preparing task");
@@ -131,9 +111,7 @@ describe("task working status label", () => {
     expect(taskWorkingStatusLabel([], "stopping", false)).toBe("Stopping");
   });
 
-  it("identifies whole-session replacement in the live activity row", async () => {
-    const { taskWorkingStatusLabel } = await import("./App");
-
+  it("identifies whole-session replacement in the live activity row", () => {
     expect(taskWorkingStatusLabel([], "active", false, { state: "syncing", generation: 1 })).toBe("Reloading session");
     expect(taskWorkingStatusLabel([], "inactive", false, { state: "updated", generation: 1 })).toBe("History updated");
   });
@@ -149,15 +127,11 @@ describe("relativeTime", () => {
     vi.useRealTimers();
   });
 
-  it("formats runtime epoch-millisecond timestamps", async () => {
-    const { relativeTime } = await import("./App");
-
+  it("formats runtime epoch-millisecond timestamps", () => {
     expect(relativeTime(String(Date.parse("2026-05-23T11:57:00.000Z")))).toBe("3m");
   });
 
-  it("formats native session ISO timestamps", async () => {
-    const { relativeTime } = await import("./App");
-
+  it("formats native session ISO timestamps", () => {
     expect(relativeTime("2026-05-23T10:00:00.000Z")).toBe("2h");
   });
 });

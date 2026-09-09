@@ -90,12 +90,18 @@ impl ActivePrompt {
     pub(super) fn steering_settlement(&self) -> PromptSettlement {
         PromptSettlement {
             completion_tx: self.completion_tx.clone(),
-            settlement: self.settlement.clone(),
         }
     }
 
     pub(super) fn mark_settled(&self, kind: PromptSettlementKind) {
         self.settlement.settle(kind);
+    }
+
+    /// Session termination must release already queued response boundaries and
+    /// make future callbacks stale before waiting for the Agent's close response.
+    pub(super) fn retire(&mut self) {
+        self.mark_settled(PromptSettlementKind::RunnerExit);
+        while self.completion_rx.try_recv().is_ok() {}
     }
 
     pub(super) fn mark_cancel_requested(&self) {
@@ -114,7 +120,6 @@ impl ActivePrompt {
 /// Lets an `end_turn` steering response settle the same lifecycle as the primary prompt.
 pub(super) struct PromptSettlement {
     completion_tx: mpsc::UnboundedSender<PromptCompletion>,
-    settlement: Arc<PromptSettlementState>,
 }
 
 #[derive(Clone, Copy)]
@@ -268,29 +273,12 @@ fn send_prompt_request(
         .send_request_to(Agent, request)
         .on_receiving_result(async move |result| {
             let _request_guard = request_guard;
-            let result = match result {
-                Ok(response) => {
-                    if let Some(trace) = &result_trace {
-                        trace.record("agent_to_client", "session/prompt.response", &response);
-                    }
-                    if let Some(usage) = response.usage {
-                        sink.emit(AgentEvent::TurnUsage(AgentTurnUsage {
-                            total_tokens: usage.total_tokens,
-                            input_tokens: usage.input_tokens,
-                            output_tokens: usage.output_tokens,
-                            reasoning_tokens: usage.thought_tokens,
-                            cached_read_tokens: usage.cached_read_tokens,
-                            cached_write_tokens: usage.cached_write_tokens,
-                        }))
-                        .map(|()| prompt_outcome(response.stop_reason))
-                    } else {
-                        Ok(prompt_outcome(response.stop_reason))
-                    }
-                }
-                Err(error) => Err(acp_error(error)),
-            };
-            let superseded_by_steering = matches!(&result, Ok(AgentPromptOutcome::Cancelled))
-                && settlement.steering_accepted()
+            if let (Some(trace), Ok(response)) = (&result_trace, &result) {
+                trace.record("agent_to_client", "session/prompt.response", response);
+            }
+            let superseded_by_steering = result.as_ref().is_ok_and(|response| {
+                response.stop_reason == crate::agent::acp_schema::StopReason::Cancelled
+            }) && settlement.steering_accepted()
                 && !cancellation.is_cancelled()
                 && !settlement.cancel_requested();
             if settlement.kind().is_some() || superseded_by_steering {
@@ -312,6 +300,26 @@ fn send_prompt_request(
                 );
                 return Ok(());
             }
+            // Usage is turn-owned too: stale responses must not overwrite the
+            // telemetry published by a later prompt generation.
+            let result = match result {
+                Ok(response) => {
+                    if let Some(usage) = response.usage {
+                        sink.emit(AgentEvent::TurnUsage(AgentTurnUsage {
+                            total_tokens: usage.total_tokens,
+                            input_tokens: usage.input_tokens,
+                            output_tokens: usage.output_tokens,
+                            reasoning_tokens: usage.thought_tokens,
+                            cached_read_tokens: usage.cached_read_tokens,
+                            cached_write_tokens: usage.cached_write_tokens,
+                        }))
+                        .map(|()| prompt_outcome(response.stop_reason))
+                    } else {
+                        Ok(prompt_outcome(response.stop_reason))
+                    }
+                }
+                Err(error) => Err(acp_error(error)),
+            };
             if completion_tx
                 .send(PromptCompletion {
                     result: Some(result),
@@ -367,6 +375,19 @@ pub(super) fn send_steering_prompt_request(
                     if let Some(trace) = &result_trace {
                         trace.record("agent_to_client", "session/prompt.response", &response);
                     }
+                    if let Some(settlement_kind) = _request_guard.settlement_state().kind() {
+                        crate::logging::info(
+                            "acp_prompt_result_stale",
+                            serde_json::json!({
+                                "task_id": task_id,
+                                "active_session_id": session_id,
+                                "prompt_kind": "steering",
+                                "settlement_kind": settlement_kind.label(),
+                                "result_status": "stop_reason",
+                            }),
+                        );
+                        return Ok(());
+                    }
                     let usage_error = response.usage.and_then(|usage| {
                         usage_sink.as_ref().and_then(|sink| {
                             sink.emit(AgentEvent::TurnUsage(AgentTurnUsage {
@@ -396,19 +417,6 @@ pub(super) fn send_steering_prompt_request(
                     let Some(settlement) = settlement else {
                         return Ok(());
                     };
-                    if let Some(settlement_kind) = settlement.settlement.kind() {
-                        crate::logging::info(
-                            "acp_prompt_result_stale",
-                            serde_json::json!({
-                                "task_id": task_id,
-                                "active_session_id": session_id,
-                                "prompt_kind": "steering",
-                                "settlement_kind": settlement_kind.label(),
-                                "result_status": "stop_reason",
-                            }),
-                        );
-                        return Ok(());
-                    }
                     let (release_tx, release_rx) = tokio::sync::oneshot::channel();
                     if settlement
                         .completion_tx
@@ -427,13 +435,15 @@ pub(super) fn send_steering_prompt_request(
                     }
                 }
                 Err(error) => {
+                    let error = acp_error(error);
                     crate::logging::warn(
                         "acp_steering_prompt_result",
                         serde_json::json!({
                             "task_id": task_id,
                             "active_session_id": session_id,
                             "result": "error",
-                            "error": error.to_string(),
+                            "error_kind": error.reason(),
+                            "error_code": error.code(),
                         }),
                     );
                 }

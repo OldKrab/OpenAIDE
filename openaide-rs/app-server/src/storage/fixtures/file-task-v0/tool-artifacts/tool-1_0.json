@@ -1,0 +1,1 @@
+{"task_id":"task-legacy","artifact_id":"tool-1_0","details":{"locations":[{"path":"/workspace/project/reference.txt"}],"content":[{"kind":"text","text":"Original tool output"}],"output":{"stdout":"Original stdout","exit_code":0,"success":true}}}

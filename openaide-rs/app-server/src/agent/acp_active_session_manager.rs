@@ -149,13 +149,21 @@ impl AcpActiveSessionManager {
         })
     }
 
+    /// Reuses a live attachment without acquiring or replacing its Agent process.
+    pub(super) fn snapshot_attached_session(
+        &self,
+        session: &AgentSessionKey,
+    ) -> Option<Result<AgentSession, RuntimeError>> {
+        self.sessions.snapshot_attached_session(session)
+    }
+
     pub(super) fn resume_session(
         &self,
         request: AgentSessionResume,
     ) -> Result<AgentSession, RuntimeError> {
         let session = request.session_key();
-        if self.sessions.contains(&session) {
-            return self.sessions.snapshot_session(&session);
+        if let Some(snapshot) = self.snapshot_attached_session(&session) {
+            return snapshot;
         }
         if request.cancellation.is_cancelled() {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));

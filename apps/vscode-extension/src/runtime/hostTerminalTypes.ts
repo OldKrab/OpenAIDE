@@ -1,4 +1,4 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
 import type { StringDecoder } from "node:string_decoder";
 
 export const TERMINAL_CREATE = "terminal/create";
@@ -33,6 +33,7 @@ export type TerminalExitStatus = {
 
 export type TerminalRecord = {
   id: string;
+  startedAt: number;
   sessionId: string;
   child: ChildProcessWithoutNullStreams;
   stdoutDecoder: StringDecoder;
@@ -43,5 +44,6 @@ export type TerminalRecord = {
   exitStatus: TerminalExitStatus | undefined;
   released: boolean;
   forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  treeKillProcess: ChildProcess | undefined;
   waiters: Array<(status: TerminalExitStatus) => void>;
 };

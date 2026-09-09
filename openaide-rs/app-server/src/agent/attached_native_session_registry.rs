@@ -86,11 +86,11 @@ impl AttachedNativeSessionRegistry {
 
     /// Reads the state held by an already attached Native Session without
     /// issuing another ACP lifecycle request.
-    pub(super) fn snapshot_session(
+    pub(super) fn snapshot_attached_session(
         &self,
         session: &AgentSessionKey,
-    ) -> Result<AgentSession, RuntimeError> {
-        self.require_session(session)?.snapshot()
+    ) -> Option<Result<AgentSession, RuntimeError>> {
+        self.get(session).map(|attachment| attachment.snapshot())
     }
 
     pub(super) fn set_config_option(

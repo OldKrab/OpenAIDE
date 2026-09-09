@@ -460,6 +460,7 @@ log_details = os.environ.get("OPENAIDE_ACP_FIXTURE_LOG_DETAILS", "") == "1"
 auth_method = os.environ.get("OPENAIDE_ACP_FIXTURE_AUTH_METHOD", "agent")
 with_resume_commands = os.environ.get("OPENAIDE_ACP_FIXTURE_RESUME_COMMANDS", "") == "1"
 pending_prompt_ids = []
+pending_config_messages = []
 prompt_request_count = 0
 next_session_number = 0
 closed_session_count = 0
@@ -609,6 +610,10 @@ for line in sys.stdin:
             elif fixture_title:
                 notify_title(fixture_title)
     elif method == "session/load":
+        if prompt_mode == "config_times_out_before_load":
+            while pending_config_messages:
+                config_message = pending_config_messages.pop(0)
+                respond(config_message, {"configOptions": []})
         if prompt_mode == "load_replay":
             notify_text_chunk("replayed through active attachment")
         respond(message, {"configOptions": []})
@@ -641,12 +646,18 @@ for line in sys.stdin:
         if session_id == "idle-session":
             notify_title("Title after idle resume")
     elif method == "session/list":
+        if prompt_mode == "blocked_list":
+            deadline = time.monotonic() + 10
+            while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
+                time.sleep(0.01)
         if prompt_mode == "pending_prompt_and_slow_list":
             time.sleep(0.2)
         respond(message, {"sessions": []})
         if prompt_mode == "pending_prompt_and_slow_list" and pending_prompt_ids:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
     elif method == "authenticate":
+        if session_id == "auth-lock-session":
+            continue
         respond(message, {})
     elif method == "logout":
         respond(message, {})
@@ -662,7 +673,7 @@ for line in sys.stdin:
             pending_prompt_ids.append(message.get("id"))
             request_terminal("prompt-terminal-create-1")
             request_terminal("prompt-terminal-create-2")
-        elif prompt_mode in ("wait_for_cancel", "pending_prompt_and_slow_list") or (
+        elif prompt_mode in ("wait_for_cancel", "pending_prompt_and_slow_list", "prompt_ends_before_config_response", "config_waits_for_cancel", "prompt_ends_before_close_response") or (
             prompt_mode == "delay_first_cancel_response" and prompt_request_count == 1
         ):
             pending_prompt_ids.append(message.get("id"))
@@ -691,13 +702,20 @@ for line in sys.stdin:
             respond(message, {"stopReason": "end_turn"})
     elif method == "session/set_config_option":
         params = message.get("params", {})
+        if prompt_mode in ("config_waits_for_cancel", "config_times_out_before_load"):
+            pending_config_messages.append(message)
+            continue
         if log_details:
             log("config:" + json.dumps(params, sort_keys=True))
         if prompt_mode in (
             "primary_ends_while_steer_pending",
             "steer_ends_while_primary_pending",
+            "prompt_ends_before_config_response",
         ) and pending_prompt_ids:
-            respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
+            respond_id(pending_prompt_ids.pop(0), {
+                "stopReason": "end_turn",
+                "usage": {"totalTokens": 999, "inputTokens": 111, "outputTokens": 888},
+            })
         if config_response_delay > 0:
             time.sleep(config_response_delay)
         config_id = params.get("configId", "model")
@@ -755,9 +773,20 @@ for line in sys.stdin:
             time.sleep(0.3)
         while pending_prompt_ids:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "cancelled"})
+        while pending_config_messages:
+            config_message = pending_config_messages.pop(0)
+            respond(config_message, {"configOptions": [{
+                "id": "model", "name": "Model", "type": "select",
+                "currentValue": config_message["params"]["value"],
+                "options": [{"value": "gpt-5.5", "name": "GPT 5.5"}],
+            }]})
     elif method == "session/fork":
         respond(message, {"sessionId": "forked-session"})
     elif method == "session/close":
+        if prompt_mode == "prompt_ends_before_close_response":
+            notify_text_chunk("final text before close")
+            while pending_prompt_ids:
+                respond_id(pending_prompt_ids.pop(0), {"stopReason": "cancelled"})
         respond(message, {})
         if session_id == "idle-session":
             closed_session_count += 1
@@ -1183,6 +1212,76 @@ fn listing_sessions_reuses_the_active_agent_process() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/list", "session/close"]
+    );
+}
+
+#[test]
+fn attached_session_resume_does_not_wait_for_discovery() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "live-during-discovery", "blocked_list")
+    else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-live-during-discovery", cwd_string()))
+        .expect("start session");
+    let discovery = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.list_sessions(AgentListSessionsRequest {
+                agent_id: "codex".to_string(),
+                cwd: Some(cwd_string()),
+                cursor: None,
+            })
+        }
+    });
+    wait_for_method(&log_path, "session/list");
+    let (resumed_tx, resumed_rx) = mpsc::channel();
+    let resume = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = session.session_id.clone();
+        move || {
+            let _ = resumed_tx.send(runtime.resume_session(AgentSessionResume {
+                agent_id: "codex".to_string(),
+                task_id: "task-live-during-discovery".to_string(),
+                session_id,
+                cwd: cwd_string(),
+                model_id: None,
+                cancellation: TurnCancellation::new(),
+                secret_resolver: None,
+            }));
+        }
+    });
+    let early_result = resumed_rx.recv_timeout(Duration::from_secs(2));
+    let reused_during_discovery = early_result.is_ok();
+    // Release the real ACP request before asserting so a regression cannot leave
+    // blocked threads or child processes behind.
+    fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+    discovery
+        .join()
+        .expect("discovery thread")
+        .expect("discovery");
+    let resumed = early_result
+        .unwrap_or_else(|_| {
+            resumed_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("resume after discovery")
+        })
+        .expect("resume session");
+    resume.join().expect("resume thread");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+    assert_eq!(resumed.session_id, session.session_id);
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new", "session/list", "session/close"]
+    );
+    assert!(
+        reused_during_discovery,
+        "an attached session must be reusable before discovery completes"
     );
 }
 
@@ -1998,6 +2097,61 @@ impl AgentSessionEventSink for BlockingConfigSessionSink {
     fn commands_changed(&self, _catalog: AgentCommandsCatalog) -> Result<(), RuntimeError> {
         Ok(())
     }
+}
+
+#[test]
+fn authentication_wait_does_not_block_another_agents_session_start() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, agent_a_log, _)) = colliding_session_runtime(&temp, "auth-lock-session")
+    else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let auth = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.authenticate(crate::agent::AgentAuthenticateRequest {
+                agent_id: "agent-a".to_string(),
+                method_id: "test-auth".to_string(),
+                env: HashMap::new(),
+                secret_env: Vec::new(),
+                secret_storage_agent_id: None,
+                terminal_confirmed: false,
+                secret_resolver: None,
+            })
+        }
+    });
+    wait_for_method(&agent_a_log, "authenticate");
+    let (started_tx, started_rx) = mpsc::channel();
+    let start = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            let mut request = start_request("task-independent-agent", cwd_string());
+            request.agent_id = "agent-b".to_string();
+            let _ = started_tx.send(runtime.start_session(request));
+        }
+    });
+    let early_result = started_rx.recv_timeout(Duration::from_secs(2));
+    let started_during_authentication = early_result.is_ok();
+    runtime
+        .cancel_authentication("agent-a")
+        .expect("cancel authentication");
+    assert!(auth.join().expect("auth thread").is_err());
+    let session = early_result
+        .unwrap_or_else(|_| {
+            started_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("start after auth teardown")
+        })
+        .expect("start independent Agent session");
+    start.join().expect("start thread");
+    runtime
+        .close_session(&session.key())
+        .expect("close independent session");
+    assert!(
+        started_during_authentication,
+        "Agent B must start while Agent A awaits user authentication"
+    );
 }
 
 #[test]
@@ -2881,12 +3035,12 @@ fn steering_sends_an_additional_prompt_while_primary_prompt_is_running() {
 }
 
 #[test]
-fn next_prompt_dispatches_when_prior_steering_request_never_settles() {
+fn next_prompt_dispatches_before_prior_steering_request_settles() {
     assert_next_prompt_ignores_stale_request("primary_ends_while_steer_pending");
 }
 
 #[test]
-fn next_prompt_dispatches_when_prior_primary_request_never_settles() {
+fn next_prompt_dispatches_before_prior_primary_request_settles() {
     assert_next_prompt_ignores_stale_request("steer_ends_while_primary_pending");
 }
 
@@ -2902,9 +3056,11 @@ fn assert_next_prompt_ignores_stale_request(prompt_mode: &str) {
         .start_session(start_request("task-prompt-generation", cwd_string()))
         .expect("start session");
 
+    let original_sink = Arc::new(CapturingEventSink::default());
     let primary_session_id = session.session_id.clone();
     let primary = std::thread::spawn({
         let runtime = runtime.clone();
+        let sink = original_sink.clone();
         move || {
             runtime.prompt(
                 AgentPrompt {
@@ -2915,7 +3071,7 @@ fn assert_next_prompt_ignores_stale_request(prompt_mode: &str) {
                     attachments: Vec::new(),
                     cancellation: TurnCancellation::new(),
                 },
-                Arc::new(CapturingEventSink::default()),
+                sink,
             )
         }
     });
@@ -2960,6 +3116,26 @@ fn assert_next_prompt_ignores_stale_request(prompt_mode: &str) {
         .join()
         .expect("next prompt thread")
         .expect("next prompt should ignore the stale response waiter");
+    // The config request makes the fixture answer the retired generation after
+    // the next turn. Its token usage must not overwrite the later turn's state.
+    runtime
+        .set_session_config_option(AgentSessionSetConfigOptionRequest {
+            agent_id: "codex".to_string(),
+            session_id: session.session_id.clone(),
+            config_id: "model".to_string(),
+            value: config_id("gpt-5.5"),
+            diagnostic_operation_id: None,
+        })
+        .expect("config response proves the stale prompt response was consumed");
+    assert!(
+        !original_sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| { matches!(event, AgentEvent::TurnUsage(_)) }),
+        "a retired prompt must not publish usage into the current turn"
+    );
     runtime
         .close_session(&session.key())
         .expect("close session");
@@ -2972,9 +3148,227 @@ fn assert_next_prompt_ignores_stale_request(prompt_mode: &str) {
             "session/prompt",
             "session/prompt",
             "session/prompt",
+            "session/set_config_option",
             "session/close"
         ]
     );
+}
+
+#[test]
+fn closing_session_accepts_prompt_response_before_close_response() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
+        &temp,
+        "close-response-order-session",
+        "prompt_ends_before_close_response",
+    ) else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-close-response-order", cwd_string()))
+        .expect("start session");
+    let session_sink = Arc::new(CapturingSessionSink::default());
+    runtime
+        .attach_session_event_sink(&session.key(), session_sink.clone())
+        .expect("attach sink");
+    let (prompt_tx, prompt_rx) = mpsc::channel();
+    let prompt_thread = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = session.session_id.clone();
+        move || {
+            let result = runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-close-response-order".to_string(),
+                    session_id,
+                    text: "wait for close".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            );
+            let _ = prompt_tx.send(result);
+        }
+    });
+    wait_for_method(&log_path, "session/prompt");
+    let close_result = runtime.close_session(&session.key());
+    let prompt_result = prompt_rx.recv_timeout(Duration::from_secs(2));
+    close_result.expect("close must receive its response after the prompt response");
+    assert!(prompt_result.expect("closed prompt must settle").is_err());
+    prompt_thread.join().expect("prompt thread");
+    assert!(session_sink.events.lock().unwrap().iter().any(|event| matches!(
+        event, AgentEvent::MessageChunk { part: crate::protocol::model::AgentMessagePart::Text { text }, .. }
+            if text == "final text before close"
+    )), "updates preceding the close response must reach the session owner");
+}
+
+#[test]
+fn prompt_completion_before_config_response_does_not_block_the_session() {
+    assert_config_response_remains_responsive("prompt_ends_before_config_response", false);
+}
+
+#[test]
+fn cancellation_is_delivered_while_config_response_is_pending() {
+    assert_config_response_remains_responsive("config_waits_for_cancel", true);
+}
+
+#[test]
+fn timed_out_config_response_cannot_deadlock_attachment_reload() {
+    let diagnostics = crate::logging::capture_test_logs();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _)) = fixture_runtime_with_prompt_mode(
+        &temp,
+        "config-timeout-load-session",
+        "config_times_out_before_load",
+    ) else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-config-timeout-load", cwd_string()))
+        .expect("start session");
+    let operation_id = "config-timeout-load";
+    let config = runtime.set_session_config_option(AgentSessionSetConfigOptionRequest {
+        agent_id: "codex".to_string(),
+        session_id: session.session_id.clone(),
+        config_id: "model".to_string(),
+        value: config_id("gpt-5.5"),
+        diagnostic_operation_id: Some(operation_id.to_string()),
+    });
+    assert!(config.is_err(), "the held config request must time out");
+    // The caller and owner have separate deadlines. Wait until owner admission
+    // reopens, otherwise Load's ordinary pending-request guard hides the bug.
+    wait_until(|| {
+        diagnostics.snapshot().iter().any(|entry| {
+            entry["event"] == "acp_config_option_request_timed_out"
+                && entry["fields"]["operation_id"] == operation_id
+        })
+    });
+    let load_request = AgentSessionLoad {
+        agent_id: "codex".to_string(),
+        task_id: "task-config-timeout-load".to_string(),
+        session_id: session.session_id.clone(),
+        cwd: cwd_string(),
+        model_id: None,
+        cancellation: TurnCancellation::new(),
+        secret_resolver: None,
+    };
+    let (load_tx, load_rx) = mpsc::channel();
+    let load = std::thread::spawn({
+        let runtime = runtime.clone();
+        let request = load_request.clone();
+        move || {
+            let _ = load_tx.send(runtime.load_session(request));
+        }
+    });
+    let early_result = load_rx.recv_timeout(Duration::from_secs(2));
+    let safely_rejected = matches!(
+        &early_result,
+        Ok(Err(RuntimeError::NotReady(message))) if message.contains("updating configuration")
+    );
+    if !safely_rejected {
+        // Stop the fixture process before reporting a deadlock; this also releases
+        // Load's waiter and avoids leaking its worker from the failing test.
+        runtime
+            .cancel_authentication("codex")
+            .expect("stop fixture process");
+    }
+    load.join().expect("load thread");
+    assert!(
+        safely_rejected,
+        "Load must reject while a timed-out config response still owns its ACP boundary"
+    );
+
+    runtime
+        .cancel_session(&session.key())
+        .expect("release held config response");
+    wait_until(|| {
+        diagnostics.snapshot().iter().any(|entry| {
+            entry["event"] == "acp_config_option_catalog_published"
+                && entry["fields"]["operation_id"] == operation_id
+        })
+    });
+    runtime
+        .load_session(load_request)
+        .expect("reload after the old config boundary settles");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+}
+
+fn assert_config_response_remains_responsive(prompt_mode: &str, cancel: bool) {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "config-response-order-session", prompt_mode)
+    else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-config-response-order", cwd_string()))
+        .expect("start session");
+    let (prompt_tx, prompt_rx) = mpsc::channel();
+    let prompt_thread = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = session.session_id.clone();
+        move || {
+            let result = runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-config-response-order".to_string(),
+                    session_id,
+                    text: "complete when configuration starts".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            );
+            let _ = prompt_tx.send(result);
+        }
+    });
+    wait_for_method(&log_path, "session/prompt");
+    let (config_tx, config_rx) = mpsc::channel();
+    let config_thread = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = session.session_id.clone();
+        move || {
+            let result = runtime.set_session_config_option(AgentSessionSetConfigOptionRequest {
+                agent_id: "codex".to_string(),
+                session_id,
+                config_id: "model".to_string(),
+                value: config_id("gpt-5.5"),
+                diagnostic_operation_id: None,
+            });
+            let _ = config_tx.send(result);
+        }
+    });
+    wait_for_method(&log_path, "session/set_config_option");
+    if cancel {
+        runtime
+            .cancel_session(&session.key())
+            .expect("cancel session");
+    }
+    let prompt_result = prompt_rx.recv_timeout(Duration::from_secs(2));
+    let config_result = config_rx.recv_timeout(Duration::from_secs(2));
+    // Request teardown before assertions; bounded receive failures must not hang on worker joins.
+    runtime.shutdown().expect("shutdown runtime");
+    assert_eq!(
+        prompt_result
+            .expect("prompt completion must remain responsive")
+            .unwrap(),
+        if cancel {
+            AgentPromptOutcome::Cancelled
+        } else {
+            AgentPromptOutcome::EndTurn
+        }
+    );
+    let catalog = config_result
+        .expect("config response must remain responsive")
+        .unwrap();
+    assert_eq!(catalog_id(&catalog, "model"), Some("gpt-5.5"));
+    prompt_thread.join().expect("prompt thread");
+    config_thread.join().expect("config thread");
 }
 
 #[test]

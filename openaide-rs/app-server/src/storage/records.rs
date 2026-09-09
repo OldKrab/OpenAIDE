@@ -2,10 +2,14 @@ use openaide_app_server_protocol::{ids::ClientInstanceId, snapshot::TaskPermissi
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
-    AgentCommandsCatalog, AgentPlan, ChatMessage, ConfigOptionCurrentValue, ConfigOptionsCatalog,
-    IsolationKind, TaskContextUsage, TaskStatus, TaskSummary, TaskTurnUsage,
+    AgentCommandsCatalog, AgentPlan, ChatMessage, ConfigOptionsCatalog, IsolationKind,
+    TaskContextUsage, TaskStatus, TaskSummary, TaskTurnUsage,
 };
 use crate::storage::composer_history::ComposerHistory;
+
+#[path = "config_state.rs"]
+mod config_state;
+pub use config_state::{PendingTaskConfigChange, TaskConfigMutationState};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "status")]
@@ -422,46 +426,6 @@ impl TaskLifecycle {
     }
 }
 
-/// App Server ordering state for one Task's Agent-owned configuration changes.
-///
-/// The sequence is monotonic across settled changes so a late Agent response can
-/// never become authoritative again after a newer client mutation supersedes it.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct TaskConfigMutationState {
-    #[serde(default)]
-    pub sequence: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending: Option<PendingTaskConfigChange>,
-}
-
-impl TaskConfigMutationState {
-    fn is_empty(&self) -> bool {
-        self.sequence == 0 && self.pending.is_none()
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PendingTaskConfigChange {
-    pub sequence: u64,
-    pub client_mutation_id: String,
-    pub config_id: String,
-    #[serde(deserialize_with = "deserialize_pending_config_value")]
-    pub requested_value: ConfigOptionCurrentValue,
-}
-
-fn deserialize_pending_config_value<'de, D>(
-    deserializer: D,
-) -> Result<ConfigOptionCurrentValue, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    if let Some(value) = value.as_str() {
-        return Ok(ConfigOptionCurrentValue::id(value));
-    }
-    serde_json::from_value(value).map_err(serde::de::Error::custom)
-}
-
 /// The latest product-level reason a Task needs user attention.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -590,8 +554,8 @@ pub struct TaskRecord {
     pub tombstoned: bool,
     #[serde(default)]
     pub revision: u64,
-    /// Last catalog reported by the bound Native Session. It is display-only until
-    /// `native_session_data_freshness` confirms it in the current server epoch.
+    /// Catalog of the live bound session only. Never persist it or restore legacy
+    /// catalogs as current controls; saved user preferences have a separate owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
     #[serde(
@@ -801,19 +765,26 @@ impl TaskRecord {
 
     /// Starts a new App Server epoch without treating its last Agent catalogs as live.
     ///
-    /// Catalogs remain display-only stale snapshots until a resumed or loaded Native Session
-    /// confirms them. Usage and in-flight mutations are still process-local and are removed.
+    /// Option catalogs, initialization progress, usage, and in-flight mutations are
+    /// process-local. A resumed session supplies fresh options before controls appear.
     pub(crate) fn clear_process_local_agent_state(&mut self) -> bool {
         let became_stale = (self.config_options_catalog.is_some()
             || self.agent_commands_catalog.is_some())
             && !self.native_session_data_freshness.is_stale();
+        let had_catalog = self.config_options_catalog.take().is_some();
+        let had_preferences = self.config_mutation.preferences.take().is_some();
         let had_pending_mutation = self.config_mutation.pending.take().is_some();
         let had_context_usage = self.context_usage.take().is_some();
         let had_turn_usage = self.last_turn_usage.take().is_some();
         if became_stale {
             self.mark_native_session_data_stale();
         }
-        became_stale || had_pending_mutation || had_context_usage || had_turn_usage
+        became_stale
+            || had_catalog
+            || had_preferences
+            || had_pending_mutation
+            || had_context_usage
+            || had_turn_usage
     }
 
     /// Updates the automatic title without replacing a visible user override.

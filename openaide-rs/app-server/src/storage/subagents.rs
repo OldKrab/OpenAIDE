@@ -1,5 +1,4 @@
-use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -7,16 +6,19 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentPlan, NormalizedMessage};
 use crate::storage::cursor;
-use crate::storage::records::{MessageMeta, StoredMessage};
+use crate::storage::records::StoredMessage;
 
 use super::Store;
 
+mod history;
+use history::{
+    advance_history_meta, append_history_frame, durable_create_empty, load_history, HistoryFile,
+    TextAppend, COMPACT_AFTER_FRAMES, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE,
+};
+
 const SUBAGENTS_DIR: &str = "subagents";
 const CATALOG_FILE: &str = "catalog.json";
-const HISTORY_SNAPSHOT_FILE: &str = "history.snapshot";
-const HISTORY_JOURNAL_FILE: &str = "history.journal";
 const SCHEMA_VERSION: u16 = 1;
-const COMPACT_AFTER_FRAMES: u64 = 64;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,37 +76,6 @@ pub struct SubagentDetailRecord {
 pub struct SubagentCatalogProjection {
     pub revision: u64,
     pub entries: Vec<SubagentRecord>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct HistoryFile {
-    schema_version: u16,
-    revision: u64,
-    journal_frames: u64,
-    messages: Vec<StoredMessage>,
-    message_meta: MessageMeta,
-    current_plan: Option<AgentPlan>,
-}
-
-impl Default for HistoryFile {
-    fn default() -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            revision: 0,
-            journal_frames: 0,
-            messages: Vec::new(),
-            message_meta: MessageMeta::default(),
-            current_plan: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct HistoryFrame {
-    revision: u64,
-    history: HistoryFile,
 }
 
 #[derive(Debug, Clone)]
@@ -278,7 +249,6 @@ impl Store {
             details,
         };
         let history_dir = root.join(&subagent_id);
-        fs::create_dir_all(&history_dir)?;
         let mut history = HistoryFile::default();
         history.message_meta.task_id = task_id.to_string();
         crate::storage::atomic::write_json(&history_dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
@@ -319,7 +289,7 @@ impl Store {
                     message.preserve_created_at_from(&stored.chat.message);
                     stored.chat.message = message;
                     advance_history_meta(history);
-                    return Ok(());
+                    return Ok(None);
                 }
             }
             let sequence = history
@@ -338,7 +308,7 @@ impl Store {
                 },
             });
             advance_history_meta(history);
-            Ok(())
+            Ok(None)
         })
     }
 
@@ -355,7 +325,7 @@ impl Store {
                 .iter_mut()
                 .find(|stored| stored.chat.identity == identity)
             {
-                let appended = match (&mut stored.chat.message, message) {
+                let append = match (&mut stored.chat.message, message) {
                     (
                         NormalizedMessage::AgentMessage { role, parts, .. },
                         NormalizedMessage::AgentMessage {
@@ -365,16 +335,26 @@ impl Store {
                         },
                     ) if *role == incoming_role && incoming_parts.len() == 1 => {
                         let part = incoming_parts.into_iter().next().expect("one checked part");
-                        if let (
-                            Some(crate::protocol::model::AgentMessagePart::Text { text }),
-                            crate::protocol::model::AgentMessagePart::Text { text: chunk },
-                        ) = (parts.last_mut(), &part)
+                        if let crate::protocol::model::AgentMessagePart::Text { text: chunk } = part
                         {
-                            text.push_str(chunk);
+                            if let Some(crate::protocol::model::AgentMessagePart::Text { text }) =
+                                parts.last_mut()
+                            {
+                                text.push_str(&chunk);
+                            } else {
+                                parts.push(crate::protocol::model::AgentMessagePart::Text {
+                                    text: chunk.clone(),
+                                });
+                            }
+                            Some(TextAppend {
+                                identity,
+                                role: *role,
+                                text: chunk,
+                            })
                         } else {
                             parts.push(part);
+                            None
                         }
-                        true
                     }
                     (
                         NormalizedMessage::User {
@@ -388,17 +368,16 @@ impl Store {
                     ) => {
                         text.push_str(&chunk);
                         attachments.extend(incoming_attachments);
-                        true
+                        None
                     }
-                    _ => false,
+                    _ => {
+                        return Err(RuntimeError::Storage(
+                            "Subagent message chunk does not match its stored message".to_string(),
+                        ))
+                    }
                 };
-                if !appended {
-                    return Err(RuntimeError::Storage(
-                        "Subagent message chunk does not match its stored message".to_string(),
-                    ));
-                }
                 advance_history_meta(history);
-                return Ok(());
+                return Ok(append);
             }
             let sequence = history
                 .messages
@@ -416,7 +395,7 @@ impl Store {
                 },
             });
             advance_history_meta(history);
-            Ok(())
+            Ok(None)
         })
     }
 
@@ -428,7 +407,7 @@ impl Store {
     ) -> Result<SubagentRecord, RuntimeError> {
         self.mutate_subagent_history(task_id, native_session_id, |history| {
             history.current_plan = (!plan.entries.is_empty()).then_some(plan);
-            Ok(())
+            Ok(None)
         })
     }
 
@@ -466,7 +445,7 @@ impl Store {
                 outcomes.push(outcome);
             }
             advance_history_meta(history);
-            Ok(())
+            Ok(None)
         })
     }
 
@@ -500,7 +479,7 @@ impl Store {
         &self,
         task_id: &str,
         native_session_id: &str,
-        mutate: impl FnOnce(&mut HistoryFile) -> Result<(), RuntimeError>,
+        mutate: impl FnOnce(&mut HistoryFile) -> Result<Option<TextAppend>, RuntimeError>,
     ) -> Result<SubagentRecord, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
         let _guard = self
@@ -525,10 +504,10 @@ impl Store {
                 return Err(error);
             }
         };
-        mutate(&mut history)?;
+        let append = mutate(&mut history)?;
         history.revision = history.revision.saturating_add(1);
         history.journal_frames = history.journal_frames.saturating_add(1);
-        append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &history)?;
+        append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &history, append)?;
         if history.journal_frames >= COMPACT_AFTER_FRAMES {
             history.journal_frames = 0;
             crate::storage::atomic::write_json(&history_dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
@@ -573,90 +552,6 @@ fn load_catalog(root: &Path) -> Result<CatalogFile, RuntimeError> {
 
 fn write_catalog(root: &Path, catalog: &CatalogFile) -> Result<(), RuntimeError> {
     crate::storage::atomic::write_json(&root.join(CATALOG_FILE), catalog)
-}
-
-fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
-    let bytes = fs::read(dir.join(HISTORY_SNAPSHOT_FILE))?;
-    let mut history: HistoryFile = serde_json::from_slice(&bytes)?;
-    validate_schema(history.schema_version)?;
-    let journal = dir.join(HISTORY_JOURNAL_FILE);
-    let file = fs::File::open(journal)?;
-    for line in BufReader::new(file).lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let frame: HistoryFrame = serde_json::from_str(&line)?;
-        if frame.revision != history.revision.saturating_add(1) {
-            return Err(RuntimeError::Storage(
-                "Subagent history journal sequence is invalid".to_string(),
-            ));
-        }
-        history = frame.history;
-    }
-    // codex-acp previously projected the encrypted causal-root placeholder as if it
-    // were child-authored User text. The identity is adapter-owned, so suppressing
-    // that exact legacy shape does not discard genuine provider-neutral history.
-    history.messages.retain(|stored| {
-        let identity = stored.chat.identity.as_str();
-        !(identity.contains(":user:collab:") && identity.ends_with(":prompt"))
-    });
-    for stored in &mut history.messages {
-        if !stored.chat.identity.contains(":codex:") {
-            continue;
-        }
-        if let NormalizedMessage::Activity { steps, .. } = &mut stored.chat.message {
-            if let [crate::protocol::model::ActivityStep::Text { level, .. }] = steps.as_mut_slice()
-            {
-                *level = Some("agent_boundary".to_string());
-            }
-        }
-    }
-    Ok(history)
-}
-
-fn append_history_frame(path: &Path, history: &HistoryFile) -> Result<(), RuntimeError> {
-    let bytes = serde_json::to_vec(&HistoryFrame {
-        revision: history.revision,
-        history: history.clone(),
-    })?;
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    file.write_all(&bytes)?;
-    file.write_all(b"\n")?;
-    file.sync_all().ok();
-    Ok(())
-}
-
-fn advance_history_meta(history: &mut HistoryFile) {
-    let previous = history
-        .message_meta
-        .local_history_updated_at
-        .parse::<u128>()
-        .unwrap_or_default();
-    let now = crate::time::now_string()
-        .parse::<u128>()
-        .unwrap_or_default();
-    history.message_meta.version = history.message_meta.version.saturating_add(1);
-    history.message_meta.message_count = history.messages.len() as u64;
-    history.message_meta.local_history_updated_at = now.max(previous.saturating_add(1)).to_string();
-    history.message_meta.first_cursor = history
-        .messages
-        .first()
-        .map(|message| message.chat.cursor.clone());
-    history.message_meta.last_cursor = history
-        .messages
-        .last()
-        .map(|message| message.chat.cursor.clone());
-}
-
-fn durable_create_empty(path: &Path) -> Result<(), RuntimeError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| RuntimeError::Storage("Subagent path has no parent".to_string()))?;
-    fs::create_dir_all(parent)?;
-    let file = fs::File::create(path)?;
-    file.sync_all().ok();
-    Ok(())
 }
 
 fn validate_schema(version: u16) -> Result<(), RuntimeError> {

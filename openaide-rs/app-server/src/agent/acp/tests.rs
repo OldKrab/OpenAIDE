@@ -1346,7 +1346,7 @@ fn replay_keeps_sourced_text_distinct_when_the_next_chunk_is_anonymous() {
 fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();
-    let projection = LivePromptProjection::for_native_subagent("codex", sink);
+    let projection = LivePromptProjection::for_native_subagent("codex", sink, true);
 
     projection
         .emit(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
@@ -1383,7 +1383,7 @@ fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
 fn codex_child_user_chunks_do_not_invent_visible_prompts() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();
-    let projection = LivePromptProjection::for_native_subagent("codex", sink);
+    let projection = LivePromptProjection::for_native_subagent("codex", sink, true);
 
     projection
         .emit(SessionUpdate::UserMessageChunk(

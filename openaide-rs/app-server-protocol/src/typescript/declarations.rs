@@ -1,3 +1,9 @@
+use crate::project_files::*;
+use crate::snapshot::{AgentConfigPreferencesSnapshot, AgentConfigPreferencesState};
+use crate::task::{
+    ConfigPreferencesResolution, TaskResolveConfigPreferencesParams,
+    TaskResolveConfigPreferencesResult,
+};
 use ts_rs::{Config, Dummy, TS};
 
 use crate::agent::{
@@ -467,6 +473,11 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TakenQueuedMessage>(output, config);
     push_decl::<TaskQueueMoveParams>(output, config);
     push_decl::<TaskQueueMoveResult>(output, config);
+    push_decl::<TaskResolveConfigPreferencesParams>(output, config);
+    push_decl::<TaskResolveConfigPreferencesResult>(output, config);
+    push_decl::<ConfigPreferencesResolution>(output, config);
+    push_decl::<AgentConfigPreferencesSnapshot>(output, config);
+    push_decl::<AgentConfigPreferencesState>(output, config);
     push_decl::<TaskSetConfigOptionParams>(output, config);
     push_decl::<TaskSetConfigOptionResult>(output, config);
     push_decl::<TaskSetPermissionPolicyParams>(output, config);
@@ -480,6 +491,12 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskClosePlanResult>(output, config);
     push_decl::<TaskToolImagePreviewParams>(output, config);
     push_decl::<TaskToolImagePreviewResult>(output, config);
+    push_decl::<ProjectFilesParams>(output, config);
+    push_decl::<ProjectFilesResult>(output, config);
+    push_decl::<ProjectFileEntry>(output, config);
+    push_decl::<ProjectFileDiff>(output, config);
+    push_decl::<ProjectDiffHunk>(output, config);
+    push_decl::<ProjectDiffLine>(output, config);
     push_decl::<FileViewerOpenParams>(output, config);
     push_decl::<FileViewerOpenFromHandleParams>(output, config);
     push_decl::<FileViewerRefreshParams>(output, config);

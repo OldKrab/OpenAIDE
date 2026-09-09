@@ -356,7 +356,9 @@ export function takeTaskQueueMessageIntent(
     return Promise.resolve();
   }
 
-  const adoption = dependencies.attachmentResources?.beginAdoption(taskId);
+  // Taking a queued item consumes durable ownership; its returned draft must
+  // survive navigation while the request is pending.
+  const adoption = dependencies.attachmentResources?.beginAdoption(taskId, "draft");
   if (dependencies.attachmentResources && !adoption) return Promise.resolve();
   dependencies.dispatch({ type: "taskQueue:take:start", taskId, item, index });
   return request(TASK_QUEUE_TAKE, {
@@ -384,7 +386,7 @@ export function takeTaskQueueMessageIntent(
       snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
       intent: "refresh",
     });
-    dependencies.dispatch({ type: "taskQueue:take:collapse", taskId, queuedMessageId });
+    dependencies.dispatch({ type: "taskQueue:take:collapse", taskId, queuedMessageId, context });
     globalThis.setTimeout(() => dependencies.dispatch({
       type: "taskQueue:take:accepted",
       taskId,

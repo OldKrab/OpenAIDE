@@ -464,6 +464,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             state: LiveSessionDataState::Unavailable,
             options: Vec::new(),
             pending_change: None,
+            preferences: None,
             error: Some(ProtocolError {
                 code: ProtocolErrorCode::CapabilityUnavailable,
                 message: "Task workflow is not available".to_string(),

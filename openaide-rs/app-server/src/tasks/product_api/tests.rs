@@ -56,6 +56,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[path = "native_catalog_refresh_tests.rs"]
+mod native_catalog_refresh_tests;
+
+#[path = "prepared_session_recovery_tests.rs"]
+mod prepared_session_recovery_tests;
+
 fn protocol_config_id(value: &str) -> AgentConfigOptionCurrentValue {
     AgentConfigOptionCurrentValue::Id {
         value: value.to_string(),
@@ -1180,7 +1186,7 @@ fn changing_a_preference_retires_a_free_prepared_task_with_stale_options() {
 }
 
 #[test]
-fn reopened_prepared_task_applies_preferences_after_runtime_restart() {
+fn reopened_prepared_task_keeps_agent_options_after_runtime_restart() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let workspace = "/tmp/openaide-unit-workspace/app";
@@ -1226,12 +1232,9 @@ fn reopened_prepared_task_applies_preferences_after_runtime_restart() {
     assert_eq!(reopened.task.task_id.as_str(), "task-prepared");
     assert_eq!(
         task_config_id(&store.read_task("task-prepared").unwrap(), "mode"),
-        Some("agent-full-access")
+        Some("agent")
     );
-    assert_eq!(
-        agent.config_updates.lock().unwrap().as_slice(),
-        [("task-prepared".to_string(), "agent-full-access".to_string())]
-    );
+    assert!(agent.config_updates.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -4425,7 +4428,7 @@ fn open_known_session_does_not_wait_for_catalog_listing() {
 }
 
 #[test]
-fn open_marks_last_known_agent_catalogs_loading_while_resume_is_running() {
+fn open_hides_old_agent_options_while_resume_is_running() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -4455,10 +4458,7 @@ fn open_marks_last_known_agent_catalogs_loading_while_resume_is_running() {
         .expect("open task while resume is running");
 
     assert_eq!(opened.agent_config.state, LiveSessionDataState::Loading);
-    assert_eq!(
-        protocol_value_id(&opened.agent_config.options[0].current_value),
-        Some("gpt-5")
-    );
+    assert!(opened.agent_config.options.is_empty());
     assert_eq!(opened.agent_commands.state, LiveSessionDataState::Loading);
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
 
@@ -8149,7 +8149,7 @@ fn config_recovery_loads_when_the_agent_does_not_support_resume() {
 }
 
 #[test]
-fn restart_shows_persisted_agent_controls_as_loading_until_native_session_recovery() {
+fn restart_hides_persisted_agent_options_until_native_session_recovery() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -8174,10 +8174,7 @@ fn restart_shows_persisted_agent_controls_as_loading_until_native_session_recove
         .unwrap();
 
     assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Loading);
-    assert_eq!(
-        protocol_value_id(&snapshot.agent_config.options[0].current_value),
-        Some("gpt-5")
-    );
+    assert!(snapshot.agent_config.options.is_empty());
     assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Loading);
     assert_eq!(snapshot.agent_commands.commands[0].name, "web");
 }
@@ -8898,8 +8895,9 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
     record.agent_session_id = Some("session-a".to_string());
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
+    let response_barrier = Arc::new(std::sync::Barrier::new(2));
     let agent = Arc::new(RecordingAgent {
-        block_set_config: AtomicBool::new(true),
+        set_config_response_barrier: Some(response_barrier.clone()),
         ..RecordingAgent::default()
     });
     let api = TaskProductApi::new(
@@ -8912,21 +8910,16 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
     .unwrap();
     set_live_config_catalog(&store, "task-existing", config_catalog("gpt-5"));
     let setting_api = api.clone();
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-
-    std::thread::spawn(move || {
-        result_tx
-            .send(
-                setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
-                    task_id: "task-existing".into(),
-                    config_id: "model".into(),
-                    value: protocol_config_id("gpt-5.5"),
-                    client_mutation_id: "superseded-change".into(),
-                }),
-            )
-            .unwrap();
+    let setting = std::thread::spawn(move || {
+        setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
+            task_id: "task-existing".into(),
+            config_id: "model".into(),
+            value: protocol_config_id("gpt-5.5"),
+            client_mutation_id: "superseded-change".into(),
+        })
     });
-    wait_until(|| agent.session_config_updates.lock().unwrap().len() == 1);
+    // The response catalog is captured; hold its return until both newer events land.
+    response_barrier.wait();
     let session_events = crate::tasks::turn_events::TaskSessionEventSink::new(
         api.mutations.clone(),
         "task-existing".to_string(),
@@ -8939,12 +8932,8 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
     session_events
         .config_options_changed(config_catalog("gpt-5.2"))
         .unwrap();
-    agent.block_set_config.store(false, Ordering::SeqCst);
-
-    let snapshot = result_rx
-        .recv_timeout(Duration::from_millis(250))
-        .expect("the superseded config request should reconcile")
-        .unwrap();
+    response_barrier.wait();
+    let snapshot = setting.join().expect("config worker panicked").unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
     assert_eq!(
@@ -9445,6 +9434,7 @@ struct RecordingAgent {
     block_close: AtomicBool,
     block_resume: AtomicBool,
     block_set_config: AtomicBool,
+    set_config_response_barrier: Option<Arc<std::sync::Barrier>>,
     config_requires_active_session: bool,
     resumed_session_active: AtomicBool,
     config_catalog: Option<ConfigOptionsCatalog>,
@@ -9880,6 +9870,11 @@ impl AgentRuntime for RecordingAgent {
             }
             ConfigOptionCurrentValue::Boolean { value } => boolean_config_catalog(value),
         };
+        if let Some(barrier) = &self.set_config_response_barrier {
+            // Rendezvous after capturing the response, then wait for the test to release it.
+            barrier.wait();
+            barrier.wait();
+        }
         while self.block_set_config.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -10409,3 +10404,6 @@ fn wait_until(condition: impl Fn() -> bool) {
     }
     assert!(condition());
 }
+
+#[path = "config_preferences_tests.rs"]
+mod config_preferences_tests;

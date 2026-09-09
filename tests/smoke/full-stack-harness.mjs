@@ -6,10 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const agentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-agent.mjs");
+const defaultAgentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-agent.mjs");
 
 /** Starts an isolated real Web, App Server, and deterministic ACP Agent stack. */
-export async function startFullStackHarness({ agentArgs = [], frontend = "web" } = {}) {
+export async function startFullStackHarness({ agentArgs = [], frontend = "web", agentFixture = defaultAgentFixture } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-smoke-"));
   const staticRoot = path.join(root, "static");
   try {
@@ -53,7 +53,7 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web" }
     cwd: repoRoot,
     env: {
       ...environmentWithoutOpenAideState(),
-      OPENAIDE_APP_SERVER_PATH: path.join(repoRoot, "target/debug/openaide-app-server"),
+      OPENAIDE_APP_SERVER_PATH: path.resolve(repoRoot, process.env.CARGO_TARGET_DIR ?? "target", "debug/openaide-app-server"),
       OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
       OPENAIDE_WEB_PORT: String(webPort),
@@ -107,6 +107,7 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web" }
 
   return {
     baseUrl,
+    stateRoot: path.join(root, "state"),
     logs,
     async close() {
       await stopProcess(server);

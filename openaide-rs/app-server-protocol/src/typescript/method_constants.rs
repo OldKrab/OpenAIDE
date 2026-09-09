@@ -1,3 +1,4 @@
+use crate::methods::TASK_RESOLVE_CONFIG_PREFERENCES;
 use crate::methods::{
     AGENT_AUTHENTICATE, AGENT_CANCEL_AUTHENTICATE, AGENT_CREATE_CUSTOM, AGENT_DELETE_CUSTOM,
     AGENT_LIST_SESSIONS, AGENT_LOGOUT, AGENT_PROBE, AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED,
@@ -28,12 +29,31 @@ use crate::methods::{
     WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE, WORKTREE_RENAME,
     WORKTREE_RESOLVE_FOLDER,
 };
+use crate::methods::{
+    FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_SEARCH,
+};
 use crate::server_requests::{
     PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_OPEN_EXTERNAL, SHELL_REVEAL_FILE,
     SHELL_SHOW_NOTIFICATION,
 };
 
 pub(super) fn push_method_constants(output: &mut String) {
+    output.push_str(&format!(
+        "export const FILE_VIEWER_LIST_DIRECTORY = {:?} as const;\n",
+        FILE_VIEWER_LIST_DIRECTORY
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_SEARCH = {:?} as const;\n",
+        FILE_VIEWER_SEARCH
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_CHANGES = {:?} as const;\n",
+        FILE_VIEWER_CHANGES
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_DIFF = {:?} as const;\n",
+        FILE_VIEWER_DIFF
+    ));
     output.push_str(&format!(
         "export const CLIENT_PROBE = {:?} as const;\n",
         CLIENT_PROBE
@@ -333,6 +353,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const TASK_QUEUE_MOVE = {:?} as const;\n",
         TASK_QUEUE_MOVE
+    ));
+    output.push_str(&format!(
+        "export const TASK_RESOLVE_CONFIG_PREFERENCES = {:?} as const;\n",
+        TASK_RESOLVE_CONFIG_PREFERENCES
     ));
     output.push_str(&format!(
         "export const TASK_SET_CONFIG_OPTION = {:?} as const;\n",
