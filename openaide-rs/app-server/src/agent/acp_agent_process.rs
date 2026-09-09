@@ -245,6 +245,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
             "task_id": initial_task_id,
         }),
     );
+    let attachment_lifetime = lifetime.clone();
     let connection = connect_acp_session_client(
         lifetime.transport(agent),
         connection_context,
@@ -290,6 +291,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     &connection_terminal_registry,
                     &session_event_sinks,
                     &session_traces,
+                    &attachment_lifetime,
                     first_open,
                 )
                 .await?;
@@ -319,6 +321,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                             &connection_terminal_registry,
                             &session_event_sinks,
                             &session_traces,
+                            &attachment_lifetime,
                             open,
                         )
                         .await
@@ -632,6 +635,7 @@ async fn open_on_shared_process(
     terminal_registry: &AcpHostTerminalRegistry,
     session_event_sinks: &crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
     session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
+    process_lifetime: &AcpProcessLifetime,
     open: AcpAgentProcessOpen,
 ) -> agent_client_protocol::Result<()> {
     let AcpAgentProcessOpen {
@@ -719,6 +723,7 @@ async fn open_on_shared_process(
     let session_event_sinks_for_task = Arc::clone(session_event_sinks);
     let session_traces_for_task = Arc::clone(session_traces);
     let session_id_for_task = session_id.clone();
+    let process_lifetime = process_lifetime.clone();
     tokio::spawn(async move {
         let result = AttachedNativeSession::run(AttachedNativeSessionRunInput {
             opened,
@@ -734,6 +739,7 @@ async fn open_on_shared_process(
             trace,
             session_event_sinks: session_event_sinks_for_task,
             session_idle_timeout,
+            process_lifetime,
         })
         .await;
         let _ = tokio::task::spawn_blocking(move || terminal_owner.close()).await;

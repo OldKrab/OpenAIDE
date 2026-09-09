@@ -76,6 +76,25 @@ fn listing_only_process_expires_and_restarts_on_demand() {
 }
 
 #[test]
+fn unanswered_listing_expires_after_its_request_deadline() {
+    let temp = tempfile::tempdir().unwrap();
+    let runtime =
+        fixture_with_mode(&temp, "unanswered_list").with_list_timeout(Duration::from_millis(400));
+    let pid = list_pid(&runtime, temp.path());
+    let result = runtime.list_sessions(AgentListSessionsRequest {
+        agent_id: "codex".into(),
+        cwd: Some(temp.path().to_string_lossy().into_owned()),
+        cursor: Some("unanswered".into()),
+    });
+    assert!(
+        matches!(result, Err(crate::protocol::errors::RuntimeError::NotReady(message))
+        if message.contains("timed out"))
+    );
+    wait_for_exit(&pid);
+    assert_ne!(list_pid(&runtime, temp.path()), pid);
+}
+
+#[test]
 fn probing_without_opening_a_session_keeps_short_retention() {
     let temp = tempfile::tempdir().unwrap();
     let runtime = fixture(&temp);
@@ -198,6 +217,21 @@ fn resume(runtime: &AcpAgentRuntime, cwd: &Path) -> AgentSession {
             secret_resolver: None,
         })
         .unwrap()
+}
+
+#[test]
+fn idle_session_close_retains_process_until_its_response() {
+    let temp = tempfile::tempdir().unwrap();
+    let runtime =
+        fixture_with_mode(&temp, "slow_close").with_session_idle_timeout(Duration::from_millis(50));
+    resume(&runtime, temp.path());
+    let pid = list_pid(&runtime, temp.path());
+    thread::sleep(SHORT_IDLE * 2);
+    assert!(
+        process_exists(&pid),
+        "idle close must retain its Agent process"
+    );
+    wait_for_exit(&pid);
 }
 
 #[test]
@@ -439,7 +473,11 @@ for line in sys.stdin:
         if os.environ['IDLE_FIXTURE_MODE'] == 'fork':
             result['agentCapabilities']['loadSession'] = True
             result['agentCapabilities']['sessionCapabilities'].update({'fork': {}, 'close': {}})
+        if os.environ['IDLE_FIXTURE_MODE'] == 'slow_close':
+            result['agentCapabilities']['sessionCapabilities']['close'] = {}
     elif method == 'session/list':
+        if os.environ['IDLE_FIXTURE_MODE'] == 'unanswered_list' and request['params'].get('cursor') == 'unanswered':
+            continue
         if os.environ['IDLE_FIXTURE_MODE'] == 'slow_list':
             time.sleep(1.0)
         result = {'sessions': [{'sessionId': str(os.getpid()), 'cwd': request['params']['cwd']}]}
@@ -448,6 +486,8 @@ for line in sys.stdin:
     elif method == 'session/fork':
         result = {'sessionId': 'forked-session'}
     elif method == 'session/close':
+        if os.environ['IDLE_FIXTURE_MODE'] == 'slow_close':
+            time.sleep(1.0)
         result = {}
     elif method in ('session/resume', 'session/load'):
         result = {}

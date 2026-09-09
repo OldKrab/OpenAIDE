@@ -39,6 +39,7 @@ pub(super) struct AttachedNativeSessionRunInput {
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
     pub(super) session_idle_timeout: Duration,
+    pub(super) process_lifetime: AcpProcessLifetime,
 }
 
 /// Process-local handle to one live Native Session attachment.

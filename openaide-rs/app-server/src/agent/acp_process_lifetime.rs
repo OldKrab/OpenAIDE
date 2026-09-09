@@ -40,7 +40,6 @@ struct State {
     long_retention: bool,
     stopping: bool,
     admitted_operations: usize,
-    client_requests: HashSet<RequestId>,
     agent_requests: HashSet<RequestId>,
 }
 
@@ -52,7 +51,6 @@ impl AcpProcessLifetime {
                 long_retention: false,
                 stopping: false,
                 admitted_operations: 0,
-                client_requests: HashSet::new(),
                 agent_requests: HashSet::new(),
             }),
             changed: Notify::new(),
@@ -98,9 +96,7 @@ impl AcpProcessLifetime {
         state.last_activity = Instant::now();
         match message {
             RawJsonRpcMessage::Request(request) => {
-                if from_client {
-                    state.client_requests.insert(request.id.clone());
-                } else {
+                if !from_client {
                     state.agent_requests.insert(request.id.clone());
                 }
                 if from_client
@@ -131,8 +127,6 @@ impl AcpProcessLifetime {
                 let (Response::Result { id, .. } | Response::Error { id, .. }) = response;
                 if from_client {
                     state.agent_requests.remove(id);
-                } else {
-                    state.client_requests.remove(id);
                 }
             }
             RawJsonRpcMessage::Notification(_) => {}
@@ -142,8 +136,9 @@ impl AcpProcessLifetime {
     }
 
     /// Atomically claims expiration so a caller cannot reuse a retiring process.
-    /// Pending wire requests suspend expiration; request cancellation/deadlines
-    /// remain owned by the operation that issued them.
+    /// Client requests are retained by operation guards, including their local
+    /// timeout/cancellation. Tracking their wire IDs would pin the process forever
+    /// when an Agent never replies. Agent requests remain pending until we respond.
     pub(super) async fn expired(&self) -> Duration {
         loop {
             let changed = self.0.changed.notified();
@@ -154,10 +149,7 @@ impl AcpProcessLifetime {
                 } else {
                     self.0.timeouts.short
                 };
-                if state.admitted_operations > 0
-                    || !state.client_requests.is_empty()
-                    || !state.agent_requests.is_empty()
-                {
+                if state.admitted_operations > 0 || !state.agent_requests.is_empty() {
                     None
                 } else {
                     let deadline = state.last_activity + timeout;
