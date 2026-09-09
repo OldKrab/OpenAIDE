@@ -16,6 +16,24 @@ describe("ChatRow", () => {
     vi.unstubAllGlobals();
   });
 
+  it("opens a Markdown screenshot in the shared image preview and closes it", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<ChatRow
+        message={agentMessage("image", "![Gesture navigation](https://images.test/gesture.png)")}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />);
+    });
+    const preview = tree.root.findByProps({ "aria-label": "Open image preview for Gesture navigation" });
+    await act(async () => preview.props.onClick({ preventDefault: vi.fn(), stopPropagation: vi.fn() }));
+    expect(tree.root.findByProps({ role: "dialog" }).props["aria-label"]).toBe("Gesture navigation preview");
+    await act(async () => tree.root.findByProps({ "aria-label": "Close image preview" }).props.onClick());
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    await act(async () => tree.unmount());
+  });
+
   it("renders a copy action under user and agent messages", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const userHtml = renderToStaticMarkup(

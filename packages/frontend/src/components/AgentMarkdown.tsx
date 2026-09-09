@@ -27,6 +27,8 @@ import { currentFrontendShell } from "../services/frontendShell";
 
 type AgentMarkdownProps = {
   className?: string;
+  /** Chat owns the shared image inspection dialog and its dismissal lifecycle. */
+  onOpenImage?: (image: { label: string; url: string }) => void;
   /** Resolves relative hrefs from an already-open File Tab without sending a raw path. */
   onOpenRelativeHref?: (href: string) => void;
   quoteSource?: "agent";
@@ -36,6 +38,7 @@ type AgentMarkdownProps = {
 };
 
 const MarkdownLinkBehaviorContext = createContext<{
+  onOpenImage?: AgentMarkdownProps["onOpenImage"];
   onOpenRelativeHref?: (href: string) => void;
   openFile?: OpenAgentFileReference;
 }>({});
@@ -43,6 +46,7 @@ const MarkdownLinkBehaviorContext = createContext<{
 // Unrelated Task and composer updates must not re-enter the synchronous Markdown parser.
 export const AgentMarkdown = memo(function AgentMarkdown({
   className,
+  onOpenImage,
   onOpenRelativeHref,
   quoteSource,
   renderDiagrams = false,
@@ -52,7 +56,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   const openFile = useAgentFileOpen();
   const parts = splitDataImageMarkdown(text);
   return (
-    <MarkdownLinkBehaviorContext.Provider value={{ onOpenRelativeHref, openFile }}>
+    <MarkdownLinkBehaviorContext.Provider value={{ onOpenImage, onOpenRelativeHref, openFile }}>
       <div className={className} data-quote-source={quoteSource}>
         {parts.map((part, index) => (
           <Fragment key={index}>
@@ -97,6 +101,7 @@ const MarkdownSourceContext = createContext({ renderDiagrams: false, source: "",
 // Stable component identities keep native pointer gestures alive across streamed Markdown updates.
 const agentMarkdownComponents: Components = {
   a: AgentMarkdownAnchor,
+  img: MarkdownImage,
   code: AgentMarkdownCode,
   pre: MarkdownPreBlock,
   blockquote: MarkdownQuoteBlock,
@@ -319,10 +324,38 @@ function StreamingCaret() {
 
 function AgentMarkdownImage({ label, url }: { label: string; url: string }) {
   return (
-    <span className="agent-markdown-image-link">
-      <img alt={label} src={url} />
-      <span>{label}</span>
-    </span>
+    <MarkdownImageAction label={label} url={url}>
+      <span className="agent-markdown-image-link">
+        <img alt={label} src={url} />
+        <span>{label}</span>
+      </span>
+    </MarkdownImageAction>
+  );
+}
+
+function MarkdownImage({ alt, src, node: _node, ...props }: ComponentProps<"img"> & ExtraProps) {
+  const image = <img {...props} alt={alt} src={src} />;
+  return typeof src === "string" && src ? (
+    <MarkdownImageAction label={alt || "Image"} url={src}>{image}</MarkdownImageAction>
+  ) : image;
+}
+
+function MarkdownImageAction({ children, label, url }: { children: ReactNode; label: string; url: string }) {
+  const { onOpenImage } = useContext(MarkdownLinkBehaviorContext);
+  if (!onOpenImage) return <>{children}</>;
+  return (
+    <button
+      aria-label={`Open image preview for ${label}`}
+      className="agent-markdown-image-preview"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenImage({ label, url });
+      }}
+      type="button"
+    >
+      {children}
+    </button>
   );
 }
 

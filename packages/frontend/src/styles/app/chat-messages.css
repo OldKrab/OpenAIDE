@@ -22,6 +22,15 @@
   line-height: 1.5;
 }
 
+/* Markdown URL images need the same bounded footprint as image content previews. */
+.chat-agent img {
+  width: auto;
+  height: auto;
+  max-width: min(320px, 100%);
+  max-height: 240px;
+  object-fit: contain;
+}
+
 .chat-agent-block {
   width: 100%;
   position: relative;
@@ -192,6 +201,20 @@
 .agent-file-ref:hover,
 .agent-file-ref:focus-visible {
   text-decoration-style: solid;
+}
+
+.agent-markdown-image-preview {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.agent-markdown-image-preview:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: 2px;
 }
 
 .agent-markdown-image-link {
