@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.3 - 2026-09-09
+
+OpenAIDE 0.5.3
+
+### Project files
+
+- Browse project files, search filenames and content, and inspect working-tree changes from a dedicated Files destination in Web and Desktop.
+- Quote selected source or diff lines into the Composer while preserving your conversation and unsent draft.
+- Download files from the Web File Viewer, including unsupported previews, and inspect large images with bounded previews, zoom, and original-file downloads.
+
+### Agent reliability
+
+- Show live session options while saved preferences are applied, and hide obsolete options until the Agent supplies its current catalog.
+- Improve Codex subagent follow-ups, lifecycle handling, and interaction markers for custom adapters.
+- Release idle Agent processes after discovery or session work, recover them on demand, and prevent unanswered discovery requests from retaining processes indefinitely.
+
+### Maintenance
+
+- Update diagram rendering, icons, desktop file opening, build tooling, Rust dependencies, and release actions.
+- Stabilize Chat layout smoke tests by waiting for navigation and Plan readiness before measuring geometry.
+
 ## 0.5.2 - 2026-09-07
 
 OpenAIDE 0.5.2
