@@ -7,7 +7,6 @@ use crate::desktop_update::{
 use crate::desktop_update_receipt::{
     ReceiptOutcome, UpdateAttemptReceipt, classify_receipt, read_receipt, write_receipt,
 };
-use crate::desktop_update_schedule::{read_schedule, record_check_terminal};
 
 #[test]
 fn feed_endpoint_is_version_and_channel_specific() {
@@ -125,25 +124,4 @@ fn artifact_digest_is_stable() {
         sha256_hex(b"OpenAIDE"),
         "0b9279285b121aa0b38a184a0c232fef15b3cb0cfd952292658bb60966f64d43"
     );
-}
-
-#[test]
-fn automatic_check_schedule_backs_off_and_resets_after_success() {
-    let directory = std::env::temp_dir().join(format!(
-        "openaide-update-schedule-test-{}",
-        uuid::Uuid::new_v4()
-    ));
-    let path = directory.join("schedule.json");
-
-    record_check_terminal(&path, 1_000_000, false);
-    let failed = read_schedule(&path);
-    assert_eq!(failed.failure_count, 1);
-    assert!(failed.next_auto_check_at_ms > 1_000_000);
-
-    record_check_terminal(&path, 2_000_000, true);
-    let succeeded = read_schedule(&path);
-    assert_eq!(succeeded.failure_count, 0);
-    assert_eq!(succeeded.last_success_at_ms, Some(2_000_000));
-    assert!(succeeded.next_auto_check_at_ms > 2_000_000 + 23 * 60 * 60 * 1_000);
-    std::fs::remove_dir_all(directory).unwrap();
 }

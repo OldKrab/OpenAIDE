@@ -23,7 +23,6 @@ mod desktop_secrets;
 mod desktop_support_export;
 mod desktop_update;
 mod desktop_update_receipt;
-mod desktop_update_schedule;
 mod desktop_update_security;
 mod desktop_update_shutdown;
 #[cfg(test)]
@@ -152,7 +151,6 @@ fn main() {
             ));
             app.manage(DesktopUpdateState::for_build(
                 app_local_data.join("desktop-update-receipt.json"),
-                app_local_data.join("desktop-update-schedule.json"),
             ));
             app.manage(DesktopQuitState::default());
             #[cfg(target_os = "macos")]

@@ -14,7 +14,7 @@ The WebView receives no generic Tauri updater capability. Its narrow native comm
 
 Desktop exposes update detail through a capability-gated Application updates section in App General Settings, while the existing Settings affordance gains a textual Update available status for discovery and opens that section. macOS additionally provides its conventional Check for Updates application-menu command; Windows uses shared Settings. After validated relaunch, one quiet accessible Updated to vX notice can open Release Notes without changing the restored Task route. Progress and state use semantic, throttled announcements, text plus icon status, visible keyboard focus, responsive layout, and reduced-motion behavior.
 
-Native Desktop persists only automatic-attempt and successful-check timestamps for scheduling. It checks after interactive startup no more than once per 24 hours with small random jitter and bounded failure backoff, while explicit Check for Updates bypasses cadence and backoff without creating a concurrent operation.
+Native Desktop checks for updates after every interactive startup, without a persisted cooldown or failure backoff across launches. Explicit Check for Updates remains available during the session without creating a concurrent operation. Legacy update schedule files are ignored.
 
 Windows applies the per-user NSIS updater in passive mode after OpenAIDE completes coherent shutdown. The user sees only a small non-interactive native progress window before automatic relaunch, never an installer wizard or elevation prompt.
 

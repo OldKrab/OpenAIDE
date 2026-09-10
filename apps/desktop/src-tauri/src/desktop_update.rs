@@ -12,7 +12,6 @@ use url::Url;
 use crate::desktop_update_receipt::{
     ReceiptOutcome, UpdateAttemptReceipt, classify_receipt, read_receipt, write_receipt,
 };
-use crate::desktop_update_schedule::{auto_check_due, record_check_started, record_check_terminal};
 use crate::desktop_update_security::{
     has_install_capacity, sha256_hex, trusted_redirect_url, validate_artifact_url,
 };
@@ -176,12 +175,11 @@ struct DesktopUpdateRuntime {
 pub(crate) struct DesktopUpdateState {
     config: Option<DesktopUpdateConfig>,
     receipt_path: PathBuf,
-    schedule_path: PathBuf,
     runtime: Mutex<DesktopUpdateRuntime>,
 }
 
 impl DesktopUpdateState {
-    pub(crate) fn for_build(receipt_path: PathBuf, schedule_path: PathBuf) -> Self {
+    pub(crate) fn for_build(receipt_path: PathBuf) -> Self {
         let config = DesktopUpdateConfig::for_build();
         let unavailable_reason = if config.is_some() {
             None
@@ -192,13 +190,12 @@ impl DesktopUpdateState {
         } else {
             Some(DesktopUpdateUnavailableReason::NotConfigured)
         };
-        Self::new(config, receipt_path, schedule_path, unavailable_reason)
+        Self::new(config, receipt_path, unavailable_reason)
     }
 
     pub(crate) fn new(
         config: Option<DesktopUpdateConfig>,
         receipt_path: PathBuf,
-        schedule_path: PathBuf,
         unavailable_reason: Option<DesktopUpdateUnavailableReason>,
     ) -> Self {
         let kind = if config.is_some() {
@@ -209,7 +206,6 @@ impl DesktopUpdateState {
         Self {
             config,
             receipt_path,
-            schedule_path,
             runtime: Mutex::new(DesktopUpdateRuntime {
                 snapshot: DesktopUpdateSnapshot {
                     revision: 0,
@@ -283,16 +279,7 @@ pub(crate) async fn desktop_check_for_update(
     app: AppHandle,
     state: tauri::State<'_, DesktopUpdateState>,
 ) -> Result<DesktopUpdateSnapshot, String> {
-    let eligible = check_is_eligible(state.snapshot()?.kind);
-    let result = check_for_update(app, state.inner()).await?;
-    if eligible && state.config.is_some() {
-        record_check_terminal(
-            &state.schedule_path,
-            unix_time_ms(),
-            result.kind != DesktopUpdateKind::Failed,
-        );
-    }
-    Ok(result)
+    check_for_update(app, state.inner()).await
 }
 
 #[tauri::command]
@@ -303,14 +290,9 @@ pub(crate) async fn desktop_auto_check_for_update(
     if state.config.is_none() || !check_is_eligible(state.snapshot()?.kind) {
         return state.snapshot();
     }
-    let now = unix_time_ms();
-    if !auto_check_due(&state.schedule_path, now) {
-        return state.snapshot();
-    }
-    record_check_started(&state.schedule_path, now);
+    // Every interactive startup checks, even if a previous launch checked recently.
     let result = check_for_update(app.clone(), state.inner()).await?;
     let succeeded = result.kind != DesktopUpdateKind::Failed;
-    record_check_terminal(&state.schedule_path, unix_time_ms(), succeeded);
     if succeeded {
         Ok(result)
     } else {
