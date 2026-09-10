@@ -91,9 +91,16 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
             // Initialize advertises sign-in choices; it does not overrule the
             // listing's known auth failure. Publish one final observation so a
             // methodless Agent cannot oscillate Connected -> AuthRequired.
-            Err(error) => self
+            Err(
+                error @ (RuntimeError::AuthRequired(_)
+                | RuntimeError::SetupRequired(_)
+                | RuntimeError::NodeJsRequired(_)),
+            ) => self
                 .statuses
                 .record_session_error(&agent_id, error, probe.as_ref()),
+            // Optional history discovery can fail while attached Tasks still work.
+            // Keep that error in the catalog refresh result, not global availability.
+            Err(_) => {}
         }
         result
     }
