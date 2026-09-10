@@ -583,7 +583,7 @@ value remains visible alongside the explicitly pending target (`Medium → High`
 selector and Send stays locked, and the row says `Applying your preferences…`. If all values
 already match, the applying stage is skipped.
 
-Unsupported saved options or values are skipped with a brief notice; session preparation continues.
+Unsupported saved options or values are skipped silently; session preparation continues using the current settings.
 A genuine application failure preserves the live confirmed catalog, blocks Send, and offers
 `Retry` or `Use current settings`. These are explicit App Server intents scoped to the client's
 leased Prepared Task; Retry applies only remaining differences, while Use current settings accepts
