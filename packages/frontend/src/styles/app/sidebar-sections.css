@@ -92,18 +92,6 @@
   opacity: 0.5;
 }
 
-.task-section-refresh.refreshing svg {
-  animation: task-refresh-spin 900ms linear infinite;
-}
-
-@keyframes task-refresh-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .task-section-refresh.refreshing svg { animation: none; }
-}
-
 .task-section-head small {
   margin-left: 2px;
   color: var(--oa-muted);

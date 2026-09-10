@@ -268,3 +268,76 @@ impl AgentRuntime for AuthRequiredListRuntime {
         unreachable!("list-session status recording must not prompt")
     }
 }
+
+#[test]
+fn history_listing_failure_keeps_started_agent_connected_in_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let statuses = AgentStatusCache::default();
+    let runtime =
+        AgentStatusRecordingRuntime::wrap(Arc::new(UnavailableHistoryRuntime), statuses.clone());
+    runtime
+        .start_session(AgentSessionStart {
+            agent_id: "codex".to_string(),
+            task_id: "task-1".to_string(),
+            cwd: "/fixture-workspace".to_string(),
+            model_id: None,
+            context: Vec::new(),
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .unwrap();
+    let error = runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: Some("/fixture-workspace".to_string()),
+            cursor: None,
+        })
+        .unwrap_err();
+    assert!(matches!(error, RuntimeError::NotReady(_)));
+
+    let api = AgentProductApi::new(
+        AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
+        AgentCatalogStore::new(store),
+        runtime,
+        statuses,
+    );
+    let result = api
+        .agent_settings_details(AgentSettingsDetailsParams {})
+        .unwrap();
+    let codex = result
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == "codex")
+        .unwrap();
+    assert_eq!(codex.status, AgentSettingsStatus::Connected);
+}
+
+struct UnavailableHistoryRuntime;
+
+impl AgentRuntime for UnavailableHistoryRuntime {
+    fn probe(&self, request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
+        AuthRequiredListRuntime.probe(request)
+    }
+
+    fn list_sessions(
+        &self,
+        _request: AgentListSessionsRequest,
+    ) -> Result<crate::protocol::model::AgentListSessionsResult, RuntimeError> {
+        Err(RuntimeError::NotReady(
+            "ACP session listing timed out".to_string(),
+        ))
+    }
+
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        MockAgent.start_session(request)
+    }
+
+    fn prompt(
+        &self,
+        prompt: AgentPrompt,
+        sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        MockAgent.prompt(prompt, sink)
+    }
+}

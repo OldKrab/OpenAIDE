@@ -239,10 +239,10 @@ export const Sidebar = memo(function Sidebar({
           <span className="task-section-tools">
             <button
               aria-label="Refresh tasks"
-              className={`task-section-refresh ${nativeSessions.loading ? "refreshing" : ""}`}
+              className="task-section-refresh"
               disabled={nativeSessions.loading || nativeSessions.adoptingSessionId !== undefined}
               onClick={() => onLoadNativeSessions()}
-              title="Refresh tasks"
+              title={nativeSessions.loading ? "Refreshing tasks" : "Refresh tasks"}
               type="button"
             >
               <RefreshCcw size={13} />

@@ -1299,7 +1299,7 @@ describe("Sidebar", () => {
       .toEqual(["Update available"]);
   });
 
-  it("shows only the animated refresh control while refreshing native sessions", () => {
+  it("describes background refresh in the control tooltip without extra status text", () => {
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
@@ -1311,7 +1311,7 @@ describe("Sidebar", () => {
 
     expect(textContent(tree)).not.toContain("Refreshing tasks");
     expect(tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.disabled).toBe(true);
-    expect(tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.className).toContain("refreshing");
+    expect(tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.title).toBe("Refreshing tasks");
   });
 
   it("hides the external-session refresh control in archive mode", () => {
