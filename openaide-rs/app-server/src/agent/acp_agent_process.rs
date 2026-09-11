@@ -410,6 +410,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                                     request.session_id.into(),
                                     initialize.agent_capabilities.session_capabilities.delete.is_some(),
                                     None,
+                                    &request.operation_id,
                                 ).await;
                                 let _ = reply_tx.send(result);
                             }

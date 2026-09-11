@@ -2482,6 +2482,7 @@ fn inactive_session_registry_reports_stable_binding_errors() {
 
     let delete_error = runtime
         .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             session_id: "missing-session".to_string(),
         })
@@ -4004,6 +4005,7 @@ fn rejected_deletion_preserves_the_live_session_for_follow_up() {
         .unwrap();
     assert!(runtime
         .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: session.agent_id.clone(),
             session_id: session.session_id.clone(),
         })
@@ -4031,6 +4033,7 @@ fn delete_detached_session_does_not_load_or_adopt_it() {
     };
     runtime
         .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             session_id: "delete-detached".to_string(),
         })
@@ -4053,6 +4056,7 @@ fn delete_session_dispatches_to_active_session() {
         .expect("start session");
     runtime
         .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: session.agent_id,
             session_id: session.session_id,
         })

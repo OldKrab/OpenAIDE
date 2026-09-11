@@ -1,6 +1,6 @@
 # Session deletion
 
-Status: agreed contract implemented; final repository checks and review in progress.
+Status: agreed contract implemented and verified.
 
 ## Agreed scope
 
@@ -58,3 +58,7 @@ The accepted contract is documented in ADR 0059 and the lifecycle specification.
 - App Server/ACP regression tests cover deletion success, rejection, uncertainty, admission/queue races, missing-session classification, scan completeness, newer observations, Composer History ownership, and referenced-file retention.
 - Shared frontend tests cover confirmations, retry, menus, and shell composition. Isolated browser checks passed for wide archived deletion with two viewing clients and narrow active deletion.
 - Browser failures now attach App Server diagnostics before the isolated harness deletes its state, preserving the signal needed to diagnose protocol stalls.
+
+- Final validation: repository check/type/protocol/source-size gates, Clippy, and the full workspace test command passed (Rust tests limited to four threads after two timing-sensitive failures under concurrent build load). Final affected checks passed after review fixes: 1,399 Frontend tests, focused App Server/ACP deletion tests, and both isolated browser scenarios.
+- Standards review findings (request correlation and gate-wait diagnostics) and specification review findings (same-route reselection and missing-baseline navigation) were fixed and rechecked. Browser verification also checks that product and ACP deletion share the request identifier.
+- The default combined CI build writes shared Frontend output. Self-development validation used isolated Frontend/App Server smoke builds and the extension build to protect the running control instance; no shared Frontend distribution was rebuilt.

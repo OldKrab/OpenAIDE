@@ -56,6 +56,7 @@ pub(super) async fn delete_active_session(
     session_id: SessionId,
     supports_session_delete: bool,
     trace: Option<&AcpTraceSession>,
+    operation_id: &str,
 ) -> Result<(), RuntimeError> {
     if !supports_session_delete {
         return Err(RuntimeError::CapabilityMissing(
@@ -64,7 +65,6 @@ pub(super) async fn delete_active_session(
     }
     let request = DeleteSessionRequest::new(session_id);
     let started_at = std::time::Instant::now();
-    let operation_id = uuid::Uuid::new_v4().to_string();
     crate::logging::info(
         "acp_session_delete_started",
         serde_json::json!({
@@ -145,6 +145,7 @@ impl SessionDeleteRequest {
         supported: bool,
         trace: Option<&AcpTraceSession>,
         reply: DeleteReply,
+        operation_id: String,
     ) {
         if self.is_pending() {
             let _ = reply.send(Err(RuntimeError::NotReady(
@@ -157,7 +158,14 @@ impl SessionDeleteRequest {
         self.pending = Some((
             reply,
             Box::pin(async move {
-                delete_active_session(&connection, session_id, supported, trace.as_ref()).await
+                delete_active_session(
+                    &connection,
+                    session_id,
+                    supported,
+                    trace.as_ref(),
+                    &operation_id,
+                )
+                .await
             }),
         ));
     }

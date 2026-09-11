@@ -495,11 +495,14 @@ impl AttachedNativeSession {
         cleanup_result.and(close_result)
     }
 
-    pub(super) fn delete(&self) -> Result<(), RuntimeError> {
+    pub(super) fn delete(&self, operation_id: String) -> Result<(), RuntimeError> {
         let _process_operation = self.acquire_process()?;
         let (reply_tx, reply_rx) = mpsc::channel();
         self.command_tx
-            .send(AcpSessionCommand::Delete { reply_tx })
+            .send(AcpSessionCommand::Delete {
+                reply_tx,
+                operation_id,
+            })
             .map_err(|_| self.attachment_stopped_error())?;
         reply_rx
             .recv_timeout(Duration::from_secs(31))
@@ -737,6 +740,7 @@ pub(super) enum AcpSessionCommand {
         request_guard: PromptRequestGuard,
     },
     Delete {
+        operation_id: String,
         reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
     },
 }

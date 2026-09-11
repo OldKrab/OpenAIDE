@@ -84,7 +84,8 @@ impl TaskArchiveWorkflow for TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: NativeSessionDeleteParams,
+        operation_id: &str,
     ) -> Result<NativeSessionDeleteResult, ProtocolError> {
-        self.delete_native_session(client_instance_id, params)
+        self.delete_native_session(client_instance_id, params, operation_id)
     }
 }

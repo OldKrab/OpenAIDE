@@ -141,7 +141,7 @@ impl AttachedNativeSessionRegistry {
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
         let key = request.session_key();
         // Keep the attachment and its sink usable when the Agent rejects deletion.
-        self.require_session(&key)?.delete()?;
+        self.require_session(&key)?.delete(request.operation_id)?;
         self.remove_event_sink(&key);
         self.remove(&key);
         Ok(())

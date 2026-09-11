@@ -41,6 +41,10 @@ test("Archive explains local retention and Delete removes archived history from 
   const second = await secondContext.newPage();
   await second.goto(taskUrl);
   await expect(second.getByLabel("Task chat")).toBeVisible();
+  // Reselecting the same route must not detach its removal handling.
+  await second.getByRole("button", { name: "Archive", exact: true }).click();
+  await second.getByRole("listitem").filter({ hasText: "Smoke task" }).first().locator(".task-open").click();
+  await expect(second).toHaveURL(taskUrl);
   await openMenu(page, "Smoke task");
   await page.getByRole("menuitem", { name: "Delete session…" }).click();
   const dialog = page.getByRole("dialog", { name: "Delete session?" });
@@ -50,6 +54,12 @@ test("Archive explains local retention and Delete removes archived history from 
   await dialog.getByRole("button", { name: "Delete session", exact: true }).click();
   await expect(page).toHaveURL(/\/new-task/);
   await expect(second).toHaveURL(/\/new-task/);
+  const diagnosticLines = (await readFile(path.join(harness.stateRoot, "diagnostics/logs/openaide-app-server.jsonl"), "utf8"))
+    .trim().split("\n").map((line) => JSON.parse(line));
+  const deletion = diagnosticLines.find((line) => line.event === "native_session_delete_completed" && line.fields.outcome === "deleted");
+  expect(deletion).toBeDefined();
+  expect(diagnosticLines.some((line) => line.event === "acp_session_delete_completed"
+    && line.fields.operation_id === deletion.fields.operation_id && line.fields.outcome === "success")).toBe(true);
   await expect(page.getByRole("listitem").filter({ hasText: "Smoke task" })).toHaveCount(0);
   await secondContext.close();
 });

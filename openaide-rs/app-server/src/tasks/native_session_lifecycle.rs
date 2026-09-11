@@ -16,6 +16,7 @@ impl<'a> NativeSessionLifecycle<'a> {
             return Ok(());
         };
         self.agent.delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: task.agent_id.clone(),
             session_id,
         })

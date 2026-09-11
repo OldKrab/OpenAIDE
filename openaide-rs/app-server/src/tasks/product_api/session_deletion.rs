@@ -40,20 +40,68 @@ impl TaskProductApi {
         &self,
         client: &ClientInstanceId,
         params: NativeSessionDeleteParams,
+        operation_id: &str,
     ) -> Result<NativeSessionDeleteResult, ProtocolError> {
-        let _adoption = self
-            .native_adoption
-            .lock()
-            .map_err(|_| super::internal_error("Native Session mutation lock poisoned"))?;
-        let target = self.resolve_delete_target(client, &params.target)?;
-        if let Some(task) = &target.task {
-            self.session_operations.serialize(&task.task_id, || {
-                let current = self.resolve_delete_target(client, &params.target)?;
-                self.delete_resolved_session(current, params)
-            })
-        } else {
-            self.delete_resolved_session(target, params)
-        }
+        let started = std::time::Instant::now();
+        let task_id = match &params.target {
+            NativeSessionDeleteTarget::Task { task_id } => Some(task_id.clone()),
+            _ => None,
+        };
+        crate::logging::info(
+            "native_session_delete_started",
+            serde_json::json!({
+                "operation": "nativeSession/delete", "operation_id": operation_id,
+                "task_id": task_id, "attempt": 1, "confirmed": params.confirmation.is_some(),
+                "stage": "waiting_for_adoption_gate",
+            }),
+        );
+        let result = (|| {
+            let _adoption = self
+                .native_adoption
+                .lock()
+                .map_err(|_| super::internal_error("Native Session mutation lock poisoned"))?;
+            crate::logging::info(
+                "native_session_delete_adoption_gate_acquired",
+                serde_json::json!({
+                    "operation_id": operation_id, "task_id": task_id,
+                    "duration_ms": started.elapsed().as_millis(),
+                }),
+            );
+            let target = self.resolve_delete_target(client, &params.target)?;
+            if let Some(task) = &target.task {
+                let waiting = std::time::Instant::now();
+                crate::logging::info(
+                    "native_session_delete_task_gate_waiting",
+                    serde_json::json!({
+                        "operation_id": operation_id, "task_id": task_id,
+                    }),
+                );
+                self.session_operations.serialize(&task.task_id, || {
+                    crate::logging::info(
+                        "native_session_delete_task_gate_acquired",
+                        serde_json::json!({
+                            "operation_id": operation_id, "task_id": task_id,
+                            "duration_ms": waiting.elapsed().as_millis(),
+                        }),
+                    );
+                    let current = self.resolve_delete_target(client, &params.target)?;
+                    self.delete_resolved_session(current, params, operation_id)
+                })
+            } else {
+                self.delete_resolved_session(target, params, operation_id)
+            }
+        })();
+        crate::logging::info(
+            "native_session_delete_completed",
+            serde_json::json!({
+                "operation": "nativeSession/delete", "operation_id": operation_id,
+                "task_id": task_id, "attempt": 1,
+                "outcome": match &result { Ok(NativeSessionDeleteResult::Deleted { .. }) => "deleted", Ok(_) => "confirmation_required", Err(_) => "failure" },
+                "duration_ms": started.elapsed().as_millis(),
+                "error_kind": result.as_ref().err().map(|error| &error.code),
+            }),
+        );
+        result
     }
 
     fn resolve_delete_target(
@@ -129,96 +177,83 @@ impl TaskProductApi {
         &self,
         target: DeletionTarget,
         params: NativeSessionDeleteParams,
+        operation_id: &str,
     ) -> Result<NativeSessionDeleteResult, ProtocolError> {
-        let started = std::time::Instant::now();
-        let operation_id = uuid::Uuid::new_v4().to_string();
         crate::logging::info(
-            "native_session_delete_started",
+            "native_session_delete_target_resolved",
             serde_json::json!({
-                "operation": "nativeSession/delete", "operation_id": operation_id,
-                "agent_id": target.reference.agent_id, "session_id": target.reference.session_id, "attempt": 1,
-                "confirmed": params.confirmation.is_some(),
+                "operation_id": operation_id, "agent_id": target.reference.agent_id,
+                "session_id": target.reference.session_id,
             }),
         );
-        let result = (|| {
-            let probe = self
-                .agent_gateway
-                .probe(AgentProbeRequest {
-                    agent_id: target.reference.agent_id.clone(),
-                })
-                .map_err(protocol_error_from_runtime)?;
-            if !probe.typed_capabilities.delete_sessions {
-                return Err(ProtocolError {
-                    code: ProtocolErrorCode::CapabilityUnavailable,
-                    message: "This Agent does not support session deletion".into(),
-                    recoverable: false,
-                    target: None,
-                });
-            }
-            let active = target.task.as_ref().is_some_and(|task| {
-                task.active_turn_id.is_some()
-                    || matches!(
-                        task.status,
-                        TaskStatus::Starting
-                            | TaskStatus::Active
-                            | TaskStatus::Stopping
-                            | TaskStatus::Waiting
-                    )
-                    || self
-                        .server_requests
-                        .has_pending_for_task(&TaskId::from(task.task_id.clone()))
-            });
-            let queued_message_count = target
-                .task
-                .as_ref()
-                .map_or(0, |task| task.message_queue.items.len());
-            if params.confirmation.as_ref().is_none_or(|confirmation| {
-                (active && !confirmation.active)
-                    || confirmation.queued_message_count != queued_message_count
-            }) {
-                return Ok(NativeSessionDeleteResult::ConfirmationRequired {
-                    title: target.title,
-                    active,
-                    queued_message_count,
-                });
-            }
-            let first_attempt = self
-                .turn_acceptance
-                .begin_session_deletion(&target.reference);
-            let deleted = self.agent_gateway.delete_session(AgentSessionDelete {
+        let probe = self
+            .agent_gateway
+            .probe(AgentProbeRequest {
                 agent_id: target.reference.agent_id.clone(),
-                session_id: target.reference.session_id.clone(),
-            });
-            if let Err(error) = deleted {
-                if first_attempt && !matches!(error, RuntimeError::OutcomeUnknown(_)) {
-                    self.turn_acceptance
-                        .resolve_session_deletion(&target.reference);
-                }
-                return Err(protocol_error_from_runtime(error));
-            }
-            self.remove_local_native_session(&target.reference, target.task.as_ref())
-                .map_err(protocol_error_from_runtime)?;
-            self.task_notifier
-                .navigation_project_entries_changed(target.project_id.as_str().to_string());
-            Ok(NativeSessionDeleteResult::Deleted {
-                reference: NativeSessionReference {
-                    agent_id: AgentId::from(target.reference.agent_id),
-                    session_id: target.reference.session_id,
-                },
-                project_id: target.project_id,
-                task_id: target.task.map(|task| TaskId::from(task.task_id)),
             })
-        })();
-        crate::logging::info(
-            "native_session_delete_completed",
-            serde_json::json!({
-                "operation": "nativeSession/delete", "operation_id": operation_id, "attempt": 1,
-                "outcome": match &result { Ok(NativeSessionDeleteResult::Deleted { .. }) => "deleted", Ok(_) => "confirmation_required", Err(_) => "failure" },
-                "duration_ms": started.elapsed().as_millis(),
-                "error_kind": result.as_ref().err().map(|error| &error.code),
-            }),
-        );
-        result
+            .map_err(protocol_error_from_runtime)?;
+        if !probe.typed_capabilities.delete_sessions {
+            return Err(ProtocolError {
+                code: ProtocolErrorCode::CapabilityUnavailable,
+                message: "This Agent does not support session deletion".into(),
+                recoverable: false,
+                target: None,
+            });
+        }
+        let active = target.task.as_ref().is_some_and(|task| {
+            task.active_turn_id.is_some()
+                || matches!(
+                    task.status,
+                    TaskStatus::Starting
+                        | TaskStatus::Active
+                        | TaskStatus::Stopping
+                        | TaskStatus::Waiting
+                )
+                || self
+                    .server_requests
+                    .has_pending_for_task(&TaskId::from(task.task_id.clone()))
+        });
+        let queued_message_count = target
+            .task
+            .as_ref()
+            .map_or(0, |task| task.message_queue.items.len());
+        if params.confirmation.as_ref().is_none_or(|confirmation| {
+            (active && !confirmation.active)
+                || confirmation.queued_message_count != queued_message_count
+        }) {
+            return Ok(NativeSessionDeleteResult::ConfirmationRequired {
+                title: target.title,
+                active,
+                queued_message_count,
+            });
+        }
+        let first_attempt = self
+            .turn_acceptance
+            .begin_session_deletion(&target.reference);
+        let deleted = self.agent_gateway.delete_session(AgentSessionDelete {
+            agent_id: target.reference.agent_id.clone(),
+            session_id: target.reference.session_id.clone(),
+            operation_id: operation_id.to_string(),
+        });
+        if let Err(error) = deleted {
+            if first_attempt && !matches!(error, RuntimeError::OutcomeUnknown(_)) {
+                self.turn_acceptance
+                    .resolve_session_deletion(&target.reference);
+            }
+            return Err(protocol_error_from_runtime(error));
+        }
+        self.remove_local_native_session(&target.reference, target.task.as_ref())
+            .map_err(protocol_error_from_runtime)?;
+        self.task_notifier
+            .navigation_project_entries_changed(target.project_id.as_str().to_string());
+        Ok(NativeSessionDeleteResult::Deleted {
+            reference: NativeSessionReference {
+                agent_id: AgentId::from(target.reference.agent_id),
+                session_id: target.reference.session_id,
+            },
+            project_id: target.project_id,
+            task_id: target.task.map(|task| TaskId::from(task.task_id)),
+        })
     }
 
     /// Shared local cleanup after explicit Agent success or authoritative missing evidence.

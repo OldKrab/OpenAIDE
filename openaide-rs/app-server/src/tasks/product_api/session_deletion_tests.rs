@@ -27,7 +27,7 @@ fn confirmed_deletion_removes_the_task_only_after_agent_success() {
     )
     .unwrap();
     let result = api
-        .delete_native_session_for_client(
+        .delete_native_session_for_test(
             &ClientInstanceId::from("client-a"),
             delete_params("delete-task", Some(false)),
         )
@@ -64,7 +64,7 @@ fn deletion_of_archived_task_removes_saved_history_without_restore() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    api.delete_native_session_for_client(
+    api.delete_native_session_for_test(
         &ClientInstanceId::from("client-a"),
         delete_params("archived-delete", Some(false)),
     )
@@ -113,7 +113,7 @@ fn unknown_deletion_retains_history_and_blocks_work_until_explicit_retry() {
     .unwrap();
     let client = ClientInstanceId::from("client-a");
     assert!(api
-        .delete_native_session_for_client(&client, delete_params("unknown-delete", Some(false)))
+        .delete_native_session_for_test(&client, delete_params("unknown-delete", Some(false)))
         .is_err());
     // Reload is a real session-work boundary and must reject before attempting Agent recovery.
     let error = api
@@ -131,7 +131,7 @@ fn unknown_deletion_retains_history_and_blocks_work_until_explicit_retry() {
     );
     *agent.failure.lock().unwrap() = None;
     assert!(matches!(
-        api.delete_native_session_for_client(&client, delete_params("unknown-delete", Some(false)))
+        api.delete_native_session_for_test(&client, delete_params("unknown-delete", Some(false)))
             .unwrap(),
         NativeSessionDeleteResult::Deleted { .. }
     ));
@@ -248,13 +248,13 @@ fn deletion_rechecks_activity_and_preserves_task_on_agent_rejection() {
     store.write_task(&task).unwrap(); // Restore live fixture state after startup recovery.
     let client = ClientInstanceId::from("client-a");
     assert!(matches!(
-        api.delete_native_session_for_client(&client, delete_params("active-delete", Some(false)))
+        api.delete_native_session_for_test(&client, delete_params("active-delete", Some(false)))
             .unwrap(),
         NativeSessionDeleteResult::ConfirmationRequired { active: true, .. }
     ));
     assert!(agent.deleted.lock().unwrap().is_empty());
     assert!(api
-        .delete_native_session_for_client(&client, delete_params("active-delete", Some(true)))
+        .delete_native_session_for_test(&client, delete_params("active-delete", Some(true)))
         .is_err());
     assert!(!store.read_task("active-delete").unwrap().tombstoned);
     assert!(api
@@ -308,7 +308,7 @@ fn unknown_deletion_blocks_automatic_queue_delivery_after_the_current_turn_finis
     let mut params = delete_params("queue-unknown", Some(true));
     params.confirmation.as_mut().unwrap().queued_message_count = 1;
     assert!(api
-        .delete_native_session_for_client(&ClientInstanceId::from("client-a"), params)
+        .delete_native_session_for_test(&ClientInstanceId::from("client-a"), params)
         .is_err());
     live.release_prompt.store(true, Ordering::SeqCst);
     wait_until(|| store.read_task("queue-unknown").unwrap().status == TaskStatus::Inactive);
@@ -371,7 +371,7 @@ fn assert_pending_startup_cannot_pass_deletion(resume_missing: bool) {
     let live = agent.live.as_ref().unwrap();
     wait_until(|| live.resumes.load(Ordering::SeqCst) == 1);
     assert!(api
-        .delete_native_session_for_client(
+        .delete_native_session_for_test(
             &ClientInstanceId::from("client-a"),
             delete_params("starting-delete", Some(true))
         )
@@ -424,7 +424,7 @@ fn deleting_an_archived_unadopted_session_never_creates_a_task() {
     };
     let client = ClientInstanceId::from("client-a");
     let preview = api
-        .delete_native_session_for_client(
+        .delete_native_session_for_test(
             &client,
             NativeSessionDeleteParams {
                 target: target.clone(),
@@ -441,7 +441,7 @@ fn deleting_an_archived_unadopted_session_never_creates_a_task() {
         }
     ));
     assert!(agent.deleted.lock().unwrap().is_empty());
-    api.delete_native_session_for_client(
+    api.delete_native_session_for_test(
         &client,
         NativeSessionDeleteParams {
             target,
@@ -494,7 +494,7 @@ fn deletion_removes_only_its_composer_history_contribution_and_preserves_project
     )
     .unwrap();
     let client = ClientInstanceId::from("client-a");
-    api.delete_native_session_for_client(&client, delete_params("delete-history", Some(false)))
+    api.delete_native_session_for_test(&client, delete_params("delete-history", Some(false)))
         .unwrap();
     let history = api
         .composer_history_for_client(
@@ -516,4 +516,47 @@ fn deletion_removes_only_its_composer_history_contribution_and_preserves_project
         std::fs::read_to_string(referenced).unwrap(),
         "project-owned content"
     );
+}
+
+#[test]
+fn deletion_diagnostics_include_target_resolution_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(DeletionAgent::default()),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let logs = crate::logging::capture_test_logs();
+    assert!(api
+        .delete_native_session_for_test(
+            &ClientInstanceId::from("client-a"),
+            delete_params("missing-delete-diagnostics", Some(false)),
+        )
+        .is_err());
+    let events = logs
+        .snapshot()
+        .into_iter()
+        .filter(|line| line["fields"]["task_id"] == "missing-delete-diagnostics")
+        .map(|line| line["event"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(events
+        .iter()
+        .any(|event| event == "native_session_delete_started"));
+    assert!(events
+        .iter()
+        .any(|event| event == "native_session_delete_completed"));
+}
+
+impl TaskProductApi {
+    fn delete_native_session_for_test(
+        &self,
+        client: &ClientInstanceId,
+        params: NativeSessionDeleteParams,
+    ) -> Result<NativeSessionDeleteResult, ProtocolError> {
+        self.delete_native_session_for_client(client, params, &uuid::Uuid::new_v4().to_string())
+    }
 }

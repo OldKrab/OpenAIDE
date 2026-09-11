@@ -227,13 +227,14 @@ pub(super) async fn run_prompt(
                             );
                         }
                     }
-                    AcpSessionCommand::Delete { reply_tx } => {
+                    AcpSessionCommand::Delete { reply_tx, operation_id } => {
                         deletion.dispatch(
                             active_session.connection(),
                             active_session.session_id().clone(),
                             context.supports_session_delete,
                             context.trace.as_ref(),
                             reply_tx,
+                            operation_id,
                         );
                     }
                 }

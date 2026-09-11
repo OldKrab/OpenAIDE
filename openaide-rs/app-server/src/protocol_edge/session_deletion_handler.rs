@@ -24,10 +24,16 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for Native Session deletion");
-        let result = match self
-            .task_archive
-            .delete_native_session_for_client(&client.client_instance_id, params)
-        {
+        let operation_id = meta
+            .client_request_id
+            .as_ref()
+            .map(|id| id.as_str())
+            .unwrap_or(&id);
+        let result = match self.task_archive.delete_native_session_for_client(
+            &client.client_instance_id,
+            params,
+            operation_id,
+        ) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };

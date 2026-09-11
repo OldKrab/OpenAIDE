@@ -298,6 +298,7 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
         &self,
         _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::NativeSessionDeleteParams,
+        _operation_id: &str,
     ) -> Result<openaide_app_server_protocol::task::NativeSessionDeleteResult, ProtocolError> {
         Err(ProtocolError {
             code: ProtocolErrorCode::CapabilityUnavailable,
