@@ -18,6 +18,30 @@ describe("AgentMarkdown", () => {
     vi.unstubAllGlobals();
   });
 
+  it("opens local image links and Markdown images through the File Viewer", () => {
+    const openFile = vi.fn();
+    for (const [reference, path] of [
+      ["sandbox:/mnt/data/meal.png", "/mnt/data/meal.png"],
+      ["file:///tmp/meal%20details.png", "/tmp/meal details.png"],
+      ["/tmp/meal.png", "/tmp/meal.png"],
+      ["screenshots/meal.png", "screenshots/meal.png"],
+    ]) {
+      for (const marker of ["", "!"]) {
+        let tree: ReturnType<typeof create>;
+        act(() => { tree = create(
+          <AgentFileOpenContext.Provider value={openFile}>
+            <AgentMarkdown text={`${marker}[Meal details](${reference})`} />
+          </AgentFileOpenContext.Provider>,
+        ); });
+        const link = tree!.root.findByType("a");
+        expect(tree!.root.findAllByType("img")).toHaveLength(0);
+        act(() => { link.props.onClick({ preventDefault: vi.fn() }); });
+        expect(openFile).toHaveBeenLastCalledWith(path, undefined);
+        act(() => { tree!.unmount(); });
+      }
+    }
+  });
+
   it("renders GFM markdown for agent messages", () => {
     const html = renderToStaticMarkup(
       <AgentMarkdown text={"Yes: **example.com**\n\n- Use `.com`\n- Redirect `.net`\n\n| registrar | price |\n| - | - |\n| Cloudflare | $10 |"} />,
