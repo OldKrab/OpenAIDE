@@ -186,20 +186,6 @@ impl TaskProductApi {
                 "session_id": target.reference.session_id,
             }),
         );
-        let probe = self
-            .agent_gateway
-            .probe(AgentProbeRequest {
-                agent_id: target.reference.agent_id.clone(),
-            })
-            .map_err(protocol_error_from_runtime)?;
-        if !probe.typed_capabilities.delete_sessions {
-            return Err(ProtocolError {
-                code: ProtocolErrorCode::CapabilityUnavailable,
-                message: "This Agent does not support session deletion".into(),
-                recoverable: false,
-                target: None,
-            });
-        }
         let active = target.task.as_ref().is_some_and(|task| {
             task.active_turn_id.is_some()
                 || matches!(
@@ -225,6 +211,22 @@ impl TaskProductApi {
                 title: target.title,
                 active,
                 queued_message_count,
+            });
+        }
+        // Preview uses local state so it cannot queue behind Agent history discovery.
+        // Only a confirmed deletion needs a live capability check.
+        let probe = self
+            .agent_gateway
+            .probe(AgentProbeRequest {
+                agent_id: target.reference.agent_id.clone(),
+            })
+            .map_err(protocol_error_from_runtime)?;
+        if !probe.typed_capabilities.delete_sessions {
+            return Err(ProtocolError {
+                code: ProtocolErrorCode::CapabilityUnavailable,
+                message: "This Agent does not support session deletion".into(),
+                recoverable: false,
+                target: None,
             });
         }
         let first_attempt = self

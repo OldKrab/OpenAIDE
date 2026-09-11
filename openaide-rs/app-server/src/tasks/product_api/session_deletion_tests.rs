@@ -7,6 +7,54 @@ use openaide_app_server_protocol::task::{
 };
 
 #[test]
+fn deletion_preview_uses_local_state_and_checks_agent_capability_only_when_confirmed() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let mut task = task_record(
+        "preview-delete",
+        temp.path().join("workspace").to_str().unwrap(),
+    );
+    task.agent_session_id = Some("native-preview".into());
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(DeletionAgent {
+        unsupported: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = ClientInstanceId::from("client-a");
+    let preview = api
+        .delete_native_session_for_test(&client, delete_params("preview-delete", None))
+        .unwrap();
+    assert!(matches!(
+        preview,
+        NativeSessionDeleteResult::ConfirmationRequired {
+            active: false,
+            queued_message_count: 0,
+            ..
+        }
+    ));
+    assert_eq!(
+        agent.probes.load(Ordering::SeqCst),
+        0,
+        "opening confirmation must not wait for the Agent"
+    );
+    let error = api
+        .delete_native_session_for_test(&client, delete_params("preview-delete", Some(false)))
+        .unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::CapabilityUnavailable);
+    assert_eq!(agent.probes.load(Ordering::SeqCst), 1);
+    assert!(agent.deleted.lock().unwrap().is_empty());
+    assert!(!store.read_task("preview-delete").unwrap().tombstoned);
+}
+
+#[test]
 fn confirmed_deletion_removes_the_task_only_after_agent_success() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
@@ -161,6 +209,7 @@ struct DeletionAgent {
     deleted: Mutex<Vec<String>>,
     failure: Mutex<Option<RuntimeError>>,
     unsupported: bool,
+    probes: AtomicUsize,
 }
 
 impl AgentRuntime for DeletionAgent {
@@ -171,6 +220,7 @@ impl AgentRuntime for DeletionAgent {
             .resume_session(request)
     }
     fn probe(&self, request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
+        self.probes.fetch_add(1, Ordering::SeqCst);
         Ok(AgentProbeResult {
             agent_id: request.agent_id,
             status: AgentProbeStatus::Ready,
