@@ -6,10 +6,10 @@ import {
   type StateSubscriptionMappingContext,
 } from "../services/appServerStateSubscriptions";
 import { bindAppServerReplicaEpoch, type AppAction, type SnapshotIntent } from "../state/appReducer";
-import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
+import { newTaskNavigationTarget, type AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
-import { postHostMessage } from "../services/hostBridge";
+import { openNewTaskSurface, postHostMessage } from "../services/hostBridge";
 import type {
   AppControllerBackendConnection,
   BackendConnectionState,
@@ -80,10 +80,18 @@ export function useTaskRouteLifecycle({
       generation: backendStateGeneration,
     });
     let active = true;
+    const routeLease = operationOwner.claim("route-task-subscription", taskId);
     const stop = startAppServerStateSubscription({
       backendConnection,
       context,
       dispatch,
+      onTaskRemoved: () => {
+        if (!active || !operationOwner.owns(routeLease)) return;
+        dispatch({ type: "selection:clear" });
+        dispatch({ type: "archive:set", showArchived: false });
+        operationOwner.beginNavigation(newTaskNavigationTarget());
+        openNewTaskSurface();
+      },
       onBaselineLost: () => {
         if (!active) return;
         sendWebviewTelemetry(postHostMessage, "task_state_baseline_lost", {

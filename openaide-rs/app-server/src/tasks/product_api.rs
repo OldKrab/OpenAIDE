@@ -8,11 +8,12 @@ use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
 use openaide_app_server_protocol::task::{
-    NativeSessionArchiveParams, NativeSessionForkParams, NativeSessionRestoreParams,
-    NativeSessionSetPinnedParams, NativeSessionSetTitleParams, TaskAcquireParams,
-    TaskAdoptNativeSessionParams, TaskArchiveOlderParams, TaskArchiveOlderResult,
-    TaskArchiveParams, TaskCancelParams, TaskClosePlanParams, TaskLifecycleChanged,
-    TaskRestoreParams, TaskSendParams, TaskSetPinnedParams, TaskSetTitleParams,
+    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskCancelParams, TaskClosePlanParams,
+    TaskSendParams, TaskSetPinnedParams, TaskSetTitleParams,
+};
+#[cfg(test)]
+use openaide_app_server_protocol::task::{
+    TaskArchiveParams, TaskLifecycleChanged, TaskRestoreParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -39,6 +40,7 @@ use crate::tasks::turns::TurnRunner;
 
 mod adopt_native_session;
 mod archive;
+mod archive_workflow;
 mod attachments;
 mod cancel;
 mod chat_page;
@@ -62,6 +64,8 @@ mod retention;
 pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;
+mod session_deletion;
+mod session_reconciliation;
 mod set_config_option;
 mod set_permission_policy;
 mod set_pinned;
@@ -127,6 +131,11 @@ impl TaskProductApi {
         client_instance_id: &ClientInstanceId,
     ) -> Result<TaskRecord, ProtocolError> {
         let task = self.read_task_for_client(task_id, client_instance_id)?;
+        if let Some(session_id) = &task.agent_session_id {
+            self.require_session_not_deleting(
+                &crate::native_sessions::catalog::NativeSessionRef::new(&task.agent_id, session_id),
+            )?;
+        }
         if matches!(
             task.lifecycle,
             crate::storage::records::TaskLifecycle::Archived
@@ -638,76 +647,6 @@ impl TaskReleaseWorkflow for TaskProductApi {
     }
 }
 
-impl TaskArchiveWorkflow for TaskProductApi {
-    fn archive_for_client(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        params: TaskArchiveParams,
-    ) -> Result<TaskLifecycleChanged, ProtocolError> {
-        self.archive_task(client_instance_id, params)
-    }
-
-    fn restore_for_client(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        params: TaskRestoreParams,
-    ) -> Result<TaskLifecycleChanged, ProtocolError> {
-        self.restore_task(client_instance_id, params)
-    }
-
-    fn archive_older_for_client(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        params: TaskArchiveOlderParams,
-    ) -> Result<TaskArchiveOlderResult, ProtocolError> {
-        self.archive_older_tasks(client_instance_id, params)
-    }
-
-    fn archive_native_session(
-        &self,
-        params: NativeSessionArchiveParams,
-    ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
-        self.set_native_session_archived(params.agent_id.as_str(), &params.native_session_id, true)
-    }
-
-    fn restore_native_session(
-        &self,
-        params: NativeSessionRestoreParams,
-    ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
-        self.set_native_session_archived(params.agent_id.as_str(), &params.native_session_id, false)
-    }
-
-    fn set_native_session_title(
-        &self,
-        params: NativeSessionSetTitleParams,
-    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
-        self.set_native_session_title(
-            params.agent_id.as_str(),
-            &params.native_session_id,
-            params.title,
-        )
-    }
-
-    fn set_native_session_pinned(
-        &self,
-        params: NativeSessionSetPinnedParams,
-    ) -> Result<NativeSessionMetadataMutation, ProtocolError> {
-        self.set_native_session_pinned(
-            params.agent_id.as_str(),
-            &params.native_session_id,
-            params.pinned,
-        )
-    }
-
-    fn fork_native_session_for_client(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        params: NativeSessionForkParams,
-    ) -> Result<NativeSessionForkMutation, ProtocolError> {
-        self.fork_native_session(client_instance_id, params)
-    }
-}
-
 impl TaskMetadataWorkflow for TaskProductApi {
     fn set_permission_policy_for_client(
         &self,
@@ -777,12 +716,14 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
             target: None,
         },
         RuntimeError::Conflict(message) => conflict_error(&message),
-        RuntimeError::TaskNotFound(message) => ProtocolError {
-            code: ProtocolErrorCode::NotFound,
-            message,
-            recoverable: false,
-            target: None,
-        },
+        RuntimeError::TaskNotFound(message) | RuntimeError::NativeSessionMissing(message) => {
+            ProtocolError {
+                code: ProtocolErrorCode::NotFound,
+                message,
+                recoverable: false,
+                target: None,
+            }
+        }
         other => ProtocolError {
             code: ProtocolErrorCode::Internal,
             message: other.to_string(),
@@ -794,12 +735,14 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
 
 pub(super) fn runtime_error(error: RuntimeError) -> ProtocolError {
     match error {
-        RuntimeError::TaskNotFound(message) => ProtocolError {
-            code: ProtocolErrorCode::NotFound,
-            message,
-            recoverable: false,
-            target: None,
-        },
+        RuntimeError::TaskNotFound(message) | RuntimeError::NativeSessionMissing(message) => {
+            ProtocolError {
+                code: ProtocolErrorCode::NotFound,
+                message,
+                recoverable: false,
+                target: None,
+            }
+        }
         RuntimeError::InvalidParams(field) => validation_error(&field, "Invalid field"),
         other => storage_error(other),
     }

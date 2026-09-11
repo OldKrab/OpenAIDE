@@ -42,6 +42,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       .map((agent) => agent.id)),
     [controller.agents],
   );
+  const deletableAgentIds = useMemo(
+    () => new Set((controller.agents ?? [])
+      .filter((agent) => agent.capabilities?.deleteNativeSessions)
+      .map((agent) => agent.id)),
+    [controller.agents],
+  );
   const codexIntegrationInstalling = controller.agents?.some(
     (agent) => agent.id === "codex" && agent.status === "installing",
   ) === true;
@@ -366,6 +372,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
           forkableAgentIds={forkableAgentIds}
+          deletableAgentIds={deletableAgentIds}
+          onDeleteSession={callbacks.navigation.deleteSession}
           environmentLabel={desktopEnvironmentLabel}
           onArchiveTask={callbacks.navigation.archiveTask}
           onArchiveOlderTasks={callbacks.navigation.archiveOlderTasks}
@@ -499,6 +507,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
         nativeSessionProjectId={navigation.newTaskSelection.projectId}
         forkableAgentIds={forkableAgentIds}
+          deletableAgentIds={deletableAgentIds}
+          onDeleteSession={callbacks.navigation.deleteSession}
         environmentLabel={desktopEnvironmentLabel}
         onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
         onForkNativeSession={callbacks.navigation.forkNativeSession}

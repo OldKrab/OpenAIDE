@@ -19,8 +19,8 @@ use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connect
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::{
     AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSecretResolver,
-    AgentSession, AgentSessionFork, AgentSessionLoad, AgentSessionResume, AgentSessionStart,
-    TurnCancellation,
+    AgentSession, AgentSessionDelete, AgentSessionFork, AgentSessionLoad, AgentSessionResume,
+    AgentSessionStart, TurnCancellation,
 };
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
@@ -141,6 +141,10 @@ pub(super) enum AcpAgentProcessControl {
     Fork {
         request: AgentSessionFork,
         reply_tx: mpsc::Sender<Result<AgentForkedSession, RuntimeError>>,
+    },
+    Delete {
+        request: AgentSessionDelete,
+        reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
     },
 }
 
@@ -397,6 +401,15 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                                     &connection,
                                     &initialize,
                                     request,
+                                ).await;
+                                let _ = reply_tx.send(result);
+                            }
+                            AcpAgentProcessControl::Delete { request, reply_tx } => {
+                                let result = crate::agent::acp_session_termination::delete_active_session(
+                                    &connection,
+                                    request.session_id.into(),
+                                    initialize.agent_capabilities.session_capabilities.delete.is_some(),
+                                    None,
                                 ).await;
                                 let _ = reply_tx.send(result);
                             }

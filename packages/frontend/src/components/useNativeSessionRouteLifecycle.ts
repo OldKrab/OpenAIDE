@@ -7,11 +7,11 @@ import {
 } from "@openaide/app-server-client";
 import type { AppAction } from "../state/appReducer";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
-import { taskNavigationTarget } from "../state/asyncOperationOwner";
+import { newTaskNavigationTarget, taskNavigationTarget } from "../state/asyncOperationOwner";
 import type { AppState } from "../state/store";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
-import { openTaskSurface, postHostMessage } from "../services/hostBridge";
+import { openNewTaskSurface, openTaskSurface, postHostMessage } from "../services/hostBridge";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import { discardPreparedNewTask } from "./navigationCallbacks";
@@ -160,6 +160,8 @@ export async function adoptRoutedNativeSession({
     });
     if (noLongerExists) {
       dispatch({ type: "newTask:nativeSessions:remove", sessionId: nativeSessionId });
+      asyncOperations.beginNavigation(newTaskNavigationTarget());
+      openNewTaskSurface();
     }
   }
 }

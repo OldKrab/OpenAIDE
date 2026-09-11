@@ -14,7 +14,7 @@ use crate::agent::acp_session_catalogs::{
 use crate::agent::acp_session_opening::OpenedAcpSession;
 use crate::agent::acp_session_paths::normalized_session_cwd;
 use crate::agent::acp_session_runner::AcpSessionRunner;
-use crate::agent::acp_session_termination::{close_active_session, delete_active_session};
+use crate::agent::acp_session_termination::{close_active_session, SessionDeleteRequest};
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::{
     AgentLoadedSession, AgentPromptCapabilities, AgentSession, AgentSessionEventSink,
@@ -65,6 +65,7 @@ pub(super) async fn run(
     let mut config_catalog = active_session_config_catalog(&started_session);
     let mut commands_catalog = started_session.commands_catalog.clone();
     let mut config_requests = SessionConfigRequests::new();
+    let mut deletion = SessionDeleteRequest::default();
     let session_id = active_session.session_id().to_string();
     let sink_registration = SessionSinkRegistration {
         session_id,
@@ -100,7 +101,7 @@ pub(super) async fn run(
                     );
                 }
             }
-            command = command_rx.recv() => {
+            command = command_rx.recv(), if !deletion.is_pending() => {
                 let Some(command) = command else {
                     break;
                 };
@@ -258,21 +259,25 @@ pub(super) async fn run(
                         }
                     }
                     AcpSessionCommand::Delete { reply_tx } => {
-                        config_requests.abandon();
-                        let connection = active_session.connection();
-                        let result = delete_active_session(
-                            connection,
+                        deletion.dispatch(
+                            active_session.connection(),
                             active_session.session_id().clone(),
                             supports_session_delete,
                             trace.as_ref(),
-                        )
-                        .await;
-                        let _ = reply_tx.send(result);
-                        break;
+                            reply_tx,
+                        );
                     }
                 }
             }
-            config = config_rx.recv(), if config_requests.can_dispatch() => {
+            (reply_tx, result) = deletion.next_response() => {
+                let deleted = result.is_ok();
+                let _ = reply_tx.send(result);
+                if deleted {
+                    config_requests.abandon();
+                    break;
+                }
+            }
+            config = config_rx.recv(), if config_requests.can_dispatch() && !deletion.is_pending() => {
                 let Some(config) = config else { break; };
                 config_requests.dispatch(&active_session, config);
             }

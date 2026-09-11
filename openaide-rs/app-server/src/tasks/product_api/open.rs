@@ -133,6 +133,16 @@ impl TaskProductApi {
         let Some(stored_session_id) = task.agent_session_id.clone() else {
             return;
         };
+        if self
+            .require_session_not_deleting(&crate::native_sessions::catalog::NativeSessionRef::new(
+                &task.agent_id,
+                &stored_session_id,
+            ))
+            .is_err()
+        {
+            self.mark_native_session_recovery_stale(&task.task_id, &stored_session_id);
+            return;
+        }
         let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
             return;
         };
@@ -158,6 +168,7 @@ impl TaskProductApi {
         generation: crate::tasks::history_sync::PassiveSyncGeneration,
     ) {
         let api = self.clone();
+        let observation_generation = self.native_catalog.observation_generation();
         std::thread::spawn(move || {
             let native_updated_at = crate::time::activity_millis(&observed_activity_at)
                 .and_then(|time| u128::try_from(time).ok());
@@ -187,7 +198,13 @@ impl TaskProductApi {
                                     observed_activity_at.clone(),
                                 ),
                             })
-                            .map_err(protocol_error_from_runtime)
+                            .map_err(|error| {
+                                api.reconcile_session_recovery_error(
+                                    &task,
+                                    observation_generation,
+                                    error,
+                                )
+                            })
                     })
             });
             if !api.history_sync.is_current(&task.task_id, &generation) {
@@ -205,6 +222,10 @@ impl TaskProductApi {
                     api.history_sync.reload_available_snapshot(&task.task_id),
                 ),
                 Some(Err(error)) => {
+                    if api.task_history_removed(&task.task_id) {
+                        api.history_sync.finish_passive(&task.task_id, &generation);
+                        return;
+                    }
                     api.mark_native_session_recovery_stale(&task.task_id, &stored_session_id);
                     api.publish_history_sync(
                         &task.task_id,
@@ -234,13 +255,14 @@ impl TaskProductApi {
         generation: crate::tasks::history_sync::PassiveSyncGeneration,
     ) {
         let api = self.clone();
+        let observation_generation = self.native_catalog.observation_generation();
         std::thread::spawn(move || {
             let load_started = std::cell::Cell::new(false);
             let result = api.history_sync.run_passive(&task.task_id, &generation, || {
                 match api
                     .native_sessions
                     .resume_for_open(&task, &stored_session_id)
-                    .map_err(protocol_error_from_runtime)?
+                    .map_err(|error| api.reconcile_session_recovery_error(&task, observation_generation, error))?
                 {
                     OpenSessionResumeOutcome::Resumed => Ok(None),
                     OpenSessionResumeOutcome::Unsupported => {
@@ -273,7 +295,7 @@ impl TaskProductApi {
                                 refreshed_at,
                                 clear_reload_requirement_through: None,
                             })
-                            .map_err(protocol_error_from_runtime)
+                            .map_err(|error| api.reconcile_session_recovery_error(&task, observation_generation, error))
                     }
                 }
             });
@@ -294,6 +316,10 @@ impl TaskProductApi {
                     },
                 ),
                 (true, Some(Err(error))) => {
+                    if api.task_history_removed(&task.task_id) {
+                        api.history_sync.finish_passive(&task.task_id, &generation);
+                        return;
+                    }
                     if let Err(persist_error) =
                         api.record_history_update_failure(&task.task_id, &error.message)
                     {
@@ -314,6 +340,10 @@ impl TaskProductApi {
                     );
                 }
                 (false, Some(Err(error))) => {
+                    if api.task_history_removed(&task.task_id) {
+                        api.history_sync.finish_passive(&task.task_id, &generation);
+                        return;
+                    }
                     api.mark_native_session_recovery_stale(&task.task_id, &stored_session_id);
                     logging::warn(
                         "adopted_task_background_resume_failed",

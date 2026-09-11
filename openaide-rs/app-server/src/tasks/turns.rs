@@ -1,3 +1,4 @@
+mod queue_settlement;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -376,53 +377,13 @@ impl TurnRunner {
                 turn_id.as_str(),
                 runner_started.elapsed().as_millis(),
             );
-            let settlement_result = runner.turn_acceptance.serialize(&task_id, || {
-                #[cfg(test)]
-                runner.pause_before_settlement_for_test();
-                let next_turn_id = format!("turn_{}", uuid::Uuid::new_v4());
-                let next_message_id = format!("message_{}", uuid::Uuid::new_v4());
-                if !runner
-                    .turn_acceptance
-                    .own_pending_turn(&task_id, &next_turn_id)
-                {
-                    return runner.transitions().finish_turn(&task_id, &turn_id, result);
-                }
-                let accepted = runner.transitions().finish_turn_and_accept_queue(
-                    &task_id,
-                    &turn_id,
-                    result,
-                    &next_turn_id,
-                    &next_message_id,
-                );
-                match accepted {
-                    Ok(Some(queued)) => {
-                        runner.spawn_agent_turn(
-                            task_id.clone(),
-                            queued.text,
-                            queued.attachments,
-                            queued.turn_id.clone(),
-                            next_session,
-                            next_session_sink,
-                        );
-                        runner
-                            .turn_acceptance
-                            .retire_pending_turn(&task_id, &queued.turn_id);
-                        Ok(true)
-                    }
-                    Ok(None) => {
-                        runner
-                            .turn_acceptance
-                            .retire_pending_turn(&task_id, &next_turn_id);
-                        Ok(true)
-                    }
-                    Err(error) => {
-                        runner
-                            .turn_acceptance
-                            .retire_pending_turn(&task_id, &next_turn_id);
-                        Err(error)
-                    }
-                }
-            });
+            let settlement_result = runner.settle_turn_and_advance_queue(
+                &task_id,
+                &turn_id,
+                result,
+                next_session,
+                next_session_sink,
+            );
             turn_diagnostics::settlement_returned(
                 task_id.as_str(),
                 turn_id.as_str(),

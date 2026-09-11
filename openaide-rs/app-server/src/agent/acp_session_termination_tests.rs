@@ -180,5 +180,6 @@ fn failed_delete_records_error_trace_and_maps_acp_error() {
     let content = wait_for_trace_content(&temp.path().join("diagnostics/acp-traces"));
     assert_trace_pair(&content, "session/delete.request", "client_to_agent");
     assert_trace_pair(&content, "session/delete.error", "agent_to_client");
-    assert!(content.contains("delete exploded"));
+    assert!(!content.contains("delete exploded"));
+    assert!(content.contains("error_kind"));
 }

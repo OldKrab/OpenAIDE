@@ -1,3 +1,4 @@
+import { requestSessionDeletion } from "../intents/sessionDeletionIntent";
 import {
   openNewTaskSurface,
   openNativeSessionSurface,
@@ -61,6 +62,10 @@ export function createNavigationCallbacks({
   // so repeated clicks cannot outrun the next React state publication.
   const pendingForkKeys = new Set<string>();
   return {
+    deleteSession: async (params) => {
+      if (!backendConnection?.request) throw new Error("App Server connection unavailable.");
+      return requestSessionDeletion({ request: backendConnection.request }, params);
+    },
     archiveNativeSession: (session) => {
       mutateNativeSessionArchive("archive", session);
     },

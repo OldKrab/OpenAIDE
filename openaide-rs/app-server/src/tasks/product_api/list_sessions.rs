@@ -347,6 +347,7 @@ impl TaskProductApi {
             .map_err(protocol_error_from_runtime)?;
         let agent_id = params.agent_id.clone();
         let mut cursor = OpaqueSessionCursor::new(params.cursor);
+        let generation = self.native_catalog.observation_generation();
         loop {
             let result = self
                 .agent_gateway
@@ -372,6 +373,7 @@ impl TaskProductApi {
                 params.agent_id.as_str(),
                 &project.workspace_root,
                 &result.sessions,
+                generation,
             )?;
             let sessions = self
                 .unowned_native_sessions(params.agent_id.as_str(), result.sessions, &task_records)?
@@ -401,9 +403,10 @@ impl TaskProductApi {
         agent_id: &str,
         workspace_root: &str,
         sessions: &[crate::protocol::model::AgentListedSession],
+        generation: u64,
     ) -> Result<(), ProtocolError> {
         self.native_catalog
-            .record_page(
+            .record_page_from_scan(
                 project_id,
                 workspace_root,
                 sessions
@@ -417,6 +420,7 @@ impl TaskProductApi {
                             .or_else(|| session.updated_at.clone()),
                     })
                     .collect(),
+                Some(generation),
             )
             .map_err(protocol_error_from_runtime)?;
         self.task_notifier

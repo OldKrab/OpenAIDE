@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod session_deletion;
+pub use session_deletion::*;
+
 use crate::attachment::PreSendAttachment;
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,

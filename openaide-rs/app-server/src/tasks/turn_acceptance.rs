@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use crate::native_sessions::catalog::NativeSessionRef;
 use crate::tasks::task_operation::TaskOperationCoordinator;
 
 /// Owns durably accepted Turns until startup hands them to `TurnRunner` or retires them.
@@ -12,6 +13,7 @@ use crate::tasks::task_operation::TaskOperationCoordinator;
 pub(super) struct TurnAcceptanceCoordinator {
     acceptance: TaskOperationCoordinator,
     pending_turns: Arc<Mutex<HashMap<String, String>>>,
+    unresolved_deletions: Arc<Mutex<HashSet<NativeSessionRef>>>,
 }
 
 impl TurnAcceptanceCoordinator {
@@ -19,7 +21,31 @@ impl TurnAcceptanceCoordinator {
         Self {
             acceptance,
             pending_turns: Default::default(),
+            unresolved_deletions: Default::default(),
         }
+    }
+
+    /// Process-local exclusion, shared with automatic queue delivery. No request is
+    /// replayed or persisted here; ordinary missing-history reconciliation survives restart.
+    pub(super) fn begin_session_deletion(&self, reference: &NativeSessionRef) -> bool {
+        self.unresolved_deletions
+            .lock()
+            .expect("session deletion state poisoned")
+            .insert(reference.clone())
+    }
+
+    pub(super) fn resolve_session_deletion(&self, reference: &NativeSessionRef) {
+        self.unresolved_deletions
+            .lock()
+            .expect("session deletion state poisoned")
+            .remove(reference);
+    }
+
+    pub(super) fn session_deletion_unresolved(&self, reference: &NativeSessionRef) -> bool {
+        self.unresolved_deletions
+            .lock()
+            .expect("session deletion state poisoned")
+            .contains(reference)
     }
 
     pub(super) fn clear(&self) {

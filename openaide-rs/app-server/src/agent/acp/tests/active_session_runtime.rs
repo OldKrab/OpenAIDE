@@ -803,6 +803,13 @@ for line in sys.stdin:
         else:
             break
     elif method == "session/delete":
+        if session_id == "reject-delete":
+            sys.stdout.write(json.dumps({
+                "jsonrpc": "2.0", "id": message["id"],
+                "error": {"code": -32600, "message": "Deletion rejected"},
+            }) + "\n")
+            sys.stdout.flush()
+            continue
         respond(message, {})
         break
     else:
@@ -2480,7 +2487,10 @@ fn inactive_session_registry_reports_stable_binding_errors() {
         })
         .expect_err("missing delete should fail")
         .to_string();
-    assert_eq!(delete_error, "runtime not ready: ACP session is not active");
+    assert!(
+        delete_error.starts_with("agent setup required:"),
+        "detached deletion initializes the Agent before dispatch"
+    );
 }
 
 #[test]
@@ -3980,6 +3990,54 @@ fn load_session_registers_active_session_for_close() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/load", "session/close"]
+    );
+}
+
+#[test]
+fn rejected_deletion_preserves_the_live_session_for_follow_up() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _)) = fixture_runtime(&temp, "reject-delete") else {
+        return;
+    };
+    let session = runtime
+        .start_session(start_request("task-rejected-delete", cwd_string()))
+        .unwrap();
+    assert!(runtime
+        .delete_session(AgentSessionDelete {
+            agent_id: session.agent_id.clone(),
+            session_id: session.session_id.clone(),
+        })
+        .is_err());
+    runtime
+        .prompt(
+            AgentPrompt {
+                agent_id: session.agent_id,
+                task_id: "task-rejected-delete".to_string(),
+                session_id: session.session_id,
+                text: "continue".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(CapturingEventSink::default()),
+        )
+        .expect("rejected deletion must not detach the session");
+}
+
+#[test]
+fn delete_detached_session_does_not_load_or_adopt_it() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "delete-detached") else {
+        return;
+    };
+    runtime
+        .delete_session(AgentSessionDelete {
+            agent_id: "codex".to_string(),
+            session_id: "delete-detached".to_string(),
+        })
+        .expect("delete persisted session without opening it");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/delete"]
     );
 }
 

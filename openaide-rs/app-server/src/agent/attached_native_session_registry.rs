@@ -140,9 +140,11 @@ impl AttachedNativeSessionRegistry {
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
         let key = request.session_key();
+        // Keep the attachment and its sink usable when the Agent rejects deletion.
+        self.require_session(&key)?.delete()?;
         self.remove_event_sink(&key);
-        let attachment = self.remove(&key).ok_or_else(not_ready)?;
-        attachment.delete()
+        self.remove(&key);
+        Ok(())
     }
 
     pub(super) fn take_shutdown_close_tasks(&self) -> Vec<Box<dyn FnOnce() + Send + 'static>> {

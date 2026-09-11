@@ -276,7 +276,7 @@ fn task_delete_deletes_bound_native_session_when_supported() {
 }
 
 #[test]
-fn task_delete_tombstone_blocks_native_session_readoption_when_agent_delete_fails() {
+fn task_delete_preserves_local_history_when_agent_delete_fails() {
     let tmp = TempDir::new().unwrap();
     let service = TaskService::new(
         Store::open(tmp.path().join("store")).unwrap(),
@@ -306,7 +306,7 @@ fn task_delete_tombstone_blocks_native_session_readoption_when_agent_delete_fail
             task_id: created.task.task_id,
             mode: DeleteMode::Delete,
         })
-        .unwrap();
+        .unwrap_err();
 
     assert!(matches!(
         service.create(params()).unwrap_err(),

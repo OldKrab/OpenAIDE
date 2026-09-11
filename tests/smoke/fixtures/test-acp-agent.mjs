@@ -3,6 +3,7 @@
 import readline from "node:readline";
 
 const sessions = new Map();
+const history = new Map();
 const pendingClientRequests = new Map();
 const nativeSessionScenario = process.argv.includes("--active-writer") ? "active-writer" : undefined;
 let nextSession = 1;
@@ -42,7 +43,7 @@ async function handleRequestOrNotification(message) {
         agentCapabilities: {
           loadSession: true,
           promptCapabilities: { image: true, embeddedContext: true },
-          sessionCapabilities: { close: {}, list: {} },
+          sessionCapabilities: { close: {}, list: {}, delete: {} },
         },
         authMethods: [],
         agentInfo: { name: "OpenAIDE Test Agent", version: "1" },
@@ -62,7 +63,7 @@ async function handleRequestOrNotification(message) {
               cwd: params.cwd,
               title: "Session open elsewhere",
             }]
-          : [],
+          : [...history.values()].filter((session) => !params.cwd || session.cwd === params.cwd),
       });
       break;
     case "session/set_config_option":
@@ -76,6 +77,12 @@ async function handleRequestOrNotification(message) {
     case "session/cancel":
       cancelSession(params.sessionId);
       break;
+    case "session/delete":
+      cancelSession(params.sessionId);
+      sessions.delete(params.sessionId);
+      history.delete(params.sessionId);
+      respond(message.id, {});
+      break;
     case "session/close":
       sessions.delete(params.sessionId);
       respond(message.id, {});
@@ -88,6 +95,7 @@ async function handleRequestOrNotification(message) {
 function createSession(message) {
   const sessionId = `smoke-session-${nextSession++}`;
   sessions.set(sessionId, { activePrompts: new Map(), promptCount: 0 });
+  history.set(sessionId, { sessionId, cwd: message.params.cwd, title: "Smoke session" });
   respond(message.id, {
     sessionId,
     configOptions: configOptions("balanced"),
@@ -470,6 +478,9 @@ function toolUpdate(sessionId, payload) {
 }
 
 function update(sessionId, payload) {
+  if (payload.sessionUpdate === "session_info_update" && payload.title && history.has(sessionId)) {
+    history.get(sessionId).title = payload.title;
+  }
   notify("session/update", { sessionId, update: payload });
 }
 

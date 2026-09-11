@@ -264,7 +264,7 @@ impl AgentRuntime for DeleteTrackingLoadSessionAgent {
                 .into_iter()
                 .find(|task| task.agent_session_id.as_deref() == Some("external-session"))
                 .expect("bound task should exist when native delete runs");
-            assert!(task.tombstoned, "native delete must run after tombstone commit");
+            assert!(!task.tombstoned, "local history must remain until Agent success");
         }
         self.deletes.fetch_add(1, Ordering::SeqCst);
         if self.fail_delete {

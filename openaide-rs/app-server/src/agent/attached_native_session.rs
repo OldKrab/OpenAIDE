@@ -497,15 +497,27 @@ impl AttachedNativeSession {
 
     pub(super) fn delete(&self) -> Result<(), RuntimeError> {
         let _process_operation = self.acquire_process()?;
-        let cleanup_result = self.terminal_owner.close();
         let (reply_tx, reply_rx) = mpsc::channel();
         self.command_tx
             .send(AcpSessionCommand::Delete { reply_tx })
             .map_err(|_| self.attachment_stopped_error())?;
-        let delete_result = reply_rx
-            .recv_timeout(Duration::from_secs(5))
-            .map_err(|error| RuntimeError::NotReady(format!("ACP delete timed out: {error}")))?;
-        cleanup_result.and(delete_result)
+        reply_rx
+            .recv_timeout(Duration::from_secs(31))
+            .map_err(|_| {
+                RuntimeError::OutcomeUnknown(
+                    "Session deletion outcome is unknown; retry explicitly".to_string(),
+                )
+            })??;
+        // Agent success is authoritative even if releasing a local terminal fails.
+        if let Err(error) = self.terminal_owner.close() {
+            crate::logging::warn(
+                "acp_session_delete_cleanup_failed",
+                serde_json::json!({
+                    "error_kind": error.code(),
+                }),
+            );
+        }
+        Ok(())
     }
 
     fn acquire_process(&self) -> Result<ProcessOperation, RuntimeError> {

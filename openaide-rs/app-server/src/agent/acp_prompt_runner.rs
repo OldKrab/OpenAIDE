@@ -20,7 +20,7 @@ use crate::agent::acp_session_catalogs::{
     session_with_catalog_snapshots, DispatchSessionCatalogs, PendingSessionCatalogs,
 };
 use crate::agent::acp_session_termination::close_active_session;
-use crate::agent::acp_session_termination::delete_active_session;
+use crate::agent::acp_session_termination::SessionDeleteRequest;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::attached_native_session::{AcpSessionCommand, AcpSessionConfigCommand};
@@ -94,6 +94,8 @@ pub(super) async fn run_prompt(
     let mut cancel_sent = false;
     let mut cancel_requested_at = None;
     let mut settled_by_response = false;
+    let mut deletion = SessionDeleteRequest::default();
+    let mut completed_prompt = None;
     let result = loop {
         if active_prompt.cancellation().is_cancelled() && !cancel_sent {
             // A session cancel can arrive without cancelling the prompt token.
@@ -168,7 +170,7 @@ pub(super) async fn run_prompt(
                 );
                 break Err(RuntimeError::NotReady("ACP session closed".to_string()));
             }
-            command = command_rx.recv() => {
+            command = command_rx.recv(), if !deletion.is_pending() => {
                 let Some(command) = command else {
                     break Err(RuntimeError::NotReady("ACP command channel stopped".to_string()));
                 };
@@ -226,22 +228,29 @@ pub(super) async fn run_prompt(
                         }
                     }
                     AcpSessionCommand::Delete { reply_tx } => {
-                        active_prompt.retire();
-                        config_requests.abandon();
-                        let connection = active_session.connection();
-                        let result = delete_active_session(
-                            connection,
+                        deletion.dispatch(
+                            active_session.connection(),
                             active_session.session_id().clone(),
                             context.supports_session_delete,
                             context.trace.as_ref(),
-                        )
-                        .await;
-                        let _ = reply_tx.send(result);
-                        break Err(RuntimeError::NotReady("ACP session deleted".to_string()));
+                            reply_tx,
+                        );
                     }
                 }
             }
-            config = config_rx.recv(), if config_requests.can_dispatch() => {
+            (reply_tx, result) = deletion.next_response() => {
+                let deleted = result.is_ok();
+                let _ = reply_tx.send(result);
+                if deleted {
+                    active_prompt.retire();
+                    config_requests.abandon();
+                    break Err(RuntimeError::NotReady("ACP session deleted".to_string()));
+                }
+                if let Some(result) = completed_prompt.take() {
+                    break result;
+                }
+            }
+            config = config_rx.recv(), if config_requests.can_dispatch() && !deletion.is_pending() => {
                 let Some(config) = config else {
                     break Err(RuntimeError::NotReady("ACP config channel stopped".to_string()));
                 };
@@ -293,7 +302,11 @@ pub(super) async fn run_prompt(
                         "result": if succeeded { "stop_reason" } else { "error" },
                     }),
                 );
-                break result;
+                if deletion.is_pending() {
+                    completed_prompt = Some(result);
+                } else {
+                    break result;
+                }
             }
             Some(reply_tx) = preceding_update_drain_rx.recv() => {
                 let result = project_preceding_session_updates(

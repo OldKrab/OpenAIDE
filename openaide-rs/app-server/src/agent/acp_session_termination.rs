@@ -63,10 +63,46 @@ pub(super) async fn delete_active_session(
         ));
     }
     let request = DeleteSessionRequest::new(session_id);
+    let started_at = std::time::Instant::now();
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    crate::logging::info(
+        "acp_session_delete_started",
+        serde_json::json!({
+            "operation": "session/delete", "operation_id": operation_id, "session_id": request.session_id.to_string(), "attempt": 1,
+        }),
+    );
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/delete.request", &request);
     }
-    match connection.send_request(request).block_task().await {
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        connection.send_request(request).block_task(),
+    )
+    .await;
+    let result = match result {
+        Ok(result) => result.map_err(|error| {
+            if agent_client_protocol::is_incoming_transport_closed(&error) {
+                RuntimeError::OutcomeUnknown(
+                    "Session deletion outcome is unknown; retry explicitly".into(),
+                )
+            } else {
+                acp_error(error)
+            }
+        }),
+        Err(_) => Err(RuntimeError::OutcomeUnknown(
+            "Session deletion outcome is unknown; retry explicitly".to_string(),
+        )),
+    };
+    crate::logging::info(
+        "acp_session_delete_completed",
+        serde_json::json!({
+            "operation": "session/delete", "operation_id": operation_id, "attempt": 1,
+            "outcome": if result.is_ok() { "success" } else { "failure" },
+            "duration_ms": started_at.elapsed().as_millis(),
+            "error_kind": result.as_ref().err().map(RuntimeError::code),
+        }),
+    );
+    match result {
         Ok(response) => {
             if let Some(trace) = trace {
                 trace.record("agent_to_client", "session/delete.response", &response);
@@ -78,10 +114,60 @@ pub(super) async fn delete_active_session(
                 trace.record_value(
                     "agent_to_client",
                     "session/delete.error",
-                    serde_json::json!({ "error": error.to_string() }),
+                    serde_json::json!({ "error_kind": error.code() }),
                 );
             }
-            Err(acp_error(error))
+            Err(error)
         }
+    }
+}
+
+/// Deletion must leave the session event loop running: an earlier prompt/config
+/// response can hold ACP's dispatch boundary until that loop consumes it.
+#[derive(Default)]
+pub(super) struct SessionDeleteRequest {
+    pending: Option<(DeleteReply, DeleteFuture)>,
+}
+
+type DeleteReply = std::sync::mpsc::Sender<Result<(), RuntimeError>>;
+type DeleteFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), RuntimeError>> + Send>>;
+
+impl SessionDeleteRequest {
+    pub(super) fn is_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    pub(super) fn dispatch(
+        &mut self,
+        connection: &ConnectionTo<Agent>,
+        session_id: SessionId,
+        supported: bool,
+        trace: Option<&AcpTraceSession>,
+        reply: DeleteReply,
+    ) {
+        if self.is_pending() {
+            let _ = reply.send(Err(RuntimeError::NotReady(
+                "Session deletion is already pending".into(),
+            )));
+            return;
+        }
+        let connection = connection.clone();
+        let trace = trace.cloned();
+        self.pending = Some((
+            reply,
+            Box::pin(async move {
+                delete_active_session(&connection, session_id, supported, trace.as_ref()).await
+            }),
+        ));
+    }
+
+    pub(super) async fn next_response(&mut self) -> (DeleteReply, Result<(), RuntimeError>) {
+        let Some((_, future)) = self.pending.as_mut() else {
+            return std::future::pending().await;
+        };
+        let result = future.await;
+        let (reply, _) = self.pending.take().expect("pending deletion completed");
+        (reply, result)
     }
 }

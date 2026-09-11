@@ -119,6 +119,16 @@ impl NativeSessionService {
                 "has_bound_session": task.agent_session_id.is_some(),
             }),
         );
+        let admission = self.turn_runner.turn_acceptance();
+        if task.agent_session_id.as_ref().is_some_and(|id| {
+            admission.session_deletion_unresolved(
+                &crate::native_sessions::catalog::NativeSessionRef::new(&task.agent_id, id),
+            )
+        }) {
+            return Err(RuntimeError::Conflict(
+                "Session deletion is unresolved; retry Delete before starting more work".into(),
+            ));
+        }
         let opened = match self.acquire_for_prompt(&task) {
             Ok(opened) => {
                 crate::logging::info(
@@ -146,137 +156,159 @@ impl NativeSessionService {
                 return Err(error);
             }
         };
-        let session_state = opened.task_state();
-        let missing_session_id = opened.replaced_session_id().map(str::to_string);
-        let replacement_session_id = opened.session().session_id.clone();
-        let binding = match missing_session_id.as_deref() {
-            Some(missing_session_id) => self.mutations.replace_missing_session_for_initial_prompt(
-                &task_id,
-                turn_id.as_str(),
-                missing_session_id,
-                TaskCommitOptions::metadata(),
-                |ctx| {
-                    session_state.apply_to(ctx.task_mut());
-                    Ok(TaskMutationResult::Changed)
-                },
-            ),
-            None => self.mutations.commit_existing_task(
-                &task_id,
-                TaskCommitOptions::metadata(),
-                |ctx| {
-                    if ctx.task().active_turn_id.as_deref() != Some(turn_id.as_str()) {
-                        return Ok(TaskMutationResult::Rejected);
-                    }
-                    session_state.apply_to(ctx.task_mut());
-                    Ok(TaskMutationResult::Changed)
-                },
-            ),
-        };
-        let binding = match binding {
-            Ok(binding) => binding,
-            Err(error) => {
-                crate::logging::error(
-                    "task_primary_prompt_session_binding_failed",
+        // Acquisition stays interruptible. Final binding and prompt admission share
+        // Delete's gate, so a recovery finishing later cannot submit new work.
+        admission.serialize(&task_id.clone(), || {
+            // Recovery may have created a replacement; the original binding's
+            // unresolved Delete must still fence this already accepted turn.
+            if task.agent_session_id.as_ref().is_some_and(|id| {
+                admission.session_deletion_unresolved(
+                    &crate::native_sessions::catalog::NativeSessionRef::new(&task.agent_id, id),
+                )
+            }) || admission.session_deletion_unresolved(
+                &crate::native_sessions::catalog::NativeSessionRef::new(
+                    &opened.session().agent_id,
+                    &opened.session().session_id,
+                ),
+            ) {
+                return Err(RuntimeError::Conflict(
+                    "Session deletion is unresolved; retry Delete before starting more work".into(),
+                ));
+            }
+            let session_state = opened.task_state();
+            let missing_session_id = opened.replaced_session_id().map(str::to_string);
+            let replacement_session_id = opened.session().session_id.clone();
+            let binding = match missing_session_id.as_deref() {
+                Some(missing_session_id) => {
+                    self.mutations.replace_missing_session_for_initial_prompt(
+                        &task_id,
+                        turn_id.as_str(),
+                        missing_session_id,
+                        TaskCommitOptions::metadata(),
+                        |ctx| {
+                            session_state.apply_to(ctx.task_mut());
+                            Ok(TaskMutationResult::Changed)
+                        },
+                    )
+                }
+                None => self.mutations.commit_existing_task(
+                    &task_id,
+                    TaskCommitOptions::metadata(),
+                    |ctx| {
+                        if ctx.task().active_turn_id.as_deref() != Some(turn_id.as_str()) {
+                            return Ok(TaskMutationResult::Rejected);
+                        }
+                        session_state.apply_to(ctx.task_mut());
+                        Ok(TaskMutationResult::Changed)
+                    },
+                ),
+            };
+            let binding = match binding {
+                Ok(binding) => binding,
+                Err(error) => {
+                    crate::logging::error(
+                        "task_primary_prompt_session_binding_failed",
+                        serde_json::json!({
+                            "task_id": task_id.as_str(),
+                            "turn_id": turn_id.as_str(),
+                            "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                            "error": error.to_string(),
+                        }),
+                    );
+                    return Err(error);
+                }
+            };
+            if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
+                crate::logging::warn(
+                    "task_primary_prompt_session_binding_rejected",
                     serde_json::json!({
                         "task_id": task_id.as_str(),
                         "turn_id": turn_id.as_str(),
                         "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
-                        "error": error.to_string(),
                     }),
                 );
-                return Err(error);
+                return Err(RuntimeError::NotReady(
+                    "Native Session changed before prompt start".to_string(),
+                ));
             }
-        };
-        if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
-            crate::logging::warn(
-                "task_primary_prompt_session_binding_rejected",
+            crate::logging::info(
+                "task_primary_prompt_session_binding_completed",
                 serde_json::json!({
                     "task_id": task_id.as_str(),
                     "turn_id": turn_id.as_str(),
                     "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
                 }),
             );
-            return Err(RuntimeError::NotReady(
-                "Native Session changed before prompt start".to_string(),
-            ));
-        }
-        crate::logging::info(
-            "task_primary_prompt_session_binding_completed",
-            serde_json::json!({
-                "task_id": task_id.as_str(),
-                "turn_id": turn_id.as_str(),
-                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
-            }),
-        );
-        if missing_session_id.is_some() {
-            log_missing_session_replaced(
-                &task_id,
-                &task.agent_id,
-                &replacement_session_id,
-                "initial_prompt",
-            );
-        }
+            if missing_session_id.is_some() {
+                log_missing_session_replaced(
+                    &task_id,
+                    &task.agent_id,
+                    &replacement_session_id,
+                    "initial_prompt",
+                );
+            }
 
-        crate::logging::info(
-            "task_primary_prompt_session_events_attach_started",
-            serde_json::json!({
-                "task_id": task_id.as_str(),
-                "turn_id": turn_id.as_str(),
-                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
-            }),
-        );
-        let session_sink = match self.ensure_update_subscription(&task_id, &opened.session().key())
-        {
-            Ok(session_sink) => {
-                crate::logging::info(
-                    "task_primary_prompt_session_events_attached",
-                    serde_json::json!({
-                        "task_id": task_id.as_str(),
-                        "turn_id": turn_id.as_str(),
-                        "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
-                    }),
-                );
-                session_sink
-            }
-            Err(error) => {
-                crate::logging::error(
-                    "task_primary_prompt_session_events_attach_failed",
-                    serde_json::json!({
-                        "task_id": task_id.as_str(),
-                        "turn_id": turn_id.as_str(),
-                        "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
-                        "error": error.to_string(),
-                    }),
-                );
-                return Err(error);
-            }
-        };
-        let session = opened.commit();
-        crate::logging::info(
-            "task_primary_prompt_turn_spawning",
-            serde_json::json!({
-                "task_id": task_id.as_str(),
-                "turn_id": turn_id.as_str(),
-                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
-            }),
-        );
-        self.turn_runner.spawn_agent_turn(
-            task_id.clone(),
-            text,
-            attachments,
-            turn_id.as_str().to_string(),
-            session,
-            session_sink,
-        );
-        crate::logging::info(
-            "task_primary_prompt_turn_spawned",
-            serde_json::json!({
-                "task_id": task_id.as_str(),
-                "turn_id": turn_id.as_str(),
-                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
-            }),
-        );
-        Ok(())
+            crate::logging::info(
+                "task_primary_prompt_session_events_attach_started",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "turn_id": turn_id.as_str(),
+                    "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                }),
+            );
+            let session_sink =
+                match self.ensure_update_subscription(&task_id, &opened.session().key()) {
+                    Ok(session_sink) => {
+                        crate::logging::info(
+                            "task_primary_prompt_session_events_attached",
+                            serde_json::json!({
+                                "task_id": task_id.as_str(),
+                                "turn_id": turn_id.as_str(),
+                                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                            }),
+                        );
+                        session_sink
+                    }
+                    Err(error) => {
+                        crate::logging::error(
+                            "task_primary_prompt_session_events_attach_failed",
+                            serde_json::json!({
+                                "task_id": task_id.as_str(),
+                                "turn_id": turn_id.as_str(),
+                                "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                                "error": error.to_string(),
+                            }),
+                        );
+                        return Err(error);
+                    }
+                };
+            let session = opened.commit();
+            crate::logging::info(
+                "task_primary_prompt_turn_spawning",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "turn_id": turn_id.as_str(),
+                    "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                }),
+            );
+            self.turn_runner.spawn_agent_turn(
+                task_id.clone(),
+                text,
+                attachments,
+                turn_id.as_str().to_string(),
+                session,
+                session_sink,
+            );
+            crate::logging::info(
+                "task_primary_prompt_turn_spawned",
+                serde_json::json!({
+                    "task_id": task_id.as_str(),
+                    "turn_id": turn_id.as_str(),
+                    "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                }),
+            );
+            Ok(())
+        })
     }
 
     /// Restores an existing Task binding before session-scoped interactions such as
@@ -379,12 +411,15 @@ impl NativeSessionService {
                         ))
                     })
                     .or_else(|error| {
-                        if !matches!(error, RuntimeError::TaskNotFound(_)) {
+                        if !matches!(
+                            error,
+                            RuntimeError::TaskNotFound(_) | RuntimeError::NativeSessionMissing(_)
+                        ) {
                             return Err(error);
                         }
                         self.start_replacement(task, session_id, cancellation)
                     }),
-                Err(RuntimeError::TaskNotFound(_)) => {
+                Err(RuntimeError::TaskNotFound(_) | RuntimeError::NativeSessionMissing(_)) => {
                     self.start_replacement(task, session_id, cancellation)
                 }
                 Err(error) => Err(error),

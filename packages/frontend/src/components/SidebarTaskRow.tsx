@@ -1,3 +1,4 @@
+import { useSessionLifecycleDialog } from "./SessionLifecycleDialog";
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
@@ -13,6 +14,7 @@ import {
   Pin,
   RotateCcw,
   Undo2,
+  Trash2,
   X,
 } from "lucide-react";
 import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
@@ -31,6 +33,7 @@ import {
 export function SidebarTaskRow({
   activeTaskId,
   canFork = false,
+  onDeleteSession,
   forkMutation,
   onArchiveTask,
   onArchiveOlderTasks,
@@ -44,6 +47,7 @@ export function SidebarTaskRow({
 }: {
   activeTaskId?: string;
   canFork?: boolean;
+  onDeleteSession?: import("../intents/sessionDeletionIntent").DeleteSessionAction;
   forkMutation?: NativeSessionMutationState;
   onArchiveTask: (taskId: string) => void;
   onArchiveOlderTasks?: ArchiveOlderTasksAction;
@@ -73,6 +77,10 @@ export function SidebarTaskRow({
     cutoff: { kind: "task", taskId: task.task_id as import("@openaide/app-server-client").TaskId },
     onArchiveOlderTasks,
   });
+  const lifecycle = useSessionLifecycleDialog({
+    title, target: { kind: "task", taskId: task.task_id as import("@openaide/app-server-client").TaskId },
+    onArchive: () => onArchiveTask(task.task_id), onDelete: onDeleteSession,
+  });
   const actionLabel = showArchived ? "Restore task" : "Archive task";
   const forkPending = forkMutation?.action === "fork" && forkMutation.state === "pending";
   const openTask = () => {
@@ -85,7 +93,7 @@ export function SidebarTaskRow({
     if (showArchived) {
       onRestoreTask(task.task_id);
     } else {
-      onArchiveTask(task.task_id);
+      lifecycle.archive();
     }
   };
   const beginRename = () => {
@@ -222,6 +230,7 @@ export function SidebarTaskRow({
         </span>
         </button>
       )}
+      {lifecycle.dialog}
       <SidebarRowActionSlot>
         <PopupMenu
           className="task-row-menu"
@@ -297,6 +306,7 @@ export function SidebarTaskRow({
                 <ListFilter size={13} />Archive older tasks…
               </button>
             </> : null}
+{onDeleteSession ? <button className="task-row-delete-action" onClick={() => { setMenuOpen(false); preview?.dismiss(); lifecycle.delete(); }} type="button" role="menuitem"><Trash2 size={13} />Delete session…</button> : null}
           </>}
         </PopupMenu>
       </SidebarRowActionSlot>

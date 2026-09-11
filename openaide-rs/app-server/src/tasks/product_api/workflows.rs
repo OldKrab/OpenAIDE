@@ -293,6 +293,19 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
             target: None,
         })
     }
+
+    fn delete_native_session_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::NativeSessionDeleteParams,
+    ) -> Result<openaide_app_server_protocol::task::NativeSessionDeleteResult, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Native Session deletion is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]

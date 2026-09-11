@@ -292,7 +292,7 @@ Opening an existing Task from history uses ACP `session/load` when Chat history 
 
 If a session appears in `session/list` but OpenAIDE has no valid normalized Chat history for it, App Server opens it with `session/load` when the Agent supports loading. If the Agent only supports `session/resume`, opening that Task shows a recoverable Chat-history-unavailable error instead of inventing an empty Chat.
 
-If local normalized Chat history exists for a session that no longer appears in the Agent-owned `session/list`, OpenAIDE deletes that local Chat history. Missing sessions do not remain in the sidebar and are not kept as orphaned recovery entries in v1.
+If authoritative evidence establishes that a session has disappeared from Agent history, OpenAIDE removes its local entry and normalized Chat history, including Archived Tasks. As specified by [ADR 0059](0059-agent-confirmed-deletion-and-history-reconciliation.md), listing absence is authoritative only after a genuine complete successful scan of the same Agent/workspace/filter scope; bounded, failed, or otherwise incomplete listings retain existing entries. Ordinary definitive missing responses also qualify. Missing sessions are not retained as orphaned recovery entries once that evidence is available.
 
 Archive is a local OpenAIDE overlay keyed to Agent/session identity. Archiving hides a Task from the default OpenAIDE list without calling ACP `session/delete` or changing the Agent-owned session list. Destructive delete is a separate feature shown only for Agents that advertise ACP `sessionCapabilities.delete`.
 

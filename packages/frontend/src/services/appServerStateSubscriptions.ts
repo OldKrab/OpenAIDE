@@ -47,6 +47,7 @@ export function startAppServerStateSubscription({
   onBaselineError,
   onBaselineLost,
   onBaselineReady,
+  onTaskRemoved,
   setAgents,
   scope,
 }: {
@@ -57,6 +58,7 @@ export function startAppServerStateSubscription({
   onBaselineLost?: () => void;
   onBaselineError?: (error: unknown) => void;
   onBaselineReady?: () => void;
+  onTaskRemoved?: (taskId: string) => void;
   setAgents?: (agents: AgentOption[]) => void;
   scope: SubscriptionScope;
 }) {
@@ -72,12 +74,7 @@ export function startAppServerStateSubscription({
         : undefined;
       if (removedTaskId) {
         dispatch({ type: "task:list:remove", taskId: removedTaskId });
-        dispatch({
-          type: "taskOpen:error",
-          taskId: removedTaskId,
-          kind: "notFound",
-          message: "Task history was reset.",
-        });
+        onTaskRemoved?.(removedTaskId);
         return;
       }
       const liveText = event ? liveTextPresentationAction(event, snapshot) : undefined;

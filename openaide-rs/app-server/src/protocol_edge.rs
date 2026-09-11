@@ -15,6 +15,7 @@ mod project_handlers;
 mod responses;
 mod routing;
 mod server_request_handlers;
+mod session_deletion_handler;
 mod settings_handlers;
 mod shared_gateway;
 mod shell_handlers;

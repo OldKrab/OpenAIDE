@@ -214,10 +214,13 @@ impl TaskProductApi {
             })
             .collect::<HashSet<_>>();
         let mut cursor = OpaqueSessionCursor::new(None);
+        let reconciliation =
+            self.capture_session_reconciliation(agent_id, project_id, workspace_root, task_records);
         let mut seen_session_ids = HashSet::new();
         let mut visible_session_ids = HashSet::new();
         let mut page_count = 0_usize;
         let mut has_more = false;
+        let mut complete = false;
         loop {
             let result = match self.agent_gateway.list_sessions(AgentListSessionsRequest {
                 agent_id: agent_id.to_string(),
@@ -259,6 +262,7 @@ impl TaskProductApi {
                 agent_id,
                 workspace_root,
                 &result.sessions,
+                reconciliation.generation,
             )?;
             self.reconcile_native_session_activity(
                 agent_id,
@@ -266,6 +270,12 @@ impl TaskProductApi {
                 &result.sessions,
                 task_records,
             )?;
+            // A local cycle/no-progress stop is not the Agent's terminal cursor.
+            // Empty terminal pages are valid completion evidence, including empty histories.
+            if result.next_cursor.is_none() {
+                complete = true;
+                break;
+            }
             let next_cursor = cursor.advance(result.next_cursor);
             if new_identity_count == 0 {
                 break;
@@ -278,6 +288,9 @@ impl TaskProductApi {
                 break;
             }
         }
+        if complete {
+            self.reconcile_completed_session_scan(reconciliation, &seen_session_ids, project_id)?;
+        }
         crate::logging::info(
             "native_session_context_refresh_completed",
             serde_json::json!({
@@ -289,6 +302,7 @@ impl TaskProductApi {
                 "observed_session_count": seen_session_ids.len(),
                 "visible_session_count": visible_session_ids.len(),
                 "has_more": has_more,
+                "complete": complete,
             }),
         );
         Ok(NativeSessionContextRefresh {

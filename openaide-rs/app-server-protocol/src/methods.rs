@@ -61,10 +61,11 @@ use crate::state::{
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ComposerHistoryParams, ComposerHistoryResult, NativeSessionArchiveParams,
-    NativeSessionArchiveResult, NativeSessionForkParams, NativeSessionForkResult,
-    NativeSessionRestoreParams, NativeSessionRestoreResult, NativeSessionSetPinnedParams,
-    NativeSessionSetPinnedResult, NativeSessionSetTitleParams, NativeSessionSetTitleResult,
-    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    NativeSessionArchiveResult, NativeSessionDeleteParams, NativeSessionDeleteResult,
+    NativeSessionForkParams, NativeSessionForkResult, NativeSessionRestoreParams,
+    NativeSessionRestoreResult, NativeSessionSetPinnedParams, NativeSessionSetPinnedResult,
+    NativeSessionSetTitleParams, NativeSessionSetTitleResult, TaskAcquireInWorktreeParams,
+    TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveOlderParams,
     TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
     TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
@@ -754,4 +755,11 @@ protocol_method!(
     FILE_VIEWER_DIFF,
     ProjectFilesParams,
     ProjectFilesResult
+);
+
+protocol_method!(
+    NativeSessionDelete,
+    NATIVE_SESSION_DELETE,
+    NativeSessionDeleteParams,
+    NativeSessionDeleteResult
 );

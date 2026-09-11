@@ -264,3 +264,40 @@ fn fork_response_identity_and_local_fallback_survive_restart() {
     );
     assert!(entry.observation.last_activity.is_some());
 }
+
+#[test]
+fn a_late_listing_page_cannot_resurrect_removed_history_but_a_fresh_observation_can() {
+    let temp = tempfile::tempdir().unwrap();
+    let catalog =
+        NativeSessionCatalog::open(Store::open(temp.path().to_path_buf()).unwrap()).unwrap();
+    let reference = NativeSessionRef::new("codex", "removed-session");
+    let observation = NativeSessionObservation {
+        reference: reference.clone(),
+        title: None,
+        last_activity: None,
+    };
+    catalog
+        .record_page("project", "/workspace", vec![observation.clone()])
+        .unwrap();
+    let started = catalog.observation_generation();
+    catalog.remove(&reference).unwrap();
+    catalog
+        .record_page_from_scan(
+            "project",
+            "/workspace",
+            vec![observation.clone()],
+            Some(started),
+        )
+        .unwrap();
+    assert!(
+        catalog.entry(&reference).is_none(),
+        "an older response must not undo confirmed removal"
+    );
+    catalog
+        .record_page("project", "/workspace", vec![observation])
+        .unwrap();
+    assert!(
+        catalog.entry(&reference).is_some(),
+        "a later restored Agent session may be discovered normally"
+    );
+}

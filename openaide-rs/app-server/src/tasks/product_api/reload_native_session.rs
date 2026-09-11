@@ -7,7 +7,7 @@ use crate::protocol::model::{AgentListedSession, TaskStatus};
 use crate::storage::records::TaskLifecycle;
 use crate::tasks::native_session_service::HistoryRefreshRequest;
 
-use super::{conflict_error, protocol_error_from_runtime, runtime_error, TaskProductApi};
+use super::{conflict_error, runtime_error, TaskProductApi};
 
 impl TaskProductApi {
     /// Replays Agent-owned state only after the user explicitly accepts the replacement.
@@ -77,6 +77,7 @@ impl TaskProductApi {
                 "trigger": "user",
             }),
         );
+        let observation_generation = self.native_catalog.observation_generation();
         let result = self
             .native_sessions
             .refresh_history(HistoryRefreshRequest {
@@ -93,7 +94,9 @@ impl TaskProductApi {
                 refreshed_at: crate::time::now_string(),
                 clear_reload_requirement_through: Some(requirement.observed_activity_at),
             })
-            .map_err(protocol_error_from_runtime);
+            .map_err(|error| {
+                self.reconcile_session_recovery_error(&task, observation_generation, error)
+            });
         self.history_sync.finish_interactive(task_id, generation);
         match result {
             Ok(Some(snapshot)) => {
@@ -118,6 +121,9 @@ impl TaskProductApi {
                 ))
             }
             Err(error) => {
+                if self.task_history_removed(task_id) {
+                    return Err(error);
+                }
                 self.mark_native_session_recovery_stale(task_id, &stale_session_id);
                 self.publish_history_sync(
                     task_id,

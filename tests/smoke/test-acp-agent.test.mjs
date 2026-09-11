@@ -59,6 +59,16 @@ test("requests structured elicitation and continues with the submitted value", a
   await agent.next((message) => message.params?.update?.content?.text === "Question result: Alpha");
 });
 
+test("lists retained history after close and removes it only on Delete", async (t) => {
+  const agent = connectAgent(t);
+  await agent.request("initialize", { protocolVersion: 1 });
+  const { sessionId } = await agent.request("session/new", { cwd: process.cwd(), mcpServers: [] });
+  await agent.request("session/close", { sessionId });
+  assert.ok((await agent.request("session/list", { cwd: process.cwd() })).sessions.some((session) => session.sessionId === sessionId));
+  await agent.request("session/delete", { sessionId });
+  assert.deepEqual((await agent.request("session/list", { cwd: process.cwd() })).sessions, []);
+});
+
 function connectAgent(t) {
   const child = spawn(process.execPath, [fixture], { stdio: ["pipe", "pipe", "pipe"] });
   const lines = readline.createInterface({ input: child.stdout });

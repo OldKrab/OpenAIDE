@@ -83,14 +83,32 @@ impl NativeSessionCatalog {
     }
 
     /// Commits one successful page without interpreting omitted sessions as deletion.
+    #[cfg(test)]
     pub(crate) fn record_page(
         &self,
         project_id: &str,
         workspace_root: &str,
         observations: Vec<NativeSessionObservation>,
     ) -> Result<(), RuntimeError> {
+        self.record_page_from_scan(project_id, workspace_root, observations, None)
+    }
+
+    /// An in-flight page cannot overwrite newer evidence or resurrect a removed identity.
+    pub(crate) fn record_page_from_scan(
+        &self,
+        project_id: &str,
+        workspace_root: &str,
+        observations: Vec<NativeSessionObservation>,
+        scan_generation: Option<u64>,
+    ) -> Result<(), RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
         for observation in observations {
+            if scan_generation
+                .is_some_and(|generation| state.newer_than(&observation.reference, generation))
+            {
+                continue;
+            }
+            state.observe(&observation.reference);
             if let Some(existing) = state
                 .entries
                 .iter_mut()
@@ -157,6 +175,7 @@ impl NativeSessionCatalog {
         local_fallback_title: String,
     ) -> Result<(), RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        state.observe(&reference);
         if state
             .entries
             .iter()
@@ -194,6 +213,7 @@ impl NativeSessionCatalog {
         updated_at: Option<String>,
     ) -> Result<bool, RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        state.observe(reference);
         let Some(existing) = state
             .entries
             .iter_mut()
@@ -289,6 +309,9 @@ impl NativeSessionCatalog {
         references: &[NativeSessionRef],
     ) -> Result<Vec<bool>, RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        for reference in references {
+            state.observe(reference);
+        }
         let known_references = state
             .entries
             .iter()
@@ -334,6 +357,7 @@ impl NativeSessionCatalog {
         reference: &NativeSessionRef,
     ) -> Result<(), RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        state.observe(reference);
         if state.archived.contains(reference) {
             return Ok(());
         }
@@ -358,6 +382,7 @@ impl NativeSessionCatalog {
         pinned: Option<bool>,
     ) -> Result<bool, RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        state.observe(reference);
         let Some(index) = state
             .entries
             .iter()
@@ -384,6 +409,7 @@ impl NativeSessionCatalog {
         archived: bool,
     ) -> Result<bool, RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        state.observe(reference);
         if !state
             .entries
             .iter()
@@ -416,17 +442,36 @@ impl NativeSessionCatalog {
         Ok(true)
     }
 
-    /// Removes only after a definitive `session/load` failure; partial listings never delete.
+    pub(crate) fn observation_generation(&self) -> u64 {
+        self.state
+            .lock()
+            .expect("native session catalog poisoned")
+            .generation
+    }
+
+    /// Removes only after Agent success or authoritative missing-session evidence.
     pub(crate) fn remove(&self, reference: &NativeSessionRef) -> Result<bool, RuntimeError> {
+        let existed = self.entry(reference).is_some();
+        self.remove_if_unobserved(reference, None)?;
+        Ok(existed)
+    }
+
+    /// Returns false when newer evidence invalidates the caller's absence observation.
+    /// A missing catalog row remains eligible: adopted Tasks need not have a listing row.
+    pub(crate) fn remove_if_unobserved(
+        &self,
+        reference: &NativeSessionRef,
+        generation: Option<u64>,
+    ) -> Result<bool, RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        if generation.is_some_and(|generation| state.newer_than(reference, generation)) {
+            return Ok(false);
+        }
         let mut candidate = state.clone();
-        let before = candidate.entries.len();
+        candidate.observe(reference);
         candidate
             .entries
             .retain(|entry| &entry.observation.reference != reference);
-        if candidate.entries.len() == before {
-            return Ok(false);
-        }
         candidate.archived.remove(reference);
         candidate.version = CATALOG_VERSION;
         atomic::write_json(&catalog_path(&self.store), &candidate)?;
@@ -513,6 +558,12 @@ impl NativeSessionCatalog {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredNativeSessionCatalog {
+    // Process-local ordering fences, including removed identities, expire on restart.
+    // They are not a deletion ledger and never prevent a later fresh observation.
+    #[serde(skip)]
+    generation: u64,
+    #[serde(skip)]
+    observed: std::collections::HashMap<NativeSessionRef, u64>,
     version: u32,
     entries: Vec<NativeSessionCatalogEntry>,
     #[serde(default, skip_serializing_if = "std::collections::HashSet::is_empty")]
@@ -522,6 +573,8 @@ struct StoredNativeSessionCatalog {
 impl Default for StoredNativeSessionCatalog {
     fn default() -> Self {
         Self {
+            generation: 0,
+            observed: Default::default(),
             version: CATALOG_VERSION,
             entries: Vec::new(),
             archived: std::collections::HashSet::new(),
@@ -531,4 +584,17 @@ impl Default for StoredNativeSessionCatalog {
 
 fn catalog_path(store: &Store) -> std::path::PathBuf {
     store.root().join("native-sessions").join("catalog.json")
+}
+
+impl StoredNativeSessionCatalog {
+    fn observe(&mut self, reference: &NativeSessionRef) {
+        self.generation += 1;
+        self.observed.insert(reference.clone(), self.generation);
+    }
+
+    fn newer_than(&self, reference: &NativeSessionRef, generation: u64) -> bool {
+        self.observed
+            .get(reference)
+            .is_some_and(|observed| *observed > generation)
+    }
 }

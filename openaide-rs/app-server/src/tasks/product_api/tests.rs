@@ -62,6 +62,12 @@ mod native_catalog_refresh_tests;
 #[path = "prepared_session_recovery_tests.rs"]
 mod prepared_session_recovery_tests;
 
+#[path = "session_deletion_tests.rs"]
+mod session_deletion_tests;
+
+#[path = "session_reconciliation_tests.rs"]
+mod session_reconciliation_tests;
+
 fn protocol_config_id(value: &str) -> AgentConfigOptionCurrentValue {
     AgentConfigOptionCurrentValue::Id {
         value: value.to_string(),
@@ -3578,8 +3584,7 @@ fn background_native_catalog_refresh_does_not_replace_owned_task_title() {
 fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
-    task.agent_session_id = Some("native-session".to_string());
+    let task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
         block_list: AtomicBool::new(true),

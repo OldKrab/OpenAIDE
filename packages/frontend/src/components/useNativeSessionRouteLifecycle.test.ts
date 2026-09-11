@@ -5,11 +5,12 @@ import { createInitialState } from "../state/store";
 import { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import { NewTaskController } from "./newTaskController";
 
-const { openTaskSurface, postHostMessage } = vi.hoisted(() => ({
+const { openNewTaskSurface, openTaskSurface, postHostMessage } = vi.hoisted(() => ({
+  openNewTaskSurface: vi.fn(),
   openTaskSurface: vi.fn(),
   postHostMessage: vi.fn(),
 }));
-vi.mock("../services/hostBridge", () => ({ openTaskSurface, postHostMessage }));
+vi.mock("../services/hostBridge", () => ({ openNewTaskSurface, openTaskSurface, postHostMessage }));
 vi.mock("../state/appServerProtocolMapping", () => ({
   mapProtocolTaskSnapshot: () => ({
     snapshot: {
@@ -22,6 +23,7 @@ import { adoptRoutedNativeSession } from "./useNativeSessionRouteLifecycle";
 
 describe("Native Session route lifecycle", () => {
   beforeEach(() => {
+    openNewTaskSurface.mockReset();
     openTaskSurface.mockReset();
     postHostMessage.mockReset();
   });
@@ -59,7 +61,7 @@ describe("Native Session route lifecycle", () => {
     expect(calls).toEqual([TASK_RELEASE, TASK_ADOPT_NATIVE_SESSION]);
   });
 
-  it("keeps the opening route, reports not-found, and removes the stale row", async () => {
+  it("opens New Task and removes the stale row when history is missing", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async () => {
       throw new AppServerProtocolError({
@@ -81,6 +83,7 @@ describe("Native Session route lifecycle", () => {
       sessionId: "session-1",
     });
     expect(openTaskSurface).not.toHaveBeenCalled();
+    expect(openNewTaskSurface).toHaveBeenCalledOnce();
   });
 
   it("keeps the opening route and explains when the session is in use elsewhere", async () => {
