@@ -28,14 +28,16 @@ impl NativeSessionService {
                         secret_resolver: Some(self.secret_resolver(&task.task_id)),
                     }) {
                         Ok(loaded) => (loaded.session, None),
-                        Err(RuntimeError::TaskNotFound(_)) => (
+                        Err(
+                            RuntimeError::TaskNotFound(_) | RuntimeError::NativeSessionMissing(_),
+                        ) => (
                             self.start_new_session(task, cancellation.clone())?,
                             Some(session_id.clone()),
                         ),
                         Err(error) => return Err(error),
                     }
                 }
-                Err(RuntimeError::TaskNotFound(_)) => (
+                Err(RuntimeError::TaskNotFound(_) | RuntimeError::NativeSessionMissing(_)) => (
                     self.start_new_session(task, cancellation.clone())?,
                     Some(session_id.clone()),
                 ),

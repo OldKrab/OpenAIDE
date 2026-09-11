@@ -1511,6 +1511,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
     bootstrap: surface === "invalid" ? { surface } : { surface, shell: VSCODE_SHELL },
     callbacks: {
       navigation: {
+        deleteSession: vi.fn(),
         archiveNativeSession: vi.fn(),
         archiveOlderTasks: vi.fn(),
         archiveTask: vi.fn(),

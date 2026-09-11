@@ -135,7 +135,7 @@ fn unsupported_close_is_noop_without_trace_or_agent_request() {
 #[test]
 fn unsupported_delete_returns_stable_capability_error_without_agent_request() {
     run_with_agent(false, async |connection, _close_count, delete_count| {
-        let error = delete_active_session(&connection, session_id(), false, None)
+        let error = delete_active_session(&connection, session_id(), false, None, "delete-test")
             .await
             .expect_err("delete should require capability");
         assert_eq!(
@@ -169,9 +169,10 @@ fn failed_delete_records_error_trace_and_maps_acp_error() {
     let trace = enabled_trace(&temp);
 
     run_with_agent(true, async |connection, _close_count, delete_count| {
-        let error = delete_active_session(&connection, session_id(), true, Some(&trace))
-            .await
-            .expect_err("delete should map ACP error");
+        let error =
+            delete_active_session(&connection, session_id(), true, Some(&trace), "delete-test")
+                .await
+                .expect_err("delete should map ACP error");
         assert!(error.to_string().contains("ACP error"), "{error}");
         assert_eq!(delete_count.load(Ordering::SeqCst), 1);
         Ok(())
@@ -180,5 +181,6 @@ fn failed_delete_records_error_trace_and_maps_acp_error() {
     let content = wait_for_trace_content(&temp.path().join("diagnostics/acp-traces"));
     assert_trace_pair(&content, "session/delete.request", "client_to_agent");
     assert_trace_pair(&content, "session/delete.error", "agent_to_client");
-    assert!(content.contains("delete exploded"));
+    assert!(!content.contains("delete exploded"));
+    assert!(content.contains("error_kind"));
 }

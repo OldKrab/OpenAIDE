@@ -3,9 +3,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskSnapshot;
 use crate::protocol::params::{DeleteMode, TaskDeleteParams, TaskIdParams};
 use crate::storage::records::TaskLifecycle;
-use crate::tasks::mutation::{
-    TaskCommitOptions, TaskCommitOutcome, TaskMutationResult, TaskMutations,
-};
+use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult, TaskMutations};
 use serde_json::Value;
 
 #[derive(Clone)]
@@ -49,10 +47,17 @@ impl TaskCommands {
         let task_id = params.task_id.clone();
         let mode = params.mode;
 
-        let result = self.mutations.commit_existing_task(
-            &task_id,
-            TaskCommitOptions::metadata(),
-            |ctx| {
+        // Legacy internal callers follow the same Agent-first deletion invariant.
+        if mode == DeleteMode::Delete {
+            let task = self.mutations.store().read_task(&task_id)?;
+            if !task.tombstoned {
+                self.agent_gateway
+                    .native_session_lifecycle()
+                    .delete_bound_session(&task)?;
+            }
+        }
+        self.mutations
+            .commit_existing_task(&task_id, TaskCommitOptions::metadata(), |ctx| {
                 match mode {
                     DeleteMode::Archive => {
                         if matches!(ctx.task().lifecycle, TaskLifecycle::Archived) {
@@ -74,17 +79,8 @@ impl TaskCommands {
                     }
                 }
                 Ok(TaskMutationResult::Changed)
-            },
-        )?;
+            })?;
 
-        if mode == DeleteMode::Delete {
-            if let TaskCommitOutcome::Committed(facts) = result.outcome {
-                let _ = self
-                    .agent_gateway
-                    .native_session_lifecycle()
-                    .delete_bound_session(&facts.committed_task);
-            }
-        }
         Ok(serde_json::json!({ "task_id": params.task_id, "hidden": true }))
     }
 }

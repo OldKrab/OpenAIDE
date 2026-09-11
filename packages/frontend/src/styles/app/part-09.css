@@ -862,3 +862,21 @@
   gap: 6px;
   min-width: 0;
 }
+
+.session-lifecycle-dialog h2 { font-size: 16px; margin: 0 0 12px; }
+.session-lifecycle-dialog .session-lifecycle-title { color: var(--oa-text); font-weight: 600; overflow-wrap: anywhere; }
+.task-row-menu button.task-row-delete-action { color: var(--oa-danger); }
+.session-lifecycle-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
+
+.session-lifecycle-dialog footer button {
+  min-height: 36px;
+  border-radius: var(--oa-radius-md);
+  padding: 6px 12px;
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+.session-lifecycle-dialog footer button:disabled { opacity: .45; }
+.session-lifecycle-dialog footer button:focus-visible { outline: 2px solid var(--oa-focus); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .session-lifecycle-dialog footer button { min-height: 44px; }
+}

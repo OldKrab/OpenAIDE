@@ -133,17 +133,19 @@ use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
     ActivityToolOutput, ActivityToolValue, ComposerHistoryEntry, ComposerHistoryParams,
     ComposerHistoryResult, ComposerHistoryScope, ComposerImage, ComposerMessage,
-    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionForkParams,
-    NativeSessionForkResult, NativeSessionForkSource, NativeSessionRestoreParams,
-    NativeSessionRestoreResult, NativeSessionSetPinnedParams, NativeSessionSetPinnedResult,
-    NativeSessionSetTitleParams, NativeSessionSetTitleResult, TakenQueuedMessage,
-    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveOlderCutoff,
-    TaskArchiveOlderParams, TaskArchiveOlderProtectedNativeSession,
-    TaskArchiveOlderProtectedReason, TaskArchiveOlderProtectedTask, TaskArchiveOlderResult,
-    TaskArchiveParams, TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
-    TaskChatPageResult, TaskClosePlanParams, TaskClosePlanResult, TaskLifecycleChanged,
-    TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionDeleteConfirmation,
+    NativeSessionDeleteParams, NativeSessionDeleteResult, NativeSessionDeleteTarget,
+    NativeSessionForkParams, NativeSessionForkResult, NativeSessionForkSource,
+    NativeSessionRestoreParams, NativeSessionRestoreResult, NativeSessionSetPinnedParams,
+    NativeSessionSetPinnedResult, NativeSessionSetTitleParams, NativeSessionSetTitleResult,
+    TakenQueuedMessage, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
+    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
+    TaskAdoptNativeSessionResult, TaskArchiveOlderCutoff, TaskArchiveOlderParams,
+    TaskArchiveOlderProtectedNativeSession, TaskArchiveOlderProtectedReason,
+    TaskArchiveOlderProtectedTask, TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult,
+    TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
+    TaskClosePlanParams, TaskClosePlanResult, TaskLifecycleChanged, TaskListLifecycle,
+    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
     TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
     TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
     TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
@@ -544,6 +546,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<NativeSessionSetPinnedResult>(output, config);
     push_decl::<NativeSessionRestoreParams>(output, config);
     push_decl::<NativeSessionRestoreResult>(output, config);
+    push_decl::<NativeSessionDeleteTarget>(output, config);
+    push_decl::<NativeSessionDeleteConfirmation>(output, config);
+    push_decl::<NativeSessionDeleteParams>(output, config);
+    push_decl::<NativeSessionDeleteResult>(output, config);
     push_decl::<NativeSessionForkSource>(output, config);
     push_decl::<NativeSessionForkParams>(output, config);
     push_decl::<NativeSessionForkResult>(output, config);

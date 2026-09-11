@@ -37,6 +37,12 @@ impl TaskProductApi {
                 "Native Session adoption lock poisoned".to_string(),
             ))
         })?;
+        self.require_session_not_deleting(
+            &crate::native_sessions::catalog::NativeSessionRef::new(
+                params.agent_id.as_str(),
+                &params.native_session_id,
+            ),
+        )?;
         if let Some(existing) = self
             .store
             .list_all_task_records_strict()
@@ -113,7 +119,7 @@ impl TaskProductApi {
             secret_resolver: Some(secret_resolver),
         }) {
             Ok(loaded) => loaded,
-            Err(error @ RuntimeError::TaskNotFound(_)) => {
+            Err(error @ RuntimeError::NativeSessionMissing(_)) => {
                 let reference = crate::native_sessions::catalog::NativeSessionRef::new(
                     params.agent_id.as_str(),
                     &params.native_session_id,

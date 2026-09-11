@@ -378,8 +378,10 @@ fn invalid(message: &str) -> ProtocolError {
 fn protocol_error(error: RuntimeError) -> ProtocolError {
     let code = match &error {
         RuntimeError::InvalidParams(_) => ProtocolErrorCode::InvalidRequest,
-        RuntimeError::TaskNotFound(_) => ProtocolErrorCode::NotFound,
-        RuntimeError::Conflict(_) => ProtocolErrorCode::Conflict,
+        RuntimeError::TaskNotFound(_) | RuntimeError::NativeSessionMissing(_) => {
+            ProtocolErrorCode::NotFound
+        }
+        RuntimeError::Conflict(_) | RuntimeError::OutcomeUnknown(_) => ProtocolErrorCode::Conflict,
         RuntimeError::CapabilityMissing(_) | RuntimeError::Unsupported(_) => {
             ProtocolErrorCode::CapabilityUnavailable
         }

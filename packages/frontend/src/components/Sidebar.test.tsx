@@ -240,6 +240,8 @@ describe("SidebarTaskRow", () => {
     act(() => menuItems[1].props.onClick());
 
     expect(onOpenTask).toHaveBeenCalledWith("task_1");
+    expect(onArchiveTask).not.toHaveBeenCalled();
+    act(() => buttonWithText(tree, "Archive task").props.onClick());
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
   });
 
@@ -823,6 +825,8 @@ describe("SidebarNativeSessionRow", () => {
     expect(archive).toBeDefined();
     act(() => archive?.props.onClick());
 
+    expect(onArchiveNativeSession).not.toHaveBeenCalled();
+    act(() => buttonWithText(tree, "Archive task").props.onClick());
     expect(onArchiveNativeSession).toHaveBeenCalledWith(session);
   });
 
@@ -1142,8 +1146,8 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
-    expect(tree.root.findByProps({ "aria-label": "Restore Existing" })).toBeDefined();
-    act(() => tree.root.findByProps({ "aria-label": "Restore Existing" }).props.onClick());
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing" }).props.onClick());
+    act(() => buttonWithText(tree, "Restore task").props.onClick());
     expect(onRestoreNativeSession).toHaveBeenCalledWith(session);
     expect(onOpenNativeSession).not.toHaveBeenCalled();
   });

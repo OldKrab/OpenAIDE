@@ -1,4 +1,5 @@
-import { AlertCircle, Archive, ArrowLeft, Check, GitFork, Info, ListFilter, MoreHorizontal, Pencil, Pin, RotateCcw, X } from "lucide-react";
+import { useSessionLifecycleDialog } from "./SessionLifecycleDialog";
+import { AlertCircle, Archive, ArrowLeft, Check, GitFork, Info, ListFilter, MoreHorizontal, Pencil, Pin, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
@@ -15,6 +16,7 @@ import {
 export function SidebarNativeSessionRow({
   archived,
   canFork = false,
+  onDeleteSession,
   mutation,
   nativeSessionAgentId,
   nativeSessionAgentName,
@@ -30,6 +32,7 @@ export function SidebarNativeSessionRow({
 }: {
   archived: boolean;
   canFork?: boolean;
+  onDeleteSession?: import("../intents/sessionDeletionIntent").DeleteSessionAction;
   mutation?: import("../state/store").NativeSessionMutationState;
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
@@ -67,6 +70,10 @@ export function SidebarNativeSessionRow({
     },
     onArchiveOlderTasks: onArchiveOlderNativeSessions,
   });
+  const lifecycle = useSessionLifecycleDialog({
+    title, target: { kind: "nativeSession", agentId: (session.agent_id ?? nativeSessionAgentId) as import("@openaide/app-server-client").AgentId, nativeSessionId: session.session_id },
+    onArchive: () => onArchiveNativeSession(session), onDelete: onDeleteSession,
+  });
   const timestamp = session.last_activity ?? session.updated_at;
   const age = timestamp ? relativeTime(timestamp) : "";
 
@@ -83,7 +90,7 @@ export function SidebarNativeSessionRow({
   const archiveSession = () => {
     closeMenu();
     preview?.dismiss();
-    onArchiveNativeSession(session);
+    lifecycle.archive();
   };
   const beginRename = () => {
     closeMenu();
@@ -185,20 +192,9 @@ export function SidebarNativeSessionRow({
           <SessionContent />
         </button>
       )}
+      {lifecycle.dialog}
       <SidebarRowActionSlot>
-        {archived ? (
-          <button
-            aria-busy={lifecyclePending || undefined}
-            aria-label={`Restore ${title}`}
-            className={`task-row-action ${lifecyclePending ? "pending" : ""}`}
-            disabled={lifecyclePending}
-            onClick={() => onRestoreNativeSession(session)}
-            title={lifecyclePending ? "Restoring Native Session" : "Restore Native Session"}
-            type="button"
-          >
-            {lifecyclePending ? <span className="task-state-spinner" /> : <RotateCcw size={13} />}
-          </button>
-        ) : <span className="external-session-details-actions">
+        {<span className="external-session-details-actions">
             <PopupMenu
               className="task-row-menu"
               label={`Task actions for ${title}`}
@@ -231,15 +227,15 @@ export function SidebarNativeSessionRow({
                 </div>
               </> : <>
                 <button className="task-row-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
-                {onSetNativeSessionTitle ? (
+                {!archived && onSetNativeSessionTitle ? (
                   <button onClick={beginRename} type="button" role="menuitem"><Pencil size={13} />Rename task</button>
                 ) : null}
-                {onSetNativeSessionPinned ? (
+                {!archived && onSetNativeSessionPinned ? (
                   <button disabled={pinSaving} onClick={() => void setPinned()} type="button" role="menuitem">
                     <Pin size={13} />{session.pinned ? "Unpin task" : "Pin task"}
                   </button>
                 ) : null}
-                {canFork && onForkNativeSession ? (
+                {!archived && canFork && onForkNativeSession ? (
                   <button
                     disabled={forkPending}
                     onClick={() => {
@@ -253,8 +249,8 @@ export function SidebarNativeSessionRow({
                     <GitFork size={13} />{forkPending ? "Forking…" : "Fork session"}
                   </button>
                 ) : null}
-                <button onClick={archiveSession} type="button" role="menuitem"><Archive size={13} />Archive task</button>
-                {onArchiveOlderNativeSessions ? <>
+                {archived ? <button onClick={() => { closeMenu(); onRestoreNativeSession(session); }} type="button" role="menuitem"><RotateCcw size={13} />Restore task</button> : <button onClick={archiveSession} type="button" role="menuitem"><Archive size={13} />Archive task</button>}
+                {!archived && onArchiveOlderNativeSessions ? <>
                   <span className="task-row-menu-separator" role="separator" />
                   <button
                     onClick={() => {
@@ -266,6 +262,7 @@ export function SidebarNativeSessionRow({
                     role="menuitem"
                   ><ListFilter size={13} />Archive older tasks…</button>
                 </> : null}
+{onDeleteSession ? <button className="task-row-delete-action" onClick={() => { setMenuOpen(false); preview?.dismiss(); lifecycle.delete(); }} type="button" role="menuitem"><Trash2 size={13} />Delete session…</button> : null}
               </>}
             </PopupMenu>
           </span>}

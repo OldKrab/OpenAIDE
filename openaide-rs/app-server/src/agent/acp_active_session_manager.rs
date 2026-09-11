@@ -225,7 +225,12 @@ impl AcpActiveSessionManager {
     }
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
-        self.sessions.delete_session(request)
+        if self.sessions.contains(&request.session_key()) {
+            self.sessions.delete_session(request)
+        } else {
+            // Deletion addresses persisted Agent history; it must not require loading it.
+            self.processes.delete_session(request)
+        }
     }
 
     pub(super) fn take_shutdown_close_tasks(&self) -> Vec<Box<dyn FnOnce() + Send + 'static>> {

@@ -26,6 +26,8 @@ type SidebarProps = {
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
   forkableAgentIds?: ReadonlySet<string>;
+  deletableAgentIds?: ReadonlySet<string>;
+  onDeleteSession?: import("../intents/sessionDeletionIntent").DeleteSessionAction;
   environmentLabel?: string;
   onArchiveNativeSession: (session: AgentListedSession) => void;
   onForkNativeSession?: (session: AgentListedSession) => void;
@@ -85,6 +87,8 @@ export const Sidebar = memo(function Sidebar({
   nativeSessionAgentName,
   nativeSessionProjectId,
   forkableAgentIds = new Set(),
+  deletableAgentIds = new Set(),
+  onDeleteSession,
   environmentLabel,
   onArchiveNativeSession,
   onForkNativeSession,
@@ -321,6 +325,8 @@ export const Sidebar = memo(function Sidebar({
                 }
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
                 forkableAgentIds={forkableAgentIds}
+                deletableAgentIds={deletableAgentIds}
+                onDeleteSession={onDeleteSession}
                 environmentLabel={environmentLabel}
                 onArchiveNativeSession={onArchiveNativeSession}
                 onArchiveOlderNativeSessions={onArchiveOlderTasks}
@@ -381,6 +387,7 @@ export const Sidebar = memo(function Sidebar({
                   key={`task:${row.task.task_id}`}
                   activeTaskId={activeTaskId}
                   canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
+                onDeleteSession={deletableAgentIds.has(row.task.agent_id) ? onDeleteSession : undefined}
                   forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
                   onArchiveTask={onArchiveTask}
                   onArchiveOlderTasks={onArchiveOlderTasks}
@@ -396,6 +403,7 @@ export const Sidebar = memo(function Sidebar({
                 <SidebarNativeSessionRow
                   archived={showArchived}
                   canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
+                onDeleteSession={deletableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) ? onDeleteSession : undefined}
                   key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
                   mutation={nativeSessionMutations[
                     `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
@@ -472,6 +480,8 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.nativeSessionAgentName === next.nativeSessionAgentName &&
     prev.nativeSessionProjectId === next.nativeSessionProjectId &&
     prev.forkableAgentIds === next.forkableAgentIds &&
+    prev.deletableAgentIds === next.deletableAgentIds &&
+    prev.onDeleteSession === next.onDeleteSession &&
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
     prev.settingsStatus === next.settingsStatus &&

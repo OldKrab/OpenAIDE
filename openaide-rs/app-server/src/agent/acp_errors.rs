@@ -21,15 +21,17 @@ pub(super) fn acp_request_error(error: &agent_client_protocol::Error) -> Runtime
     }
     let message = error.to_string();
     let normalized = message.to_ascii_lowercase();
-    if normalized.contains("not found")
-        || normalized.contains("does not exist")
-        // Codex can create an empty session identity before its first durable rollout.
-        // After a restart, that identity is explicitly reported as missing this way.
+    // Generic missing files/configuration and an unloaded thread are not evidence
+    // that Agent-owned conversation history disappeared.
+    if error.code == crate::agent::acp_schema::ErrorCode::ResourceNotFound
         || normalized.contains("no rollout found for thread id")
-        // The managed recovery adapter reads before resuming. Native thread/read
-        // reports the same absent empty session with this different wording.
-        || normalized.contains("thread not loaded:")
+        || normalized.contains("session not found")
+        || normalized.contains("session does not exist")
     {
+        return RuntimeError::NativeSessionMissing(message);
+    }
+    // Preserve empty Prepared-session recovery without authorizing history removal.
+    if normalized.contains("thread not loaded:") {
         return RuntimeError::TaskNotFound(message);
     }
     // Codex allows only one writable attachment per thread. Treat this provider-specific

@@ -446,6 +446,7 @@ fn fixture_agent_script() -> &'static str {
 import os
 import sys
 import time
+import threading
 
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
@@ -646,6 +647,14 @@ for line in sys.stdin:
         if session_id == "idle-session":
             notify_title("Title after idle resume")
     elif method == "session/list":
+        if prompt_mode == "concurrent_list":
+            def release_listing(request):
+                deadline = time.monotonic() + 10
+                while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                respond(request, {"sessions": []})
+            threading.Thread(target=release_listing, args=(message,), daemon=True).start()
+            continue
         if prompt_mode == "blocked_list":
             deadline = time.monotonic() + 10
             while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
@@ -803,7 +812,16 @@ for line in sys.stdin:
         else:
             break
     elif method == "session/delete":
+        if session_id == "reject-delete":
+            sys.stdout.write(json.dumps({
+                "jsonrpc": "2.0", "id": message["id"],
+                "error": {"code": -32600, "message": "Deletion rejected"},
+            }) + "\n")
+            sys.stdout.flush()
+            continue
         respond(message, {})
+        if prompt_mode == "concurrent_list":
+            continue
         break
     else:
         sys.stdout.write(json.dumps({
@@ -2475,12 +2493,16 @@ fn inactive_session_registry_reports_stable_binding_errors() {
 
     let delete_error = runtime
         .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             session_id: "missing-session".to_string(),
         })
         .expect_err("missing delete should fail")
         .to_string();
-    assert_eq!(delete_error, "runtime not ready: ACP session is not active");
+    assert!(
+        delete_error.starts_with("agent setup required:"),
+        "detached deletion initializes the Agent before dispatch"
+    );
 }
 
 #[test]
@@ -3984,6 +4006,117 @@ fn load_session_registers_active_session_for_close() {
 }
 
 #[test]
+fn rejected_deletion_preserves_the_live_session_for_follow_up() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _)) = fixture_runtime(&temp, "reject-delete") else {
+        return;
+    };
+    let session = runtime
+        .start_session(start_request("task-rejected-delete", cwd_string()))
+        .unwrap();
+    assert!(runtime
+        .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            agent_id: session.agent_id.clone(),
+            session_id: session.session_id.clone(),
+        })
+        .is_err());
+    runtime
+        .prompt(
+            AgentPrompt {
+                agent_id: session.agent_id,
+                task_id: "task-rejected-delete".to_string(),
+                session_id: session.session_id,
+                text: "continue".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(CapturingEventSink::default()),
+        )
+        .expect("rejected deletion must not detach the session");
+}
+
+#[test]
+fn delete_detached_session_does_not_load_or_adopt_it() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "delete-detached") else {
+        return;
+    };
+    runtime
+        .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            agent_id: "codex".to_string(),
+            session_id: "delete-detached".to_string(),
+        })
+        .expect("delete persisted session without opening it");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/delete"]
+    );
+}
+
+#[test]
+fn deletion_reaches_agent_while_history_listing_is_pending() {
+    for attached in [false, true] {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let Some((runtime, log_path)) =
+            fixture_runtime_with_prompt_mode(&temp, "delete-during-list", "concurrent_list")
+        else {
+            return;
+        };
+        let runtime = Arc::new(runtime);
+        if attached {
+            runtime
+                .start_session(start_request("task-delete-during-list", cwd_string()))
+                .expect("attach session");
+        }
+        let discovery = std::thread::spawn({
+            let runtime = runtime.clone();
+            move || {
+                runtime.list_sessions(AgentListSessionsRequest {
+                    agent_id: "codex".into(),
+                    cwd: Some(cwd_string()),
+                    cursor: None,
+                })
+            }
+        });
+        wait_for_method(&log_path, "session/list");
+        let (deleted_tx, deleted_rx) = mpsc::channel();
+        let deletion = std::thread::spawn({
+            let runtime = runtime.clone();
+            move || {
+                let _ = deleted_tx.send(runtime.delete_session(AgentSessionDelete {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    agent_id: "codex".into(),
+                    session_id: "delete-during-list".into(),
+                }));
+            }
+        });
+        let early_result = deleted_rx.recv_timeout(Duration::from_secs(2));
+        let deleted_during_listing = matches!(early_result, Ok(Ok(())));
+        // Release discovery and join workers even when Delete incorrectly waits for it.
+        fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+        discovery
+            .join()
+            .expect("discovery thread")
+            .expect("discovery");
+        early_result
+            .unwrap_or_else(|_| {
+                deleted_rx
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("delete after listing")
+            })
+            .expect("delete session");
+        deletion.join().expect("deletion thread");
+        runtime.shutdown().expect("shutdown");
+        assert!(
+            deleted_during_listing,
+            "Delete waited for history; attached={attached}"
+        );
+    }
+}
+
+#[test]
 fn delete_session_dispatches_to_active_session() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "delete-session") else {
@@ -3995,6 +4128,7 @@ fn delete_session_dispatches_to_active_session() {
         .expect("start session");
     runtime
         .delete_session(AgentSessionDelete {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: session.agent_id,
             session_id: session.session_id,
         })

@@ -8,10 +8,16 @@ pub enum RuntimeError {
     InvalidParams(String),
     #[error("task not found: {0}")]
     TaskNotFound(String),
+    /// Authoritative Agent evidence that the requested conversation has no history.
+    #[error("native session missing: {0}")]
+    NativeSessionMissing(String),
     #[error("runtime not ready: {0}")]
     NotReady(String),
     #[error("conflict: {0}")]
     Conflict(String),
+    /// A non-replayed external mutation may have committed before its response was lost.
+    #[error("outcome unknown: {0}")]
+    OutcomeUnknown(String),
     #[error("agent authentication required: {0}")]
     AuthRequired(String),
     #[error("agent setup required: {0}")]
@@ -34,8 +40,8 @@ impl RuntimeError {
     pub fn code(&self) -> i64 {
         match self {
             RuntimeError::InvalidParams(_) => -32602,
-            RuntimeError::TaskNotFound(_) => -32005,
-            RuntimeError::Conflict(_) => -32009,
+            RuntimeError::TaskNotFound(_) | RuntimeError::NativeSessionMissing(_) => -32005,
+            RuntimeError::Conflict(_) | RuntimeError::OutcomeUnknown(_) => -32009,
             RuntimeError::NotReady(_)
             | RuntimeError::AuthRequired(_)
             | RuntimeError::SetupRequired(_)
@@ -50,8 +56,10 @@ impl RuntimeError {
         match self {
             RuntimeError::InvalidParams(_) => "validation_failed",
             RuntimeError::TaskNotFound(_) => "task_not_found",
+            RuntimeError::NativeSessionMissing(_) => "native_session_missing",
             RuntimeError::NotReady(_) => "not_ready",
             RuntimeError::Conflict(_) => "conflict",
+            RuntimeError::OutcomeUnknown(_) => "outcome_unknown",
             RuntimeError::AuthRequired(_) => "auth_required",
             RuntimeError::SetupRequired(_) => "setup_required",
             RuntimeError::NodeJsRequired(_) => "node_js_required",

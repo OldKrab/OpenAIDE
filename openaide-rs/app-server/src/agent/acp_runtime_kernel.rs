@@ -102,11 +102,10 @@ impl AcpRuntimeKernel {
             .active_sessions
             .allows_passive_session_discovery(&request.agent_id)
         {
-            return Ok(AgentListSessionsResult {
-                agent_id: request.agent_id,
-                sessions: Vec::new(),
-                next_cursor: None,
-            });
+            // A skipped probe is not an empty authoritative Agent history.
+            return Err(RuntimeError::SetupRequired(
+                "Agent runtime is not installed; open the Agent to finish setup".to_string(),
+            ));
         }
 
         self.with_agent_process_operation(&request.agent_id.clone(), || {
@@ -202,6 +201,9 @@ impl AcpRuntimeKernel {
     }
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
+        self.registry.require(&request.agent_id)?;
+        // Session deletion owns its attachment serialization and must not wait behind
+        // unrelated process discovery. Detached requests share the existing connection.
         self.active_sessions.delete_session(request)
     }
 

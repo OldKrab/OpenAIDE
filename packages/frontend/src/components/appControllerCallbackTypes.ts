@@ -42,6 +42,7 @@ export type AppControllerCallbacks = {
 };
 
 export type NavigationCallbacks = {
+  deleteSession: import("../intents/sessionDeletionIntent").DeleteSessionAction;
   archiveNativeSession: (session: AgentListedSession) => void;
   archiveTask: (taskId: string) => void;
   archiveOlderTasks: (

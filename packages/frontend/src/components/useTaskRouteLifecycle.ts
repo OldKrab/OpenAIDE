@@ -6,10 +6,10 @@ import {
   type StateSubscriptionMappingContext,
 } from "../services/appServerStateSubscriptions";
 import { bindAppServerReplicaEpoch, type AppAction, type SnapshotIntent } from "../state/appReducer";
-import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
+import { newTaskNavigationTarget, type AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
-import { postHostMessage } from "../services/hostBridge";
+import { openNewTaskSurface, postHostMessage } from "../services/hostBridge";
 import type {
   AppControllerBackendConnection,
   BackendConnectionState,
@@ -67,6 +67,13 @@ export function useTaskRouteLifecycle({
     setReadyRouteOpenKey(undefined);
   }, []);
 
+  const showNewTaskAfterRemoval = () => {
+    dispatch({ type: "selection:clear" });
+    dispatch({ type: "archive:set", showArchived: false });
+    operationOwner.beginNavigation(newTaskNavigationTarget());
+    openNewTaskSurface();
+  };
+
   useEffect(() => {
     if (!backendConnection || !backendReady || !backendInitialized.current) return;
     const context = stateSubscriptionContext.current;
@@ -80,10 +87,18 @@ export function useTaskRouteLifecycle({
       generation: backendStateGeneration,
     });
     let active = true;
+    // The subscription follows the routed Task, including same-route reselection
+    // and Archive presentation changes. Effect cleanup retires a departed route.
+    const routeLease = operationOwner.claim("route-task-subscription", taskId, "replica");
+    const onTaskRemoved = () => {
+      if (!active || !operationOwner.owns(routeLease)) return;
+      showNewTaskAfterRemoval();
+    };
     const stop = startAppServerStateSubscription({
       backendConnection,
       context,
       dispatch,
+      onTaskRemoved,
       onBaselineLost: () => {
         if (!active) return;
         sendWebviewTelemetry(postHostMessage, "task_state_baseline_lost", {
@@ -103,6 +118,13 @@ export function useTaskRouteLifecycle({
           generation: backendStateGeneration,
           error_name: error instanceof Error ? error.name : typeof error,
         });
+        // A client can miss the removal event while disconnected. A definitive
+        // missing baseline closes the obsolete route instead of retrying its scope.
+        if (error instanceof AppServerProtocolError && error.protocolError.code === "notFound") {
+          dispatch({ type: "task:list:remove", taskId });
+          onTaskRemoved();
+          return;
+        }
         markSubscriptionError(subscriptionKey, error);
       },
       onBaselineReady: () => {
@@ -193,7 +215,8 @@ export function useTaskRouteLifecycle({
             : undefined,
         });
         if (taskNotFound) {
-          requestDispatch({ type: "taskOpen:error", taskId, kind: "notFound", message });
+          requestDispatch({ type: "task:list:remove", taskId });
+          showNewTaskAfterRemoval();
           return;
         }
         requestDispatch({ type: "taskOpen:error", taskId, message });

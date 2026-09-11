@@ -62,6 +62,12 @@ mod native_catalog_refresh_tests;
 #[path = "prepared_session_recovery_tests.rs"]
 mod prepared_session_recovery_tests;
 
+#[path = "session_deletion_tests.rs"]
+mod session_deletion_tests;
+
+#[path = "session_reconciliation_tests.rs"]
+mod session_reconciliation_tests;
+
 fn protocol_config_id(value: &str) -> AgentConfigOptionCurrentValue {
     AgentConfigOptionCurrentValue::Id {
         value: value.to_string(),
@@ -3578,8 +3584,7 @@ fn background_native_catalog_refresh_does_not_replace_owned_task_title() {
 fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
-    task.agent_session_id = Some("native-session".to_string());
+    let task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
         block_list: AtomicBool::new(true),
@@ -4370,8 +4375,10 @@ fn open_known_session_does_not_wait_for_catalog_listing() {
         .parse::<u128>()
         .unwrap()
         + 6_000;
+    let (operation_tx, operation_rx) = std::sync::mpsc::channel();
     let agent = Arc::new(RecordingAgent {
-        block_list: AtomicBool::new(true),
+        fail_list: true,
+        session_operation_tx: Some(operation_tx),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
             cwd: "/tmp/openaide-unit-workspace/app".to_string(),
@@ -4398,21 +4405,15 @@ fn open_known_session_does_not_wait_for_catalog_listing() {
     )
     .unwrap();
 
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-    let open_api = api.clone();
-    std::thread::spawn(move || {
-        let result = open_api.open_for_test(TaskOpenParams {
+    let snapshot = api
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
-        });
-        let _ = result_tx.send(result);
-    });
-
-    let result = result_rx.recv_timeout(Duration::from_millis(250));
-    let snapshot = result
-        .expect("task/open should not wait for native session listing")
+        })
         .unwrap();
     assert_eq!(snapshot.task.task_id.as_str(), "task-existing");
-    wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
+    // Observe the asynchronous Agent operation directly. Listing returns an error
+    // immediately, so an accidental list call fails this assertion without a timer.
+    assert_eq!(operation_rx.recv().unwrap(), "resume");
     assert_eq!(agent.list_calls.load(Ordering::SeqCst), 0);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
 
@@ -4421,8 +4422,6 @@ fn open_known_session_does_not_wait_for_catalog_listing() {
     })
     .unwrap();
 
-    agent.block_list.store(false, Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(50));
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
 }
@@ -9426,6 +9425,7 @@ struct RecordingAgent {
     closes: AtomicUsize,
     forks: AtomicUsize,
     list_calls: AtomicUsize,
+    session_operation_tx: Option<std::sync::mpsc::Sender<&'static str>>,
     block_list: AtomicBool,
     fail_list: bool,
     block_start: AtomicBool,
@@ -9671,6 +9671,9 @@ impl AgentRuntime for RecordingAgent {
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         self.list_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(tx) = &self.session_operation_tx {
+            let _ = tx.send("list");
+        }
         while self.block_list.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -9724,6 +9727,9 @@ impl AgentRuntime for RecordingAgent {
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         self.resumes.fetch_add(1, Ordering::SeqCst);
+        if let Some(tx) = &self.session_operation_tx {
+            let _ = tx.send("resume");
+        }
         while self.block_resume.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }

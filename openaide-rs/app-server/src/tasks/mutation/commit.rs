@@ -76,6 +76,9 @@ fn commit_existing_task_with_session_policy(
     // drops late ACP updates that raced with the archive transition.
     if matches!(original_task.lifecycle, TaskLifecycle::Archived)
         && matches!(ctx.task().lifecycle, TaskLifecycle::Archived)
+        // Explicit deletion and authoritative missing-session cleanup are lifecycle
+        // removals, not edits to archived history. Late Agent updates still cannot edit it.
+        && !ctx.task().tombstoned
     {
         mutation_result = TaskMutationResult::Unchanged;
     }

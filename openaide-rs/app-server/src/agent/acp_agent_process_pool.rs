@@ -19,7 +19,7 @@ use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSecretResolver,
-    AgentSessionFork,
+    AgentSessionDelete, AgentSessionFork,
 };
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
@@ -226,6 +226,25 @@ impl AcpAgentProcessPool {
         reply_rx
             .recv_timeout(std::time::Duration::from_secs(30))
             .map_err(|_| RuntimeError::NotReady("ACP session fork timed out".to_string()))?
+    }
+
+    pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
+        let (process, _operation) = self.get_or_launch_process(&request.agent_id)?;
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        process
+            .control_tx
+            .send(AcpAgentProcessControl::Delete { request, reply_tx })
+            .map_err(|_| {
+                RuntimeError::NotReady("ACP process ended before session deletion".to_string())
+            })?;
+        // Never replay a mutation after losing its reply: the Agent may have applied it.
+        reply_rx
+            .recv_timeout(Duration::from_secs(31))
+            .map_err(|_| {
+                RuntimeError::OutcomeUnknown(
+                    "Session deletion outcome is unknown; retry explicitly".to_string(),
+                )
+            })?
     }
 
     pub(super) fn probe(

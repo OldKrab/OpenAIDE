@@ -246,6 +246,8 @@ pub struct AgentListSessionsRequest {
 
 #[derive(Clone)]
 pub struct AgentSessionDelete {
+    /// Correlates one explicit deletion attempt across product and ACP boundaries.
+    pub operation_id: String,
     pub agent_id: String,
     pub session_id: String,
 }

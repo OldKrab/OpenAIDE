@@ -122,6 +122,7 @@ impl TaskProductApi {
                 native_session_id,
             } => {
                 let reference = NativeSessionRef::new(agent_id.as_str(), &native_session_id);
+                self.require_session_not_deleting(&reference)?;
                 let entry = self
                     .native_catalog
                     .entry(&reference)

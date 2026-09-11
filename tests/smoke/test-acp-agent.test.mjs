@@ -59,8 +59,27 @@ test("requests structured elicitation and continues with the submitted value", a
   await agent.next((message) => message.params?.update?.content?.text === "Question result: Alpha");
 });
 
-function connectAgent(t) {
-  const child = spawn(process.execPath, [fixture], { stdio: ["pipe", "pipe", "pipe"] });
+test("lists retained history after close and removes it only on Delete", async (t) => {
+  const agent = connectAgent(t);
+  await agent.request("initialize", { protocolVersion: 1 });
+  const { sessionId } = await agent.request("session/new", { cwd: process.cwd(), mcpServers: [] });
+  await agent.request("session/close", { sessionId });
+  assert.ok((await agent.request("session/list", { cwd: process.cwd() })).sessions.some((session) => session.sessionId === sessionId));
+  await agent.request("session/delete", { sessionId });
+  assert.deepEqual((await agent.request("session/list", { cwd: process.cwd() })).sessions, []);
+});
+
+test("active-writer history includes newly created sessions", async (t) => {
+  const agent = connectAgent(t, ["--active-writer"]);
+  await agent.request("initialize", { protocolVersion: 1 });
+  const { sessionId } = await agent.request("session/new", { cwd: process.cwd(), mcpServers: [] });
+  const listed = await agent.request("session/list", { cwd: process.cwd() });
+  assert.deepEqual(new Set(listed.sessions.map((session) => session.sessionId)),
+    new Set(["smoke-active-writer-session", sessionId]));
+});
+
+function connectAgent(t, args = []) {
+  const child = spawn(process.execPath, [fixture, ...args], { stdio: ["pipe", "pipe", "pipe"] });
   const lines = readline.createInterface({ input: child.stdout });
   const pending = new Map();
   const inbox = [];

@@ -108,6 +108,10 @@ _Avoid_: Chat message, reusable attachment, immutable prompt
 The read-only lifecycle for Tasks the user no longer needs in ordinary work. Archived Tasks retain saved history, do not interact with their Agent Native Session, and can return to Open only through Restore.
 _Avoid_: Treating Archive as a peer task mode, location-only flag, Recent, inactive
 
+**Delete**:
+The explicit removal of a Task or discovered Native Session from OpenAIDE and the Agent's session history. It is distinct from reversible OpenAIDE Archive and does not guarantee permanent erasure of Agent-retained data.
+_Avoid_: Archive, permanent data erasure
+
 **Task Navigation**:
 The compact App Shell navigation surface for finding, creating, selecting, archiving, and checking status of Tasks.
 _Avoid_: Full Task pages or Settings inside the sidebar

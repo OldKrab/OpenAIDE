@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT",
+        " | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;\n");
@@ -116,6 +116,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedParams;\n");
     output.push_str("  [NATIVE_SESSION_RESTORE]: NativeSessionRestoreParams;\n");
     output.push_str("  [NATIVE_SESSION_FORK]: NativeSessionForkParams;\n");
+    output.push_str("  [NATIVE_SESSION_DELETE]: NativeSessionDeleteParams;\n");
     output.push_str("  [TASK_RELEASE]: TaskReleaseParams;\n");
     output.push_str("  [TASK_ARCHIVE]: TaskArchiveParams;\n  [TASK_ARCHIVE_OLDER]: TaskArchiveOlderParams;\n  [TASK_RESTORE]: TaskRestoreParams;\n");
     output.push_str("};\n\n");
@@ -229,6 +230,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedResult;\n");
     output.push_str("  [NATIVE_SESSION_RESTORE]: NativeSessionRestoreResult;\n");
     output.push_str("  [NATIVE_SESSION_FORK]: NativeSessionForkResult;\n");
+    output.push_str("  [NATIVE_SESSION_DELETE]: NativeSessionDeleteResult;\n");
     output.push_str("  [TASK_RELEASE]: TaskReleaseResult;\n");
     output.push_str("  [TASK_ARCHIVE]: TaskArchiveResult;\n  [TASK_ARCHIVE_OLDER]: TaskArchiveOlderResult;\n  [TASK_RESTORE]: TaskRestoreResult;\n");
     output.push_str("};\n\n");

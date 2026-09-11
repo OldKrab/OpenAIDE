@@ -51,7 +51,7 @@ impl NativeSessionService {
         );
         let current = match self.store.read_task(&task.task_id) {
             Ok(current) => current,
-            Err(RuntimeError::TaskNotFound(_)) => {
+            Err(RuntimeError::TaskNotFound(_) | RuntimeError::NativeSessionMissing(_)) => {
                 log_prepare_cancelled(task, started_at, "task_no_longer_exists");
                 return Ok(());
             }

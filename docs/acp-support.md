@@ -61,7 +61,7 @@ This document tracks three things:
 | Next edit suggestions | planned | RFD/capabilities | Editor suggestion surface when advertised. |
 | Proxy chains | planned | registry/proxy metadata | Agent extension/proxy capability model. |
 | Request cancellation mechanism | planned | RFD/capabilities | Request-level cancellation beyond prompt cancel. |
-| Session delete | partial | session capabilities | Confirmed Task delete calls `session/delete` for active bound Native Sessions when advertised; local tombstones prevent re-adoption when native deletion is unavailable or fails. |
+| Session delete | partial | session capabilities | Internal attached-session deletion exists; there is no exposed Delete API or navigation action yet. The accepted [session deletion plan](plans/session-deletion.md) adds Agent-confirmed deletion, detached/unadopted targets, shared confirmation UI, and authoritative missing-session reconciliation. |
 | Session fork | supported (experimental) | `agentCapabilities.sessionCapabilities.fork` plus load/close capabilities | Capability-gated `nativeSession/fork` creates an unowned catalog entry from a Task-bound or listed source, preserves no OpenAIDE Chat history, and closes the returned active session after creation. The ACP RFD remains Draft, so the SDK schema and boundary tests pin the currently supported shape. |
 | Session usage/context status | planned | session updates | Context usage and limits in UI. |
 | Streamable HTTP/WebSocket transport | planned | transport metadata | Non-stdio transports; not blocking first stdio process iteration. |
