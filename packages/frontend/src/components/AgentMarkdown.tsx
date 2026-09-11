@@ -334,6 +334,19 @@ function AgentMarkdownImage({ label, url }: { label: string; url: string }) {
 }
 
 function MarkdownImage({ alt, src, node: _node, ...props }: ComponentProps<"img"> & ExtraProps) {
+  const { openFile, onOpenRelativeHref } = useContext(MarkdownLinkBehaviorContext);
+  const href = typeof src === "string" ? src : undefined;
+  const relative = relativeMarkdownHref(href);
+  const location = chatMarkdownFileLocation(href, true);
+  if (location) {
+    // Local Markdown images cannot be fetched by a remote browser. Keep the
+    // explicit file-open action; Agent text must not trigger automatic disk reads.
+    return <a href={href} onClick={(event) => {
+      event.preventDefault();
+      if (relative && onOpenRelativeHref) onOpenRelativeHref(relative);
+      else activateAgentFileReference(openFile, location.path, location.line);
+    }}>{alt || "Open image"}</a>;
+  }
   const image = <img {...props} alt={alt} src={src} />;
   return typeof src === "string" && src ? (
     <MarkdownImageAction label={alt || "Image"} url={src}>{image}</MarkdownImageAction>

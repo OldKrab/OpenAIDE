@@ -1,7 +1,7 @@
 const FILE_EXTENSIONS = new Set([
   "c", "cc", "cpp", "cs", "css", "env", "ex", "exs", "go", "h", "hpp", "html", "java", "js", "json",
   "jsonc", "jsx", "kt", "lock", "lua", "md", "markdown", "mjs", "php", "proto", "py", "rb", "rs",
-  "scss", "sh", "sql", "svg", "swift", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml", "zig",
+  "gif", "jpeg", "jpg", "png", "webp", "scss", "sh", "sql", "svg", "swift", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml", "zig",
 ]);
 
 export type AgentFileLocation = { path: string; line?: number };
@@ -10,7 +10,16 @@ export function markdownFileLocation(href: string | undefined): AgentFileLocatio
   if (!href) return undefined;
   let decoded: string;
   try {
-    decoded = decodeURIComponent(href);
+    // Agent-authored local URIs are references, not browser resource URLs. Resolve
+    // only on user activation through the existing App Server File Viewer boundary.
+    let path = href;
+    if (/^(?:file|sandbox):/i.test(href)) {
+      const uri = new URL(href);
+      if (uri.hostname || uri.search || uri.hash || !uri.pathname.startsWith("/")) return undefined;
+      path = uri.pathname;
+      if (uri.protocol === "file:" && /^\/[a-z]:\//i.test(path)) path = path.slice(1);
+    }
+    decoded = decodeURIComponent(path);
   } catch {
     return undefined;
   }

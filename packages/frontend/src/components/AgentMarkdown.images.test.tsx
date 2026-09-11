@@ -7,7 +7,7 @@ import { AgentMarkdown } from "./AgentMarkdown";
 it("keeps portrait Markdown images proportional and inside Chat on desktop and phone", async () => {
   const css = await readFile(new URL("../styles/app/chat-messages.css", import.meta.url), "utf8");
   const html = renderToStaticMarkup(
-    <AgentMarkdown className="chat-agent" onOpenImage={() => {}} text={"![Gesture navigation](https://images.test/gesture.svg)\n\n![Three-button navigation](https://images.test/buttons.svg)"} />,
+    <AgentMarkdown className="chat-agent" onOpenImage={() => {}} text={"![Gesture navigation](https://images.test/gesture.svg)\n\n![Three-button navigation](https://images.test/buttons.svg)\n\n![Meal details](/tmp/meal.png)"} />,
   );
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   try {
@@ -20,6 +20,9 @@ it("keeps portrait Markdown images proportional and inside Chat on desktop and p
       await page.setViewportSize({ width, height: 844 });
       await page.setContent(`<style>${css}</style><main style="max-width:726px;margin:auto">${html}</main>`);
       await page.locator("img").evaluateAll((images) => Promise.all(images.map((image) => (image as HTMLImageElement).decode())));
+      const localImage = page.getByRole("link", { name: "Meal details" });
+      expect(await localImage.isVisible()).toBe(true);
+      expect(await localImage.getAttribute("href")).toBe("/tmp/meal.png");
       const bounds = await page.locator("img").evaluateAll((images) => images.map((image) => {
         const box = image.getBoundingClientRect();
         const parent = image.closest("main")!.getBoundingClientRect();
