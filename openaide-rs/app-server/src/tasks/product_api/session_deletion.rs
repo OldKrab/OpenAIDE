@@ -1,11 +1,11 @@
-use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
+use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::NativeSessionReference;
 use openaide_app_server_protocol::task::{
     NativeSessionDeleteParams, NativeSessionDeleteResult, NativeSessionDeleteTarget,
 };
 
-use crate::agent::{AgentProbeRequest, AgentSessionDelete};
+use crate::agent::AgentSessionDelete;
 use crate::native_sessions::catalog::NativeSessionRef;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus;
@@ -213,22 +213,7 @@ impl TaskProductApi {
                 queued_message_count,
             });
         }
-        // Preview uses local state so it cannot queue behind Agent history discovery.
-        // Only a confirmed deletion needs a live capability check.
-        let probe = self
-            .agent_gateway
-            .probe(AgentProbeRequest {
-                agent_id: target.reference.agent_id.clone(),
-            })
-            .map_err(protocol_error_from_runtime)?;
-        if !probe.typed_capabilities.delete_sessions {
-            return Err(ProtocolError {
-                code: ProtocolErrorCode::CapabilityUnavailable,
-                message: "This Agent does not support session deletion".into(),
-                recoverable: false,
-                target: None,
-            });
-        }
+        // Send directly: the Agent reports unsupported or missing sessions on Delete.
         let first_attempt = self
             .turn_acceptance
             .begin_session_deletion(&target.reference);

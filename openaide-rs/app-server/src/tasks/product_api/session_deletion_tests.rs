@@ -7,7 +7,7 @@ use openaide_app_server_protocol::task::{
 };
 
 #[test]
-fn deletion_preview_uses_local_state_and_checks_agent_capability_only_when_confirmed() {
+fn deletion_uses_local_preview_and_sends_confirmed_request_directly_to_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
     let mut task = task_record(
@@ -18,6 +18,9 @@ fn deletion_preview_uses_local_state_and_checks_agent_capability_only_when_confi
     store.write_task(&task).unwrap();
     let agent = Arc::new(DeletionAgent {
         unsupported: true,
+        failure: Mutex::new(Some(RuntimeError::CapabilityMissing(
+            "Delete is unsupported".into(),
+        ))),
         ..Default::default()
     });
     let api = TaskProductApi::new(
@@ -49,8 +52,8 @@ fn deletion_preview_uses_local_state_and_checks_agent_capability_only_when_confi
         .delete_native_session_for_test(&client, delete_params("preview-delete", Some(false)))
         .unwrap_err();
     assert_eq!(error.code, ProtocolErrorCode::CapabilityUnavailable);
-    assert_eq!(agent.probes.load(Ordering::SeqCst), 1);
-    assert!(agent.deleted.lock().unwrap().is_empty());
+    assert_eq!(agent.probes.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.deleted.lock().unwrap().as_slice(), ["native-preview"]);
     assert!(!store.read_task("preview-delete").unwrap().tombstoned);
 }
 

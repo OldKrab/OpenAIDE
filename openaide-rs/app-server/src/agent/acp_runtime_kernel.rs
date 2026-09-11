@@ -202,9 +202,9 @@ impl AcpRuntimeKernel {
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
         self.registry.require(&request.agent_id)?;
-        self.with_agent_process_operation(&request.agent_id.clone(), || {
-            self.active_sessions.delete_session(request)
-        })
+        // Session deletion owns its attachment serialization and must not wait behind
+        // unrelated process discovery. Detached requests share the existing connection.
+        self.active_sessions.delete_session(request)
     }
 
     pub(super) fn shutdown(&self) -> Result<(), RuntimeError> {

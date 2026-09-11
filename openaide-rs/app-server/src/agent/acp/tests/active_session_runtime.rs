@@ -446,6 +446,7 @@ fn fixture_agent_script() -> &'static str {
 import os
 import sys
 import time
+import threading
 
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
@@ -646,6 +647,14 @@ for line in sys.stdin:
         if session_id == "idle-session":
             notify_title("Title after idle resume")
     elif method == "session/list":
+        if prompt_mode == "concurrent_list":
+            def release_listing(request):
+                deadline = time.monotonic() + 10
+                while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                respond(request, {"sessions": []})
+            threading.Thread(target=release_listing, args=(message,), daemon=True).start()
+            continue
         if prompt_mode == "blocked_list":
             deadline = time.monotonic() + 10
             while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
@@ -811,6 +820,8 @@ for line in sys.stdin:
             sys.stdout.flush()
             continue
         respond(message, {})
+        if prompt_mode == "concurrent_list":
+            continue
         break
     else:
         sys.stdout.write(json.dumps({
@@ -4042,6 +4053,67 @@ fn delete_detached_session_does_not_load_or_adopt_it() {
         read_fixture_methods(&log_path),
         ["initialize", "session/delete"]
     );
+}
+
+#[test]
+fn deletion_reaches_agent_while_history_listing_is_pending() {
+    for attached in [false, true] {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let Some((runtime, log_path)) =
+            fixture_runtime_with_prompt_mode(&temp, "delete-during-list", "concurrent_list")
+        else {
+            return;
+        };
+        let runtime = Arc::new(runtime);
+        if attached {
+            runtime
+                .start_session(start_request("task-delete-during-list", cwd_string()))
+                .expect("attach session");
+        }
+        let discovery = std::thread::spawn({
+            let runtime = runtime.clone();
+            move || {
+                runtime.list_sessions(AgentListSessionsRequest {
+                    agent_id: "codex".into(),
+                    cwd: Some(cwd_string()),
+                    cursor: None,
+                })
+            }
+        });
+        wait_for_method(&log_path, "session/list");
+        let (deleted_tx, deleted_rx) = mpsc::channel();
+        let deletion = std::thread::spawn({
+            let runtime = runtime.clone();
+            move || {
+                let _ = deleted_tx.send(runtime.delete_session(AgentSessionDelete {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    agent_id: "codex".into(),
+                    session_id: "delete-during-list".into(),
+                }));
+            }
+        });
+        let early_result = deleted_rx.recv_timeout(Duration::from_secs(2));
+        let deleted_during_listing = matches!(early_result, Ok(Ok(())));
+        // Release discovery and join workers even when Delete incorrectly waits for it.
+        fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+        discovery
+            .join()
+            .expect("discovery thread")
+            .expect("discovery");
+        early_result
+            .unwrap_or_else(|_| {
+                deleted_rx
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("delete after listing")
+            })
+            .expect("delete session");
+        deletion.join().expect("deletion thread");
+        runtime.shutdown().expect("shutdown");
+        assert!(
+            deleted_during_listing,
+            "Delete waited for history; attached={attached}"
+        );
+    }
 }
 
 #[test]

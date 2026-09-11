@@ -300,8 +300,12 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 )
                 .await?;
             }
+            // Keep discovery owned by this connection, but allow controls such as Delete
+            // while the Agent is still producing a history response. Drop aborts pending work.
+            let mut discovery_tasks = tokio::task::JoinSet::new();
             loop {
                 tokio::select! {
+                    _ = discovery_tasks.join_next(), if !discovery_tasks.is_empty() => {}
                     open = open_rx.recv() => {
                         let Some(open) = open else { break };
                         let operation = open.request.operation_name();
@@ -353,24 +357,27 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     }
                     list = list_rx.recv() => {
                         let Some(list) = list else { break };
-                        // Discovery is best-effort background work. Bound only its ACP request;
-                        // active Native Session attachments continue on the shared connection.
-                        let result = tokio::time::timeout(
-                            list.timeout,
-                            list_sessions_on_shared_process(
-                                &connection,
-                                &initialize,
-                                list.request,
-                                list.preferred_auth_method_id.as_deref(),
-                            ),
-                        )
-                        .await
-                        .unwrap_or_else(|_| {
-                            Err(RuntimeError::NotReady(
-                                "ACP session listing timed out".to_string(),
-                            ))
+                        let connection = connection.clone();
+                        let initialize = initialize.clone();
+                        discovery_tasks.spawn(async move {
+                            // Bound the ACP request without disconnecting live attachments.
+                            let result = tokio::time::timeout(
+                                list.timeout,
+                                list_sessions_on_shared_process(
+                                    &connection,
+                                    &initialize,
+                                    list.request,
+                                    list.preferred_auth_method_id.as_deref(),
+                                ),
+                            )
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(RuntimeError::NotReady(
+                                    "ACP session listing timed out".to_string(),
+                                ))
+                            });
+                            let _ = list.reply_tx.send(result);
                         });
-                        let _ = list.reply_tx.send(result);
                     }
                     control = control_rx.recv() => {
                         let Some(control) = control else { break };
