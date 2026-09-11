@@ -57,13 +57,15 @@ async function handleRequestOrNotification(message) {
       break;
     case "session/list":
       respond(message.id, {
-        sessions: nativeSessionScenario === "active-writer"
-          ? [{
-              sessionId: "smoke-active-writer-session",
-              cwd: params.cwd,
-              title: "Session open elsewhere",
-            }]
-          : [...history.values()].filter((session) => !params.cwd || session.cwd === params.cwd),
+        // The conflict scenario adds one external session; it must not hide real history.
+        sessions: [
+          ...history.values(),
+          ...(nativeSessionScenario === "active-writer" ? [{
+            sessionId: "smoke-active-writer-session",
+            cwd: params.cwd,
+            title: "Session open elsewhere",
+          }] : []),
+        ].filter((session) => !params.cwd || session.cwd === params.cwd),
       });
       break;
     case "session/set_config_option":
