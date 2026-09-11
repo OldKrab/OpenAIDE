@@ -8,6 +8,10 @@ import {
   type LocalHttpConnection,
 } from "./desktopBootstrap";
 
+import { initializeStartupWindow } from "./desktopStartupWindow";
+
+initializeStartupWindow();
+
 const startupStartedAt = performance.now();
 const startupElapsedTimer = window.setInterval(updateStartupElapsed, 1_000);
 
