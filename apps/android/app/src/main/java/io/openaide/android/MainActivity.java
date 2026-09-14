@@ -229,6 +229,7 @@ public final class MainActivity extends Activity {
         browser.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                if ("data".equals(uri.getScheme()) || "blob".equals(uri.getScheme())) return null;
                 if ("http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost()) && uri.getPort() == 5474) return null;
                 return new WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden",
                     Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
