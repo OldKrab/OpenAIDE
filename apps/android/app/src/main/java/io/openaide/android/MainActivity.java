@@ -17,6 +17,7 @@ import android.webkit.HttpAuthHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -25,6 +26,7 @@ import android.widget.TextView;
 import android.widget.ScrollView;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -225,6 +227,12 @@ public final class MainActivity extends Activity {
         browser.getSettings().setAllowFileAccess(false);
         browser.getSettings().setAllowContentAccess(true);
         browser.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                if ("http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost()) && uri.getPort() == 5474) return null;
+                return new WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden",
+                    Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
+            }
             @Override public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
                 if ("127.0.0.1".equals(host) && "OpenAIDE".equals(realm)) handler.proceed("android", password);
                 else handler.cancel();

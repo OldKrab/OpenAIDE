@@ -1,4 +1,5 @@
 set -eu
+: "${OPENAIDE_WEB_PASSWORD:?OpenAIDE must provide a connection password}"
 umask 077
 export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export PATH="$PREFIX/bin:$PATH"
