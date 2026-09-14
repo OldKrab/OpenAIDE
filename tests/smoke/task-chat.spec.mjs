@@ -1101,6 +1101,26 @@ test("uploads a 2 MiB file and sends it with the first New Task message", async 
   expect(downloadedBytes).toBe(2 * 1024 * 1024);
 });
 
+for (const width of [390, 1180]) {
+  test(`keeps selected images after picker menu dismissal at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await openPreparedNewTask(page);
+    await page.getByRole("button", { name: "Add context" }).click();
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("menuitem", { name: /Attach images/ }).click(),
+    ]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu", { name: "Add context" })).toHaveCount(0);
+    await chooser.setFiles({
+      name: "pixel.png", mimeType: "image/png",
+      buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+    });
+    await expect(page.getByLabel("Attached context").locator(".composer-attachment-tile")).toHaveCount(1);
+    await page.screenshot({ path: testInfo.outputPath(`image-attachment-${width}.png`) });
+  });
+}
+
 test("keeps Images and files in one composer attachment list", async ({ page }) => {
   await openPreparedNewTask(page);
   await page.getByRole("button", { name: "Add context" }).click();

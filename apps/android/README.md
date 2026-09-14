@@ -23,8 +23,9 @@ The runtime artifact currently targets ARM64 phones only.
 
 4. Set `allow-external-apps=true` in `~/.termux/termux.properties`. This allows
    apps granted Termux's command permission to execute commands in Termux.
-5. Open OpenAIDE, tap **Connect to Termux**, and grant the command permission.
-   If Android no longer prompts, use **App permissions** to grant it manually.
+5. Open OpenAIDE, tap **Start working**, and grant the command permission.
+   Later launches connect automatically. Use **Setup & background → App permissions**
+   if Android no longer prompts.
 
 The APK sends its bundled startup script through Intent stdin; it does not need
 access to Termux's private directory. A random per-install password stays in the
@@ -35,7 +36,7 @@ No agent credential is copied into the APK. App backup is disabled.
 Reconnect reuses the running server when its credentials match. A server using
 different credentials must be stopped before connecting. Clearing app data or
 reinstalling the APK resets its password. Android may kill Termux processes;
-return to Connection and reconnect to restart after a failure. Closing the
+return to OpenAIDE to reconnect after a failure. Closing the
 Android view leaves the Termux Web Shell running, following existing Web Shell
 lifetime semantics. To stop it explicitly, stop its process in Termux.
 
@@ -47,7 +48,7 @@ the runtime directory so replacing runtime files does not delete task history.
 Use JDK 17, Gradle 8.13 and Android SDK 35:
 
 ```sh
-gradle -p apps/android lintDebug assembleDebug
+gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
 ```
 
 CI separately cross-compiles the App Server with the Android NDK, builds the
@@ -67,14 +68,32 @@ task creation, streaming, tool approvals, attachments, Back navigation, rotation
 reconnection, and recovery after Termux is stopped. APK compilation alone does
 not establish working Codex execution on Android.
 
-Native notifications, support-export downloads and automatic runtime updates
+Task-completion notifications, support-export downloads and automatic runtime updates
 are not implemented in this first shell. Shared task and settings behavior stays
 in the existing Frontend and App Server.
 
-Android Back navigates page history, then returns to the connection screen. This
-keeps native connection controls out of the shared task interface. The connection
-screen includes **Share connection diagnostics** for native picker outcomes and
-WebView error metadata; it excludes file names, URLs, message content and secrets.
+Android Back navigates page history, then backgrounds the app. Returning wakes
+the existing transport rather than reloading the page, preserving unsent drafts.
+Stalled HTTP uploads retry the same sequenced frame, not a new user command.
+
+Background mode uses a foreground service and a partial wake lock, with a visible
+notification and **Turn off** action. It keeps the CPU awake, not the screen, and
+uses additional battery. Enable unrestricted battery use for **both OpenAIDE and
+Termux** in Android settings; Doze, vendor restrictions, force-stop, reboot or
+memory pressure can still interrupt execution. This is not a guarantee against
+Android killing processes. Turning off background mode releases protection; it
+does not cancel tasks or stop the Termux server. The service uses the `specialUse`
+type for user-enabled local agent execution, which requires review before store
+distribution.
+
+Use **Settings** in the background notification (or long-press the launcher icon
+and choose **App settings**) for setup, battery controls and
+**Share diagnostics**. Logs include picker readability/delivery and WebView error
+metadata, but exclude file names, URLs, message content and secrets.
+
+The Android document picker grants access only to selected, readable `content:`
+URIs. The WebView resource policy allows those exact documents while continuing
+to block arbitrary providers, local files and external network resources.
 
 Existing Codex sessions are grouped by their original working directory. A CLI
 session started in Termux home appears under the home Project, even if commands

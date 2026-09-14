@@ -76,8 +76,10 @@ export function createReliableHttpMessageChannel(
   let closed = false;
   let terminalError: unknown;
   let consecutiveReceiveTimeouts = 0;
+  const pendingPosts = new Set<() => void>();
   logger.info("reliable_http_channel_created", connectionContext);
   const unsubscribeWake = options.subscribeToWake?.(() => {
+    for (const interrupt of pendingPosts) interrupt();
     if (!receiveAbort || receiveAbort.signal.aborted) return;
     logger.info("reliable_http_receive_woken", connectionContext);
     receiveAbort.abort();
@@ -144,7 +146,7 @@ export function createReliableHttpMessageChannel(
     const startedAt = Date.now();
     logger.info("reliable_http_session_open_started", connectionContext);
     try {
-      const response = await fetchImpl(options.endpointUrl, {
+      const response = await postWithDeadline({
         method: "POST",
         headers: baseHeaders(),
         body: JSON.stringify({ transport: "open" }),
@@ -200,7 +202,7 @@ export function createReliableHttpMessageChannel(
             queue_depth: uploads.length,
             method: rpcMethod(upload.message),
           });
-          const response = await fetchImpl(options.endpointUrl, {
+          const response = await postWithDeadline({
             method: "POST",
             headers: baseHeaders(),
             body,
@@ -272,7 +274,7 @@ export function createReliableHttpMessageChannel(
     const bytes = new TextEncoder().encode(body);
     for (let offset = 0; offset < bytes.byteLength; offset += RELIABLE_UPLOAD_CHUNK_BYTES) {
       const data = bytes.subarray(offset, Math.min(offset + RELIABLE_UPLOAD_CHUNK_BYTES, bytes.byteLength));
-      const response = await fetchImpl(options.endpointUrl, {
+      const response = await postWithDeadline({
         method: "POST",
         headers: baseHeaders(),
         body: JSON.stringify({
@@ -420,6 +422,34 @@ export function createReliableHttpMessageChannel(
       "Content-Type": "application/json",
       "X-OpenAIDE-Connection-Id": options.connectionId,
     };
+  }
+
+  async function postWithDeadline(init: Parameters<ReliableHttpFetch>[1]) {
+    const controller = new AbortController();
+    let rejectPending: (error: Error) => void = () => {};
+    const interrupted = new Promise<never>((_resolve, reject) => { rejectPending = reject; });
+    const interrupt = () => {
+      controller.abort();
+      rejectPending(new Error("Reliable HTTP POST interrupted; retry the same frame"));
+    };
+    const close = () => { controller.abort(); rejectPending(receiveAbortError()); };
+    const timer = setTimeout(interrupt, receiveTimeoutMs);
+    const isUpload = init.body !== '{"transport":"open"}';
+    if (isUpload) pendingPosts.add(interrupt);
+    abort.signal.addEventListener("abort", close, { once: true });
+    try {
+      if (abort.signal.aborted) close();
+      const read = async () => {
+        const result = await fetchImpl(options.endpointUrl, { ...init, signal: controller.signal });
+        const body = await result.text();
+        return { ok: result.ok, status: result.status, text: async () => body };
+      };
+      return await Promise.race([read(), interrupted]);
+    } finally {
+      clearTimeout(timer);
+      pendingPosts.delete(interrupt);
+      abort.signal.removeEventListener("abort", close);
+    }
   }
 
   function retryDelay() {

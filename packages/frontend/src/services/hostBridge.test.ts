@@ -408,7 +408,7 @@ describe("host bridge", () => {
     );
   });
 
-  it("replays queued App Server events when a suspended browser page becomes visible", async () => {
+  it.each(["visibility", "native"])("replays queued events after %s resume", async (resume) => {
     const documentListeners = new Map<string, () => void>();
     const windowListeners = new Map<string, () => void>();
     const transport = wakeableReliableFetch();
@@ -462,7 +462,8 @@ describe("host bridge", () => {
     documentState.visibilityState = "hidden";
     documentListeners.get("visibilitychange")?.();
     documentState.visibilityState = "visible";
-    documentListeners.get("visibilitychange")?.();
+    if (resume === "native") windowListeners.get("openaide:resume")?.();
+    else documentListeners.get("visibilitychange")?.();
 
     await vi.waitFor(() => expect(onEvent).toHaveBeenCalledWith({ cursor: "cursor-2" }));
     expect(windowListeners.has("pageshow")).toBe(true);
