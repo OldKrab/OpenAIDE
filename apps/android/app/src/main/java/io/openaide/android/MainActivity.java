@@ -22,6 +22,7 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.ScrollView;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
@@ -92,7 +93,14 @@ public final class MainActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(16);
         layout.addView(status);
-        setContentView(layout);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(layout);
+        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        setContentView(scroll);
     }
 
     private void requestConnection() {
@@ -122,7 +130,7 @@ public final class MainActivity extends Activity {
         Log.i("OpenAIDE", "connection_start attempt=" + attempt);
         worker.execute(() -> {
             int response = probe();
-            if (response == 200) { finishConnection(attempt, started, true); return; }
+            if (response == 200) { finishConnection(attempt, started); return; }
             if (response == 503) { waitForServer(attempt, started); return; }
             if (response == 401) {
                 fail(attempt, "A server with different credentials uses port 5474. Stop it in Termux, then reconnect.");
@@ -158,7 +166,7 @@ public final class MainActivity extends Activity {
     private void waitForServer(int attempt, long started) {
         worker.execute(() -> {
             while (attempt == generation && SystemClock.elapsedRealtime() - started < 45_000) {
-                if (probe() == 200) { finishConnection(attempt, started, true); return; }
+                if (probe() == 200) { finishConnection(attempt, started); return; }
                 try { Thread.sleep(500); }
                 catch (InterruptedException error) { Thread.currentThread().interrupt(); return; }
             }
@@ -192,7 +200,7 @@ public final class MainActivity extends Activity {
         return "Basic " + Base64.encodeToString(("android:" + password).getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
     }
 
-    private void finishConnection(int attempt, long started, boolean ready) {
+    private void finishConnection(int attempt, long started) {
         runOnUiThread(() -> {
             if (attempt != generation) return;
             Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
