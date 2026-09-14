@@ -3,12 +3,23 @@ plugins { id 'com.android.application' }
 android {
     namespace 'io.openaide.android'
     compileSdk 35
+    signingConfigs {
+        debug {
+            if (System.getenv('OPENAIDE_ANDROID_KEYSTORE')) {
+                storeFile file(System.getenv('OPENAIDE_ANDROID_KEYSTORE'))
+                storeType 'PKCS12'
+                storePassword System.getenv('OPENAIDE_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'openaide-debug'
+                keyPassword System.getenv('OPENAIDE_ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     defaultConfig {
         applicationId 'io.openaide.android'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 2
+        versionName '0.1.1'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

@@ -5,10 +5,11 @@
     <application
         android:label="OpenAIDE"
         android:allowBackup="false"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:theme="@style/OpenAIDETheme"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

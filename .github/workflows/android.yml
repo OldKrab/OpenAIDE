@@ -30,7 +30,18 @@ jobs:
           gradle-version: '8.13'
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - run: gradle -p apps/android --no-daemon lintDebug assembleDebug
+      - name: Build APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE }}
+          OPENAIDE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            umask 077
+            export OPENAIDE_ANDROID_KEYSTORE="$RUNNER_TEMP/openaide-debug.p12"
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$OPENAIDE_ANDROID_KEYSTORE"
+            trap 'rm -f "$OPENAIDE_ANDROID_KEYSTORE"' EXIT
+          fi
+          gradle -p apps/android --no-daemon lintDebug assembleDebug
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: openaide-android-debug
@@ -67,6 +78,7 @@ jobs:
         run: |
           npm ci
           npm run build:typescript-deps
+          npm exec --workspace openaide-frontend -- vitest run src/components/ComposerView.test.tsx
           npm run build --workspace openaide-frontend
           npm run test --workspace openaide-web
       - name: Package Termux runtime

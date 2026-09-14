@@ -54,6 +54,14 @@ CI separately cross-compiles the App Server with the Android NDK, builds the
 shared Frontend, runs existing Web Shell tests and packages the Termux runtime.
 The APK is debug signed for testing, not a store release.
 
+For installable updates, configure repository secrets
+`OPENAIDE_ANDROID_DEBUG_KEYSTORE` (base64-encoded PKCS12, alias `openaide-debug`)
+and `OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD`. Keep the signing key private and
+backed up. Without these secrets, CI uses a temporary debug key and subsequent
+APKs may require uninstalling the previous app. Switching from the initial
+temporary key requires a one-time reinstall; Termux task history is unaffected,
+but the app's connection password resets.
+
 On a device, verify permission denial and grant, first startup, authenticated
 task creation, streaming, tool approvals, attachments, Back navigation, rotation,
 reconnection, and recovery after Termux is stopped. APK compilation alone does
@@ -62,5 +70,15 @@ not establish working Codex execution on Android.
 Native notifications, support-export downloads and automatic runtime updates
 are not implemented in this first shell. Shared task and settings behavior stays
 in the existing Frontend and App Server.
+
+Android Back navigates page history, then returns to the connection screen. This
+keeps native connection controls out of the shared task interface. The connection
+screen includes **Share connection diagnostics** for native picker outcomes and
+WebView error metadata; it excludes file names, URLs, message content and secrets.
+
+Existing Codex sessions are grouped by their original working directory. A CLI
+session started in Termux home appears under the home Project, even if commands
+later operate inside a repository. Add that original folder as a Project to find
+the session; changing command working directories does not move its history.
 
 Termux API: https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent

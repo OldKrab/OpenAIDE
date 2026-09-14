@@ -18,6 +18,8 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
+import android.webkit.WebResourceError;
+import android.webkit.ConsoleMessage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -47,6 +49,8 @@ public final class MainActivity extends Activity {
     private Button connect;
     private WebView browser;
     private ValueCallback<Uri[]> fileCallback;
+    private long pickerStarted;
+    private final AndroidDiagnostics diagnostics = new AndroidDiagnostics();
 
     @Override public void onCreate(Bundle savedState) {
         super.onCreate(savedState);
@@ -92,6 +96,15 @@ public final class MainActivity extends Activity {
         permissions.setOnClickListener(view -> startActivity(new Intent(
             Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))));
         layout.addView(permissions);
+        Button diagnosticButton = new Button(this);
+        diagnosticButton.setText("Share connection diagnostics");
+        diagnosticButton.setOnClickListener(view -> {
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType("text/plain");
+            share.putExtra(Intent.EXTRA_TEXT, diagnostics.snapshot());
+            startActivity(Intent.createChooser(share, "Share OpenAIDE diagnostics"));
+        });
+        layout.addView(diagnosticButton);
         status = new TextView(this);
         status.setTextSize(16);
         layout.addView(status);
@@ -227,6 +240,9 @@ public final class MainActivity extends Activity {
         browser.getSettings().setAllowFileAccess(false);
         browser.getSettings().setAllowContentAccess(true);
         browser.setWebViewClient(new WebViewClient() {
+            @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                diagnostics.record("web_resource", "failed", error.getErrorCode(), 0);
+            }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 if ("data".equals(uri.getScheme()) || "blob".equals(uri.getScheme())) return null;
@@ -249,25 +265,35 @@ public final class MainActivity extends Activity {
             }
         });
         browser.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onConsoleMessage(ConsoleMessage message) {
+                diagnostics.record("web_console", message.messageLevel().name(), message.lineNumber(), 0);
+                return true;
+            }
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
-                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                if (fileCallback != null) {
+                    diagnostics.record("file_picker", "replaced", 0, SystemClock.elapsedRealtime() - pickerStarted);
+                    fileCallback.onReceiveValue(null);
+                }
                 fileCallback = callback;
+                pickerStarted = SystemClock.elapsedRealtime();
+                diagnostics.record("file_picker", "started", 0, 0);
                 try { startActivityForResult(params.createIntent(), FILE_REQUEST); }
-                catch (ActivityNotFoundException error) { fileCallback.onReceiveValue(null); fileCallback = null; }
+                catch (ActivityNotFoundException error) {
+                    diagnostics.record("file_picker", "unavailable", 0, SystemClock.elapsedRealtime() - pickerStarted);
+                    fileCallback.onReceiveValue(null);
+                    fileCallback = null;
+                }
                 return true;
             }
         });
         LinearLayout frame = new LinearLayout(this);
         frame.setOrientation(LinearLayout.VERTICAL);
+        frame.setBackgroundColor(Color.rgb(248, 249, 251));
         frame.setOnApplyWindowInsetsListener((view, insets) -> {
             view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
             return insets;
         });
-        Button connectionButton = new Button(this);
-        connectionButton.setText("Connection");
-        connectionButton.setOnClickListener(view -> showConnection());
-        frame.addView(connectionButton);
         frame.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(frame);
         browser.loadUrl(ENDPOINT, Collections.singletonMap("Authorization", authorization()));
@@ -276,8 +302,13 @@ public final class MainActivity extends Activity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == FILE_REQUEST && fileCallback != null) {
-            fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result, data));
+            Uri[] selected = WebChromeClient.FileChooserParams.parseResult(result, data);
+            diagnostics.record("file_picker", selected == null ? "cancelled" : "selected",
+                selected == null ? 0 : selected.length, SystemClock.elapsedRealtime() - pickerStarted);
+            fileCallback.onReceiveValue(selected);
             fileCallback = null;
+        } else if (request == FILE_REQUEST) {
+            diagnostics.record("file_picker", "callback_lost", 0, 0);
         }
     }
 
@@ -290,7 +321,10 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         generation++;
         worker.shutdownNow();
-        if (fileCallback != null) fileCallback.onReceiveValue(null);
+        if (fileCallback != null) {
+            diagnostics.record("file_picker", "activity_destroyed", 0, SystemClock.elapsedRealtime() - pickerStarted);
+            fileCallback.onReceiveValue(null);
+        }
         if (browser != null) browser.destroy();
         super.onDestroy();
     }

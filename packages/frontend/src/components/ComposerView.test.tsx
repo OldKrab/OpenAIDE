@@ -284,6 +284,20 @@ describe("Composer view behavior", () => {
     expect(renderer.root.findAllByProps({ className: "composer-footer-status" })).toHaveLength(0);
   });
 
+  it("accepts an image picker result after the attachment menu closes", async () => {
+    const fileBrowser = fileBrowserCallbacks();
+    const renderer = renderComposer({ fileBrowser });
+    click(buttonByLabel(renderer.root, "Add context"));
+    const input = renderer.root.findByProps({ type: "file", accept: "image/*" });
+    act(() => renderer.root.findByType("section").props.onKeyDown({ key: "Escape" }));
+    expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
+    expect(renderer.root.findByProps({ type: "file", accept: "image/*" })).toBe(input);
+    const image = new File(["image"], "selected.png", { type: "image/png" });
+    act(() => input.props.onChange({ currentTarget: { value: "selected.png" }, target: { files: [image] } }));
+    await settleRenderer();
+    expect(fileBrowser.attachImage).toHaveBeenCalledWith(image);
+  });
+
   it("uploads every selected image through the App Server attachment callback", async () => {
     const first = new File(["first"], "first.png", { type: "image/png" });
     const second = new File(["second"], "second.png", { type: "image/png" });

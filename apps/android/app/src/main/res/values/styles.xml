@@ -1,0 +1,9 @@
+<resources>
+    <style name="OpenAIDETheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">#F8F9FB</item>
+        <item name="android:navigationBarColor">#F8F9FB</item>
+        <item name="android:windowBackground">#F8F9FB</item>
+    </style>
+</resources>
