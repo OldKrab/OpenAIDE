@@ -2286,6 +2286,26 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
         other => panic!("expected tool call event, got {other:?}"),
     }
 
+    let edit = tool_call_event(
+        &ToolCall::new("tool_call_edit", "Edit file")
+            .kind(ToolKind::Edit)
+            .raw_input(serde_json::json!({
+                "filePath": "/workspace/sample-project/packages/frontend/src/stateIngestionTask.ts",
+                "oldString": "previous contents",
+                "newString": "next contents",
+                "replaceAll": false
+            })),
+    );
+    match edit {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(
+                tool_call.input_summary.as_deref(),
+                Some("stateIngestionTask.ts")
+            );
+        }
+        other => panic!("expected tool call event, got {other:?}"),
+    }
+
     let secret_argument = tool_call_event(
         &ToolCall::new("tool_call_secret_argument", "Authenticated request")
             .kind(ToolKind::Execute)
