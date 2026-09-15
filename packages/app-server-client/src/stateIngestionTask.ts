@@ -54,6 +54,7 @@ function applyTaskChanges(
       : changes.activeTurnStartedAt,
     lifecycle: changes.lifecycle ?? snapshot.task.lifecycle,
     preparation: changes.preparation ?? snapshot.task.preparation,
+    permissionPolicy: changes.permissionPolicy ?? snapshot.task.permissionPolicy,
     agentConfig: changes.agentConfig ?? snapshot.task.agentConfig,
     agentCommands: changes.agentCommands ?? snapshot.task.agentCommands,
     sendCapability: changes.sendCapability ?? snapshot.task.sendCapability,

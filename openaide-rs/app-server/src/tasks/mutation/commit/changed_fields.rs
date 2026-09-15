@@ -5,6 +5,7 @@ pub(super) struct ChangedFields {
     pub summary: bool,
     pub lifecycle: bool,
     pub preparation: bool,
+    pub permission_policy: bool,
     pub agent_config: bool,
     pub agent_commands: bool,
     pub send_capability: bool,
@@ -31,6 +32,7 @@ pub(super) fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> Change
         summary,
         lifecycle: original.lifecycle != task.lifecycle,
         preparation,
+        permission_policy: original.permission_policy != task.permission_policy,
         agent_config: preparation
             || original.config_options_catalog != task.config_options_catalog
             || original.config_mutation != task.config_mutation

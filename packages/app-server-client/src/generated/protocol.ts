@@ -1054,7 +1054,12 @@ export type TaskChanges = { task?: TaskSummary | null,
 /**
  * Present when the active-turn clock changes; inner `None` clears it.
  */
-activeTurnStartedAt?: string | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, inputCapabilities?: TaskInputCapabilities | null,
+activeTurnStartedAt?: string | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null,
+/**
+ * Task-owned permission handling. Carried as a delta so an open replica
+ * learns about `task/setPermissionPolicy` without a fresh baseline.
+ */
+permissionPolicy?: TaskPermissionPolicy | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, inputCapabilities?: TaskInputCapabilities | null,
 /**
  * Outer option controls delta presence; inner option clears stale session usage.
  */
