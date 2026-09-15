@@ -1,5 +1,11 @@
 plugins { id 'com.android.application' }
 
+def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../../package.json')).version as String
+if (!(appVersion ==~ /\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?/)) throw new GradleException('Invalid Android release version')
+def versionParts = appVersion.split('-')[0].split('\\.').collect { it.toLong() }
+def appVersionCode = versionParts[0] * 1000000 + versionParts[1] * 1000 + versionParts[2]
+if (versionParts[1] > 999 || versionParts[2] > 999 || appVersionCode < 1 || appVersionCode > 2100000000) throw new GradleException('Android version is out of range')
+
 android {
     namespace 'io.openaide.android'
     compileSdk 35
@@ -20,14 +26,15 @@ android {
         applicationId 'io.openaide.android'
         minSdk 26
         targetSdk 35
-        versionCode 7
-        versionName '0.4.2'
+        versionCode appVersionCode.toInteger()
+        versionName appVersion
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    buildFeatures { buildConfig true }
     buildTypes {
         release {
             if (System.getenv('OPENAIDE_ANDROID_KEYSTORE')) signingConfig signingConfigs.debug
