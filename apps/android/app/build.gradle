@@ -3,6 +3,8 @@ plugins { id 'com.android.application' }
 android {
     namespace 'io.openaide.android'
     compileSdk 35
+    useLibrary 'android.test.runner', false
+    useLibrary 'android.test.base', false
     signingConfigs {
         debug {
             if (System.getenv('OPENAIDE_ANDROID_KEYSTORE')) {
@@ -18,13 +20,22 @@ android {
         applicationId 'io.openaide.android'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '0.2.0'
+        versionCode 7
+        versionName '0.4.2'
+        testInstrumentationRunner 'android.test.InstrumentationTestRunner'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    buildTypes {
+        release {
+            if (System.getenv('OPENAIDE_ANDROID_KEYSTORE')) signingConfig signingConfigs.debug
+        }
+    }
     lint { abortOnError true }
 }
-dependencies { testImplementation 'junit:junit:4.13.2' }
+dependencies {
+    implementation 'com.google.zxing:core:3.5.3'
+    testImplementation 'junit:junit:4.13.2'
+}

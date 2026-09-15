@@ -188,7 +188,7 @@ export function DataSupportSettingsTab({
   );
 }
 
-function GeneralSection({
+export function GeneralSection({
   children,
   description,
   id,
@@ -246,7 +246,7 @@ function ThemePicker({ appearance }: { appearance: FrontendShellAppearance }) {
   );
 }
 
-function GeneralPreferenceRow({
+export function GeneralPreferenceRow({
   action,
   detail,
   icon,
@@ -271,7 +271,7 @@ function GeneralPreferenceRow({
   );
 }
 
-function SettingsSwitch({
+export function SettingsSwitch({
   checked,
   disabled = false,
   label,

@@ -6,6 +6,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 final class WebResourcePolicy {
     private final Set<String> documents = ConcurrentHashMap.newKeySet();
+    private volatile ConnectionProfile profile = new ConnectionProfile("http://127.0.0.1:5474/", "android", "unused", true);
+
+    void use(ConnectionProfile profile) { clear(); this.profile = profile; }
 
     void allowDocument(String address) {
         URI uri = URI.create(address);
@@ -20,8 +23,7 @@ final class WebResourcePolicy {
             URI uri = URI.create(address);
             return "data".equals(uri.getScheme()) || "blob".equals(uri.getScheme())
                 || documents.contains(address)
-                || ("http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost())
-                    && uri.getPort() == 5474 && uri.getUserInfo() == null);
+                || profile.owns(address);
         } catch (IllegalArgumentException error) {
             return false;
         }

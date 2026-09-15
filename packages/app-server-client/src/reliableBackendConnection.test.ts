@@ -12,6 +12,7 @@ import {
   PERMISSION_REQUEST,
   STATE_SUBSCRIBE,
   TASK_LIST,
+  TASK_SEND,
   type ClientInstanceId,
 } from "./generated/protocol";
 
@@ -430,6 +431,98 @@ describe("ReliableBackendConnection", () => {
     connection.close();
   });
 
+  it("resynchronizes a restarted server behind the same proxy without replaying interrupted requests", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const statuses: string[] = [];
+    const baselines = vi.fn();
+    const snapshots = vi.fn();
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    connection.handleRecoveryBaseline(baselines);
+    try {
+      await connection.initialize({
+        clientInstanceId: "client-1" as ClientInstanceId,
+        shell: { kind: "web" },
+        requestedSurface: { kind: "home" },
+        capabilities: { protocol: [], shell: [] },
+      });
+      connection.subscribeState({ kind: "projects" }, { onSnapshot: snapshots });
+      await vi.waitFor(() => expect(snapshots).toHaveBeenCalledOnce());
+      transport.restartServer();
+      transport.holdNextSubscription("projects");
+      await expect(connection.request(TASK_SEND, { taskId: "task-1" as never, message: { text: "Do not replay" } })).rejects.toThrow();
+      await vi.waitFor(() => expect(transport.subscriptionSessions()).toContain("session-2:projects"));
+      expect(statuses.at(-1)).toBe("recovering");
+      expect(transport.sentMessageSessions()).toEqual(["session-1"]);
+      const followUp = connection.request(TASK_LIST, { lifecycle: "open" });
+      transport.resolveHeldSubscription();
+      await expect(followUp).resolves.toEqual({ tasks: [], revision: 2 });
+      expect(statuses.at(-1)).toBe("ready");
+      expect(snapshots).toHaveBeenCalledTimes(2);
+      expect(transport.sentMessageSessions()).toEqual(["session-1"]);
+      expect(baselines).toHaveBeenCalledWith({ reason: "appServerRestarted", result: initializeResult("cursor-2", "server-2") });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("explicitly retries a failed replacement once and shares its readiness barrier", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc", connectionId: "connection-1",
+      fetch: transport.fetch, retryDelayMs: 1, heartbeatIntervalMs: 60_000,
+    });
+    const statuses: string[] = [];
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    try {
+      await connection.initialize({
+        clientInstanceId: "client-1" as ClientInstanceId,
+        shell: { kind: "web" }, requestedSurface: { kind: "home" },
+        capabilities: { protocol: [], shell: [] },
+      });
+      transport.failNextReplacementInitialization();
+      transport.expireReplayOnNextReceive();
+      await vi.waitFor(() => expect(statuses.at(-1)).toBe("unavailable"));
+      connection.retryRecovery?.();
+      connection.retryRecovery?.();
+      await vi.waitFor(() => expect(statuses.at(-1)).toBe("ready"));
+      await expect(connection.request(TASK_LIST, { lifecycle: "open" })).resolves.toEqual({ tasks: [], revision: 2 });
+      expect(transport.openedSessions()).toBe(3);
+      expect(transport.taskListSessions()).toEqual(["session-3"]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rejects an unannounced local server identity change", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableLocalHttpBackendConnection({
+      endpointUrl: "http://app-server.test/rpc", authToken: "token-1", connectionId: "connection-1",
+      fetch: transport.fetch, retryDelayMs: 1, heartbeatIntervalMs: 60_000,
+    });
+    const statuses: string[] = [];
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    try {
+      await connection.initialize({
+        clientInstanceId: "client-1" as ClientInstanceId,
+        shell: { kind: "web" }, requestedSurface: { kind: "home" },
+        capabilities: { protocol: [], shell: [] },
+      });
+      transport.restartServer();
+      transport.expireReplayOnNextReceive();
+      await vi.waitFor(() => expect(statuses.at(-1)).toBe("unavailable"));
+      await expect(connection.request(TASK_LIST, { lifecycle: "open" })).rejects.toThrow("App Server instance changed");
+    } finally {
+      connection.close();
+    }
+  });
+
   it("returns replacement initialization when the old pending initialize is rejected by peer closure", async () => {
     const transport = createExpiringSessionTransport("transport", "task", true);
     let replaceEndpoint: ((endpoint: { endpointUrl: string; authToken: string }) => void) | undefined;
@@ -608,6 +701,7 @@ function createExpiringSessionTransport(
   const frames = new Map<string, Array<{ sequence: number; message: RpcMessage }>>();
   const initialized: string[] = [];
   const taskLists: string[] = [];
+  const sentMessages: string[] = [];
   const permissionResponses: string[] = [];
   const heartbeats: string[] = [];
   const subscriptions: string[] = [];
@@ -620,6 +714,7 @@ function createExpiringSessionTransport(
   let rejectedAcknowledgementCount = 0;
   let frozenPollCount = 0;
   let opened = 0;
+  let currentServerId = "server-1";
   let holdNextSessionOpen = false;
   let heldSessionOpen: { resolve: (value: ReturnType<typeof response>) => void; value: ReturnType<typeof response> }
     | undefined;
@@ -671,7 +766,7 @@ function createExpiringSessionTransport(
         openedEndpoints.push(endpoint);
         const serverId = serverByEndpoint && endpoint.includes("server-two")
           ? "server-2"
-          : "server-1";
+          : currentServerId;
         const sessionId = `session-${opened}`;
         sessionServers.set(sessionId, serverId);
         const openedResponse = response(200, {
@@ -738,6 +833,10 @@ function createExpiringSessionTransport(
         }
         return response(204, "");
       }
+      if (message.method === TASK_SEND) {
+        sentMessages.push(sessionId);
+        return response(410, "session expired");
+      }
       if (message.method === TASK_LIST) {
         taskLists.push(sessionId);
         if (sessionId === "session-1") {
@@ -785,6 +884,10 @@ function createExpiringSessionTransport(
     failNextReplacementInitialization() {
       failNextReplacementInitialization = true;
     },
+    restartServer() {
+      currentServerId = "server-2";
+    },
+    sentMessageSessions: () => sentMessages,
     rejectedAcknowledgements: () => rejectedAcknowledgementCount,
     holdNextSessionOpen() {
       holdNextSessionOpen = true;

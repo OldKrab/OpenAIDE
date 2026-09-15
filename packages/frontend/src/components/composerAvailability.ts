@@ -64,9 +64,11 @@ export function composerAvailability({
     const canEdit = allowEditingWhileSendBlocked;
     return {
       ...unavailable(
-        connectionStatus === "reconnecting" || connectionStatus === "unavailable"
-          ? "Reconnecting. Draft is saved here."
-          : "Connecting to App Server.",
+        connectionStatus === "unavailable"
+          ? "Disconnected. Draft is saved here."
+          : connectionStatus === "reconnecting"
+            ? "Reconnecting. Draft is saved here."
+            : "Connecting to App Server.",
         canEdit,
       ),
     };

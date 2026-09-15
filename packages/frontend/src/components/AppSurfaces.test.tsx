@@ -654,7 +654,7 @@ describe("AppSurfaces callback wiring", () => {
     act(() => {
       shell.props.onPointerDownCapture(pointerEvent({ clientX: 8, clientY: 120, pointerId: 1 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 160, clientY: 126, pointerId: 1 }));
-      shell.props.onPointerUp(pointerEvent({ clientX: 160, clientY: 126, pointerId: 1 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 160, clientY: 126, pointerId: 1 }));
     });
 
     expect(tree.root.findByProps({ "aria-label": "Close task navigation" }).props["aria-expanded"]).toBe(true);
@@ -667,6 +667,18 @@ describe("AppSurfaces callback wiring", () => {
     const backdrop = tree.root.findByProps({ className: "mobile-navigation-backdrop" });
 
     expect(backdrop.props["aria-hidden"]).toBe("true");
+  });
+
+  it("accepts a swipe slightly inside the left edge over scrollable content", () => {
+    stubMobileWindow();
+    const tree = render(webControllerFor("task"));
+    const shell = tree.root.findByType("main");
+    act(() => {
+      shell.props.onPointerDownCapture(pointerEvent({ clientX: 36, clientY: 300, pointerId: 1 }));
+      shell.props.onPointerMoveCapture(pointerEvent({ clientX: 190, clientY: 306, pointerId: 1 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 190, clientY: 306, pointerId: 1 }));
+    });
+    expect(tree.root.findByProps({ "aria-label": "Close task navigation" }).props["aria-expanded"]).toBe(true);
   });
 
   it("moves mobile navigation with an in-progress edge swipe", () => {
@@ -738,7 +750,7 @@ describe("AppSurfaces callback wiring", () => {
     act(() => {
       shell.props.onPointerDownCapture(pointerEvent({ clientX: 80, clientY: 120, pointerId: 1 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 160, clientY: 122, pointerId: 1 }));
-      shell.props.onPointerUp(pointerEvent({ clientX: 160, clientY: 122, pointerId: 1 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 160, clientY: 122, pointerId: 1 }));
     });
 
     expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
@@ -753,7 +765,7 @@ describe("AppSurfaces callback wiring", () => {
     act(() => {
       shell.props.onPointerDownCapture(pointerEvent({ clientX: 8, clientY: 120, pointerId: 1 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 30, clientY: 190, pointerId: 1 }));
-      shell.props.onPointerUp(pointerEvent({ clientX: 30, clientY: 190, pointerId: 1 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 30, clientY: 190, pointerId: 1 }));
     });
 
     expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
@@ -776,7 +788,7 @@ describe("AppSurfaces callback wiring", () => {
         pointerId: 1,
         setPointerCapture,
       }));
-      shell.props.onPointerUp(pointerEvent({ clientX: 120, clientY: 800, pointerId: 1 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 120, clientY: 800, pointerId: 1 }));
     });
 
     expect(setPointerCapture).not.toHaveBeenCalled();
@@ -794,7 +806,7 @@ describe("AppSurfaces callback wiring", () => {
     act(() => {
       shell.props.onPointerDownCapture(pointerEvent({ clientX: 240, clientY: 120, pointerId: 1 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
-      shell.props.onPointerCancel(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
+      shell.props.onPointerCancelCapture(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
     });
 
     expect(tree.root.findByProps({ "aria-label": "Close task navigation" }).props["aria-expanded"]).toBe(true);
@@ -811,7 +823,7 @@ describe("AppSurfaces callback wiring", () => {
     act(() => {
       shell.props.onPointerDownCapture(pointerEvent({ clientX: 240, clientY: 120, pointerId: 1 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
-      shell.props.onPointerUp(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
     });
 
     expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
@@ -825,7 +837,7 @@ describe("AppSurfaces callback wiring", () => {
     act(() => {
       shell.props.onPointerDownCapture(pointerEvent({ clientX: 8, clientY: 120, pointerId: 1, timeStamp: 0 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 80, clientY: 124, pointerId: 1, timeStamp: 60 }));
-      shell.props.onPointerUp(pointerEvent({ clientX: 80, clientY: 124, pointerId: 1, timeStamp: 70 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 80, clientY: 124, pointerId: 1, timeStamp: 70 }));
     });
 
     expect(tree.root.findByProps({ "aria-label": "Close task navigation" }).props["aria-expanded"]).toBe(true);
@@ -839,7 +851,7 @@ describe("AppSurfaces callback wiring", () => {
     act(() => {
       shell.props.onPointerDownCapture(pointerEvent({ clientX: 8, clientY: 120, pointerId: 1, timeStamp: 0 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 80, clientY: 124, pointerId: 1, timeStamp: 50 }));
-      shell.props.onPointerUp(pointerEvent({ clientX: 80, clientY: 124, pointerId: 1, timeStamp: 200 }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 80, clientY: 124, pointerId: 1, timeStamp: 200 }));
     });
 
     expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);

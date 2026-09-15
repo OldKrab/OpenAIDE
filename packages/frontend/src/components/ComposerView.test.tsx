@@ -637,18 +637,18 @@ describe("Composer view behavior", () => {
       selection: selection({ isolation: "git_worktree" }),
     });
 
-    click(buttonByText(renderer.root, "More · 3"));
-    expect(text(menuByLabel(renderer.root, "More options"))).toContain("Current: Balanced");
+    click(buttonByText(renderer.root, "Options · 3"));
+    expect(text(menuByLabel(renderer.root, "Options"))).toContain("Current: Balanced");
 
     click(menuButtonByStrongLabel(renderer.root, "Reasoning"));
     expect(text(menuByLabel(renderer.root, "Reasoning"))).toContain("Higher accuracy.");
     click(menuButtonByStrongLabel(renderer.root, "High"));
 
     expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", { type: "id", value: "high" });
-    expect(text(menuByLabel(renderer.root, "More options"))).toContain("Reasoning");
+    expect(text(menuByLabel(renderer.root, "Options"))).toContain("Reasoning");
   });
 
-  it("closes a grouped option submenu when More is pressed again", () => {
+  it("closes a grouped option submenu when Options is pressed again", () => {
     vi.stubGlobal("ResizeObserver", class {
       disconnect() {}
       observe() {}
@@ -671,14 +671,14 @@ describe("Composer view behavior", () => {
       },
     });
 
-    click(buttonByText(renderer.root, "More · 3"));
+    click(buttonByText(renderer.root, "Options · 3"));
     click(menuButtonByStrongLabel(renderer.root, "Reasoning"));
     expect(menuByLabel(renderer.root, "Reasoning")).toBeTruthy();
 
-    click(buttonByText(renderer.root, "More · 3"));
+    click(buttonByText(renderer.root, "Options · 3"));
 
     expect(menusByLabel(renderer.root, "Reasoning")).toHaveLength(0);
-    expect(menusByLabel(renderer.root, "More options")).toHaveLength(0);
+    expect(menusByLabel(renderer.root, "Options")).toHaveLength(0);
   });
 
   it("keeps grouped Configuration Options locked while leaving mutable Isolation available", () => {
@@ -979,8 +979,8 @@ describe("Composer view behavior", () => {
       showIsolationSelector: false,
     });
 
-    click(buttonByText(renderer.root, "More · 1"));
-    const overflow = menuByLabel(renderer.root, "More options");
+    click(buttonByText(renderer.root, "Options · 1"));
+    const overflow = menuByLabel(renderer.root, "Options");
     const control = buttonByLabel(overflow, "Brave mode: Off");
     click(control);
 
@@ -988,7 +988,7 @@ describe("Composer view behavior", () => {
       "brave_mode",
       { type: "boolean", value: true },
     );
-    expect(menuByLabel(renderer.root, "More options")).toBeTruthy();
+    expect(menuByLabel(renderer.root, "Options")).toBeTruthy();
   });
 
   it("keeps grouped configuration rows iconless and the boolean indicator beside its label", () => {
@@ -1005,8 +1005,8 @@ describe("Composer view behavior", () => {
       showIsolationSelector: false,
     });
 
-    click(buttonByText(renderer.root, "More · 2"));
-    const overflow = menuByLabel(renderer.root, "More options");
+    click(buttonByText(renderer.root, "Options · 2"));
+    const overflow = menuByLabel(renderer.root, "Options");
     const reasoning = menuButtonByStrongLabel(overflow, "Reasoning");
     const boolean = buttonByLabel(overflow, "Brave mode: Off");
     const booleanCopy = boolean.findByProps({ className: "composer-boolean-copy" });
@@ -1044,11 +1044,11 @@ describe("Composer view behavior", () => {
     });
 
     const more = renderer.root.findByProps({
-      "aria-label": "More · 1, updating Agent option",
+      "aria-label": "Options · 1, updating Agent option",
     });
     expect(more.props["aria-busy"]).toBe(true);
     expect(more.props.className).toContain("pending");
-    expect(text(more)).toBe("More · 1");
+    expect(text(more)).toBe("Options · 1");
   });
 
   it("labels mode config controls with the compact selected value", () => {

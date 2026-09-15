@@ -4,6 +4,7 @@
         <item name="android:statusBarColor">#F8F9FB</item>
         <item name="android:navigationBarColor">#202124</item>
         <item name="android:windowBackground">#F8F9FB</item>
+        <item name="android:colorAccent">#397DCE</item>
     </style>
     <style name="OpenAIDETheme" parent="OpenAIDEBaseTheme" />
 </resources>

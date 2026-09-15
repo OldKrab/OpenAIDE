@@ -3,6 +3,7 @@ import type {
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
 import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
+import { androidConnectionSettings } from "./androidConnectionSettings";
 import openAideIconUrl from "../../vscode-extension/media/openaide.png";
 import {
   createWebTaskNotificationManager,
@@ -27,7 +28,7 @@ import { createWebSecretStore } from "./webSecretVault";
 import { createWebSecretMessageHandler } from "./webSecrets";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
-const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "desktop", "data", "worktrees"]);
+const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "connection", "desktop", "data", "worktrees"]);
 const logger = createRuntimeLogger("openaide-webview");
 function openWebExternal(url: string) {
   usableExternalWindow(window.open(url, "_blank", "noopener,noreferrer"));
@@ -82,7 +83,10 @@ export function createWebAppShell(): FrontendShell {
     }
   };
   const navigate = (path: string) => {
-    window.history.pushState(null, "", path);
+    if (window.location.pathname + window.location.search === path) return;
+    const enteringSettings = path.startsWith("/settings") && window.location.pathname !== "/settings";
+    if (path.startsWith("/settings") && isSettingsPath(window.location.pathname)) window.history.replaceState(window.history.state, "", path);
+    else window.history.pushState(enteringSettings ? { openaideSettingsReturn: true } : null, "", path);
     publishRoute();
   };
   const publishRoute = () => {
@@ -93,6 +97,7 @@ export function createWebAppShell(): FrontendShell {
   );
   return {
     appearance,
+    connectionSettings: androidConnectionSettings(window),
     bootstrap,
     clipboard: { writeText: writeBrowserClipboardText },
     sentFiles: {
@@ -142,6 +147,13 @@ export function createWebAppShell(): FrontendShell {
       openSettings: (agentId, returnToNewTask, projectId, settingsTab, settingsIntent) =>
         navigate(settingsPath(agentId, returnToNewTask, projectId, settingsTab, settingsIntent)),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
+      closeSettings(taskId, projectId) {
+        if (window.history.state?.openaideSettingsReturn) window.history.back();
+        else {
+          window.history.replaceState(null, "", taskId ? `/task/${encodeURIComponent(taskId)}` : newTaskPath(projectId));
+          publishRoute();
+        }
+      },
       replaceSettingsTab(tab) {
         replaceSettingsSearch(publishRoute, (search) => {
           search.set("tab", tab);
@@ -370,7 +382,7 @@ function replaceSettingsSearch(
   const query = search.toString();
   const next = query ? `/settings?${query}` : "/settings";
   if (`${window.location.pathname}${window.location.search}` === next) return;
-  window.history.replaceState(null, "", next);
+  window.history.replaceState(window.history.state, "", next);
   publishRoute();
 }
 

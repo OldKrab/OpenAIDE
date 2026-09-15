@@ -736,7 +736,7 @@ describe("host bridge", () => {
     });
 
     expect(pushState).toHaveBeenCalledWith(
-      null,
+      { openaideSettingsReturn: true },
       "",
       "/settings?tab=data&intent=openSupportExport&intentRequestId=diagnostics-1",
     );
@@ -797,6 +797,8 @@ describe("host bridge", () => {
 });
 
 async function installedHostBridge() {
+  Object.assign(window, { navigator: { userAgent: "Browser test" } });
+  if (window.history && window.history.state === undefined) Object.assign(window.history, { state: null });
   const [{ installFrontendShell }, { createBrowserShell }, hostBridge] = await Promise.all([
     import("./frontendShell"),
     import("../../../../apps/browser/frontend/browserShell"),

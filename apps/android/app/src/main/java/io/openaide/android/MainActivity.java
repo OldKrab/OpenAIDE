@@ -2,7 +2,6 @@ package io.openaide.android;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -12,8 +11,6 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.SystemClock;
-import android.provider.Settings;
-import android.util.Base64;
 import android.util.Log;
 import android.webkit.HttpAuthHandler;
 import android.webkit.ValueCallback;
@@ -33,11 +30,9 @@ import android.widget.Toast;
 import android.view.Gravity;
 import android.view.View;
 import java.io.IOException;
-import java.io.ByteArrayOutputStream;
 import java.io.ByteArrayInputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
@@ -46,11 +41,13 @@ import java.util.concurrent.Executors;
 /** Android owns connection UI; all tasks, credentials and execution stay in Termux. */
 public final class MainActivity extends Activity {
     private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
-    private static final String ENDPOINT = "http://127.0.0.1:5474/";
     private static final int FILE_REQUEST = 2;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private volatile int generation;
     private String password;
+    private ConnectionProfile profile;
+    private ConnectionStore connections;
+    private boolean visible;
     private TextView status;
     private Button connect;
     private Button setup;
@@ -61,9 +58,16 @@ public final class MainActivity extends Activity {
     private final WebResourcePolicy resourcePolicy = new WebResourcePolicy();
     private boolean connecting;
     private boolean mainFrameFailed;
+    private boolean settingsOpen;
+    private boolean credentialsUnavailable;
+    private boolean pairingAttempted;
+    private WorkspaceConnectionBridge connectionBridge;
+    private boolean pendingSettings;
+    private BackNavigation backNavigation;
 
     @Override public void onCreate(Bundle savedState) {
         super.onCreate(savedState);
+        backNavigation = new BackNavigation(this, () -> browser, this::backThroughHistory);
         SharedPreferences preferences = getSharedPreferences("connection", MODE_PRIVATE);
         password = preferences.getString("password", null);
         if (password == null) {
@@ -74,13 +78,20 @@ public final class MainActivity extends Activity {
             password = encoded.toString();
             preferences.edit().putString("password", password).apply();
         }
+        connections = new ConnectionStore(this);
+        try { profile = connections.load(); }
+        catch (RuntimeException error) { profile = connections.local(); credentialsUnavailable = true; }
         showConnection();
-        if (checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) requestConnection();
-        if (getIntent().getBooleanExtra("show_settings", false)) showSettings();
+        if (credentialsUnavailable) openSetup("remote");
+        else if (getIntent().getBooleanExtra("show_settings", false)) showSettings();
+        else if (preferences.getBoolean("configured", false) || checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) requestConnection();
+        else openSetup("welcome");
     }
 
     private void showConnection() {
         generation++;
+        connecting = false;
+        if (connectionBridge != null) { connectionBridge.dispose(); connectionBridge = null; }
         if (browser != null) { browser.destroy(); browser = null; }
         resourcePolicy.clear();
         LinearLayout layout = new LinearLayout(this);
@@ -88,7 +99,7 @@ public final class MainActivity extends Activity {
         layout.setGravity(Gravity.CENTER);
         int padding = (int) (24 * getResources().getDisplayMetrics().density);
         layout.setPadding(padding, padding * 2, padding, padding);
-        layout.setBackgroundColor(Color.rgb(245, 246, 248));
+        layout.setBackgroundColor(shellBackground());
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.mipmap.ic_launcher);
         icon.setContentDescription("OpenAIDE");
@@ -98,26 +109,27 @@ public final class MainActivity extends Activity {
         title.setTextSize(30);
         layout.addView(title);
         TextView instructions = new TextView(this);
-        instructions.setText("Your workspace, on this phone.\n\n"
-            + "Code with your agents. Your projects and login stay in Termux.\n"
-            + "Background mode lets work continue with the screen locked.\n");
+        instructions.setText("Your agent workspace");
         instructions.setGravity(Gravity.CENTER);
         instructions.setTextSize(16);
         layout.addView(instructions);
         connect = new Button(this);
-        connect.setText("Start working");
+        connect.setText("Open workspace");
+        connect.setAllCaps(false);
         connect.setOnClickListener(view -> requestConnection());
         layout.addView(connect);
         setup = new Button(this);
-        setup.setText("Setup & background");
-        setup.setOnClickListener(view -> showSettings());
+        setup.setText("Connection settings");
+        setup.setAllCaps(false);
+        setup.setBackgroundColor(Color.TRANSPARENT);
+        setup.setOnClickListener(view -> {
+            pendingSettings = false;
+            openSetup(getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false) ? "settings" : "welcome");
+        });
         layout.addView(setup);
-        if (checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) {
-            instructions.setVisibility(View.GONE);
-            setup.setVisibility(View.GONE);
-        }
         status = new TextView(this);
         status.setTextSize(16);
+        status.setGravity(Gravity.CENTER);
         layout.addView(status);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -131,45 +143,43 @@ public final class MainActivity extends Activity {
     }
 
     private void showSettings() {
-        new AlertDialog.Builder(this).setTitle("On-device workspace")
-            .setItems(new String[]{"Background mode", "Battery settings", "Termux settings", "App permissions", "Setup help", "Share diagnostics"},
-                (dialog, which) -> {
-                    if (which == 0) {
-                        boolean enabled = getSharedPreferences("connection", MODE_PRIVATE).getBoolean("background", true);
-                        new AlertDialog.Builder(this).setTitle("Work with the screen locked")
-                            .setMessage("Keeps the CPU awake and shows a notification. This uses extra battery. "
-                                + "Allow unrestricted battery use for both Termux and OpenAIDE for reliable background work.")
-                            .setPositiveButton(enabled ? "Turn off" : "Enable", (choice, button) -> {
-                                getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("background", !enabled).apply();
-                                if (enabled) stopService(new Intent(this, BackgroundService.class));
-                                else startBackgroundWork();
-                            }).setNegativeButton("Cancel", null).show();
-                    } else if (which == 1) openSettingsIntent(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-                    else if (which == 2) openSettingsIntent(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.termux")));
-                    else if (which == 3) openSettingsIntent(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
-                    else if (which == 4) new AlertDialog.Builder(this).setTitle("One-time setup")
-                        .setMessage("Install Termux, Node.js, Git, Codex and the OpenAIDE runtime. "
-                            + "Sign in to Codex in Termux. Enable allow-external-apps=true in ~/.termux/termux.properties, "
-                            + "then grant OpenAIDE permission to run commands. Future launches connect automatically.")
-                        .setPositiveButton("Done", null).show();
-                    else {
-                        Intent share = new Intent(Intent.ACTION_SEND).setType("text/plain");
-                        share.putExtra(Intent.EXTRA_TEXT, diagnostics.snapshot());
-                        startActivity(Intent.createChooser(share, "Share OpenAIDE diagnostics"));
-                    }
-                }).setPositiveButton("Done", null).show();
+        pendingSettings = true;
+        if (browser != null) navigateToConnectionSettings();
+        else if (getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false)) requestConnection();
+        else openSetup("welcome");
     }
 
-    private void openSettingsIntent(Intent intent) {
-        try { startActivity(intent); }
-        catch (ActivityNotFoundException error) {
-            Toast.makeText(this, "Open your phone's Settings app to change this option.", Toast.LENGTH_LONG).show();
+    private void navigateToConnectionSettings() {
+        if (browser == null) return;
+        pendingSettings = false;
+        browser.evaluateJavascript("history.pushState(null, '', '/settings?tab=connection'); window.dispatchEvent(new PopStateEvent('popstate'))", null);
+    }
+
+    private void openSetup(String screen) {
+        if (settingsOpen) return;
+        settingsOpen = true;
+        startActivityForResult(new Intent(this, SetupActivity.class).putExtra("screen", screen)
+            .putExtra("diagnostics", diagnostics.snapshot()), 5);
+    }
+
+    private void changeConnection() {
+        android.webkit.WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword();
+        if (profile.local && browser != null) {
+            try { startService(new Intent(this, BackgroundService.class).putExtra("visible", false)); }
+            catch (RuntimeException ignored) { }
         }
+        profile = connections.load();
+        credentialsUnavailable = false;
+        pairingAttempted = false;
+        password = getSharedPreferences("connection", MODE_PRIVATE).getString("password", password);
+        showConnection();
+        requestConnection();
     }
 
     private void startBackgroundWork() {
+        if (!profile.local) return;
         if (!getSharedPreferences("connection", MODE_PRIVATE).getBoolean("background", true)) return;
-        try { startForegroundService(new Intent(this, BackgroundService.class)); }
+        try { startForegroundService(new Intent(this, BackgroundService.class).putExtra("visible", visible)); }
         catch (RuntimeException error) {
             diagnostics.record("background_work", "start_failed", 0, 0);
             Toast.makeText(this, "Background mode could not start. Keep OpenAIDE open and try again.", Toast.LENGTH_LONG).show();
@@ -189,26 +199,32 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        visible = true;
         if (browser != null) {
+            browser.resumeTimers();
             browser.onResume();
+            if (connectionBridge != null) connectionBridge.resume();
             browser.evaluateJavascript("window.dispatchEvent(new Event('openaide:resume'))", null);
             if (fileCallback == null && !connecting) connect();
         }
     }
 
     @Override protected void onPause() {
-        if (browser != null) browser.onPause();
+        visible = false;
+        if (browser != null && profile.local) startBackgroundWork();
+        if (browser != null) { browser.onPause(); browser.pauseTimers(); }
         super.onPause();
     }
 
     private void requestConnection() {
+        if (!profile.local) { connect(); return; }
         try { getPackageManager().getPackageInfo("com.termux", 0); }
         catch (PackageManager.NameNotFoundException error) {
-            status.setText("Install and open Termux first, then return here.");
+            openSetup("local");
             return;
         }
         if (checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{PERMISSION}, 1);
+            openSetup("local");
             return;
         }
         connect();
@@ -216,6 +232,10 @@ public final class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
+        if (connectionBridge != null && SetupPagePolicy.isConnectionRoute(profile, browser.getUrl())) {
+            connectionBridge.onRequestPermissionsResult(request, permissions, results);
+            return;
+        }
         if (request != 1) return;
         if (request == 1 && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) connect();
         else status.setText("Open App permissions and allow running commands in Termux, then connect again.");
@@ -234,33 +254,42 @@ public final class MainActivity extends Activity {
             int response = probe();
             if (response == 200) { finishConnection(attempt, started); return; }
             if (response == 503) { waitForServer(attempt, started); return; }
-            if (response == 401) {
-                fail(attempt, "A server with different credentials uses port 5474. Stop it in Termux, then reconnect.");
+            if (response == 401 || response == 403) {
+                if (profile.local && !pairingAttempted) {
+                    pairingAttempted = true;
+                    repairConnection(attempt, started);
+                    return;
+                }
+                fail(attempt, "We couldn’t sign in to your workspace. Check your connection in Settings.");
+                return;
+            }
+            if (!profile.local) {
+                fail(attempt, "Your computer is unreachable. Make sure it is online and your phone is connected to its network or VPN.");
                 return;
             }
             runOnUiThread(() -> {
                 if (attempt != generation) return;
-                try {
-                    String script;
-                    try (var input = getAssets().open("start-termux.sh")) {
-                        ByteArrayOutputStream output = new ByteArrayOutputStream();
-                        byte[] buffer = new byte[4096];
-                        int count;
-                        while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
-                        script = output.toString(StandardCharsets.UTF_8.name());
-                    }
-                    Intent command = new Intent("com.termux.RUN_COMMAND");
-                    command.setClassName("com.termux", "com.termux.app.RunCommandService");
-                    command.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash");
-                    command.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-s"});
-                    command.putExtra("com.termux.RUN_COMMAND_STDIN",
-                        "export OPENAIDE_WEB_PASSWORD='" + password + "'\n" + script);
-                    command.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
-                    startService(command);
-                    waitForServer(attempt, started);
-                } catch (IOException | RuntimeException error) {
-                    fail(attempt, "Could not start Termux. Check its installation and command permission.");
-                }
+                status.setText("Checking local tools…");
+                TermuxCommand.run(this, "check-termux.sh", "", false, (checked, report) -> {
+                    if (attempt != generation || isDestroyed()) return;
+                    if (!checked) { fail(attempt, "Termux needs permission to connect."); openSetup("local"); return; }
+                    try {
+                        org.json.JSONObject checks = new org.json.JSONObject(report.trim());
+                        for (String key : new String[]{"node", "nodeVersion", "codex", "codexVersion", "runtime", "frontend", "storage"}) {
+                            if (!checks.optBoolean(key)) {
+                                fail(attempt, "Let’s finish setting up this phone.");
+                                openSetup("local");
+                                return;
+                            }
+                        }
+                    } catch (org.json.JSONException error) { fail(attempt, "Termux needs permission to connect. Open Connection settings to finish setup."); return; }
+                    status.setText("Starting local workspace…");
+                    TermuxCommand.run(this, "start-termux.sh", TermuxCommand.variable("OPENAIDE_WEB_PASSWORD", password), true,
+                        (success, output) -> {
+                            if (success) waitForServer(attempt, started);
+                            else fail(attempt, output);
+                        });
+                });
             });
         });
     }
@@ -273,16 +302,40 @@ public final class MainActivity extends Activity {
                 catch (InterruptedException error) { Thread.currentThread().interrupt(); return; }
             }
             if (attempt == generation) fail(attempt,
-                "OpenAIDE did not start. Check allow-external-apps=true and the runtime installation. "
-                + "Details: ~/.local/share/openaide-android/state/launcher.log in Termux.");
+                "Your workspace is taking too long to start. Try again, or check this phone in Connection settings.");
+        });
+    }
+
+    private void repairConnection(int attempt, long started) {
+        runOnUiThread(() -> {
+            if (attempt != generation) return;
+            TermuxCommand.run(this, "pair-termux.sh", "", false, (success, output) -> {
+                if (attempt != generation || isDestroyed()) return;
+                if (!success || !output.trim().matches("[a-f0-9]{64}")) {
+                    fail(attempt, "We couldn’t restore your local connection. Open Connection settings to check this phone.");
+                    return;
+                }
+                ConnectionProfile candidate = new ConnectionProfile(profile.endpoint, profile.username, output.trim(), true);
+                worker.execute(() -> {
+                    try { ServerStatus.read(candidate); }
+                    catch (IOException error) { fail(attempt, "Your local connection needs attention. Open Connection settings to check this phone."); return; }
+                    runOnUiThread(() -> {
+                        if (attempt != generation || isDestroyed()) return;
+                        password = candidate.password;
+                        profile = candidate;
+                        getSharedPreferences("connection", MODE_PRIVATE).edit().putString("password", password).apply();
+                        worker.execute(() -> finishConnection(attempt, started));
+                    });
+                });
+            });
         });
     }
 
     private int probe() {
-        int authorized = requestStatus(ENDPOINT, true);
+        int authorized = requestStatus(profile.endpoint, true);
         if (authorized != 200) return authorized;
-        if (requestStatus(ENDPOINT, false) != 401) return 401;
-        return requestStatus(ENDPOINT + "readyz", true);
+        if (requestStatus(profile.endpoint, false) != 401) return 401;
+        return requestStatus(profile.endpoint + "readyz", true);
     }
 
     private int requestStatus(String address, boolean authenticated) {
@@ -299,13 +352,22 @@ public final class MainActivity extends Activity {
     }
 
     private String authorization() {
-        return "Basic " + Base64.encodeToString(("android:" + password).getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+        return ServerStatus.authorization(profile);
     }
 
     private void finishConnection(int attempt, long started) {
+        if (attempt != generation) return;
+        try { ServerStatus.read(profile); }
+        catch (ServerStatus.Incompatible error) { fail(attempt, "Runtime compatibility check failed. Update the runtime or run setup checks."); return; }
+        catch (IOException error) {
+            if (SystemClock.elapsedRealtime() - started < 45_000) waitForServer(attempt, started);
+            else fail(attempt, "The server is not responding. Check connection settings and retry.");
+            return;
+        }
         runOnUiThread(() -> {
             if (attempt != generation) return;
             connecting = false;
+            getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("configured", true).apply();
             Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
             diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
             startBackgroundWork();
@@ -326,23 +388,32 @@ public final class MainActivity extends Activity {
             connect.setText("Try again");
             status.setText(message);
             diagnostics.record("connection", "failed", attempt, 0);
-            if (browser != null) new AlertDialog.Builder(this).setTitle("Connection interrupted")
-                .setMessage(message).setPositiveButton("Retry", (dialog, which) -> connect())
-                .setNeutralButton("Settings", (dialog, which) -> showSettings())
-                .setNegativeButton("Later", null).show();
+            if (browser != null) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         });
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private void showBrowser() {
+        resourcePolicy.use(profile);
+        WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
         browser = new WebView(this);
+        connectionBridge = new WorkspaceConnectionBridge(this, browser, profile, () -> visible, this::changeConnection);
+        if (visible) browser.resumeTimers();
+        else browser.pauseTimers();
         browser.getSettings().setJavaScriptEnabled(true);
+        browser.getSettings().setUserAgentString(browser.getSettings().getUserAgentString() + " OpenAIDE-Android/1");
         browser.getSettings().setDomStorageEnabled(true);
         browser.getSettings().setAllowFileAccess(false);
         browser.getSettings().setAllowContentAccess(true);
         browser.setWebViewClient(new WebViewClient() {
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 mainFrameFailed = false;
+                connectionBridge.detach();
+            }
+            @Override public void onPageFinished(WebView view, String url) {
+                if (!profile.owns(url)) return;
+                connectionBridge.attach();
+                if (pendingSettings) navigateToConnectionSettings();
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) mainFrameFailed = true;
@@ -356,12 +427,17 @@ public final class MainActivity extends Activity {
                     Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
             }
             @Override public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
-                if ("127.0.0.1".equals(host) && "OpenAIDE".equals(realm)) handler.proceed("android", password);
+                if (java.net.URI.create(profile.endpoint).getHost().equalsIgnoreCase(host)
+                        && realm.startsWith("OpenAIDE")) handler.proceed(profile.username, profile.password);
                 else handler.cancel();
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                if ("http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost()) && uri.getPort() == 5474) return false;
+                if (SetupPagePolicy.opensSettings(profile, view.getUrl(), uri.toString(), request.isForMainFrame(), request.hasGesture())) {
+                    showSettings();
+                    return true;
+                }
+                if (profile.owns(uri.toString())) return false;
                 if (request.hasGesture() && ("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))) {
                     try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
                     catch (ActivityNotFoundException ignored) { }
@@ -371,7 +447,8 @@ public final class MainActivity extends Activity {
         });
         browser.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onConsoleMessage(ConsoleMessage message) {
-                diagnostics.record("web_console", message.messageLevel().name(), message.lineNumber(), 0);
+                if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR || message.messageLevel() == ConsoleMessage.MessageLevel.WARNING)
+                    diagnostics.record("web_console", message.messageLevel().name(), message.lineNumber(), 0);
                 return true;
             }
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
@@ -401,7 +478,7 @@ public final class MainActivity extends Activity {
         });
         LinearLayout frame = new LinearLayout(this);
         frame.setOrientation(LinearLayout.VERTICAL);
-        frame.setBackgroundColor(Color.rgb(248, 249, 251));
+        frame.setBackgroundColor(shellBackground());
         frame.setOnApplyWindowInsetsListener((view, insets) -> {
             view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
@@ -409,11 +486,22 @@ public final class MainActivity extends Activity {
         });
         frame.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(frame);
-        browser.loadUrl(ENDPOINT, Collections.singletonMap("Authorization", authorization()));
+        browser.loadUrl(profile.endpoint, Collections.singletonMap("Authorization", authorization()));
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == 4 && connectionBridge != null) {
+            connectionBridge.onActivityResult(request, result, data);
+            return;
+        }
+        if (request == 5) {
+            settingsOpen = false;
+            if (result == RESULT_OK) changeConnection();
+            else if (browser == null && !credentialsUnavailable && (getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false)
+                || checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)) requestConnection();
+            return;
+        }
         if (request == FILE_REQUEST && fileCallback != null) {
             Uri[] selected = WebChromeClient.FileChooserParams.parseResult(result, data);
             diagnostics.record("file_picker", selected == null ? "cancelled" : "selected",
@@ -453,14 +541,26 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        backNavigation.back();
+    }
+
+    private void backThroughHistory() {
         if (browser != null && browser.canGoBack()) browser.goBack();
         else if (browser != null) moveTaskToBack(true);
         else super.onBackPressed();
     }
 
+    private int shellBackground() {
+        boolean dark = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        return dark ? 0xff1f232b : 0xfff8f9fb;
+    }
+
     @Override protected void onDestroy() {
+        backNavigation.dispose();
         generation++;
         worker.shutdownNow();
+        if (connectionBridge != null) connectionBridge.dispose();
         if (fileCallback != null) {
             diagnostics.record("file_picker", "activity_destroyed", 0, SystemClock.elapsedRealtime() - pickerStarted);
             fileCallback.onReceiveValue(null);

@@ -9,6 +9,7 @@ import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
+import { useBackNavigation } from "./useBackNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
@@ -64,6 +65,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         return project ? [project] : [];
       });
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
+  const [mobileTaskActionsTarget, setMobileTaskActionsTarget] = useState<HTMLElement | null>(null);
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
   const [planDrawerOpen, setPlanDrawerOpen] = useState(false);
   const [projectFolderDialogOpen, setProjectFolderDialogOpen] = useState(false);
@@ -123,6 +125,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   };
   const backFromSettings = isProjectWorkbench
     ? () => {
+        if (frontendShell?.navigation.closeSettings) {
+          frontendShell.navigation.closeSettings(activeNavigationTaskId, bootstrap.surface === "settings" ? bootstrap.projectId : undefined);
+          return;
+        }
         if (activeNavigationTaskId) {
           callbacks.navigation.openTask(activeNavigationTaskId);
           return;
@@ -169,6 +175,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
+  useBackNavigation(mobileNavigationOpen, () => closeMobileNavigation(), 60);
+  useBackNavigation(planDrawerOpen, () => setPlanDrawerOpen(false), 50);
+  useBackNavigation(projectFolderDialogOpen, () => setProjectFolderDialogOpen(false));
+  useBackNavigation(Boolean(projectToRemove), () => setProjectToRemove(undefined));
   // Folder acquisition belongs to the App Shell: Web browses through the App
   // Server, Desktop opens the OS picker, and VS Code delegates to its host.
   const workspaceBrowser = isWebShell ? callbacks.newTask.workspaceBrowser : undefined;
@@ -555,10 +565,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         header={desktopTitleBar}
         headerPlacement={desktopTitleBarPlacement}
         onKeyDown={trapMobileNavigationFocus}
-        onPointerCancel={mobileNavigation.cancelSwipe}
+        onPointerCancelCapture={mobileNavigation.cancelSwipe}
         onPointerDownCapture={mobileNavigation.beginSwipe}
         onPointerMoveCapture={mobileNavigation.trackSwipe}
-        onPointerUp={mobileNavigation.endSwipe}
+        onPointerUpCapture={mobileNavigation.endSwipe}
         sidebar={taskNavigation}
         style={mobileNavigation.dragProgress === undefined
           ? undefined
@@ -591,6 +601,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             <strong>{mobileTitle}</strong>
             <small>{mobileSubtitle}</small>
           </span>
+          <div className="mobile-task-file-action" ref={setMobileTaskActionsTarget} />
           {mobilePermissionTask ? (
             <TaskPermissionPolicyControl
               disabled={renderableTaskArchived || !taskMutationReady}
@@ -636,6 +647,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               controller={controller}
               desktopWindow={desktopWindow}
               focusRequestKey={newTaskFocusRequestKey}
+              headerActionsTarget={mobileLayoutActive ? mobileTaskActionsTarget : null}
               model={taskSurfaceModel}
               projects={navigationProjects}
               onAddProject={addProject}

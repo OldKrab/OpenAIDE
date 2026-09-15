@@ -742,6 +742,8 @@ describe("TaskView timeline presentation", () => {
 
     const rendered = JSON.stringify(tree.toJSON());
     expect(rendered).toContain("Unable to refresh task.");
+    expect(rendered).toContain("Disconnected");
+    expect(rendered).not.toContain("Reconnecting");
     expect(rendered).toContain("Earlier response");
     expect(rendered).toContain("Connection closed.");
     expect(tree.root.findByProps({ role: "textbox", "aria-label": "Message" }).props.contentEditable).toBe("plaintext-only");

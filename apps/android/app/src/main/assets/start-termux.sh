@@ -33,4 +33,40 @@ export OPENAIDE_WEB_STATIC_ROOT="$runtime/packages/frontend/dist"
 export OPENAIDE_APP_SERVER_PATH="$runtime/bin/openaide-app-server"
 export OPENAIDE_WEB_PROJECT_ROOTS="$HOME"
 cd "$runtime"
+export OPENAIDE_ANDROID_RUNTIME="$runtime"
+if command -v runsv >/dev/null 2>&1; then
+    service="$state/service"
+    mkdir -p "$service"
+    cat > "$service/run" <<'RUN'
+#!/data/data/com.termux/files/usr/bin/sh
+cd "$OPENAIDE_ANDROID_RUNTIME"
+date +%s > "$OPENAIDE_WEB_STATE_ROOT/service/started"
+exec node apps/web/src/dev-server.mjs
+RUN
+    cat > "$service/finish" <<'FINISH'
+#!/data/data/com.termux/files/usr/bin/sh
+service="$OPENAIDE_WEB_STATE_ROOT/service"
+count=$(cat "$service/failures" 2>/dev/null || echo 0)
+started=$(cat "$service/started" 2>/dev/null || echo 0)
+if [ $(( $(date +%s) - started )) -gt 60 ]; then count=0; fi
+count=$((count + 1))
+printf '%s' "$count" > "$service/failures"
+if [ "$count" -ge 5 ]; then
+    touch "$service/down"
+    sv -w 1 down "$service" >/dev/null 2>&1 || true
+fi
+sleep 10
+FINISH
+    chmod 700 "$service/run" "$service/finish"
+    exec 9> "$state/supervisor.lock"
+    if ! flock -n 9; then
+        rm -f "$service/down" "$service/failures"
+        sv up "$service"
+        exit 0
+    fi
+    rm -f "$service/down" "$service/failures"
+    printf '%s' "$OPENAIDE_WEB_PASSWORD" > "$state/connection-password"
+    exec runsv "$service"
+fi
+echo 'openaide_android_start outcome=supervisor_missing'
 exec node apps/web/src/dev-server.mjs

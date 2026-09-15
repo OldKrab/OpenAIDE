@@ -38,6 +38,7 @@ type TaskChatTimelineProps = {
   canRestoreTask: boolean;
   chat: ReturnType<typeof renderedChat>;
   chatScroll: ReturnType<typeof useTaskChatScroll>;
+  headerActionsTarget?: HTMLElement | null;
   commandCatalog: TaskSnapshot["agent_commands"];
   items: ChatMessage[];
   liveTextPresentation?: TaskLiveTextPresentation;
@@ -66,6 +67,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   canRestoreTask,
   chat,
   chatScroll,
+  headerActionsTarget,
   commandCatalog,
   items,
   liveTextPresentation,
@@ -202,7 +204,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
           </div>
         </ChatContentSizeChangeContext.Provider>
       </div>
-      <UserMessageNavigator navigation={chatScroll.userMessageNavigation} />
+      <UserMessageNavigator key={taskId} navigation={chatScroll.userMessageNavigation} target={headerActionsTarget} />
       {onQuote && messageListElement ? (
         <QuoteSelectionAction key={taskId} onQuote={onQuote} root={messageListElement} />
       ) : null}

@@ -83,7 +83,7 @@ vi.mock("../services/hostBridge", () => ({
       handleGenerationInvalidated: connection.handleGenerationInvalidated
         ?? defaultHandleGenerationInvalidated,
       handleRecoveryBaseline: connection.handleRecoveryBaseline ?? defaultHandleRecoveryBaseline,
-      handleRecoveryFailed: defaultHandleRecoveryFailed,
+      handleRecoveryFailed: connection.handleRecoveryFailed ?? defaultHandleRecoveryFailed,
     });
   },
   getBootstrap: () => bootstrap,
@@ -1368,6 +1368,55 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
   });
 
+  it("Retry restores a failed session before reopening the Task and preserves its draft", async () => {
+    let invalidate: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;
+    let fail: Parameters<BackendConnection["handleRecoveryFailed"]>[0] | undefined;
+    let recover: Parameters<BackendConnection["handleRecoveryBaseline"]>[0] | undefined;
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "Recovered Task") };
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === STATE_SUBSCRIBE) return params?.scope?.kind === "task"
+        ? taskSubscriptionSnapshot("cursor_2")
+        : nonTaskSubscriptionSnapshot(params?.scope, "cursor_2");
+      throw new Error(method);
+    });
+    const retryRecovery = vi.fn(() => {
+      invalidate?.({ reason: "httpSessionExpired" });
+      return true;
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as BackendConnection["request"],
+      handleNotification: () => () => undefined,
+      handleGenerationInvalidated: (listener) => { invalidate = listener; return () => undefined; },
+      handleRecoveryFailed: (listener) => { fail = listener; return () => undefined; },
+      handleRecoveryBaseline: (listener) => { recover = listener; return () => undefined; },
+      retryRecovery,
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+    await act(async () => { create(<ControllerProbe />); });
+    act(() => {
+      latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "Keep this draft" });
+      invalidate?.({ reason: "httpSessionExpired" });
+      fail?.({ reason: "httpSessionExpired", error: new Error("Replacement failed") });
+    });
+    expect(latestController?.backendConnectionState.status).toBe("unavailable");
+    const openCount = request.mock.calls.filter(([method]) => method === TASK_OPEN).length;
+    await act(async () => { latestController?.retryTaskOpen(); });
+    expect(retryRecovery).toHaveBeenCalledOnce();
+    expect(latestController?.backendConnectionState.status).toBe("reconnecting");
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(openCount);
+    await act(async () => {
+      recover?.({ reason: "httpSessionExpired", result: { snapshot: clientSnapshot() } });
+    });
+    expect(latestController?.backendConnectionState.status).toBe("ready");
+    expect(latestController?.taskMutationReady).toBe(true);
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(openCount + 1);
+    expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
+    expect(request.mock.calls.some(([method]) => method === TASK_SEND)).toBe(false);
+  });
+
   it.each(["open", "baseline"] as const)("returns a missing routed Task to New Task after %s recovery", async (missingAt) => {
     const missing = new AppServerProtocolError({ error: {
       code: "notFound", message: "Task no longer exists", recoverable: false,
@@ -2018,7 +2067,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.tasks.map((task) => task.task_id)).not.toContain("task_prepared");
   });
 
-  it("reacquires an expired Prepared Task while preserving the Composer draft", async () => {
+  it.each(["clientLivenessExpired", "appServerRestarted"] as const)("reacquires a Prepared Task after %s while preserving the Composer draft", async (reason) => {
     let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
     let publishInvalidation: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;
     let acquireCount = 0;
@@ -2080,9 +2129,9 @@ describe("app controller mounted lifecycle", () => {
     expect(publishRecoveryBaseline).toBeTypeOf("function");
 
     await act(async () => {
-      publishInvalidation?.({ reason: "clientLivenessExpired" });
+      publishInvalidation?.({ reason });
       publishRecoveryBaseline?.({
-        reason: "clientLivenessExpired",
+        reason,
         result: { snapshot: clientSnapshot({ includeActiveTask: false }) },
       });
       await Promise.resolve();
@@ -3873,6 +3922,8 @@ type TestBackendConnection = {
   handleNotification?: BackendConnection["handleNotification"];
   handleGenerationInvalidated?: BackendConnection["handleGenerationInvalidated"];
   handleRecoveryBaseline?: BackendConnection["handleRecoveryBaseline"];
+  handleRecoveryFailed?: BackendConnection["handleRecoveryFailed"];
+  retryRecovery?: BackendConnection["retryRecovery"];
   close: () => void;
 };
 

@@ -3,17 +3,15 @@ name: Android APK and Termux runtime
 on:
   workflow_dispatch:
   push:
-    branches: ['android/**']
-    paths: ['apps/android/**', '.github/workflows/android.yml']
+    branches: [main, 'android/**']
   pull_request:
-    paths: ['apps/android/**', '.github/workflows/android.yml']
 
 permissions:
   contents: read
 
 concurrency:
   group: android-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   browser:
@@ -33,7 +31,8 @@ jobs:
           shared-key: android-browser
       - run: npm ci
       - run: cargo build --locked -p openaide-app-server
-      - run: npx playwright install --with-deps chrome
+      - run: google-chrome --version
+      - run: npx playwright install ffmpeg
       - run: npx playwright test task-chat.spec.mjs --grep 'keeps selected images after picker menu dismissal'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -54,7 +53,10 @@ jobs:
           gradle-version: '8.13'
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - name: Build APK
+      - name: Check and build APKs
+        run: gradle -p apps/android --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+      - name: Build signed user APK
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE }}
           OPENAIDE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
@@ -64,13 +66,31 @@ jobs:
             export OPENAIDE_ANDROID_KEYSTORE="$RUNNER_TEMP/openaide-debug.p12"
             printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$OPENAIDE_ANDROID_KEYSTORE"
             trap 'rm -f "$OPENAIDE_ANDROID_KEYSTORE"' EXIT
+            gradle -p apps/android --no-daemon assembleRelease
+          else
+            echo '::notice::Android signing secrets are not configured; only debug APKs are available.'
           fi
-          gradle -p apps/android --no-daemon testDebugUnitTest lintDebug assembleDebug
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: openaide-android-debug
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: openaide-android-device-tests
+          path: apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: openaide-android-reports
+          path: apps/android/app/build/reports/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: github.event_name != 'pull_request'
+        with:
+          name: openaide-android-user
+          path: apps/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: warn
   runtime:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -102,6 +122,9 @@ jobs:
         run: |
           npm ci
           npm run build:typescript-deps
+          node --test apps/android/scripts/install-termux.test.mjs
+          node --test apps/android/scripts/setup-ui.test.mjs
+          npm exec --workspace openaide-frontend -- vitest run src/components/settings/ConnectionSettings.test.tsx src/components/ContextUsageMobile.test.tsx src/components/UserMessagePicker.test.tsx src/components/useBackNavigation.test.ts
           npm exec -- vitest run packages/app-server-client/src/reliableHttpChannel.test.ts packages/app-server-client/src/reliableBackendConnection.test.ts
           npm exec --workspace openaide-frontend -- vitest run src/services/hostBridge.test.ts
           npm exec --workspace openaide-frontend -- vitest run src/components/ComposerView.test.tsx
