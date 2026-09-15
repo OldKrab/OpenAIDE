@@ -1986,6 +1986,47 @@ fn permission_policy_is_task_scoped_durable_and_does_not_advance_activity() {
 }
 
 #[test]
+fn permission_policy_change_publishes_a_task_delta() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = task_record(
+        "task-policy-delta",
+        "/tmp/openaide-policy-delta-workspace/app",
+    );
+    store.write_task(&record).unwrap();
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        notifier,
+    )
+    .unwrap();
+    let client = crate::attachment_runtime::AttachmentOwner::test_client_instance_id();
+
+    api.set_task_permission_policy(
+        &client,
+        TaskSetPermissionPolicyParams {
+            task_id: "task-policy-delta".into(),
+            policy: TaskPermissionPolicy::AutoApprove,
+        },
+    )
+    .unwrap();
+
+    let update = updates
+        .try_recv()
+        .expect("permission change must publish a Task update");
+    let TaskUpdateKind::Changed(change) = update.kind else {
+        panic!("expected a changed Task update");
+    };
+    assert_eq!(
+        change.changes.permission_policy,
+        Some(TaskPermissionPolicy::AutoApprove)
+    );
+}
+
+#[test]
 fn user_can_close_an_incomplete_plan_and_retain_it_in_chat() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

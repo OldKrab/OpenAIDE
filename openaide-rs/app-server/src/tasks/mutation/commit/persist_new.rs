@@ -60,6 +60,7 @@ pub(super) fn persist_new_task(
         summary: true,
         lifecycle: true,
         preparation: true,
+        permission_policy: true,
         agent_config: true,
         agent_commands: true,
         send_capability: true,

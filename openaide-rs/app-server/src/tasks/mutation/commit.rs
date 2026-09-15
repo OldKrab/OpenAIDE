@@ -766,6 +766,7 @@ fn project_committed_changes(
         active_turn_started_at: fields.summary.then(|| task.active_turn_started_at.clone()),
         lifecycle: fields.lifecycle.then_some(task.lifecycle),
         preparation: fields.preparation.then(|| task.preparation.clone()),
+        permission_policy: fields.permission_policy.then_some(task.permission_policy),
         agent_config: fields.agent_config.then(|| task.agent_config.clone()),
         agent_commands: fields.agent_commands.then(|| task.agent_commands.clone()),
         send_capability: fields.send_capability.then(|| task.send_capability.clone()),
