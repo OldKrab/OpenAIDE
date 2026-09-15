@@ -70,7 +70,8 @@ pins Codex 0.153.3; use a compatible Termux build. Authenticate Codex in Termux.
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
-2. Download and unzip both artifacts. Install `app-debug.apk` on the phone.
+2. Download and unzip the runtime and APK artifacts. Prefer `app-release.apk`
+   from `openaide-android-user` for everyday use; `app-debug.apk` is for development.
 3. Transfer `openaide-termux-arm64.tar.gz` into Termux and extract it:
 
    ```sh
@@ -127,8 +128,9 @@ Signed user builds run only on pushes and manual dispatch, not pull requests.
 For installable updates, configure repository secrets
 `OPENAIDE_ANDROID_DEBUG_KEYSTORE` (base64-encoded PKCS12, alias `openaide-debug`)
 and `OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD`. Keep the signing key private and
-backed up. Without these secrets, CI uses a temporary debug key and subsequent
-APKs may require uninstalling the previous app. Switching from the initial
+backed up. These secrets sign user builds. Debug and device-test APKs use a temporary
+debug key; subsequent debug APKs may require uninstalling the previous app. Without
+the secrets, CI does not publish a user APK. Switching from the initial
 temporary key requires a one-time reinstall; Termux task history is unaffected,
 but the app's connection password resets.
 
