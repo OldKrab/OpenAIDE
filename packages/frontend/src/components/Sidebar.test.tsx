@@ -407,6 +407,8 @@ describe("SidebarTaskRow", () => {
   it("keeps the task preview dismissed while the actions menu is open", () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       innerHeight: 800,
       innerWidth: 1200,
       matchMedia: () => ({ matches: false }),

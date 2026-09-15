@@ -6,14 +6,27 @@ import { shouldConsumeAgentDeleteAck, shouldConsumeAgentSaveAck } from "./AgentS
 import { compactPathForSettings, DataSupportSettingsTab, GeneralSettingsTab } from "./GeneralSettingsTab";
 import { SettingsView } from "./SettingsView";
 import { SupportExportButton } from "../SupportExportDialog";
+import * as frontendShell from "../../services/frontendShell";
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("SettingsView custom Agent acknowledgements", () => {
+  it("finds phone connection settings through search only when the shell supports them", () => {
+    vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({ connectionSettings: { snapshot: () => undefined, subscribe: () => () => {}, execute: vi.fn().mockResolvedValue(undefined) } } as unknown as frontendShell.FrontendShell);
+    const tree = renderSettingsView();
+    act(() => tree.root.findAllByProps({ placeholder: "Search Settings" })[0].props.onChange({ currentTarget: { value: "Termux" }, target: { value: "Termux" } }));
+    expect(JSON.stringify(tree.toJSON())).toContain("Connection");
+    act(() => tree.unmount());
+    vi.mocked(frontendShell.currentFrontendShell).mockReturnValue(undefined);
+    const ordinary = renderSettingsView();
+    act(() => ordinary.root.findAllByProps({ placeholder: "Search Settings" })[0].props.onChange({ currentTarget: { value: "Termux" }, target: { value: "Termux" } }));
+    expect(JSON.stringify(ordinary.toJSON())).not.toContain("Connection");
+    act(() => ordinary.unmount());
+  });
   it("opens the Settings index first on a narrow viewport", () => {
     vi.stubGlobal("window", {
       cancelAnimationFrame: vi.fn(),
@@ -449,6 +462,8 @@ describe("SettingsView custom Agent acknowledgements", () => {
 
   it("opens the diagnostics wizard from the Settings search result", () => {
     vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       cancelAnimationFrame: vi.fn(),
       matchMedia: vi.fn(() => ({ matches: false })),
       requestAnimationFrame: vi.fn(() => 1),

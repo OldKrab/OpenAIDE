@@ -54,6 +54,7 @@ export type BackendRequestContext = {
 
 export interface BackendConnection {
   initialize(params: InitializeParams, meta?: RequestMeta): Promise<InitializeResult>;
+  retryRecovery?(): boolean;
   request<M extends ProtocolMethod>(
     method: M,
     params: RequestParamsByMethod[M],

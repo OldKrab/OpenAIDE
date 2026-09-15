@@ -106,13 +106,14 @@ export function createReliableWebProxyBackendConnection(
   options: ReliableWebProxyBackendConnectionOptions,
 ): AppServerSession {
   return createAppServerSession(
-    createReliableHttpBackendConnection(options),
+    createReliableHttpBackendConnection(options, true),
     options.logger,
   );
 }
 
 function createReliableHttpBackendConnection(
   options: ReliableLocalHttpBackendConnectionOptions | ReliableWebProxyBackendConnectionOptions,
+  serverRestartBehindProxy = false,
 ): BackendConnection {
   const logger = options.logger ?? createDiagnosticsLogger();
   const eventListeners = new Set<BackendEventListener>();
@@ -139,6 +140,7 @@ function createReliableHttpBackendConnection(
   let recoveryPromise: Promise<InitializeResult> | undefined;
   let recoveringGeneration: HttpConnectionGeneration | undefined;
   let terminalError: unknown;
+  let lastInvalidation: (BackendGenerationInvalidation & { message: string }) | undefined;
   let closed = false;
   logger.info("backend_connection_created", {
     connection_id: options.connectionId,
@@ -149,6 +151,13 @@ function createReliableHttpBackendConnection(
     : undefined;
 
   return {
+    retryRecovery() {
+      if (closed) return false;
+      if (recoveryPromise) return true;
+      if (!terminalError || !lastInvalidation) return false;
+      beginRecovery(active, lastInvalidation);
+      return true;
+    },
     initialize(params, meta) {
       if (initializePromise) return initializePromise;
       const startedAt = Date.now();
@@ -338,8 +347,9 @@ function createReliableHttpBackendConnection(
       });
       throw new Error("App Server instance changed while replacing an expired HTTP session");
     }
+    const result = await generation.connection.initialize(params, initializeMeta);
     initializedServerId = identity.serverId;
-    return generation.connection.initialize(params, initializeMeta);
+    return result;
   }
 
   function replaceEndpoint(next: { endpointUrl: string; authToken: string }) {
@@ -430,10 +440,12 @@ function createReliableHttpBackendConnection(
   function beginRecovery(
     generation: HttpConnectionGeneration,
     invalidation: BackendGenerationInvalidation & { message: string },
-    allowServerChange = false,
+    allowServerChange = serverRestartBehindProxy || invalidation.reason === "appServerRestarted",
   ) {
     if (recoveryPromise) return;
+    lastInvalidation = invalidation;
     terminalError = undefined;
+    const previousServerId = initializedServerId;
     const startedAt = Date.now();
     logger.warn("backend_recovery_started", {
       connection_id: options.connectionId,
@@ -445,14 +457,17 @@ function createReliableHttpBackendConnection(
     void attempt.then(
       (result) => {
         if (recoveryPromise === attempt) recoveryPromise = undefined;
+        const reason = previousServerId && result.snapshot.server.serverId !== previousServerId
+          ? "appServerRestarted"
+          : invalidation.reason;
         logger.info("backend_recovery_completed", {
           connection_id: options.connectionId,
-          reason: invalidation.reason,
+          reason,
           duration_ms: Date.now() - startedAt,
         });
         notifyListeners(
           recoveryBaselineListeners,
-          { reason: invalidation.reason, result },
+          { reason, result },
           logger,
           "recovery_baseline",
         );

@@ -129,6 +129,7 @@ export type FrontendFileAcquisition =
 
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
+  connectionSettings?: import("./connectionSettings").ConnectionSettings;
   /** Writes text through the App Shell that owns system clipboard access. */
   clipboard?: {
     writeText(text: string): Promise<void>;
@@ -156,6 +157,7 @@ export type FrontendShell = {
     openNativeSession(agentId: string, nativeSessionId: string, projectId?: string): void;
     openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId, settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent): void;
     openTask(taskId: string, title?: string, agentId?: string): void;
+    closeSettings?(taskId?: string, projectId?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;
     /** Writes the open Agent into the Settings route so refresh stays on that detail. */
     replaceSettingsAgent?(agentId?: string): void;

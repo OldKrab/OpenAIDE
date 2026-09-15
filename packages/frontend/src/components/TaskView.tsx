@@ -27,6 +27,7 @@ import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
   permissionResponseForMessage,
   questionResponseForMessage,
+  userMessageNavigationPreview,
 } from "./taskChatPresentation";
 import { useTaskChatScroll } from "./useTaskChatScroll";
 import { appServerAttachmentHandles, appServerComposerImages } from "../state/composerOptions";
@@ -36,6 +37,7 @@ import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
 import { AgentFileOpenContext } from "./agentFileOpen";
 import { ProjectFileWorkspace } from "./ProjectFileWorkspace";
+import { ProjectFilesButton } from "./ProjectFilesButton";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
@@ -137,6 +139,7 @@ export function TaskView({
   onAddToQueue,
   fileBrowser,
   fileViewer: fileViewerConnection,
+  headerActionsTarget,
   onLoadChatPage,
   onLoadComposerHistory,
   onLoadToolImagePreview,
@@ -188,6 +191,7 @@ export function TaskView({
   onAddToQueue?: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   fileViewer?: Pick<BackendConnection, "request">;
+  headerActionsTarget?: HTMLElement | null;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadComposerHistory?: () => Promise<string[]>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
@@ -588,7 +592,7 @@ export function TaskView({
               <small>{completedPlanSteps}/{visiblePlan.entries.length}</small>
             </button>
           ) : null}
-          {fileViewerEnabled && <button className="project-files-entry" aria-expanded={projectFilesOpen} onClick={() => setProjectFilesOpen(true)}>Project files</button>}
+          {fileViewerEnabled && <ProjectFilesButton open={projectFilesOpen} onOpen={() => setProjectFilesOpen(true)} target={headerActionsTarget} />}
         </div>
       </div>
       <div className="task-workbench">
@@ -610,6 +614,7 @@ export function TaskView({
           canRestoreTask={onRestoreTask !== undefined}
           chat={chat}
           chatScroll={chatScroll}
+          headerActionsTarget={projectFilesOpen ? null : headerActionsTarget}
           commandCatalog={snapshot.agent_commands}
           items={chatItems}
           liveTextPresentation={subagents.selected ? subagents.liveTextPresentation : liveTextPresentation}
@@ -790,16 +795,6 @@ export function TaskView({
 
 async function unavailableToolImagePreview() {
   return undefined;
-}
-
-function userMessageNavigationPreview(
-  text: string,
-  attachments?: readonly { kind: string; label: string }[],
-) {
-  const attachmentLines = attachments?.map(
-    (attachment) => `[${attachment.kind}] ${attachment.label}`,
-  ) ?? [];
-  return [text.trim(), ...attachmentLines].filter(Boolean).join("\n");
 }
 
 /** Keeps a callback interface stable while routing calls to the latest controller closure. */

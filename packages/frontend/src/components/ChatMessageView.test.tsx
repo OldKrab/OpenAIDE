@@ -8,7 +8,7 @@ describe("ChatRow", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetModules();
-    vi.stubGlobal("window", { acquireVsCodeApi: undefined });
+    vi.stubGlobal("window", { acquireVsCodeApi: undefined, addEventListener: vi.fn(), removeEventListener: vi.fn() });
   });
 
   afterEach(() => {

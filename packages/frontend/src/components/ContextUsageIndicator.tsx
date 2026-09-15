@@ -2,6 +2,8 @@ import { X } from "lucide-react";
 import {
   type CSSProperties,
   type ReactNode,
+  createContext,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -12,8 +14,29 @@ import type {
   ConfigOptionsCatalog,
   TaskContextUsage,
 } from "@openaide/app-shell-contracts";
+import { PopupPanel } from "./Popup";
+import { useBackNavigation } from "./useBackNavigation";
 
 type UsageTone = "normal" | "high" | "critical";
+const ContextUsageControl = createContext<ReactNode>(null);
+
+export function ComposerContextUsageControl() {
+  return useContext(ContextUsageControl);
+}
+
+function useCompactContextUsage() {
+  const [compact, setCompact] = useState(() => typeof window !== "undefined"
+    && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 760px)");
+    const update = () => setCompact(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return compact;
+}
 
 export function ComposerWithContextUsage({
   children,
@@ -25,6 +48,7 @@ export function ComposerWithContextUsage({
   usage?: TaskContextUsage;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const compact = useCompactContextUsage();
   const hostRef = useRef<HTMLDivElement>(null);
   const detailsId = useId().replaceAll(":", "");
   const capacity = usage?.capacity_tokens ?? 0;
@@ -38,9 +62,10 @@ export function ComposerWithContextUsage({
   const closeDetails = () => {
     setDetailsOpen(false);
   };
+  useBackNavigation(detailsOpen && !compact, closeDetails);
 
   useEffect(() => {
-    if (!detailsOpen) return undefined;
+    if (!detailsOpen || compact) return undefined;
     const closeOnOutsideInteraction = (event: PointerEvent) => {
       if (!hostRef.current?.contains(event.target as Node)) closeDetails();
     };
@@ -53,16 +78,44 @@ export function ComposerWithContextUsage({
       document.removeEventListener("pointerdown", closeOnOutsideInteraction);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [detailsOpen]);
+  }, [detailsOpen, compact]);
 
   useEffect(() => {
     if (!usage) closeDetails();
   }, [usage]);
 
+  useEffect(() => setDetailsOpen(false), [compact]);
+
+  const mobileControl = compact && usage && capacity > 0 ? (
+    <PopupPanel
+      anchorRef={hostRef}
+      className="context-usage-popup"
+      label="Context usage details"
+      onOpenChange={setDetailsOpen}
+      open={detailsOpen}
+      placement="top-end"
+      trigger={(props) => (
+        <button {...props}
+          aria-label={`Context usage: ${usagePercent}% used. Show details`}
+          className={`context-usage-compact context-usage-meter-${tone}`}
+          title="Context usage" type="button">
+          <svg aria-hidden="true" className="context-usage-ring" viewBox="0 0 20 20">
+            <circle className="context-usage-ring-track" cx="10" cy="10" r="7" />
+            <circle className="context-usage-ring-fill" cx="10" cy="10" r="7" pathLength="100" strokeDasharray={`${usagePercent} 100`} />
+          </svg>
+          <span>{usagePercent}%</span>
+        </button>
+      )}
+    >
+      <ContextUsageDetails detailsId={detailsId} modelLabel={selectedModelLabel(configOptions)}
+        onClose={closeDetails} tone={tone} usage={usage} usagePercent={usagePercent} popup />
+    </PopupPanel>
+  ) : null;
+
   return (
     <div className="composer-context-host" ref={hostRef}>
-      {children}
-      {usage && capacity > 0 ? (
+      <ContextUsageControl.Provider value={mobileControl}>{children}</ContextUsageControl.Provider>
+      {!compact && usage && capacity > 0 ? (
         <div className="context-usage-interaction">
           <button
             aria-controls={detailsId}
@@ -188,6 +241,7 @@ function ContextUsageDetails({
   tone,
   usage,
   usagePercent,
+  popup = false,
 }: {
   detailsId: string;
   modelLabel?: string;
@@ -195,16 +249,17 @@ function ContextUsageDetails({
   tone: UsageTone;
   usage: TaskContextUsage;
   usagePercent: number;
+  popup?: boolean;
 }) {
   const remaining = Math.max(0, usage.capacity_tokens - usage.used_tokens);
   const turn = usage.last_turn;
   return (
     <section
-      aria-label="Context usage details"
+      aria-label={popup ? undefined : "Context usage details"}
       className={`context-usage-panel context-usage-panel-${tone} context-usage-panel-anchor`}
       data-placement="anchor"
       id={detailsId}
-      role="dialog"
+      role={popup ? undefined : "dialog"}
     >
       <div className="context-usage-panel-header">
         <strong>Context</strong>

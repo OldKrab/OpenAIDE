@@ -9,6 +9,7 @@ import {
   RefreshCcw,
   Search,
   SlidersHorizontal,
+  Smartphone,
   Sparkles,
   X,
 } from "lucide-react";
@@ -37,6 +38,7 @@ import type { NewTaskViewIntents } from "../NewTaskView";
 import { agentLeftLaunching } from "./agentSettingsModel";
 import { AgentSettingsTab } from "./AgentSettingsTab";
 import { DataSupportSettingsTab, DesktopSettingsTab, GeneralSettingsTab } from "./GeneralSettingsTab";
+import { ConnectionSettingsTab } from "./ConnectionSettingsTab";
 import { currentFrontendShell, type FrontendShellAppearance } from "../../services/frontendShell";
 import { SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { McpSettingsTab } from "./McpSettingsTab";
@@ -45,6 +47,7 @@ import { SettingsSkeleton } from "./settingsPresentation";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
 import type { AgentRecoveryActions } from "../AgentRecovery";
 import { AppSidebarFrame } from "../AppSidebarFrame";
+import { useBackNavigation } from "../useBackNavigation";
 
 const tabs: Array<{
   group: "App" | "Agent work" | "Projects";
@@ -54,6 +57,7 @@ const tabs: Array<{
   description: string;
 }> = [
   { group: "App", icon: SlidersHorizontal, id: "common", label: "General", description: "Appearance and everyday interaction preferences." },
+  { group: "App", icon: Smartphone, id: "connection", label: "Connection", description: "Where agents run and how work continues in the background." },
   { group: "App", icon: MonitorCog, id: "desktop", label: "Desktop", description: "Runtime selection and application updates for this device." },
   { group: "App", icon: Database, id: "data", label: "Data & support", description: "Diagnostics, developer tools, and local history." },
   { group: "Agent work", icon: Bot, id: "agents", label: "Agents", description: "Configure the Agents available for tasks." },
@@ -63,6 +67,7 @@ const tabs: Array<{
 ];
 
 const searchEntries: Array<{ tab: SettingsTabId; label: string; keywords: string; target?: string; action?: "openSupportExport" }> = [
+  { tab: "connection", label: "Connection", keywords: "phone remote computer termux background battery", target: "settings-connection-workspace" },
   { tab: "common", label: "Appearance", keywords: "theme system light dark", target: "settings-general-appearance" },
   { tab: "common", label: "Send with Enter", keywords: "composer keyboard shortcut newline", target: "settings-general-behavior" },
   { tab: "common", label: "Desktop notifications", keywords: "alerts browser os", target: "settings-general-behavior" },
@@ -155,6 +160,7 @@ export function SettingsView({
   const availableTabs = state.availableTabs ?? ["agents", "common", "data"];
   const visibleTabs = tabs.filter((tab) => (
     tab.id === "worktrees"
+    || (tab.id === "connection" && Boolean(shell?.connectionSettings))
     || (availableTabs.includes(tab.id) && (tab.id !== "desktop" || Boolean(shell?.desktopRuntime || shell?.desktopUpdates)))
   ));
   const activeTab = visibleTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : visibleTabs[0]?.id ?? "agents";
@@ -162,6 +168,10 @@ export function SettingsView({
   const showAgentSkeleton = activeTab === "agents" && state.loading && !state.agentDetails;
   const [navigationQuery, setNavigationQuery] = useState("");
   const [mobileIndexOpen, setMobileIndexOpen] = useState(isNarrowSettingsViewport);
+  useBackNavigation(Boolean(onBackToApp), () => {
+    if (isNarrowSettingsViewport() && !mobileIndexOpen) setMobileIndexOpen(true);
+    else onBackToApp?.();
+  }, 20);
   const [developerUnlockClicks, setDeveloperUnlockClicks] = useState(0);
   const [developerSettingsUnlocked, setDeveloperSettingsUnlocked] = useState(initialDeveloperSettingsUnlocked);
   const [searchSupportExportRequestKey, setSearchSupportExportRequestKey] = useState<string>();
@@ -612,6 +622,7 @@ function SettingsTabContent({
         />
       ) : null}
       {tab === "desktop" ? <DesktopSettingsTab /> : null}
+      {tab === "connection" && currentFrontendShell()?.connectionSettings ? <ConnectionSettingsTab capability={currentFrontendShell()!.connectionSettings!} /> : null}
       {tab === "data" ? (
         <DataSupportSettingsTab
           backendConnection={backendConnection}

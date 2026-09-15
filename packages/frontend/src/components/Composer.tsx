@@ -1,4 +1,5 @@
 import { ComposerPreferencesStatus } from "./ComposerPreferencesStatus";
+import { ComposerContextUsageControl } from "./ContextUsageIndicator";
 import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
@@ -628,12 +629,13 @@ export function Composer({
           </span>
         ) : blockedStatus?.placement === "footer" ? (
           <span aria-live="polite" className="composer-footer-status" role="status">
-            <LoaderCircle aria-hidden="true" size={13} />
+            {blockedStatus.label !== "Disconnected" ? <LoaderCircle aria-hidden="true" size={13} /> : null}
             <strong>{blockedStatus.label}</strong>
             {blockedStatus.secondary ? <small>{blockedStatus.secondary}</small> : null}
           </span>
         ) : null}
         <div className="composer-actions">
+          <ComposerContextUsageControl />
           {blockedStatus?.placement === "action" ? (
             <span aria-live="polite" className="composer-action-status" role="status">
               <LoaderCircle aria-hidden="true" size={13} /> {blockedStatus.label}
@@ -694,6 +696,9 @@ const CONFIG_CHANGE_STATUS_STAGES = [
 
 function composerBlockedStatus(message: string) {
   const normalized = message.trim().replace(/[.]$/, "");
+  if (normalized.startsWith("Disconnected")) {
+    return { label: "Disconnected", placement: "footer" as const, secondary: "Draft saved" };
+  }
   if (normalized === "Moving queued message to Composer") {
     return { label: "Moving…", placement: "action" as const };
   }

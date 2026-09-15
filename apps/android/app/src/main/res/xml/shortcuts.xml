@@ -1,0 +1,9 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="settings" android:icon="@drawable/ic_agent"
+        android:shortcutShortLabel="@string/app_settings">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="io.openaide.android"
+            android:targetClass="io.openaide.android.MainActivity">
+            <extra android:name="show_settings" android:value="true" />
+        </intent>
+    </shortcut>
+</shortcuts>

@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <application android:label="OpenAIDE device checks">
+        <uses-library android:name="android.test.runner" />
+        <provider android:name="io.openaide.android.PickerDocument" android:authorities="io.openaide.android.test.image" android:exported="true" />
+    </application>
+    <instrumentation android:name="android.test.InstrumentationTestRunner" android:targetPackage="io.openaide.android" />
+</manifest>

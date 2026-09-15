@@ -8,6 +8,52 @@ import {
 } from "./reliableHttpChannel";
 
 describe("ReliableHttpMessageChannel", () => {
+  it.each(["fetch", "body"])("retries a frozen upload %s on wake without changing its sequence or body", async (stage) => {
+    let wake: (() => void) | undefined;
+    const bodies: string[] = [];
+    const fetch: ReliableHttpFetch = async (_url, init) => {
+      if (init.body?.includes('"transport":"open"')) {
+        return response(200, JSON.stringify({ transportVersion: 1, sessionId: "session-1", serverId: "server-1" }));
+      }
+      if (init.method === "POST") {
+        bodies.push(init.body ?? "");
+        if (bodies.length > 1) return response(204, "");
+        if (stage === "body") return { ok: true, status: 204, text: () => new Promise(() => undefined) };
+      }
+      return new Promise(() => undefined);
+    };
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://server.test/rpc", connectionId: "mobile", fetch,
+      retryDelayMs: 0, subscribeToWake: (listener) => { wake = listener; return () => {}; },
+    });
+    try {
+      await channel.ready();
+      channel.send({ jsonrpc: "2.0", id: "request-1", method: "client/heartbeat", params: {} });
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      wake?.();
+      await vi.waitFor(() => expect(bodies).toHaveLength(2));
+      expect(bodies[1]).toBe(bodies[0]);
+    } finally {
+      channel.close();
+    }
+  });
+
+  it("bounds a frozen handshake even when fetch ignores abort", async () => {
+    vi.useFakeTimers();
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://server.test/rpc", connectionId: "mobile",
+      fetch: () => new Promise(() => undefined), receiveTimeoutMs: 100,
+    });
+    try {
+      const rejected = expect(channel.ready()).rejects.toThrow("Reliable HTTP POST interrupted");
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+    } finally {
+      channel.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("retries the identical sequenced upload and receives the response through polling", async () => {
     const uploadBodies: string[] = [];
     const loggerSink = {
