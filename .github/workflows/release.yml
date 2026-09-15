@@ -62,9 +62,16 @@ jobs:
       version: ${{ needs.validate.outputs.version }}
       enable_windows_updates: true
 
+  android-artifacts:
+    needs: validate
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+    with:
+      release: true
+
   github-release:
     name: Publish canonical immutable GitHub release
-    needs: [validate, ci, artifacts]
+    needs: [validate, ci, artifacts, android-artifacts]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -94,11 +101,23 @@ jobs:
           pattern: desktop-*
           path: release
           merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: openaide-android-user
+          path: release/android
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: openaide-termux-arm64
+          path: release
       - name: Require the complete canonical asset set
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
+          mv release/android/app-release.apk "release/openaide-android-$RELEASE_VERSION.apk"
+          rmdir release/android
+          test -s "release/openaide-android-$RELEASE_VERSION.apk"
+          test -s release/openaide-termux-arm64.tar.gz
           for target in linux-x64 win32-x64 darwin-arm64; do
             test -f "release/openaide-vscode-$target-$RELEASE_VERSION.vsix"
           done
@@ -119,6 +138,8 @@ jobs:
             release/*.exe
             release/*.exe.sig
             release/*.dmg
+            release/*.apk
+            release/openaide-termux-arm64.tar.gz
       - name: Publish the completed draft
         env:
           GH_TOKEN: ${{ github.token }}

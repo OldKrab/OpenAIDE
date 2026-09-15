@@ -52,11 +52,11 @@ Idle foreground checks run less frequently, status reads coalesce, and ordinary
 browser console output is not copied into Android diagnostics. Background safety
 does not depend on rendering the chat or keeping its WebView awake.
 
-The installer obtains the runtime URL and SHA-256 automatically from the fixed
-`android-v0.4.0` release in `OldKrab/OpenAIDE`, checks the exact artifact URL and digest,
+The installer obtains the runtime URL and SHA-256 automatically from the canonical
+`v<APK version>` release in `OldKrab/OpenAIDE`, checks the exact artifact URL and digest,
 and verifies the archive before extraction. Users do not enter checksums or package lists.
-**Release prerequisite:** that public Android release and its `openaide-termux-arm64.tar.gz`
-asset must be published before fresh-phone one-tap installation works. Until published,
+The canonical release includes the signed APK and matching `openaide-termux-arm64.tar.gz`
+asset together, enabling fresh-phone one-tap installation. Until that version is published,
 the app reports an unavailable download without installing unverified content.
 An existing runtime is never overwritten: updates are verified and placed in
 `~/.local/share/openaide-android/runtime.pending`. Applying staged updates remains
@@ -124,6 +124,10 @@ artifact remains available for device tests. Store distribution still needs its
 own signing/review process; the current persistent development certificate is
 retained for in-place updates on existing test phones.
 Signed user builds run only on pushes and manual dispatch, not pull requests.
+The canonical Release workflow also requires a signed user APK and matching runtime
+before publishing its immutable draft. The APK takes its version from root `package.json`;
+its sideload version code is `major * 1000000 + minor * 1000 + patch`. Prereleases
+share their base version code; Play Store distribution is not configured.
 
 For installable updates, configure repository secrets
 `OPENAIDE_ANDROID_DEBUG_KEYSTORE` (base64-encoded PKCS12, alias `openaide-debug`)

@@ -7,9 +7,17 @@ import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
 final class RuntimeRelease {
+    static String releaseTag(String version) {
+        if (version == null || !version.matches("\\d+\\.\\d+\\.\\d+(?:-(?:alpha|beta|rc)\\.[1-9]\\d*)?")) {
+            throw new IllegalArgumentException("Invalid runtime release version");
+        }
+        return "v" + version;
+    }
+
     static String installEnvironment() throws Exception {
+        String tag = releaseTag(BuildConfig.VERSION_NAME);
         HttpURLConnection request = (HttpURLConnection) new URL(
-            "https://api.github.com/repos/OldKrab/OpenAIDE/releases/tags/android-v0.4.0").openConnection();
+            "https://api.github.com/repos/OldKrab/OpenAIDE/releases/tags/" + tag).openConnection();
         request.setConnectTimeout(10_000);
         request.setReadTimeout(15_000);
         request.setInstanceFollowRedirects(false);
@@ -33,7 +41,7 @@ final class RuntimeRelease {
                 if (!"openaide-termux-arm64.tar.gz".equals(asset.optString("name"))) continue;
                 String url = asset.getString("browser_download_url");
                 String digest = asset.getString("digest");
-                if (!url.equals("https://github.com/OldKrab/OpenAIDE/releases/download/android-v0.4.0/openaide-termux-arm64.tar.gz")
+                if (!url.equals("https://github.com/OldKrab/OpenAIDE/releases/download/" + tag + "/openaide-termux-arm64.tar.gz")
                     || !digest.matches("sha256:[a-f0-9]{64}")) throw new IOException("Unverified release");
                 return TermuxCommand.variable("OPENAIDE_RUNTIME_URL", url)
                     + TermuxCommand.variable("OPENAIDE_RUNTIME_SHA256", digest.substring(7));
