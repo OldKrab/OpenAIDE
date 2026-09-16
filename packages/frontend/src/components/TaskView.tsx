@@ -85,6 +85,7 @@ export function TaskLoadingView({
         <section className="task-surface task-loading" aria-label="Session open elsewhere">
           <p>Session open elsewhere.</p>
           <small className="inline-error" role="alert">{error}</small>
+          {onRetry ? <button type="button" onClick={onRetry}>Try again</button> : null}
         </section>
       );
     }
