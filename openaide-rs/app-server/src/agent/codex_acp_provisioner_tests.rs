@@ -554,3 +554,14 @@ fn successful_install_removes_stale_staging_and_unleased_versions_beyond_previou
     assert!(!runtime_root.join("1.0.1").exists());
     assert!(!runtime_root.join("1.0.0").exists());
 }
+
+#[test]
+fn npm_permission_failure_is_not_reported_as_missing_node() {
+    let error = super::provisioning_installer_error(super::installer_spawn_error(
+        std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+    ));
+    assert!(matches!(
+        error,
+        crate::protocol::errors::RuntimeError::NotReady(_)
+    ));
+}

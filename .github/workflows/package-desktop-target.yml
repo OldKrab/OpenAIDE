@@ -110,6 +110,8 @@ jobs:
       - name: Build desktop installer
         shell: bash
         env:
+          # Tauri otherwise omits Finder layout in CI, producing an unstyled DMG.
+          TAURI_BUNDLER_DMG_IGNORE_CI: ${{ inputs.target == 'darwin-arm64' && 'true' || '' }}
           OPENAIDE_DESKTOP_UPDATE_ENABLED_BUILD: ${{ inputs.target == 'win32-x64' && inputs.enable_windows_updates && '1' || '' }}
           OPENAIDE_DESKTOP_UPDATE_ORIGIN: ${{ inputs.target == 'win32-x64' && inputs.enable_windows_updates && 'https://oldkrab.github.io/OpenAIDE/' || '' }}
           OPENAIDE_DESKTOP_UPDATE_RELEASE_PUBLIC_KEY: ${{ inputs.target == 'win32-x64' && inputs.enable_windows_updates && vars.DESKTOP_UPDATE_RELEASE_PUBLIC_KEY || '' }}
@@ -161,6 +163,9 @@ jobs:
             trap 'hdiutil detach "$mount_root"' EXIT
             packaged_server="$mount_root/OpenAIDE.app/Contents/MacOS/openaide-app-server"
             test -f "$packaged_server"
+            test -s "$mount_root/.DS_Store"
+            test -f "$mount_root/.background/dmg-background.tiff"
+            test -L "$mount_root/Applications"
             # The pre-bundle cmp above proves the sidecar input. Tauri then
             # replaces its linker signature while sealing the app.
             codesign --verify --strict "$packaged_server"

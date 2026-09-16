@@ -34,7 +34,7 @@ export function createDesktopShell(
   let backgroundSyncSequence = 0;
   let nativeZoomSequence = 0;
   let nativeZoomInFlight = false;
-  let quitInFlight = false;
+  let quitAttempt: { operationId: string; startedAt: number } | undefined;
   const commandListeners = new Set<(command: DesktopSurfaceCommand) => void>();
   let unzoomedViewport: ViewportSize | undefined;
   const syncNativeBackground = (theme: "light" | "dark") => {
@@ -101,24 +101,35 @@ export function createDesktopShell(
   };
 
   const handleDesktopCommand = (payload: DesktopCommand) => {
-    if (payload === "quit" && !quitInFlight) {
-      quitInFlight = true;
-      const operationId = `desktop-quit-${crypto.randomUUID()}`;
-      const startedAt = performance.now();
-      console.info(`desktop_quit_started operation_id=${operationId}`);
+    if (payload === "quit") {
+      if (quitAttempt) {
+        // A repeated Quit press is an explicit force request: a hung detach or
+        // session close must never leave the native app running.
+        console.warn(
+          `desktop_quit_forced operation_id=${quitAttempt.operationId} outcome=force_exit duration_ms=${Math.round(performance.now() - quitAttempt.startedAt)}`,
+        );
+        void invoke("complete_desktop_quit");
+        return;
+      }
+      const attempt = {
+        operationId: `desktop-quit-${crypto.randomUUID()}`,
+        startedAt: performance.now(),
+      };
+      quitAttempt = attempt;
+      console.info(`desktop_quit_started operation_id=${attempt.operationId}`);
       void quitDesktop({
         requestDetach: () => session.request(CLIENT_DETACH, {}),
         closeSession: () => session.close(),
         beforeExit: (detachOutcome) => {
           console.info(
-            `desktop_quit_completed operation_id=${operationId} outcome=success detach_outcome=${detachOutcome} duration_ms=${Math.round(performance.now() - startedAt)}`,
+            `desktop_quit_completed operation_id=${attempt.operationId} outcome=success detach_outcome=${detachOutcome} duration_ms=${Math.round(performance.now() - attempt.startedAt)}`,
           );
         },
         exitApp: () => invoke("complete_desktop_quit"),
       });
-    } else if (payload !== "quit") {
-      for (const listener of commandListeners) listener(payload);
+      return;
     }
+    for (const listener of commandListeners) listener(payload);
   };
   void listen<DesktopCommand>("desktop-command", ({ payload }) => {
     handleDesktopCommand(payload);

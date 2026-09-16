@@ -1,9 +1,7 @@
+use crate::desktop_update_security::{sha256_hex, trusted_redirect_url, validate_artifact_url};
 use url::Url;
 
-use crate::desktop_update::{
-    DesktopUpdateConfig, DesktopUpdateError, sha256_hex, trusted_redirect_url,
-    validate_artifact_url,
-};
+use crate::desktop_update::{DesktopUpdateConfig, DesktopUpdateError};
 use crate::desktop_update_receipt::{
     ReceiptOutcome, UpdateAttemptReceipt, classify_receipt, read_receipt, write_receipt,
 };

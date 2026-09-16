@@ -28,6 +28,8 @@ mod desktop_update_shutdown;
 #[cfg(test)]
 mod desktop_update_tests;
 #[cfg(target_os = "macos")]
+mod macos_shell_path;
+#[cfg(target_os = "macos")]
 mod macos_webview_resize;
 mod startup_process;
 mod wsl_runtime;
@@ -162,6 +164,10 @@ fn main() {
             Ok(())
         })
         .on_menu_event(|app, event| {
+            #[cfg(target_os = "macos")]
+            if event.id().as_ref() == "quit" {
+                arm_macos_quit_watchdog(app);
+            }
             let _ = app.emit("desktop-command", event.id().as_ref());
         })
         .on_window_event(|window, event| {
@@ -386,6 +392,30 @@ fn watch_development_runner(app: &tauri::App) {
             eprintln!("desktop_development_runner_watch_completed outcome=parent_ended");
             app_handle.exit(0);
             break;
+        }
+    });
+}
+
+/// Guarantees explicit Quit on macOS even when the WebView cannot run its
+/// graceful detach. The frontend owns the normal path; this watchdog uses the
+/// same budget as the Windows close fallback and then terminates natively.
+#[cfg(target_os = "macos")]
+fn arm_macos_quit_watchdog(app: &tauri::AppHandle) {
+    {
+        let state = app.state::<DesktopQuitState>();
+        if state.pending.swap(true, Ordering::AcqRel) {
+            return;
+        }
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(5));
+        if app
+            .state::<DesktopQuitState>()
+            .pending
+            .swap(false, Ordering::AcqRel)
+        {
+            app.exit(0);
         }
     });
 }
@@ -656,6 +686,13 @@ fn launch_app_server_handoff(
     create_directory(&runtime_paths.runtime_root, "runtime_create")?;
 
     let mut command = Command::new(&runtime_paths.app_server_binary);
+    #[cfg(target_os = "macos")]
+    macos_shell_path::apply_to(&mut command).map_err(|_| {
+        failure(
+            "shell_environment",
+            "OpenAIDE could not load your terminal PATH. Check your shell startup files and retry.",
+        )
+    })?;
     command
         .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
         .env("OPENAIDE_STORAGE_ROOT", &runtime_paths.storage_root)
