@@ -28,6 +28,8 @@ mod desktop_update_shutdown;
 #[cfg(test)]
 mod desktop_update_tests;
 #[cfg(target_os = "macos")]
+mod macos_shell_path;
+#[cfg(target_os = "macos")]
 mod macos_webview_resize;
 mod startup_process;
 mod wsl_runtime;
@@ -656,6 +658,13 @@ fn launch_app_server_handoff(
     create_directory(&runtime_paths.runtime_root, "runtime_create")?;
 
     let mut command = Command::new(&runtime_paths.app_server_binary);
+    #[cfg(target_os = "macos")]
+    macos_shell_path::apply_to(&mut command).map_err(|_| {
+        failure(
+            "shell_environment",
+            "OpenAIDE could not load your terminal PATH. Check your shell startup files and retry.",
+        )
+    })?;
     command
         .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
         .env("OPENAIDE_STORAGE_ROOT", &runtime_paths.storage_root)
