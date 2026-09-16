@@ -53,6 +53,62 @@
   padding: 7px 12px;
 }
 
+/*
+ * macOS windows center their document title in the toolbar, so the Task title
+ * stays the visual anchor while the trailing control keeps a right-aligned hit
+ * target. Scoped to the Desktop shell so Web and VS Code never inherit it;
+ * Windows keeps its native left-aligned caption behavior.
+ */
+body[data-shell="desktop"] .task-header[data-desktop-window="macos"] {
+  /* Symmetric side tracks center the title and reserve room for the trailing
+     control without depending on percentage widths inside a flex item. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* The owning header paints the chrome strip; see the rule below. */
+  background: transparent;
+}
+
+/* Share the sidebar's surface so the title band reads as one window chrome
+   strip across the sidebar and the work surface, not as Chat content. The
+   header owns the bottom edge so trailing actions sit on the same surface. */
+body[data-shell="desktop"] .task-work-stack[data-desktop-window="macos"] .task-work-stack-header {
+  background: var(--oa-panel);
+  border-bottom-color: var(--oa-border);
+}
+
+body[data-shell="desktop"] .task-header[data-desktop-window="macos"] .task-header-title {
+  grid-column: 2;
+  min-width: 0;
+  justify-content: center;
+  gap: 10px;
+}
+
+body[data-shell="desktop"] .task-header[data-desktop-window="macos"] .task-header-title strong {
+  max-width: 52ch;
+  color: color-mix(in oklch, var(--oa-text) 88%, var(--oa-muted));
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-align: center;
+}
+
+body[data-shell="desktop"] .task-header[data-desktop-window="macos"] .task-header-status {
+  gap: 4px;
+  color: color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text));
+  font-size: 11px;
+}
+
+body[data-shell="desktop"] .task-header[data-desktop-window="macos"] .task-header-status svg {
+  width: 9px;
+  height: 9px;
+}
+
+body[data-shell="desktop"] .task-header[data-desktop-window="macos"] > :not(.task-header-title) {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+}
+
 .task-header-workspace {
   min-width: 0;
   max-width: 32ch;
