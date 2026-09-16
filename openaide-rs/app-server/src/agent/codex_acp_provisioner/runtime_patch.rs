@@ -44,6 +44,12 @@ pub(super) struct ArtifactDigests {
     helper: String,
 }
 
+/// `sha2` 0.11 returns a raw `Array<u8>` from `finalize()` that no longer
+/// implements `LowerHex`, so encode the digest bytes ourselves.
+fn hex_digest(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 impl Default for ArtifactDigests {
     fn default() -> Self {
         Self {
@@ -57,8 +63,8 @@ impl ArtifactDigests {
     #[cfg(test)]
     pub(super) fn for_fixture(index: &[u8], helper: &[u8]) -> Self {
         Self {
-            index: format!("{:x}", Sha256::digest(index)),
-            helper: format!("{:x}", Sha256::digest(helper)),
+            index: hex_digest(&Sha256::digest(index)),
+            helper: hex_digest(&Sha256::digest(helper)),
         }
     }
 
@@ -78,7 +84,7 @@ impl ArtifactDigests {
                 }
                 digest.update(&buffer[..length]);
             }
-            if &format!("{:x}", digest.finalize()) != expected {
+            if hex_digest(&digest.finalize()) != *expected {
                 return Err(provisioning_error(
                     "installed Codex integration did not match the managed patch".to_string(),
                 ));
