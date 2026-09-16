@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.1 - 2026-09-16
+
+### Desktop reliability
+- Keep Desktop Quit responsive when the App Server cannot detach, including a repeated Cmd+Q force request and a native macOS fallback.
+- Load the login shell PATH for the macOS App Server so Codex setup finds npm instead of reporting missing Node.js.
+- Report npm launch failures distinctly during Codex setup, keeping Node.js guidance only for genuinely missing npm.
+- Reconcile Agent session discovery once per readiness so setup failures stop re-triggering catalog refresh.
+
+### Task and Chat
+- Propagate Task permission policy deltas so the auto-approve control no longer flips and reverts.
+- Offer retry when a Task session is open elsewhere instead of dead-ending.
+- Show the file name in Tool titles for camelCase/snake_case path arguments instead of a raw argument dump.
+- Center the macOS Task title in the window chrome.
+
+### macOS packaging
+- Ship a Finder-styled DMG background and refresh generated Tauri ACL schemas.
+
 ## 0.6.0 - 2026-09-15
 
 Release v0.6.0
