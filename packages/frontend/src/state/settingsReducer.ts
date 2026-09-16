@@ -58,7 +58,7 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
         settings: {
           ...state.settings,
           availableTabs: action.tabs,
-          activeTab: action.tabs.includes(state.settings.activeTab) ? state.settings.activeTab : action.tabs[0] ?? "agents",
+          activeTab: state.settings.activeTab === "connection" || action.tabs.includes(state.settings.activeTab) ? state.settings.activeTab : action.tabs[0] ?? "agents",
         },
       };
     case "settings:agentDetailsResult":

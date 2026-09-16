@@ -1069,13 +1069,53 @@ fn background_native_catalog_refresh_request_is_delegated() {
 }
 
 #[test]
-fn terminal_agent_activity_requests_native_session_reconciliation() {
+fn background_agent_readiness_reconciles_once_without_retrying_setup_failures() {
+    use crate::agent::registry_handle::AgentRegistryHandle;
+    use crate::agent::status_cache::AgentStatusCache;
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().to_path_buf()).unwrap();
     let workflow = Arc::new(RecordingCatalogRefresh::default());
-    let mut gateway = gateway_with_agent_session_listing(workflow.clone());
-
-    let _ = gateway.publish_background_agent_status_update(AppServerTime(2));
-
-    assert_eq!(workflow.requests.load(Ordering::SeqCst), 1);
+    let statuses = AgentStatusCache::default();
+    let mut gateway = gateway_with_project_store_and_listing(store.clone(), workflow.clone());
+    gateway.snapshots = SnapshotBuilder::with_sources(
+        "server-1".into(),
+        "root-1".into(),
+        SnapshotSources::new(
+            Arc::new(store.clone()),
+            Arc::new(AgentRegistrySnapshotSource::with_status_cache(
+                AgentRegistryHandle::new(crate::agent::registry::AgentRegistry::default_built_ins()),
+                statuses.clone(),
+            )),
+            Arc::new(ProjectCollectionStore::new_with_configured_roots(
+                store.clone(),
+                crate::projects::ConfiguredProjectRoots::default(),
+            )),
+            Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
+            Arc::new(SettingsCatalog::default()),
+            Arc::new(TaskNavigationStore::new(store.clone())),
+            Arc::new(TaskSnapshotStore::new(store)),
+        ),
+    );
+    statuses.begin_installation("codex");
+    gateway.publish_background_agent_status_update(AppServerTime(1));
+    statuses.record_probe_error(
+        "codex",
+        &RuntimeError::NodeJsRequired("npm unavailable".into()),
+    );
+    gateway.publish_background_agent_status_update(AppServerTime(2));
+    assert_eq!(
+        workflow.requests.load(Ordering::SeqCst),
+        0,
+        "setup failures must not request another installation through discovery"
+    );
+    statuses.record_launching("codex");
+    gateway.publish_background_agent_status_update(AppServerTime(3));
+    gateway.publish_background_agent_status_update(AppServerTime(4));
+    assert_eq!(
+        workflow.requests.load(Ordering::SeqCst),
+        1,
+        "readiness triggers one reconciliation, repeated status notifications do not"
+    );
 }
 
 #[test]

@@ -9,7 +9,8 @@ use crate::snapshot::{
     PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
     SubagentHistorySnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage,
     TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot,
-    TaskNavigationSnapshot, TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
+    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationSnapshot,
+    TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
@@ -150,6 +151,10 @@ pub struct TaskChanges {
     pub lifecycle: Option<TaskLifecycle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preparation: Option<TaskPreparationSnapshot>,
+    /// Task-owned permission handling. Carried as a delta so an open replica
+    /// learns about `task/setPermissionPolicy` without a fresh baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_policy: Option<TaskPermissionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_config: Option<TaskAgentConfigSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,6 +183,7 @@ impl TaskChanges {
             && self.active_turn_started_at.is_none()
             && self.lifecycle.is_none()
             && self.preparation.is_none()
+            && self.permission_policy.is_none()
             && self.agent_config.is_none()
             && self.agent_commands.is_none()
             && self.send_capability.is_none()

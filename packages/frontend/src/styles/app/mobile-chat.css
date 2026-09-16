@@ -86,6 +86,19 @@
     padding: 10px;
   }
 
+  body[data-shell="web"] .chat-column {
+    padding-bottom: 8px;
+  }
+
+  body[data-shell="web"] .chat-column > .composer-context-host {
+    width: calc(100% - 24px);
+  }
+
+  .composer-context-host .composer-actions {
+    margin-right: 0;
+    flex-shrink: 0;
+  }
+
   .task-surface:not(.new-task-surface) .composer {
     min-height: 72px;
     border-radius: 14px;
@@ -104,6 +117,59 @@
     justify-items: stretch;
     align-items: center;
     gap: 8px;
+  }
+
+  .composer-footer > .composer-controls {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .composer-footer > .composer-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .composer-footer > .composer-footer-status {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    max-width: none;
+    flex-wrap: wrap;
+    padding: 0 4px 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .composer-footer-status > svg {
+    flex-shrink: 0;
+  }
+
+  .composer-footer-status button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .task-connection-notice {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 12px;
+    padding: 10px 12px;
+  }
+
+  body[data-shell="web"] .chat-column > .task-connection-notice {
+    width: calc(100% - 24px);
+  }
+
+  .task-connection-notice > span,
+  .task-connection-notice > small {
+    grid-column: 1;
+  }
+
+  .task-connection-notice > button {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    min-height: 44px;
+    margin: 0;
+    padding-inline: 12px;
   }
 
   .composer-footer > .composer-icon-button,

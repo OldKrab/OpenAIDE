@@ -23,6 +23,7 @@ import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 import { createRuntimeLogger } from "./runtime-logger.mjs";
+import { createMobileStatus } from './mobile-status.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const host = process.env.OPENAIDE_WEB_HOST ?? "127.0.0.1";
@@ -100,6 +101,7 @@ const prototypeViteProxy = prototypePort === undefined
       unavailableMessage: "Prototype server is not running. Start it with npm run prototype:target.",
     });
 
+const mobileStatus = createMobileStatus(appServerManager.listTasks);
 const server = http.createServer(async (req, res) => {
   try {
     if (!isAllowedHost(req.headers.host, allowedHosts)) {
@@ -127,6 +129,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === '/__openaide-mobile/status') {
+      if (req.method !== 'GET') { writeText(res, 405, 'Method not allowed'); return; }
+      const status = await mobileStatus();
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(status));
+      return;
+    }
     if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
       writeFavicon(res);
       return;

@@ -124,7 +124,7 @@ export function ComposerRunOptions({
         <div className="composer-option-anchor composer-overflow-options-anchor">
           <PopupMenu
             className="composer-popover composer-overflow-menu"
-            label={hiddenMenuControl ? controlLabel(hiddenMenuControl) : "More options"}
+            label={hiddenMenuControl ? controlLabel(hiddenMenuControl) : visibleControls.length ? "More options" : "Options"}
             onOpenChange={(nextOpen) => setOpenMenu(nextOpen ? "options" : undefined)}
             open={openMenu === "options" || hiddenMenuControl !== undefined}
             placement="top-start"
@@ -133,7 +133,7 @@ export function ComposerRunOptions({
                 className="composer-overflow-options-control"
                 disabled={disabled || overflowLocked}
                 icon={<SlidersHorizontal size={12} />}
-                label={`More · ${hiddenControls.length}`}
+                label={`${visibleControls.length ? "More" : "Options"} · ${hiddenControls.length}`}
                 locked={overflowLocked}
                 menuOpen={openMenu === "options" || hiddenMenuControl !== undefined}
                 pending={hiddenControls.some((control) =>
@@ -505,7 +505,7 @@ function MeasurementSurface({
             <Selector
               disabled={false}
               icon={<SlidersHorizontal size={12} />}
-              label={`More · ${hiddenCount}`}
+              label={`${hiddenCount < controls.length ? "More" : "Options"} · ${hiddenCount}`}
               locked={false}
               menuOpen={false}
               onClick={() => {}}

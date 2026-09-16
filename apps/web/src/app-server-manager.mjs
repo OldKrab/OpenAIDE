@@ -155,7 +155,7 @@ export function createAppServerManager({
 
   async function sendShellRequest(connection, method, params) {
     const startedAt = Date.now();
-    const shouldLog = method !== CLIENT_HEARTBEAT;
+    const shouldLog = method !== CLIENT_HEARTBEAT && method !== 'task/list';
     // A socket that stays open without responding is still a failed liveness
     // check. Abort its I/O so it cannot retain startup or heartbeat ownership.
     const controller = new AbortController();
@@ -195,6 +195,10 @@ export function createAppServerManager({
   }
 
   return {
+    listTasks: async (params) => {
+      await startAppServer();
+      return sendShellRequest(appServerConnection, 'task/list', params);
+    },
     clearConnection,
     currentConnection: () => appServerConnection,
     currentProcess: () => appServer,

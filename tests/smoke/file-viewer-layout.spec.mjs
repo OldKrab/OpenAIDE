@@ -81,6 +81,8 @@ test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page
   await page.getByRole("button", { name: "Back to conversation" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
+  const hidePlan = page.getByRole("button", { name: "Hide Plan", exact: true });
+  if (await hidePlan.isVisible()) await hidePlan.click();
   await readme.click();
   await expect(fileViewer).toBeVisible();
   const tabStrip = await fileViewer.locator(".file-viewer-tabs").evaluate((el) => ({

@@ -49,4 +49,60 @@ describe("desktop quit lifecycle", () => {
       "exit-app",
     ]);
   });
+
+  it("still exits when the detach request never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const quit = quitDesktop({
+        requestDetach: () => new Promise<unknown>(() => undefined),
+        closeSession() {
+          events.push("close-session");
+        },
+        beforeExit(outcome) {
+          events.push(`terminal-log:${outcome}`);
+        },
+        exitApp() {
+          events.push("exit-app");
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      await expect(quit).resolves.toBe("detachTimeout");
+      expect(events).toEqual([
+        "close-session",
+        "terminal-log:detachTimeout",
+        "exit-app",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still exits when closing the session never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const quit = quitDesktop({
+        async requestDetach() {
+          events.push("detach");
+        },
+        closeSession: () => new Promise<void>(() => undefined),
+        beforeExit(outcome) {
+          events.push(`terminal-log:${outcome}`);
+        },
+        exitApp() {
+          events.push("exit-app");
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(quit).resolves.toBe("detached");
+      expect(events).toEqual(["detach", "terminal-log:detached", "exit-app"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

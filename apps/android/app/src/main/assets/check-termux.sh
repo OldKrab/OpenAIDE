@@ -1,0 +1,18 @@
+set -eu
+export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+export PATH="$PREFIX/bin:$PATH"
+runtime="$HOME/.local/share/openaide-android/runtime"
+check() { if "$@" >/dev/null 2>&1; then printf 'true'; else printf 'false'; fi; }
+printf '{"node":%s,' "$(check command -v node)"
+printf '"git":%s,' "$(check command -v git)"
+printf '"npm":%s,' "$(check command -v npm)"
+printf '"codex":%s,' "$(check command -v codex)"
+printf '"codexVersion":%s,' "$(check bash -c 'codex --version | grep -q "0\.153\.3"')"
+printf '"nodeVersion":%s,' "$(check node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)')"
+printf '"authenticated":%s,' "$(check timeout 15 codex login status)"
+printf '"runtime":%s,' "$(check test -x "$runtime/bin/openaide-app-server")"
+printf '"frontend":%s,' "$(check test -f "$runtime/packages/frontend/dist/index.html")"
+printf '"supervisor":%s,' "$(check command -v runsv)"
+printf '"storage":%s,' "$(check test -w "$HOME")"
+printf '"arm64":%s,' "$(check test "$(uname -m)" = aarch64)"
+printf '"space":%s}\n' "$(check test "$(df -Pk "$HOME" | awk 'END {print $4}')" -gt 524288)"

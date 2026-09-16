@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0 - 2026-09-15
+
+Release v0.6.0
+
+### Android
+- Use OpenAIDE on Android with a local Termux workspace or an authenticated remote HTTPS server.
+- Set up connections through guided onboarding and Settings, with version-matched, checksum-verified Termux runtime installation.
+- Keep active local work protected while the screen is locked, and release wake protection when idle. Android and vendor process restrictions still apply.
+- Attach images and use mobile-friendly header actions, message navigation, context details, and Back navigation.
+
+### Reliability and workspace improvements
+- Recover suspended or restarted connections without replaying messages, preserve in-memory drafts, and make Retry restore failed connections.
+- Delete Tasks and discovered sessions through compatible Agents, with explicit failure recovery and history reconciliation.
+- Keep history-discovery failures separate from Agent availability.
+- Open local Markdown image references in File Viewer, check for Desktop updates on startup, and keep window controls accessible during startup.
+
+### Android installation
+- Download `openaide-android-0.6.0.apk`. Local execution requires Termux on an ARM64 phone; the app does not embed its own execution environment.
+- The matching `openaide-termux-arm64.tar.gz` runtime is included in this release. Existing runtime updates are staged for manual application rather than replacing running work.
+
 ## 0.5.4 - 2026-09-10
 
 OpenAIDE 0.5.4

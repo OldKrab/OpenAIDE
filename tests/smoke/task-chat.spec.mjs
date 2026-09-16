@@ -165,7 +165,7 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
-test("scrubs User messages from the quiet rail at wide and constrained widths", async ({ page }) => {
+test("navigates User messages with a desktop rail and mobile header picker", async ({ page }) => {
   await page.setViewportSize({ width: 1_440, height: 760 });
   await openPreparedNewTask(page);
   const prompts = Array.from(
@@ -315,54 +315,38 @@ test("scrubs User messages from the quiet rail at wide and constrained widths", 
   );
 
   await page.setViewportSize({ width: 390, height: 760 });
-  await expect(rail).toBeVisible();
-  const constrained = await page.locator(".task-surface").evaluate((surface) => {
-    const railBounds = surface.querySelector(".user-message-navigator")?.getBoundingClientRect();
-    const messageListBounds = surface.querySelector(".message-list")?.getBoundingClientRect();
-    const messageBounds = surface.querySelector(".chat-agent-block, .chat-user-block")?.getBoundingClientRect();
-    const composerBounds = surface.querySelector(".composer")?.getBoundingClientRect();
-    if (!railBounds || !messageListBounds || !messageBounds || !composerBounds) {
-      throw new Error("Constrained User-message navigation geometry is incomplete.");
-    }
-    return {
-      messageRight: messageBounds.right,
-      railBottom: railBounds.bottom,
-      railLeft: railBounds.left,
-      railRight: railBounds.right,
-      railTop: railBounds.top,
-      composerTop: composerBounds.top,
-      scrollRight: messageListBounds.right,
-      overflow: surface.scrollWidth - surface.clientWidth,
-    };
-  });
-  expect(constrained.railTop).toBeGreaterThanOrEqual(0);
-  expect(constrained.railBottom).toBeLessThanOrEqual(constrained.composerTop);
-  expect(constrained.composerTop - constrained.railBottom).toBeLessThan(constrained.railTop);
-  expect(constrained.messageRight).toBeGreaterThan(constrained.railLeft);
-  expect(constrained.railRight).toBeLessThanOrEqual(constrained.scrollRight);
-  expect(constrained.overflow).toBeLessThanOrEqual(0);
-
-  const mobileToggle = rail.locator(".user-message-navigator-mobile-toggle");
-  await expect(mobileToggle).toHaveAttribute("aria-expanded", "false");
-  await expect.poll(async () => Number.parseFloat(await railScroll.evaluate(
-    (element) => getComputedStyle(element).opacity,
-  ))).toBeLessThan(0.1);
-  await mobileToggle.click();
-  await expect(mobileToggle).toHaveAttribute("aria-expanded", "true");
-  await expect.poll(async () => Number.parseFloat(await railScroll.evaluate(
-    (element) => getComputedStyle(element).opacity,
-  ))).toBeGreaterThan(0.9);
-  await prepareUserMessageNavigationObservation(page, 2);
-  await markers.nth(2).click();
+  await expect(rail).toHaveCount(0);
+  const mobilePicker = page.getByRole("button", { name: "Jump to a message", exact: true });
+  await expect(mobilePicker).toBeVisible();
+  const pickerBounds = await mobilePicker.boundingBox();
+  const chatBounds = await page.locator(".message-list").boundingBox();
+  expect(pickerBounds.width).toBeGreaterThanOrEqual(44);
+  expect(pickerBounds.height).toBeGreaterThanOrEqual(44);
+  expect(pickerBounds.y + pickerBounds.height).toBeLessThanOrEqual(chatBounds.y);
+  await mobilePicker.click();
+  const dialog = page.getByRole("dialog", { name: "Jump to a message" });
+  await expect(dialog).toBeVisible();
+  const dialogBounds = await dialog.boundingBox();
+  expect(dialogBounds.x).toBeGreaterThanOrEqual(0);
+  expect(dialogBounds.x + dialogBounds.width).toBeLessThanOrEqual(390);
+  expect(dialogBounds.y + dialogBounds.height).toBeLessThanOrEqual(760);
+  const mobileMessages = dialog.locator(".user-message-picker-list button[title]");
+  await expect(mobileMessages).toHaveCount(21);
+  await prepareUserMessageNavigationObservation(page, 2, ".user-message-picker-list button[title]");
+  await mobileMessages.nth(2).click();
   const narrowNavigation = await page.evaluate(() => window.__openaideNavigationFinished);
-  expectSmoothNavigation(narrowNavigation, 18);
-  await expect(mobileToggle).toHaveAttribute("aria-expanded", "false");
+  expectSmoothNavigation(narrowNavigation, 18, false);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.message-list-virtual-row[data-user-message-navigation-target="true"] .chat-user')).toHaveText(prompts[2]);
+  await mobilePicker.click();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
 });
 
-async function prepareUserMessageNavigationObservation(page, markerIndex) {
-  await page.evaluate((index) => {
+async function prepareUserMessageNavigationObservation(page, markerIndex, selector = ".user-message-position-marker") {
+  await page.evaluate(({ index, selector }) => {
     const messageList = document.querySelector(".message-list");
-    const destinationMarker = document.querySelectorAll(".user-message-position-marker")[index];
+    const destinationMarker = document.querySelectorAll(selector)[index];
     if (!messageList || !destinationMarker) throw new Error("Task Chat navigation surface is missing.");
     destinationMarker.addEventListener("click", () => {
       const startedAt = performance.now();
@@ -423,10 +407,10 @@ async function prepareUserMessageNavigationObservation(page, markerIndex) {
     function currentIndicatorTop() {
       return document.querySelector(".user-message-current-indicator")?.getBoundingClientRect().top;
     }
-  }, markerIndex);
+  }, { index: markerIndex, selector });
 }
 
-function expectSmoothNavigation(navigation, minimumPaintedPositions) {
+function expectSmoothNavigation(navigation, minimumPaintedPositions, hasRail = true) {
   const lowerBound = Math.min(navigation.initialScrollTop, navigation.finalScrollTop);
   const upperBound = Math.max(navigation.initialScrollTop, navigation.finalScrollTop);
   const intermediateSamples = navigation.samples.filter(
@@ -440,7 +424,7 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions) {
     "Every intermediate navigation frame must contain Chat rows").toEqual([]);
   // Initial, final, and at least two intermediate positions prove the
   // selector animates without coupling the assertion to CI frame cadence.
-  expect(new Set(navigation.samples
+  if (hasRail) expect(new Set(navigation.samples
     .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
     .filter(Boolean)).size).toBeGreaterThanOrEqual(4);
   return paintedPositions;
@@ -473,7 +457,7 @@ test("keeps an Agent link clickable while its message is streaming", async ({ pa
   await expect.poll(() => page.evaluate(() => window.__openaideStreamingLinkClicks)).toBe(1);
 });
 
-test("keeps the context meter on the composer's rounded edge as a draft grows", async ({ page }) => {
+test("uses a mobile context button and keeps the desktop meter on the rounded edge", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 640 });
   await openPreparedNewTask(page);
   await send(page, "smoke:context-usage-curve");
@@ -484,7 +468,28 @@ test("keeps the context meter on the composer's rounded edge as a draft grows", 
   const initialHeight = await composer.evaluate((element) => element.getBoundingClientRect().height);
   await editor.fill(Array.from({ length: 80 }, (_, index) => `line ${index + 1}`).join("\n"));
 
+  const mobileMeter = page.locator(".context-usage-compact");
+  await expect(mobileMeter).toBeVisible();
+  await expect(page.locator(".context-usage-edge")).toHaveCount(0);
+  const mobileBounds = await mobileMeter.boundingBox();
+  const mobileComposer = await composer.boundingBox();
+  expect(mobileBounds.width).toBeGreaterThanOrEqual(44);
+  expect(mobileBounds.height).toBeGreaterThanOrEqual(44);
+  expect(mobileBounds.x).toBeGreaterThanOrEqual(mobileComposer.x);
+  expect(mobileBounds.x + mobileBounds.width).toBeLessThanOrEqual(mobileComposer.x + mobileComposer.width);
+  await mobileMeter.click();
+  const mobileDetails = page.getByRole("dialog", { name: "Context usage details" });
+  await expect(mobileDetails).toBeVisible();
+  const mobileDetailsBounds = await mobileDetails.boundingBox();
+  expect(mobileDetailsBounds.x).toBeGreaterThanOrEqual(0);
+  expect(mobileDetailsBounds.x + mobileDetailsBounds.width).toBeLessThanOrEqual(360);
+  expect(mobileDetailsBounds.y + mobileDetailsBounds.height).toBeLessThanOrEqual(mobileComposer.y);
+  await page.keyboard.press("Escape");
+  await expect(mobileDetails).toHaveCount(0);
+  await expect(editor).toContainText("line 80");
+  await page.setViewportSize({ width: 1_200, height: 800 });
   const meterEdge = page.locator(".context-usage-edge");
+  await expect(meterEdge).toBeVisible();
   const geometry = await composer.evaluate((element) => ({
     height: element.getBoundingClientRect().height,
     radius: getComputedStyle(element).borderTopRightRadius,
@@ -1100,6 +1105,26 @@ test("uploads a 2 MiB file and sends it with the first New Task message", async 
   for await (const chunk of stream) downloadedBytes += chunk.length;
   expect(downloadedBytes).toBe(2 * 1024 * 1024);
 });
+
+for (const width of [390, 1180]) {
+  test(`keeps selected images after picker menu dismissal at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await openPreparedNewTask(page);
+    await page.getByRole("button", { name: "Add context" }).click();
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("menuitem", { name: /Attach images/ }).click(),
+    ]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu", { name: "Add context" })).toHaveCount(0);
+    await chooser.setFiles({
+      name: "pixel.png", mimeType: "image/png",
+      buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+    });
+    await expect(page.getByLabel("Attached context").locator(".composer-attachment-tile")).toHaveCount(1);
+    await page.screenshot({ path: testInfo.outputPath(`image-attachment-${width}.png`) });
+  });
+}
 
 test("keeps Images and files in one composer attachment list", async ({ page }) => {
   await openPreparedNewTask(page);

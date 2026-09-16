@@ -13,7 +13,7 @@ type MobileNavigationGesture = {
   previousTime: number;
 };
 
-const EDGE_WIDTH = 28;
+const EDGE_WIDTH = 40;
 const CAPTURE_DISTANCE = 8;
 const MAX_VERTICAL_DRIFT = 42;
 const SETTLE_PROGRESS = 0.42;
@@ -34,8 +34,10 @@ export function useMobileNavigation(enabled: boolean) {
 
   const beginSwipe = (event: ReactPointerEvent<HTMLElement>) => {
     if (!enabled || !isMobileWebViewport()) return;
+    if (event.isPrimary === false) return;
     if (event.pointerType === "mouse" && event.buttons !== 1) return;
     if (!open && event.clientX > EDGE_WIDTH) return;
+    if (gestureRef.current) setDragProgress(undefined);
     gestureRef.current = {
       captured: false,
       pointerId: event.pointerId,

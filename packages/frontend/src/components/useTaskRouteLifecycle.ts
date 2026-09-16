@@ -249,11 +249,12 @@ export function useTaskRouteLifecycle({
   const routeOpenReady = routeOpenKey === undefined || readyRouteOpenKey === routeOpenKey;
   const retryTaskOpen = useCallback(() => {
     if (bootstrap.surface !== "task" || !bootstrap.taskId || !backendInitialized.current) return;
+    if (backendConnection?.retryRecovery?.()) return;
     lastRequestedRouteTaskKey.current = undefined;
     setReadyRouteOpenKey(undefined);
     dispatch({ type: "taskOpen:start", taskId: bootstrap.taskId });
     setRouteOpenSettlement((settlement) => settlement + 1);
-  }, [bootstrap.surface, bootstrap.taskId, dispatch]);
+  }, [backendConnection, bootstrap.surface, bootstrap.taskId, dispatch]);
 
   return {
     ready: taskSubscriptionReady && routeOpenReady,

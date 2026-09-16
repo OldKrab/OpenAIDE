@@ -354,12 +354,14 @@ describe("TaskView timeline presentation", () => {
   it("renders a Native Session writer conflict as an open-elsewhere state", async () => {
     const { TaskLoadingView } = await import("./TaskView");
     let tree!: ReactTestRenderer;
+    const retry = vi.fn();
 
     act(() => {
       tree = create(
         <TaskLoadingView
           error="This session is open in another OpenAIDE window. Close it there, then try again."
           errorKind="conflict"
+          onRetry={retry}
         />,
       );
     });
@@ -369,6 +371,10 @@ describe("TaskView timeline presentation", () => {
     expect(rendered).toContain("Session open elsewhere.");
     expect(rendered).toContain("Close it there, then try again.");
     expect(rendered).not.toContain("Unable to open task.");
+    const button = tree.root.findByType("button");
+    expect(button.children).toEqual(["Try again"]);
+    act(() => button.props.onClick());
+    expect(retry).toHaveBeenCalledOnce();
   });
 
   it("uses the route-specific opening label", async () => {
@@ -742,6 +748,8 @@ describe("TaskView timeline presentation", () => {
 
     const rendered = JSON.stringify(tree.toJSON());
     expect(rendered).toContain("Unable to refresh task.");
+    expect(rendered).toContain("Disconnected");
+    expect(rendered).not.toContain("Reconnecting");
     expect(rendered).toContain("Earlier response");
     expect(rendered).toContain("Connection closed.");
     expect(tree.root.findByProps({ role: "textbox", "aria-label": "Message" }).props.contentEditable).toBe("plaintext-only");

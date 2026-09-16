@@ -345,24 +345,23 @@
   color: var(--oa-text);
   margin-top: 12px;
 }
-@media (max-width: 759px) {
-  .task-work-stack:has(.project-file-workspace) > .task-work-stack-header {
+@media (max-width: 760px) {
+  body:not([data-shell="web"]) .task-work-stack:has(.project-file-workspace) > .task-work-stack-header {
     display: flex !important;
   }
   body[data-shell="web"] .task-work-stack:has(.project-file-workspace) {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr);
   }
   body[data-shell="web"] .task-work-stack:has(.project-file-workspace) > .task-workbench {
-    grid-row: 2;
+    grid-row: 1;
     grid-column: 1;
   }
   body[data-shell="web"] .task-work-stack:has(.project-file-workspace) > .task-work-stack-header {
-    justify-content: flex-end;
-    min-height: 36px;
+    display: none;
   }
-  body[data-shell="web"] .task-work-stack:has(.project-file-workspace) > .task-work-stack-header .task-header {
-    display: none !important;
+  body[data-shell="web"] .task-work-stack > .project-file-workspace {
+    grid-row: 1;
   }
   .project-files-header {
     gap: 6px;

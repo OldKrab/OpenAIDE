@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { MoreHorizontal } from "lucide-react";
+import { createPortal } from "react-dom";
+import { UserMessagePicker } from "./UserMessagePicker";
 import type {
   UserMessageAnchor,
   UserMessageNavigation,
@@ -8,6 +10,7 @@ import type {
 
 type UserMessageNavigatorProps = {
   navigation: UserMessageNavigation;
+  target?: HTMLElement | null;
 };
 
 type DragState = {
@@ -29,11 +32,22 @@ type ScrollEdges = {
 /** Navigates the loaded User-message projection without creating a second Chat model. */
 export function UserMessageNavigator({
   navigation,
+  target,
 }: UserMessageNavigatorProps) {
+  if (navigation.anchors.length === 0 || (navigation.anchors.length === 1 && !navigation.hasEarlier)) return null;
+  if (target) return createPortal(<UserMessagePicker navigation={navigation} />, target);
+  return (
+    <>
+      <UserMessageRail navigation={navigation} />
+      <div className="user-message-navigation-entry"><UserMessagePicker navigation={navigation} /></div>
+    </>
+  );
+}
+
+function UserMessageRail({ navigation }: UserMessageNavigatorProps) {
   const { anchors, currentIndex, hasEarlier, pendingPrevious } = navigation;
   const [previewIndex, setPreviewIndex] = useState(currentIndex);
   const [currentIndicatorPosition, setCurrentIndicatorPosition] = useState<CurrentIndicatorPosition>();
-  const [mobileExpanded, setMobileExpanded] = useState(false);
   const [scrollEdges, setScrollEdges] = useState<ScrollEdges>({ end: true, start: true });
   const [suppressFocusPresentation, setSuppressFocusPresentation] = useState(false);
   const navigatorRef = useRef<HTMLElement>(null);
@@ -106,7 +120,7 @@ export function UserMessageNavigator({
 
   useLayoutEffect(() => {
     updateScrollEdges();
-  }, [anchors.length, mobileExpanded, updateScrollEdges]);
+  }, [anchors.length, updateScrollEdges]);
 
   useEffect(() => {
     if (
@@ -127,12 +141,6 @@ export function UserMessageNavigator({
   const visiblePreviewAnchor = previewAnchor ?? anchors[0]!;
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.key === "Escape" && mobileExpanded) {
-      event.preventDefault();
-      setMobileExpanded(false);
-      setSuppressFocusPresentation(true);
-      return;
-    }
     setSuppressFocusPresentation(false);
     if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
       event.preventDefault();
@@ -161,13 +169,7 @@ export function UserMessageNavigator({
     <nav
       aria-label="User message navigation"
       className="user-message-navigator"
-      data-mobile-expanded={mobileExpanded ? "true" : undefined}
       data-suppress-focus-presentation={suppressFocusPresentation ? "true" : undefined}
-      onBlurCapture={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          setMobileExpanded(false);
-        }
-      }}
       onFocusCapture={() => setSuppressFocusPresentation(false)}
       onKeyDown={onKeyDown}
       onMouseLeave={() => {
@@ -176,19 +178,6 @@ export function UserMessageNavigator({
       }}
       ref={navigatorRef}
     >
-      <button
-        aria-expanded={mobileExpanded}
-        aria-label={mobileExpanded ? "Close user message navigation" : "Open user message navigation"}
-        className="user-message-navigator-mobile-toggle"
-        onClick={() => {
-          setMobileExpanded((expanded) => !expanded);
-          setSuppressFocusPresentation(true);
-        }}
-        onFocus={() => setSuppressFocusPresentation(true)}
-        type="button"
-      >
-        <span aria-hidden="true"><span /><span /><span /></span>
-      </button>
       <div className="user-message-navigator-preview" ref={previewRef}>
         <div className="user-message-navigator-preview-content" key={visiblePreviewAnchor.key}>
           <p>{messageFullPreview(visiblePreviewAnchor.text)}</p>
@@ -261,7 +250,6 @@ export function UserMessageNavigator({
                 }
                 setPreviewIndex(index);
                 navigation.navigateTo(anchor);
-                setMobileExpanded(false);
                 setSuppressFocusPresentation(true);
               }}
               onFocus={() => setPreviewIndex(index)}

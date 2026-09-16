@@ -28,7 +28,8 @@ pub(super) fn tool_input_field_summary(key: &str, value: &Value) -> Option<Strin
     match value {
         Value::String(text) => Some(match key {
             "cmd" | "command" => sanitize_command_summary(text),
-            "path" | "file" | "cwd" => path_leaf_summary(text),
+            "path" | "file" | "cwd" | "filePath" | "file_path" | "absolutePath"
+            | "absolute_path" => path_leaf_summary(text),
             _ => sanitize_scalar_summary(text),
         }),
         Value::Bool(value) => Some(value.to_string()),

@@ -2542,6 +2542,13 @@ describe("app reducer composer state", () => {
     expect(state.questionResponses["question-1"]).toBeUndefined();
   });
 
+  it("preserves the shell-owned Connection submenu when server sections refresh", () => {
+    let state = createInitialState();
+    state = appReducer(state, { type: "settings:tab", tab: "connection" });
+    state = appReducer(state, { type: "settings:sections", tabs: ["agents", "common"] });
+    expect(state.settings.activeTab).toBe("connection");
+  });
+
   it("stores settings loading, errors, and selected tab", () => {
     let state = createInitialState();
 

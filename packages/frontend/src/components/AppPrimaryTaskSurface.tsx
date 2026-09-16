@@ -79,6 +79,7 @@ type AppPrimaryTaskSurfaceProps = {
   controller: AppController;
   desktopWindow?: DesktopWindowCapability;
   focusRequestKey: number;
+  headerActionsTarget?: HTMLElement | null;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
   projects?: AppController["view"]["navigation"]["projects"];
   onPlanDrawerOpenChange?: (open: boolean) => void;
@@ -97,6 +98,7 @@ export function AppPrimaryTaskSurface({
   controller,
   desktopWindow,
   focusRequestKey,
+  headerActionsTarget,
   model,
   projects,
   onPlanDrawerOpenChange,
@@ -154,6 +156,7 @@ export function AppPrimaryTaskSurface({
         taskMutationReady={taskMutationReady}
         fileBrowser={callbacks.task.fileBrowser}
         fileViewer={callbacks.task.fileViewer}
+        headerActionsTarget={headerActionsTarget}
         intents={intents.task}
         onCancel={renderableTaskSnapshot.task.has_messages || renderableTaskSnapshot.task.status === "active"
           ? callbacks.task.cancel

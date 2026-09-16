@@ -94,7 +94,7 @@ describe("UserMessageNavigator", () => {
     act(() => tree.unmount());
   });
 
-  it("expands the mobile rail on demand and collapses it after navigation", () => {
+  it("opens a readable message picker and closes it after navigation", () => {
     const navigation = navigationState({
       anchors: [
         { key: "message:first", rowIndex: 0, text: "First" },
@@ -105,15 +105,17 @@ describe("UserMessageNavigator", () => {
     act(() => {
       tree = create(<UserMessageNavigator navigation={navigation} />);
     });
-    const toggle = tree.root.findByProps({ className: "user-message-navigator-mobile-toggle" });
+    const toggle = tree.root.findByProps({ className: "user-message-picker-trigger" });
 
     expect(toggle.props["aria-expanded"]).toBe(false);
+    expect(toggle.props["aria-label"]).toBe("Jump to a message");
+    expect(toggle.props.title).toBe("Jump to a message");
+    expect(toggle.findByType("svg").props["aria-hidden"]).toBe("true");
     act(() => toggle.props.onClick());
     expect(toggle.props["aria-expanded"]).toBe(true);
-
-    act(() => tree.root.findByProps({
-      "aria-label": "User message 2 of 2: Second",
-    }).props.onClick({ preventDefault: vi.fn() }));
+    const message = tree.root.findByProps({ title: "Second" });
+    expect(message.findByProps({ className: "user-message-picker-text" }).children).toEqual(["Second"]);
+    act(() => message.props.onClick());
     expect(toggle.props["aria-expanded"]).toBe(false);
     expect(navigation.navigateTo).toHaveBeenCalledWith(navigation.anchors[1]);
     act(() => tree.unmount());

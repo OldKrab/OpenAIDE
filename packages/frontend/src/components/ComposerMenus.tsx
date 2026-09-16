@@ -206,6 +206,27 @@ export function ComposerControls({
 
   return (
     <div className="composer-controls">
+      <input
+        disabled={disabled || uploadsActive || !fileBrowser?.attachFiles}
+        multiple
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.currentTarget.value = "";
+          attachFiles(files);
+        }}
+        ref={fileUploadRef}
+        style={{ display: "none" }}
+        type="file"
+      />
+      <input
+        accept="image/*"
+        disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
+        multiple
+        onChange={(event) => uploadImages(Array.from(event.target.files ?? []), event.currentTarget)}
+        ref={imageUploadRef}
+        style={{ display: "none" }}
+        type="file"
+      />
       <div className="composer-menu-anchor">
         <PopupMenu
           className="composer-popover"
@@ -235,33 +256,12 @@ export function ComposerControls({
                 else fileUploadRef.current?.click();
               }}
             />
-            <input
-              disabled={disabled || uploadsActive || !fileBrowser?.attachFiles}
-              multiple
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                event.currentTarget.value = "";
-                attachFiles(files);
-              }}
-              ref={fileUploadRef}
-              style={{ display: "none" }}
-              type="file"
-            />
             <MenuButton
               description="Choose images from this device."
               disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
               icon={<Image size={13} />}
               label="Attach images"
               onClick={() => imageUploadRef.current?.click()}
-            />
-            <input
-              accept="image/*"
-              disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
-              multiple
-              onChange={(event) => uploadImages(Array.from(event.target.files ?? []), event.currentTarget)}
-              ref={imageUploadRef}
-              style={{ display: "none" }}
-              type="file"
             />
         </PopupMenu>
       </div>

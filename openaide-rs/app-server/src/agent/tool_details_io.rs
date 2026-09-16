@@ -139,7 +139,21 @@ pub(super) fn tool_input_summary(raw_input: Option<&Value>) -> Option<String> {
         return Some(summary);
     }
 
-    const PRIORITY_KEYS: &[&str] = &["query", "q", "pattern", "url", "path", "file", "cwd"];
+    // Prefer the single field that names the tool's target over a dump of its
+    // arguments. Bridges disagree on casing, so accept snake_case and camelCase.
+    const PRIORITY_KEYS: &[&str] = &[
+        "query",
+        "q",
+        "pattern",
+        "url",
+        "path",
+        "file",
+        "filePath",
+        "file_path",
+        "absolutePath",
+        "absolute_path",
+        "cwd",
+    ];
 
     for key in PRIORITY_KEYS {
         if let Some(summary) = object

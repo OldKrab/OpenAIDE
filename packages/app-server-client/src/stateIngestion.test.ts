@@ -89,6 +89,21 @@ describe("scope-local state ingestion", () => {
     expect(result.state.snapshot.task.chat.items).toEqual([item]);
   });
 
+  it("applies a Task-owned permission policy delta", () => {
+    const state = taskState("task-1", 4);
+    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+      kind: "taskChanged",
+      taskId: taskId("task-1"),
+      revision: 5,
+      changes: { permissionPolicy: "autoApprove" },
+    }));
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") return;
+    expect(result.snapshotChanged).toBe(true);
+    expect(result.state.snapshot.task.permissionPolicy).toBe("autoApprove");
+  });
+
   it("clears stale context usage when a new live session removes it", () => {
     const state = taskState("task-1", 4);
     if (state.snapshot.kind !== "task") return;

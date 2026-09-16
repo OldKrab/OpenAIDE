@@ -144,9 +144,11 @@ function subscribeToBrowserWake(wake: () => void) {
   document.addEventListener?.("visibilitychange", handleVisibilityChange);
   window.addEventListener?.("pageshow", handlePageShow);
   window.addEventListener?.("online", handleOnline);
+  window.addEventListener?.("openaide:resume", handlePageShow);
   return () => {
     document.removeEventListener?.("visibilitychange", handleVisibilityChange);
     window.removeEventListener?.("pageshow", handlePageShow);
     window.removeEventListener?.("online", handleOnline);
+    window.removeEventListener?.("openaide:resume", handlePageShow);
   };
 }

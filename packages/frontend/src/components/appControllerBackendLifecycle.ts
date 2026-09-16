@@ -60,6 +60,7 @@ export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 export type AppControllerBackendConnection = Pick<
   AppServerSession,
   | "initialize"
+  | "retryRecovery"
   | "request"
   | "handleNotification"
   | "handleRecoveryBaseline"
@@ -211,7 +212,7 @@ export function useAppControllerBackendLifecycle({
       if (currentContext) Object.assign(currentContext, recoveredContext);
       else stateSubscriptionContext.current = recoveredContext;
 
-      if (baseline.reason === "clientLivenessExpired") {
+      if (baseline.reason === "clientLivenessExpired" || baseline.reason === "appServerRestarted") {
         const expiredConfigOptions = newTaskController.getSnapshot()?.agent_config;
         const expiredTaskId = newTaskController.expireClientLease();
         if (expiredTaskId) {

@@ -75,7 +75,8 @@ Before that release:
    atomically pushes the `main` update and tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, then
    builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
-   self-contained Windows x64 and macOS Apple Silicon desktop installers while
+   self-contained Windows x64 and macOS Apple Silicon desktop installers, a signed
+   Android APK and its ARM64 Termux runtime while
    normal CI validates the exact version commit. Publication requires both to
    succeed; the release workflow does not repeat the CI suite. Prerelease
    packages carry the registry's native prerelease metadata. Each VSIX runner
@@ -97,6 +98,13 @@ Before that release:
 The root `package.json` is the release-version source of truth. VSIX and Desktop
 package, Cargo, lockfile, and Tauri manifests stamped only during artifact
 creation stay at `0.0.0` in source and must not be updated by hand.
+
+Android builds read the same root version and pin one-tap installation to the matching
+canonical release's `openaide-termux-arm64.tar.gz` asset and GitHub SHA-256 digest.
+Canonical publication requires `OPENAIDE_ANDROID_DEBUG_KEYSTORE` and
+`OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD`; it must not substitute a temporary key
+or omit the APK. Android APK and runtime assets are attached before the draft is
+published, never added to an immutable release afterward.
 
 ## Recovery and registry reconciliation
 

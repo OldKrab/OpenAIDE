@@ -26,6 +26,7 @@ import {
   type RefCallback,
   type RefObject,
 } from "react";
+import { useBackNavigation } from "./useBackNavigation";
 
 export type PopupTriggerProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   "data-oa-popup-trigger"?: true;
@@ -33,6 +34,7 @@ export type PopupTriggerProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 type AnchoredPopupProps = {
+  anchorRef?: RefObject<HTMLElement | null>;
   children: ReactNode;
   className?: string;
   label: string;
@@ -71,6 +73,7 @@ export function anchoredPopupMaxHeight({
 export function PopupMenu({
   ...props
 }: AnchoredPopupProps) {
+  useBackNavigation(props.open, () => props.onOpenChange(false));
   const browser = typeof document !== "undefined"
     && Boolean(document.body)
     && typeof Element !== "undefined";
@@ -81,6 +84,7 @@ export function PopupMenu({
 
 /** Anchored composite surface for forms or controls that cannot use menu semantics. */
 export function PopupPanel({ ...props }: AnchoredPopupProps) {
+  useBackNavigation(props.open, () => props.onOpenChange(false));
   const browser = typeof document !== "undefined"
     && Boolean(document.body)
     && typeof Element !== "undefined";
@@ -166,6 +170,7 @@ export function PopupDialog({
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
+  useBackNavigation(open, () => onOpenChange(false));
   const browser = typeof document !== "undefined"
     && Boolean(document.body)
     && typeof Element !== "undefined";
@@ -288,6 +293,7 @@ function BrowserHoverSurface({
 }
 
 function BrowserAnchoredPopup({
+  anchorRef,
   children,
   className,
   label,
@@ -324,6 +330,9 @@ function BrowserAnchoredPopup({
     strategy: "fixed",
     whileElementsMounted: autoUpdate,
   });
+  useLayoutEffect(() => {
+    refs.setPositionReference(anchorRef?.current ?? refs.domReference.current);
+  }, [anchorRef, open, refs]);
   const click = useClick(context);
   const dismiss = useDismiss(context, { outsidePressEvent: "pointerdown" });
   const role = useRole(context, { role: surfaceRole });

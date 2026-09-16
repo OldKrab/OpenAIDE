@@ -23,7 +23,7 @@
     "targets": ["app", "dmg"],
     "macOS": {
       "dmg": {
-        "background": "dmg-background.png",
+        "background": "dmg-background.tiff",
         "windowPosition": { "x": 200, "y": 160 },
         "windowSize": { "width": 660, "height": 400 },
         "appPosition": { "x": 165, "y": 225 },
