@@ -636,13 +636,32 @@ impl RpcGateway {
         &mut self,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        // Provisioning activity is an Agent Status transition. Reuse the
-        // coalesced discovery owner so session history appears without a
-        // frontend-authored retry or a prompt replay.
-        self.agent_list_sessions
-            .request_native_session_catalog_refresh();
         let events = match self.snapshots.agent_collection_snapshot() {
             Ok(agents) => {
+                use openaide_app_server_protocol::snapshot::AgentStatus;
+                let ready_agents: std::collections::HashSet<_> = agents
+                    .agents
+                    .iter()
+                    .filter(|agent| {
+                        matches!(
+                            agent.status,
+                            AgentStatus::Launching | AgentStatus::Connected
+                        )
+                    })
+                    .map(|agent| agent.agent_id.clone())
+                    .collect();
+                // Only newly usable Agents need discovery. Installing/setup-failed
+                // notifications must not feed back into provisioning, and repeated
+                // Ready notifications must not restart the same catalog refresh.
+                if ready_agents
+                    .difference(&self.ready_catalog_agents)
+                    .next()
+                    .is_some()
+                {
+                    self.agent_list_sessions
+                        .request_native_session_catalog_refresh();
+                }
+                self.ready_catalog_agents = ready_agents;
                 let installing_agent_count = agents
                     .agents
                     .iter()
