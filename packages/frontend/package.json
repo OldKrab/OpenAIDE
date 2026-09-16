@@ -21,7 +21,7 @@
     "lucide-react": "^1.39.0",
     "mermaid": "11.17.2",
     "react": "^19.2.1",
-    "react-dom": "^19.2.8",
+    "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "typescript": "^7.0.2",
@@ -31,8 +31,8 @@
     "@types/node": "~24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
-    "@types/react-test-renderer": "^19.1.0",
+    "@types/react-test-renderer": "^19.3.0",
     "jsdom": "^30.0.1",
-    "react-test-renderer": "^19.2.8"
+    "react-test-renderer": "^19.3.0"
   }
 }
