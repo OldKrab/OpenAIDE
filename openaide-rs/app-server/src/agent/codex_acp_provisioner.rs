@@ -304,7 +304,7 @@ impl CodexAcpInstaller for NpmCodexAcpInstaller {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|_| "npm could not be started".to_string())?;
+            .map_err(installer_spawn_error)?;
         let deadline = Instant::now() + self.timeout;
         loop {
             match child.try_wait() {
@@ -538,10 +538,18 @@ fn provisioning_error(message: String) -> RuntimeError {
     RuntimeError::NotReady(format!("Codex integration setup failed: {message}"))
 }
 
+fn installer_spawn_error(error: std::io::Error) -> String {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "npm could not be started".to_string(),
+        std::io::ErrorKind::PermissionDenied => "permission denied when starting npm".to_string(),
+        _ => "npm process launch failed".to_string(),
+    }
+}
+
 fn provisioning_installer_error(message: String) -> RuntimeError {
     if message == "npm could not be started" {
         RuntimeError::NodeJsRequired(
-            "Codex needs Node.js before its integration can be installed.".to_string(),
+            "OpenAIDE could not find npm in its launch environment. Install Node.js with npm, or restart OpenAIDE after updating your terminal PATH.".to_string(),
         )
     } else {
         provisioning_error(message)
