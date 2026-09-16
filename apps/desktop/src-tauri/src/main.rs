@@ -164,6 +164,10 @@ fn main() {
             Ok(())
         })
         .on_menu_event(|app, event| {
+            #[cfg(target_os = "macos")]
+            if event.id().as_ref() == "quit" {
+                arm_macos_quit_watchdog(app);
+            }
             let _ = app.emit("desktop-command", event.id().as_ref());
         })
         .on_window_event(|window, event| {
@@ -388,6 +392,30 @@ fn watch_development_runner(app: &tauri::App) {
             eprintln!("desktop_development_runner_watch_completed outcome=parent_ended");
             app_handle.exit(0);
             break;
+        }
+    });
+}
+
+/// Guarantees explicit Quit on macOS even when the WebView cannot run its
+/// graceful detach. The frontend owns the normal path; this watchdog uses the
+/// same budget as the Windows close fallback and then terminates natively.
+#[cfg(target_os = "macos")]
+fn arm_macos_quit_watchdog(app: &tauri::AppHandle) {
+    {
+        let state = app.state::<DesktopQuitState>();
+        if state.pending.swap(true, Ordering::AcqRel) {
+            return;
+        }
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(5));
+        if app
+            .state::<DesktopQuitState>()
+            .pending
+            .swap(false, Ordering::AcqRel)
+        {
+            app.exit(0);
         }
     });
 }
