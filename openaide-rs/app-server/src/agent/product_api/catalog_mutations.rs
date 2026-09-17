@@ -70,6 +70,14 @@ impl AgentCatalogMutationWorkflow for AgentProductApi {
         let agent_id = normalized_existing_custom_agent_id(params.agent_id)
             .map_err(protocol_error_from_identity)?;
         let label = normalized_label(params.label).map_err(protocol_error_from_identity)?;
+        // Saving with availability off disables the Agent, so it needs the same
+        // acknowledgement and process retirement as `set_enabled`.
+        if !params.enabled {
+            self.require_active_work_confirmation(
+                agent_id.as_str(),
+                params.confirmation.accepted_active_work_interruption,
+            )?;
+        }
         let registry = self
             .catalog_store
             .update_custom_metadata(
@@ -81,6 +89,9 @@ impl AgentCatalogMutationWorkflow for AgentProductApi {
             .map_err(protocol_error_from_runtime)?;
         self.registry.replace(registry);
         self.statuses.clear(agent_id.as_str());
+        if !params.enabled {
+            self.retire_agent_process(agent_id.as_str(), "agent/updateCustomMetadata");
+        }
         Ok(AgentUpdateCustomMetadataResult {
             agent_id,
             agents: self.snapshot()?,
@@ -161,16 +172,11 @@ impl AgentCatalogMutationWorkflow for AgentProductApi {
         params: AgentSetEnabledParams,
     ) -> Result<AgentSetEnabledResult, ProtocolError> {
         let agent_id = params.agent_id.as_str().to_string();
-        if !params.enabled
-            && !params.confirmation.accepted_active_work_interruption
-            && self
-                .has_running_task(&agent_id)
-                .map_err(protocol_error_from_runtime)?
-        {
-            // Disabling stops the Agent process, so it would interrupt its running Tasks.
-            return Err(validation_error(
-                "confirmation.acceptedActiveWorkInterruption",
-            ));
+        if !params.enabled {
+            self.require_active_work_confirmation(
+                agent_id.as_str(),
+                params.confirmation.accepted_active_work_interruption,
+            )?;
         }
         let registry = self
             .catalog_store
@@ -179,8 +185,7 @@ impl AgentCatalogMutationWorkflow for AgentProductApi {
         self.registry.replace(registry);
         self.statuses.clear(agent_id.as_str());
         if !params.enabled {
-            // Retire the process so re-enabling probes a new one instead of adopting this one.
-            self.stop_agent_process(&agent_id);
+            self.retire_agent_process(agent_id.as_str(), "agent/setEnabled");
         }
         Ok(AgentSetEnabledResult {
             agents: self.snapshot()?,
@@ -189,22 +194,53 @@ impl AgentCatalogMutationWorkflow for AgentProductApi {
 }
 
 impl AgentProductApi {
-    /// Disabling is already durable, so a failed process stop must not become an RPC
-    /// error. Later work launches a fresh process when the Agent is re-enabled.
-    fn stop_agent_process(&self, agent_id: &str) {
+    /// Disabling stops the Agent process, so it interrupts the Agent's running Tasks.
+    /// Only the App Server knows that set; the Frontend asks for the acknowledgement.
+    /// An Agent that is already disabled has no process to stop, so repeating the change
+    /// asks for nothing; registry membership is exactly the enabled set.
+    fn require_active_work_confirmation(
+        &self,
+        agent_id: &str,
+        accepted: bool,
+    ) -> Result<(), ProtocolError> {
+        if accepted || self.registry.require(agent_id).is_err() {
+            return Ok(());
+        }
+        if self
+            .has_running_task(agent_id)
+            .map_err(protocol_error_from_runtime)?
+        {
+            return Err(validation_error(
+                "confirmation.acceptedActiveWorkInterruption",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Retires the process so re-enabling probes a new one instead of adopting this one.
+    /// Disabling is already durable, so a failed stop must not become an RPC error.
+    fn retire_agent_process(&self, agent_id: &str, operation: &'static str) {
+        // Authenticate holds the per-Agent process lock for the whole device-code flow.
+        // Interrupt it first (that path deliberately skips the lock) so retirement cannot
+        // wait behind a sign-in the user just disabled the Agent out of.
+        let cancelled_authentication = match self.gateway.cancel_authentication(agent_id) {
+            Ok(()) => "succeeded",
+            Err(error) => error.reason(),
+        };
         let started_at = std::time::Instant::now();
         crate::logging::info(
             "agent_process_shutdown_started",
             serde_json::json!({
-                "operation": "agent/setEnabled",
+                "operation": operation,
                 "agent_id": agent_id,
+                "authentication_cancel_outcome": cancelled_authentication,
             }),
         );
         match self.gateway.shutdown_agent(agent_id) {
             Ok(()) => crate::logging::info(
                 "agent_process_shutdown_completed",
                 serde_json::json!({
-                    "operation": "agent/setEnabled",
+                    "operation": operation,
                     "agent_id": agent_id,
                     "outcome": "succeeded",
                     "duration_ms": started_at.elapsed().as_millis(),
@@ -213,7 +249,7 @@ impl AgentProductApi {
             Err(error) => crate::logging::warn(
                 "agent_process_shutdown_failed",
                 serde_json::json!({
-                    "operation": "agent/setEnabled",
+                    "operation": operation,
                     "agent_id": agent_id,
                     "outcome": "failed",
                     "duration_ms": started_at.elapsed().as_millis(),

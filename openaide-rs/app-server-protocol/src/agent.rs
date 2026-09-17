@@ -145,6 +145,10 @@ pub struct AgentUpdateCustomMetadataParams {
     pub icon: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Saving can disable an Agent, which stops its process and interrupts its running
+    /// Tasks; it needs the same acknowledgement as `agent/setEnabled`.
+    #[serde(default)]
+    pub confirmation: AgentActiveWorkConfirmation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -234,14 +238,14 @@ pub struct AgentSetEnabledParams {
     pub agent_id: AgentId,
     pub enabled: bool,
     #[serde(default)]
-    pub confirmation: AgentSetEnabledConfirmation,
+    pub confirmation: AgentActiveWorkConfirmation,
 }
 
-/// User acknowledgement required before disabling an Agent whose running Tasks
-/// would be interrupted when its process stops.
+/// User acknowledgement required by every request that disables an Agent, because
+/// disabling stops its process and interrupts its running Tasks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentSetEnabledConfirmation {
+pub struct AgentActiveWorkConfirmation {
     #[serde(default)]
     pub accepted_active_work_interruption: bool,
 }
@@ -290,6 +294,10 @@ pub struct AgentSettingsDetail {
     /// True when signing out would interrupt a running Task for this Agent.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub logout_blocked_by_running_task: bool,
+    /// Running Tasks for this Agent across all Projects, ignoring search or the current
+    /// App Shell scope, so Settings can ask before disabling interrupts them.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub running_task_count: u32,
     /// Cleanup provenance only; this does not assert that the Agent is currently authenticated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_authentication_method_id: Option<String>,
@@ -369,6 +377,10 @@ fn default_enabled() -> bool {
 
 fn default_custom_icon() -> String {
     "bot".to_string()
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 #[cfg(test)]

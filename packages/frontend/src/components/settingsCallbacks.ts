@@ -49,6 +49,28 @@ export function createSettingsCallbacks({
     setAgents: setAgents ?? (() => undefined),
     state,
   });
+  const setAgentEnabled: SettingsCallbacks["setAgentEnabled"] = async (
+    agentId,
+    enabled,
+    acceptedActiveWorkInterruption,
+  ) => {
+    dispatch({ type: "settings:start" });
+    try {
+      const outcome = await setAgentEnabledThroughBackend(
+        agentSettingsContext(),
+        agentId,
+        enabled,
+        acceptedActiveWorkInterruption,
+      );
+      if (outcome.kind === "unavailable") {
+        dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+      }
+      return outcome;
+    } catch (error) {
+      dispatch({ type: "settings:error", message: safeErrorMessage(error) });
+      return { kind: "failed" };
+    }
+  };
   return {
     dismissError: () => dispatch({ type: "settings:error:clear" }),
     // Sign-in Flow state is App Server-owned and arrives through the agents subscription, so
@@ -159,13 +181,17 @@ export function createSettingsCallbacks({
         .then((settings) => dispatch({ type: "settings:runtimeSettings", settings: mapProtocolRuntimeSettings(settings) }))
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
-    setAgentEnabled: (agentId, enabled, acceptedActiveWorkInterruption) => {
-      dispatch({ type: "settings:start" });
-      void setAgentEnabledThroughBackend(agentSettingsContext(), agentId, enabled, acceptedActiveWorkInterruption)
-        .then((handled) => {
-          if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
-        })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+    setAgentEnabled,
+    disableRecoveredAgent: async (agentId) => {
+      const outcome = await setAgentEnabled(agentId, false);
+      if (outcome.kind === "confirmation-required") {
+        // Recovery surfaces cannot show the disable dialog; send the user to the Agent pane,
+        // which owns the confirmation for interrupting running work.
+        dispatch({
+          type: "settings:error",
+          message: "This Agent has running Tasks. Disable it from Settings, Agents.",
+        });
+      }
     },
     setMcpServerEnabled: (id, enabled) => {
       void setMcpServerEnabledThroughBackend(agentSettingsContext(), id, enabled)
@@ -193,13 +219,22 @@ export function createSettingsCallbacks({
       dispatch({ type: "settings:start" });
       postHostMessage({ type: "developer.settings.unlock" });
     },
-    updateCustomAgentMetadata: (payload) => {
+    updateCustomAgentMetadata: async (payload, acceptedActiveWorkInterruption) => {
       dispatch({ type: "settings:start" });
-      void updateCustomAgentMetadataThroughBackend(agentSettingsContext(), payload)
-        .then((handled) => {
-          if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
-        })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+      try {
+        const outcome = await updateCustomAgentMetadataThroughBackend(
+          agentSettingsContext(),
+          payload,
+          acceptedActiveWorkInterruption,
+        );
+        if (outcome.kind === "unavailable") {
+          dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        }
+        return outcome;
+      } catch (error) {
+        dispatch({ type: "settings:error", message: safeErrorMessage(error) });
+        return { kind: "failed" };
+      }
     },
   };
 }

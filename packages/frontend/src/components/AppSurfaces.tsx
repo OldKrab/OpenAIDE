@@ -53,19 +53,16 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     (agent) => agent.id === "codex" && agent.status === "installing",
   ) === true;
   // Task rows and headers render Agent identity from the App Server catalog, not from
-  // Task metadata, so custom Agent icons follow the Agent rather than the Task.
-  const agentIcons = useMemo(
-    () => Object.fromEntries((controller.agents ?? []).map((agent) => [agent.id, agent.icon])),
-    [controller.agents],
-  );
-  const runningTaskCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const task of visibleTasks) {
-      if (task.status !== "active" && task.status !== "stopping" && task.status !== "waiting") continue;
-      counts[task.agent_id] = (counts[task.agent_id] ?? 0) + 1;
+  // Task metadata, so custom Agent icons follow the Agent rather than the Task. Disabled
+  // Agents leave that catalog but keep their configured icon in the Settings projection,
+  // so a Task opened from history still renders the Agent the user configured.
+  const agentIcons = useMemo(() => {
+    const icons = Object.fromEntries((controller.agents ?? []).map((agent) => [agent.id, agent.icon]));
+    for (const agent of settings.agentDetails ?? []) {
+      if (!icons[agent.id]) icons[agent.id] = agent.icon;
     }
-    return counts;
-  }, [visibleTasks]);
+    return icons;
+  }, [controller.agents, settings.agentDetails]);
   // The App Server Project catalog is global; current-Project shells expose only
   // the ordered Project identities represented by this App Shell workspace.
   const currentNavigationProjectIds = bootstrap.surface !== "invalid"
@@ -421,7 +418,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onRecoverNativeSessions={(kind) => kind === "launchFailed"
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
-          onDisableRecoveredAgent={(agentId) => callbacks.settings.setAgentEnabled(agentId, false)}
+          onDisableRecoveredAgent={callbacks.settings.disableRecoveredAgent}
           onRestoreTask={callbacks.navigation.restoreTask}
           onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
@@ -491,7 +488,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           : undefined}
         projects={navigationProjects}
         recoveryActions={settingsRecoveryActions}
-        runningTaskCounts={runningTaskCounts}
         state={settings}
         worktreeIntents={controller.intents.newTask}
         worktreeRepositories={view.primaryTask.newTask.worktreeRepositories}
@@ -553,7 +549,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onRecoverNativeSessions={(kind) => kind === "launchFailed"
           ? callbacks.navigation.loadNativeSessions()
           : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
-        onDisableRecoveredAgent={(agentId) => callbacks.settings.setAgentEnabled(agentId, false)}
+        onDisableRecoveredAgent={callbacks.settings.disableRecoveredAgent}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSetTaskPinned={callbacks.navigation.setTaskPinned}
         onSetTaskTitle={callbacks.navigation.setTaskTitle}

@@ -72,9 +72,10 @@ impl AcpRuntimeKernel {
     }
 
     pub(super) fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
-        self.registry.require(agent_id)?;
         // Authenticate holds the process lock until Codex returns. Stop the
         // process without taking that lock so Cancel can interrupt device-code login.
+        // Registry membership is not required: disabling an Agent removes it while the
+        // sign-in it must interrupt is still running.
         self.active_sessions.cancel_authentication(agent_id);
         Ok(())
     }

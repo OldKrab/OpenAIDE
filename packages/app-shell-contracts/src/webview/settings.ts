@@ -66,6 +66,11 @@ export type AgentSettingsRecord = {
   }>;
   logout_supported?: boolean;
   logout_blocked_by_running_task?: boolean;
+  /**
+   * Running Tasks for this Agent across all Projects as the App Server sees them. Settings
+   * asks before disabling an Agent, because disabling stops its process and interrupts them.
+   */
+  running_task_count?: number;
   /** Cleanup provenance only; it does not assert that the Agent is currently signed in. */
   last_authentication_method_id?: string;
   /**

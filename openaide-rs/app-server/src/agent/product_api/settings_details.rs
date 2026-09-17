@@ -89,6 +89,9 @@ fn built_in_detail(
         logout_blocked_by_running_task: api
             .has_running_task(metadata.id)
             .map_err(protocol_error_from_runtime)?,
+        running_task_count: api
+            .running_task_count(metadata.id)
+            .map_err(protocol_error_from_runtime)?,
         last_authentication_method_id: api
             .auth_provenance
             .method(metadata.id)
@@ -130,6 +133,9 @@ fn custom_detail(
         logout_supported: api.statuses.snapshot(&id).logout_supported,
         logout_blocked_by_running_task: api
             .has_running_task(&id)
+            .map_err(protocol_error_from_runtime)?,
+        running_task_count: api
+            .running_task_count(&id)
             .map_err(protocol_error_from_runtime)?,
         last_authentication_method_id: api
             .auth_provenance

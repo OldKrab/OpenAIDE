@@ -193,9 +193,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -222,9 +222,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -254,9 +254,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -284,10 +284,10 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
         onSetDesktopNotifications={onSetDesktopNotifications}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{ activeTab: "common", loading: false }}
@@ -312,9 +312,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={onUnlockDeveloperSettings}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -348,9 +348,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -385,9 +385,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -415,9 +415,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onResetTaskHistory={async () => undefined}
         onSelectTab={onSelectTab}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{ activeTab: "common", loading: false }}
@@ -446,9 +446,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{ activeTab: "common", error: "Could not save setting.", loading: false }}
@@ -490,9 +490,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{ activeTab: "common", availableTabs: ["common", "desktop", "data"], loading: false }}
@@ -516,9 +516,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -546,9 +546,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{ activeTab: "common", loading: false }}
@@ -570,9 +570,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -606,9 +606,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -638,9 +638,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -666,9 +666,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
         onReplaceCustomAgent={() => undefined}
         onSelectTab={() => undefined}
         onSetAcpTrace={() => undefined}
-        onSetAgentEnabled={() => undefined}
+        onSetAgentEnabled={async () => ({ kind: "applied" })}
         onSetComposerSubmitShortcut={() => undefined}
-        onUpdateCustomAgentMetadata={() => undefined}
+        onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
         onUnlockDeveloperSettings={() => undefined}
         preferences={{ composer_submit_shortcut: "mod_enter" }}
         state={{
@@ -703,9 +703,9 @@ function renderSettingsView(activeTab: "common" | "data" = "common") {
       onReplaceCustomAgent={() => undefined}
       onSelectTab={() => undefined}
       onSetAcpTrace={() => undefined}
-      onSetAgentEnabled={() => undefined}
+      onSetAgentEnabled={async () => ({ kind: "applied" })}
       onSetComposerSubmitShortcut={() => undefined}
-      onUpdateCustomAgentMetadata={() => undefined}
+      onUpdateCustomAgentMetadata={async () => ({ kind: "applied" })}
       onUnlockDeveloperSettings={() => undefined}
       preferences={{ composer_submit_shortcut: "mod_enter" }}
       state={{ activeTab, loading: false }}

@@ -7,10 +7,11 @@ use crate::storage::records::{
 };
 use crate::storage::Store;
 use openaide_app_server_protocol::agent::{
-    AgentAuthenticateParams, AgentAuthenticateStatus as ProtocolAgentAuthenticateStatus,
-    AgentCreateCustomParams, AgentDeleteCustomParams, AgentLogoutParams,
-    AgentReplaceCustomConfirmation, AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams,
-    AgentSetEnabledConfirmation, AgentSetEnabledParams,
+    AgentActiveWorkConfirmation, AgentAuthenticateParams,
+    AgentAuthenticateStatus as ProtocolAgentAuthenticateStatus, AgentCreateCustomParams,
+    AgentDeleteCustomParams, AgentLogoutParams, AgentReplaceCustomConfirmation,
+    AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams, AgentSetEnabledParams,
+    AgentUpdateCustomMetadataParams,
 };
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::ids::AgentId;
@@ -34,7 +35,7 @@ fn disabling_an_agent_stops_its_process_and_removes_it_from_the_runtime_catalog(
         .set_enabled(AgentSetEnabledParams {
             agent_id: AgentId::from("codex"),
             enabled: false,
-            confirmation: AgentSetEnabledConfirmation::default(),
+            confirmation: AgentActiveWorkConfirmation::default(),
         })
         .unwrap();
 
@@ -68,7 +69,7 @@ fn disabling_an_agent_with_a_running_task_requires_confirmation() {
         .set_enabled(AgentSetEnabledParams {
             agent_id: AgentId::from("codex"),
             enabled: false,
-            confirmation: AgentSetEnabledConfirmation::default(),
+            confirmation: AgentActiveWorkConfirmation::default(),
         })
         .unwrap_err();
 
@@ -86,12 +87,264 @@ fn disabling_an_agent_with_a_running_task_requires_confirmation() {
     api.set_enabled(AgentSetEnabledParams {
         agent_id: AgentId::from("codex"),
         enabled: false,
-        confirmation: AgentSetEnabledConfirmation {
+        confirmation: AgentActiveWorkConfirmation {
             accepted_active_work_interruption: true,
         },
     })
     .unwrap();
     assert_eq!(shutdowns.lock().unwrap().as_slice(), ["codex"]);
+}
+
+#[test]
+fn saving_a_custom_agent_as_unavailable_stops_its_process_and_requires_confirmation() {
+    let catalog_store = test_catalog_store();
+    let shutdowns = Arc::new(Mutex::new(Vec::new()));
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        catalog_store.clone(),
+        Arc::new(ShutdownRecordingAgent(shutdowns.clone())),
+        AgentStatusCache::default(),
+    );
+    let created = api
+        .create_custom(AgentCreateCustomParams {
+            agent_id: None,
+            label: "Local Agent".to_string(),
+            icon: "bot".to_string(),
+            command_line: "local-agent".to_string(),
+            command: "local-agent".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            secret_env: Vec::new(),
+            enabled: true,
+        })
+        .unwrap();
+    let agent_id = created.agent_id.clone();
+    let mut running = running_task_record("task-running");
+    running.agent_id = agent_id.as_str().to_string();
+    running.agent_name = "Local Agent".to_string();
+    catalog_store.backing_store().write_task(&running).unwrap();
+
+    // Availability is an editable field of the same save, so it must not become a
+    // second way to disable an Agent that skips the safeguards.
+    let error = api
+        .update_custom_metadata(metadata_params(&agent_id, false, false))
+        .unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::ValidationFailed);
+    assert!(shutdowns.lock().unwrap().is_empty());
+    assert!(
+        api.agent_settings_details(
+            openaide_app_server_protocol::agent::AgentSettingsDetailsParams {}
+        )
+        .unwrap()
+        .agents
+        .iter()
+        .any(|agent| agent.agent_id == agent_id && agent.enabled),
+        "a rejected save leaves the Agent available"
+    );
+
+    api.update_custom_metadata(metadata_params(&agent_id, false, true))
+        .unwrap();
+    assert_eq!(shutdowns.lock().unwrap().as_slice(), [agent_id.as_str()]);
+    assert!(
+        api.snapshot()
+            .unwrap()
+            .agents
+            .iter()
+            .all(|agent| agent.agent_id != agent_id),
+        "a saved disable leaves the runtime catalog"
+    );
+}
+
+#[test]
+fn saving_an_unavailable_agent_as_unavailable_does_not_ask_for_confirmation() {
+    // The Agent is already disabled, so it has no process to stop and nothing to confirm.
+    let catalog_store = test_catalog_store();
+    let shutdowns = Arc::new(Mutex::new(Vec::new()));
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        catalog_store.clone(),
+        Arc::new(ShutdownRecordingAgent(shutdowns.clone())),
+        AgentStatusCache::default(),
+    );
+    let created = api
+        .create_custom(AgentCreateCustomParams {
+            agent_id: None,
+            label: "Local Agent".to_string(),
+            icon: "bot".to_string(),
+            command_line: "local-agent".to_string(),
+            command: "local-agent".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            secret_env: Vec::new(),
+            enabled: false,
+        })
+        .unwrap();
+    let agent_id = created.agent_id.clone();
+    let mut running = running_task_record("task-running");
+    running.agent_id = agent_id.as_str().to_string();
+    catalog_store.backing_store().write_task(&running).unwrap();
+
+    api.update_custom_metadata(metadata_params(&agent_id, false, false))
+        .expect("an already disabled Agent has no process to stop");
+
+    // Retirement is requested and finds nothing, which is already the desired state.
+    assert_eq!(shutdowns.lock().unwrap().as_slice(), [agent_id.as_str()]);
+}
+
+#[test]
+fn saving_a_live_agent_metadata_does_not_stop_its_process() {
+    let shutdowns = Arc::new(Mutex::new(Vec::new()));
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        test_catalog_store(),
+        Arc::new(ShutdownRecordingAgent(shutdowns.clone())),
+        AgentStatusCache::default(),
+    );
+    let created = api
+        .create_custom(AgentCreateCustomParams {
+            agent_id: None,
+            label: "Local Agent".to_string(),
+            icon: "bot".to_string(),
+            command_line: "local-agent".to_string(),
+            command: "local-agent".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            secret_env: Vec::new(),
+            enabled: true,
+        })
+        .unwrap();
+
+    api.update_custom_metadata(metadata_params(&created.agent_id, true, false))
+        .unwrap();
+
+    assert!(shutdowns.lock().unwrap().is_empty());
+}
+
+#[test]
+fn cancelling_authentication_still_works_after_the_agent_is_disabled() {
+    // Disabling removes registry membership while the sign-in the user cancels out of
+    // is still running, so cancel must not require that membership.
+    let statuses = AgentStatusCache::default();
+    statuses.record_probe_error(
+        "codex",
+        &RuntimeError::AuthRequired("Authentication required".to_string()),
+    );
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        test_catalog_store(),
+        Arc::new(ShutdownRecordingAgent(Arc::new(Mutex::new(Vec::new())))),
+        statuses.clone(),
+    );
+    statuses
+        .begin_authentication("codex", "chat-gpt", false)
+        .expect("begin authentication");
+    api.set_enabled(AgentSetEnabledParams {
+        agent_id: AgentId::from("codex"),
+        enabled: false,
+        confirmation: AgentActiveWorkConfirmation::default(),
+    })
+    .unwrap();
+
+    api.cancel_authenticate(
+        openaide_app_server_protocol::agent::AgentCancelAuthenticateParams {
+            agent_id: AgentId::from("codex"),
+        },
+    )
+    .expect("cancel after disable");
+
+    assert!(
+        api.snapshot()
+            .unwrap()
+            .agents
+            .iter()
+            .all(|agent| agent.agent_id.as_str() != "codex"),
+        "the disabled Agent stays out of the runtime catalog"
+    );
+    assert!(
+        api.cancel_authenticate(
+            openaide_app_server_protocol::agent::AgentCancelAuthenticateParams {
+                agent_id: AgentId::from("not-an-agent"),
+            }
+        )
+        .is_err(),
+        "cancel still rejects an unknown Agent"
+    );
+}
+
+#[test]
+fn disabling_an_agent_interrupts_sign_in_before_retiring_its_process() {
+    // Authenticate holds the per-Agent process lock for the whole device-code flow, so
+    // retirement must interrupt it first or it waits out the sign-in it just invalidated.
+    let lifecycle = Arc::new(Mutex::new(Vec::new()));
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        test_catalog_store(),
+        Arc::new(ProcessLifecycleAgent(lifecycle.clone())),
+        AgentStatusCache::default(),
+    );
+
+    api.set_enabled(AgentSetEnabledParams {
+        agent_id: AgentId::from("codex"),
+        enabled: false,
+        confirmation: AgentActiveWorkConfirmation::default(),
+    })
+    .unwrap();
+
+    assert_eq!(
+        lifecycle.lock().unwrap().as_slice(),
+        ["cancel:codex", "shutdown:codex"]
+    );
+}
+
+#[test]
+fn settings_details_report_running_task_counts_for_every_project() {
+    let catalog_store = test_catalog_store();
+    catalog_store
+        .backing_store()
+        .write_task(&running_task_record("task-running"))
+        .unwrap();
+    catalog_store
+        .backing_store()
+        .write_task(&running_task_record("task-other"))
+        .unwrap();
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        catalog_store,
+        Arc::new(ReadyAgent),
+        AgentStatusCache::default(),
+    );
+
+    let details = api
+        .agent_settings_details(openaide_app_server_protocol::agent::AgentSettingsDetailsParams {})
+        .unwrap();
+    let codex = details
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == "codex")
+        .unwrap();
+    assert_eq!(codex.running_task_count, 2);
+    let other = details
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() != "codex")
+        .unwrap();
+    assert_eq!(other.running_task_count, 0);
+}
+
+fn metadata_params(
+    agent_id: &AgentId,
+    enabled: bool,
+    accepted_active_work_interruption: bool,
+) -> AgentUpdateCustomMetadataParams {
+    AgentUpdateCustomMetadataParams {
+        agent_id: agent_id.clone(),
+        label: "Local Agent".to_string(),
+        icon: "bot".to_string(),
+        enabled,
+        confirmation: AgentActiveWorkConfirmation {
+            accepted_active_work_interruption,
+        },
+    }
 }
 
 #[test]
@@ -536,6 +789,32 @@ fn running_task_record(task_id: &str) -> TaskRecord {
         model_id: None,
         supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
+    }
+}
+
+struct ProcessLifecycleAgent(Arc<Mutex<Vec<String>>>);
+
+impl AgentRuntime for ProcessLifecycleAgent {
+    fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.0.lock().unwrap().push(format!("cancel:{agent_id}"));
+        Ok(())
+    }
+
+    fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.0.lock().unwrap().push(format!("shutdown:{agent_id}"));
+        Ok(())
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Err(RuntimeError::CapabilityMissing("test".to_string()))
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Err(RuntimeError::CapabilityMissing("test".to_string()))
     }
 }
 

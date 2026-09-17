@@ -11,6 +11,7 @@ import type {
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
+import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import type { AgentOption, ComposerAttachment } from "../state/composerOptions";
 import type { AppState } from "../state/store";
 import type {
@@ -78,6 +79,8 @@ export type SettingsCallbacks = {
   deleteCustomAgent: (agentId: string) => void;
   deleteMcpServer: (server: McpServerDefinition) => void;
   dismissError?: () => void;
+  /** Recovery-surface disable; cannot confirm interrupting running work, so it reports instead. */
+  disableRecoveredAgent: (agentId: string) => void;
   getMcpServerDetails: (id: string) => Promise<McpServerDefinition>;
   getSkillDetails: (id: string) => Promise<SkillSettingsDetails>;
   replaceCustomAgent: (payload: CustomAgentReplaceParams) => void;
@@ -86,10 +89,17 @@ export type SettingsCallbacks = {
   resetTaskHistory: () => Promise<void>;
   selectSettingsTab: (tab: SettingsTabId) => void;
   setAcpTrace: (enabled: boolean) => void;
-  setAgentEnabled: (agentId: string, enabled: boolean, acceptedActiveWorkInterruption?: boolean) => void;
+  setAgentEnabled: (
+    agentId: string,
+    enabled: boolean,
+    acceptedActiveWorkInterruption?: boolean,
+  ) => Promise<AgentDisableOutcome>;
   setMcpServerEnabled: (id: string, enabled: boolean) => void;
   setComposerSubmitShortcut: (shortcut: AppPreferencesRecord["composer_submit_shortcut"]) => void;
-  updateCustomAgentMetadata: (payload: CustomAgentMetadataUpdateParams) => void;
+  updateCustomAgentMetadata: (
+    payload: CustomAgentMetadataUpdateParams,
+    acceptedActiveWorkInterruption?: boolean,
+  ) => Promise<AgentDisableOutcome>;
   unlockDeveloperSettings: () => void;
 };
 
