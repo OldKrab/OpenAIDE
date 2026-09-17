@@ -370,7 +370,12 @@ export type AgentCreateCustomParams = { agentId?: AgentId | null, label: string,
 
 export type AgentCreateCustomResult = { agentId: AgentId, agents: AgentCollectionSnapshot, };
 
-export type AgentUpdateCustomMetadataParams = { agentId: AgentId, label: string, icon: string, enabled: boolean, };
+export type AgentUpdateCustomMetadataParams = { agentId: AgentId, label: string, icon: string, enabled: boolean,
+/**
+ * Saving can disable an Agent, which stops its process and interrupts its running
+ * Tasks; it needs the same acknowledgement as `agent/setEnabled`.
+ */
+confirmation: AgentActiveWorkConfirmation, };
 
 export type AgentUpdateCustomMetadataResult = { agentId: AgentId, agents: AgentCollectionSnapshot, };
 
@@ -388,7 +393,9 @@ export type AgentDeleteCustomParams = { agentId: AgentId, expectedSecretEnv?: Ar
 
 export type AgentDeleteCustomResult = { agentId: AgentId, removedSecretEnv?: Array<string>, agents: AgentCollectionSnapshot, };
 
-export type AgentSetEnabledParams = { agentId: AgentId, enabled: boolean, };
+export type AgentSetEnabledParams = { agentId: AgentId, enabled: boolean, confirmation: AgentActiveWorkConfirmation, };
+
+export type AgentActiveWorkConfirmation = { acceptedActiveWorkInterruption: boolean, };
 
 export type AgentSetEnabledResult = { agents: AgentCollectionSnapshot, };
 
@@ -401,6 +408,11 @@ export type AgentSettingsDetail = { agentId: AgentId, label: string, enabled: bo
  * True when signing out would interrupt a running Task for this Agent.
  */
 logoutBlockedByRunningTask?: boolean,
+/**
+ * Running Tasks for this Agent across all Projects, ignoring search or the current
+ * App Shell scope, so Settings can ask before disabling interrupts them.
+ */
+runningTaskCount?: number,
 /**
  * Cleanup provenance only; this does not assert that the Agent is currently authenticated.
  */
@@ -1091,7 +1103,12 @@ export type ProjectSummary = { projectId: ProjectId, label: string, workspaceRoo
 
 export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
-export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities,
+export type AgentSummary = { agentId: AgentId, label: string,
+/**
+ * Configured display icon id for this Agent. Unknown ids stay opaque here and
+ * are normalized by the Frontend, which owns icon rendering.
+ */
+icon: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities,
 /**
  * The one Sign-in Flow App Server is running (or last ran without success) for this Agent.
  * Absent when no flow is running and the last flow ended in success or cancellation.

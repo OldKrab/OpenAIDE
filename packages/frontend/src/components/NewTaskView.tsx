@@ -287,6 +287,7 @@ export function NewTaskView({
   if (state.newTask.submitting && openingNativeSession) {
     return (
       <NewTaskStartingView
+        agentIcon={agentChoices.find((agent) => agent.id === state.newTask.selection.agentId)?.icon}
         agentId={state.newTask.selection.agentId}
         agentName={state.newTask.selection.agentLabel}
         composer={composer}

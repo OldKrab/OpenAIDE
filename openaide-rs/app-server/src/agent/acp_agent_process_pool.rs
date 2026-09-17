@@ -414,6 +414,14 @@ impl AcpAgentProcessPool {
         }
     }
 
+    /// Stops the pooled process for one Agent so a later launch is a new process.
+    /// A missing process already satisfies the request.
+    pub(super) fn shutdown_agent(&self, agent_id: &str) {
+        if let Some(process) = self.existing_process(agent_id) {
+            self.stop_process(agent_id, &process);
+        }
+    }
+
     fn get_or_launch_process(
         &self,
         agent_id: &str,

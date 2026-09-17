@@ -8,6 +8,22 @@
   container-type: inline-size;
 }
 
+/*
+ * Desktop work surface reads as an inset panel: the sidebar and Task header
+ * chrome wrap its rounded top-left corner. The chrome color must sit behind
+ * the workbench, otherwise the curve is invisible against the matching app
+ * background. The header keeps its bottom edge; only the vertical sidebar
+ * divider is removed so the chrome reads as one uninterrupted plane.
+ */
+body[data-shell="desktop"] .task-work-stack[data-desktop-window="macos"] {
+  background: var(--oa-panel);
+}
+
+body[data-shell="desktop"] .task-work-stack[data-desktop-window="macos"] > .task-workbench {
+  border-top-left-radius: var(--oa-radius-lg);
+  background: var(--oa-bg);
+}
+
 .app-sidebar-frame[data-resizing="true"] .task-work-stack,
 .task-work-stack[data-resizing="true"],
 .task-work-stack[data-file-viewer] {

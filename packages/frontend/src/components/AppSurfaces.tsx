@@ -52,6 +52,17 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const codexIntegrationInstalling = controller.agents?.some(
     (agent) => agent.id === "codex" && agent.status === "installing",
   ) === true;
+  // Task rows and headers render Agent identity from the App Server catalog, not from
+  // Task metadata, so custom Agent icons follow the Agent rather than the Task. Disabled
+  // Agents leave that catalog but keep their configured icon in the Settings projection,
+  // so a Task opened from history still renders the Agent the user configured.
+  const agentIcons = useMemo(() => {
+    const icons = Object.fromEntries((controller.agents ?? []).map((agent) => [agent.id, agent.icon]));
+    for (const agent of settings.agentDetails ?? []) {
+      if (!icons[agent.id]) icons[agent.id] = agent.icon;
+    }
+    return icons;
+  }, [controller.agents, settings.agentDetails]);
   // The App Server Project catalog is global; current-Project shells expose only
   // the ordered Project identities represented by this App Shell workspace.
   const currentNavigationProjectIds = bootstrap.surface !== "invalid"
@@ -374,6 +385,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
+          agentIcons={agentIcons}
           codexIntegrationInstalling={codexIntegrationInstalling}
           groupByProject={true}
           nativeSessions={navigation.nativeSessions}
@@ -406,7 +418,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onRecoverNativeSessions={(kind) => kind === "launchFailed"
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
-          onDisableRecoveredAgent={(agentId) => callbacks.settings.setAgentEnabled(agentId, false)}
+          onDisableRecoveredAgent={callbacks.settings.disableRecoveredAgent}
           onRestoreTask={callbacks.navigation.restoreTask}
           onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
@@ -506,6 +518,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const taskNavigation = (
       <Sidebar
         activeTaskId={sidebarActiveTaskId}
+        agentIcons={agentIcons}
         codexIntegrationInstalling={codexIntegrationInstalling}
         groupByProject={true}
         hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
@@ -536,7 +549,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onRecoverNativeSessions={(kind) => kind === "launchFailed"
           ? callbacks.navigation.loadNativeSessions()
           : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
-        onDisableRecoveredAgent={(agentId) => callbacks.settings.setAgentEnabled(agentId, false)}
+        onDisableRecoveredAgent={callbacks.settings.disableRecoveredAgent}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSetTaskPinned={callbacks.navigation.setTaskPinned}
         onSetTaskTitle={callbacks.navigation.setTaskTitle}
@@ -644,6 +657,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             <AppServerErrorView message={appServerError} />
           ) : (
             <AppPrimaryTaskSurface
+              agentIcons={agentIcons}
               controller={controller}
               desktopWindow={desktopWindow}
               focusRequestKey={newTaskFocusRequestKey}
@@ -673,6 +687,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   return (
     <main className="app-shell editor-shell">
       <AppPrimaryTaskSurface
+        agentIcons={agentIcons}
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
         model={taskSurfaceModel}

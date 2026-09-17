@@ -28,6 +28,7 @@ pub(crate) enum AgentLaunch {
 pub(crate) struct AgentDefinition {
     id: String,
     label: String,
+    icon: String,
     source_kind: AgentSourceKind,
     launch: AgentLaunch,
 }
@@ -36,12 +37,14 @@ impl AgentDefinition {
     pub(super) fn new(
         id: String,
         label: String,
+        icon: String,
         source_kind: AgentSourceKind,
         launch: AgentLaunch,
     ) -> Self {
         Self {
             id,
             label,
+            icon,
             source_kind,
             launch,
         }
@@ -49,6 +52,10 @@ impl AgentDefinition {
 
     pub(crate) fn label(&self) -> &str {
         &self.label
+    }
+
+    pub(crate) fn icon(&self) -> &str {
+        &self.icon
     }
 
     pub(crate) fn id(&self) -> &str {
@@ -191,6 +198,7 @@ impl AgentRegistry {
             .map(|agent| AgentDefinitionSummary {
                 id: agent.id().to_string(),
                 label: agent.label().to_string(),
+                icon: agent.icon().to_string(),
                 source_kind: agent.source_kind,
             })
             .collect();
@@ -236,6 +244,7 @@ fn normalized_launch_command_key<'a>(parts: impl IntoIterator<Item = &'a str>) -
 pub(crate) struct AgentDefinitionSummary {
     pub(crate) id: String,
     pub(crate) label: String,
+    pub(crate) icon: String,
     pub(crate) source_kind: AgentSourceKind,
 }
 

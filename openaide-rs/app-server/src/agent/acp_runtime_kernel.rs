@@ -72,9 +72,10 @@ impl AcpRuntimeKernel {
     }
 
     pub(super) fn cancel_authentication(&self, agent_id: &str) -> Result<(), RuntimeError> {
-        self.registry.require(agent_id)?;
         // Authenticate holds the process lock until Codex returns. Stop the
         // process without taking that lock so Cancel can interrupt device-code login.
+        // Registry membership is not required: disabling an Agent removes it while the
+        // sign-in it must interrupt is still running.
         self.active_sessions.cancel_authentication(agent_id);
         Ok(())
     }
@@ -82,6 +83,16 @@ impl AcpRuntimeKernel {
     pub(super) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
         self.registry.require(agent_id)?;
         self.with_agent_process_operation(agent_id, || self.active_sessions.logout(agent_id))
+    }
+
+    pub(super) fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        // The Agent may already be gone from the registry when disable removes it, so
+        // cleanup must not require registry membership. Stopping a missing process is
+        // already the desired state.
+        self.with_agent_process_operation(agent_id, || {
+            self.active_sessions.shutdown_agent(agent_id);
+            Ok(())
+        })
     }
 
     pub(super) fn list_sessions(

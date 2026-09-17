@@ -21,6 +21,7 @@ export function taskStatusLabel(status: TaskStatus) {
 }
 
 export function TaskHeader({
+  agentIcon,
   agentId,
   agentName,
   desktopWindow,
@@ -37,6 +38,7 @@ export function TaskHeader({
   gitRef,
   agentNavigation,
 }: {
+  agentIcon?: import("@openaide/app-shell-contracts").AgentIconId;
   agentId: string;
   agentName: string;
   desktopWindow?: DesktopWindowCapability;
@@ -76,7 +78,7 @@ export function TaskHeader({
             {visibleStatusLabel}
           </span>
           {agentNavigation ?? <span className="task-header-agent">
-            <AgentIcon agentId={agentId} agentName={agentName} size={11} />
+            <AgentIcon agentId={agentId} agentName={agentName} icon={agentIcon} size={11} />
             <span>{agentName}</span>
           </span>}
         </span>

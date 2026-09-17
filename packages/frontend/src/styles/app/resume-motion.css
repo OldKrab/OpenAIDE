@@ -1,0 +1,11 @@
+/*
+ * Machine sleep can stall individual animation timelines in the WebView, which shows
+ * up as an in-progress Task spinner that stopped while other spinners keep moving.
+ * The Frontend applies this class to <html> for a single frame on resume so every
+ * animation is torn down and rebuilt from the current clock.
+ */
+.oa-animations-suspended *,
+.oa-animations-suspended *::before,
+.oa-animations-suspended *::after {
+  animation: none !important;
+}

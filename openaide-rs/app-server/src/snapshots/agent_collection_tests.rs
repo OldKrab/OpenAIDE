@@ -60,6 +60,7 @@ fn summary(id: &str, label: &str) -> AgentDefinitionSummary {
     AgentDefinitionSummary {
         id: id.to_string(),
         label: label.to_string(),
+        icon: "bot".to_string(),
         source_kind: AgentSourceKind::BuiltIn,
     }
 }

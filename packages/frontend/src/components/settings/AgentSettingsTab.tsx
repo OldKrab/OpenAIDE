@@ -7,6 +7,9 @@ import type {
   CustomAgentReplaceParams,
 } from "@openaide/app-shell-contracts";
 import { currentFrontendShell } from "../../services/frontendShell";
+import { AgentDisableDialog } from "../AgentDisableDialog";
+import { useAgentDisableConfirmation } from "../useAgentDisableConfirmation";
+import type { AgentDisableOutcome } from "../../intents/agentSettingsIntents";
 import { AgentSettingsDetail } from "./AgentSettingsDetail";
 import { AgentSettingsList } from "./AgentSettingsList";
 import type { AgentRecoveryActions } from "../AgentRecovery";
@@ -44,8 +47,15 @@ export function AgentSettingsTab({
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
-  onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
-  onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
+  onSetAgentEnabled: (
+    agentId: string,
+    enabled: boolean,
+    acceptedActiveWorkInterruption?: boolean,
+  ) => Promise<AgentDisableOutcome>;
+  onUpdateCustomAgentMetadata: (
+    params: CustomAgentMetadataUpdateParams,
+    acceptedActiveWorkInterruption?: boolean,
+  ) => Promise<AgentDisableOutcome>;
   deletedAgentId?: string;
   savedAgentId?: string;
   saveError?: string;
@@ -58,6 +68,7 @@ export function AgentSettingsTab({
   const [draft, setDraft] = useState<AgentDraft | undefined>();
   const [pendingDeleteAgentId, setPendingDeleteAgentId] = useState<string | undefined>();
   const [pendingSaveAgentId, setPendingSaveAgentId] = useState<string | undefined>();
+  const { cancelDisable, confirmDisable, pendingDisable, requestDisable } = useAgentDisableConfirmation();
   const selectedAgent = agents.find((agent) => agent.id === selectedId);
   const selected = draft ? undefined : selectedAgent;
   const activeDraft = draft ?? (selected ? draftFromAgent(selected) : newAgentDraft());
@@ -80,9 +91,17 @@ export function AgentSettingsTab({
       pendingSaveAgentId,
       hasDraft: draft !== undefined,
     })) return;
+    const createdAgent = pendingSaveAgentId === "__new__";
     setDraft(undefined);
-    setSelectedId(savedAgentId!);
     setPendingSaveAgentId(undefined);
+    if (createdAgent) {
+      // Land on the Agent list so the new row is the visible result of Save while
+      // its first process check runs. Staying in the pane looks like no change.
+      setSelectedId(undefined);
+      currentFrontendShell()?.navigation?.replaceSettingsAgent?.();
+      return;
+    }
+    setSelectedId(savedAgentId!);
   }, [deletedAgentId, draft, pendingSaveAgentId, savedAgentId]);
 
   useEffect(() => {
@@ -132,12 +151,28 @@ export function AgentSettingsTab({
       });
       return;
     }
-    onUpdateCustomAgentMetadata({
-      agent_id: activeDraft.agent_id,
-      label: activeDraft.label,
-      icon: activeDraft.icon,
-      enabled: activeDraft.enabled,
-    });
+    const savedAgentId = activeDraft.agent_id;
+    if (activeDraft.enabled) {
+      void onUpdateCustomAgentMetadata({
+        agent_id: savedAgentId,
+        label: activeDraft.label,
+        icon: activeDraft.icon,
+        enabled: true,
+      });
+      return;
+    }
+    // Availability is part of the same save, so switching it off needs the same
+    // acknowledgement as the toggle instead of becoming a second way to disable.
+    requestDisable(
+      savedAgentId,
+      (acceptedActiveWorkInterruption) => onUpdateCustomAgentMetadata({
+        agent_id: savedAgentId,
+        label: activeDraft.label,
+        icon: activeDraft.icon,
+        enabled: false,
+      }, acceptedActiveWorkInterruption),
+      () => setPendingSaveAgentId(undefined),
+    );
   };
   const deleteDraft = () => {
     if (!activeDraft.agent_id) return;
@@ -155,6 +190,15 @@ export function AgentSettingsTab({
     setPendingSaveAgentId(undefined);
     setDraft(undefined);
   };
+  const requestEnabled = (agentId: string, enabled: boolean) => {
+    if (enabled) {
+      void onSetAgentEnabled(agentId, true);
+      return;
+    }
+    requestDisable(agentId, (acceptedActiveWorkInterruption) =>
+      onSetAgentEnabled(agentId, false, acceptedActiveWorkInterruption));
+  };
+  const pendingDisableAgent = agents.find((agent) => agent.id === pendingDisable?.agentId);
 
   if (!selected && !draft) {
     return (
@@ -163,8 +207,16 @@ export function AgentSettingsTab({
           agents={agents}
           onAdd={() => setDraft(newAgentDraft())}
           onSelectAgent={selectAgent}
-          onSetAgentEnabled={onSetAgentEnabled}
+          onSetAgentEnabled={requestEnabled}
         />
+        {pendingDisable && pendingDisableAgent ? (
+          <AgentDisableDialog
+            agentLabel={pendingDisableAgent.label}
+            onCancel={cancelDisable}
+            onConfirm={confirmDisable}
+            runningTaskCount={pendingDisable.runningTaskCount}
+          />
+        ) : null}
       </div>
     );
   }
@@ -201,12 +253,20 @@ export function AgentSettingsTab({
           saveChecksConnection={saveChecksConnection}
           saveBlockedMessage={missingRequiredLaunchFields ? "Name and command are required." : undefined}
           savePending={pendingSaveAgentId !== undefined}
-          onSetAgentEnabled={onSetAgentEnabled}
+          onSetAgentEnabled={requestEnabled}
           onUpdateDraft={updateDraft}
           recoveryActions={recoveryActions}
           selected={selected}
         />
       </div>
+      {pendingDisable && pendingDisableAgent ? (
+        <AgentDisableDialog
+          agentLabel={pendingDisableAgent.label}
+          onCancel={cancelDisable}
+          onConfirm={confirmDisable}
+          runningTaskCount={pendingDisable.runningTaskCount}
+        />
+      ) : null}
     </div>
   );
 }

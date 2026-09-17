@@ -82,6 +82,9 @@ export const agentIconLabels = {
   shield: "Shield",
 } satisfies Record<AgentIconId, string>;
 
+/** App Server-provided Agent icon by Agent id, for surfaces that render Tasks or sessions. */
+export type AgentIconLookup = Readonly<Record<string, AgentIconId>>;
+
 export function AgentIcon({ agentId, agentName, icon = "bot", size }: { agentId?: string; agentName?: string; icon?: AgentIconId; size: number }) {
   if (icon === "openai" || agentId === "codex" || agentName?.trim().toLowerCase() === "codex") {
     return <OpenAiIcon size={size} />;

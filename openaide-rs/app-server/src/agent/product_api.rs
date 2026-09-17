@@ -266,9 +266,10 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
         &self,
         params: ProtocolAgentCancelAuthenticateParams,
     ) -> Result<ProtocolAgentCancelAuthenticateResult, ProtocolError> {
-        self.registry
-            .require(params.agent_id.as_str())
-            .map_err(protocol_error_from_runtime)?;
+        // The user can disable an Agent while its sign-in dialog is open. Disabling removes
+        // registry membership, and cancel must still work there or the interrupted sign-in
+        // has no way to finish.
+        self.ensure_agent_known(params.agent_id.as_str())?;
         let agent_id = params.agent_id.as_str();
         let cancel_result = self.gateway.cancel_authentication(agent_id);
         crate::logging::info(
@@ -391,11 +392,18 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
 
 impl AgentProductApi {
     pub(super) fn has_running_task(&self, agent_id: &str) -> Result<bool, RuntimeError> {
+        Ok(self.running_task_count(agent_id)? > 0)
+    }
+
+    /// Running Tasks for an Agent across every Project. Disabling an Agent stops its
+    /// process, so this count is the acknowledgement Settings must collect; it must not
+    /// depend on any Frontend filter, Task scope, or navigation state.
+    pub(super) fn running_task_count(&self, agent_id: &str) -> Result<u32, RuntimeError> {
         Ok(self
             .store
             .list_all_task_records_strict()?
             .into_iter()
-            .any(|task| {
+            .filter(|task| {
                 task.agent_id == agent_id
                     && !task.tombstoned
                     && matches!(
@@ -405,11 +413,33 @@ impl AgentProductApi {
                             | crate::protocol::model::TaskStatus::Stopping
                             | crate::protocol::model::TaskStatus::Waiting
                     )
-            }))
+            })
+            .count() as u32)
     }
 }
 
 impl AgentProductApi {
+    /// Existence check for cleanup requests that must outlive registry membership.
+    /// A disabled Agent keeps its catalog record but leaves the enabled runtime registry.
+    fn ensure_agent_known(&self, agent_id: &str) -> Result<(), ProtocolError> {
+        if self.registry.require(agent_id).is_ok() {
+            return Ok(());
+        }
+        let known = self
+            .catalog_store
+            .load_records()
+            .map_err(protocol_error_from_runtime)?
+            .into_iter()
+            .any(|record| record.id().is_ok_and(|id| id == agent_id));
+        if known {
+            Ok(())
+        } else {
+            Err(protocol_error_from_runtime(
+                RuntimeError::CapabilityMissing(format!("agent {agent_id} is not available")),
+            ))
+        }
+    }
+
     /// Authentication errors cross a user-facing trust boundary; Agent details stay server-side.
     fn authentication_failure_message(&self, agent_id: &str, method_id: &str) -> String {
         let agent_label = self

@@ -83,6 +83,36 @@ describe("AppSurfaces callback wiring", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps the configured icon for an Agent that is disabled", () => {
+    // Disabling removes an Agent from the runtime catalog but not from Settings, and a Task
+    // opened from history still renders the Agent the user configured rather than a default.
+    const controller = controllerFor("navigation");
+    controller.agents = [{ id: "codex", label: "Codex", icon: "openai", status: "connected" } as never];
+    controller.state.settings.agentDetails = [{
+      id: "custom.retired",
+      label: "Retired Agent",
+      enabled: false,
+      scope: "global",
+      source_kind: "custom",
+      icon: "sparkles",
+      transport: "stdio",
+      status: "disabled",
+      launch_label: "agent run",
+      description: "Custom ACP stdio Agent",
+      capabilities: [],
+      auth_methods: [],
+    }];
+
+    render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentIcons: { codex: "openai", "custom.retired": "sparkles" },
+      }),
+      undefined,
+    );
+  });
+
   it("passes navigation callbacks to the sidebar", () => {
     const controller = controllerFor("navigation");
 
@@ -1555,6 +1585,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         cancelAgentAuthentication: vi.fn(),
         logoutAgent: vi.fn(),
         createCustomAgent: vi.fn(),
+        disableRecoveredAgent: vi.fn(),
         deleteCustomAgent: vi.fn(),
         deleteMcpServer: vi.fn(),
         getMcpServerDetails: vi.fn(),

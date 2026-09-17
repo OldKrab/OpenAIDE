@@ -72,7 +72,10 @@ describe("custom Agent Settings flow", () => {
       AGENT_PROBE,
     ]);
     expect(buttonsByText(view.root, "Saving and checking…")).toHaveLength(0);
-    expect(buttonByText(view.root, "Delete")).toBeTruthy();
+    // Saving a new Agent returns to the list so the new row is the visible result.
+    expect(buttonByText(view.root, "Add agent")).toBeTruthy();
+    expect(textContent(view.root)).toContain("Cursor");
+    expect(buttonsByText(view.root, "Delete")).toHaveLength(0);
 
     finishProbe();
     await settle();
@@ -81,6 +84,9 @@ describe("custom Agent Settings flow", () => {
       AGENT_PROBE,
       SETTINGS_GET_AGENT_DETAILS,
     ]);
+    expect(textContent(view.root)).toContain("Needs attention");
+
+    act(() => view.root.findByProps({ className: "agent-catalog-row" }).props.onClick());
     expect(textContent(view.root)).toContain("Connection check failed.");
 
     act(() => buttonByText(view.root, "Delete").props.onClick());

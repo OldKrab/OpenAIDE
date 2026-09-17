@@ -118,6 +118,10 @@ button {
   border-right: 0;
 }
 
+body[data-shell="desktop"] .sidebar {
+  border-right: 0;
+}
+
 .web-workbench-shell {
   grid-template-columns: var(--app-sidebar-width, 304px) minmax(0, 1fr);
   background:

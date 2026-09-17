@@ -24,7 +24,7 @@ describe("scope-local state ingestion", () => {
       cursor: "cursor-1" as EventCursor,
       snapshot: {
         kind: "agents",
-        agents: { agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "disconnected" }] },
+        agents: { agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "disconnected" }] },
       },
     }, {
       stateRootId: rootId,
@@ -37,7 +37,7 @@ describe("scope-local state ingestion", () => {
       scope: { kind: "stateRoot", stateRootId: rootId },
       payload: {
         kind: "agentCollectionUpdated",
-        agents: { agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "installing" }] },
+        agents: { agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "installing" }] },
       },
     });
 

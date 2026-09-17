@@ -45,6 +45,18 @@ import {
 
 type AgentSettingsConnection = Pick<BackendConnection, "request">;
 
+/**
+ * Result of a request that can disable an Agent. Disabling stops the Agent process, so the
+ * App Server requires an acknowledgement whenever that would interrupt running Tasks; only
+ * the App Server knows which Tasks are running, so it answers `confirmation-required` and
+ * the caller asks the user before repeating the request with `acceptedActiveWorkInterruption`.
+ */
+export type AgentDisableOutcome =
+  | { kind: "applied" }
+  | { kind: "confirmation-required"; runningTaskCount: number }
+  | { kind: "unavailable" }
+  | { kind: "failed" };
+
 export type AgentSettingsIntentContext = {
   backendConnection?: AgentSettingsConnection;
   currentAgentId: string;
@@ -189,17 +201,26 @@ function authSecretStorageAgentId(agentId: string, methodId: string) {
 export async function updateCustomAgentMetadataThroughBackend(
   context: AgentSettingsIntentContext,
   payload: CustomAgentMetadataUpdateParams,
-) {
+  acceptedActiveWorkInterruption = false,
+): Promise<AgentDisableOutcome> {
   const backendConnection = context.backendConnection;
-  if (!backendConnection) return false;
+  if (!backendConnection) return { kind: "unavailable" };
   const wasEnabled = context.state.settings.agentDetails
     ?.find((agent) => agent.id === payload.agent_id)
     ?.enabled;
+  if (!payload.enabled && wasEnabled !== false && !acceptedActiveWorkInterruption) {
+    // Availability is part of the same save, so switching it off disables the Agent with the
+    // same consequences as the toggle. An Agent that is already unavailable has no process to
+    // stop, so it asks for nothing.
+    const runningTaskCount = await runningTaskCountFromAppServer(context, payload.agent_id);
+    if (runningTaskCount > 0) return { kind: "confirmation-required", runningTaskCount };
+  }
   const result = await backendConnection.request(AGENT_UPDATE_CUSTOM_METADATA, {
     agentId: payload.agent_id as AgentId,
     label: payload.label,
     icon: payload.icon,
     enabled: payload.enabled,
+    confirmation: { acceptedActiveWorkInterruption },
   });
   applyAgentMutationResult(context, result.agents);
   context.dispatch({
@@ -210,7 +231,7 @@ export async function updateCustomAgentMetadataThroughBackend(
   if (payload.enabled && wasEnabled === false) {
     await probeAgentSettingsThroughBackend(context, result.agentId);
   }
-  return true;
+  return { kind: "applied" };
 }
 
 export async function replaceCustomAgentThroughBackend(
@@ -287,10 +308,21 @@ export async function setAgentEnabledThroughBackend(
   context: AgentSettingsIntentContext,
   agentId: string,
   enabled: boolean,
-) {
+  acceptedActiveWorkInterruption = false,
+): Promise<AgentDisableOutcome> {
   const backendConnection = context.backendConnection;
-  if (!backendConnection) return false;
-  const result = await backendConnection.request(AGENT_SET_ENABLED, { agentId: agentId as AgentId, enabled });
+  if (!backendConnection) return { kind: "unavailable" };
+  const wasEnabled = context.state.settings.agentDetails?.find((agent) => agent.id === agentId)?.enabled;
+  if (!enabled && wasEnabled !== false && !acceptedActiveWorkInterruption) {
+    const runningTaskCount = await runningTaskCountFromAppServer(context, agentId);
+    if (runningTaskCount > 0) return { kind: "confirmation-required", runningTaskCount };
+  }
+  const result = await backendConnection.request(AGENT_SET_ENABLED, {
+    agentId: agentId as AgentId,
+    enabled,
+    // Disabling stops the Agent process; the App Server requires this when the Agent owns running Tasks.
+    confirmation: { acceptedActiveWorkInterruption },
+  });
   applyAgentMutationResult(context, result.agents);
   context.dispatch({
     type: "settings:agentUpdated",
@@ -299,7 +331,20 @@ export async function setAgentEnabledThroughBackend(
   if (enabled) {
     await probeAgentSettingsThroughBackend(context, agentId);
   }
-  return true;
+  return { kind: "applied" };
+}
+
+/**
+ * Reads the App Server's own running-Task count for an Agent instead of counting Frontend
+ * state: the Sidebar list is filtered by Project scope and search, and it omits Tasks that
+ * have not produced a message, so it cannot decide whether disabling interrupts work.
+ */
+async function runningTaskCountFromAppServer(
+  context: AgentSettingsIntentContext,
+  agentId: string,
+): Promise<number> {
+  const agents = await fetchAgentDetails(context);
+  return agents.find((agent) => agent.id === agentId)?.running_task_count ?? 0;
 }
 
 function generatedCustomAgentId() {
@@ -331,15 +376,28 @@ async function requestWithSecretRollback<T>(
 }
 
 export async function refreshAgentSettingsThroughBackend(context: AgentSettingsIntentContext) {
+  if (!context.backendConnection) return false;
+  await fetchAgentDetails(context);
+  return true;
+}
+
+/**
+ * Reads Agent settings details and records them in one place, so callers that only need a
+ * fresh server view (running-Task counts) do not invent a second projection.
+ */
+async function fetchAgentDetails(
+  context: AgentSettingsIntentContext,
+): Promise<NonNullable<AppState["settings"]["agentDetails"]>> {
   const backendConnection = context.backendConnection;
-  if (!backendConnection) return false;
+  if (!backendConnection) throw new Error("Agent settings require the App Server.");
   const result = await backendConnection.request(SETTINGS_GET_AGENT_DETAILS, {});
+  const agents = result.agents.map(agentSettingsRecordFromProtocol);
   context.dispatch({
     type: "settings:agentDetailsResult",
     generatedAt: result.generatedAt,
-    agents: result.agents.map(agentSettingsRecordFromProtocol),
+    agents,
   });
-  return true;
+  return agents;
 }
 
 async function probeAgentSettingsThroughBackend(

@@ -125,6 +125,10 @@ impl AgentRuntime for AcpAgentRuntime {
         self.kernel.logout(agent_id)
     }
 
+    fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.kernel.shutdown_agent(agent_id)
+    }
+
     fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

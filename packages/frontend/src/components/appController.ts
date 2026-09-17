@@ -508,6 +508,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
             agents: renderState.agents?.map((agent) => ({
               agentId: agent.id as AgentId,
               label: agent.label,
+              icon: agent.icon,
               status: agent.enabled === false ? "disconnected" as const : "connected" as const,
             })),
             projects: state.projects.map((project) => ({

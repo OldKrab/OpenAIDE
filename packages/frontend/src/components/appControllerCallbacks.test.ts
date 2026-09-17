@@ -2614,7 +2614,9 @@ describe("app controller callbacks", () => {
   it("sets Agent availability through BackendConnection when available", async () => {
     const dispatch = vi.fn();
     const setAgents = vi.fn();
-    const request = vi.fn(async () => ({ agents: protocolAgents(["codex"]) }));
+    const request = vi.fn(async (method: string) => method === SETTINGS_GET_AGENT_DETAILS
+      ? { generatedAt: "before-disable", agents: [agentDetails({ agentId: "codex" })] }
+      : { agents: protocolAgents(["codex"]) });
     const state = createInitialState();
 
     callbacks({
@@ -2625,13 +2627,50 @@ describe("app controller callbacks", () => {
     }).settings.setAgentEnabled("codex", false);
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, { agentId: "codex", enabled: false });
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, {
+      agentId: "codex",
+      enabled: false,
+      confirmation: { acceptedActiveWorkInterruption: false },
+    });
     expect(setAgents).toHaveBeenCalledWith([expect.objectContaining({ id: "codex" })]);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "settings:agentUpdated",
       agent: expect.objectContaining({ id: "codex", enabled: false, status: "disabled" }),
     }));
     expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("asks before disabling an Agent whose running Tasks the Sidebar does not show", async () => {
+    // Settings counts running Tasks itself, so a filtered or out-of-scope Sidebar list cannot
+    // make the App Server refuse an unconfirmed disable.
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => method === SETTINGS_GET_AGENT_DETAILS
+      ? { generatedAt: "before-disable", agents: [agentDetails({ agentId: "codex", runningTaskCount: 3 })] }
+      : { agents: protocolAgents(["codex"]) });
+    const state = createInitialState();
+
+    const outcome = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).settings.setAgentEnabled("codex", false);
+    await settlePromises();
+
+    expect(outcome).toEqual({ kind: "confirmation-required", runningTaskCount: 3 });
+    expect(request).not.toHaveBeenCalledWith(AGENT_SET_ENABLED, expect.anything());
+
+    const confirmed = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).settings.setAgentEnabled("codex", false, true);
+
+    expect(confirmed).toEqual({ kind: "applied" });
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, {
+      agentId: "codex",
+      enabled: false,
+      confirmation: { acceptedActiveWorkInterruption: true },
+    });
   });
 
   it("checks an Agent after it is enabled", async () => {
@@ -2664,9 +2703,30 @@ describe("app controller callbacks", () => {
     }).settings.setAgentEnabled("codex", true);
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, { agentId: "codex", enabled: true });
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, {
+      agentId: "codex",
+      enabled: true,
+      confirmation: { acceptedActiveWorkInterruption: false },
+    });
     expect(request).toHaveBeenCalledWith(AGENT_PROBE, { agentId: "codex" });
     expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
+  });
+
+  it("forwards an accepted interruption when disabling an Agent with running Tasks", async () => {
+    const request = vi.fn(async () => ({ agents: protocolAgents(["codex"]) }));
+    const state = createInitialState();
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state,
+    }).settings.setAgentEnabled("codex", false, true);
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, {
+      agentId: "codex",
+      enabled: false,
+      confirmation: { acceptedActiveWorkInterruption: true },
+    });
   });
 
   it("keeps settings errors local after BackendConnection rejection", async () => {
@@ -4514,9 +4574,27 @@ function protocolAgents(ids: string[]) {
     agents: ids.map((agentId) => ({
       agentId: agentId as never,
       label: agentId === "codex" ? "Codex" : "Local Agent",
+      icon: "bot",
       status: "disconnected" as const,
       capabilities: { resumeTasks: false, deleteNativeSessions: false },
     })),
+  };
+}
+
+function agentDetails({ agentId, runningTaskCount = 0 }: { agentId: string; runningTaskCount?: number }) {
+  return {
+    agentId: agentId as never,
+    label: agentId === "codex" ? "Codex" : "Local Agent",
+    enabled: true,
+    sourceKind: "builtIn" as const,
+    icon: "bot",
+    transport: "stdio" as const,
+    status: "connected" as const,
+    launchLabel: "Built-in stdio launch policy",
+    description: "OpenAI coding agent.",
+    capabilities: [],
+    authMethods: [],
+    runningTaskCount,
   };
 }
 

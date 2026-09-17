@@ -50,6 +50,7 @@ export function agentSettingsRecordFromProtocol(agent: AgentSettingsDetail): Age
     })) ?? [],
     logout_supported: agent.logoutSupported,
     logout_blocked_by_running_task: agent.logoutBlockedByRunningTask,
+    running_task_count: agent.runningTaskCount,
     last_authentication_method_id: agent.lastAuthenticationMethodId ?? undefined,
     sign_in: agentSignInFlowFromProtocol(agent.signIn),
   };

@@ -507,8 +507,8 @@ describe("app controller mounted lifecycle", () => {
       initialize: vi.fn(async () => ({
         snapshot: clientSnapshot({
           agents: [
-            { agentId: "opencode" as never, label: "OpenCode", status: "disconnected" },
-            { agentId: "custom.one" as never, label: "Custom One", status: "disconnected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "disconnected" },
+            { agentId: "custom.one" as never, label: "Custom One", icon: "bot", status: "disconnected" },
           ],
           newTaskDefaultAgentId: "custom.one",
         }),
@@ -895,8 +895,8 @@ describe("app controller mounted lifecycle", () => {
     const initializedSnapshot = clientSnapshot({
       includeActiveTask: false,
       agents: [
-        { agentId: "codex" as never, label: "Codex", status: "connected" },
-        { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+        { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" },
+        { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" },
       ],
     });
     const request = vi.fn();
@@ -988,8 +988,8 @@ describe("app controller mounted lifecycle", () => {
       deferred.resolve({
         snapshot: clientSnapshot({
           agents: [
-            { agentId: "opencode" as never, label: "OpenCode", status: "disconnected" },
-            { agentId: "custom.one" as never, label: "Custom One", status: "disconnected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "disconnected" },
+            { agentId: "custom.one" as never, label: "Custom One", icon: "bot", status: "disconnected" },
           ],
           newTaskDefaultAgentId: "custom.one",
         }),
@@ -1190,6 +1190,47 @@ describe("app controller mounted lifecycle", () => {
     expect(postHostMessage).not.toHaveBeenCalledWith({ type: "task.list", payload: { archived: false } });
   });
 
+  it("loads Agent identity for Task surfaces so a disabled Agent keeps its configured icon", async () => {
+    // Settings owns the only projection that still describes a disabled Agent, so a Task that
+    // renders history after a restart needs it before Settings has ever been opened.
+    const request = vi.fn(async (method: string) => method === SETTINGS_GET_AGENT_DETAILS
+      ? {
+          generatedAt: "now",
+          agents: [{
+            agentId: "custom.retired",
+            label: "Retired Agent",
+            enabled: false,
+            sourceKind: "custom",
+            icon: "sparkles",
+            transport: "stdio",
+            status: "disabled",
+            launchLabel: "agent run",
+            env: [],
+            description: "Custom ACP stdio Agent",
+            capabilities: [],
+            authMethods: [],
+          }],
+        }
+      : {});
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
+    expect(latestController?.state.settings.agentDetails).toEqual([
+      expect.objectContaining({ id: "custom.retired", icon: "sparkles", enabled: false }),
+    ]);
+  });
+
   it("requests typed task open when initialize omits the active task", async () => {
     const request = vi.fn(async () => ({
       task: protocolTaskSnapshot("task_1", "Typed Open"),
@@ -1207,8 +1248,8 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
+    expect(request).not.toHaveBeenCalledWith(TASK_LIST, expect.anything());
     expect(latestController?.state.snapshot?.task.title).toBe("Typed Open");
   });
 
@@ -1856,7 +1897,7 @@ describe("app controller mounted lifecycle", () => {
             snapshot: {
               kind: "agents",
               agents: {
-                agents: [{ agentId: "codex", label: "Codex", status: "connected" }],
+                agents: [{ agentId: "codex", label: "Codex", icon: "openai", status: "connected" }],
               },
             },
           };
@@ -2686,8 +2727,8 @@ describe("app controller mounted lifecycle", () => {
         snapshot: clientSnapshot({
           includeActiveTask: false,
           agents: [
-            { agentId: "codex" as never, label: "Codex", status: "connected" },
-            { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+            { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" },
           ],
         }),
       })),
@@ -2789,8 +2830,8 @@ describe("app controller mounted lifecycle", () => {
         snapshot: clientSnapshot({
           includeActiveTask: false,
           agents: [
-            { agentId: "codex" as never, label: "Codex", status: "connected" },
-            { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+            { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" },
           ],
         }),
       })),
@@ -4071,7 +4112,7 @@ function clientSnapshot(
       agentId: (options.newTaskDefaultAgentId ?? "codex") as never,
     },
     agents: {
-      agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", status: "connected" }],
+      agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" }],
     },
     settings: {
       sections: options.settingsSections ?? [],
@@ -4203,7 +4244,7 @@ function nonTaskSubscriptionSnapshot(
       snapshot: {
         kind: "agents" as const,
         agents: {
-          agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" as const }],
+          agents: [{ agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" as const }],
         },
       },
     };

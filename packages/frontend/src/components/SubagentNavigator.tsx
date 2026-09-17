@@ -1,15 +1,24 @@
-import { Bot, Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import type { SubagentCatalogEntrySnapshot } from "@openaide/app-server-client";
+import type { AgentIconId } from "@openaide/app-shell-contracts";
 
+import { AgentIcon } from "./AgentIcon";
 import { PopupMenu } from "./Popup";
 
 export function SubagentNavigator({
+  agentIcon,
+  agentId,
+  agentName,
   entries,
   onSelect,
   selectedId,
   unseen,
 }: {
+  /** Identity of the Task's own Agent, shown while the navigator is on its main history. */
+  agentIcon?: AgentIconId;
+  agentId?: string;
+  agentName?: string;
   entries: SubagentCatalogEntrySnapshot[];
   onSelect: (subagentId?: string) => void;
   selectedId?: string;
@@ -43,7 +52,9 @@ export function SubagentNavigator({
             {selected ? (
               <span className={`subagent-status-dot ${selected.status}`} aria-hidden="true" />
             ) : (
-              <Bot aria-hidden="true" size={13} />
+              // The main history belongs to the Task's Agent, so it carries that Agent's
+              // configured icon rather than a generic one.
+              <AgentIcon agentId={agentId} agentName={agentName} icon={agentIcon} size={13} />
             )}
             <span className="subagent-switcher-value">{selected?.name ?? "Main Agent"}</span>
             {!selected ? <span className="subagent-count" aria-label={`${entries.length} subagents`}>{entries.length}</span> : null}
@@ -62,7 +73,9 @@ export function SubagentNavigator({
           role="menuitemradio"
           type="button"
         >
-          <span className="subagent-menu-icon"><Bot aria-hidden="true" size={14} /></span>
+          <span className="subagent-menu-icon">
+            <AgentIcon agentId={agentId} agentName={agentName} icon={agentIcon} size={14} />
+          </span>
           <span className="subagent-menu-copy">
             <strong>Main Agent</strong>
             <small>Primary conversation</small>

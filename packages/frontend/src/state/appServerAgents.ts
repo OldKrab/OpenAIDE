@@ -1,5 +1,5 @@
 import type { AgentCollectionSnapshot } from "@openaide/app-server-client";
-import { agentCatalogEntry } from "@openaide/app-shell-contracts";
+import { agentCatalogEntry, normalizedAgentIcon } from "@openaide/app-shell-contracts";
 import type { AppAction } from "./appReducer";
 import type { AgentOption } from "./composerOptions";
 
@@ -22,7 +22,8 @@ export function agentOptionsFromProtocol(snapshot: AgentCollectionSnapshot): Age
       id: agent.agentId,
       label: agent.label,
       description: known?.description ?? "Agent available from App Server.",
-      icon: known?.icon ?? "bot",
+      // The App Server owns the configured icon for every Agent, including custom ones.
+      icon: normalizedAgentIcon(agent.icon) ?? known?.icon ?? "bot",
       enabled: true,
       status: agent.status,
       setupReason: agent.setupReason ?? undefined,

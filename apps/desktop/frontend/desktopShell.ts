@@ -12,6 +12,7 @@ import type { PostHostMessage } from "../../../packages/frontend/src/state/postH
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
 import { quitDesktop } from "./desktopQuitLifecycle";
 import { createDesktopProjectPicker } from "./desktopProjectPicker";
+import { createDesktopServerRecovery } from "./desktopServerRecovery";
 import { createDesktopUpdates } from "./desktopUpdates";
 import type { DesktopBootstrap } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
@@ -31,6 +32,14 @@ export function createDesktopShell(
   document.body.dataset.platform = host.platform;
   const nativeWindow = getCurrentWindow();
   const nativeWebview = getCurrentWebview();
+  // Desktop owns the App Server process, so return-to-app restores it here. The
+  // subscription lives as long as the WebView. Native focus is the reliable
+  // machine-resume signal on macOS, and re-broadcasting it as `openaide:resume`
+  // also wakes the shared transport and restarts suspended animations.
+  createDesktopServerRecovery({ invoke });
+  void nativeWindow.onFocusChanged(({ payload: focused }) => {
+    if (focused) window.dispatchEvent(new Event("openaide:resume"));
+  });
   let backgroundSyncSequence = 0;
   let nativeZoomSequence = 0;
   let nativeZoomInFlight = false;

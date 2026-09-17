@@ -46,6 +46,7 @@ import { WorktreesSettingsTab } from "./WorktreesSettingsTab";
 import { SettingsSkeleton } from "./settingsPresentation";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
 import type { AgentRecoveryActions } from "../AgentRecovery";
+import type { AgentDisableOutcome } from "../../intents/agentSettingsIntents";
 import { AppSidebarFrame } from "../AppSidebarFrame";
 import { useBackNavigation } from "../useBackNavigation";
 
@@ -136,10 +137,10 @@ export function SettingsView({
   onNewTaskInWorktree?: (project: ProjectOption, worktree: WorktreeSummary) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
   onResetTaskHistory?: () => Promise<void>;
-  onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
+  onSetAgentEnabled: (agentId: string, enabled: boolean, acceptedActiveWorkInterruption?: boolean) => Promise<AgentDisableOutcome>;
   onSetMcpServerEnabled?: (id: string, enabled: boolean) => void;
   onSaveMcpServer?: (input: McpServerSaveInput) => void;
-  onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
+  onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams, acceptedActiveWorkInterruption?: boolean) => Promise<AgentDisableOutcome>;
   onUnlockDeveloperSettings: () => void;
   onRefresh: () => void;
   onDismissError?: () => void;
@@ -562,13 +563,13 @@ function SettingsTabContent({
   onNewTaskInWorktree?: (project: ProjectOption, worktree: WorktreeSummary) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
   onResetTaskHistory?: () => Promise<void>;
-  onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
+  onSetAgentEnabled: (agentId: string, enabled: boolean, acceptedActiveWorkInterruption?: boolean) => Promise<AgentDisableOutcome>;
   onSetMcpServerEnabled: (id: string, enabled: boolean) => void;
   onSaveMcpServer: (input: McpServerSaveInput) => void;
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
-  onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
+  onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams, acceptedActiveWorkInterruption?: boolean) => Promise<AgentDisableOutcome>;
   deletedAgentId?: string;
   developerSettingsUnlocked: boolean;
   preferences: AppPreferencesRecord;

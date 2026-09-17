@@ -63,6 +63,7 @@ fn collection_from_registry_summaries_with_statuses(
                 AgentSummary {
                     agent_id: AgentId::from(agent.id),
                     label: agent.label,
+                    icon: agent.icon,
                     status: status.status,
                     setup_reason: status.setup_reason,
                     capabilities: status.capabilities,

@@ -1,7 +1,7 @@
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
+import type { AgentSettingsRecord, CustomAgentMetadataUpdateParams } from "@openaide/app-shell-contracts";
 import type { AgentRecoveryActions } from "../AgentRecovery";
 import { agentLeftLaunching } from "./agentSettingsModel";
 import { AgentSettingsTab } from "./AgentSettingsTab";
@@ -221,7 +221,7 @@ describe("AgentSettingsTab interactions", () => {
   });
 
   it("toggles built-in Agent availability through the parent callback", () => {
-    const onSetAgentEnabled = vi.fn();
+    const onSetAgentEnabled = vi.fn(async () => ({ kind: "applied" as const }));
     const view = renderAgentSettings({ agents: [builtInAgent("codex")], onSetAgentEnabled });
     const enabledToggle = inputByProps(view.root, { checked: true, type: "checkbox" });
 
@@ -229,11 +229,11 @@ describe("AgentSettingsTab interactions", () => {
       enabledToggle.props.onChange({ currentTarget: { checked: false } });
     });
 
-    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false);
+    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false, false);
   });
 
   it("toggles Agent availability directly from the catalog", () => {
-    const onSetAgentEnabled = vi.fn();
+    const onSetAgentEnabled = vi.fn(async () => ({ kind: "applied" as const }));
     const view = renderAgentSettings({ agents: [builtInAgent("codex")], onSetAgentEnabled, openFirst: false });
     const availabilityToggle = view.root.findByProps({ "aria-label": "Codex available", type: "checkbox" });
 
@@ -241,7 +241,80 @@ describe("AgentSettingsTab interactions", () => {
       availabilityToggle.props.onChange({ currentTarget: { checked: false } });
     });
 
-    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false);
+    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false, false);
+  });
+
+  it("confirms before disabling an Agent whose running Tasks would be interrupted", async () => {
+    // The App Server answers the first, unconfirmed request with the count it owns, so the
+    // dialog does not depend on any Frontend Task list or filter.
+    const onSetAgentEnabled = vi.fn(async (_agentId: string, _enabled: boolean, accepted?: boolean) =>
+      accepted ? { kind: "applied" as const } : { kind: "confirmation-required" as const, runningTaskCount: 2 });
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex")],
+      onSetAgentEnabled,
+      openFirst: false,
+    });
+
+    await act(async () => {
+      await view.root.findByProps({ "aria-label": "Codex available", type: "checkbox" })
+        .props.onChange({ currentTarget: { checked: false } });
+    });
+
+    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false, false);
+    expect(textContent(view.root)).toContain("Disable Codex?");
+    expect(textContent(view.root)).toContain("2 running Tasks");
+
+    act(() => buttonByText(view.root, "Cancel").props.onClick());
+    expect(textContent(view.root)).not.toContain("Disable Codex?");
+    expect(onSetAgentEnabled).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await view.root.findByProps({ "aria-label": "Codex available", type: "checkbox" })
+        .props.onChange({ currentTarget: { checked: false } });
+    });
+    act(() => buttonByText(view.root, "Disable Agent").props.onClick());
+
+    expect(onSetAgentEnabled).toHaveBeenLastCalledWith("codex", false, true);
+  });
+
+  it("confirms before a save that switches Agent availability off", async () => {
+    // Availability is a field of the same save, so it must not become a second way to
+    // disable an Agent that skips the confirmation.
+    const onUpdateCustomAgentMetadata = vi.fn(async (
+      _params: CustomAgentMetadataUpdateParams,
+      accepted?: boolean,
+    ) => accepted ? { kind: "applied" as const } : { kind: "confirmation-required" as const, runningTaskCount: 1 });
+    const view = renderAgentSettings({
+      agents: [customAgent("custom.local")],
+      onUpdateCustomAgentMetadata,
+    });
+
+    // Editing a field enters the draft; availability edits then belong to the same save.
+    act(() => {
+      inputByProps(view.root, { value: "Custom Agent" })
+        .props.onChange({ currentTarget: { value: "Renamed Agent" } });
+    });
+    act(() => {
+      view.root.findAllByProps({ "aria-label": "Renamed Agent available", type: "checkbox" })[0]
+        .props.onChange({ currentTarget: { checked: false } });
+    });
+    act(() => buttonByText(view.root, "Save").props.onClick());
+
+    await act(async () => undefined);
+
+    expect(onUpdateCustomAgentMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ agent_id: "custom.local", enabled: false }),
+      false,
+    );
+    expect(textContent(view.root)).toContain("Disable Custom Agent?");
+
+    act(() => buttonByText(view.root, "Disable Agent").props.onClick());
+    await act(async () => undefined);
+
+    expect(onUpdateCustomAgentMetadata).toHaveBeenLastCalledWith(
+      expect.objectContaining({ agent_id: "custom.local", enabled: false }),
+      true,
+    );
   });
 
   it("describes disabled built-in Agent availability as disabled", () => {
@@ -631,8 +704,8 @@ function renderAgentSettings({
   onCreateCustomAgent = vi.fn(),
   onDeleteCustomAgent = vi.fn(),
   onReplaceCustomAgent = vi.fn(),
-  onSetAgentEnabled = vi.fn(),
-  onUpdateCustomAgentMetadata = vi.fn(),
+  onSetAgentEnabled = vi.fn(async () => ({ kind: "applied" as const })),
+  onUpdateCustomAgentMetadata = vi.fn(async () => ({ kind: "applied" as const })),
   onAuthenticate = vi.fn(),
   onCancelAuthentication,
   openFirst = true,
@@ -642,7 +715,7 @@ function renderAgentSettings({
   onCreateCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onCreateCustomAgent"];
   onDeleteCustomAgent?: (agentId: string) => void;
   onReplaceCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onReplaceCustomAgent"];
-  onSetAgentEnabled?: (agentId: string, enabled: boolean) => void;
+  onSetAgentEnabled?: Parameters<typeof AgentSettingsTab>[0]["onSetAgentEnabled"];
   onUpdateCustomAgentMetadata?: Parameters<typeof AgentSettingsTab>[0]["onUpdateCustomAgentMetadata"];
   onAuthenticate?: Parameters<typeof AgentSettingsTab>[0]["onAuthenticate"];
   onCancelAuthentication?: Parameters<typeof AgentSettingsTab>[0]["onCancelAuthentication"];

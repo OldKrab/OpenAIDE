@@ -31,6 +31,7 @@ pub(super) fn codex_definition(config: AcpAgentConfig) -> AgentDefinition {
     AgentDefinition::new(
         CODEX_AGENT_ID.to_string(),
         CODEX_AGENT_LABEL.to_string(),
+        built_in_icon(CODEX_AGENT_ID).to_string(),
         AgentSourceKind::BuiltIn,
         AgentLaunch::AcpStdio(config),
     )
@@ -40,9 +41,20 @@ pub(super) fn opencode_definition(config: AcpAgentConfig) -> AgentDefinition {
     AgentDefinition::new(
         OPENCODE_AGENT_ID.to_string(),
         OPENCODE_AGENT_LABEL.to_string(),
+        built_in_icon(OPENCODE_AGENT_ID).to_string(),
         AgentSourceKind::BuiltIn,
         AgentLaunch::AcpStdio(config),
     )
+}
+
+/// Display icon for a Built-in Agent. Empty icon fields in catalog overlays fall
+/// back to this so persisted records from earlier schemas keep their identity.
+pub(super) fn built_in_icon(agent_id: &str) -> &'static str {
+    BUILT_IN_AGENT_METADATA
+        .iter()
+        .find(|metadata| metadata.id == agent_id)
+        .map(|metadata| metadata.icon)
+        .unwrap_or("bot")
 }
 
 pub(super) fn default_definitions() -> [AgentDefinition; 2] {
