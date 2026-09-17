@@ -136,6 +136,9 @@ pub struct AgentCollectionSnapshot {
 pub struct AgentSummary {
     pub agent_id: AgentId,
     pub label: String,
+    /// Configured display icon id for this Agent. Unknown ids stay opaque here and
+    /// are normalized by the Frontend, which owns icon rendering.
+    pub icon: String,
     pub status: AgentStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup_reason: Option<AgentSetupReason>,

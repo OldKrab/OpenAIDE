@@ -507,8 +507,8 @@ describe("app controller mounted lifecycle", () => {
       initialize: vi.fn(async () => ({
         snapshot: clientSnapshot({
           agents: [
-            { agentId: "opencode" as never, label: "OpenCode", status: "disconnected" },
-            { agentId: "custom.one" as never, label: "Custom One", status: "disconnected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "disconnected" },
+            { agentId: "custom.one" as never, label: "Custom One", icon: "bot", status: "disconnected" },
           ],
           newTaskDefaultAgentId: "custom.one",
         }),
@@ -895,8 +895,8 @@ describe("app controller mounted lifecycle", () => {
     const initializedSnapshot = clientSnapshot({
       includeActiveTask: false,
       agents: [
-        { agentId: "codex" as never, label: "Codex", status: "connected" },
-        { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+        { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" },
+        { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" },
       ],
     });
     const request = vi.fn();
@@ -988,8 +988,8 @@ describe("app controller mounted lifecycle", () => {
       deferred.resolve({
         snapshot: clientSnapshot({
           agents: [
-            { agentId: "opencode" as never, label: "OpenCode", status: "disconnected" },
-            { agentId: "custom.one" as never, label: "Custom One", status: "disconnected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "disconnected" },
+            { agentId: "custom.one" as never, label: "Custom One", icon: "bot", status: "disconnected" },
           ],
           newTaskDefaultAgentId: "custom.one",
         }),
@@ -1856,7 +1856,7 @@ describe("app controller mounted lifecycle", () => {
             snapshot: {
               kind: "agents",
               agents: {
-                agents: [{ agentId: "codex", label: "Codex", status: "connected" }],
+                agents: [{ agentId: "codex", label: "Codex", icon: "openai", status: "connected" }],
               },
             },
           };
@@ -2686,8 +2686,8 @@ describe("app controller mounted lifecycle", () => {
         snapshot: clientSnapshot({
           includeActiveTask: false,
           agents: [
-            { agentId: "codex" as never, label: "Codex", status: "connected" },
-            { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+            { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" },
           ],
         }),
       })),
@@ -2789,8 +2789,8 @@ describe("app controller mounted lifecycle", () => {
         snapshot: clientSnapshot({
           includeActiveTask: false,
           agents: [
-            { agentId: "codex" as never, label: "Codex", status: "connected" },
-            { agentId: "opencode" as never, label: "OpenCode", status: "connected" },
+            { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" },
           ],
         }),
       })),
@@ -4071,7 +4071,7 @@ function clientSnapshot(
       agentId: (options.newTaskDefaultAgentId ?? "codex") as never,
     },
     agents: {
-      agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", status: "connected" }],
+      agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" }],
     },
     settings: {
       sections: options.settingsSections ?? [],
@@ -4203,7 +4203,7 @@ function nonTaskSubscriptionSnapshot(
       snapshot: {
         kind: "agents" as const,
         agents: {
-          agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" as const }],
+          agents: [{ agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" as const }],
         },
       },
     };

@@ -160,15 +160,67 @@ impl AgentCatalogMutationWorkflow for AgentProductApi {
         &self,
         params: AgentSetEnabledParams,
     ) -> Result<AgentSetEnabledResult, ProtocolError> {
+        let agent_id = params.agent_id.as_str().to_string();
+        if !params.enabled
+            && !params.confirmation.accepted_active_work_interruption
+            && self
+                .has_running_task(&agent_id)
+                .map_err(protocol_error_from_runtime)?
+        {
+            // Disabling stops the Agent process, so it would interrupt its running Tasks.
+            return Err(validation_error(
+                "confirmation.acceptedActiveWorkInterruption",
+            ));
+        }
         let registry = self
             .catalog_store
-            .set_enabled(params.agent_id.as_str(), params.enabled)
+            .set_enabled(agent_id.as_str(), params.enabled)
             .map_err(protocol_error_from_runtime)?;
         self.registry.replace(registry);
-        self.statuses.clear(params.agent_id.as_str());
+        self.statuses.clear(agent_id.as_str());
+        if !params.enabled {
+            // Retire the process so re-enabling probes a new one instead of adopting this one.
+            self.stop_agent_process(&agent_id);
+        }
         Ok(AgentSetEnabledResult {
             agents: self.snapshot()?,
         })
+    }
+}
+
+impl AgentProductApi {
+    /// Disabling is already durable, so a failed process stop must not become an RPC
+    /// error. Later work launches a fresh process when the Agent is re-enabled.
+    fn stop_agent_process(&self, agent_id: &str) {
+        let started_at = std::time::Instant::now();
+        crate::logging::info(
+            "agent_process_shutdown_started",
+            serde_json::json!({
+                "operation": "agent/setEnabled",
+                "agent_id": agent_id,
+            }),
+        );
+        match self.gateway.shutdown_agent(agent_id) {
+            Ok(()) => crate::logging::info(
+                "agent_process_shutdown_completed",
+                serde_json::json!({
+                    "operation": "agent/setEnabled",
+                    "agent_id": agent_id,
+                    "outcome": "succeeded",
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            ),
+            Err(error) => crate::logging::warn(
+                "agent_process_shutdown_failed",
+                serde_json::json!({
+                    "operation": "agent/setEnabled",
+                    "agent_id": agent_id,
+                    "outcome": "failed",
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "error_kind": error.reason(),
+                }),
+            ),
+        }
     }
 }
 

@@ -134,6 +134,11 @@ impl AcpActiveSessionManager {
         self.processes.logout(agent_id)
     }
 
+    /// Ends this Agent's pooled process and every session attached to it.
+    pub(super) fn shutdown_agent(&self, agent_id: &str) {
+        self.processes.shutdown_agent(agent_id);
+    }
+
     pub(super) fn load_session(
         &self,
         request: AgentSessionLoad,

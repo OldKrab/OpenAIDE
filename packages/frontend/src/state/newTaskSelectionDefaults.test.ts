@@ -12,8 +12,8 @@ const projects = [
   { projectId: "project-b", label: "B" },
 ];
 const agents = [
-  { agentId: "codex" as never, label: "Codex", status: "connected" as const },
-  { agentId: "opencode" as never, label: "OpenCode", status: "connected" as const },
+  { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" as const },
+  { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" as const },
 ];
 
 describe("New Task initial selection", () => {

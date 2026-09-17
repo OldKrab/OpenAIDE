@@ -77,7 +77,7 @@ describe("App Server Protocol state mapping", () => {
       }],
     }, {
       ...mappingContext(),
-      agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "authRequired" as const }],
+      agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "authRequired" as const }],
     });
 
     expect(mapping.refreshError).toBe("Codex needs sign-in. Sign in or disable Codex to continue.");
@@ -1293,7 +1293,7 @@ function protocolSummary(overrides: Partial<ProtocolTaskSummary> = {}): Protocol
 
 function mappingContext() {
   return {
-    agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "connected" as const }],
+    agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "connected" as const }],
     projects: [{ projectId: "project-1" as ProjectId, label: "App", workspaceRoot: "/workspace/App", available: true }],
   };
 }

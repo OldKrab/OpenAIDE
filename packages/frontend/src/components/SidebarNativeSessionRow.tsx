@@ -15,6 +15,7 @@ import {
 
 export function SidebarNativeSessionRow({
   archived,
+  agentIcon,
   canFork = false,
   onDeleteSession,
   mutation,
@@ -31,6 +32,7 @@ export function SidebarNativeSessionRow({
   session,
 }: {
   archived: boolean;
+  agentIcon?: import("@openaide/app-shell-contracts").AgentIconId;
   canFork?: boolean;
   onDeleteSession?: import("../intents/sessionDeletionIntent").DeleteSessionAction;
   mutation?: import("../state/store").NativeSessionMutationState;
@@ -275,7 +277,7 @@ export function SidebarNativeSessionRow({
   function SessionContent() {
     return <>
       <span aria-label={`Agent: ${nativeSessionAgentName}`} className="task-agent-icon" role="img" title={nativeSessionAgentName}>
-        <AgentIcon agentId={nativeSessionAgentId} agentName={nativeSessionAgentName} size={12} />
+        <AgentIcon agentId={nativeSessionAgentId} agentName={nativeSessionAgentName} icon={agentIcon} size={12} />
       </span>
       <span className="task-row-body">
         <span className="task-title">{title}</span>

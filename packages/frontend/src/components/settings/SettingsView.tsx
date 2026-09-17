@@ -113,6 +113,7 @@ export function SettingsView({
   supportExportRequestKey,
   projects = [],
   recoveryActions,
+  runningTaskCounts,
   state,
   worktreeIntents,
   worktreeRepositories = {},
@@ -136,7 +137,7 @@ export function SettingsView({
   onNewTaskInWorktree?: (project: ProjectOption, worktree: WorktreeSummary) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
   onResetTaskHistory?: () => Promise<void>;
-  onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
+  onSetAgentEnabled: (agentId: string, enabled: boolean, acceptedActiveWorkInterruption?: boolean) => void;
   onSetMcpServerEnabled?: (id: string, enabled: boolean) => void;
   onSaveMcpServer?: (input: McpServerSaveInput) => void;
   onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
@@ -152,6 +153,8 @@ export function SettingsView({
   supportExportRequestKey?: string;
   projects?: ProjectOption[];
   recoveryActions?: AgentRecoveryActions;
+  /** Running Task counts by Agent id; used to ask before disabling stops work. */
+  runningTaskCounts?: Readonly<Record<string, number>>;
   state: SettingsState;
   worktreeIntents?: NewTaskViewIntents;
   worktreeRepositories?: Record<string, WorktreeRepositorySnapshot>;
@@ -483,6 +486,7 @@ export function SettingsView({
             preferredAgentId={preferredAgentId}
             projects={projects}
             recoveryActions={recoveryActions}
+            runningTaskCounts={runningTaskCounts}
             developerSettingsUnlocked={developerSettingsUnlocked}
             saveError={state.error}
             savedAgentId={state.savedAgentId}
@@ -536,6 +540,7 @@ function SettingsTabContent({
   preferredAgentId,
   projects,
   recoveryActions,
+  runningTaskCounts,
   saveError,
   savedAgentId,
   deletedAgentId,
@@ -562,7 +567,7 @@ function SettingsTabContent({
   onNewTaskInWorktree?: (project: ProjectOption, worktree: WorktreeSummary) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
   onResetTaskHistory?: () => Promise<void>;
-  onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
+  onSetAgentEnabled: (agentId: string, enabled: boolean, acceptedActiveWorkInterruption?: boolean) => void;
   onSetMcpServerEnabled: (id: string, enabled: boolean) => void;
   onSaveMcpServer: (input: McpServerSaveInput) => void;
   onSetAcpTrace: (enabled: boolean) => void;
@@ -575,6 +580,7 @@ function SettingsTabContent({
   preferredAgentId?: string;
   projects: ProjectOption[];
   recoveryActions?: AgentRecoveryActions;
+  runningTaskCounts?: Readonly<Record<string, number>>;
   saveError?: string;
   savedAgentId?: string;
   runtimeSettings?: RuntimeSettingsResult;
@@ -608,6 +614,7 @@ function SettingsTabContent({
           onReplaceCustomAgent={onReplaceCustomAgent}
           onSetAgentEnabled={onSetAgentEnabled}
           onUpdateCustomAgentMetadata={onUpdateCustomAgentMetadata}
+          runningTaskCounts={runningTaskCounts}
           saveError={saveError}
           savedAgentId={savedAgentId}
         />

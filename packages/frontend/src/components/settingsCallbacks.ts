@@ -159,9 +159,9 @@ export function createSettingsCallbacks({
         .then((settings) => dispatch({ type: "settings:runtimeSettings", settings: mapProtocolRuntimeSettings(settings) }))
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
-    setAgentEnabled: (agentId, enabled) => {
+    setAgentEnabled: (agentId, enabled, acceptedActiveWorkInterruption) => {
       dispatch({ type: "settings:start" });
-      void setAgentEnabledThroughBackend(agentSettingsContext(), agentId, enabled)
+      void setAgentEnabledThroughBackend(agentSettingsContext(), agentId, enabled, acceptedActiveWorkInterruption)
         .then((handled) => {
           if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
         })

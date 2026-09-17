@@ -343,6 +343,13 @@ pub trait AgentRuntime: Send + Sync {
         )))
     }
 
+    /// Stops the pooled Agent process for one Agent without ending the runtime.
+    /// Any attached session ends; later work launches a fresh process. Runtimes
+    /// that do not pool processes keep the default no-op.
+    fn shutdown_agent(&self, _agent_id: &str) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
     fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

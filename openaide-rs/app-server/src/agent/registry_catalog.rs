@@ -166,7 +166,7 @@ pub(super) fn definition_from_record(
     let AgentCatalogRecord {
         id: raw_id,
         label,
-        icon: _,
+        icon,
         source_kind,
         enabled: _,
         transport,
@@ -182,6 +182,11 @@ pub(super) fn definition_from_record(
     if transport != "stdio" || command.trim().is_empty() {
         return Err(RuntimeError::InvalidParams(format!("agents.{id}.command")));
     }
+    let icon = if icon.trim().is_empty() {
+        registry_builtin::built_in_icon(&id).to_string()
+    } else {
+        icon
+    };
 
     let source_kind = match source_kind {
         AgentCatalogSourceKind::BuiltIn => AgentSourceKind::BuiltIn,
@@ -196,6 +201,7 @@ pub(super) fn definition_from_record(
     Ok(Some(AgentDefinition::new(
         id,
         trimmed_or_id(&label, &raw_id).chars().take(80).collect(),
+        icon,
         source_kind,
         AgentLaunch::AcpStdio(launch),
     )))

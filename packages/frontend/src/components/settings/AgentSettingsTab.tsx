@@ -7,6 +7,7 @@ import type {
   CustomAgentReplaceParams,
 } from "@openaide/app-shell-contracts";
 import { currentFrontendShell } from "../../services/frontendShell";
+import { AgentDisableDialog } from "./AgentDisableDialog";
 import { AgentSettingsDetail } from "./AgentSettingsDetail";
 import { AgentSettingsList } from "./AgentSettingsList";
 import type { AgentRecoveryActions } from "../AgentRecovery";
@@ -36,6 +37,7 @@ export function AgentSettingsTab({
   saveError,
   preferredAgentId,
   recoveryActions,
+  runningTaskCounts,
 }: {
   agents: AgentSettingsRecord[];
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
@@ -44,13 +46,15 @@ export function AgentSettingsTab({
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
-  onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
+  onSetAgentEnabled: (agentId: string, enabled: boolean, acceptedActiveWorkInterruption?: boolean) => void;
   onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
   deletedAgentId?: string;
   savedAgentId?: string;
   saveError?: string;
   preferredAgentId?: string;
   recoveryActions?: AgentRecoveryActions;
+  /** Running Task counts by Agent id; used to ask before disabling stops work. */
+  runningTaskCounts?: Readonly<Record<string, number>>;
 }) {
   const [selectedId, setSelectedId] = useState<string>();
   const [confirmDeleteAgentId, setConfirmDeleteAgentId] = useState<string | undefined>();
@@ -58,6 +62,7 @@ export function AgentSettingsTab({
   const [draft, setDraft] = useState<AgentDraft | undefined>();
   const [pendingDeleteAgentId, setPendingDeleteAgentId] = useState<string | undefined>();
   const [pendingSaveAgentId, setPendingSaveAgentId] = useState<string | undefined>();
+  const [pendingDisableAgentId, setPendingDisableAgentId] = useState<string | undefined>();
   const selectedAgent = agents.find((agent) => agent.id === selectedId);
   const selected = draft ? undefined : selectedAgent;
   const activeDraft = draft ?? (selected ? draftFromAgent(selected) : newAgentDraft());
@@ -80,9 +85,17 @@ export function AgentSettingsTab({
       pendingSaveAgentId,
       hasDraft: draft !== undefined,
     })) return;
+    const createdAgent = pendingSaveAgentId === "__new__";
     setDraft(undefined);
-    setSelectedId(savedAgentId!);
     setPendingSaveAgentId(undefined);
+    if (createdAgent) {
+      // Land on the Agent list so the new row is the visible result of Save while
+      // its first process check runs. Staying in the pane looks like no change.
+      setSelectedId(undefined);
+      currentFrontendShell()?.navigation?.replaceSettingsAgent?.();
+      return;
+    }
+    setSelectedId(savedAgentId!);
   }, [deletedAgentId, draft, pendingSaveAgentId, savedAgentId]);
 
   useEffect(() => {
@@ -155,6 +168,25 @@ export function AgentSettingsTab({
     setPendingSaveAgentId(undefined);
     setDraft(undefined);
   };
+  // Disabling stops the Agent process. When that would interrupt running Tasks,
+  // the user confirms before the App Server accepts the change.
+  const requestEnabled = (agentId: string, enabled: boolean, acceptedActiveWorkInterruption = false) => {
+    if (enabled) {
+      onSetAgentEnabled(agentId, true);
+      return;
+    }
+    if (acceptedActiveWorkInterruption) {
+      setPendingDisableAgentId(undefined);
+      onSetAgentEnabled(agentId, false, true);
+      return;
+    }
+    if ((runningTaskCounts?.[agentId] ?? 0) > 0) {
+      setPendingDisableAgentId(agentId);
+      return;
+    }
+    onSetAgentEnabled(agentId, false);
+  };
+  const pendingDisableAgent = agents.find((agent) => agent.id === pendingDisableAgentId);
 
   if (!selected && !draft) {
     return (
@@ -163,8 +195,16 @@ export function AgentSettingsTab({
           agents={agents}
           onAdd={() => setDraft(newAgentDraft())}
           onSelectAgent={selectAgent}
-          onSetAgentEnabled={onSetAgentEnabled}
+          onSetAgentEnabled={requestEnabled}
         />
+        {pendingDisableAgent ? (
+          <AgentDisableDialog
+            agentLabel={pendingDisableAgent.label}
+            onCancel={() => setPendingDisableAgentId(undefined)}
+            onConfirm={() => requestEnabled(pendingDisableAgent.id, false, true)}
+            runningTaskCount={runningTaskCounts?.[pendingDisableAgent.id] ?? 0}
+          />
+        ) : null}
       </div>
     );
   }
@@ -201,12 +241,20 @@ export function AgentSettingsTab({
           saveChecksConnection={saveChecksConnection}
           saveBlockedMessage={missingRequiredLaunchFields ? "Name and command are required." : undefined}
           savePending={pendingSaveAgentId !== undefined}
-          onSetAgentEnabled={onSetAgentEnabled}
+          onSetAgentEnabled={requestEnabled}
           onUpdateDraft={updateDraft}
           recoveryActions={recoveryActions}
           selected={selected}
         />
       </div>
+      {pendingDisableAgent ? (
+        <AgentDisableDialog
+          agentLabel={pendingDisableAgent.label}
+          onCancel={() => setPendingDisableAgentId(undefined)}
+          onConfirm={() => requestEnabled(pendingDisableAgent.id, false, true)}
+          runningTaskCount={runningTaskCounts?.[pendingDisableAgent.id] ?? 0}
+        />
+      ) : null}
     </div>
   );
 }

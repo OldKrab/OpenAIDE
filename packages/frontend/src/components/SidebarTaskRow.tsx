@@ -32,6 +32,7 @@ import {
 
 export function SidebarTaskRow({
   activeTaskId,
+  agentIcon,
   canFork = false,
   onDeleteSession,
   forkMutation,
@@ -46,6 +47,7 @@ export function SidebarTaskRow({
   task,
 }: {
   activeTaskId?: string;
+  agentIcon?: import("@openaide/app-shell-contracts").AgentIconId;
   canFork?: boolean;
   onDeleteSession?: import("../intents/sessionDeletionIntent").DeleteSessionAction;
   forkMutation?: NativeSessionMutationState;
@@ -214,7 +216,7 @@ export function SidebarTaskRow({
           role="img"
           title={task.agent_name}
         >
-          <AgentIcon agentId={task.agent_id} agentName={task.agent_name} size={12} />
+          <AgentIcon agentId={task.agent_id} agentName={task.agent_name} icon={agentIcon} size={12} />
         </span>
         <span className="task-row-body">
           <span className="task-title">{title}</span>

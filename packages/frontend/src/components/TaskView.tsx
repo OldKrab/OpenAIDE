@@ -270,6 +270,7 @@ export function TaskView({
     agents,
     snapshot.preparation,
   );
+  const activeAgentIcon = agents?.find((agent) => agent.id === snapshot.task.agent_id)?.icon;
   const subagents = useSubagentSessions({
     connection: subagentConnection,
     enabled: backendReady,
@@ -562,6 +563,7 @@ export function TaskView({
             />
           )}
           agentId={snapshot.task.agent_id}
+          agentIcon={activeAgentIcon}
           agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
           desktopWindow={desktopWindow}
           status={snapshot.task.status}

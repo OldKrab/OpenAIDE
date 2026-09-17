@@ -44,6 +44,10 @@ impl AgentGateway {
         self.agent.logout(agent_id)
     }
 
+    pub(crate) fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.agent.shutdown_agent(agent_id)
+    }
+
     pub(crate) fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

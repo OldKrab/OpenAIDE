@@ -61,6 +61,10 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
         self.inner.logout(agent_id)
     }
 
+    fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.inner.shutdown_agent(agent_id)
+    }
+
     fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

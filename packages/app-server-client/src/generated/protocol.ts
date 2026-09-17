@@ -388,7 +388,9 @@ export type AgentDeleteCustomParams = { agentId: AgentId, expectedSecretEnv?: Ar
 
 export type AgentDeleteCustomResult = { agentId: AgentId, removedSecretEnv?: Array<string>, agents: AgentCollectionSnapshot, };
 
-export type AgentSetEnabledParams = { agentId: AgentId, enabled: boolean, };
+export type AgentSetEnabledParams = { agentId: AgentId, enabled: boolean, confirmation: AgentSetEnabledConfirmation, };
+
+export type AgentSetEnabledConfirmation = { acceptedActiveWorkInterruption: boolean, };
 
 export type AgentSetEnabledResult = { agents: AgentCollectionSnapshot, };
 
@@ -1091,7 +1093,12 @@ export type ProjectSummary = { projectId: ProjectId, label: string, workspaceRoo
 
 export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
-export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities,
+export type AgentSummary = { agentId: AgentId, label: string,
+/**
+ * Configured display icon id for this Agent. Unknown ids stay opaque here and
+ * are normalized by the Frontend, which owns icon rendering.
+ */
+icon: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities,
 /**
  * The one Sign-in Flow App Server is running (or last ran without success) for this Agent.
  * Absent when no flow is running and the last flow ended in success or cancellation.

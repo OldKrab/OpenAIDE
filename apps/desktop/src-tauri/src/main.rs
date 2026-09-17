@@ -26,6 +26,9 @@ mod desktop_update_receipt;
 mod desktop_update_security;
 mod desktop_update_shutdown;
 #[cfg(test)]
+#[path = "desktop_server_recovery_tests.rs"]
+mod desktop_server_recovery_tests;
+#[cfg(test)]
 mod desktop_update_tests;
 #[cfg(target_os = "macos")]
 mod macos_shell_path;
@@ -201,6 +204,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_bootstrap,
             desktop_bootstrap_context,
+            desktop_ensure_app_server,
             desktop_take_pending_quit,
             complete_desktop_quit,
             record_desktop_telemetry,
@@ -496,40 +500,14 @@ async fn desktop_bootstrap(
     }
 
     let operation_id = format!("desktop-bootstrap-{}", uuid::Uuid::new_v4());
-    let started_at = Instant::now();
-    eprintln!("desktop_app_server_handoff_started operation_id={operation_id}");
-    let runtime_paths = state.runtime_paths.clone();
-    let wsl_resource_binary = state.wsl_resource_binary.clone();
-    let launch_environment = environment.clone();
-    let progress_app = app.clone();
-    let connection = tauri::async_runtime::spawn_blocking(move || {
-        launch_app_server_handoff(
-            &runtime_paths,
-            &launch_environment,
-            &wsl_resource_binary,
-            |stage, message| emit_bootstrap_progress(&progress_app, stage, message),
-        )
-    })
-    .await
-    .map_err(|_| {
-        eprintln!(
-            "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage=task_join duration_ms={}",
-            started_at.elapsed().as_millis()
-        );
-        "App Server handoff task failed".to_string()
-    })?
-    .map_err(|error| {
-        eprintln!(
-            "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage={} duration_ms={}",
-            error.stage,
-            started_at.elapsed().as_millis()
-        );
-        error.user_message
-    })?;
-    eprintln!(
-        "desktop_app_server_handoff_completed operation_id={operation_id} outcome=success duration_ms={}",
-        started_at.elapsed().as_millis()
-    );
+    let connection = launch_app_server_for_desktop(
+        state.runtime_paths.clone(),
+        state.wsl_resource_binary.clone(),
+        environment.clone(),
+        Some(app.clone()),
+        operation_id,
+    )
+    .await?;
     *state
         .connection
         .lock()
@@ -554,6 +532,131 @@ async fn desktop_bootstrap(
 struct HandoffFailure {
     stage: &'static str,
     user_message: String,
+}
+
+/// Runs the App Server handoff and always reports one terminal line. Callers own the
+/// decision to ask for a process; the handoff itself may elect an App Server that is
+/// already running. Progress goes to the startup window only while it is listening.
+async fn launch_app_server_for_desktop(
+    runtime_paths: DesktopRuntimePaths,
+    wsl_resource_binary: PathBuf,
+    environment: DesktopRuntimeEnvironment,
+    progress_app: Option<tauri::AppHandle>,
+    operation_id: String,
+) -> Result<LocalHttpConnection, String> {
+    let started_at = Instant::now();
+    eprintln!("desktop_app_server_handoff_started operation_id={operation_id}");
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        launch_app_server_handoff(
+            &runtime_paths,
+            &environment,
+            &wsl_resource_binary,
+            |stage, message| {
+                if let Some(app) = progress_app.as_ref() {
+                    emit_bootstrap_progress(app, stage, message);
+                }
+            },
+        )
+    })
+    .await;
+    match joined {
+        Err(_) => {
+            eprintln!(
+                "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage=task_join duration_ms={}",
+                started_at.elapsed().as_millis()
+            );
+            Err("App Server handoff task failed".to_string())
+        }
+        Ok(Err(error)) => {
+            eprintln!(
+                "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage={} duration_ms={}",
+                error.stage,
+                started_at.elapsed().as_millis()
+            );
+            Err(error.user_message)
+        }
+        Ok(Ok(connection)) => {
+            eprintln!(
+                "desktop_app_server_handoff_completed operation_id={operation_id} outcome=success duration_ms={}",
+                started_at.elapsed().as_millis()
+            );
+            Ok(connection)
+        }
+    }
+}
+
+/// A live App Server answers HTTP on its published loopback endpoint. Any HTTP status
+/// proves a listener; the endpoint is loopback-only and token-guarded, so a 401 still
+/// means the process is there. Only a connection failure means the process is gone.
+async fn app_server_endpoint_reachable(connection: &LocalHttpConnection) -> bool {
+    let Ok(url) = url::Url::parse(&connection.endpoint_url) else {
+        return false;
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .connect_timeout(Duration::from_millis(750))
+        .timeout(Duration::from_secs(2))
+        .no_proxy()
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(url)
+        .bearer_auth(&connection.auth_token)
+        .send()
+        .await
+        .is_ok()
+}
+
+/// Restores the Desktop-owned App Server after machine sleep or an idle shutdown. An
+/// already reachable endpoint is reused; a new process is published to the WebView
+/// through the same replacement event the client already handles.
+#[tauri::command]
+async fn desktop_ensure_app_server(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Option<LocalHttpConnection>, String> {
+    let operation_id = format!("desktop-ensure-app-server-{}", uuid::Uuid::new_v4());
+    let started_at = Instant::now();
+    let cached = state
+        .connection
+        .lock()
+        .map_err(|_| "desktop connection state unavailable")?
+        .clone();
+    if let Some(connection) = &cached {
+        if app_server_endpoint_reachable(connection).await {
+            return Ok(None);
+        }
+    }
+    let environment = state
+        .preferences
+        .lock()
+        .map_err(|_| "desktop bootstrap preferences unavailable")?
+        .environment
+        .clone();
+    eprintln!(
+        "desktop_app_server_ensure_started operation_id={operation_id} had_connection={} reason_code={}",
+        cached.is_some(),
+        if cached.is_some() { "endpoint_unreachable" } else { "no_connection" }
+    );
+    let connection = launch_app_server_for_desktop(
+        state.runtime_paths.clone(),
+        state.wsl_resource_binary.clone(),
+        environment,
+        None,
+        operation_id.clone(),
+    )
+    .await?;
+    *state
+        .connection
+        .lock()
+        .map_err(|_| "desktop connection state unavailable")? = Some(connection.clone());
+    let _ = app.emit("desktop-app-server-replaced", &connection);
+    eprintln!(
+        "desktop_app_server_ensure_completed operation_id={operation_id} outcome=success duration_ms={}",
+        started_at.elapsed().as_millis()
+    );
+    Ok(Some(connection))
 }
 
 fn emit_bootstrap_progress(app: &tauri::AppHandle, stage: &'static str, message: String) {

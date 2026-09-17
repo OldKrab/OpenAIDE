@@ -10,13 +10,89 @@ use openaide_app_server_protocol::agent::{
     AgentAuthenticateParams, AgentAuthenticateStatus as ProtocolAgentAuthenticateStatus,
     AgentCreateCustomParams, AgentDeleteCustomParams, AgentLogoutParams,
     AgentReplaceCustomConfirmation, AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams,
+    AgentSetEnabledConfirmation, AgentSetEnabledParams,
 };
+use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::ids::AgentId;
 use openaide_app_server_protocol::snapshot::AgentSignInPhase;
 use openaide_app_server_protocol::snapshot::AgentStatus;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+#[test]
+fn disabling_an_agent_stops_its_process_and_removes_it_from_the_runtime_catalog() {
+    let shutdowns = Arc::new(Mutex::new(Vec::new()));
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        test_catalog_store(),
+        Arc::new(ShutdownRecordingAgent(shutdowns.clone())),
+        AgentStatusCache::default(),
+    );
+
+    let result = api
+        .set_enabled(AgentSetEnabledParams {
+            agent_id: AgentId::from("codex"),
+            enabled: false,
+            confirmation: AgentSetEnabledConfirmation::default(),
+        })
+        .unwrap();
+
+    assert_eq!(shutdowns.lock().unwrap().as_slice(), ["codex"]);
+    assert!(
+        result
+            .agents
+            .agents
+            .iter()
+            .all(|agent| agent.agent_id.as_str() != "codex"),
+        "disabled Agents leave the runtime catalog"
+    );
+}
+
+#[test]
+fn disabling_an_agent_with_a_running_task_requires_confirmation() {
+    let catalog_store = test_catalog_store();
+    catalog_store
+        .backing_store()
+        .write_task(&running_task_record("task-running"))
+        .unwrap();
+    let shutdowns = Arc::new(Mutex::new(Vec::new()));
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        catalog_store,
+        Arc::new(ShutdownRecordingAgent(shutdowns.clone())),
+        AgentStatusCache::default(),
+    );
+
+    let error = api
+        .set_enabled(AgentSetEnabledParams {
+            agent_id: AgentId::from("codex"),
+            enabled: false,
+            confirmation: AgentSetEnabledConfirmation::default(),
+        })
+        .unwrap_err();
+
+    assert_eq!(error.code, ProtocolErrorCode::ValidationFailed);
+    assert!(shutdowns.lock().unwrap().is_empty());
+    assert!(
+        api.snapshot()
+            .unwrap()
+            .agents
+            .iter()
+            .any(|agent| agent.agent_id.as_str() == "codex"),
+        "a rejected disable leaves the Agent enabled"
+    );
+
+    api.set_enabled(AgentSetEnabledParams {
+        agent_id: AgentId::from("codex"),
+        enabled: false,
+        confirmation: AgentSetEnabledConfirmation {
+            accepted_active_work_interruption: true,
+        },
+    })
+    .unwrap();
+    assert_eq!(shutdowns.lock().unwrap().as_slice(), ["codex"]);
+}
 
 #[test]
 fn probe_success_returns_updated_agent_collection() {
@@ -482,6 +558,27 @@ impl AgentRuntime for ReadyAgent {
             auth_methods: Vec::new(),
             logout_supported: false,
         })
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Err(RuntimeError::CapabilityMissing("test".to_string()))
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Err(RuntimeError::CapabilityMissing("test".to_string()))
+    }
+}
+
+struct ShutdownRecordingAgent(Arc<Mutex<Vec<String>>>);
+
+impl AgentRuntime for ShutdownRecordingAgent {
+    fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        self.0.lock().unwrap().push(agent_id.to_string());
+        Ok(())
     }
 
     fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {

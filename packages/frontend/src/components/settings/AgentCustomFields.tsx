@@ -3,22 +3,32 @@ import type {
   AgentIconId,
   CustomAgentEnvRecord,
 } from "@openaide/app-shell-contracts";
+import { agentIconIds } from "@openaide/app-shell-contracts";
 import { AgentIcon, agentIconLabels } from "../AgentIcon";
 
+/** Built-in brand marks stay reserved for their Agents; custom Agents pick from the rest. */
+const reservedCustomAgentIconIds: AgentIconId[] = ["openai", "opencode"];
 const preferredCustomAgentIconIds: AgentIconId[] = ["bot", "code", "terminal", "sparkles", "wrench", "brain"];
+const pickableCustomAgentIconIds: AgentIconId[] = [
+  ...preferredCustomAgentIconIds,
+  ...agentIconIds.filter((icon) => (
+    !preferredCustomAgentIconIds.includes(icon) && !reservedCustomAgentIconIds.includes(icon)
+  )),
+];
 
 export function AgentIconPicker({ value, onChange }: { value: AgentIconId; onChange: (icon: AgentIconId) => void }) {
-  const customAgentIconIds = preferredCustomAgentIconIds.includes(value)
-    ? preferredCustomAgentIconIds
-    : [value, ...preferredCustomAgentIconIds.slice(0, 5)];
-  const selectedIcon: AgentIconId = customAgentIconIds.some((icon) => icon === value) ? value : "bot";
+  // A record saved before this list grew may hold an icon outside it. Keep the
+  // current choice visible so the picker never silently reports another icon.
+  const iconIds = pickableCustomAgentIconIds.includes(value)
+    ? pickableCustomAgentIconIds
+    : [value, ...pickableCustomAgentIconIds];
   return (
     <div className="agent-icon-picker" role="radiogroup" aria-label="Agent icon">
-      {customAgentIconIds.map((icon) => (
+      {iconIds.map((icon) => (
         <button
-          aria-checked={icon === selectedIcon}
+          aria-checked={icon === value}
           aria-label={agentIconLabels[icon]}
-          className={icon === selectedIcon ? "selected" : ""}
+          className={icon === value ? "selected" : ""}
           key={icon}
           onClick={() => onChange(icon)}
           role="radio"

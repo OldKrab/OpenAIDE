@@ -77,8 +77,8 @@ describe("App Server initial snapshot ingestion", () => {
       },
       agents: {
         agents: [
-          { agentId: "codex" as AgentId, label: "Codex", status: "connected" },
-          { agentId: "opencode" as AgentId, label: "OpenCode", status: "connected" },
+          { agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "connected" },
+          { agentId: "opencode" as AgentId, label: "OpenCode", icon: "opencode", status: "connected" },
         ],
       },
       newTaskDefaults: {
@@ -141,7 +141,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
       projects: [{ projectId: "project-1" as ProjectId, label: "Project", workspaceRoot: "/workspace/Project", available: true }],
     },
     agents: {
-      agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "connected" }],
+      agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "connected" }],
     },
     tasks: {
       section: "tasks",

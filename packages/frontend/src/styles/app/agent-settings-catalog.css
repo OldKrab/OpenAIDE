@@ -355,6 +355,10 @@
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+  /* The full icon set is scrollable so the Appearance row never floods the pane. */
+  max-height: 118px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .agent-icon-picker button {

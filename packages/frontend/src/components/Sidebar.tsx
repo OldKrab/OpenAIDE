@@ -20,6 +20,7 @@ import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation"
 
 type SidebarProps = {
   activeTaskId?: string;
+  agentIcons?: import("./AgentIcon").AgentIconLookup;
   nativeSessions: AppState["newTask"]["nativeSessions"];
   nativeSessionMutations?: AppState["nativeSessionMutations"];
   nativeSessionAgentId: string;
@@ -81,6 +82,7 @@ type SidebarProps = {
 
 export const Sidebar = memo(function Sidebar({
   activeTaskId,
+  agentIcons,
   nativeSessions,
   nativeSessionMutations = {},
   nativeSessionAgentId,
@@ -307,6 +309,7 @@ export const Sidebar = memo(function Sidebar({
           ? visibleGroups.map((group) => (
               <SidebarProjectTaskGroup
                 activeTaskId={activeTaskId}
+                agentIcons={agentIcons}
                 collapsed={groupSearchQuery ? false : collapsedProjectKeys.has(group.key)}
                 group={group}
                 key={group.key}
@@ -402,6 +405,7 @@ export const Sidebar = memo(function Sidebar({
               ) : (
                 <SidebarNativeSessionRow
                   archived={showArchived}
+                  agentIcon={agentIcons?.[row.session.agent_id ?? nativeSessionAgentId]}
                   canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
                 onDeleteSession={deletableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) ? onDeleteSession : undefined}
                   key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}

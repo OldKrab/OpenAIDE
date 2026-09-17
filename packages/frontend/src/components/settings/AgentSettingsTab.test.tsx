@@ -244,6 +244,36 @@ describe("AgentSettingsTab interactions", () => {
     expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false);
   });
 
+  it("confirms before disabling an Agent whose running Tasks would be interrupted", () => {
+    const onSetAgentEnabled = vi.fn();
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex")],
+      onSetAgentEnabled,
+      openFirst: false,
+      runningTaskCounts: { codex: 2 },
+    });
+
+    act(() => {
+      view.root.findByProps({ "aria-label": "Codex available", type: "checkbox" })
+        .props.onChange({ currentTarget: { checked: false } });
+    });
+
+    expect(onSetAgentEnabled).not.toHaveBeenCalled();
+    expect(textContent(view.root)).toContain("Disable Codex?");
+
+    act(() => buttonByText(view.root, "Cancel").props.onClick());
+    expect(onSetAgentEnabled).not.toHaveBeenCalled();
+    expect(textContent(view.root)).not.toContain("Disable Codex?");
+
+    act(() => {
+      view.root.findByProps({ "aria-label": "Codex available", type: "checkbox" })
+        .props.onChange({ currentTarget: { checked: false } });
+    });
+    act(() => buttonByText(view.root, "Disable Agent").props.onClick());
+
+    expect(onSetAgentEnabled).toHaveBeenCalledWith("codex", false, true);
+  });
+
   it("describes disabled built-in Agent availability as disabled", () => {
     const view = renderAgentSettings({
       agents: [builtInAgent("codex", { enabled: false, status: "disabled" })],
@@ -637,17 +667,19 @@ function renderAgentSettings({
   onCancelAuthentication,
   openFirst = true,
   recoveryActions,
+  runningTaskCounts,
 }: {
   agents: AgentSettingsRecord[];
   onCreateCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onCreateCustomAgent"];
   onDeleteCustomAgent?: (agentId: string) => void;
   onReplaceCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onReplaceCustomAgent"];
-  onSetAgentEnabled?: (agentId: string, enabled: boolean) => void;
+  onSetAgentEnabled?: (agentId: string, enabled: boolean, acceptedActiveWorkInterruption?: boolean) => void;
   onUpdateCustomAgentMetadata?: Parameters<typeof AgentSettingsTab>[0]["onUpdateCustomAgentMetadata"];
   onAuthenticate?: Parameters<typeof AgentSettingsTab>[0]["onAuthenticate"];
   onCancelAuthentication?: Parameters<typeof AgentSettingsTab>[0]["onCancelAuthentication"];
   openFirst?: boolean;
   recoveryActions?: AgentRecoveryActions;
+  runningTaskCounts?: Readonly<Record<string, number>>;
 }) {
   let view: ReactTestRenderer | undefined;
   act(() => {
@@ -662,6 +694,7 @@ function renderAgentSettings({
         onSetAgentEnabled={onSetAgentEnabled}
         onUpdateCustomAgentMetadata={onUpdateCustomAgentMetadata}
         recoveryActions={recoveryActions}
+        runningTaskCounts={runningTaskCounts}
       />,
     );
   });

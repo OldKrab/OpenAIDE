@@ -2625,7 +2625,11 @@ describe("app controller callbacks", () => {
     }).settings.setAgentEnabled("codex", false);
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, { agentId: "codex", enabled: false });
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, {
+      agentId: "codex",
+      enabled: false,
+      confirmation: { acceptedActiveWorkInterruption: false },
+    });
     expect(setAgents).toHaveBeenCalledWith([expect.objectContaining({ id: "codex" })]);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "settings:agentUpdated",
@@ -2664,9 +2668,30 @@ describe("app controller callbacks", () => {
     }).settings.setAgentEnabled("codex", true);
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, { agentId: "codex", enabled: true });
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, {
+      agentId: "codex",
+      enabled: true,
+      confirmation: { acceptedActiveWorkInterruption: false },
+    });
     expect(request).toHaveBeenCalledWith(AGENT_PROBE, { agentId: "codex" });
     expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
+  });
+
+  it("forwards an accepted interruption when disabling an Agent with running Tasks", async () => {
+    const request = vi.fn(async () => ({ agents: protocolAgents(["codex"]) }));
+    const state = createInitialState();
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state,
+    }).settings.setAgentEnabled("codex", false, true);
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(AGENT_SET_ENABLED, {
+      agentId: "codex",
+      enabled: false,
+      confirmation: { acceptedActiveWorkInterruption: true },
+    });
   });
 
   it("keeps settings errors local after BackendConnection rejection", async () => {
@@ -4514,6 +4539,7 @@ function protocolAgents(ids: string[]) {
     agents: ids.map((agentId) => ({
       agentId: agentId as never,
       label: agentId === "codex" ? "Codex" : "Local Agent",
+      icon: "bot",
       status: "disconnected" as const,
       capabilities: { resumeTasks: false, deleteNativeSessions: false },
     })),

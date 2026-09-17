@@ -84,6 +84,16 @@ impl AcpRuntimeKernel {
         self.with_agent_process_operation(agent_id, || self.active_sessions.logout(agent_id))
     }
 
+    pub(super) fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
+        // The Agent may already be gone from the registry when disable removes it, so
+        // cleanup must not require registry membership. Stopping a missing process is
+        // already the desired state.
+        self.with_agent_process_operation(agent_id, || {
+            self.active_sessions.shutdown_agent(agent_id);
+            Ok(())
+        })
+    }
+
     pub(super) fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

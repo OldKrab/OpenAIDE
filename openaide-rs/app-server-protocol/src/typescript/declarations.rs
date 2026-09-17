@@ -13,8 +13,8 @@ use crate::agent::{
     AgentListSessionsParams, AgentListSessionsResult, AgentListedSession, AgentLogoutParams,
     AgentLogoutResult, AgentProbeParams, AgentProbeResult, AgentReplaceCustomCleanup,
     AgentReplaceCustomConfirmation, AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams,
-    AgentReplaceCustomResult, AgentSetEnabledParams, AgentSetEnabledResult,
-    AgentSettingsAuthMethod, AgentSettingsAuthVariable, AgentSettingsDetail,
+    AgentReplaceCustomResult, AgentSetEnabledConfirmation, AgentSetEnabledParams,
+    AgentSetEnabledResult, AgentSettingsAuthMethod, AgentSettingsAuthVariable, AgentSettingsDetail,
     AgentSettingsDetailsParams, AgentSettingsDetailsResult, AgentSettingsEnvRow,
     AgentSettingsSourceKind, AgentSettingsStatus, AgentSettingsTransport,
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
@@ -292,6 +292,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentDeleteCustomParams>(output, config);
     push_decl::<AgentDeleteCustomResult>(output, config);
     push_decl::<AgentSetEnabledParams>(output, config);
+    push_decl::<AgentSetEnabledConfirmation>(output, config);
     push_decl::<AgentSetEnabledResult>(output, config);
     push_decl::<AgentSettingsDetailsParams>(output, config);
     push_decl::<AgentSettingsDetailsResult>(output, config);

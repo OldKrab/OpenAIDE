@@ -287,10 +287,16 @@ export async function setAgentEnabledThroughBackend(
   context: AgentSettingsIntentContext,
   agentId: string,
   enabled: boolean,
+  acceptedActiveWorkInterruption = false,
 ) {
   const backendConnection = context.backendConnection;
   if (!backendConnection) return false;
-  const result = await backendConnection.request(AGENT_SET_ENABLED, { agentId: agentId as AgentId, enabled });
+  const result = await backendConnection.request(AGENT_SET_ENABLED, {
+    agentId: agentId as AgentId,
+    enabled,
+    // Disabling stops the Agent process; the App Server requires this when the Agent owns running Tasks.
+    confirmation: { acceptedActiveWorkInterruption },
+  });
   applyAgentMutationResult(context, result.agents);
   context.dispatch({
     type: "settings:agentUpdated",

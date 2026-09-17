@@ -16,6 +16,7 @@ import type { ArchiveOlderTasksAction } from "./SidebarArchiveOlderMenu";
 
 type SidebarProjectTaskGroupProps = {
   activeTaskId?: string;
+  agentIcons?: import("./AgentIcon").AgentIconLookup;
   collapsed: boolean;
   group: SidebarProjectGroup;
   maxTasks: number;
@@ -60,6 +61,7 @@ type SidebarProjectTaskGroupProps = {
 
 export function SidebarProjectTaskGroup({
   activeTaskId,
+  agentIcons,
   collapsed,
   group,
   maxTasks,
@@ -202,6 +204,7 @@ export function SidebarProjectTaskGroup({
               <SidebarTaskRow
                 key={`task:${row.task.task_id}`}
                 activeTaskId={activeTaskId}
+                agentIcon={agentIcons?.[row.task.agent_id]}
                 canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
                 onDeleteSession={deletableAgentIds.has(row.task.agent_id) ? onDeleteSession : undefined}
                 forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
@@ -218,6 +221,7 @@ export function SidebarProjectTaskGroup({
             ) : (
               <SidebarNativeSessionRow
                 archived={showArchived}
+                agentIcon={agentIcons?.[row.session.agent_id ?? nativeSessionAgentId]}
                 canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
                 onDeleteSession={deletableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) ? onDeleteSession : undefined}
                 key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}

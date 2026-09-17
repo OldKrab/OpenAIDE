@@ -233,6 +233,17 @@ pub struct AgentDeleteCustomResult {
 pub struct AgentSetEnabledParams {
     pub agent_id: AgentId,
     pub enabled: bool,
+    #[serde(default)]
+    pub confirmation: AgentSetEnabledConfirmation,
+}
+
+/// User acknowledgement required before disabling an Agent whose running Tasks
+/// would be interrupted when its process stops.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSetEnabledConfirmation {
+    #[serde(default)]
+    pub accepted_active_work_interruption: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

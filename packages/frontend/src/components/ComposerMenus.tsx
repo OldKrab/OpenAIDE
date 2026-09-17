@@ -1,4 +1,4 @@
-import { Code2, FileUp, Image, Plus } from "lucide-react";
+import { FileUp, Image, Plus } from "lucide-react";
 import type { ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import {
@@ -276,7 +276,7 @@ export function ComposerControls({
             trigger={(popupTrigger) => (
               <Selector
                 disabled={controlsLocked}
-                icon={<Code2 size={12} />}
+                icon={<AgentIcon icon={agents.find((agent) => agent.id === selection.agentId)?.icon} size={12} />}
                 label={selection.agentLabel}
                 locked={agentLocked}
                 menuOpen={openMenu === "agent"}

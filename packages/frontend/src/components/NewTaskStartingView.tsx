@@ -5,12 +5,14 @@ import { TaskHeader } from "./TaskHeader";
 const SLOW_START_DELAY_MS = 5_000;
 
 export function NewTaskStartingView({
+  agentIcon,
   agentId,
   agentName,
   composer,
   openingNativeSession,
   workspaceRoot,
 }: {
+  agentIcon?: import("@openaide/app-shell-contracts").AgentIconId;
   agentId: string;
   agentName: string;
   composer: ReactNode;
@@ -28,6 +30,7 @@ export function NewTaskStartingView({
   return (
     <section className="task-surface new-task-starting-surface" aria-label={statusLabel}>
       <TaskHeader
+        agentIcon={agentIcon}
         agentId={agentId}
         agentName={agentName}
         status="active"
