@@ -7,8 +7,9 @@ import type {
   CustomAgentReplaceParams,
 } from "@openaide/app-shell-contracts";
 import { currentFrontendShell } from "../../services/frontendShell";
+import { AgentDisableDialog } from "../AgentDisableDialog";
+import { useAgentDisableConfirmation } from "../useAgentDisableConfirmation";
 import type { AgentDisableOutcome } from "../../intents/agentSettingsIntents";
-import { AgentDisableDialog } from "./AgentDisableDialog";
 import { AgentSettingsDetail } from "./AgentSettingsDetail";
 import { AgentSettingsList } from "./AgentSettingsList";
 import type { AgentRecoveryActions } from "../AgentRecovery";
@@ -67,7 +68,7 @@ export function AgentSettingsTab({
   const [draft, setDraft] = useState<AgentDraft | undefined>();
   const [pendingDeleteAgentId, setPendingDeleteAgentId] = useState<string | undefined>();
   const [pendingSaveAgentId, setPendingSaveAgentId] = useState<string | undefined>();
-  const [pendingDisable, setPendingDisable] = useState<PendingDisable>();
+  const { cancelDisable, confirmDisable, pendingDisable, requestDisable } = useAgentDisableConfirmation();
   const selectedAgent = agents.find((agent) => agent.id === selectedId);
   const selected = draft ? undefined : selectedAgent;
   const activeDraft = draft ?? (selected ? draftFromAgent(selected) : newAgentDraft());
@@ -128,32 +129,6 @@ export function AgentSettingsTab({
     setConfirmReplaceAgentId(undefined);
     setDraft({ ...activeDraft, ...patch });
   };
-  // Disabling stops the Agent process, so it interrupts that Agent's running Tasks. The
-  // App Server owns that count, and answers "confirmation-required" when the request needs
-  // the acknowledgement; only then does this ask, and confirming repeats the same request.
-  const requestAgentChange = (
-    agentId: string,
-    attempt: (acceptedActiveWorkInterruption: boolean) => Promise<AgentDisableOutcome>,
-    cancelsPendingSave = false,
-  ) => {
-    void Promise.resolve(attempt(false))
-      .then((outcome) => {
-        if (outcome.kind !== "confirmation-required") return;
-        setPendingDisable({
-          agentId,
-          runningTaskCount: outcome.runningTaskCount,
-          confirm: () => {
-            setPendingDisable(undefined);
-            void attempt(true);
-          },
-          cancel: () => {
-            setPendingDisable(undefined);
-            if (cancelsPendingSave) setPendingSaveAgentId(undefined);
-          },
-        });
-      })
-      .catch(() => undefined);
-  };
   const saveDraft = () => {
     setConfirmDeleteAgentId(undefined);
     if (missingRequiredLaunchFields) return;
@@ -188,7 +163,7 @@ export function AgentSettingsTab({
     }
     // Availability is part of the same save, so switching it off needs the same
     // acknowledgement as the toggle instead of becoming a second way to disable.
-    requestAgentChange(
+    requestDisable(
       savedAgentId,
       (acceptedActiveWorkInterruption) => onUpdateCustomAgentMetadata({
         agent_id: savedAgentId,
@@ -196,7 +171,7 @@ export function AgentSettingsTab({
         icon: activeDraft.icon,
         enabled: false,
       }, acceptedActiveWorkInterruption),
-      true,
+      () => setPendingSaveAgentId(undefined),
     );
   };
   const deleteDraft = () => {
@@ -220,7 +195,8 @@ export function AgentSettingsTab({
       void onSetAgentEnabled(agentId, true);
       return;
     }
-    requestAgentChange(agentId, (accepted) => onSetAgentEnabled(agentId, false, accepted));
+    requestDisable(agentId, (acceptedActiveWorkInterruption) =>
+      onSetAgentEnabled(agentId, false, acceptedActiveWorkInterruption));
   };
   const pendingDisableAgent = agents.find((agent) => agent.id === pendingDisable?.agentId);
 
@@ -236,8 +212,8 @@ export function AgentSettingsTab({
         {pendingDisable && pendingDisableAgent ? (
           <AgentDisableDialog
             agentLabel={pendingDisableAgent.label}
-            onCancel={pendingDisable.cancel}
-            onConfirm={pendingDisable.confirm}
+            onCancel={cancelDisable}
+            onConfirm={confirmDisable}
             runningTaskCount={pendingDisable.runningTaskCount}
           />
         ) : null}
@@ -286,8 +262,8 @@ export function AgentSettingsTab({
       {pendingDisable && pendingDisableAgent ? (
         <AgentDisableDialog
           agentLabel={pendingDisableAgent.label}
-          onCancel={pendingDisable.cancel}
-          onConfirm={pendingDisable.confirm}
+          onCancel={cancelDisable}
+          onConfirm={confirmDisable}
           runningTaskCount={pendingDisable.runningTaskCount}
         />
       ) : null}
@@ -304,14 +280,3 @@ function customAgentCreateParams(draft: AgentDraft): CustomAgentCreateParams {
     env: draft.env,
   };
 }
-
-/**
- * A disable the App Server said would interrupt running Tasks. `confirm` repeats the exact
- * request that was refused; `cancel` also releases any Save the request belonged to.
- */
-type PendingDisable = {
-  agentId: string;
-  runningTaskCount: number;
-  confirm: () => void;
-  cancel: () => void;
-};

@@ -3,6 +3,7 @@ import { TaskLoadingView, TaskView } from "./TaskView";
 import type { AppController } from "./appController";
 import { openRecoveryUrl, reloadRecoveryShell } from "../services/hostBridge";
 import type { AgentRecoveryActions } from "./AgentRecovery";
+import type { AgentIconLookup } from "./AgentIcon";
 import type { DesktopWindowCapability } from "../services/frontendShell";
 
 export function primaryTaskSurfaceModel(controller: AppController) {
@@ -76,6 +77,8 @@ function hasVisibleTaskDraft(input: AppController["view"]["primaryTask"]["taskIn
 }
 
 type AppPrimaryTaskSurfaceProps = {
+  /** Agent icon by Agent id, including Agents that left the runtime catalog (disabled). */
+  agentIcons?: AgentIconLookup;
   controller: AppController;
   desktopWindow?: DesktopWindowCapability;
   focusRequestKey: number;
@@ -95,6 +98,7 @@ type AppPrimaryTaskSurfaceProps = {
 };
 
 export function AppPrimaryTaskSurface({
+  agentIcons,
   controller,
   desktopWindow,
   focusRequestKey,
@@ -145,6 +149,7 @@ export function AppPrimaryTaskSurface({
     return (
       <TaskView
         activeTask={activeTask}
+        agentIcons={agentIcons}
         agents={agents}
         agentRecoveryActions={recoveryActions}
         archived={renderableTaskArchived}

@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import type { AppServerSession } from "@openaide/app-server-client";
+import { refreshAgentSettingsThroughBackend } from "../intents/agentSettingsIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
 import {
@@ -395,6 +396,17 @@ export function useAppControllerBackendLifecycle({
                 });
               });
             }
+            // Task surfaces render Agent identity for Tasks whose Agent is no longer in the
+            // runtime catalog, and the Settings projection is the only source for a disabled
+            // Agent's configured icon. Load it once per client so history keeps it after a
+            // restart, not only after Settings was opened.
+            void refreshAgentSettingsThroughBackend({
+              backendConnection: { request: backendConnection.request },
+              currentAgentId: currentAgentId.current,
+              dispatch: initializedDispatch,
+              setAgents,
+              state,
+            }).catch(() => undefined);
             // Route opening also starts App Server recovery work, so the route effect must
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;

@@ -16,6 +16,9 @@ import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
 import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
+import { AgentDisableDialog } from "./AgentDisableDialog";
+import { useAgentDisableConfirmation } from "./useAgentDisableConfirmation";
+import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
 
 type SidebarProps = {
@@ -48,7 +51,10 @@ type SidebarProps = {
   onOpenWorkspaceFolder?: () => void;
   onOpenTask: (taskId: string) => void;
   onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
-  onDisableRecoveredAgent?: (agentId: string) => void;
+  onDisableRecoveredAgent?: (
+    agentId: string,
+    acceptedActiveWorkInterruption?: boolean,
+  ) => Promise<AgentDisableOutcome>;
   onArchiveTask: (taskId: string) => void;
   onArchiveOlderTasks?: (cutoff: TaskArchiveOlderCutoff, preview: boolean) => Promise<TaskArchiveOlderResult>;
   onRestoreNativeSession: (session: AgentListedSession) => void;
@@ -136,6 +142,9 @@ export const Sidebar = memo(function Sidebar({
   const taskListRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const taskListOverflow = useScrollOverflow(taskListRef, showArchived);
+  // The recovery banner disables a recovered Agent here, so the confirmation it needs has to
+  // appear here too; a Settings-only error would be invisible where the user clicked.
+  const { cancelDisable, confirmDisable, pendingDisable, requestDisable } = useAgentDisableConfirmation();
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
   const [projectRowLimits, setProjectRowLimits] = useState<Map<string, number>>(() => new Map());
   const [visibleProjectLimit, setVisibleProjectLimit] = useState(maxVisibleProjects);
@@ -288,7 +297,14 @@ export const Sidebar = memo(function Sidebar({
                     : nativeSessions.recoveryKind === "launchFailed" ? "Try again" : "Set up Codex"}
                 </button>
                 {nativeSessions.recoveryKind === "authRequired" && nativeSessions.recoveryAgentId && onDisableRecoveredAgent ? (
-                  <button type="button" onClick={() => onDisableRecoveredAgent(nativeSessions.recoveryAgentId!)}>
+                  <button
+                    type="button"
+                    onClick={() => requestDisable(
+                      nativeSessions.recoveryAgentId!,
+                      (acceptedActiveWorkInterruption) =>
+                        onDisableRecoveredAgent(nativeSessions.recoveryAgentId!, acceptedActiveWorkInterruption),
+                    )}
+                  >
                     {`Disable ${nativeSessions.recoveryAgentLabel ?? "this Agent"}`}
                   </button>
                 ) : null}
@@ -472,6 +488,14 @@ export const Sidebar = memo(function Sidebar({
           </span>
         </button>
       </div>
+      {pendingDisable ? (
+        <AgentDisableDialog
+          agentLabel={nativeSessions.recoveryAgentLabel ?? "this Agent"}
+          onCancel={cancelDisable}
+          onConfirm={confirmDisable}
+          runningTaskCount={pendingDisable.runningTaskCount}
+        />
+      ) : null}
     </aside>
   );
 }, sameSidebarDataProps);

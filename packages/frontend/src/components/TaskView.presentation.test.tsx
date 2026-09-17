@@ -576,6 +576,27 @@ describe("TaskView timeline presentation", () => {
     expect(rendered).not.toContain("Loading options…");
   });
 
+  it("keeps the Agent identity in the header when there are no subagent histories", async () => {
+    // The header shows the Agent's configured icon unless a subagent navigator replaces it, so
+    // an Agent with no subagents must not lose its identity to an empty navigator.
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.task.agent_id = "custom.retired";
+    snapshot.task.agent_name = "Retired Agent";
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView {...taskViewProps(snapshot)} agentIcons={{ "custom.retired": "sparkles" }} />,
+      );
+    });
+
+    const identity = tree.root.findAllByProps({ className: "task-header-agent" });
+    expect(identity).toHaveLength(1);
+    expect(identity[0].findAllByProps({ icon: "sparkles" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ className: "subagent-switcher-trigger" })).toHaveLength(0);
+  });
+
   it("keeps permission handling available during unrelated Backend recovery", async () => {
     const { TaskView } = await import("./TaskView");
     let tree!: ReactTestRenderer;

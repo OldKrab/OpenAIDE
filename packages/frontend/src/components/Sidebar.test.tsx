@@ -1215,7 +1215,48 @@ describe("Sidebar", () => {
     act(() => buttonWithText(tree, "Sign in").props.onClick());
     expect(onRecoverNativeSessions).toHaveBeenCalledWith("authRequired");
     act(() => buttonWithText(tree, "Disable Codex").props.onClick());
-    expect(onDisableRecoveredAgent).toHaveBeenCalledWith("codex");
+    expect(onDisableRecoveredAgent).toHaveBeenCalledWith("codex", false);
+  });
+
+  it("confirms here when disabling a recovered Agent would interrupt running Tasks", async () => {
+    // The App Server asks for the acknowledgement, and the Sidebar has to show it where the
+    // Disable button is: a Settings-only error would leave this click with no visible response.
+    const onDisableRecoveredAgent = vi.fn(async (_agentId: string, accepted?: boolean) =>
+      accepted ? { kind: "applied" as const } : { kind: "confirmation-required" as const, runningTaskCount: 2 });
+    const tree = render(
+      <Sidebar
+        nativeSessions={nativeSessions({
+          error: "Codex needs sign-in. Sign in or disable Codex to continue.",
+          recoveryKind: "authRequired",
+          recoveryAgentId: "codex",
+          recoveryAgentLabel: "Codex",
+        })}
+        onDisableRecoveredAgent={onDisableRecoveredAgent}
+        onRecoverNativeSessions={vi.fn()}
+        showArchived={false}
+        tasks={[]}
+        {...sidebarCallbacks()}
+      />,
+    );
+
+    await act(async () => {
+      await buttonWithText(tree, "Disable Codex").props.onClick();
+    });
+
+    expect(onDisableRecoveredAgent).toHaveBeenCalledWith("codex", false);
+    expect(tree.root.findAllByProps({ "aria-label": "Disable Codex" })).toHaveLength(1);
+    expect(textContent(tree)).toContain("2 running Tasks");
+
+    act(() => buttonWithText(tree, "Cancel").props.onClick());
+    expect(tree.root.findAllByProps({ "aria-label": "Disable Codex" })).toHaveLength(0);
+    expect(onDisableRecoveredAgent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await buttonWithText(tree, "Disable Codex").props.onClick();
+    });
+    act(() => buttonWithText(tree, "Disable Agent").props.onClick());
+
+    expect(onDisableRecoveredAgent).toHaveBeenLastCalledWith("codex", true);
   });
 
   it("keeps saved rows visible while the Codex integration installs", () => {

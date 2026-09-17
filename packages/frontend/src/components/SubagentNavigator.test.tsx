@@ -54,4 +54,34 @@ describe("SubagentNavigator", () => {
     act(() => choices[0]!.props.onClick());
     expect(onSelect).toHaveBeenCalledWith(undefined);
   });
+
+  it("shows the Task Agent's configured icon for the main history", () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    let view: ReturnType<typeof create>;
+    act(() => {
+      view = create(<SubagentNavigator
+        agentIcon="sparkles"
+        agentId="custom.local"
+        agentName="Local Agent"
+        entries={[
+          {
+            subagentId: "subagent_11111111111111111111111111111111" as SubagentId,
+            name: "Explorer",
+            delegatedTask: "Inspect",
+            status: "running",
+            capabilities: { cancel: false, close: false },
+            spawnedOrder: 1,
+            historyRevision: 2,
+          },
+        ]}
+        onSelect={vi.fn()}
+        unseen={new Set()}
+      />);
+    });
+
+    // The main history belongs to the Task's Agent, so the switcher carries that Agent's
+    // configured icon rather than a generic one.
+    const trigger = view!.root.findByProps({ "aria-label": "Switch agent. Currently viewing Main Agent" });
+    expect(trigger.findAllByProps({ icon: "sparkles" })).toHaveLength(1);
+  });
 });

@@ -79,8 +79,11 @@ export type SettingsCallbacks = {
   deleteCustomAgent: (agentId: string) => void;
   deleteMcpServer: (server: McpServerDefinition) => void;
   dismissError?: () => void;
-  /** Recovery-surface disable; cannot confirm interrupting running work, so it reports instead. */
-  disableRecoveredAgent: (agentId: string) => void;
+  /** Recovery-surface disable; its banner renders the confirmation for interrupting running work. */
+  disableRecoveredAgent: (
+    agentId: string,
+    acceptedActiveWorkInterruption?: boolean,
+  ) => Promise<AgentDisableOutcome>;
   getMcpServerDetails: (id: string) => Promise<McpServerDefinition>;
   getSkillDetails: (id: string) => Promise<SkillSettingsDetails>;
   replaceCustomAgent: (payload: CustomAgentReplaceParams) => void;

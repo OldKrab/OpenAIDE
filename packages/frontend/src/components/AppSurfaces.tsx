@@ -657,6 +657,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             <AppServerErrorView message={appServerError} />
           ) : (
             <AppPrimaryTaskSurface
+              agentIcons={agentIcons}
               controller={controller}
               desktopWindow={desktopWindow}
               focusRequestKey={newTaskFocusRequestKey}
@@ -686,6 +687,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   return (
     <main className="app-shell editor-shell">
       <AppPrimaryTaskSurface
+        agentIcons={agentIcons}
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
         model={taskSurfaceModel}

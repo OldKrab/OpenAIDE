@@ -182,17 +182,10 @@ export function createSettingsCallbacks({
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
     setAgentEnabled,
-    disableRecoveredAgent: async (agentId) => {
-      const outcome = await setAgentEnabled(agentId, false);
-      if (outcome.kind === "confirmation-required") {
-        // Recovery surfaces cannot show the disable dialog; send the user to the Agent pane,
-        // which owns the confirmation for interrupting running work.
-        dispatch({
-          type: "settings:error",
-          message: "This Agent has running Tasks. Disable it from Settings, Agents.",
-        });
-      }
-    },
+    // The recovery banner shows the disable confirmation in the surface that offered the
+    // action, so this only performs the change the user confirmed.
+    disableRecoveredAgent: (agentId, acceptedActiveWorkInterruption) =>
+      setAgentEnabled(agentId, false, acceptedActiveWorkInterruption),
     setMcpServerEnabled: (id, enabled) => {
       void setMcpServerEnabledThroughBackend(agentSettingsContext(), id, enabled)
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));

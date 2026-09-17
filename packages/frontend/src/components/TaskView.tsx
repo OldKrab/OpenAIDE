@@ -9,7 +9,6 @@ import type {
   TaskSummary,
 } from "@openaide/app-shell-contracts";
 import type { AppServerSession, BackendConnection, ToolImagePreview } from "@openaide/app-server-client";
-import { renderedChat } from "../state/chatPaging";
 import type {
   AppState,
   TaskChatScrollState,
@@ -35,6 +34,9 @@ import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
+import type { AgentIconLookup } from "./AgentIcon";
+import { useReturnToMainHistory } from "./useReturnToMainHistory";
+import { useTaskHistoryView } from "./useTaskHistoryView";
 import { AgentFileOpenContext } from "./agentFileOpen";
 import { ProjectFileWorkspace } from "./ProjectFileWorkspace";
 import { ProjectFilesButton } from "./ProjectFilesButton";
@@ -48,7 +50,6 @@ import { currentFrontendShell } from "../services/frontendShell";
 import { useTaskFileViewer } from "./useTaskFileViewer";
 import { useSubagentSessions } from "./useSubagentSessions";
 import { SubagentNavigator } from "./SubagentNavigator";
-import { mapProtocolChatItem } from "../state/appServerProtocolChatMapping";
 
 export {
   scrollTopAfterPrependedContent,
@@ -125,6 +126,7 @@ export function TaskLoadingView({
 
 export function TaskView({
   activeTask,
+  agentIcons,
   agents,
   agentRecoveryActions,
   archived = false,
@@ -177,6 +179,8 @@ export function TaskView({
   showWorkspaceContext = true,
 }: {
   activeTask?: TaskSummary;
+  /** Agent icon by Agent id, including Agents that left the runtime catalog (disabled). */
+  agentIcons?: AgentIconLookup;
   agents?: AgentOption[];
   agentRecoveryActions?: AgentRecoveryActions;
   archived?: boolean;
@@ -270,52 +274,22 @@ export function TaskView({
     agents,
     snapshot.preparation,
   );
-  const activeAgentIcon = agents?.find((agent) => agent.id === snapshot.task.agent_id)?.icon;
+  const activeAgentIcon = agentIcons?.[snapshot.task.agent_id]
+    ?? agents?.find((agent) => agent.id === snapshot.task.agent_id)?.icon;
   const subagents = useSubagentSessions({
     connection: subagentConnection,
     enabled: backendReady,
     taskId: snapshot.task.task_id,
   });
-  useEffect(() => {
-    if (!subagents.selectedSubagentId) return;
-    const returnToMain = (event: KeyboardEvent) => {
-      if (!event.altKey || event.key !== "ArrowLeft" || event.ctrlKey || event.metaKey || event.shiftKey) {
-        return;
-      }
-      event.preventDefault();
-      subagents.selectSubagent(undefined);
-    };
-    window.addEventListener("keydown", returnToMain);
-    return () => window.removeEventListener("keydown", returnToMain);
-  }, [subagents.selectSubagent, subagents.selectedSubagentId]);
-  const mainChat = useMemo(() => renderedChat(snapshot, chatPageState), [chatPageState, snapshot]);
-  const childChat = useMemo(() => {
-    if (!subagents.selected) return undefined;
-    const history = subagents.history;
-    return {
-      items: (history?.chat.items ?? []).map((item) => mapProtocolChatItem(item, snapshot.task.updated_at)),
-      hasBefore: history?.chat.hasMoreBefore === true,
-      beforeCursor: history?.chat.startCursor ?? undefined,
-      pending: history === undefined,
-      error: history?.availability === "unavailable" ? "This subagent history is unavailable." : undefined,
-    };
-  }, [snapshot.task.updated_at, subagents.history, subagents.selected]);
-  const chat = childChat ?? mainChat;
+  // An Agent with no subagent history has nothing to navigate, so the header shows the Agent
+  // identity (its configured icon) instead of an empty navigator.
+  const subagentEntries = subagents.catalog?.entries ?? [];
+  useReturnToMainHistory(subagents.selectedSubagentId, subagents.selectSubagent);
+  const { chat, visiblePlan } = useTaskHistoryView({ chatPageState, snapshot, subagents });
   const chatItems = useMemo(() => [
     ...chat.items,
     ...snapshot.active_requests,
   ], [chat.items, snapshot.active_requests]);
-  const visiblePlan = useMemo(() => {
-    if (!subagents.selected) return snapshot.current_plan;
-    const plan = subagents.history?.currentPlan;
-    return plan ? {
-      entries: plan.entries.map((entry) => ({
-        content: entry.content,
-        priority: entry.priority,
-        status: entry.status === "inProgress" ? "in_progress" as const : entry.status,
-      })),
-    } : undefined;
-  }, [snapshot.current_plan, subagents.history?.currentPlan, subagents.selected]);
   const turnBusy = snapshot.task.status === "active";
   const queueAvailable = snapshot.task.status === "active"
     || snapshot.task.status === "waiting"
@@ -554,14 +528,17 @@ export function TaskView({
     >
       <div className="task-work-stack-header">
         <TaskHeader
-          agentNavigation={(
+          agentNavigation={subagentEntries.length > 0 ? (
             <SubagentNavigator
-              entries={subagents.catalog?.entries ?? []}
+              agentIcon={activeAgentIcon}
+              agentId={snapshot.task.agent_id}
+              agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
+              entries={subagentEntries}
               onSelect={subagents.selectSubagent}
               selectedId={subagents.selectedSubagentId}
               unseen={subagents.unseen}
             />
-          )}
+          ) : undefined}
           agentId={snapshot.task.agent_id}
           agentIcon={activeAgentIcon}
           agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
