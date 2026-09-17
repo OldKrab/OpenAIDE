@@ -49,7 +49,7 @@
 .desktop-title-bar-sidebar {
   min-width: 0;
   position: relative;
-  border-right: 1px solid var(--oa-border-subtle);
+  border-right: 0;
   background: var(--oa-panel);
   display: flex;
   align-items: center;
