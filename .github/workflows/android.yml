@@ -44,7 +44,7 @@ jobs:
       - run: google-chrome --version
       - run: npx playwright install ffmpeg
       - run: npx playwright test task-chat.spec.mjs --grep 'keeps selected images after picker menu dismissal'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: android-browser-checks
@@ -87,22 +87,22 @@ jobs:
             fi
             echo '::notice::Android signing secrets are not configured; only debug APKs are available.'
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: openaide-android-debug
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: openaide-android-device-tests
           path: apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: openaide-android-reports
           path: apps/android/app/build/reports/
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: github.event_name != 'pull_request'
         with:
           name: openaide-android-user
@@ -157,7 +157,7 @@ jobs:
           node apps/android/scripts/package-runtime.mjs
           chmod +x apps/android/build/runtime/bin/openaide-app-server
           tar -czf apps/android/build/openaide-termux-arm64.tar.gz -C apps/android/build runtime
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: openaide-termux-arm64
           path: apps/android/build/openaide-termux-arm64.tar.gz
