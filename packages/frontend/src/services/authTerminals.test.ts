@@ -5,7 +5,7 @@ const frame = { agentId: "fixture", terminalId: "login-1", output: btoa("Sign in
 afterEach(() => { closeAuthTerminals(); vi.useRealTimers(); });
 
 describe("client-scoped auth terminals", () => {
-  it("renders exact bytes and sends each input batch once without keeping a transcript", async () => {
+  it("renders exact bytes and sends each input batch once", async () => {
     vi.useFakeTimers();
     const response = handleAuthTerminal(frame, new AbortController().signal);
     const session = authTerminalForAgent("fixture")!;
@@ -18,6 +18,9 @@ describe("client-scoped auth terminals", () => {
     const next = handleAuthTerminal({ ...frame, output: "" }, new AbortController().signal);
     await vi.advanceTimersByTimeAsync(100);
     expect((await next).input).toBe("");
+    const remounted = vi.fn();
+    session.attach(remounted);
+    expect(new TextDecoder().decode(remounted.mock.calls[0][0])).toBe("Sign in: ");
   });
 
   it("cancels pending input and removes the terminal on disconnect", async () => {

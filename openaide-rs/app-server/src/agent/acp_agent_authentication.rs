@@ -80,6 +80,9 @@ async fn authenticate_inner(
         launch
             .env
             .extend(config.secret_env_values(host_bridge, request.secret_resolver.as_deref())?);
+        // Launch configuration may use an auth-method-specific secret-storage namespace.
+        // The interactive surface must still belong to the product Agent identity.
+        launch.agent_id = request.agent_id.clone();
         launch.args.extend(method.args.clone());
         let mut env: HashMap<_, _> = launch.env.into_iter().collect();
         env.extend(method.env.clone());

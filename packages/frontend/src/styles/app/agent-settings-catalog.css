@@ -178,6 +178,7 @@
 
 .agent-focused-view,
 .agent-detail-pane {
+  min-width: 0;
   width: min(700px, 100%);
   margin-inline: auto;
 }
@@ -190,6 +191,7 @@
 
 .agent-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 30px;
   padding: 0;

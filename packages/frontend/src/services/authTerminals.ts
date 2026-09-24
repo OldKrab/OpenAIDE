@@ -27,8 +27,6 @@ export class AuthTerminalSession {
   attach(output: (bytes: Uint8Array) => void) {
     this.output = output;
     for (const bytes of this.backlog) output(bytes);
-    this.backlog = [];
-    this.backlogBytes = 0;
     return () => { this.output = undefined; };
   }
 
@@ -54,12 +52,12 @@ export class AuthTerminalSession {
     clearTimeout(this.idleTimer);
     const bytes = Uint8Array.from(atob(params.output), (char) => char.charCodeAt(0));
     if (bytes.length) {
-      if (this.output) this.output(bytes);
-      else {
-        this.backlog.push(bytes);
-        this.backlogBytes += bytes.length;
-        while (this.backlogBytes > 262144) this.backlogBytes -= this.backlog.shift()!.length;
-      }
+      // Retain bounded screen replay only for this live flow so navigating away and back
+      // doesn't lose the login prompt. Completion/disconnect destroys it with the session.
+      this.backlog.push(bytes);
+      this.backlogBytes += bytes.length;
+      while (this.backlogBytes > 262144) this.backlogBytes -= this.backlog.shift()!.length;
+      this.output?.(bytes);
     }
     if (params.exited) {
       this.close();

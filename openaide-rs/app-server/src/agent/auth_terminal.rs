@@ -115,6 +115,20 @@ impl ClientAuthTerminal {
             .try_clone_reader()
             .map_err(|_| terminal_error())?;
         let mut writer = pair.master.take_writer().map_err(|_| terminal_error())?;
+        // PTY writes can block when an Agent stops reading input. Keep those writes off the
+        // lifecycle worker so cancellation can always kill the owned process and unblock I/O.
+        let (input_send, input_receive) = mpsc::sync_channel::<Vec<u8>>(1);
+        std::thread::spawn(move || {
+            while let Ok(bytes) = input_receive.recv() {
+                if writer
+                    .write_all(&bytes)
+                    .and_then(|_| writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         // Backpressure bounds memory even if the login process prints continuously while the
         // browser is disconnected. Closing the receiver releases a blocked reader on teardown.
         let (send, receive) = mpsc::sync_channel::<Vec<u8>>(8);
@@ -179,10 +193,9 @@ impl ClientAuthTerminal {
             let input = STANDARD
                 .decode(response.input)
                 .map_err(|_| terminal_error())?;
-            writer
-                .write_all(&input)
-                .and_then(|_| writer.flush())
-                .map_err(|_| terminal_error())?;
+            if !input.is_empty() {
+                input_send.try_send(input).map_err(|_| terminal_error())?;
+            }
         }
     }
 }
@@ -259,3 +272,7 @@ impl Drop for LoginChild {
 #[cfg(all(test, unix))]
 #[path = "auth_terminal_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "auth_terminal_backpressure_tests.rs"]
+mod backpressure_tests;
