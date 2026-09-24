@@ -137,7 +137,7 @@ impl AcpAgentConfig {
             && self.args == ["-y", PRODUCT_CODEX_ACP_SPEC]
     }
 
-    fn secret_env_values(
+    pub(super) fn secret_env_values(
         &self,
         host_bridge: &HostBridge,
         secret_resolver: Option<&dyn AgentSecretResolver>,

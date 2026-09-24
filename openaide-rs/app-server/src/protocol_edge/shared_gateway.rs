@@ -343,7 +343,9 @@ impl SharedRpcGateway {
                 } else {
                     self.client_secret_resolver(&connection_id)
                 };
-                let result = workflow.authenticate_with_secret_resolver(params, secret_resolver);
+                let terminal_runner = self.client_auth_terminal(&connection_id);
+                let result =
+                    workflow.authenticate_with_client(params, secret_resolver, terminal_runner);
                 let mut gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
                 gateway.finish_agent_authenticate(connection_id.clone(), id, meta, now, result)
             }
@@ -371,6 +373,27 @@ impl SharedRpcGateway {
             client_instance_id,
             delivery,
         )))
+    }
+
+    fn client_auth_terminal(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Option<Arc<dyn crate::agent::auth_terminal::AuthTerminalRunner>> {
+        if !connection_id.as_str().starts_with("local-http:") {
+            return None;
+        }
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        let context = gateway.client_hub.context_for_connection(connection_id)?;
+        let delivery = gateway
+            .client_hub
+            .delivery_for(&context.client_instance_id)?;
+        Some(Arc::new(
+            crate::agent::auth_terminal::ClientAuthTerminal::new(
+                gateway.server_requests.clone(),
+                context.client_instance_id,
+                delivery,
+            ),
+        ))
     }
 
     fn handle_agent_logout_without_protocol_lock(

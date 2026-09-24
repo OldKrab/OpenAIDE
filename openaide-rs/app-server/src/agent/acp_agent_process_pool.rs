@@ -328,7 +328,12 @@ impl AcpAgentProcessPool {
                 self.stop_process(&agent_id, &process);
             }
         }
-        result
+        let (result, reconnect) = result?;
+        if reconnect {
+            self.stop_process(&agent_id, &process);
+            self.probe(&agent_id, Duration::from_secs(30))?;
+        }
+        Ok(result)
     }
 
     fn restore_auth_environment(&self, agent_id: &str, previous: Option<AcpAuthEnvironment>) {

@@ -3,11 +3,13 @@ import { openAgentAuthTerminal, registerAgentAuthTerminalHandler } from "./hostA
 
 const vscodeMocks = vi.hoisted(() => ({
   createTerminal: vi.fn(),
+  onDidCloseTerminal: vi.fn(),
 }));
 
 vi.mock("vscode", () => ({
   window: {
     createTerminal: vscodeMocks.createTerminal,
+    onDidCloseTerminal: vscodeMocks.onDidCloseTerminal,
   },
 }));
 
@@ -25,14 +27,16 @@ describe("Agent authentication terminal host bridge", () => {
   });
 
   it("opens the exact advertised command without a shell", async () => {
-    const terminal = { show: vi.fn() };
+    const terminal = { show: vi.fn(), exitStatus: { code: 0 } };
     vscodeMocks.createTerminal.mockReturnValue(terminal);
+    const dispose = vi.fn();
+    vscodeMocks.onDidCloseTerminal.mockReturnValue({ dispose });
 
-    await expect(openAgentAuthTerminal({
+    const completion = openAgentAuthTerminal({
       command: "codex-acp",
       args: ["auth", "login"],
       env: { CODEX_HOME: "/tmp/codex" },
-    })).resolves.toEqual({});
+    });
 
     expect(vscodeMocks.createTerminal).toHaveBeenCalledWith({
       name: "Agent sign in",
@@ -41,6 +45,9 @@ describe("Agent authentication terminal host bridge", () => {
       env: { CODEX_HOME: "/tmp/codex" },
     });
     expect(terminal.show).toHaveBeenCalledTimes(1);
+    vscodeMocks.onDidCloseTerminal.mock.calls.at(-1)![0](terminal);
+    await expect(completion).resolves.toEqual({ exitCode: 0 });
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 
   it("rejects malformed commands before opening a terminal", async () => {

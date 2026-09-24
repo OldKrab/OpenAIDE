@@ -1444,6 +1444,7 @@ fn authentication_reuses_the_active_agent_process() {
             secret_env: Vec::new(),
             secret_storage_agent_id: None,
             terminal_confirmed: false,
+            terminal_runner: None,
             secret_resolver: None,
         })
         .expect("authenticate agent");
@@ -1536,6 +1537,7 @@ fn env_var_authentication_relaunches_with_secure_host_values() {
             secret_env: vec!["OPENAIDE_SECRET_TEST".to_string()],
             secret_storage_agent_id: Some("codex.auth.6170692d6b6579".to_string()),
             terminal_confirmed: false,
+            terminal_runner: None,
             secret_resolver: None,
         })
         .expect("authenticate with env var");
@@ -1584,6 +1586,7 @@ fn env_var_authentication_relaunches_with_typed_client_secret_resolver() {
             secret_env: vec!["OPENAIDE_SECRET_TEST".to_string()],
             secret_storage_agent_id: Some("codex.auth.6170692d6b6579".to_string()),
             terminal_confirmed: false,
+            terminal_runner: None,
             secret_resolver: Some(Arc::new(StaticSecretResolver {
                 values: HashMap::from([(
                     "OPENAIDE_SECRET_TEST".to_string(),
@@ -1600,7 +1603,7 @@ fn env_var_authentication_relaunches_with_typed_client_secret_resolver() {
 }
 
 #[test]
-fn terminal_authentication_waits_for_user_confirmation_before_acp_authenticate() {
+fn terminal_authentication_reconnects_without_sending_acp_authenticate() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     if !python3_available() {
         return;
@@ -1622,7 +1625,7 @@ fn terminal_authentication_waits_for_user_confirmation_before_acp_authenticate()
         assert!(response_bridge.try_handle_response(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": request.id,
-            "result": {},
+            "result": {"exitCode": 0},
         })));
     });
     let runtime = AcpAgentRuntime::new_with_host(
@@ -1649,7 +1652,7 @@ fn terminal_authentication_waits_for_user_confirmation_before_acp_authenticate()
         host_bridge,
     );
 
-    let awaiting = runtime
+    let authenticated = runtime
         .authenticate(crate::agent::AgentAuthenticateRequest {
             agent_id: "codex".to_string(),
             method_id: "test-auth".to_string(),
@@ -1657,31 +1660,19 @@ fn terminal_authentication_waits_for_user_confirmation_before_acp_authenticate()
             secret_env: Vec::new(),
             secret_storage_agent_id: None,
             terminal_confirmed: false,
+            terminal_runner: None,
             secret_resolver: None,
         })
         .expect("open terminal auth");
     assert!(matches!(
-        awaiting.status,
-        AgentAuthenticateStatus::AwaitingUser
+        authenticated.status,
+        AgentAuthenticateStatus::Authenticated
     ));
-    assert_eq!(read_fixture_methods(&log_path), ["initialize"]);
-    host.join().expect("visible terminal host");
-
-    runtime
-        .authenticate(crate::agent::AgentAuthenticateRequest {
-            agent_id: "codex".to_string(),
-            method_id: "test-auth".to_string(),
-            env: HashMap::new(),
-            secret_env: Vec::new(),
-            secret_storage_agent_id: None,
-            terminal_confirmed: true,
-            secret_resolver: None,
-        })
-        .expect("confirm terminal auth");
     assert_eq!(
         read_fixture_methods(&log_path),
-        ["initialize", "authenticate"]
+        ["initialize", "initialize"]
     );
+    host.join().expect("visible terminal host");
 }
 
 #[test]
@@ -2135,6 +2126,7 @@ fn authentication_wait_does_not_block_another_agents_session_start() {
                 secret_env: Vec::new(),
                 secret_storage_agent_id: None,
                 terminal_confirmed: false,
+                terminal_runner: None,
                 secret_resolver: None,
             })
         }

@@ -47,6 +47,7 @@ pub(crate) mod acp_update_projection;
 pub(crate) mod attached_native_session;
 pub(crate) mod attached_native_session_registry;
 mod auth_provenance_store;
+pub(crate) mod auth_terminal;
 pub(crate) mod catalog_store;
 mod client_secret_resolver;
 pub(crate) mod codex_acp_provisioner;

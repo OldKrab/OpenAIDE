@@ -339,6 +339,9 @@ impl RpcGateway {
         let Some(context) = self.client_hub.context_for_connection(&connection_id) else {
             return GatewayOutcome::Noop;
         };
+        let terminal_exchange = self
+            .server_requests
+            .is_auth_terminal_exchange(&RequestId::from(request_id.clone()));
         let outcome = self.server_requests.handle_response_from_scopes(
             context.client_instance_id.clone(),
             RequestId::from(request_id.clone()),
@@ -359,6 +362,11 @@ impl RpcGateway {
             };
         };
 
+        // Terminal frames are transport exchanges, not product-state changes. Publishing a
+        // Client snapshot for every keystroke would turn transient I/O into state traffic.
+        if terminal_exchange {
+            return GatewayOutcome::Noop;
+        }
         let events = self.publish_request_resolution(&context, scope, now);
         if events.is_empty() {
             GatewayOutcome::Noop

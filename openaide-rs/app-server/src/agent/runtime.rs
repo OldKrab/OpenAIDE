@@ -232,6 +232,7 @@ pub struct AgentAuthenticateRequest {
     pub secret_env: Vec<String>,
     pub secret_storage_agent_id: Option<String>,
     pub terminal_confirmed: bool,
+    pub terminal_runner: Option<Arc<dyn super::auth_terminal::AuthTerminalRunner>>,
     /// Reads shell-owned values during process launch without moving them into protocol state.
     pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
 }

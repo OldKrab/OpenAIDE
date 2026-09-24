@@ -222,14 +222,17 @@ impl ServerRequestRuntime {
             responder_scopes,
             now,
         );
-        logging::info(
-            "server_request_response_handled",
-            json!({
-                "server_request_id": request_id.as_str(),
-                "outcome": response_outcome_name(&outcome),
-                "responder_scope_count": responder_scopes.len(),
-            }),
-        );
+        let terminal_exchange = inner.broker.is_auth_terminal_exchange(&request_id);
+        if !terminal_exchange {
+            logging::info(
+                "server_request_response_handled",
+                json!({
+                    "server_request_id": request_id.as_str(),
+                    "outcome": response_outcome_name(&outcome),
+                    "responder_scope_count": responder_scopes.len(),
+                }),
+            );
+        }
         if let ResponseOutcome::Accepted { result, .. } = &outcome {
             if let Some(option_id) = option_id_from_result(result) {
                 let accepted =

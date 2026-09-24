@@ -34,6 +34,19 @@ pub(super) struct AvailableResponder {
 }
 
 impl ServerRequestBroker {
+    pub(crate) fn is_auth_terminal_exchange(&self, request_id: &RequestId) -> bool {
+        self.records.get(request_id).is_some_and(|record| {
+            record.method == openaide_app_server_protocol::server_requests::SHELL_AUTH_TERMINAL
+        })
+    }
+    pub(crate) fn forget_auth_terminal_exchange(&mut self, request_id: &RequestId) {
+        if self.records.get(request_id).is_some_and(|record| {
+            record.method == openaide_app_server_protocol::server_requests::SHELL_AUTH_TERMINAL
+        }) {
+            self.records.remove(request_id);
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             next_request_id: 1,

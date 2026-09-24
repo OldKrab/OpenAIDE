@@ -33,8 +33,8 @@ use crate::methods::{
     FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_SEARCH,
 };
 use crate::server_requests::{
-    PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_OPEN_EXTERNAL, SHELL_REVEAL_FILE,
-    SHELL_SHOW_NOTIFICATION,
+    PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_AUTH_TERMINAL, SHELL_OPEN_EXTERNAL,
+    SHELL_REVEAL_FILE, SHELL_SHOW_NOTIFICATION,
 };
 
 pub(super) fn push_method_constants(output: &mut String) {
@@ -479,6 +479,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const SECRET_READ = {:?} as const;\n",
         SECRET_READ
+    ));
+    output.push_str(&format!(
+        "export const SHELL_AUTH_TERMINAL = {:?} as const;\n",
+        SHELL_AUTH_TERMINAL
     ));
     output.push_str(&format!(
         "export const SHELL_OPEN_EXTERNAL = {:?} as const;\n",

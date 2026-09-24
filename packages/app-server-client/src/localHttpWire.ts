@@ -14,6 +14,7 @@ import {
   PERMISSION_REQUEST,
   QUESTION_REQUEST,
   SECRET_READ,
+  SHELL_AUTH_TERMINAL,
   SHELL_OPEN_EXTERNAL,
   SHELL_REVEAL_FILE,
   SHELL_SHOW_NOTIFICATION,
@@ -100,6 +101,7 @@ function isServerRequestMethod(method: string): method is ServerRequestMethod {
     method === PERMISSION_REQUEST ||
     method === QUESTION_REQUEST ||
     method === SECRET_READ ||
+    method === SHELL_AUTH_TERMINAL ||
     method === SHELL_OPEN_EXTERNAL ||
     method === SHELL_SHOW_NOTIFICATION ||
     method === SHELL_REVEAL_FILE
@@ -151,6 +153,14 @@ function validateServerRequestParams(method: ServerRequestMethod, params: unknow
   }
   if (method === SECRET_READ) {
     requiredString(method, object, "key");
+    return;
+  }
+  if (method === SHELL_AUTH_TERMINAL) {
+    requiredString(method, object, "agentId");
+    requiredString(method, object, "terminalId");
+    if (typeof object.output !== "string" || object.output.length > 65536 || typeof object.exited !== "boolean") {
+      throw new Error("Invalid authentication terminal frame");
+    }
     return;
   }
   if (method === SHELL_SHOW_NOTIFICATION) {
