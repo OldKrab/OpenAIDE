@@ -14,6 +14,7 @@ use crate::protocol::host::HostBridge;
 mod tests;
 
 const PRODUCT_CODEX_ACP_SPEC: &str = "@openaide/codex-acp@1.2.2";
+const PRODUCT_CLAUDE_ACP_SPEC: &str = "@agentclientprotocol/claude-agent-acp@0.81.2";
 
 #[derive(Debug, Clone)]
 pub struct AcpAgentConfig {
@@ -41,6 +42,18 @@ impl AcpAgentConfig {
             agent_id: "codex".to_string(),
             command: resolved_command_or_name("npx"),
             args: vec!["-y".to_string(), PRODUCT_CODEX_ACP_SPEC.to_string()],
+            env: Vec::new(),
+            secret_env: Vec::new(),
+        }
+    }
+
+    /// Pin the Claude adapter rather than selecting an arbitrary executable from PATH.
+    /// The adapter bundles the Claude runtime and owns authentication and session storage.
+    pub fn claude_code() -> Self {
+        Self {
+            agent_id: "claude-code".to_string(),
+            command: resolved_command_or_name("npx"),
+            args: vec!["-y".to_string(), PRODUCT_CLAUDE_ACP_SPEC.to_string()],
             env: Vec::new(),
             secret_env: Vec::new(),
         }
@@ -296,13 +309,13 @@ fn command_not_found_error(agent_id: &str, command: &str) -> RuntimeError {
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(command);
-    if agent_id == "codex"
+    if matches!(agent_id, "codex" | "claude-code")
         && ["node", "npm", "npx"]
             .iter()
             .any(|candidate| executable.eq_ignore_ascii_case(candidate))
     {
         return RuntimeError::NodeJsRequired(
-            "Codex needs Node.js before it can start.".to_string(),
+            "The built-in Agent needs Node.js before it can start.".to_string(),
         );
     }
     RuntimeError::SetupRequired(format!(

@@ -3,6 +3,17 @@ import type { AgentCollectionSnapshot } from "@openaide/app-server-client";
 import { agentOptionsFromProtocol, fallbackAgentActionFromProtocol } from "./appServerAgents";
 
 describe("App Server Agent state mapping", () => {
+  it("presents the built-in Claude Code option with its shared catalog metadata", () => {
+    expect(agentOptionsFromProtocol(agentCollection({
+      agents: [{ agentId: "claude-code" as never, label: "Claude Code", icon: "sparkles", status: "disconnected" }],
+    }))).toEqual([
+      expect.objectContaining({
+        id: "claude-code", label: "Claude Code", icon: "sparkles",
+        description: "Anthropic coding agent.", enabled: true,
+      }),
+    ]);
+  });
+
   it("maps backend Agent summaries to frontend presentation options", () => {
     expect(agentOptionsFromProtocol(agentCollection())).toEqual([
       expect.objectContaining({ id: "opencode", label: "OpenCode", icon: "opencode", enabled: true }),

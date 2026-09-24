@@ -1,7 +1,7 @@
 use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::registry::{
-    AgentDefinition, AgentLaunch, AgentSourceKind, CODEX_AGENT_ID, CODEX_AGENT_LABEL,
-    OPENCODE_AGENT_ID, OPENCODE_AGENT_LABEL,
+    AgentDefinition, AgentLaunch, AgentSourceKind, CLAUDE_CODE_AGENT_ID, CLAUDE_CODE_AGENT_LABEL,
+    CODEX_AGENT_ID, CODEX_AGENT_LABEL, OPENCODE_AGENT_ID, OPENCODE_AGENT_LABEL,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -12,7 +12,7 @@ pub(crate) struct BuiltInAgentMetadata {
     pub(crate) description: &'static str,
 }
 
-pub(crate) const BUILT_IN_AGENT_METADATA: [BuiltInAgentMetadata; 2] = [
+pub(crate) const BUILT_IN_AGENT_METADATA: [BuiltInAgentMetadata; 3] = [
     BuiltInAgentMetadata {
         id: CODEX_AGENT_ID,
         label: CODEX_AGENT_LABEL,
@@ -24,6 +24,12 @@ pub(crate) const BUILT_IN_AGENT_METADATA: [BuiltInAgentMetadata; 2] = [
         label: OPENCODE_AGENT_LABEL,
         icon: "opencode",
         description: "Open-source coding agent.",
+    },
+    BuiltInAgentMetadata {
+        id: CLAUDE_CODE_AGENT_ID,
+        label: CLAUDE_CODE_AGENT_LABEL,
+        icon: "sparkles",
+        description: "Anthropic coding agent.",
     },
 ];
 
@@ -57,10 +63,17 @@ pub(super) fn built_in_icon(agent_id: &str) -> &'static str {
         .unwrap_or("bot")
 }
 
-pub(super) fn default_definitions() -> [AgentDefinition; 2] {
+pub(super) fn default_definitions() -> [AgentDefinition; 3] {
     [
         codex_definition(AcpAgentConfig::codex()),
         opencode_definition(AcpAgentConfig::opencode()),
+        AgentDefinition::new(
+            CLAUDE_CODE_AGENT_ID.to_string(),
+            CLAUDE_CODE_AGENT_LABEL.to_string(),
+            built_in_icon(CLAUDE_CODE_AGENT_ID).to_string(),
+            AgentSourceKind::BuiltIn,
+            AgentLaunch::AcpStdio(AcpAgentConfig::claude_code()),
+        ),
     ]
 }
 
@@ -68,6 +81,7 @@ pub(super) fn known_built_in_launch(agent_id: &str) -> Option<AcpAgentConfig> {
     match agent_id {
         CODEX_AGENT_ID => Some(AcpAgentConfig::codex()),
         OPENCODE_AGENT_ID => Some(AcpAgentConfig::opencode()),
+        CLAUDE_CODE_AGENT_ID => Some(AcpAgentConfig::claude_code()),
         _ => None,
     }
 }

@@ -9,7 +9,7 @@ use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentSetupReason
 use crate::agent::catalog_store::AgentCatalogStore;
 use crate::agent::product_api::{AgentProductApi, AgentSettingsDetailsWorkflow};
 use crate::agent::registry::{
-    AgentCatalogRecord, AgentRegistry, CODEX_AGENT_ID, OPENCODE_AGENT_ID,
+    AgentCatalogRecord, AgentRegistry, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, OPENCODE_AGENT_ID,
 };
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::runtime::{
@@ -85,6 +85,7 @@ fn built_in_agent_settings_use_agent_specific_descriptions() {
 
     assert_eq!(description(CODEX_AGENT_ID), "OpenAI coding agent.");
     assert_eq!(description(OPENCODE_AGENT_ID), "Open-source coding agent.");
+    assert_eq!(description(CLAUDE_CODE_AGENT_ID), "Anthropic coding agent.");
 }
 
 #[test]
@@ -95,6 +96,7 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
     catalog_store
         .save_records(&[
             AgentCatalogRecord::disabled_builtin(CODEX_AGENT_ID.to_string()),
+            AgentCatalogRecord::disabled_builtin(CLAUDE_CODE_AGENT_ID.to_string()),
             AgentCatalogRecord::custom(
                 "custom.local".to_string(),
                 "Local Agent".to_string(),
@@ -146,6 +148,18 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
         .unwrap();
     assert!(!codex.enabled);
     assert_eq!(codex.status, AgentSettingsStatus::Disabled);
+
+    let claude = result
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == CLAUDE_CODE_AGENT_ID)
+        .unwrap();
+    assert!(!claude.enabled);
+    assert_eq!(claude.status, AgentSettingsStatus::Disabled);
+    assert_eq!(claude.source_kind, AgentSettingsSourceKind::BuiltIn);
+    assert_eq!(claude.label, "Claude Code");
+    assert_eq!(claude.icon, "sparkles");
+    assert!(claude.command_line.is_none());
 
     let custom = result
         .agents

@@ -29,6 +29,20 @@ export const builtInAgents = [
     env: {},
     secret_env: [],
   },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    description: "Anthropic coding agent.",
+    source_kind: "built_in",
+    icon: "sparkles",
+    enabled: true,
+    transport: "stdio",
+    command_line: "npx -y @agentclientprotocol/claude-agent-acp@0.81.2",
+    command: "npx",
+    args: ["-y", "@agentclientprotocol/claude-agent-acp@0.81.2"],
+    env: {},
+    secret_env: [],
+  },
 ] as const satisfies readonly AgentCatalogEntry[];
 
 export const defaultAgent = builtInAgents[0];

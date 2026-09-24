@@ -424,6 +424,8 @@ function knownBuiltInAgentLabel(agentId: string) {
       return "Codex";
     case "opencode":
       return "OpenCode";
+    case "claude-code":
+      return "Claude Code";
     default:
       return undefined;
   }

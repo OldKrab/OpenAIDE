@@ -12,6 +12,8 @@ pub(crate) const CODEX_AGENT_ID: &str = "codex";
 pub(crate) const CODEX_AGENT_LABEL: &str = "Codex";
 pub(crate) const OPENCODE_AGENT_ID: &str = "opencode";
 pub(crate) const OPENCODE_AGENT_LABEL: &str = "OpenCode";
+pub(crate) const CLAUDE_CODE_AGENT_ID: &str = "claude-code";
+pub(crate) const CLAUDE_CODE_AGENT_LABEL: &str = "Claude Code";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentSourceKind {
@@ -202,7 +204,11 @@ impl AgentRegistry {
                 source_kind: agent.source_kind,
             })
             .collect();
-        summaries.sort_by(|left, right| left.id.cmp(&right.id));
+        // Registry order supplies the initial Agent fallback. Adding Claude Code
+        // must not displace Codex for clients without a retained selection.
+        summaries.sort_by(|left, right| {
+            (left.id != CODEX_AGENT_ID, &left.id).cmp(&(right.id != CODEX_AGENT_ID, &right.id))
+        });
         summaries
     }
 
