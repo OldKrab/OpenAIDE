@@ -43,7 +43,7 @@ NativeSessionService
 
 `NewTaskController` owns the New Task state machine and consumes App Server baselines and events. `TaskDraftStore` owns local unsent Composer state keyed by real Task id. `ShellRouter` receives shell-neutral typed routes; browser URLs and VS Code panels remain in their App Shell adapters.
 
-`NativeSessionService` is a deep App Server module. `acquire` returns an opaque handle with one Native Session update consumer already connected to Task projection. `startPrompt` uses that handle and internally returns an existing live ACP session or performs required load, resume, or recreation. Send callers never inspect readiness fields or choose an ACP recovery method. `steer` forwards additional User messages without making their responses part of Task status. The update consumer persists Agent text, Thoughts, Tool activity, transient requests, terminal state, title, options, and commands for the handle lifetime.
+`NativeSessionService` is a deep App Server module. `acquire` returns an opaque handle with one Native Session update consumer already connected to Task projection. `startPrompt` uses that handle and internally returns an existing live ACP session or performs required load, resume, or recreation. Send callers never inspect readiness fields or choose an ACP recovery method. `steer` selects the advertised steering extension or the existing prompt fallback internally. Extension acknowledgments report delivery acceptance only; completion and any explicitly required continuation remain runtime-owned as specified in the Task flow. The update consumer persists Agent text, Thoughts, Tool activity, transient requests, terminal state, title, options, and commands for the handle lifetime.
 
 ## New Task Presentation State
 

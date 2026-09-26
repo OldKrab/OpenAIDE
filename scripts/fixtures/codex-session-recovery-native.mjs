@@ -17,6 +17,7 @@ const model = (id, isDefault) => ({
   defaultReasoningEffort: "medium", inputModalities: ["text"], supportsPersonality: false,
 });
 let turnNumber = 0;
+let steeringTurn;
 let activePolicy = { ...fixture.policy, sandbox: fixture.globalSandbox ?? { type: "dangerFullAccess" } };
 for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line);
@@ -75,10 +76,24 @@ for await (const line of createInterface({ input: process.stdin })) {
       } })}\n`);
       const turn = { id: `turn-fixture-${++turnNumber}`, items: [], status: "inProgress", error: null };
       result = { turn };
+      if (params.input.some((item) => item.text === "Steering race fixture")) {
+        steeringTurn = turn;
+        break;
+      }
       setImmediate(() => send({ method: "turn/completed", params: {
         threadId: thread.id, turn: { ...turn, status: "completed" },
       } }));
       break;
+    }
+    case "turn/steer": {
+      // Complete exactly after the adapter selected the active turn, before
+      // native injection. This is the production late-delivery race.
+      send({ method: "turn/completed", params: {
+        threadId: thread.id, turn: { ...steeringTurn, status: "completed" },
+      } });
+      steeringTurn = undefined;
+      send({ id: request.id, error: { code: -32600, message: "no active turn to steer" } });
+      continue;
     }
     default:
       send({ id: request.id, error: { code: -32601, message: `Unsupported fixture method: ${request.method}` } });

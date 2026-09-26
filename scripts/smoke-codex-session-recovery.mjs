@@ -169,6 +169,49 @@ async function verifyRecovery(adapter, method, scenario) {
       assert.equal(changedTurn.approvalsReviewer, "auto_review");
       assert.deepEqual(changedTurn.sandboxPolicy, askPolicy.sandbox);
     }
+    if (scenario.name === "preset") {
+      const startsBefore = (await readCalls()).filter((call) => call.method === "turn/start").length;
+      const steering = await request("_session/steering", {
+        sessionId: "native-session", prompt: [{ type: "text", text: "Late correction" }],
+        _meta: { steering: { idleBehavior: "promptRequired" } },
+      });
+      assert.deepEqual(steering, { outcome: "promptRequired", reason: "noRunningTurn" });
+      // An ACP roundtrip is an ordering barrier: no detached turn may have
+      // been started by the steering request before it acknowledged non-delivery.
+      await request("session/set_config_option", {
+        sessionId: "native-session", configId: "mode", value: selectedMode,
+      });
+      assert.equal((await readCalls()).filter((call) => call.method === "turn/start").length, startsBefore);
+      await request("session/prompt", {
+        sessionId: "native-session", prompt: [{ type: "text", text: "Late correction" }],
+      });
+      assert.equal((await readCalls()).filter((call) => call.method === "turn/start").length, startsBefore + 1);
+      const active = request("session/prompt", {
+        sessionId: "native-session", prompt: [{ type: "text", text: "Steering race fixture" }],
+      });
+      // Observe native turn/start before delivering the steer. File polling is
+      // a fixture barrier, not an assumption about how fast the adapter runs.
+      const deadline = Date.now() + 5000;
+      while (!(await readCalls()).some((call) => call.method === "turn/start"
+        && call.params.input.some((item) => item.text === "Steering race fixture"))) {
+        assert.ok(Date.now() < deadline, "native turn must start");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const late = request("_session/steering", {
+        sessionId: "native-session", prompt: [{ type: "text", text: "Race correction" }],
+        _meta: { steering: { idleBehavior: "promptRequired" } },
+      });
+      const [completed, declined] = await Promise.all([active, late]);
+      assert.equal(completed.stopReason, "end_turn");
+      assert.equal(declined.outcome, "promptRequired");
+      assert.equal((await readCalls()).filter((call) => call.method === "turn/start").length, startsBefore + 2);
+      // Non-opted-in clients keep the published adapter's original behavior.
+      const detached = await request("_session/steering", {
+        sessionId: "native-session", prompt: [{ type: "text", text: "Legacy continuation" }],
+      });
+      assert.equal(detached.outcome, "startedNewTurn");
+      assert.equal((await readCalls()).filter((call) => call.method === "turn/start").length, startsBefore + 3);
+    }
     console.log(`Verified ${method}: ${scenario.name}.`);
   } catch (error) {
     const methods = (await readCalls().catch(() => [])).map((call) => call.method).join(",");

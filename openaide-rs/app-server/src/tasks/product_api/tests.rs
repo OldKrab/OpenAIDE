@@ -5604,6 +5604,8 @@ fn send_while_working_accepts_a_steering_message_without_replacing_primary_work(
     );
 
     agent.release_prompt.store(true, Ordering::SeqCst);
+    // Drain the turn before TempDir removes the journal beneath its writer.
+    api.shutdown().expect("shutdown steering fixture");
 }
 
 #[test]

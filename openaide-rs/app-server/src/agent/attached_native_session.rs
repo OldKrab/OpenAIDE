@@ -391,7 +391,8 @@ impl AttachedNativeSession {
         }
     }
 
-    /// Queues a second ACP prompt in the current prompt generation.
+    /// Admits delivery into the current prompt generation; the worker chooses
+    /// the negotiated steering extension or the legacy prompt fallback.
     pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
         if prompt.cancellation.is_cancelled() {
             return Ok(());
@@ -594,6 +595,7 @@ impl PromptLifecycle {
                             generation_id,
                             settlement,
                             process_operation: None,
+                            steering_pending: false,
                         },
                     }));
                 }
@@ -631,13 +633,16 @@ impl PromptLifecycle {
         };
         // Record admission before enqueueing the command: the primary response
         // can race with steering dispatch on the shared ACP connection.
-        generation.settlement.accept_steering();
+        if !generation.settlement.admit_steering() {
+            return Err(RuntimeError::NotReady("ACP prompt already settled".into()));
+        }
         generation.outstanding_requests += 1;
         Ok(PromptRequestGuard {
             lifecycle: self.clone(),
             generation_id: generation.id,
             settlement: generation.settlement.clone(),
             process_operation: None,
+            steering_pending: true,
         })
     }
 
@@ -699,6 +704,7 @@ pub(super) struct PromptRequestGuard {
     lifecycle: Arc<PromptLifecycle>,
     generation_id: u64,
     settlement: Arc<PromptSettlementState>,
+    steering_pending: bool,
 }
 
 impl PromptRequestGuard {
@@ -710,10 +716,20 @@ impl PromptRequestGuard {
     pub(super) fn settlement_state(&self) -> Arc<PromptSettlementState> {
         self.settlement.clone()
     }
+
+    /// Delivery has been resolved or transferred to a tracked prompt. Until
+    /// then extension-capable turns cannot retire ahead of an admitted Send.
+    pub(super) fn finish_steering_admission(&mut self) {
+        if self.steering_pending {
+            self.steering_pending = false;
+            self.settlement.finish_steering();
+        }
+    }
 }
 
 impl Drop for PromptRequestGuard {
     fn drop(&mut self) {
+        self.finish_steering_admission();
         self.lifecycle.finish_request(self.generation_id);
     }
 }

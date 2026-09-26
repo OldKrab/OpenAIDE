@@ -21,6 +21,7 @@ use crate::agent::acp_session_catalogs::{
 };
 use crate::agent::acp_session_termination::close_active_session;
 use crate::agent::acp_session_termination::SessionDeleteRequest;
+use crate::agent::acp_steering::{SteeringAction, SteeringDelivery, SteeringRequests};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::attached_native_session::{AcpSessionCommand, AcpSessionConfigCommand};
@@ -52,6 +53,7 @@ pub(super) async fn run_prompt(
     prompt: AgentPrompt,
     sink: Arc<dyn AgentEventSink>,
     request_guard: crate::agent::attached_native_session::PromptRequestGuard,
+    steering_requests: &mut SteeringRequests,
     command_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionCommand>,
     config_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
     config_requests: &mut SessionConfigRequests,
@@ -96,6 +98,9 @@ pub(super) async fn run_prompt(
     let mut settled_by_response = false;
     let mut deletion = SessionDeleteRequest::default();
     let mut completed_prompt = None;
+    // Legacy prompt sets still settle on their first terminal response. With
+    // the extension, resolve admitted deliveries before retiring their owner.
+    let wait_for_steering = steering_requests.supported();
     let result = loop {
         if active_prompt.cancellation().is_cancelled() && !cancel_sent {
             // A session cancel can arrive without cancelling the prompt token.
@@ -114,6 +119,13 @@ pub(super) async fn run_prompt(
                 Err(error) => break Err(error),
             }
             cancel_sent = true;
+        }
+        if completed_prompt.is_some()
+            && !deletion.is_pending()
+            && active_prompt.settle_after_delivery(wait_for_steering && !cancel_sent)
+        {
+            settled_by_response = true;
+            break completed_prompt.take().expect("completed prompt");
         }
         tokio::select! {
             Some(()) = cancel_rx.recv(), if !cancel_sent => {
@@ -212,19 +224,29 @@ pub(super) async fn run_prompt(
                         prompt,
                         request_guard,
                     } => {
-                        if let Err(error) = send_steering_prompt_request(
-                            active_session,
-                            prompt,
-                            context.content_policy,
-                            context.trace.as_ref(),
-                            Some(active_prompt.steering_settlement()),
-                            Some(sink.clone()),
-                            request_guard,
-                        ) {
-                            logging::error(
-                                "acp_steering_prompt_start_failed",
-                                json!({ "error": error.to_string() }),
-                            );
+                        if cancel_sent || active_prompt.cancellation().is_cancelled() {
+                            continue;
+                        }
+                        let result = if wait_for_steering {
+                            steering_requests.enqueue(
+                                active_session.connection(),
+                                SteeringDelivery { prompt, request_guard },
+                                context.content_policy,
+                                context.trace.as_ref(),
+                            )
+                        } else {
+                            send_steering_prompt_request(
+                                active_session,
+                                prompt,
+                                context.content_policy,
+                                context.trace.as_ref(),
+                                Some(active_prompt.steering_settlement()),
+                                Some(sink.clone()),
+                                request_guard,
+                            )
+                        };
+                        if let Err(error) = result {
+                            report_steering_failure(sink.as_ref(), &error)?;
                         }
                     }
                     AcpSessionCommand::Delete { reply_tx, operation_id } => {
@@ -239,6 +261,44 @@ pub(super) async fn run_prompt(
                     }
                 }
             }
+            (delivery, action) = steering_requests.next_response() => {
+                if cancel_sent || active_prompt.cancellation().is_cancelled() || deletion.is_pending() {
+                    continue;
+                }
+                project_preceding_session_updates(
+                    active_session, context.agent_id, active_prompt.task_id(),
+                    active_session_id.as_str(), session_projection.clone(),
+                    session_event_sink.clone(), pending_session_catalogs,
+                    config_catalog, commands_catalog,
+                ).await?;
+                match action {
+                    SteeringAction::Injected => {
+                        // Drop the admission guard, retaining primary completion
+                        // ownership. Acceptance says nothing about consumption.
+                    }
+                    SteeringAction::ContinuePrompt => {
+                        if let Err(error) = active_prompt.continue_prompt(
+                            active_session, context.content_policy, context.trace.as_ref(),
+                            delivery.prompt, sink.clone(), delivery.request_guard,
+                        ) {
+                            break Err(error);
+                        }
+                        completed_prompt = None;
+                    }
+                    SteeringAction::LegacyPrompt => {
+                        if let Err(error) = send_steering_prompt_request(
+                            active_session, delivery.prompt, context.content_policy,
+                            context.trace.as_ref(), Some(active_prompt.steering_settlement()),
+                            Some(sink.clone()), delivery.request_guard,
+                        ) {
+                            report_steering_failure(sink.as_ref(), &error)?;
+                        }
+                    }
+                    SteeringAction::Failed(error) => {
+                        report_steering_failure(sink.as_ref(), &error)?;
+                    }
+                }
+            }
             (reply_tx, result) = deletion.next_response() => {
                 let deleted = result.is_ok();
                 let _ = reply_tx.send(result);
@@ -246,9 +306,6 @@ pub(super) async fn run_prompt(
                     active_prompt.retire();
                     config_requests.abandon();
                     break Err(RuntimeError::NotReady("ACP session deleted".to_string()));
-                }
-                if let Some(result) = completed_prompt.take() {
-                    break result;
                 }
             }
             config = config_rx.recv(), if config_requests.can_dispatch() && !deletion.is_pending() => {
@@ -290,8 +347,6 @@ pub(super) async fn run_prompt(
                     commands_catalog,
                 )
                 .await?;
-                active_prompt.mark_settled(PromptSettlementKind::PromptResponse);
-                settled_by_response = true;
                 let result = completion.finish();
                 let succeeded = result.is_ok();
                 logging::info(
@@ -303,11 +358,9 @@ pub(super) async fn run_prompt(
                         "result": if succeeded { "stop_reason" } else { "error" },
                     }),
                 );
-                if deletion.is_pending() {
-                    completed_prompt = Some(result);
-                } else {
-                    break result;
-                }
+                // Release the ACP receive boundary before waiting for a steering
+                // acknowledgment, which may be the very next incoming response.
+                completed_prompt = Some(result);
             }
             Some(reply_tx) = preceding_update_drain_rx.recv() => {
                 let result = project_preceding_session_updates(
@@ -379,6 +432,23 @@ pub(super) async fn run_prompt(
         }),
     );
     result
+}
+
+fn report_steering_failure(
+    sink: &dyn AgentEventSink,
+    error: &RuntimeError,
+) -> Result<(), RuntimeError> {
+    logging::warn(
+        "acp_steering_delivery_failed",
+        json!({
+            "error_kind": error.reason(), "error_code": error.code(),
+        }),
+    );
+    sink.emit(crate::agent::events::AgentEvent::Activity {
+        title: "Message delivery was not confirmed".into(),
+        tool_name: String::new(),
+        output_preview: "Check the Agent's response before sending the message again.".into(),
+    })
 }
 
 async fn dispatch_prompt_cancel(
