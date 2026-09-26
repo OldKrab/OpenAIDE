@@ -204,9 +204,10 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
           </div>
         </ChatContentSizeChangeContext.Provider>
       </div>
-      <UserMessageNavigator key={taskId} navigation={chatScroll.userMessageNavigation} target={headerActionsTarget} />
+      {/* Sibling keys must differ: duplicate keys orphan the old portaled header picker on task switch. */}
+      <UserMessageNavigator key={`navigator:${taskId}`} navigation={chatScroll.userMessageNavigation} target={headerActionsTarget} />
       {onQuote && messageListElement ? (
-        <QuoteSelectionAction key={taskId} onQuote={onQuote} root={messageListElement} />
+        <QuoteSelectionAction key={`quote:${taskId}`} onQuote={onQuote} root={messageListElement} />
       ) : null}
       {chatScroll.showJumpToLatest ? (
         <button

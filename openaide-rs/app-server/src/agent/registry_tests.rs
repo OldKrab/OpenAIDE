@@ -27,6 +27,16 @@ fn registry_resolves_opencode_as_builtin_agent() {
 }
 
 #[test]
+fn registry_resolves_claude_code_as_builtin_agent() {
+    let registry = AgentRegistry::default_built_ins();
+    let claude = registry.require(CLAUDE_CODE_AGENT_ID).unwrap();
+
+    assert_eq!(claude.id, CLAUDE_CODE_AGENT_ID);
+    assert_eq!(claude.label(), CLAUDE_CODE_AGENT_LABEL);
+    assert_eq!(claude.source_kind, AgentSourceKind::BuiltIn);
+}
+
+#[test]
 fn registry_summaries_are_stable_and_label_only() {
     let summaries = AgentRegistry::default_built_ins().summaries();
 
@@ -37,6 +47,11 @@ fn registry_summaries_are_stable_and_label_only() {
             .collect::<Vec<_>>(),
         vec![
             (CODEX_AGENT_ID, CODEX_AGENT_LABEL, AgentSourceKind::BuiltIn),
+            (
+                CLAUDE_CODE_AGENT_ID,
+                CLAUDE_CODE_AGENT_LABEL,
+                AgentSourceKind::BuiltIn
+            ),
             (
                 OPENCODE_AGENT_ID,
                 OPENCODE_AGENT_LABEL,
@@ -126,6 +141,40 @@ fn registry_uses_builtin_opencode_launch_policy_for_catalog_opencode_record() {
     assert_ne!(config.args, ["ignored"]);
     assert!(config.args.iter().any(|arg| arg == "acp"));
     assert!(config.env.is_empty());
+}
+
+#[test]
+fn claude_code_catalog_overlays_preserve_launch_policy_and_allow_disabling() {
+    for source_kind in ["built_in", "custom"] {
+        let registry = AgentRegistry::from_catalog_overlay(vec![catalog_record(json!({
+            "id": CLAUDE_CODE_AGENT_ID,
+            "label": CLAUDE_CODE_AGENT_LABEL,
+            "source_kind": source_kind,
+            "command": "untrusted-claude",
+            "args": ["ignored"],
+            "env": { "IGNORED": "1" }
+        }))])
+        .unwrap();
+        let claude = registry.require(CLAUDE_CODE_AGENT_ID).unwrap();
+        assert_eq!(claude.label(), CLAUDE_CODE_AGENT_LABEL);
+        assert_eq!(claude.source_kind, AgentSourceKind::BuiltIn);
+        let config = claude.acp_stdio_config();
+        assert_ne!(config.command, "untrusted-claude");
+        assert_eq!(
+            config.args,
+            ["-y", "@agentclientprotocol/claude-agent-acp@0.81.2"]
+        );
+        assert!(config.env.is_empty());
+        assert!(config.secret_env.is_empty());
+    }
+
+    let registry = AgentRegistry::from_catalog_overlay(vec![AgentCatalogRecord::disabled_builtin(
+        CLAUDE_CODE_AGENT_ID.to_string(),
+    )])
+    .unwrap();
+    assert!(registry.require(CLAUDE_CODE_AGENT_ID).is_err());
+    assert!(registry.require(CODEX_AGENT_ID).is_ok());
+    assert!(registry.require(OPENCODE_AGENT_ID).is_ok());
 }
 
 #[test]

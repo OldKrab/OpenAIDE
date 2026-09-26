@@ -186,6 +186,27 @@ describe("NewTaskView", () => {
     expect(menuLabels(tree)).toEqual(expect.arrayContaining(["Codex", "OpenCode"]));
   });
 
+  it("shows the Claude mark for Claude Code in the Agent menu even with a stale catalog icon", () => {
+    const state = createInitialState();
+    const agents: AgentOption[] = [
+      { id: "codex", label: "Codex", description: "Code agent", icon: "openai", enabled: true },
+      { id: "claude-code", label: "Claude Code", description: "Claude agent", icon: "sparkles", enabled: true },
+    ];
+    const tree = render(
+      <NewTaskView
+        agents={agents}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    act(() => buttonWithText(tree, "Codex").props.onClick());
+    expect(buttonWithText(tree, "Claude Code").findAllByProps({ className: "agent-brand-icon claude-agent-icon" })).toHaveLength(1);
+  });
+
   it("omits Isolation when the selected Project does not support worktrees", () => {
     const state = createInitialState();
     const project = {

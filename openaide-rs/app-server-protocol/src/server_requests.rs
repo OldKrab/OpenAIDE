@@ -8,6 +8,7 @@ use crate::ids::{ClientInstanceId, RequestId};
 pub const PERMISSION_REQUEST: &str = "permission/request";
 pub const QUESTION_REQUEST: &str = "question/request";
 pub const SECRET_READ: &str = "secret/read";
+pub const SHELL_AUTH_TERMINAL: &str = "shell/authTerminal";
 pub const SHELL_OPEN_EXTERNAL: &str = "shell/openExternal";
 pub const SHELL_SHOW_NOTIFICATION: &str = "shell/showNotification";
 pub const SHELL_REVEAL_FILE: &str = "shell/revealFile";
@@ -262,6 +263,27 @@ pub struct SecretReadParams {
 pub struct SecretReadResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+}
+
+/// One bounded, ordered exchange with the initiating client's authentication terminal.
+/// Bytes are base64 to preserve split UTF-8/escape sequences. Neither direction is durable
+/// product state. The server alone chooses the command and determines login success.
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellAuthTerminalParams {
+    pub agent_id: String,
+    pub terminal_id: String,
+    pub output: String,
+    pub exited: bool,
+}
+
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellAuthTerminalResponse {
+    pub input: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub cancel: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

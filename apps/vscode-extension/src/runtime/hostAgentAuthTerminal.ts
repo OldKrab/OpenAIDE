@@ -10,7 +10,7 @@ type AgentAuthTerminalParams = {
 };
 
 /** Opens an ACP-advertised sign-in command in a user-visible terminal. */
-export async function openAgentAuthTerminal(params: unknown): Promise<Record<string, never>> {
+export async function openAgentAuthTerminal(params: unknown): Promise<{ exitCode: number | null }> {
   const request = params as AgentAuthTerminalParams;
   if (
     typeof request?.command !== "string"
@@ -27,8 +27,15 @@ export async function openAgentAuthTerminal(params: unknown): Promise<Record<str
     shellArgs: request.args as string[] | undefined,
     env: request.env as Record<string, string> | undefined,
   });
-  terminal.show();
-  return {};
+  // ACP uses the login process exit status, never a user confirmation or output pattern.
+  return new Promise((resolve) => {
+    const listener = vscode.window.onDidCloseTerminal((closed) => {
+      if (closed !== terminal) return;
+      listener.dispose();
+      resolve({ exitCode: closed.exitStatus?.code ?? null });
+    });
+    terminal.show();
+  });
 }
 
 export function registerAgentAuthTerminalHandler(runtime: RuntimeClient): vscode.Disposable {

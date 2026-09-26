@@ -138,6 +138,7 @@ export const PERMISSION_REQUEST = "permission/request" as const;
 export const QUESTION_REQUEST = "question/request" as const;
 
 export const SECRET_READ = "secret/read" as const;
+export const SHELL_AUTH_TERMINAL = "shell/authTerminal" as const;
 export const SHELL_OPEN_EXTERNAL = "shell/openExternal" as const;
 export const SHELL_SHOW_NOTIFICATION = "shell/showNotification" as const;
 export const SHELL_REVEAL_FILE = "shell/revealFile" as const;
@@ -749,6 +750,10 @@ export type QuestionValue = string | number | number | boolean | Array<string>;
 export type SecretReadParams = { key: string, label?: string | null, };
 
 export type SecretReadResponse = { value?: string | null, };
+
+export type ShellAuthTerminalParams = { agentId: string, terminalId: string, output: string, exited: boolean, };
+
+export type ShellAuthTerminalResponse = { input: string, cols: number, rows: number, cancel: boolean, };
 
 export type ShellOpenExternalParams = { url: string,
 /**
@@ -1630,11 +1635,12 @@ export type TaskReleaseResponse = ResponseEnvelope<TaskReleaseResult>;
 export type TaskArchiveResponse = ResponseEnvelope<TaskArchiveResult>;
 export type TaskRestoreResponse = ResponseEnvelope<TaskRestoreResult>;
 
-export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;
+export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;
 export type ServerRequestParamsByMethod = {
   [PERMISSION_REQUEST]: PermissionRequestParams;
   [QUESTION_REQUEST]: QuestionRequestParams;
   [SECRET_READ]: SecretReadParams;
+  [SHELL_AUTH_TERMINAL]: ShellAuthTerminalParams;
   [SHELL_OPEN_EXTERNAL]: ShellOpenExternalParams;
   [SHELL_SHOW_NOTIFICATION]: ShellShowNotificationParams;
   [SHELL_REVEAL_FILE]: ShellRevealFileParams;
@@ -1644,6 +1650,7 @@ export type ServerRequestResponseResultByMethod = {
   [PERMISSION_REQUEST]: PermissionRequestResponse;
   [QUESTION_REQUEST]: QuestionRequestResponse;
   [SECRET_READ]: SecretReadResponse;
+  [SHELL_AUTH_TERMINAL]: ShellAuthTerminalResponse;
   [SHELL_OPEN_EXTERNAL]: ShellOpenExternalResponse;
   [SHELL_SHOW_NOTIFICATION]: ShellShowNotificationResponse;
   [SHELL_REVEAL_FILE]: ShellRevealFileResponse;

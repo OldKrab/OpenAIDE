@@ -132,7 +132,7 @@ pub(super) enum AcpAgentProcessControl {
     },
     Authenticate {
         request: AgentAuthenticateRequest,
-        reply_tx: mpsc::Sender<Result<AgentAuthenticateResult, RuntimeError>>,
+        reply_tx: mpsc::Sender<Result<(AgentAuthenticateResult, bool), RuntimeError>>,
     },
     Logout {
         agent_id: String,

@@ -482,6 +482,7 @@ describe("App Server Protocol state mapping", () => {
   it("uses known built-in Agent labels when the Agent collection is not available yet", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ agentId: "codex" as AgentId })).agent_name).toBe("Codex");
     expect(mapProtocolTaskSummary(protocolSummary({ agentId: "opencode" as AgentId })).agent_name).toBe("OpenCode");
+    expect(mapProtocolTaskSummary(protocolSummary({ agentId: "claude-code" as AgentId })).agent_name).toBe("Claude Code");
   });
 
   it("maps protocol image attachment previews into chat attachment payloads", () => {

@@ -1,10 +1,10 @@
 //! Owns the current ACP prompt set for a Native Session.
 //!
-//! One primary request owns Task lifecycle while additional prompt requests may
-//! steer the same work. The first current `end_turn` settles the shared prompt set.
+//! Extension delivery retains primary completion ownership. Legacy prompt
+//! steering keeps the first-current-`end_turn` settlement rule.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::agent::acp_schema::CancelNotification;
@@ -84,7 +84,51 @@ impl ActivePrompt {
     }
 
     pub(super) async fn next_completion(&mut self) -> Option<PromptCompletion> {
-        self.completion_rx.recv().await
+        loop {
+            let completion = self.completion_rx.recv().await?;
+            if completion
+                .primary_request
+                .is_none_or(|id| id == self.settlement.primary_request.load(Ordering::Acquire))
+            {
+                return Some(completion);
+            }
+            // A promptRequired handoff may overtake an already queued primary
+            // response. Dropping it releases its transport boundary only.
+        }
+    }
+
+    pub(super) fn settle_after_delivery(&self, wait_for_steering: bool) -> bool {
+        self.settlement
+            .try_settle(PromptSettlementKind::PromptResponse, wait_for_steering)
+    }
+
+    /// The adapter explicitly declined delivery because its native turn ended.
+    /// Replace completion ownership before sending the still-undelivered input.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn continue_prompt(
+        &self,
+        active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+        content_policy: PromptContentPolicy,
+        trace: Option<&AcpTraceSession>,
+        mut prompt: AgentPrompt,
+        sink: Arc<dyn AgentEventSink>,
+        mut request_guard: PromptRequestGuard,
+    ) -> Result<(), RuntimeError> {
+        self.settlement
+            .primary_request
+            .fetch_add(1, Ordering::AcqRel);
+        prompt.cancellation = self.cancellation.clone();
+        request_guard.finish_steering_admission();
+        send_prompt_request(
+            active_session,
+            prompt,
+            content_policy,
+            trace,
+            self.completion_tx.clone(),
+            self.settlement.clone(),
+            sink,
+            request_guard,
+        )
     }
 
     pub(super) fn steering_settlement(&self) -> PromptSettlement {
@@ -139,24 +183,57 @@ impl PromptSettlementKind {
 
 #[derive(Default)]
 pub(super) struct PromptSettlementState {
-    kind: AtomicU8,
+    // Admission and terminal publication share this lock: a Send either joins
+    // before settlement or is refused, never accepted into a retired turn.
+    status: Mutex<SettlementStatus>,
     // Some Agents answer the primary request with `cancelled` when steering
     // replaces it. That response must not settle the shared prompt set.
     steering_accepted: AtomicBool,
     // Session cancellation is delivered independently of the primary prompt's
     // cancellation token, so it must override the steering handoff.
     cancel_requested: AtomicBool,
+    primary_request: AtomicU64,
+}
+
+#[derive(Default)]
+struct SettlementStatus {
+    kind: Option<PromptSettlementKind>,
+    pending_steering: usize,
 }
 
 impl PromptSettlementState {
     fn settle(&self, kind: PromptSettlementKind) {
-        let _ = self
-            .kind
-            .compare_exchange(0, kind as u8, Ordering::AcqRel, Ordering::Acquire);
+        self.try_settle(kind, false);
+    }
+
+    fn try_settle(&self, kind: PromptSettlementKind, wait_for_steering: bool) -> bool {
+        let mut status = self.status.lock().expect("ACP settlement poisoned");
+        if wait_for_steering && status.pending_steering != 0 {
+            return false;
+        }
+        status.kind.get_or_insert(kind);
+        true
     }
 
     pub(super) fn accept_steering(&self) {
         self.steering_accepted.store(true, Ordering::Release);
+    }
+
+    pub(super) fn admit_steering(&self) -> bool {
+        let mut status = self.status.lock().expect("ACP settlement poisoned");
+        if status.kind.is_some() {
+            return false;
+        }
+        status.pending_steering += 1;
+        true
+    }
+
+    pub(super) fn finish_steering(&self) {
+        let mut status = self.status.lock().expect("ACP settlement poisoned");
+        status.pending_steering = status
+            .pending_steering
+            .checked_sub(1)
+            .expect("ACP steering admission underflow");
     }
 
     pub(super) fn request_cancellation(&self) {
@@ -164,15 +241,7 @@ impl PromptSettlementState {
     }
 
     pub(super) fn kind(&self) -> Option<PromptSettlementKind> {
-        match self.kind.load(Ordering::Acquire) {
-            value if value == PromptSettlementKind::PromptResponse as u8 => {
-                Some(PromptSettlementKind::PromptResponse)
-            }
-            value if value == PromptSettlementKind::RunnerExit as u8 => {
-                Some(PromptSettlementKind::RunnerExit)
-            }
-            _ => None,
-        }
+        self.status.lock().expect("ACP settlement poisoned").kind
     }
 
     fn steering_accepted(&self) -> bool {
@@ -188,6 +257,7 @@ impl PromptSettlementState {
 pub(super) struct PromptCompletion {
     result: Option<Result<AgentPromptOutcome, RuntimeError>>,
     release: Option<tokio::sync::oneshot::Sender<()>>,
+    primary_request: Option<u64>,
 }
 
 impl PromptCompletion {
@@ -267,6 +337,7 @@ fn send_prompt_request(
     }
     let result_trace = trace.cloned();
     let prompt_started_at = Instant::now();
+    let primary_request = settlement.primary_request.load(Ordering::Acquire);
     let (release_tx, release_rx) = tokio::sync::oneshot::channel();
     active_session
         .connection()
@@ -281,7 +352,9 @@ fn send_prompt_request(
             }) && settlement.steering_accepted()
                 && !cancellation.is_cancelled()
                 && !settlement.cancel_requested();
-            if settlement.kind().is_some() || superseded_by_steering {
+            let superseded_by_continuation =
+                primary_request != settlement.primary_request.load(Ordering::Acquire);
+            if settlement.kind().is_some() || superseded_by_steering || superseded_by_continuation {
                 crate::logging::info(
                     "acp_prompt_result_stale",
                     serde_json::json!({
@@ -289,7 +362,9 @@ fn send_prompt_request(
                         "active_session_id": session_id,
                         "prompt_kind": "primary",
                         "settlement_kind": settlement.kind().map(PromptSettlementKind::label),
-                        "stale_reason": if superseded_by_steering {
+                        "stale_reason": if superseded_by_continuation {
+                            "superseded_by_continuation"
+                        } else if superseded_by_steering {
                             "superseded_by_steering"
                         } else {
                             "already_settled"
@@ -324,6 +399,7 @@ fn send_prompt_request(
                 .send(PromptCompletion {
                     result: Some(result),
                     release: Some(release_tx),
+                    primary_request: Some(primary_request),
                 })
                 .is_err()
             {
@@ -353,8 +429,12 @@ pub(super) fn send_steering_prompt_request(
     trace: Option<&AcpTraceSession>,
     settlement: Option<PromptSettlement>,
     usage_sink: Option<Arc<dyn AgentEventSink>>,
-    request_guard: PromptRequestGuard,
+    mut request_guard: PromptRequestGuard,
 ) -> Result<(), RuntimeError> {
+    // Only the legacy prompt path may supersede the primary with `cancelled`.
+    // Extension acceptance alone never changes the primary's stop semantics.
+    request_guard.settlement_state().accept_steering();
+    request_guard.finish_steering_admission();
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
     let content = build_prompt_content_with_policy(prompt.text, prompt.attachments, content_policy)
@@ -426,6 +506,7 @@ pub(super) fn send_steering_prompt_request(
                                 None => Ok(outcome),
                             }),
                             release: Some(release_tx),
+                            primary_request: None,
                         })
                         .is_ok()
                     {

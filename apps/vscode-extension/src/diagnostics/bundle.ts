@@ -244,7 +244,7 @@ function publicSnapshot(snapshot: DiagnosticsSnapshot): DiagnosticsSnapshot {
 }
 
 function publicAgentId(agentId: string, aliases: Map<string, string>) {
-  if (agentId === "codex" || agentId === "opencode") return agentId;
+  if (agentId === "codex" || agentId === "opencode" || agentId === "claude-code") return agentId;
   const existing = aliases.get(agentId);
   if (existing) return existing;
   const alias = `agent:${aliases.size + 1}`;

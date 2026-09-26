@@ -1108,6 +1108,22 @@ describe("AppSurfaces callback wiring", () => {
       .toBe("OpenAIDE");
   });
 
+  it("names the selected New Task Project in the narrow workbench header", () => {
+    const controller = webControllerFor("task");
+    controller.state.projects = [
+      { projectId: "project-first", label: "First", workspaceRoot: "/first" },
+      { projectId: "project-selected", label: "Selected", workspaceRoot: "/selected" },
+    ] as typeof controller.state.projects;
+    controller.state.newTask.selection.projectId = "project-selected";
+    controller.activeTask = { ...snapshot("task_previous").task, project_label: "Previous" };
+    controller.view = viewFor(controller.state);
+
+    const tree = render(controller);
+
+    expect(tree.root.findByProps({ className: "mobile-workbench-bar" }).findByType("small").children.join(""))
+      .toBe("Selected");
+  });
+
   it("renders pending empty task snapshots through the task view", () => {
     const controller = controllerFor("task");
     controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };

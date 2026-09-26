@@ -500,7 +500,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const mobileTitle = renderableTaskSnapshot?.task.title
       ?? routedActiveTask?.title
       ?? (openingNativeSession ? "Opening session" : bootstrap.taskId ? "Opening task" : "New task");
-    const mobileProject = activeTask?.project_label ?? navigation.projects[0]?.label ?? "OpenAIDE";
+    // New Task names the Project it will start in; `activeTask` can still be the previously viewed Task.
+    const newTaskProject = bootstrap.taskId
+      ? undefined
+      : navigation.projects.find((project) => project.projectId === navigation.newTaskSelection.projectId)?.label;
+    const mobileProject = newTaskProject ?? activeTask?.project_label ?? navigation.projects[0]?.label ?? "OpenAIDE";
     const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? routedActiveTask?.status;
     const mobileSubtitle = [
       mobileTaskStatus ? taskStatusLabel(mobileTaskStatus) : undefined,

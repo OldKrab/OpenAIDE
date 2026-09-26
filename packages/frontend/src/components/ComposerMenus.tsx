@@ -276,7 +276,7 @@ export function ComposerControls({
             trigger={(popupTrigger) => (
               <Selector
                 disabled={controlsLocked}
-                icon={<AgentIcon icon={agents.find((agent) => agent.id === selection.agentId)?.icon} size={12} />}
+                icon={<AgentIcon agentId={selection.agentId} agentName={selection.agentLabel} icon={agents.find((agent) => agent.id === selection.agentId)?.icon} size={12} />}
                 label={selection.agentLabel}
                 locked={agentLocked}
                 menuOpen={openMenu === "agent"}
@@ -288,7 +288,7 @@ export function ComposerControls({
                 <MenuButton
                   active={selection.agentId === agent.id}
                   description={agent.description}
-                  icon={<AgentIcon icon={agent.icon} size={13} />}
+                  icon={<AgentIcon agentId={agent.id} agentName={agent.label} icon={agent.icon} size={13} />}
                   key={agent.id}
                   label={agent.label}
                   onClick={() => selectAndClose(() => onSelectAgent?.(agent.id))}

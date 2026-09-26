@@ -78,10 +78,11 @@ use crate::server_requests::{
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
     PermissionRequestResponse, PermissionToolCallRef, QuestionField, QuestionOption,
     QuestionRequestParams, QuestionRequestResponse, QuestionStringFormat, QuestionValue,
-    SecretReadParams, SecretReadResponse, ShellNotificationAction, ShellNotificationLevel,
-    ShellOpenExternalParams, ShellOpenExternalResponse, ShellResolveFileRevealParams,
-    ShellResolveFileRevealResult, ShellRevealFileParams, ShellRevealFileResponse,
-    ShellShowNotificationParams, ShellShowNotificationResponse,
+    SecretReadParams, SecretReadResponse, ShellAuthTerminalParams, ShellAuthTerminalResponse,
+    ShellNotificationAction, ShellNotificationLevel, ShellOpenExternalParams,
+    ShellOpenExternalResponse, ShellResolveFileRevealParams, ShellResolveFileRevealResult,
+    ShellRevealFileParams, ShellRevealFileResponse, ShellShowNotificationParams,
+    ShellShowNotificationResponse,
 };
 use crate::settings::{
     AppPreferences, AppPreferencesParams, AppPreferencesPatch, AppPreferencesResult,
@@ -442,6 +443,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<QuestionValue>(output, config);
     push_decl::<SecretReadParams>(output, config);
     push_decl::<SecretReadResponse>(output, config);
+    push_decl::<ShellAuthTerminalParams>(output, config);
+    push_decl::<ShellAuthTerminalResponse>(output, config);
     push_decl::<ShellOpenExternalParams>(output, config);
     push_decl::<ShellOpenExternalResponse>(output, config);
     push_decl::<ShellShowNotificationParams>(output, config);

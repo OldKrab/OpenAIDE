@@ -16,6 +16,8 @@ impl ServerRequestRuntime {
         let scope = inner.broker.interrupt_request(request_id, now);
         super::remove_permission_waiter(&mut inner, request_id);
         inner.question_waiters.remove(request_id);
+        inner.waitable_requests.remove(request_id);
+        self.changed.notify_all();
         scope
     }
 
@@ -151,6 +153,7 @@ impl ServerRequestRuntime {
             let RequestLifecycleOutcome::Interrupted { request_id, .. } = outcome;
             super::remove_permission_waiter(&mut inner, request_id);
             inner.question_waiters.remove(request_id);
+            inner.waitable_requests.remove(request_id);
         }
         if !outcomes.is_empty() {
             self.changed.notify_all();

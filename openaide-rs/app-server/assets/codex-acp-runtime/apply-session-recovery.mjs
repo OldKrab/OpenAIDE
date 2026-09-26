@@ -53,6 +53,29 @@ export function patchBundle(original) {
     "applyModeChange(sessionState, value) {" + newline + "    if (value === sessionState.agentMode.id) return;" + newline + "    const newMode = AgentMode.find(value);",
     1,
   );
+  // TODO(codex-acp): remove when upstream implements the host-owned idle
+  // steering fallback. A detached prompt has no ACP completion for the Host.
+  replace(
+    "return await this.startNewTurnFromSteering(params);",
+    [
+      'if (params._meta?.steering?.idleBehavior === "promptRequired") {',
+      "      await this.activePrompts.get(params.sessionId)?.completion;",
+      '      return { outcome: "promptRequired", reason: "noRunningTurn" };',
+      "    }",
+      "    return await this.startNewTurnFromSteering(params);",
+    ].join(newline),
+    1,
+  );
+  replace(
+    ["  parseSessionSteerParams(params) {", '    const sessionId = params["sessionId"];'].join(newline),
+    ["  parseSessionSteerParams(params) {", '    const meta = params["_meta"];', '    const sessionId = params["sessionId"];'].join(newline),
+    1,
+  );
+  replace(
+    ["      sessionId,", "      prompt", "    };", "  }", "  createSessionConfigOptions(sessionState) {"].join(newline),
+    ["      sessionId,", "      prompt,", "      _meta: meta", "    };", "  }", "  createSessionConfigOptions(sessionState) {"].join(newline),
+    1,
+  );
   return source;
 }
 

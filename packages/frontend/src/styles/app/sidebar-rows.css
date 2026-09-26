@@ -368,6 +368,10 @@
   color: color-mix(in oklch, var(--oa-muted) 76%, var(--oa-text));
 }
 
+.claude-agent-icon {
+  color: color-mix(in oklch, var(--oa-muted) 76%, var(--oa-text));
+}
+
 .opencode-agent-icon {
   color: color-mix(in oklch, var(--oa-muted) 70%, var(--oa-text));
 }

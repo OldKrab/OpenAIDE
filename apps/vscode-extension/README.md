@@ -12,7 +12,7 @@ leaving your editor.
 
 ## What you can do
 
-- Run ACP-compatible coding agents such as Codex and OpenCode.
+- Run built-in Codex, OpenCode, and Claude Code agents, or configure a custom ACP agent.
 - Follow chat, tool activity, and terminal output in one Task.
 - Review permission requests before an Agent takes sensitive actions.
 - Reopen saved Tasks and continue from their existing Agent sessions.
@@ -31,8 +31,12 @@ affected Task.
 ## Requirements
 
 - VS Code 1.100 or newer
-- A supported ACP Agent, such as Codex or OpenCode, authenticated separately
+- A supported ACP Agent, such as Codex, OpenCode, or Claude Code, authenticated separately
 - Node.js and npm when an Agent must be launched through `npx`
+
+Claude Code requires Node.js 22 or newer and npm. Select **Claude Code** in Agent
+Settings and use its sign-in action. OpenAIDE downloads the pinned ACP integration
+on first launch; a separate Claude Code CLI installation is not required.
 
 ## Reporting a problem
 

@@ -35,7 +35,14 @@ fn client_snapshot_includes_backend_owned_agent_collection() {
         .unwrap();
 
     let agents = snapshot.agents.unwrap();
-    assert_eq!(agents.agents.len(), 2);
+    assert_eq!(
+        agents
+            .agents
+            .iter()
+            .map(|agent| agent.agent_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["codex", "claude-code", "opencode"]
+    );
     assert!(agents
         .agents
         .iter()

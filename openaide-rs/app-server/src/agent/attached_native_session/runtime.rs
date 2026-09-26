@@ -15,6 +15,7 @@ use crate::agent::acp_session_opening::OpenedAcpSession;
 use crate::agent::acp_session_paths::normalized_session_cwd;
 use crate::agent::acp_session_runner::AcpSessionRunner;
 use crate::agent::acp_session_termination::{close_active_session, SessionDeleteRequest};
+use crate::agent::acp_steering::SteeringRequests;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::{
     AgentLoadedSession, AgentPromptCapabilities, AgentSession, AgentSessionEventSink,
@@ -66,6 +67,7 @@ pub(super) async fn run(
     let mut commands_catalog = started_session.commands_catalog.clone();
     let mut config_requests = SessionConfigRequests::new();
     let mut deletion = SessionDeleteRequest::default();
+    let mut steering_requests = SteeringRequests::new(&initialize);
     let session_id = active_session.session_id().to_string();
     let sink_registration = SessionSinkRegistration {
         session_id,
@@ -218,6 +220,7 @@ pub(super) async fn run(
                             prompt,
                             sink,
                             request_guard,
+                            &mut steering_requests,
                             &mut command_rx,
                             &mut config_rx,
                             &mut config_requests,
@@ -229,6 +232,9 @@ pub(super) async fn run(
                             &mut pending_session_catalogs,
                         )
                         .await;
+                        // Also covers early error returns from the runner: no
+                        // queued delivery may leak into the next Task turn.
+                        steering_requests.abandon();
                         session_snapshot = session_with_catalog_snapshots(
                             &session_snapshot,
                             &config_catalog,

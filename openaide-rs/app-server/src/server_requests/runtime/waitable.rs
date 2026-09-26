@@ -207,9 +207,29 @@ impl ServerRequestRuntime {
         request_id: &RequestId,
         timeout: Duration,
     ) -> Result<Value, RuntimeError> {
+        self.wait_client_response_cancellable(
+            request_id,
+            timeout,
+            &crate::agent::TurnCancellation::new(),
+        )
+    }
+
+    pub fn wait_client_response_cancellable(
+        &self,
+        request_id: &RequestId,
+        timeout: Duration,
+        cancellation: &crate::agent::TurnCancellation,
+    ) -> Result<Value, RuntimeError> {
         let started_at = Instant::now();
         let mut inner = self.inner.lock().expect("server request runtime poisoned");
         loop {
+            if cancellation.is_cancelled() {
+                inner.waitable_requests.remove(request_id);
+                inner
+                    .broker
+                    .interrupt_request(request_id, AppServerTime::now());
+                return Err(RuntimeError::NotReady("server request cancelled".into()));
+            }
             let Some(waiter) = inner.waitable_requests.get_mut(request_id) else {
                 return Err(RuntimeError::NotReady(
                     "server request is unavailable".to_string(),
@@ -235,5 +255,21 @@ impl ServerRequestRuntime {
                 .expect("server request runtime poisoned");
             inner = next_inner;
         }
+    }
+
+    /// Auth terminal frames may contain credentials. Do not retain a resolved frame in the
+    /// reverse-RPC broker; ordering comes from one outstanding exchange, not retained history.
+    pub(crate) fn forget_auth_terminal_exchange(&self, request_id: &RequestId) {
+        let mut inner = self.inner.lock().expect("server request runtime poisoned");
+        inner.waitable_requests.remove(request_id);
+        inner.broker.forget_auth_terminal_exchange(request_id);
+    }
+
+    pub(crate) fn is_auth_terminal_exchange(&self, request_id: &RequestId) -> bool {
+        self.inner
+            .lock()
+            .expect("server request runtime poisoned")
+            .broker
+            .is_auth_terminal_exchange(request_id)
     }
 }

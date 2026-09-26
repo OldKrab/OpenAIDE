@@ -1,5 +1,6 @@
 import {
   SECRET_READ,
+  SHELL_AUTH_TERMINAL,
   SHELL_OPEN_EXTERNAL,
   SHELL_REVEAL_FILE,
   SHELL_SHOW_NOTIFICATION,
@@ -12,6 +13,7 @@ import {
 import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
 import type { PostHostMessage } from "../state/postHostMessage";
 import { frontendShell } from "./frontendShell";
+import { closeAuthTerminals, handleAuthTerminal } from "./authTerminals";
 
 type ServerRequestConnection = Pick<BackendConnection, "handleRequest">;
 
@@ -32,6 +34,8 @@ export function startAppServerServerRequestBridge({
     method,
     (params, context) => forwardRequest(method, params, context) as never,
   ));
+  stops.push(backendConnection.handleRequest(SHELL_AUTH_TERMINAL,
+    (params, context) => handleAuthTerminal(params, context.signal)));
 
   function forwardRequest<M extends ServerRequestMethod>(
     method: M,
@@ -75,6 +79,7 @@ export function startAppServerServerRequestBridge({
       return true;
     },
     dispose() {
+      closeAuthTerminals();
       pending.clear();
       for (const stop of stops) stop();
     },

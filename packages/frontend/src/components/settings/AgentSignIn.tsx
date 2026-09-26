@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import {
   ArrowLeft,
   ChevronRight,
@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import type { AgentSettingsRecord, AgentSignInFlowRecord } from "@openaide/app-shell-contracts";
 import { authMethodUsesValues, type AgentAuthMethod } from "./agentSettingsModel";
+import { authTerminalForAgent, subscribeAuthTerminals } from "../../services/authTerminals";
+const AgentAuthTerminal = lazy(() => import("./AgentAuthTerminal").then((module) => ({ default: module.AgentAuthTerminal })));
 
 type AuthenticateAgent = (agentId: string, methodId: string, values?: Record<string, string>) => void;
 
@@ -32,6 +34,7 @@ export function AgentSignIn({
   onLogout?: (agentId: string) => boolean | void | Promise<boolean | void>;
 }) {
   const flow = agent.sign_in;
+  const terminal = useSyncExternalStore(subscribeAuthTerminals, () => authTerminalForAgent(agent.id));
   const isRequired = agent.status === "auth_required";
   const [panel, setPanel] = useState<"summary" | "methods">("summary");
   const [selectedMethodId, setSelectedMethodId] = useState<string>();
@@ -63,7 +66,11 @@ export function AgentSignIn({
   } : undefined;
   return (
     <section aria-label={isRequired ? "Sign in" : "Authentication"} className="agent-page-section agent-sign-in">
-      {flow ? (
+      {terminal && flow && flow.phase !== "failed" ? (
+        <Suspense fallback={<p role="status">Opening sign-in terminal…</p>}>
+          <AgentAuthTerminal session={terminal} onCancel={cancel} />
+        </Suspense>
+      ) : flow ? (
         <AgentSignInStep agent={agent} flow={flow} onAuthenticate={authenticate} onCancel={cancel} />
       ) : selectedMethod ? (
         <AgentSignInValueStep

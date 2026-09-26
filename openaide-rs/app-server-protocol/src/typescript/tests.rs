@@ -202,7 +202,7 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;",
         "export type TaskListResponse = ResponseEnvelope<TaskListResult>;",
         "export type TaskReleaseResponse = ResponseEnvelope<TaskReleaseResult>;",
-        "export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;",
+        "export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;",
         "[PERMISSION_REQUEST]: PermissionRequestParams;",
         "[QUESTION_REQUEST]: QuestionRequestParams;",
         "[SECRET_READ]: SecretReadParams;",

@@ -154,6 +154,10 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
     );
     assert_eq!(
         response["result"]["result"]["snapshot"]["agents"]["agents"][1]["agentId"],
+        "claude-code"
+    );
+    assert_eq!(
+        response["result"]["result"]["snapshot"]["agents"]["agents"][2]["agentId"],
         "opencode"
     );
     assert_eq!(
@@ -638,10 +642,14 @@ fn initialize_uses_stored_agent_catalog_in_production_startup_path() {
     let response = response(&responses[0]);
     assert_eq!(
         response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
-        "custom.local"
+        "claude-code"
     );
     assert_eq!(
         response["result"]["result"]["snapshot"]["agents"]["agents"][1]["agentId"],
+        "custom.local"
+    );
+    assert_eq!(
+        response["result"]["result"]["snapshot"]["agents"]["agents"][2]["agentId"],
         "opencode"
     );
 }

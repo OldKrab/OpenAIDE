@@ -245,3 +245,13 @@
   .agent-sign-in-step-actions { grid-column: 1; }
   .agent-sign-in-step-actions > .agent-page-row-button { flex: 1 1 100%; justify-content: center; }
 }
+.agent-auth-terminal { padding: 16px; min-width: 0; }
+.agent-sign-in { min-width: 0; }
+.agent-auth-terminal > p { color: var(--oa-muted); margin-block: 10px 16px; }
+.agent-auth-terminal > .agent-sign-in-panel-heading { flex-wrap: wrap; padding: 0 0 12px; min-height: 0; }
+.agent-auth-terminal-screen { contain: inline-size; height: 340px; min-width: 0; padding: 8px; background: var(--oa-bg); color: var(--oa-text); border-radius: 6px; overflow: hidden; }
+.agent-auth-terminal-screen:focus-within { outline: 2px solid var(--oa-focus); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .agent-auth-terminal { padding: 12px; }
+  .agent-auth-terminal-screen { height: 300px; }
+}

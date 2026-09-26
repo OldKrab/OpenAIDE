@@ -52,9 +52,18 @@ fn assert_unsigned_catalog_settles(advertises_auth_method: bool) {
         api.native_session_catalog().refresh_state(),
         TaskNavigationRefreshState::Failed { .. }
     ));
-    assert_eq!(api.native_session_catalog().entries().len(), 3);
+    let contexts = 3;
+    let agent_count = BUILT_IN_AGENT_METADATA.len();
+    assert_eq!(
+        api.native_session_catalog().entries().len(),
+        contexts * (agent_count - 1)
+    );
     let before_retry = agent.calls.lock().unwrap().clone();
-    assert_eq!(before_retry.len(), 6, "two Agents cover three contexts");
+    assert_eq!(
+        before_retry.len(),
+        contexts * agent_count,
+        "every Agent covers every context"
+    );
 
     api.request_native_session_catalog_refresh();
     assert!(publish_status_updates_until_settled(&api, &updates));
@@ -74,7 +83,10 @@ fn assert_unsigned_catalog_settles(advertises_auth_method: bool) {
         api.native_session_catalog().refresh_state(),
         TaskNavigationRefreshState::Idle
     );
-    assert_eq!(api.native_session_catalog().entries().len(), 6);
+    assert_eq!(
+        api.native_session_catalog().entries().len(),
+        contexts * agent_count
+    );
 }
 
 /// Reproduces the process owner's status receiver -> catalog refresh feedback.

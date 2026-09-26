@@ -45,6 +45,16 @@ pub(crate) trait AgentProbeWorkflow: Send + Sync {
 }
 
 pub(crate) trait AgentAuthenticateWorkflow: Send + Sync {
+    fn authenticate_with_client(
+        &self,
+        params: ProtocolAgentAuthenticateParams,
+        secret_resolver: Option<Arc<dyn crate::agent::AgentSecretResolver>>,
+        terminal_runner: Option<Arc<dyn crate::agent::auth_terminal::AuthTerminalRunner>>,
+    ) -> Result<ProtocolAgentAuthenticateResult, ProtocolError> {
+        let _ = terminal_runner;
+        self.authenticate_with_secret_resolver(params, secret_resolver)
+    }
+
     fn authenticate(
         &self,
         params: ProtocolAgentAuthenticateParams,
@@ -171,6 +181,15 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
         params: ProtocolAgentAuthenticateParams,
         secret_resolver: Option<Arc<dyn crate::agent::AgentSecretResolver>>,
     ) -> Result<ProtocolAgentAuthenticateResult, ProtocolError> {
+        self.authenticate_with_client(params, secret_resolver, None)
+    }
+
+    fn authenticate_with_client(
+        &self,
+        params: ProtocolAgentAuthenticateParams,
+        secret_resolver: Option<Arc<dyn crate::agent::AgentSecretResolver>>,
+        terminal_runner: Option<Arc<dyn crate::agent::auth_terminal::AuthTerminalRunner>>,
+    ) -> Result<ProtocolAgentAuthenticateResult, ProtocolError> {
         self.registry
             .require(params.agent_id.as_str())
             .map_err(protocol_error_from_runtime)?;
@@ -201,6 +220,7 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
             secret_env: params.secret_env,
             secret_storage_agent_id: params.secret_storage_agent_id,
             terminal_confirmed: params.terminal_confirmed,
+            terminal_runner,
             secret_resolver,
         });
         let result = match result {

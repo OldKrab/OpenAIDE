@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::registry::{AgentCatalogRecord, AgentRegistry};
+use crate::agent::registry_builtin::BUILT_IN_AGENT_METADATA;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentEventSink, AgentForkedSession, AgentListSessionsRequest, AgentLoadedSession, AgentPrompt,
@@ -3201,7 +3202,10 @@ fn background_native_catalog_refresh_stops_when_a_page_adds_no_session_identity(
     .unwrap();
 
     api.refresh_native_session_catalogs().unwrap();
-    assert_eq!(agent.requested_cursors(), vec![None, None]);
+    assert_eq!(
+        agent.requested_cursors(),
+        vec![None; BUILT_IN_AGENT_METADATA.len()]
+    );
 }
 
 #[test]
@@ -3382,7 +3386,7 @@ fn load_more_continues_past_a_page_containing_only_archived_sessions() {
     )
     .unwrap();
     let project_id = project_id_for_workspace("/tmp/openaide-unit-workspace/app");
-    for agent_id in ["codex", "opencode"] {
+    for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
         let reference =
             crate::native_sessions::catalog::NativeSessionRef::new(agent_id, "archived-page");
         api.native_session_catalog()
@@ -3451,7 +3455,7 @@ fn project_load_stops_after_the_requested_navigation_window() {
         !api.native_session_catalog()
             .project_refreshing(project.project_id.as_str())
     });
-    for agent_id in ["codex", "opencode"] {
+    for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
         assert_eq!(
             agent.requested_cursors_for(agent_id),
             vec![None, Some("page-2".to_string())]
@@ -3461,7 +3465,7 @@ fn project_load_stops_after_the_requested_navigation_window() {
         api.native_session_catalog()
             .project(project.project_id.as_str())
             .len(),
-        20
+        10 * BUILT_IN_AGENT_METADATA.len()
     );
     assert!(api
         .native_session_catalog()
@@ -3503,7 +3507,7 @@ fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
     api.request_native_session_catalog_refresh();
     wait_until(|| !api.native_session_catalog().refreshing());
 
-    for agent_id in ["codex", "opencode"] {
+    for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
         assert_eq!(
             agent.requested_cursors_for(agent_id),
             vec![
@@ -3524,7 +3528,7 @@ fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
             .project_refreshing(project.project_id.as_str())
     });
 
-    for agent_id in ["codex", "opencode"] {
+    for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
         assert!(agent
             .requested_cursors_for(agent_id)
             .iter()
@@ -3646,7 +3650,10 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     agent.block_list.store(false, Ordering::SeqCst);
 
     wait_until(|| !api.native_session_catalog().refreshing());
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        agent.list_calls.load(Ordering::SeqCst),
+        2 * BUILT_IN_AGENT_METADATA.len()
+    );
 }
 
 #[test]
@@ -4677,12 +4684,18 @@ fn failed_native_session_listing_is_not_cached() {
     )
     .unwrap();
 
-    for expected in [2, 4] {
+    for attempt in 1..=2 {
         assert!(api.refresh_native_session_catalogs().is_err());
-        assert_eq!(agent.list_calls.load(Ordering::SeqCst), expected);
+        assert_eq!(
+            agent.list_calls.load(Ordering::SeqCst),
+            attempt * BUILT_IN_AGENT_METADATA.len()
+        );
     }
 
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        agent.list_calls.load(Ordering::SeqCst),
+        2 * BUILT_IN_AGENT_METADATA.len()
+    );
 }
 
 #[test]
@@ -5591,6 +5604,8 @@ fn send_while_working_accepts_a_steering_message_without_replacing_primary_work(
     );
 
     agent.release_prompt.store(true, Ordering::SeqCst);
+    // Drain the turn before TempDir removes the journal beneath its writer.
+    api.shutdown().expect("shutdown steering fixture");
 }
 
 #[test]
