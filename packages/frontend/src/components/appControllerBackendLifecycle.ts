@@ -500,11 +500,17 @@ export function useAppControllerBackendLifecycle({
     };
   }, [backendConnection, initialBootstrap.surface, initialBootstrap.taskId]);
 
+  const taskNavigationEnabled = shouldLoadTaskNavigation(bootstrap);
+  const taskNavigationSection = state.showArchived ? "archive" : "tasks";
+  const taskNavigationScope = taskNavigationScopeForBootstrap(bootstrap, taskNavigationSection);
+  // A route change need not change this scope. Re-subscribing asks App Server for
+  // another catalog refresh, so compare the generated scope by value, not route identity.
+  const taskNavigationScopeKey = JSON.stringify(taskNavigationScope);
+
   useEffect(() => {
-    if (!backendConnection || !backendInitializationReady || !shouldLoadTaskNavigation(bootstrap)) return;
+    if (!backendConnection || !backendInitializationReady || !taskNavigationEnabled) return;
     const context = stateSubscriptionContext.current;
     if (!context) return;
-    const section = state.showArchived ? "archive" : "tasks";
     const taskNavigationKey = "task-navigation";
     return startAppServerStateSubscription({
       backendConnection: { subscribeState: backendConnection.subscribeState },
@@ -512,7 +518,7 @@ export function useAppControllerBackendLifecycle({
       dispatch: dispatchForCurrentReplica,
       onBaselineLost: () => markGlobalSubscriptionLost(taskNavigationKey),
       onBaselineError: (error) => {
-        if (section === "archive") {
+        if (taskNavigationSection === "archive") {
           dispatchForCurrentReplica({
             type: "tasks:error",
             message: error instanceof Error ? error.message : "Unable to load archived tasks.",
@@ -522,14 +528,14 @@ export function useAppControllerBackendLifecycle({
         markSubscriptionError(taskNavigationKey, error);
       },
       onBaselineReady: () => markSubscriptionReady(taskNavigationKey),
-      scope: taskNavigationScopeForBootstrap(bootstrap, section),
+      scope: taskNavigationScope,
     });
   }, [
     backendConnection,
     backendInitializationReady,
-    bootstrap,
+    taskNavigationEnabled,
+    taskNavigationScopeKey,
     dispatchForCurrentReplica,
-    state.showArchived,
   ]);
 
   useNewTaskSubscription({

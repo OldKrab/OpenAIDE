@@ -16,6 +16,7 @@ import {
   STATE_UNSUBSCRIBE,
   TASK_ACQUIRE,
   TASK_ADOPT_NATIVE_SESSION,
+  TASK_COMPOSER_HISTORY,
   TASK_RELEASE,
   TASK_LIST,
   TASK_NAVIGATION_LOAD_MORE,
@@ -730,6 +731,94 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot).toBeUndefined();
     expect(initialize).toHaveBeenCalledTimes(1);
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["web", webTaskBootstrap],
+    ["desktop", desktopTaskBootstrap],
+  ] as const)("retains Task Navigation while switching %s Tasks", async (_shell, taskBootstrapForShell) => {
+    const request = vi.fn(async (
+      method: string,
+      params?: { taskId?: string; scope?: { kind: string; taskId?: string; section?: "tasks" | "archive" } },
+    ) => {
+      if (method === STATE_SUBSCRIBE) {
+        if (params?.scope?.kind === "task") {
+          return {
+            ...taskSubscriptionSnapshot("cursor_task", protocolTaskSnapshot(params.scope.taskId!, "Task")),
+            scope: params.scope,
+          };
+        }
+        return nonTaskSubscriptionSnapshot(params?.scope);
+      }
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === TASK_OPEN) return { task: protocolTaskSnapshot(params!.taskId!, "Task") };
+      if (method === TASK_COMPOSER_HISTORY) return { entries: [] };
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({
+        snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }),
+      })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrapForShell("task_1");
+    let mounted!: ReturnType<typeof create>;
+    try {
+      await act(async () => { mounted = create(<ControllerProbe />); });
+      const navigationRequests = () => request.mock.calls.filter(([, params]) => params?.scope?.kind === "taskNavigation");
+      expect(navigationRequests()).toEqual([
+        [STATE_SUBSCRIBE, { scope: { kind: "taskNavigation", section: "tasks" } }],
+      ]);
+
+      await act(async () => { webRouteListeners[0]?.(taskBootstrapForShell("task_2")); });
+      expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_2" });
+      expect(navigationRequests()).toEqual([
+        [STATE_SUBSCRIBE, { scope: { kind: "taskNavigation", section: "tasks" } }],
+      ]);
+    } finally {
+      await act(async () => { mounted?.unmount(); });
+    }
+  });
+
+  it("updates Task Navigation only when the fixed Project scope changes", async () => {
+    const request = vi.fn(async (
+      method: string,
+      params?: { scope?: { kind: string; section?: "tasks" | "archive" } },
+    ) => {
+      if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({
+        snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }),
+      })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+    bootstrap = navigationBootstrap({ projectId: "project_1" });
+    let mounted!: ReturnType<typeof create>;
+    try {
+      await act(async () => { mounted = create(<ControllerProbe />); });
+      const navigationRequests = () => request.mock.calls.filter(([, params]) => params?.scope?.kind === "taskNavigation");
+      const firstScope = { kind: "taskNavigation", section: "tasks", projectIds: ["project_1"] };
+      expect(navigationRequests()).toEqual([[STATE_SUBSCRIBE, { scope: firstScope }]]);
+
+      await act(async () => { webRouteListeners[0]?.(navigationBootstrap({ projectId: "project_1" })); });
+      expect(navigationRequests()).toEqual([[STATE_SUBSCRIBE, { scope: firstScope }]]);
+
+      await act(async () => { webRouteListeners[0]?.(navigationBootstrap({ projectId: "project_2" })); });
+      expect(navigationRequests()).toEqual([
+        [STATE_SUBSCRIBE, { scope: firstScope }],
+        [STATE_UNSUBSCRIBE, { scope: firstScope }],
+        [STATE_SUBSCRIBE, { scope: { ...firstScope, projectIds: ["project_2"] } }],
+      ]);
+    } finally {
+      await act(async () => { mounted?.unmount(); });
+    }
   });
 
   it("loads new-task Agent options after a project route change even when an old task snapshot remains", async () => {
@@ -3945,6 +4034,7 @@ type TestBootstrap =
   | ReturnType<typeof vscodeNewTaskBootstrap>
   | ReturnType<typeof settingsBootstrap>
   | ReturnType<typeof webTaskBootstrap>
+  | ReturnType<typeof desktopTaskBootstrap>
   | ReturnType<typeof webSettingsBootstrap>;
 
 function nativeSessionBootstrap(agentId: string, nativeSessionId: string) {
@@ -4023,6 +4113,13 @@ function webTaskBootstrap(taskId?: string, projectId?: string) {
       kind: "webProxy" as const,
       endpointUrl: "/__openaide-app-server/probe",
     },
+  };
+}
+
+function desktopTaskBootstrap(taskId?: string, projectId?: string) {
+  return {
+    ...webTaskBootstrap(taskId, projectId),
+    shell: { kind: "desktop" as const, navigationMode: "project" as const },
   };
 }
 
