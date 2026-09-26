@@ -28,7 +28,7 @@ pub(crate) const BUILT_IN_AGENT_METADATA: [BuiltInAgentMetadata; 3] = [
     BuiltInAgentMetadata {
         id: CLAUDE_CODE_AGENT_ID,
         label: CLAUDE_CODE_AGENT_LABEL,
-        icon: "sparkles",
+        icon: "claude",
         description: "Anthropic coding agent.",
     },
 ];

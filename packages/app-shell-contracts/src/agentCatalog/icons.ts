@@ -1,6 +1,7 @@
 export type AgentIconId =
   | "openai"
   | "opencode"
+  | "claude"
   | "bot"
   | "code"
   | "terminal"
@@ -29,6 +30,7 @@ export type AgentIconId =
 export const agentIconIds = [
   "openai",
   "opencode",
+  "claude",
   "bot",
   "code",
   "terminal",
@@ -58,4 +60,3 @@ export const agentIconIds = [
 export function normalizedAgentIcon(value: unknown): AgentIconId | undefined {
   return agentIconIds.find((icon) => icon === value);
 }
-

@@ -1,4 +1,4 @@
-import { CircleAlert, FolderOpen, FolderPlus, FolderRoot, FolderX, GitBranch, LoaderCircle } from "lucide-react";
+import { CircleAlert, FolderOpen, FolderPlus, FolderX, GitBranch, LoaderCircle, ShieldOff } from "lucide-react";
 import { useState } from "react";
 import type { AppPreferencesRecord, ConfigOptionCurrentValue } from "@openaide/app-shell-contracts";
 import {
@@ -359,7 +359,7 @@ export function NewTaskView({
                 trigger={(popupTrigger) => (
                   <Selector
                     disabled={state.newTask.submitting}
-                    icon={state.newTask.selection.worktreeId ? <GitBranch size={12} /> : <FolderRoot size={12} />}
+                    icon={state.newTask.selection.worktreeId ? <GitBranch size={12} /> : <ShieldOff size={12} />}
                     label={taskWorkspaceLabel}
                     locked={false}
                     menuOpen={openContextMenu === "workspace"}
@@ -409,7 +409,7 @@ export function NewTaskView({
                   <MenuButton
                     active={state.newTask.selection.agentId === agent.id}
                     description={agent.description}
-                    icon={<AgentIcon icon={agent.icon} size={13} />}
+                    icon={<AgentIcon agentId={agent.id} agentName={agent.label} icon={agent.icon} size={13} />}
                     key={agent.id}
                     label={agent.label}
                     onClick={() =>

@@ -158,7 +158,7 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
     assert_eq!(claude.status, AgentSettingsStatus::Disabled);
     assert_eq!(claude.source_kind, AgentSettingsSourceKind::BuiltIn);
     assert_eq!(claude.label, "Claude Code");
-    assert_eq!(claude.icon, "sparkles");
+    assert_eq!(claude.icon, "claude");
     assert!(claude.command_line.is_none());
 
     let custom = result

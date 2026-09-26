@@ -25,6 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { AgentIconId } from "@openaide/app-shell-contracts";
+import { ClaudeIcon } from "./ClaudeIcon";
 
 const lucideAgentIcons = {
   bot: Bot,
@@ -56,6 +57,7 @@ const lucideAgentIcons = {
 export const agentIconLabels = {
   openai: "OpenAI",
   opencode: "OpenCode",
+  claude: "Claude",
   bot: "Bot",
   code: "Code",
   terminal: "Terminal",
@@ -86,6 +88,9 @@ export const agentIconLabels = {
 export type AgentIconLookup = Readonly<Record<string, AgentIconId>>;
 
 export function AgentIcon({ agentId, agentName, icon = "bot", size }: { agentId?: string; agentName?: string; icon?: AgentIconId; size: number }) {
+  if (icon === "claude" || agentId === "claude-code" || agentName?.trim().toLowerCase() === "claude code") {
+    return <ClaudeIcon size={size} />;
+  }
   if (icon === "openai" || agentId === "codex" || agentName?.trim().toLowerCase() === "codex") {
     return <OpenAiIcon size={size} />;
   }

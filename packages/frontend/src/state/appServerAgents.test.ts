@@ -5,10 +5,10 @@ import { agentOptionsFromProtocol, fallbackAgentActionFromProtocol } from "./app
 describe("App Server Agent state mapping", () => {
   it("presents the built-in Claude Code option with its shared catalog metadata", () => {
     expect(agentOptionsFromProtocol(agentCollection({
-      agents: [{ agentId: "claude-code" as never, label: "Claude Code", icon: "sparkles", status: "disconnected" }],
+      agents: [{ agentId: "claude-code" as never, label: "Claude Code", icon: "claude", status: "disconnected" }],
     }))).toEqual([
       expect.objectContaining({
-        id: "claude-code", label: "Claude Code", icon: "sparkles",
+        id: "claude-code", label: "Claude Code", icon: "claude",
         description: "Anthropic coding agent.", enabled: true,
       }),
     ]);

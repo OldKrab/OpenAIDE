@@ -34,7 +34,7 @@ export const builtInAgents = [
     label: "Claude Code",
     description: "Anthropic coding agent.",
     source_kind: "built_in",
-    icon: "sparkles",
+    icon: "claude",
     enabled: true,
     transport: "stdio",
     command_line: "npx -y @agentclientprotocol/claude-agent-acp@0.81.2",
