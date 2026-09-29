@@ -231,7 +231,9 @@ async function verifyRecovery(adapter, method, scenario) {
   }
 
   async function readCalls() {
-    return (await readFile(callsPath, "utf8")).trim().split("\n").map(JSON.parse);
+    // The fixture may append while this snapshot is read. Only newline-committed
+    // records participate in the barrier; an in-flight final record is retried.
+    return (await readFile(callsPath, "utf8")).split("\n").slice(0, -1).map(JSON.parse);
   }
 
   function killOwnedProcesses() {
