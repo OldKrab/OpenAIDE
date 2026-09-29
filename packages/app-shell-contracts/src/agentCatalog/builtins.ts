@@ -1,4 +1,8 @@
 import type { AgentCatalogEntry } from "./types.js";
+import claudeAcpPolicy from "./claude-acp/package.json" with { type: "json" };
+
+// Shared with App Server: Dependabot updates this exact launch pin in one place.
+const claudeAcpSpec = `@agentclientprotocol/claude-agent-acp@${claudeAcpPolicy.dependencies["@agentclientprotocol/claude-agent-acp"]}`;
 
 export const builtInAgents = [
   {
@@ -37,9 +41,9 @@ export const builtInAgents = [
     icon: "claude",
     enabled: true,
     transport: "stdio",
-    command_line: "npx -y @agentclientprotocol/claude-agent-acp@0.81.2",
+    command_line: `npx -y ${claudeAcpSpec}`,
     command: "npx",
-    args: ["-y", "@agentclientprotocol/claude-agent-acp@0.81.2"],
+    args: ["-y", claudeAcpSpec],
     env: {},
     secret_env: [],
   },
