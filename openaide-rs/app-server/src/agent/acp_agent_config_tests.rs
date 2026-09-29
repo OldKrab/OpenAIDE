@@ -18,6 +18,30 @@ fn built_in_codex_uses_the_product_pinned_adapter() {
 }
 
 #[test]
+fn built_in_claude_uses_an_exact_stable_package_pin() {
+    let config = AcpAgentConfig::claude_code();
+    assert_eq!(config.agent_id, "claude-code");
+    assert_eq!(config.args.len(), 2);
+    assert_eq!(config.args[0], "-y");
+    let version = config.args[1]
+        .strip_prefix("@agentclientprotocol/claude-agent-acp@")
+        .expect("the built-in must use the official Claude ACP package");
+    let components: Vec<_> = version.split('.').collect();
+    assert_eq!(
+        components.len(),
+        3,
+        "the launch policy must pin an exact version"
+    );
+    for component in components {
+        assert!(!component.is_empty());
+        assert!(component.bytes().all(|byte| byte.is_ascii_digit()));
+        assert!(component == "0" || !component.starts_with('0'));
+    }
+    assert!(config.env.is_empty());
+    assert!(config.secret_env.is_empty());
+}
+
+#[test]
 fn missing_codex_npx_is_classified_as_node_js_required() {
     assert!(matches!(
         command_not_found_error("codex", "npx"),

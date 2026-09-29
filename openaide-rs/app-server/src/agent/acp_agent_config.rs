@@ -14,7 +14,10 @@ use crate::protocol::host::HostBridge;
 mod tests;
 
 const PRODUCT_CODEX_ACP_SPEC: &str = "@openaide/codex-acp@1.2.2";
-const PRODUCT_CLAUDE_ACP_SPEC: &str = "@agentclientprotocol/claude-agent-acp@0.81.2";
+// The shared catalog and App Server consume the same Dependabot-managed policy.
+const CLAUDE_ACP_POLICY: &str = include_str!(
+    "../../../../packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json"
+);
 
 #[derive(Debug, Clone)]
 pub struct AcpAgentConfig {
@@ -50,10 +53,18 @@ impl AcpAgentConfig {
     /// Pin the Claude adapter rather than selecting an arbitrary executable from PATH.
     /// The adapter bundles the Claude runtime and owns authentication and session storage.
     pub fn claude_code() -> Self {
+        let policy: serde_json::Value = serde_json::from_str(CLAUDE_ACP_POLICY)
+            .expect("embedded Claude ACP policy is valid JSON");
+        let version = policy["dependencies"]["@agentclientprotocol/claude-agent-acp"]
+            .as_str()
+            .expect("embedded Claude ACP policy includes its package version");
         Self {
             agent_id: "claude-code".to_string(),
             command: resolved_command_or_name("npx"),
-            args: vec!["-y".to_string(), PRODUCT_CLAUDE_ACP_SPEC.to_string()],
+            args: vec![
+                "-y".to_string(),
+                format!("@agentclientprotocol/claude-agent-acp@{version}"),
+            ],
             env: Vec::new(),
             secret_env: Vec::new(),
         }
