@@ -31,6 +31,7 @@ fn fixture_with_host(temp: &tempfile::TempDir, mode: &str, host: HostBridge) -> 
 fn list_pid(runtime: &AcpAgentRuntime, cwd: &Path) -> String {
     runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".into(),
             cwd: Some(cwd.to_string_lossy().into_owned()),
             cursor: None,
@@ -82,6 +83,7 @@ fn unanswered_listing_expires_after_its_request_deadline() {
         fixture_with_mode(&temp, "unanswered_list").with_list_timeout(Duration::from_millis(400));
     let pid = list_pid(&runtime, temp.path());
     let result = runtime.list_sessions(AgentListSessionsRequest {
+        operation_id: uuid::Uuid::new_v4().to_string(),
         agent_id: "codex".into(),
         cwd: Some(temp.path().to_string_lossy().into_owned()),
         cursor: Some("unanswered".into()),

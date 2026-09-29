@@ -14,6 +14,7 @@ export function TaskMessageQueueView({
   onExpanded,
   onRemove,
   onSendNow,
+  onResume,
 }: {
   editDisabled?: boolean;
   extractionStage?: "pending" | "collapsing";
@@ -24,6 +25,7 @@ export function TaskMessageQueueView({
   onExpanded?: () => void;
   onRemove: (queuedMessageId: string) => void | Promise<void>;
   onSendNow?: (queuedMessageId: string) => void | Promise<void>;
+  onResume?: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(true);
   const [draggingId, setDraggingId] = useState<string>();
@@ -301,6 +303,11 @@ export function TaskMessageQueueView({
               ) : <ListPlus aria-hidden="true" className="task-message-queue-single-icon" size={14} />}
               <div className="task-message-queue-copy">
                 <span>{item.text || "Attachment-only message"}</span>
+                {item.not_before ? (
+                  <time dateTime={new Date(Number(item.not_before)).toISOString()}>Scheduled: {new Date(Number(item.not_before)).toLocaleString(undefined, {
+                    dateStyle: "medium", timeStyle: "short",
+                  })}</time>
+                ) : null}
                 {item.attachments?.length ? (
                   <small>{item.attachments.map((attachment) => attachment.label).join(", ")}</small>
                 ) : null}
@@ -341,7 +348,7 @@ export function TaskMessageQueueView({
               : queue.pause === "attachmentUnavailable"
                 ? "Paused: attachment unavailable"
                 : "Paused after interrupted work"}</span>
-            <button disabled={queueBusy} onClick={() => runMutation(queue.items[0]!.queued_message_id, "send", () => onSendNow?.(queue.items[0]!.queued_message_id))} type="button">
+            <button disabled={queueBusy || !onResume} onClick={() => runMutation(queue.items[0]!.queued_message_id, "send", () => onResume?.())} type="button">
               Resume queue
             </button>
           </div>

@@ -239,6 +239,8 @@ pub struct AgentAuthenticateRequest {
 
 #[derive(Clone)]
 pub struct AgentListSessionsRequest {
+    /// Correlates queueing, process dispatch, and one page response without exposing cursors.
+    pub operation_id: String,
     pub agent_id: String,
     /// Optional ACP cwd filter. `None` requests the Agent's global session catalog.
     pub cwd: Option<String>,

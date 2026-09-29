@@ -199,6 +199,7 @@ fn main() {
             }),
             "agent_list_sessions": to_value(AgentListSessionsResult {
                 agent_id: "codex".to_string(),
+                authoritative: true,
                 sessions: vec![AgentListedSession {
                     session_id: "session_1".to_string(),
                     cwd: "/workspace/app".to_string(),

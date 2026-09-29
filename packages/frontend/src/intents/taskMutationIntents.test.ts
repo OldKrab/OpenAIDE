@@ -4,6 +4,7 @@ import {
   TASK_CLOSE_PLAN,
   TASK_QUEUE_APPEND,
   TASK_QUEUE_REMOVE,
+  TASK_QUEUE_RESUME,
   TASK_QUEUE_TAKE,
   TASK_SEND,
   TASK_SET_PERMISSION_POLICY,
@@ -15,6 +16,31 @@ afterEach(() => {
 });
 
 describe("task mutation intents", () => {
+  it("schedules the exact draft once and retains it after rejected acceptance", async () => {
+    const { appendTaskQueueIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("Choose a future date and time"));
+    const dispatch = vi.fn();
+    appendTaskQueueIntent({ backendConnection: { request }, clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1), dispatch, postHostMessage: vi.fn(), stateRootId: "root-a",
+    }, taskSnapshot(), { prompt: "Later", context: [] }, "4102444800000");
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:sendError",
+      taskId: "task-a", message: "Choose a future date and time" }));
+    expect(request).toHaveBeenCalledExactlyOnceWith(TASK_QUEUE_APPEND, {
+      taskId: "task-a", message: { text: "Later" }, notBefore: "4102444800000",
+    });
+    expect(dispatch.mock.calls.some(([action]) => action.type === "taskQueue:accepted")).toBe(false);
+  });
+
+  it("resumes scheduling without issuing Send now or replaying a conflict", async () => {
+    const { resumeTaskQueueIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("Task Message Queue changed"));
+    await expect(resumeTaskQueueIntent({ backendConnection: { request }, clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1), dispatch: vi.fn(), postHostMessage: vi.fn(), stateRootId: "root-a",
+    }, taskSnapshot())).rejects.toThrow("Task Message Queue changed");
+    expect(request).toHaveBeenCalledExactlyOnceWith(TASK_QUEUE_RESUME, {
+      taskId: "task-a", queueRevision: taskSnapshot().message_queue?.revision ?? 0,
+    });
+  });
   it("sends the Task-owned auto-approve policy through the central mutation seam", async () => {
     const { setTaskPermissionPolicyIntent } = await import("./taskMutationIntents");
     const request = vi.fn().mockRejectedValue(new Error("connection closed"));

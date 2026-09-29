@@ -355,6 +355,10 @@ pub(super) fn push_method_constants(output: &mut String) {
         TASK_QUEUE_MOVE
     ));
     output.push_str(&format!(
+        "export const TASK_QUEUE_RESUME = {:?} as const;\n",
+        crate::methods::TASK_QUEUE_RESUME
+    ));
+    output.push_str(&format!(
         "export const TASK_RESOLVE_CONFIG_PREFERENCES = {:?} as const;\n",
         TASK_RESOLVE_CONFIG_PREFERENCES
     ));

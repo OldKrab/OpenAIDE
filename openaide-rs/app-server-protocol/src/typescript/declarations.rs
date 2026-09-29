@@ -477,6 +477,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskQueueTakeParams>(output, config);
     push_decl::<TaskQueueTakeResult>(output, config);
     push_decl::<TakenQueuedMessage>(output, config);
+    push_decl::<crate::task::TaskQueueResumeParams>(output, config);
+    push_decl::<crate::task::TaskQueueResumeResult>(output, config);
     push_decl::<TaskQueueMoveParams>(output, config);
     push_decl::<TaskQueueMoveResult>(output, config);
     push_decl::<TaskResolveConfigPreferencesParams>(output, config);

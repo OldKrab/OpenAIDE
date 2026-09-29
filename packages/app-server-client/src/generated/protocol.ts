@@ -99,6 +99,7 @@ export const TASK_QUEUE_APPEND = "task/queueAppend" as const;
 export const TASK_QUEUE_REMOVE = "task/queueRemove" as const;
 export const TASK_QUEUE_TAKE = "task/queueTake" as const;
 export const TASK_QUEUE_MOVE = "task/queueMove" as const;
+export const TASK_QUEUE_RESUME = "task/queueResume" as const;
 export const TASK_RESOLVE_CONFIG_PREFERENCES = "task/resolveConfigPreferences" as const;
 export const TASK_SET_CONFIG_OPTION = "task/setConfigOption" as const;
 export const TASK_SET_PERMISSION_POLICY = "task/setPermissionPolicy" as const;
@@ -819,7 +820,11 @@ export type ComposerImage = { label: string, mimeType: string, data: string, };
 
 export type TaskSendResult = { task: TaskSnapshot, turnId: TurnId, userMessageId: MessageId, };
 
-export type TaskQueueAppendParams = { taskId: TaskId, message: ComposerMessage, };
+export type TaskQueueAppendParams = { taskId: TaskId, message: ComposerMessage,
+/**
+ * Earliest delivery time, as UTC epoch milliseconds. Omission queues after the turn.
+ */
+notBefore?: string, };
 
 export type TaskQueueAppendResult = { task: TaskSnapshot, };
 
@@ -832,6 +837,10 @@ export type TaskQueueTakeParams = { taskId: TaskId, queuedMessageId: QueuedMessa
 export type TaskQueueTakeResult = { task: TaskSnapshot, message: TakenQueuedMessage, };
 
 export type TakenQueuedMessage = { text: string, attachments?: Array<PreSendAttachment>, images?: Array<ComposerImage>, };
+
+export type TaskQueueResumeParams = { taskId: TaskId, queueRevision: number, };
+
+export type TaskQueueResumeResult = { task: TaskSnapshot, };
 
 export type TaskQueueMoveParams = { taskId: TaskId, queuedMessageId: QueuedMessageId, targetIndex: number, queueRevision: number, clientMutationId: ClientMutationId, };
 
@@ -1204,7 +1213,11 @@ export type TaskMessageQueueSnapshot = { revision: number, pause?: TaskMessageQu
 
 export type TaskMessageQueuePauseSnapshot = "restarted" | "unsuccessfulTurn" | "attachmentUnavailable";
 
-export type QueuedMessageSnapshot = { queuedMessageId: QueuedMessageId, text: string, createdAt: string, attachments?: Array<QueuedMessageAttachmentSnapshot>, };
+export type QueuedMessageSnapshot = { queuedMessageId: QueuedMessageId,
+/**
+ * Earliest automatic delivery time, as UTC epoch milliseconds.
+ */
+notBefore?: string, text: string, createdAt: string, attachments?: Array<QueuedMessageAttachmentSnapshot>, };
 
 export type QueuedMessageAttachmentSnapshot = { kind: string, label: string, };
 
@@ -1318,7 +1331,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof TASK_QUEUE_RESUME;
 export type RequestParamsByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;
   [FILE_VIEWER_SEARCH]: ProjectFilesParams;
@@ -1399,6 +1412,7 @@ export type RequestParamsByMethod = {
   [TASK_QUEUE_REMOVE]: TaskQueueRemoveParams;
   [TASK_QUEUE_TAKE]: TaskQueueTakeParams;
   [TASK_QUEUE_MOVE]: TaskQueueMoveParams;
+  [TASK_QUEUE_RESUME]: TaskQueueResumeParams;
   [TASK_RESOLVE_CONFIG_PREFERENCES]: TaskResolveConfigPreferencesParams;
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;
   [TASK_SET_PERMISSION_POLICY]: TaskSetPermissionPolicyParams;
@@ -1511,6 +1525,7 @@ export type ResponseResultByMethod = {
   [TASK_QUEUE_REMOVE]: TaskQueueRemoveResult;
   [TASK_QUEUE_TAKE]: TaskQueueTakeResult;
   [TASK_QUEUE_MOVE]: TaskQueueMoveResult;
+  [TASK_QUEUE_RESUME]: TaskQueueResumeResult;
   [TASK_RESOLVE_CONFIG_PREFERENCES]: TaskResolveConfigPreferencesResult;
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;
   [TASK_SET_PERMISSION_POLICY]: TaskSetPermissionPolicyResult;
@@ -1623,6 +1638,7 @@ export type TaskQueueAppendResponse = ResponseEnvelope<TaskQueueAppendResult>;
 export type TaskQueueRemoveResponse = ResponseEnvelope<TaskQueueRemoveResult>;
 export type TaskQueueTakeResponse = ResponseEnvelope<TaskQueueTakeResult>;
 export type TaskQueueMoveResponse = ResponseEnvelope<TaskQueueMoveResult>;
+export type TaskQueueResumeResponse = ResponseEnvelope<TaskQueueResumeResult>;
 export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionResult>;
 export type TaskSetPermissionPolicyResponse = ResponseEnvelope<TaskSetPermissionPolicyResult>;
 export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;

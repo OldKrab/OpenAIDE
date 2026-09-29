@@ -35,6 +35,7 @@ import {
   moveTaskQueueMessageIntent,
   takeTaskQueueMessageIntent,
   sendTaskQueueMessageNowIntent,
+  resumeTaskQueueIntent,
   sendTaskPromptIntent,
 } from "../intents/taskMutationIntents";
 import { requestComposerHistory } from "../intents/taskReadIntents";
@@ -73,7 +74,7 @@ export function createTaskCallbacks({
   state,
 }: TaskDependencies): TaskCallbacks {
   return {
-    addToQueue: () => {
+    addToQueue: (notBefore) => {
       if (!state.snapshot) return;
       const taskId = state.snapshot.task.task_id;
       const input = state.taskInputs[taskId] ?? { prompt: "", context: [] };
@@ -85,7 +86,7 @@ export function createTaskCallbacks({
         dispatch,
         postHostMessage,
         stateRootId: state.appServerStateRootId,
-      }, state.snapshot, input);
+      }, state.snapshot, input, notBefore);
     },
     cancel: () => {
       const cancel = () => cancelTaskIntent(
@@ -258,6 +259,10 @@ export function createTaskCallbacks({
         dispatch, postHostMessage, stateRootId: state.appServerStateRootId,
       }, state.snapshot, queuedMessageId);
     },
+    resumeQueue: () => resumeTaskQueueIntent({
+      attachmentResources, backendConnection, clientInstanceId, createSnapshotRequestId,
+      dispatch, postHostMessage, stateRootId: state.appServerStateRootId,
+    }, state.snapshot),
     revealAttachment: (attachmentId) => {
       if (!state.snapshot || !backendConnection?.request) return Promise.reject(new Error(appServerRequiredMessage()));
       const taskId = state.snapshot.task.task_id;

@@ -37,6 +37,7 @@ fn catalog_list_finishing_after_sign_in_starts_preserves_the_running_flow() {
         );
         let listing = std::thread::spawn(move || {
             runtime.list_sessions(AgentListSessionsRequest {
+                operation_id: uuid::Uuid::new_v4().to_string(),
                 agent_id: "codex".to_string(),
                 cwd: Some("/fixture-workspace".to_string()),
                 cursor: None,
@@ -86,6 +87,7 @@ impl AgentRuntime for BlockedListRuntime {
             AuthRequiredListRuntime.list_sessions(request)
         } else {
             Ok(crate::protocol::model::AgentListSessionsResult {
+                authoritative: true,
                 agent_id: request.agent_id,
                 sessions: Vec::new(),
                 next_cursor: None,
@@ -165,6 +167,7 @@ fn list_sessions_auth_required_leaves_launching_and_keeps_advertised_methods() {
 
     let error = runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some("/tmp".to_string()),
             cursor: None,
@@ -289,6 +292,7 @@ fn history_listing_failure_keeps_started_agent_connected_in_settings() {
         .unwrap();
     let error = runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some("/fixture-workspace".to_string()),
             cursor: None,

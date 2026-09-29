@@ -7,6 +7,23 @@ import { TaskMessageQueueView } from "./TaskMessageQueue";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("Task Message Queue", () => {
+  it("shows scheduled delivery and resumes without sending the head immediately", async () => {
+    const onResume = vi.fn();
+    const onSendNow = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TaskMessageQueueView queue={{ revision: 2, pause: "restarted", items: [{
+        queued_message_id: "scheduled", text: "Tomorrow", created_at: "now", not_before: "4102444800000",
+      }] }} onRemove={vi.fn()} onResume={onResume} onSendNow={onSendNow} />);
+    });
+    expect(JSON.stringify(tree.toJSON())).toContain("Scheduled:");
+    await act(async () => {
+      tree.root.findAllByType("button").find((button) => button.children.includes("Resume queue"))!.props.onClick();
+    });
+    expect(onResume).toHaveBeenCalledOnce();
+    expect(onSendNow).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
   it("requests immediate removal without adding confirmation UI", () => {
     const onRemove = vi.fn();
     let tree!: ReturnType<typeof create>;

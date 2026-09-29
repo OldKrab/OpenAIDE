@@ -268,6 +268,35 @@ impl TaskJournalStore {
             .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))
     }
 
+    /// Projects metadata without cloning Chat or queued attachment payloads. The
+    /// callback runs under a read lock and must not call back into storage.
+    pub(crate) fn inspect_task_record<T>(
+        &self,
+        task_id: &str,
+        inspect: impl FnOnce(&TaskRecord) -> T,
+    ) -> Result<T, RuntimeError> {
+        validate_task_id(task_id)?;
+        recovery::ensure_task_loaded(
+            &self.inner.tasks_root,
+            &self.inner.catalog,
+            &self.inner.epoch_task_overlays,
+            &self.inner.projections,
+            &self.inner.projection_load_lock,
+            task_id,
+        )?;
+        self.inner
+            .projections
+            .read()
+            .expect("Task journal projections poisoned")
+            .get(task_id)
+            .map(|task| match task {
+                RecoveredTask::Available { projection, .. } => Ok(inspect(&projection.task)),
+                RecoveredTask::Unavailable { error } => Err(RuntimeError::Storage(error.clone())),
+            })
+            .transpose()?
+            .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))
+    }
+
     /// Returns lightweight Task records without hydrating Chat or Tool details.
     pub fn list_task_records(&self) -> Vec<TaskRecord> {
         self.inner

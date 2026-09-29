@@ -5,6 +5,7 @@ import {
   TASK_QUEUE_APPEND,
   TASK_QUEUE_MOVE,
   TASK_QUEUE_REMOVE,
+  TASK_QUEUE_RESUME,
   TASK_QUEUE_TAKE,
   TASK_RELOAD_NATIVE_SESSION,
   TASK_SEND,
@@ -249,6 +250,7 @@ export function appendTaskQueueIntent(
   dependencies: TaskMutationIntentDependencies,
   snapshot: TaskSnapshot | undefined,
   input: TaskComposerInput,
+  notBefore?: string,
 ) {
   if (!snapshot) return;
   const taskId = snapshot.task.task_id;
@@ -273,6 +275,7 @@ export function appendTaskQueueIntent(
   void dependencies.backendConnection.request(TASK_QUEUE_APPEND, {
     taskId: taskId as TaskId,
     message,
+    ...(notBefore ? { notBefore } : {}),
   }).then((result) => {
     dependencies.dispatch({
       type: "snapshot",
@@ -415,6 +418,25 @@ export function moveTaskQueueMessageIntent(
     queuedMessageId: queuedMessageId as QueuedMessageId,
     targetIndex,
   });
+}
+
+/** Resumes delivery while preserving every scheduled message's earliest send time. */
+export async function resumeTaskQueueIntent(
+  dependencies: TaskMutationIntentDependencies,
+  snapshot: TaskSnapshot | undefined,
+): Promise<void> {
+  if (!snapshot) return;
+  const taskId = snapshot.task.task_id;
+  try {
+    if (!dependencies.backendConnection?.request) throw new Error("App Server connection unavailable.");
+    const result = await dependencies.backendConnection.request(TASK_QUEUE_RESUME, {
+      taskId: taskId as TaskId, queueRevision: snapshot.message_queue?.revision ?? 0,
+    });
+    dependencies.dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
+  } catch (error) {
+    dependencies.dispatch({ type: "taskInput:error", taskId, message: taskMutationErrorMessage(error, "Unable to resume queue.") });
+    throw error;
+  }
 }
 
 /** Sends one observed queue item and consumes it in the App Server's Send commit. */

@@ -66,7 +66,11 @@ impl CodexAcpInstaller for RecordingInstaller {
         fs::create_dir_all(package_root.join("dist")).expect("create managed package fixture");
         fs::write(
             package_root.join("package.json"),
-            r#"{"name":"@openaide/codex-acp","version":"1.2.2"}"#,
+            serde_json::json!({
+                "name": super::runtime_manifest().package_name,
+                "version": super::runtime_manifest().package_version,
+            })
+            .to_string(),
         )
         .expect("write managed package manifest");
         fs::write(package_root.join("dist/index.js"), INDEX_FIXTURE)

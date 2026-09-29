@@ -119,9 +119,8 @@ impl AcpRuntimeKernel {
             ));
         }
 
-        self.with_agent_process_operation(&request.agent_id.clone(), || {
-            self.active_sessions.list_sessions(request)
-        })
+        let operation = self.agent_process_operation(&request.agent_id)?;
+        self.active_sessions.list_sessions(request, &operation)
     }
 
     pub(super) fn set_session_config_option(
@@ -256,7 +255,15 @@ impl AcpRuntimeKernel {
         agent_id: &str,
         operation: impl FnOnce() -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
-        let agent_operation = self
+        let agent_operation = self.agent_process_operation(agent_id)?;
+        let _operation = agent_operation.lock().map_err(|_| {
+            RuntimeError::Internal("ACP Agent process operation lock poisoned".to_string())
+        })?;
+        operation()
+    }
+
+    fn agent_process_operation(&self, agent_id: &str) -> Result<Arc<Mutex<()>>, RuntimeError> {
+        Ok(self
             .agent_process_operations
             .lock()
             .map_err(|_| {
@@ -264,10 +271,6 @@ impl AcpRuntimeKernel {
             })?
             .entry(agent_id.to_string())
             .or_default()
-            .clone();
-        let _operation = agent_operation.lock().map_err(|_| {
-            RuntimeError::Internal("ACP Agent process operation lock poisoned".to_string())
-        })?;
-        operation()
+            .clone())
     }
 }

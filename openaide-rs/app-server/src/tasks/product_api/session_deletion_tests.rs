@@ -351,6 +351,7 @@ fn unknown_deletion_blocks_automatic_queue_delivery_after_the_current_turn_finis
     let live = agent.live.as_ref().unwrap();
     wait_until(|| live.prompts.load(Ordering::SeqCst) == 1);
     api.queue_append_for_test(TaskQueueAppendParams {
+        not_before: None,
         task_id: "queue-unknown".into(),
         message: ComposerMessage {
             text: Some("must stay queued".into()),

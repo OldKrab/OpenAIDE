@@ -61,6 +61,7 @@ mod reload_native_session;
 mod reset_task_history;
 mod resolve_config_preferences;
 mod retention;
+mod scheduled_queue;
 pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;
@@ -74,6 +75,7 @@ mod support_recovery;
 mod workflows;
 
 pub(crate) use queue::queued_attachment_paths_are_available;
+pub(crate) use scheduled_queue::queued_message_is_due;
 pub(crate) use workflows::*;
 
 #[derive(Clone)]
@@ -98,6 +100,7 @@ pub(crate) struct TaskProductApi {
     native_catalog: crate::native_sessions::catalog::NativeSessionCatalog,
     native_catalog_refresh: list_sessions::NativeCatalogRefreshCoordinator,
     storage_maintenance: retention::TaskStorageMaintenanceCoordinator,
+    scheduled_queue: scheduled_queue::ScheduledQueueCoordinator,
     task_subscription_presence: TaskSubscriptionPresence,
     native_adoption: Arc<Mutex<()>>,
     #[allow(dead_code)]
@@ -256,6 +259,7 @@ impl TaskProductApi {
             native_catalog,
             native_catalog_refresh: Default::default(),
             storage_maintenance: Default::default(),
+            scheduled_queue: Default::default(),
             task_subscription_presence: Default::default(),
             native_adoption: Arc::new(Mutex::new(())),
             server_requests,
@@ -386,6 +390,17 @@ impl TaskAdoptNativeSessionWorkflow for TaskProductApi {
 }
 
 impl TaskSendWorkflow for TaskProductApi {
+    fn queue_resume_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskQueueResumeParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.resume_scheduled_queue(client_instance_id, params)
+    }
+
+    fn request_scheduled_queue_delivery(&self) {
+        self.poll_scheduled_queue();
+    }
     fn send_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

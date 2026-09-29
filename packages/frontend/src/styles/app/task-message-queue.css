@@ -1,3 +1,52 @@
+.oa-popup-surface.composer-schedule {
+  width: min(320px, calc(100vw - 24px));
+  padding: 14px;
+  box-sizing: border-box;
+}
+
+.composer-schedule form {
+  display: grid;
+  gap: 10px;
+}
+
+.composer-schedule label { font-weight: 600; }
+
+.composer-schedule input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  font: inherit;
+}
+
+.composer-schedule p {
+  margin: 0;
+  color: var(--oa-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.composer-schedule p.composer-schedule-error { color: var(--oa-danger); }
+
+.composer-schedule-submit {
+  justify-self: end;
+  padding: 8px 12px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-schedule-submit:hover { background: var(--oa-panel); }
+.composer-schedule-submit:disabled { opacity: 0.5; cursor: default; }
+
 .task-queue-anchor,
 .task-composer-shell {
   width: min(760px, 100%);
@@ -239,6 +288,14 @@
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Delivery time must remain readable beside the touch actions at narrow widths. */
+.task-message-queue-copy > time {
+  color: var(--oa-muted);
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .task-message-queue-grip {

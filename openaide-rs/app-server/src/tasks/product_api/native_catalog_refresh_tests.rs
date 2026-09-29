@@ -8,6 +8,66 @@ use crate::protocol::model::{
 use openaide_app_server_protocol::snapshot::TaskNavigationRefreshState;
 
 #[test]
+fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    for index in 0..3 {
+        store
+            .write_task(&task_record(
+                &format!("task-{index}"),
+                temp.path()
+                    .join(format!("workspace-{index}"))
+                    .to_str()
+                    .unwrap(),
+            ))
+            .unwrap();
+    }
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let agent = Arc::new(MixedCatalogRuntime {
+        authenticated: AtomicBool::new(true),
+        listing_gate: Some(gate.clone()),
+        listing_entered: Some(entered_tx),
+        ..Default::default()
+    });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        notifier,
+    )
+    .unwrap();
+    api.request_native_session_catalog_refresh();
+    let expected = 3 * BUILT_IN_AGENT_METADATA.len();
+    let mut entered = 0;
+    for _ in 0..expected {
+        if entered_rx.recv_timeout(Duration::from_secs(2)).is_err() {
+            break;
+        }
+        entered += 1;
+    }
+    // Release and drain before asserting, including the intentionally failing run.
+    *gate.0.lock().unwrap() = true;
+    gate.1.notify_all();
+    loop {
+        let update = updates.recv_timeout(Duration::from_secs(5)).unwrap();
+        if matches!(
+            update.kind,
+            TaskUpdateKind::NavigationRefreshStateChanged {
+                refresh: TaskNavigationRefreshState::Idle
+            }
+        ) {
+            break;
+        }
+    }
+    assert_eq!(entered, expected,
+        "one slow history must not serialize every Agent/workspace and keep sidebar Refresh disabled");
+    assert!(!api.native_session_catalog().refreshing());
+}
+
+#[test]
 fn unsigned_agent_catalog_refresh_settles_and_retries_after_explicit_refresh_or_sign_in() {
     assert_unsigned_catalog_settles(true);
 }
@@ -117,6 +177,8 @@ struct MixedCatalogRuntime {
     authenticated: AtomicBool,
     calls: Mutex<HashMap<(String, String), usize>>,
     advertises_auth_method: bool,
+    listing_gate: Option<Arc<(Mutex<bool>, std::sync::Condvar)>>,
+    listing_entered: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl AgentRuntime for MixedCatalogRuntime {
@@ -151,6 +213,16 @@ impl AgentRuntime for MixedCatalogRuntime {
         &self,
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
+        if let Some(entered) = &self.listing_entered {
+            entered.send(()).unwrap();
+        }
+        if let Some(gate) = &self.listing_gate {
+            drop(
+                gate.1
+                    .wait_while(gate.0.lock().unwrap(), |released| !*released)
+                    .unwrap(),
+            );
+        }
         let cwd = request.cwd.unwrap();
         *self
             .calls
@@ -164,6 +236,7 @@ impl AgentRuntime for MixedCatalogRuntime {
             ));
         }
         Ok(AgentListSessionsResult {
+            authoritative: true,
             agent_id: request.agent_id.clone(),
             sessions: vec![AgentListedSession {
                 session_id: format!(

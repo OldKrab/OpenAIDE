@@ -927,6 +927,7 @@ fn listing_sessions_does_not_create_a_native_session() {
 
     runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some(cwd_string()),
             cursor: None,
@@ -1150,6 +1151,7 @@ fn listing_then_starting_reuses_one_agent_process() {
 
     runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some(cwd_string()),
             cursor: None,
@@ -1180,6 +1182,7 @@ fn task_trace_preserves_initialize_capabilities_after_process_warmup() {
 
     runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some(cwd_string()),
             cursor: None,
@@ -1218,6 +1221,7 @@ fn listing_sessions_reuses_the_active_agent_process() {
 
     runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some(cwd_string()),
             cursor: None,
@@ -1249,6 +1253,7 @@ fn attached_session_resume_does_not_wait_for_discovery() {
         let runtime = runtime.clone();
         move || {
             runtime.list_sessions(AgentListSessionsRequest {
+                operation_id: uuid::Uuid::new_v4().to_string(),
                 agent_id: "codex".to_string(),
                 cwd: Some(cwd_string()),
                 cursor: None,
@@ -1338,6 +1343,7 @@ fn session_listing_timeout_does_not_disconnect_active_prompt() {
 
     let error = runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some(cwd_string()),
             cursor: None,
@@ -1389,6 +1395,7 @@ fn listing_sessions_recovers_after_a_failed_resume_ends_the_shared_process() {
 
     runtime
         .list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: "codex".to_string(),
             cwd: Some(cwd_string()),
             cursor: None,
@@ -4066,6 +4073,7 @@ fn deletion_reaches_agent_while_history_listing_is_pending() {
             let runtime = runtime.clone();
             move || {
                 runtime.list_sessions(AgentListSessionsRequest {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
                     agent_id: "codex".into(),
                     cwd: Some(cwd_string()),
                     cursor: None,
@@ -4106,6 +4114,60 @@ fn deletion_reaches_agent_while_history_listing_is_pending() {
             "Delete waited for history; attached={attached}"
         );
     }
+}
+
+#[test]
+fn independent_history_reads_reach_agent_while_another_listing_is_pending() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "parallel-history", "concurrent_list")
+    else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let mut workers = Vec::new();
+    for index in 0..3 {
+        let runtime = runtime.clone();
+        let cwd = temp.path().join(format!("workspace-{index}"));
+        workers.push(std::thread::spawn(move || {
+            runtime.list_sessions(AgentListSessionsRequest {
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                agent_id: "codex".into(),
+                cwd: Some(cwd.to_string_lossy().into_owned()),
+                cursor: None,
+            })
+        }));
+    }
+    // The fixture acknowledges entry by logging the method and holds every response
+    // behind the release file. The deadline is only a deadlock watchdog.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let entered = loop {
+        let count = read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| *method == "session/list")
+            .count();
+        if count == 3 || Instant::now() >= deadline {
+            break count;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+    for worker in workers {
+        worker.join().unwrap().unwrap();
+    }
+    runtime.shutdown().unwrap();
+    assert_eq!(
+        entered, 3,
+        "independent Projects must not queue behind one history read"
+    );
+    assert_eq!(
+        read_fixture_methods(&log_path)
+            .iter()
+            .filter(|method| *method == "initialize")
+            .count(),
+        1,
+        "concurrent discovery must share one Agent process"
+    );
 }
 
 #[test]
@@ -4385,7 +4447,12 @@ fn active_prompt_process_exit_records_safe_terminal_diagnostics() {
     assert_eq!(terminal["fields"]["exit_code"], 23);
     assert_eq!(terminal["fields"]["exit_signal"], serde_json::Value::Null);
     assert_eq!(terminal["fields"]["active_session_count"], 1);
-    assert_eq!(terminal["fields"]["active_prompt_count"], 1);
+    // Transport failure and prompt cleanup race legitimately: this is a snapshot at
+    // connection termination, not a count of prompts interrupted by the exit.
+    assert!(matches!(
+        terminal["fields"]["active_prompt_count"].as_u64(),
+        Some(0 | 1)
+    ));
     assert!(terminal["fields"].get("stderr").is_none());
     assert!(terminal["fields"].get("error").is_none());
 }

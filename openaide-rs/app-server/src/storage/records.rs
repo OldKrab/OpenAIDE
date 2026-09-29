@@ -463,6 +463,9 @@ impl TaskAttentionEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct QueuedMessageRecord {
     pub queued_message_id: String,
+    /// Automatic delivery remains FIFO and cannot consume this item before this UTC time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_before: Option<String>,
     pub text: String,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

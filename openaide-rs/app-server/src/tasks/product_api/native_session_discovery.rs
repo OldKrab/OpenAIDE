@@ -20,10 +20,24 @@ impl TaskProductApi {
     /// ACP's cwd filter is exact, so roots, available worktrees, and historical Task
     /// workspaces are independent discovery contexts. This avoids making a sparse Project
     /// paginate through another Project's entire Agent history.
+    #[cfg(test)]
     pub(super) fn refresh_native_session_project_trees(
         &self,
         project_filter: Option<&str>,
         target_row_count: Option<usize>,
+    ) -> Result<(), ProtocolError> {
+        self.refresh_native_session_project_trees_with_id(
+            project_filter,
+            target_row_count,
+            &uuid::Uuid::new_v4().to_string(),
+        )
+    }
+
+    pub(super) fn refresh_native_session_project_trees_with_id(
+        &self,
+        project_filter: Option<&str>,
+        target_row_count: Option<usize>,
+        refresh_id: &str,
     ) -> Result<(), ProtocolError> {
         let projects = self.configured_projects.projects();
         let task_records = self
@@ -105,20 +119,37 @@ impl TaskProductApi {
             .collect::<Vec<_>>();
         let mut outcomes = Vec::with_capacity(agents.len() * selected_workspaces.len());
         let mut first_error = None;
+        let contexts = agents
+            .iter()
+            .flat_map(|agent| {
+                selected_workspaces
+                    .iter()
+                    .map(move |(project_id, workspace_root)| {
+                        (&agent.id, project_id, workspace_root)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let next_context = std::sync::atomic::AtomicUsize::new(0);
         let agent_results = std::thread::scope(|scope| {
-            agents
-                .iter()
-                .map(|agent| {
+            // Start the bounded worker set before joining any worker. Joining a lazy
+            // spawn iterator serializes discovery and keeps Navigation busy for minutes.
+            let workers = (0..contexts
+                .len()
+                .min(super::list_sessions::MAX_CONCURRENT_CATALOG_LISTINGS))
+                .map(|_| {
                     scope.spawn(|| {
                         let mut agent_outcomes = Vec::with_capacity(selected_workspaces.len());
                         let mut agent_error = None;
-                        for (project_id, workspace_root) in &selected_workspaces {
+                        while let Some((agent_id, project_id, workspace_root)) = contexts
+                            .get(next_context.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                        {
                             match self.refresh_native_session_context(
-                                &agent.id,
+                                agent_id,
                                 project_id,
                                 workspace_root,
                                 target_row_count,
                                 &task_records,
+                                refresh_id,
                             ) {
                                 Ok(outcome) => agent_outcomes.push(outcome),
                                 Err(error) => {
@@ -129,6 +160,9 @@ impl TaskProductApi {
                         (agent_outcomes, agent_error)
                     })
                 })
+                .collect::<Vec<_>>();
+            workers
+                .into_iter()
                 .map(|worker| worker.join())
                 .collect::<Vec<_>>()
         });
@@ -194,12 +228,15 @@ impl TaskProductApi {
         workspace_root: &str,
         target_row_count: usize,
         task_records: &[crate::storage::records::TaskRecord],
+        refresh_id: &str,
     ) -> Result<NativeSessionContextRefresh, ProtocolError> {
         let started_at = Instant::now();
+        let context_id = uuid::Uuid::new_v4().to_string();
         crate::logging::info(
             "native_session_context_refresh_started",
             serde_json::json!({
                 "operation": "agent/list_sessions/context",
+                "operation_id": context_id, "refresh_id": refresh_id, "attempt": 1,
                 "agent_id": agent_id,
                 "project_id": project_id,
                 "target_row_count": target_row_count,
@@ -221,95 +258,135 @@ impl TaskProductApi {
         let mut page_count = 0_usize;
         let mut has_more = false;
         let mut complete = false;
-        loop {
-            let result = match self.agent_gateway.list_sessions(AgentListSessionsRequest {
-                agent_id: agent_id.to_string(),
-                cwd: Some(workspace_root.to_string()),
-                cursor: cursor.current(),
-            }) {
-                Ok(result) => result,
-                Err(error) => {
-                    crate::logging::warn(
-                        "native_session_context_refresh_failed",
-                        serde_json::json!({
-                            "operation": "agent/list_sessions/context",
-                            "agent_id": agent_id,
-                            "project_id": project_id,
-                            "duration_ms": started_at.elapsed().as_millis(),
-                            "page_count": page_count,
-                            "error_kind": error.code(),
-                        }),
-                    );
-                    return Err(protocol_error_from_runtime(error));
+        let mut authoritative = true;
+        let mut stop_reason = "error";
+        let outcome = (|| {
+            loop {
+                let page_id = uuid::Uuid::new_v4().to_string();
+                crate::logging::info(
+                    "native_session_context_page_started",
+                    serde_json::json!({
+                        "operation": "agent/list_sessions/page", "operation_id": page_id,
+                        "context_id": context_id, "refresh_id": refresh_id, "agent_id": agent_id,
+                        "project_id": project_id, "page_number": page_count + 1, "attempt": 1,
+                    }),
+                );
+                let page_started = Instant::now();
+                let page_outcome = (|| {
+                    let result = self
+                        .native_catalog_refresh
+                        .list_sessions(
+                            &self.agent_gateway,
+                            AgentListSessionsRequest {
+                                operation_id: page_id.clone(),
+                                agent_id: agent_id.to_string(),
+                                cwd: Some(workspace_root.to_string()),
+                                cursor: cursor.current(),
+                            },
+                        )
+                        .map_err(protocol_error_from_runtime)?;
+                    page_count = page_count.saturating_add(1);
+                    authoritative &= result.authoritative;
+                    let mut new_identity_count = 0_usize;
+                    for session in &result.sessions {
+                        if !seen_session_ids.insert(session.session_id.clone()) {
+                            continue;
+                        }
+                        new_identity_count = new_identity_count.saturating_add(1);
+                        let reference = NativeSessionRef::new(agent_id, &session.session_id);
+                        if !owned_sessions.contains(&(agent_id, session.session_id.as_str()))
+                            && !self.native_catalog.is_archived(&reference)
+                        {
+                            visible_session_ids.insert(session.session_id.clone());
+                        }
+                    }
+                    self.record_native_catalog_page(
+                        project_id,
+                        agent_id,
+                        workspace_root,
+                        &result.sessions,
+                        reconciliation.generation,
+                    )?;
+                    self.reconcile_native_session_activity(
+                        agent_id,
+                        workspace_root,
+                        &result.sessions,
+                        task_records,
+                    )?;
+                    Ok((result, new_identity_count))
+                })();
+                let fields = serde_json::json!({
+                    "operation": "agent/list_sessions/page", "operation_id": page_id,
+                    "context_id": context_id, "refresh_id": refresh_id, "attempt": 1,
+                    "outcome": if page_outcome.is_ok() { "completed" } else { "failed" },
+                    "duration_ms": page_started.elapsed().as_millis(),
+                    "error_kind": page_outcome.as_ref().err().map(|error: &ProtocolError| &error.code),
+                    "returned_count": page_outcome.as_ref().ok().map(|(page, _)| page.sessions.len()),
+                    "eligible_count": visible_session_ids.len(), "authoritative": authoritative,
+                });
+                if page_outcome.is_ok() {
+                    crate::logging::info("native_session_context_page_published", fields);
+                } else {
+                    crate::logging::warn("native_session_context_page_failed", fields);
                 }
-            };
-            page_count = page_count.saturating_add(1);
-            let mut new_identity_count = 0_usize;
-            for session in &result.sessions {
-                if !seen_session_ids.insert(session.session_id.clone()) {
-                    continue;
+                let (result, new_identity_count) = page_outcome?;
+                // A local cycle/no-progress stop is not the Agent's terminal cursor.
+                // Empty terminal pages are valid completion evidence, including empty histories.
+                if result.next_cursor.is_none() {
+                    complete = true;
+                    stop_reason = "exhausted";
+                    break;
                 }
-                new_identity_count = new_identity_count.saturating_add(1);
-                let reference = NativeSessionRef::new(agent_id, &session.session_id);
-                if !owned_sessions.contains(&(agent_id, session.session_id.as_str()))
-                    && !self.native_catalog.is_archived(&reference)
-                {
-                    visible_session_ids.insert(session.session_id.clone());
+                let next_cursor = cursor.advance(result.next_cursor);
+                if new_identity_count == 0 {
+                    stop_reason = "no_progress";
+                    break;
+                }
+                if visible_session_ids.len() >= target_row_count {
+                    has_more = next_cursor.is_some();
+                    stop_reason = "visible_target";
+                    break;
+                }
+                if next_cursor.is_none() {
+                    stop_reason = "cursor_cycle";
+                    break;
                 }
             }
-            self.record_native_catalog_page(
-                project_id,
-                agent_id,
-                workspace_root,
-                &result.sessions,
-                reconciliation.generation,
-            )?;
-            self.reconcile_native_session_activity(
-                agent_id,
-                workspace_root,
-                &result.sessions,
-                task_records,
-            )?;
-            // A local cycle/no-progress stop is not the Agent's terminal cursor.
-            // Empty terminal pages are valid completion evidence, including empty histories.
-            if result.next_cursor.is_none() {
-                complete = true;
-                break;
+            if complete && authoritative {
+                self.reconcile_completed_session_scan(
+                    reconciliation,
+                    &seen_session_ids,
+                    project_id,
+                )?;
             }
-            let next_cursor = cursor.advance(result.next_cursor);
-            if new_identity_count == 0 {
-                break;
-            }
-            if visible_session_ids.len() >= target_row_count {
-                has_more = next_cursor.is_some();
-                break;
-            }
-            if next_cursor.is_none() {
-                break;
-            }
+            Ok(NativeSessionContextRefresh {
+                project_id: project_id.to_string(),
+                discovered_count: seen_session_ids.len(),
+                has_more,
+            })
+        })();
+        let fields = serde_json::json!({
+            "operation": "agent/list_sessions/context",
+            "operation_id": context_id, "refresh_id": refresh_id, "attempt": 1,
+            "outcome": if outcome.is_ok() { "completed" } else { "failed" },
+            "error_kind": outcome.as_ref().err().map(|error: &ProtocolError| &error.code),
+            "stop_reason": stop_reason,
+            "agent_id": agent_id,
+            "project_id": project_id,
+            "duration_ms": started_at.elapsed().as_millis(),
+            "page_count": page_count,
+            "observed_session_count": seen_session_ids.len(),
+            "visible_session_count": visible_session_ids.len(),
+            "has_more": has_more,
+            "complete": complete,
+            "authoritative": authoritative,
+        });
+        if outcome.is_ok() {
+            crate::logging::info("native_session_context_refresh_completed", fields);
+        } else {
+            crate::logging::warn("native_session_context_refresh_failed", fields);
         }
-        if complete {
-            self.reconcile_completed_session_scan(reconciliation, &seen_session_ids, project_id)?;
-        }
-        crate::logging::info(
-            "native_session_context_refresh_completed",
-            serde_json::json!({
-                "operation": "agent/list_sessions/context",
-                "agent_id": agent_id,
-                "project_id": project_id,
-                "duration_ms": started_at.elapsed().as_millis(),
-                "page_count": page_count,
-                "observed_session_count": seen_session_ids.len(),
-                "visible_session_count": visible_session_ids.len(),
-                "has_more": has_more,
-                "complete": complete,
-            }),
-        );
-        Ok(NativeSessionContextRefresh {
-            project_id: project_id.to_string(),
-            discovered_count: seen_session_ids.len(),
-            has_more,
-        })
+        outcome
     }
 
     pub(super) fn initial_native_session_row_target() -> usize {

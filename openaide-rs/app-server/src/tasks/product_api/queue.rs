@@ -27,9 +27,32 @@ impl TaskProductApi {
         params: TaskQueueAppendParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
-        self.turn_acceptance.serialize(&task_id, || {
+        let scheduled = params.not_before.is_some();
+        let started = std::time::Instant::now();
+        let operation_id = Uuid::new_v4().to_string();
+        if scheduled {
+            crate::logging::info(
+                "task_queue_schedule_started",
+                serde_json::json!({
+                    "task_id": task_id, "operation_id": operation_id, "attempt": 1,
+                }),
+            );
+        }
+        let result = self.turn_acceptance.serialize(&task_id, || {
             self.queue_append_message_serialized(client_instance_id, params)
-        })
+        });
+        if scheduled {
+            crate::logging::info(
+                "task_queue_schedule_completed",
+                serde_json::json!({
+                    "task_id": task_id, "operation_id": operation_id, "attempt": 1,
+                    "outcome": if result.is_ok() { "accepted" } else { "error" },
+                    "error_class": result.as_ref().err().map(|error| format!("{:?}", error.code)),
+                    "duration_ms": started.elapsed().as_millis(),
+                }),
+            );
+        }
+        result
     }
 
     fn queue_append_message_serialized(
@@ -38,6 +61,7 @@ impl TaskProductApi {
         params: TaskQueueAppendParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.read_interactive_task_for_client(params.task_id.as_str(), client_instance_id)?;
+        super::scheduled_queue::validate_schedule(params.not_before.as_deref())?;
         if params.message.attachments.len() > 20 {
             return Err(validation_error(
                 "message.attachments",
@@ -75,13 +99,25 @@ impl TaskProductApi {
                 super::response_snapshot_options(),
                 |ctx| {
                     crate::tasks::access::require_client_task_access(ctx.task(), &sending_client)?;
-                    if !matches!(
-                        ctx.task().status,
-                        TaskStatus::Starting
-                            | TaskStatus::Active
-                            | TaskStatus::Waiting
-                            | TaskStatus::Stopping
-                    ) {
+                    if params.not_before.is_some()
+                        && !matches!(
+                            ctx.task().lifecycle,
+                            crate::storage::records::TaskLifecycle::Open
+                        )
+                    {
+                        return Err(RuntimeError::Conflict(
+                            "Send the first message before scheduling follow-ups".to_string(),
+                        ));
+                    }
+                    if params.not_before.is_none()
+                        && !matches!(
+                            ctx.task().status,
+                            TaskStatus::Starting
+                                | TaskStatus::Active
+                                | TaskStatus::Waiting
+                                | TaskStatus::Stopping
+                        )
+                    {
                         return Err(RuntimeError::Conflict(
                             "Queue is available only while Agent work is active".to_string(),
                         ));
@@ -93,13 +129,16 @@ impl TaskProductApi {
                     }
                     let task = ctx.task_mut();
                     task.message_queue.items.push(QueuedMessageRecord {
+                        not_before: params.not_before.clone(),
                         queued_message_id: queued_message_id.clone(),
                         text: text.clone(),
                         created_at: now.clone(),
                         chat_attachments: chat_attachments.clone(),
                         agent_attachments: agent_attachments.clone(),
                     });
-                    super::send::record_composer_history(task, &queued_message_id, &text, &now);
+                    if params.not_before.is_none() {
+                        super::send::record_composer_history(task, &queued_message_id, &text, &now);
+                    }
                     task.message_queue.revision = task.message_queue.revision.saturating_add(1);
                     task.updated_at = now.clone();
                     Ok(TaskMutationResult::Changed)
@@ -111,6 +150,7 @@ impl TaskProductApi {
             .ok_or_else(|| internal_error("missing queue append snapshot"))?;
         // Client-owned handles become queue-owned only after the Task mutation is durable.
         let _persisted_attachments = attachment_reservation.commit_with(attachments);
+        self.watch_scheduled_queue(params.task_id.as_str());
         crate::logging::info(
             "task_queue_message_appended",
             serde_json::json!({

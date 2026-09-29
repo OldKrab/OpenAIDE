@@ -2,8 +2,8 @@ use openaide_app_server_protocol::agent::{
     AgentListSessionsParams, AgentListSessionsResult, AgentListedSession,
 };
 use openaide_app_server_protocol::errors::ProtocolError;
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
@@ -18,16 +18,80 @@ use super::{protocol_error_from_runtime, AgentListSessionsWorkflow, TaskProductA
 #[derive(Clone, Default)]
 pub(super) struct NativeCatalogRefreshCoordinator {
     state: Arc<Mutex<NativeCatalogRefreshState>>,
+    listing_slots: Arc<(Mutex<usize>, Condvar)>,
+}
+
+pub(super) const MAX_CONCURRENT_CATALOG_LISTINGS: usize = 20;
+
+/// A permit spans one Agent request; unwinding also releases capacity.
+struct CatalogListingPermit<'a>(&'a (Mutex<usize>, Condvar));
+
+impl Drop for CatalogListingPermit<'_> {
+    fn drop(&mut self) {
+        *self.0 .0.lock().expect("catalog listing slots poisoned") -= 1;
+        self.0 .1.notify_one();
+    }
 }
 
 #[derive(Default)]
 struct NativeCatalogRefreshState {
     exhausted_project_ids: HashSet<String>,
+    // TODO: unify global and Project demand by Agent plus canonical workspace;
+    // separate coordinators can still repeat a context during overlapping refreshes.
+    project_targets: HashMap<String, usize>,
     running: bool,
     trailing_run_requested: bool,
 }
 
 impl NativeCatalogRefreshCoordinator {
+    /// All discovery entry points share the same process-wide request budget.
+    pub(super) fn list_sessions(
+        &self,
+        gateway: &crate::agent::gateway::AgentGateway,
+        request: AgentListSessionsRequest,
+    ) -> Result<
+        crate::protocol::model::AgentListSessionsResult,
+        crate::protocol::errors::RuntimeError,
+    > {
+        let started_at = Instant::now();
+        let operation_id = request.operation_id.clone();
+        let agent_id = request.agent_id.clone();
+        crate::logging::info(
+            "native_session_page_requested",
+            serde_json::json!({
+                "operation": "agent/list_sessions/page", "operation_id": operation_id,
+                "agent_id": agent_id, "attempt": 1, "has_cursor": request.cursor.is_some(),
+            }),
+        );
+        let (active, available) = &*self.listing_slots;
+        let mut active = available
+            .wait_while(
+                active.lock().expect("catalog listing slots poisoned"),
+                |active| *active >= MAX_CONCURRENT_CATALOG_LISTINGS,
+            )
+            .expect("catalog listing slots poisoned");
+        *active += 1;
+        drop(active);
+        let _permit = CatalogListingPermit(&self.listing_slots);
+        let queue_ms = started_at.elapsed().as_millis();
+        let result = gateway.list_sessions(request);
+        let fields = serde_json::json!({
+            "operation": "agent/list_sessions/page", "operation_id": operation_id,
+            "agent_id": agent_id, "attempt": 1,
+            "outcome": if result.is_ok() { "completed" } else { "failed" },
+            "queue_ms": queue_ms, "duration_ms": started_at.elapsed().as_millis(),
+            "returned_count": result.as_ref().ok().map(|page| page.sessions.len()),
+            "authoritative": result.as_ref().ok().map(|page| page.authoritative),
+            "error_kind": result.as_ref().err().map(|error| error.reason()),
+        });
+        if result.is_ok() {
+            crate::logging::info("native_session_page_completed", fields);
+        } else {
+            crate::logging::warn("native_session_page_failed", fields);
+        }
+        result
+    }
+
     fn begin_ordinary_refresh(&self) {
         self.state
             .lock()
@@ -92,27 +156,38 @@ impl TaskProductApi {
         let api = self.clone();
         std::thread::spawn(move || loop {
             let started_at = Instant::now();
+            let operation_id = uuid::Uuid::new_v4().to_string();
             crate::logging::info(
                 "native_session_catalog_refresh_started",
-                serde_json::json!({ "operation": "agent/list_sessions" }),
+                serde_json::json!({ "operation": "agent/list_sessions", "operation_id": operation_id, "attempt": 1 }),
             );
-            let refresh = api.refresh_native_session_catalogs();
+            let refresh = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                api.refresh_native_session_project_trees_with_id(
+                    None,
+                    Some(Self::initial_native_session_row_target()),
+                    &operation_id,
+                )
+            }))
+            .unwrap_or_else(|_| {
+                Err(super::internal_error(
+                    "Native Session refresh worker failed",
+                ))
+            });
             let mut state = api
                 .native_catalog_refresh
                 .state
                 .lock()
                 .expect("Native Session catalog refresh state poisoned");
-            if state.trailing_run_requested {
-                state.trailing_run_requested = false;
-                continue;
-            }
-            state.running = false;
             let refresh = match refresh {
                 Ok(()) => {
                     crate::logging::info(
                         "native_session_catalog_refresh_completed",
                         serde_json::json!({
                             "operation": "agent/list_sessions",
+                            "operation_id": operation_id,
+                            "attempt": 1,
+                            "outcome": "completed",
+                            "trailing_run_requested": state.trailing_run_requested,
                             "duration_ms": started_at.elapsed().as_millis(),
                         }),
                     );
@@ -123,8 +198,12 @@ impl TaskProductApi {
                         "native_session_catalog_refresh_failed",
                         serde_json::json!({
                             "operation": "agent/list_sessions",
+                            "operation_id": operation_id,
+                            "attempt": 1,
+                            "outcome": "failed",
+                            "trailing_run_requested": state.trailing_run_requested,
                             "duration_ms": started_at.elapsed().as_millis(),
-                            "error": error.message,
+                            "error_kind": error.code,
                         }),
                     );
                     openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed {
@@ -132,6 +211,11 @@ impl TaskProductApi {
                     }
                 }
             };
+            if state.trailing_run_requested {
+                state.trailing_run_requested = false;
+                continue;
+            }
+            state.running = false;
             api.native_catalog.set_refresh_state(refresh.clone());
             api.task_notifier.navigation_refresh_state_changed(refresh);
             break;
@@ -168,6 +252,20 @@ impl TaskProductApi {
             }
             return;
         }
+        {
+            let mut state = self
+                .native_catalog_refresh
+                .state
+                .lock()
+                .expect("Native Session catalog refresh state poisoned");
+            if let Some(target) = state.project_targets.get_mut(project_id.as_str()) {
+                *target = (*target).max(target_row_count);
+                return;
+            }
+            state
+                .project_targets
+                .insert(project_id.as_str().to_string(), target_row_count);
+        }
         if self
             .native_catalog
             .set_project_refreshing(project_id.as_str(), true)
@@ -176,58 +274,81 @@ impl TaskProductApi {
                 .navigation_project_entries_changed(project_id.as_str().to_string());
         }
         let api = self.clone();
-        std::thread::spawn(move || {
+        std::thread::spawn(move || loop {
+            let target_row_count = api
+                .native_catalog_refresh
+                .state
+                .lock()
+                .expect("Native Session catalog refresh state poisoned")
+                .project_targets[project_id.as_str()];
             let started_at = Instant::now();
+            let operation_id = uuid::Uuid::new_v4().to_string();
             crate::logging::info(
                 "native_session_project_catalog_refresh_started",
                 serde_json::json!({
                     "operation": "agent/list_sessions/project",
+                    "operation_id": operation_id, "attempt": 1,
                     "project_id": project_id.as_str(),
                     "target_row_count": target_row_count,
                 }),
             );
-            let outcome = if let Err(error) = api.refresh_native_session_project_trees(
-                Some(project_id.as_str()),
-                Some(target_row_count),
-            ) {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                api.refresh_native_session_project_trees_with_id(
+                    Some(project_id.as_str()),
+                    Some(target_row_count),
+                    &operation_id,
+                )
+            }))
+            .unwrap_or_else(|_| {
+                Err(super::internal_error(
+                    "Native Session refresh worker failed",
+                ))
+            });
+            let outcome = if let Err(error) = result {
                 crate::logging::warn(
                     "native_session_project_catalog_refresh_failed",
                     serde_json::json!({
                         "project_id": project_id.as_str(),
-                        "error": error.message,
+                        "operation_id": operation_id, "attempt": 1,
+                        "error_kind": error.code,
                     }),
                 );
                 "failed"
             } else {
                 "completed"
             };
-            api.native_catalog
-                .set_project_refreshing(project_id.as_str(), false);
-            api.task_notifier
-                .navigation_project_entries_changed(project_id.as_str().to_string());
             crate::logging::info(
                 "native_session_project_catalog_refresh_completed",
                 serde_json::json!({
                     "operation": "agent/list_sessions/project",
+                    "operation_id": operation_id, "attempt": 1,
                     "project_id": project_id.as_str(),
                     "target_row_count": target_row_count,
                     "outcome": outcome,
                     "duration_ms": started_at.elapsed().as_millis(),
                 }),
             );
+            let mut state = api
+                .native_catalog_refresh
+                .state
+                .lock()
+                .expect("Native Session catalog refresh state poisoned");
+            if state.project_targets[project_id.as_str()] > target_row_count {
+                continue;
+            }
+            state.project_targets.remove(project_id.as_str());
+            api.native_catalog
+                .set_project_refreshing(project_id.as_str(), false);
+            api.task_notifier
+                .navigation_project_entries_changed(project_id.as_str().to_string());
+            break;
         });
     }
 
+    #[cfg(test)]
     pub(super) fn refresh_native_session_catalogs(&self) -> Result<(), ProtocolError> {
-        self.refresh_native_session_catalogs_for(None)
-    }
-
-    fn refresh_native_session_catalogs_for(
-        &self,
-        project_filter: Option<&str>,
-    ) -> Result<(), ProtocolError> {
         self.refresh_native_session_project_trees(
-            project_filter,
+            None,
             Some(Self::initial_native_session_row_target()),
         )
     }
@@ -350,12 +471,16 @@ impl TaskProductApi {
         let generation = self.native_catalog.observation_generation();
         loop {
             let result = self
-                .agent_gateway
-                .list_sessions(AgentListSessionsRequest {
-                    agent_id: params.agent_id.as_str().to_string(),
-                    cwd: Some(project.workspace_root.clone()),
-                    cursor: cursor.current(),
-                })
+                .native_catalog_refresh
+                .list_sessions(
+                    &self.agent_gateway,
+                    AgentListSessionsRequest {
+                        operation_id: uuid::Uuid::new_v4().to_string(),
+                        agent_id: params.agent_id.as_str().to_string(),
+                        cwd: Some(project.workspace_root.clone()),
+                        cursor: cursor.current(),
+                    },
+                )
                 .map_err(protocol_error_from_runtime)?;
             let next_cursor = cursor.advance(result.next_cursor);
             let task_records = self

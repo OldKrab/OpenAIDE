@@ -97,6 +97,8 @@ export type TaskMessageQueue = {
 
 export type QueuedMessage = {
   queued_message_id: string;
+  /** Earliest automatic delivery, as UTC epoch milliseconds; queue order still applies. */
+  not_before?: string;
   text: string;
   created_at: string;
   attachments?: Array<{ kind: string; label: string }>;

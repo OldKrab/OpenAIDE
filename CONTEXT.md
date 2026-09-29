@@ -85,8 +85,12 @@ A user-authored instruction accepted for later automatic or manual delivery. It 
 _Avoid_: Draft, delayed steering message, pending Chat message
 
 **Task Message Queue**:
-The ordered durable collection of Queued Messages awaiting delivery for one Task. Its head advances automatically after normal Agent-turn completion.
+The ordered durable collection of Queued Messages awaiting delivery for one Task. Its head advances automatically after normal Agent-turn completion or when its scheduled time arrives while the Task is idle, unless paused.
 _Avoid_: Draft list, Chat backlog, steering queue
+
+**Scheduled Message**:
+A Queued Message with a user-selected earliest delivery time. It keeps its position in the Task Message Queue and waits for both that time and an idle Task. App Server must be running; restart preserves it behind Queue Pause.
+_Avoid_: Browser timer, recurring automation, guaranteed exact execution time
 
 **Queue Pause**:
 The idle recovery state in which automatic Task Message Queue advancement is suspended after interrupted or unsuccessful work. Explicit Send or Resume Queue clears it before Agent work begins.

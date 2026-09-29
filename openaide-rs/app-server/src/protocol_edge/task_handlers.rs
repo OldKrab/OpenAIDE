@@ -324,6 +324,38 @@ impl RpcGateway {
         }
     }
 
+    pub(super) fn handle_task_queue_resume(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        use openaide_app_server_protocol::task::{TaskQueueResumeParams, TaskQueueResumeResult};
+        let params = match serde_json::from_value::<TaskQueueResumeParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("queue resume requires an initialized client");
+        match self
+            .task_send
+            .queue_resume_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => self.result::<TaskQueueResumeResult>(
+                connection_id,
+                id,
+                meta,
+                TaskQueueResumeResult { task },
+            ),
+            Err(error) => self.error(connection_id, id, meta, error),
+        }
+    }
+
     pub(super) fn handle_task_cancel(
         &mut self,
         connection_id: ConnectionId,
