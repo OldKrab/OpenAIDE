@@ -73,12 +73,12 @@ test("artifact verification rejects corruption of either independently pinned fi
 
 test("the dependency updater recognizes the current patched version without changing files", async (t) => {
   const setup = await fixture(t);
-  const config = path.join(setup.root, "agent-config.rs");
-  const source = `const PIN: &str = "${setup.manifest.packageName}@${setup.manifest.packageVersion}";`;
+  const config = path.join(setup.root, "package.json");
+  const source = JSON.stringify({ dependencies: { [setup.manifest.packageName]: setup.manifest.packageVersion } });
   await writeFile(config, source);
 
   await run(process.execPath, [fileURLToPath(new URL("./update-codex-acp-version.mjs", import.meta.url))], {
-    env: { ...process.env, CODEX_ACP_CONFIG_PATH: config, CODEX_ACP_LATEST_VERSION: setup.manifest.packageVersion },
+    env: { ...process.env, CODEX_ACP_MANIFEST_PATH: config, CODEX_ACP_LATEST_VERSION: setup.manifest.packageVersion },
     timeout: 5000,
   });
 
@@ -87,14 +87,17 @@ test("the dependency updater recognizes the current patched version without chan
 
 test("a newer dependency version requires patch review before updating any pin", async (t) => {
   const setup = await fixture(t);
-  const config = path.join(setup.root, "agent-config.rs");
-  const source = `const PIN: &str = "${setup.manifest.packageName}@${setup.manifest.packageVersion}";`;
+  const config = path.join(setup.root, "package.json");
+  const source = JSON.stringify({ dependencies: { [setup.manifest.packageName]: setup.manifest.packageVersion } });
   await writeFile(config, source);
 
   await assert.rejects(run(process.execPath, [fileURLToPath(new URL("./update-codex-acp-version.mjs", import.meta.url))], {
-    env: { ...process.env, CODEX_ACP_CONFIG_PATH: config, CODEX_ACP_LATEST_VERSION: "99.0.0" },
+    env: { ...process.env, CODEX_ACP_MANIFEST_PATH: config, CODEX_ACP_LATEST_VERSION: "99.0.0" },
     timeout: 5000,
-  }));
+  }), (error) => {
+    assert.match(error.stderr, /requires reviewing or removing the managed session recovery patch/);
+    return true;
+  });
 
   assert.equal(await readFile(config, "utf8"), source);
 });

@@ -160,10 +160,7 @@ fn claude_code_catalog_overlays_preserve_launch_policy_and_allow_disabling() {
         assert_eq!(claude.source_kind, AgentSourceKind::BuiltIn);
         let config = claude.acp_stdio_config();
         assert_ne!(config.command, "untrusted-claude");
-        assert_eq!(
-            config.args,
-            ["-y", "@agentclientprotocol/claude-agent-acp@0.81.2"]
-        );
+        assert_eq!(config.args, AcpAgentConfig::claude_code().args);
         assert!(config.env.is_empty());
         assert!(config.secret_env.is_empty());
     }
@@ -215,5 +212,5 @@ fn registry_overlay_does_not_let_legacy_custom_records_replace_builtin_codex() {
 
     assert_eq!(codex.source_kind, AgentSourceKind::BuiltIn);
     assert_ne!(config.command, "codex-acp");
-    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.2.2"]);
+    assert!(config.uses_product_pinned_codex_package());
 }

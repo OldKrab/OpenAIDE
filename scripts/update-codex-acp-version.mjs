@@ -3,17 +3,10 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const packageName = "@openaide/codex-acp";
-const configPath =
-  process.env.CODEX_ACP_CONFIG_PATH ??
-  fileURLToPath(
-    new URL("../openaide-rs/app-server/src/agent/acp_agent_config.rs", import.meta.url),
-  );
-const packagePattern =
-  /@openaide\/codex-acp@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/g;
 const recoveryManifestPath = fileURLToPath(
   new URL("../openaide-rs/app-server/assets/codex-acp-runtime/session-recovery-manifest.json", import.meta.url),
 );
-const runtimeManifestPath = fileURLToPath(
+const runtimeManifestPath = process.env.CODEX_ACP_MANIFEST_PATH ?? fileURLToPath(
   new URL("../openaide-rs/app-server/assets/codex-acp-runtime/package.json", import.meta.url),
 );
 
@@ -50,15 +43,9 @@ async function emitOutput(name, value) {
   }
 }
 
-const source = await readFile(configPath, "utf8");
-const matches = [...source.matchAll(packagePattern)];
-if (matches.length !== 1) {
-  throw new Error(`expected one ${packageName} pin in ${configPath}, found ${matches.length}`);
-}
-
-const current = matches[0][1];
 const recoveryManifest = JSON.parse(await readFile(recoveryManifestPath, "utf8"));
 const runtimeManifest = JSON.parse(await readFile(runtimeManifestPath, "utf8"));
+const current = requireExactVersion(runtimeManifest.dependencies?.[packageName], "runtime manifest");
 const runtimeLock = JSON.parse(await readFile(
   fileURLToPath(new URL("../openaide-rs/app-server/assets/codex-acp-runtime/package-lock.json", import.meta.url)),
   "utf8",

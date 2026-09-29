@@ -44,14 +44,16 @@ export function patchBundle(original) {
   );
   // Native resume reloads the sandbox from current configuration. Resolve the
   // session's persisted policy before that operation can append new settings.
+  // The adapter's shared resume wrapper projects its response; carry the full
+  // recovered policy separately while retaining its history/subscription state.
   replace(
-    "const response = await this.codexClient.threadResume({",
-    "const response = await resumeNativeSession(this.codexClient, {",
-    2,
+    "const response = await this.codexClient.threadResume(params);" + newline + "      return {",
+    "const response = await resumeNativeSession(this.codexClient, params);" + newline + "      return {" + newline + "        nativePolicy: response,",
+    1,
   );
   replace(
-    ["sessionId: request.sessionId,", "      currentModelId,", "      models: codexModels,", "      collaborationMode: this.getCollaborationMode(response.thread.id),"].join(newline),
-    ["sessionId: request.sessionId,", "      nativePolicy: response,", "      currentModelId,", "      models: codexModels,", "      collaborationMode: this.getCollaborationMode(response.thread.id),"].join(newline),
+    ["sessionId: request.sessionId,", "      currentModelId,", "      models: codexModels,"].join(newline),
+    ["sessionId: request.sessionId,", "      nativePolicy: response.nativePolicy,", "      currentModelId,", "      models: codexModels,"].join(newline),
     2,
   );
   replace("agentMode: AgentMode.getInitialAgentMode(),", "agentMode: recoveredSessionMode(sessionMetadata.nativePolicy, AgentMode),", 2);

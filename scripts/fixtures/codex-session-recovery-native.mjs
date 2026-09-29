@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Native 0.153.3 restores model/approval history, but derives the resumed sandbox
+// Native Codex restores model/approval history, but derives the resumed sandbox
 // from current config. A separate history fixture exposes that distinction.
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -8,7 +8,7 @@ const fixture = JSON.parse(readFileSync(process.env.OPENAIDE_CODEX_RECOVERY_FIXT
 const thread = {
   id: "native-session", sessionId: "native-session", preview: "Fixture session",
   createdAt: 1, updatedAt: 1, cwd: fixture.cwd, modelProvider: "openai",
-  path: fixture.historyPath ?? null, turns: [], status: { type: "idle" }, source: "appServer",
+  path: fixture.historyPath ?? null, turns: [], historyMode: "legacy", status: { type: "idle" }, source: "appServer",
 };
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const model = (id, isDefault) => ({

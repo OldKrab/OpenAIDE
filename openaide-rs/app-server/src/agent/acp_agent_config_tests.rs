@@ -12,9 +12,40 @@ fn built_in_codex_uses_the_product_pinned_adapter() {
 
     assert_eq!(config.agent_id, "codex");
     assert_eq!(config.command, "npx");
-    assert_eq!(config.args, ["-y", "@openaide/codex-acp@1.2.2"]);
+    assert_eq!(config.args.len(), 2);
+    assert_eq!(config.args[0], "-y");
+    let version = config.args[1].strip_prefix("@openaide/codex-acp@").unwrap();
+    assert_eq!(version.split('.').count(), 3);
+    assert!(version
+        .split('.')
+        .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())));
+    assert!(config.uses_product_pinned_codex_package());
     assert!(config.env.is_empty());
     assert_eq!(config.diagnostic_launcher_kind(), "managed_package");
+}
+
+#[test]
+fn built_in_claude_uses_an_exact_stable_package_pin() {
+    let config = AcpAgentConfig::claude_code();
+    assert_eq!(config.agent_id, "claude-code");
+    assert_eq!(config.args.len(), 2);
+    assert_eq!(config.args[0], "-y");
+    let version = config.args[1]
+        .strip_prefix("@agentclientprotocol/claude-agent-acp@")
+        .expect("the built-in must use the official Claude ACP package");
+    let components: Vec<_> = version.split('.').collect();
+    assert_eq!(
+        components.len(),
+        3,
+        "the launch policy must pin an exact version"
+    );
+    for component in components {
+        assert!(!component.is_empty());
+        assert!(component.bytes().all(|byte| byte.is_ascii_digit()));
+        assert!(component == "0" || !component.starts_with('0'));
+    }
+    assert!(config.env.is_empty());
+    assert!(config.secret_env.is_empty());
 }
 
 #[test]
@@ -82,7 +113,7 @@ fn windows_command_extensions_follow_pathext_and_ignore_unsupported_scripts() {
 fn windows_batch_launcher_is_invoked_through_cmd_exe() {
     let args = process_args(
         r"C:\Program Files\nodejs\npx.cmd",
-        &["-y".to_string(), "@openaide/codex-acp@1.2.2".to_string()],
+        &["-y".to_string(), "fixture-package@1.0.0".to_string()],
         &[("AGENT_TOKEN".to_string(), "secret".to_string())],
         true,
     );
@@ -96,7 +127,7 @@ fn windows_batch_launcher_is_invoked_through_cmd_exe() {
             "/C",
             r"C:\Program Files\nodejs\npx.cmd",
             "-y",
-            "@openaide/codex-acp@1.2.2",
+            "fixture-package@1.0.0",
         ]
     );
 }
