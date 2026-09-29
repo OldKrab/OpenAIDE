@@ -25,6 +25,52 @@ test.afterEach(async ({}, testInfo) => {
   }
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`schedules a message and retains it across reload at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await openPreparedNewTask(page);
+    await send(page, "Start scheduling test");
+    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    const editor = page.getByRole("textbox", { name: "Message" });
+    await editor.fill("Review the results tomorrow");
+    await page.getByRole("button", { name: "Send later", exact: true }).click();
+    const picker = page.getByRole("dialog", { name: "Send later" });
+    await expect(picker).toBeVisible();
+    await picker.getByLabel("Send later", { exact: true }).fill("2100-01-01T09:30");
+    const bounds = await picker.boundingBox();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+    await page.screenshot({ path: testInfo.outputPath(`scheduled-${viewport.width}.png`), fullPage: true });
+    await picker.getByRole("button", { name: "Schedule message" }).click();
+    const queue = page.getByRole("region", { name: "Queued messages", exact: true });
+    await expect(queue).toContainText("Review the results tomorrow");
+    await expect(queue).toContainText("Scheduled:");
+    await expect(editor).toHaveText("");
+    await expect(page.getByLabel("Task chat").locator("p.chat-user").filter({ hasText: "Review the results tomorrow" })).toHaveCount(0);
+    await page.reload();
+    await expect(queue).toContainText("Review the results tomorrow");
+    await send(page, "smoke:hold");
+    await expect(page.getByLabel("Task chat").getByText("Waiting for steering", { exact: true })).toBeVisible();
+    await editor.fill("Ordinary queued follow-up");
+    await page.getByRole("button", { name: "Add to queue", exact: true }).click();
+    const ordinary = queue.locator("li").filter({ hasText: "Ordinary queued follow-up" });
+    await expect(ordinary).toBeVisible();
+    await ordinary.getByRole("button", { name: "Delete queued message" }).click();
+    await expect(ordinary).toHaveCount(0);
+    await page.getByLabel("Stop task").click();
+    await expect(queue).toContainText("Paused after interrupted work");
+    const schedule = queue.locator("time");
+    expect(await schedule.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`scheduled-queue-${viewport.width}.png`), fullPage: true });
+    await queue.getByRole("button", { name: "Resume queue" }).click();
+    await expect(queue).not.toContainText("Paused");
+    await expect(queue).toContainText("Review the results tomorrow");
+    await queue.getByRole("button", { name: "Send queued message now" }).click();
+    await expect(page.getByLabel("Task chat").locator("p.chat-user").filter({ hasText: "Review the results tomorrow" })).toHaveText("Review the results tomorrow");
+    await expect(queue).toHaveCount(0);
+  });
+}
+
 test("keeps shared typography when an App Shell supplies body defaults", async ({ page }) => {
   await openPreparedNewTask(page);
 

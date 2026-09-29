@@ -1,5 +1,6 @@
 import { ComposerPreferencesStatus } from "./ComposerPreferencesStatus";
 import { ComposerContextUsageControl } from "./ContextUsageIndicator";
+import { ComposerSchedule } from "./ComposerSchedule";
 import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
@@ -59,6 +60,7 @@ type ComposerProps = {
   agents?: AgentOption[];
   onCancel?: () => void;
   onAddToQueue?: () => void;
+  onSchedule?: (notBefore: string) => void;
   onChange: (prompt: string) => void;
   onDismissError?: () => void;
   onUnsupportedImageAttachment?: (message?: string) => void;
@@ -97,6 +99,7 @@ export function Composer({
   agents = agentOptions,
   onCancel,
   onAddToQueue,
+  onSchedule,
   onChange,
   onDismissError,
   onUnsupportedImageAttachment,
@@ -660,6 +663,9 @@ export function Composer({
               onClick={onAddToQueue}
               title="Add to queue (Ctrl/Cmd+Shift+Enter)"
             />
+          ) : null}
+          {onSchedule && hasDraftContent && !availability.submitting ? (
+            <ComposerSchedule disabled={!canAddToQueue} onSchedule={onSchedule} />
           ) : null}
           {!availability.submitting && showSendAction ? (
             <IconButton

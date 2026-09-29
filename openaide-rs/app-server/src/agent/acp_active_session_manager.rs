@@ -99,9 +99,13 @@ impl AcpActiveSessionManager {
     pub(super) fn list_sessions(
         &self,
         request: AgentListSessionsRequest,
+        process_operation: &std::sync::Mutex<()>,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
-        self.processes
-            .list_sessions(request, self.auth_method_cache.preferred_method())
+        self.processes.list_sessions(
+            request,
+            self.auth_method_cache.preferred_method(),
+            process_operation,
+        )
     }
 
     pub(super) fn allows_passive_session_discovery(&self, agent_id: &str) -> bool {

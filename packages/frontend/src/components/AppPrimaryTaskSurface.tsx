@@ -188,6 +188,7 @@ export function AppPrimaryTaskSurface({
         onMoveQueueMessage={callbacks.task.moveQueueMessage}
         onPlanDrawerOpenChange={onPlanDrawerOpenChange}
         onSendQueueMessageNow={callbacks.task.sendQueueMessageNow}
+        onResumeQueue={callbacks.task.resumeQueue}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSelectConfigOption={callbacks.task.selectConfigOption}
         onSendPrompt={callbacks.task.sendPrompt}

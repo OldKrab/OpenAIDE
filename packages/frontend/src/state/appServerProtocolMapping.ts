@@ -228,6 +228,7 @@ function mapProtocolTaskSnapshotWithCache(
         pause: snapshot.messageQueue?.pause ?? undefined,
         items: (snapshot.messageQueue?.items ?? []).map((item) => ({
           queued_message_id: item.queuedMessageId,
+          not_before: item.notBefore,
           text: item.text,
           created_at: item.createdAt,
           attachments: item.attachments,

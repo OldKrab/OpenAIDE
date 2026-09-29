@@ -50,6 +50,7 @@ impl AgentRuntime for MockAgent {
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         Ok(AgentListSessionsResult {
+            authoritative: true,
             agent_id: request.agent_id,
             sessions: vec![AgentListedSession {
                 session_id: "mock-session".to_string(),

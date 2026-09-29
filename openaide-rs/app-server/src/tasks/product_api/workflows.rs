@@ -75,6 +75,17 @@ pub(crate) struct TaskSendAccepted {
 }
 
 pub(crate) trait TaskSendWorkflow: Send + Sync {
+    /// Wakes due scheduled work without blocking the process liveness loop.
+    fn request_scheduled_queue_delivery(&self) {}
+
+    fn queue_resume_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskQueueResumeParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        Err(queue_unavailable())
+    }
+
     fn send_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

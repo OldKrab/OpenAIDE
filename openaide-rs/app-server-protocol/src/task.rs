@@ -166,11 +166,29 @@ pub struct TaskSendResult {
 pub struct TaskQueueAppendParams {
     pub task_id: TaskId,
     pub message: ComposerMessage,
+    /// Earliest delivery time, as UTC epoch milliseconds. Omission queues after the turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub not_before: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskQueueAppendResult {
+    pub task: TaskSnapshot,
+}
+
+/// Explicitly rearms automatic delivery without overriding scheduled times.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueResumeParams {
+    pub task_id: TaskId,
+    pub queue_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueueResumeResult {
     pub task: TaskSnapshot,
 }
 

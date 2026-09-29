@@ -222,6 +222,15 @@ pub(super) fn agent_list_sessions_result_from_response(
     requested_cwd: Option<&Path>,
     excluded_session_id: Option<&str>,
 ) -> AgentListSessionsResult {
+    // Our managed adapter explicitly marks index-backed pages as observational.
+    // Ordinary ACP listings retain the existing complete-scan reconciliation contract.
+    let authoritative = response
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.get("io.openaide/session-list"))
+        .and_then(|meta| meta.get("authoritative"))
+        .and_then(serde_json::Value::as_bool)
+        != Some(false);
     let sessions = response
         .sessions
         .into_iter()
@@ -243,6 +252,7 @@ pub(super) fn agent_list_sessions_result_from_response(
     AgentListSessionsResult {
         agent_id,
         sessions,
+        authoritative,
         next_cursor: response.next_cursor,
     }
 }

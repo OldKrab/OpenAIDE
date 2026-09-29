@@ -532,6 +532,7 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
                 .into_iter()
                 .map(
                     |item| openaide_app_server_protocol::snapshot::QueuedMessageSnapshot {
+                        not_before: item.not_before.clone(),
                         queued_message_id: item.queued_message_id.into(),
                         text: item.text,
                         created_at: item.created_at,

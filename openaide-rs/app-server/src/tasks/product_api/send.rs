@@ -37,7 +37,7 @@ impl TaskProductApi {
         })
     }
 
-    fn send_message_serialized(
+    pub(super) fn send_message_serialized(
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskSendParams,
@@ -45,6 +45,14 @@ impl TaskProductApi {
         let task_id = params.task_id.as_str().to_string();
         let mut existing_task =
             self.read_interactive_task_for_client(&task_id, client_instance_id)?;
+        if existing_task
+            .message_queue
+            .items
+            .iter()
+            .any(|item| item.not_before.is_some())
+        {
+            self.watch_scheduled_queue(&task_id);
+        }
         if existing_task.active_turn_id.is_none() {
             self.turn_acceptance.retire_for_idle_task(&task_id);
         }

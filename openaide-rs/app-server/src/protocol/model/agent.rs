@@ -216,6 +216,13 @@ pub struct AgentListedSession {
 pub struct AgentListSessionsResult {
     pub agent_id: String,
     pub sessions: Vec<AgentListedSession>,
+    /// Indexed observations may add/update rows, but cannot prove another row was deleted.
+    #[serde(default = "authoritative_session_listing")]
+    pub authoritative: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+}
+
+fn authoritative_session_listing() -> bool {
+    true
 }

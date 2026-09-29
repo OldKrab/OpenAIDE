@@ -122,6 +122,21 @@ async function verifyRecovery(adapter, method, scenario) {
   });
   try {
     await request("initialize", { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: "recovery-fixture", version: "1" } });
+    if (scenario.name === "preset") {
+      const listing = await request("session/list", { cwd: root });
+      assert.equal(listing.sessions.length, 1);
+      assert.equal(listing.nextCursor, "next-index-page");
+      assert.equal(listing._meta?.["io.openaide/session-list"]?.authoritative, false,
+        "indexed observations cannot authorize removal of missing history");
+      const empty = await request("session/list", { cwd: root, cursor: listing.nextCursor });
+      assert.equal(empty.sessions.length, 0);
+      assert.equal(empty._meta?.["io.openaide/session-list"]?.authoritative, false);
+      const calls = (await readCalls()).filter(call => call.method === "thread/list");
+      assert.equal(calls.length, 2, "routine discovery must not fall back to transcript scans");
+      assert.ok(calls.every(call => call.params.useStateDbOnly === true));
+      assert.ok(calls.every(call => call.params.cwd === root));
+      assert.equal(calls[1].params.cursor, "next-index-page");
+    }
     if (scenario.rejected) {
       await assert.rejects(request(method, { sessionId: "native-session", cwd: root, mcpServers: [] }));
       assert.ok(!(await readCalls()).some((call) => call.method === "thread/resume"), "unsupported history must fail before native resume");

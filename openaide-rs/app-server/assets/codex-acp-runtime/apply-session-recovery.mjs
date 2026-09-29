@@ -21,6 +21,20 @@ export function patchBundle(original) {
     "#!/usr/bin/env node" + newline + 'import { recoveredSessionMode, resumeNativeSession } from "./openaide-session-recovery.mjs";' + newline,
     1,
   );
+  // TODO(codex-acp): drop this patch when upstream uses indexed discovery and
+  // reports its weaker absence evidence. Repeated scan-and-repair reads gigabytes
+  // per Project; an incomplete native index must never authorize history removal.
+  replace(
+    "const listResponse = await this.codexClient.threadList({" + newline,
+    "const listResponse = await this.codexClient.threadList({" + newline + "      useStateDbOnly: true," + newline,
+    1,
+  );
+  replace(
+    "sessions: listResponse.data.map(mapThreadToSession)," + newline,
+    'sessions: listResponse.data.map(mapThreadToSession),' + newline
+      + '      _meta: { "io.openaide/session-list": { authoritative: false } },' + newline,
+    1,
+  );
   // Merely supplying a provider disables native persisted model/effort restore.
   // Explicit adapter gateway/provider overrides retain their existing behavior.
   replace(

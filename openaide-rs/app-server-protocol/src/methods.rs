@@ -1,4 +1,5 @@
 use crate::project_files::{ProjectFilesParams, ProjectFilesResult};
+use crate::task::{TaskQueueResumeParams, TaskQueueResumeResult};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{
@@ -610,6 +611,12 @@ protocol_method!(
     TASK_QUEUE_MOVE,
     TaskQueueMoveParams,
     TaskQueueMoveResult
+);
+protocol_method!(
+    TaskQueueResume,
+    TASK_QUEUE_RESUME,
+    TaskQueueResumeParams,
+    TaskQueueResumeResult
 );
 protocol_method!(
     TaskResolveConfigPreferences,

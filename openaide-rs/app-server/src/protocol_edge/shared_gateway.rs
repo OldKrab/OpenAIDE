@@ -88,6 +88,16 @@ impl SharedRpcGateway {
         workflow.request_task_storage_maintenance();
     }
 
+    pub fn request_scheduled_queue_delivery(&self) {
+        let workflow = self
+            .gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .task_send
+            .clone();
+        workflow.request_scheduled_queue_delivery();
+    }
+
     pub fn has_task_navigation_subscribers(&self) -> bool {
         self.gateway
             .lock()

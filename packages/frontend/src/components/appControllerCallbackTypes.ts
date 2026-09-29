@@ -123,7 +123,8 @@ export type NewTaskDraftInput = {
 };
 
 export type TaskCallbacks = {
-  addToQueue: () => void;
+  addToQueue: (notBefore?: string) => void;
+  resumeQueue?: () => Promise<void>;
   cancel: () => void;
   closePlan?: () => Promise<void>;
   fileBrowser?: TaskFileBrowserCallbacks;

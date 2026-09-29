@@ -162,6 +162,7 @@ export function TaskView({
   onMoveQueueMessage,
   onPlanDrawerOpenChange,
   onSendQueueMessageNow,
+  onResumeQueue,
   onRestoreTask,
   onSendPrompt,
   onPermissionPolicyChange,
@@ -193,7 +194,7 @@ export function TaskView({
   intents: TaskViewIntents;
   onCancel: () => void;
   onClosePlan?: () => Promise<void>;
-  onAddToQueue?: () => void;
+  onAddToQueue?: (notBefore?: string) => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   fileViewer?: Pick<BackendConnection, "request">;
   headerActionsTarget?: HTMLElement | null;
@@ -219,6 +220,7 @@ export function TaskView({
   onMoveQueueMessage?: (queuedMessageId: string, targetIndex: number) => void | Promise<void>;
   onPlanDrawerOpenChange?: (open: boolean) => void;
   onSendQueueMessageNow?: (queuedMessageId: string) => void;
+  onResumeQueue?: () => Promise<void>;
   onRestoreTask?: (taskId: string) => void;
   onSendPrompt: (prompt?: string) => void;
   onPermissionPolicyChange?: (policy: import("@openaide/app-shell-contracts").TaskPermissionPolicy) => Promise<void>;
@@ -658,6 +660,7 @@ export function TaskView({
                 onTake={onTakeQueueMessage}
                 onMove={onMoveQueueMessage}
                 onSendNow={onSendQueueMessageNow}
+                onResume={onResumeQueue}
               />
             </div>
           </section>
@@ -705,7 +708,8 @@ export function TaskView({
                   ? onCancel
                   : undefined
               }
-              onAddToQueue={!archived && queueAvailable ? onAddToQueue : undefined}
+              onAddToQueue={!archived && queueAvailable && onAddToQueue ? () => onAddToQueue() : undefined}
+              onSchedule={!archived && backendReady ? onAddToQueue : undefined}
               onChange={intents.changePrompt}
               onDismissError={taskInput.error ? intents.dismissError : undefined}
               onUnsupportedImageAttachment={intents.reportAttachmentError}

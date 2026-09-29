@@ -246,6 +246,10 @@ pub enum TaskMessageQueuePauseSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct QueuedMessageSnapshot {
     pub queued_message_id: crate::ids::QueuedMessageId,
+    /// Earliest automatic delivery time, as UTC epoch milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub not_before: Option<String>,
     pub text: String,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

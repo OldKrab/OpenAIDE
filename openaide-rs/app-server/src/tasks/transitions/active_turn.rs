@@ -150,8 +150,17 @@ impl TaskTransitions {
                             )?;
                             if let Some((next_turn_id, next_message_id)) = queued_successor {
                                 if ctx.task().message_queue.pause.is_none() {
-                                    if let Some(queued) =
-                                        ctx.task().message_queue.items.first().cloned()
+                                    if let Some(queued) = ctx
+                                        .task()
+                                        .message_queue
+                                        .items
+                                        .first()
+                                        .filter(|item| {
+                                            crate::tasks::product_api::queued_message_is_due(
+                                                item, &now,
+                                            )
+                                        })
+                                        .cloned()
                                     {
                                         if !queued_attachments_available(ctx.task(), &queued) {
                                             let queue = &mut ctx.task_mut().message_queue;

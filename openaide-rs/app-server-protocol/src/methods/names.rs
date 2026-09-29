@@ -76,6 +76,7 @@ pub const TASK_QUEUE_APPEND: &str = "task/queueAppend";
 pub const TASK_QUEUE_REMOVE: &str = "task/queueRemove";
 pub const TASK_QUEUE_TAKE: &str = "task/queueTake";
 pub const TASK_QUEUE_MOVE: &str = "task/queueMove";
+pub const TASK_QUEUE_RESUME: &str = "task/queueResume";
 pub const TASK_SEND: &str = "task/send";
 pub const TASK_RESOLVE_CONFIG_PREFERENCES: &str = "task/resolveConfigPreferences";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
@@ -183,6 +184,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_QUEUE_REMOVE,
     TASK_QUEUE_TAKE,
     TASK_QUEUE_MOVE,
+    TASK_QUEUE_RESUME,
     TASK_SEND,
     TASK_SET_CONFIG_OPTION,
     TASK_RESOLVE_CONFIG_PREFERENCES,

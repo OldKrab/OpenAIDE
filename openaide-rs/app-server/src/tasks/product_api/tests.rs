@@ -69,6 +69,9 @@ mod session_deletion_tests;
 #[path = "session_reconciliation_tests.rs"]
 mod session_reconciliation_tests;
 
+#[path = "scheduled_queue_tests.rs"]
+mod scheduled_queue_tests;
+
 fn protocol_config_id(value: &str) -> AgentConfigOptionCurrentValue {
     AgentConfigOptionCurrentValue::Id {
         value: value.to_string(),
@@ -3645,7 +3648,9 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     .unwrap();
 
     api.request_native_session_catalog_refresh();
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
+    // Entry is synchronized by the counter; independent contexts may all enter
+    // before this thread wakes, while block_list holds their responses.
+    wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= 1);
     api.request_native_session_catalog_refresh();
     agent.block_list.store(false, Ordering::SeqCst);
 
@@ -4783,7 +4788,7 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
 
     let refresh_api = api.clone();
     let refresh = std::thread::spawn(move || refresh_api.refresh_native_session_catalogs());
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
+    wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= 1);
     api.send(send_params("task-existing", "What next?"))
         .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
@@ -5691,6 +5696,7 @@ fn queued_message_append_and_remove_are_durable_without_entering_chat() {
 
     let appended = api
         .queue_append_for_test(TaskQueueAppendParams {
+            not_before: None,
             task_id: "task-queue-durable".into(),
             message: ComposerMessage {
                 text: Some("follow up later".to_string()),
@@ -5756,6 +5762,7 @@ fn queued_message_is_available_through_task_composer_history() {
     wait_until(|| store.read_task("task-queue-history").unwrap().status == TaskStatus::Active);
 
     api.queue_append_for_test(TaskQueueAppendParams {
+        not_before: None,
         task_id: "task-queue-history".into(),
         message: ComposerMessage {
             text: Some("  follow up later  ".to_string()),
@@ -5816,6 +5823,7 @@ fn queue_take_atomically_returns_composer_content_and_rejects_stale_revisions() 
 
     let appended = api
         .queue_append_for_test(TaskQueueAppendParams {
+            not_before: None,
             task_id: "task-queue-take".into(),
             message: ComposerMessage {
                 text: Some("revise this".into()),
@@ -5902,6 +5910,7 @@ fn queued_message_move_rebases_by_stable_id_while_agent_turn_is_active() {
     wait_until(|| store.read_task("task-queue-mutate").unwrap().status == TaskStatus::Active);
     let _first = api
         .queue_append_for_test(TaskQueueAppendParams {
+            not_before: None,
             task_id: "task-queue-mutate".into(),
             message: ComposerMessage {
                 text: Some("first".into()),
@@ -5911,6 +5920,7 @@ fn queued_message_move_rebases_by_stable_id_while_agent_turn_is_active() {
         .unwrap();
     let second = api
         .queue_append_for_test(TaskQueueAppendParams {
+            not_before: None,
             task_id: "task-queue-mutate".into(),
             message: ComposerMessage {
                 text: Some("second".into()),
@@ -5970,6 +5980,7 @@ fn send_now_accepts_and_removes_the_exact_queued_message_atomically() {
     wait_until(|| store.read_task("task-queue-send").unwrap().status == TaskStatus::Active);
     let queued = api
         .queue_append_for_test(TaskQueueAppendParams {
+            not_before: None,
             task_id: "task-queue-send".into(),
             message: ComposerMessage {
                 text: Some("send this now".into()),
@@ -6012,6 +6023,7 @@ fn restart_pauses_an_idle_nonempty_queue() {
     let workspace = temp.path().join("workspace");
     let mut task = task_record("task-queue-restart", &workspace.to_string_lossy());
     task.message_queue.items.push(QueuedMessageRecord {
+        not_before: None,
         queued_message_id: "queued-1".into(),
         text: "wait for resume".into(),
         created_at: "now".into(),
@@ -6067,6 +6079,7 @@ fn normal_turn_completion_accepts_the_queue_head_as_the_next_turn() {
         .unwrap();
     wait_until(|| store.read_task("task-queue-advance").unwrap().status == TaskStatus::Active);
     api.queue_append_for_test(TaskQueueAppendParams {
+        not_before: None,
         task_id: "task-queue-advance".into(),
         message: ComposerMessage {
             text: Some("queued second turn".to_string()),
@@ -6134,6 +6147,7 @@ fn automatic_queue_delivery_preserves_inline_image_attachments() {
         .unwrap();
     wait_until(|| store.read_task("task-queue-image").unwrap().status == TaskStatus::Active);
     api.queue_append_for_test(TaskQueueAppendParams {
+        not_before: None,
         task_id: "task-queue-image".into(),
         message: ComposerMessage {
             text: Some("inspect image".into()),
@@ -6193,6 +6207,7 @@ fn automatic_queue_delivery_accepts_a_managed_web_upload_outside_the_workspace()
     wait_until(|| store.read_task("task-queue-upload").unwrap().status == TaskStatus::Active);
     api.queue_append_for_test(TaskQueueAppendParams {
         task_id,
+        not_before: None,
         message: ComposerMessage {
             text: Some("inspect profile".into()),
             attachments: vec![attachment.handle_id],
@@ -6246,6 +6261,7 @@ fn unsuccessful_turn_completion_keeps_the_queue_intact() {
         .unwrap();
     wait_until(|| store.read_task("task-queue-paused").unwrap().status == TaskStatus::Active);
     api.queue_append_for_test(TaskQueueAppendParams {
+        not_before: None,
         task_id: "task-queue-paused".into(),
         message: ComposerMessage {
             text: Some("keep this queued".to_string()),
@@ -9748,6 +9764,7 @@ impl AgentRuntime for RecordingAgent {
             }
         }
         Ok(AgentListSessionsResult {
+            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor: None,
@@ -10081,6 +10098,7 @@ impl AgentRuntime for BoundedGlobalSessionAgent {
             _ => None,
         };
         Ok(AgentListSessionsResult {
+            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor,
@@ -10145,6 +10163,7 @@ impl AgentRuntime for ArchivedFirstPageAgent {
             _ => (Vec::new(), None),
         };
         Ok(AgentListSessionsResult {
+            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor,
@@ -10197,6 +10216,7 @@ impl AgentRuntime for CyclingEmptySessionAgent {
             _ => None,
         };
         Ok(crate::protocol::model::AgentListSessionsResult {
+            authoritative: true,
             agent_id: request.agent_id,
             sessions: Vec::new(),
             next_cursor,
@@ -10254,6 +10274,7 @@ impl AgentRuntime for PagedSessionAgent {
             _ => None,
         };
         Ok(crate::protocol::model::AgentListSessionsResult {
+            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor,

@@ -342,6 +342,9 @@ impl RpcGateway {
             }
             TASK_QUEUE_TAKE => self.handle_task_queue_take(connection_id, id, params, meta, now),
             TASK_QUEUE_MOVE => self.handle_task_queue_move(connection_id, id, params, meta, now),
+            openaide_app_server_protocol::methods::TASK_QUEUE_RESUME => {
+                self.handle_task_queue_resume(connection_id, id, params, meta)
+            }
             TASK_CANCEL => self.handle_task_cancel(connection_id, id, params, meta, now),
             TASK_CHAT_PAGE => self.handle_task_chat_page(connection_id, id, params, meta),
             TASK_COMPOSER_HISTORY => {

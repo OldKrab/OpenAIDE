@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -149,45 +149,53 @@ impl AcpAgentProcessPool {
         &self,
         request: AgentListSessionsRequest,
         preferred_auth_method_id: Option<String>,
+        process_operation: &Mutex<()>,
     ) -> Result<crate::protocol::model::AgentListSessionsResult, RuntimeError> {
         let agent_id = request.agent_id.clone();
-        for attempt in 1..=2 {
-            let (process, _operation) = self.get_or_launch_process(&agent_id)?;
-            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-            let sent = process.list_tx.send(AcpAgentProcessList {
-                request: request.clone(),
-                preferred_auth_method_id: preferred_auth_method_id.clone(),
-                timeout: self.list_timeout,
-                reply_tx,
-            });
-            if sent.is_err() {
-                self.remove_process_if_current(&agent_id, &process);
-                if attempt == 1 {
-                    logging::info(
-                        "acp_session_list_retry",
-                        serde_json::json!({
-                            "operation": "agent/list_sessions",
-                            "agent_id": agent_id,
-                            "attempt": 2,
-                            "reason": "process_ended",
-                        }),
-                    );
-                    continue;
-                }
-                return Err(RuntimeError::NotReady(
-                    "ACP agent process ended before session listing".to_string(),
-                ));
-            }
-            match reply_rx.recv_timeout(self.list_timeout.saturating_add(LIST_REPLY_TIMEOUT_GRACE))
-            {
-                Ok(result) => return result,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+        let operation_id = request.operation_id.clone();
+        let started_at = Instant::now();
+        let mut attempts = 0;
+        logging::info(
+            "acp_session_list_started",
+            serde_json::json!({
+                "operation": "agent/list_sessions/page", "operation_id": operation_id,
+                "agent_id": agent_id, "attempt": 1,
+            }),
+        );
+        let result = (|| {
+            for attempt in 1..=2 {
+                attempts = attempt;
+                // Serialize process launch/dispatch with lifecycle mutations, then release
+                // before the reply. Independent history reads share one live Agent process.
+                let queued_at = Instant::now();
+                let dispatch = lock_listing_dispatch(process_operation, self.list_timeout)?;
+                let lock_wait_ms = queued_at.elapsed().as_millis();
+                let dispatch_started = Instant::now();
+                let (process, _operation) = self.get_or_launch_process(&agent_id)?;
+                let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+                let sent = process.list_tx.send(AcpAgentProcessList {
+                    request: request.clone(),
+                    preferred_auth_method_id: preferred_auth_method_id.clone(),
+                    timeout: self.list_timeout,
+                    reply_tx,
+                });
+                drop(dispatch);
+                logging::info(
+                    "acp_session_list_dispatched",
+                    serde_json::json!({
+                        "operation": "agent/list_sessions/page", "operation_id": operation_id,
+                        "agent_id": agent_id, "attempt": attempt, "lock_wait_ms": lock_wait_ms,
+                        "dispatch_ms": dispatch_started.elapsed().as_millis(), "sent": sent.is_ok(),
+                    }),
+                );
+                if sent.is_err() {
                     self.remove_process_if_current(&agent_id, &process);
                     if attempt == 1 {
                         logging::info(
                             "acp_session_list_retry",
                             serde_json::json!({
                                 "operation": "agent/list_sessions",
+                                "operation_id": operation_id,
                                 "agent_id": agent_id,
                                 "attempt": 2,
                                 "reason": "process_ended",
@@ -196,19 +204,56 @@ impl AcpAgentProcessPool {
                         continue;
                     }
                     return Err(RuntimeError::NotReady(
-                        "ACP agent process ended during session listing".to_string(),
+                        "ACP agent process ended before session listing".to_string(),
                     ));
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // The async ACP request owns the listing deadline. This receiver is only a
-                    // worker watchdog and must never terminate a process with live attachments.
-                    return Err(RuntimeError::NotReady(
-                        "ACP session listing timed out".to_string(),
-                    ));
+                match reply_rx
+                    .recv_timeout(self.list_timeout.saturating_add(LIST_REPLY_TIMEOUT_GRACE))
+                {
+                    Ok(result) => return result,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        self.remove_process_if_current(&agent_id, &process);
+                        if attempt == 1 {
+                            logging::info(
+                                "acp_session_list_retry",
+                                serde_json::json!({
+                                    "operation": "agent/list_sessions",
+                                    "operation_id": operation_id,
+                                    "agent_id": agent_id,
+                                    "attempt": 2,
+                                    "reason": "process_ended",
+                                }),
+                            );
+                            continue;
+                        }
+                        return Err(RuntimeError::NotReady(
+                            "ACP agent process ended during session listing".to_string(),
+                        ));
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        // The async ACP request owns the listing deadline. This receiver is only a
+                        // worker watchdog and must never terminate a process with live attachments.
+                        return Err(RuntimeError::NotReady(
+                            "ACP session listing timed out".to_string(),
+                        ));
+                    }
                 }
             }
+            unreachable!("ACP session listing attempts are bounded")
+        })();
+        let fields = serde_json::json!({
+            "operation": "agent/list_sessions/page", "operation_id": operation_id,
+            "agent_id": agent_id, "attempt": attempts,
+            "outcome": if result.is_ok() { "completed" } else { "failed" },
+            "duration_ms": started_at.elapsed().as_millis(),
+            "error_kind": result.as_ref().err().map(RuntimeError::reason),
+        });
+        if result.is_ok() {
+            logging::info("acp_session_list_completed", fields);
+        } else {
+            logging::warn("acp_session_list_failed", fields);
         }
-        unreachable!("ACP session listing attempts are bounded")
+        result
     }
 
     pub(super) fn fork_session(
@@ -537,5 +582,34 @@ impl AcpAgentProcessPool {
         drop(list_tx);
         drop(control_tx);
         Ok((process, operation))
+    }
+}
+
+/// User authentication can hold the lifecycle gate indefinitely; passive discovery
+/// must settle within its own deadline so Navigation can expose a retry.
+fn lock_listing_dispatch(
+    gate: &Mutex<()>,
+    timeout: Duration,
+) -> Result<std::sync::MutexGuard<'_, ()>, RuntimeError> {
+    let started = Instant::now();
+    loop {
+        match gate.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(RuntimeError::Internal(
+                    "ACP Agent process operation lock poisoned".into(),
+                ))
+            }
+            Err(std::sync::TryLockError::WouldBlock) if started.elapsed() < timeout => {
+                thread::sleep(
+                    Duration::from_millis(10).min(timeout.saturating_sub(started.elapsed())),
+                );
+            }
+            Err(_) => {
+                return Err(RuntimeError::NotReady(
+                    "Agent is busy; retry history refresh".into(),
+                ))
+            }
+        }
     }
 }

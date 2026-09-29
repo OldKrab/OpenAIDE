@@ -183,6 +183,7 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway, shutdown_sender: mps
         let mut last_task_storage_maintenance = Instant::now();
         loop {
             thread::sleep(Duration::from_secs(1));
+            gateway.request_scheduled_queue_delivery();
             if gateway.has_task_navigation_subscribers()
                 && native_session_catalog_refresh_due(last_native_catalog_refresh.elapsed())
             {

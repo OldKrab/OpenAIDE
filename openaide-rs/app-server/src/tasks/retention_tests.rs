@@ -96,6 +96,7 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
                 task.active_turn_id = Some("turn-1".to_string());
             }
             "queued" => task.message_queue.items.push(QueuedMessageRecord {
+                not_before: None,
                 queued_message_id: "queued-1".to_string(),
                 text: "later".to_string(),
                 created_at: old.to_string(),

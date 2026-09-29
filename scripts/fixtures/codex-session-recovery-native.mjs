@@ -31,6 +31,9 @@ for await (const line of createInterface({ input: process.stdin })) {
     case "skills/list": result = { data: [] }; break;
     case "skills/extraRoots/set": result = {}; break;
     case "model/list": result = { data: [model("native-luna", false), model("native-astra", true)], nextCursor: null }; break;
+    case "thread/list": result = {
+      data: request.params.cursor ? [] : [thread], nextCursor: request.params.cursor ? null : "next-index-page",
+    }; break;
     case "thread/resume": {
       const params = request.params;
       activePolicy = {

@@ -75,6 +75,7 @@ impl AgentService {
             return Err(RuntimeError::InvalidParams("workspace_root".to_string()));
         }
         self.gateway.list_sessions(AgentListSessionsRequest {
+            operation_id: uuid::Uuid::new_v4().to_string(),
             agent_id: params.agent_id,
             cwd: Some(workspace_root.to_string_lossy().to_string()),
             cursor: params.cursor,

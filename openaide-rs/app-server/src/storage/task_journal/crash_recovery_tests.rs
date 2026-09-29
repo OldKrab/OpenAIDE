@@ -53,6 +53,7 @@ fn recovered_queue_delivery_never_reoffers_accepted_work_or_reverts_later_metada
         .message_queue
         .items
         .push(QueuedMessageRecord {
+            not_before: None,
             queued_message_id: "queue_1".to_string(),
             text: "queued prompt".to_string(),
             created_at: "2026-09-05T00:00:00Z".to_string(),
@@ -236,6 +237,7 @@ fn streamed_chat_does_not_duplicate_unchanged_queued_content_in_its_recovery_rec
         .message_queue
         .items
         .push(QueuedMessageRecord {
+            not_before: None,
             queued_message_id: "queue_large".to_string(),
             text: "q".repeat(1024 * 1024),
             created_at: "2026-09-05T00:00:00Z".to_string(),
