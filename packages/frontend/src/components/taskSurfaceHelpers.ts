@@ -1,5 +1,5 @@
 import type { AgentListedSession, ChatMessage, HistorySyncState, TaskStatus } from "@openaide/app-shell-contracts";
-import { activityStepCompletedLabel, activityStepProgressLabel } from "../state/activityLabels";
+import { activityStepCompletedLabel, activityStepProgressLabel, activityStepWithTitle } from "../state/activityLabels";
 
 export function newTaskStatusLabel({
   openingNativeSession,
@@ -54,10 +54,12 @@ export function taskWorkingStatusLabel(
   }
   if (latestWork?.message.kind === "activity") {
     // The footer tracks the newest concrete action while the folded group keeps its broader title.
-    const step = [...latestWork.message.steps]
+    const latestStep = [...latestWork.message.steps]
       .reverse()
       .find((candidate) => candidate.kind === "tool" || candidate.kind === "command" || candidate.kind === "thought");
-    if (!step) return "Working";
+    if (!latestStep) return "Working";
+    const step = activityStepWithTitle(latestStep,
+      latestWork.message.steps.length === 1 ? latestWork.message.title : undefined);
     if (step.kind === "thought" && step.streaming) return activityStepProgressLabel(step, latestWork.message.title);
     if (step.kind !== "thought" && step.status === "running") {
       return activityStepProgressLabel(step, latestWork.message.title);

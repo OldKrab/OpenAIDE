@@ -2,10 +2,43 @@ import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NormalizedMessage } from "@openaide/app-shell-contracts";
 import { ChatActivityView } from "./ChatActivityView";
+import { coalesceAdjacentActivities } from "../state/chatActivityCoalescing";
+import { taskWorkingStatusLabel } from "./taskSurfaceHelpers";
 
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
 describe("ChatActivityView", () => {
+  it.each([false, true])("preserves compaction titles in standalone and grouped activity (grouped=%s)", (grouped) => {
+    const item = (id: string, title: string, name: string, status: "running" | "completed") => ({
+      cursor: id,
+      identity: id,
+      message_type: "activity",
+      message_id: id,
+      message: {
+        kind: "activity" as const,
+        id,
+        title,
+        status,
+        created_at: "2026-10-01T00:00:00Z",
+        collapsed: true,
+        steps: [{ kind: "tool" as const, tool_call_id: id, name, status }],
+      },
+    });
+    const before = grouped ? [item("read", "Read notes.md", "read", "completed")] : [];
+    for (const status of ["running", "completed"] as const) {
+      const items = coalesceAdjacentActivities([...before, item("compact", "Compact conversation", "think", status)]);
+      const activity = items[0].message as ActivityMessage;
+      let tree!: ReturnType<typeof create>;
+      act(() => { tree = create(<ChatActivityView activity={activity} taskId="task_1" />); });
+      act(() => tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0].props.onClick());
+      expect(tree.root.findAllByProps({ className: "activity-step-title" }).some(
+        (node) => node.children.join("") === "Compact conversation",
+      )).toBe(true);
+      expect(taskWorkingStatusLabel(items, "active", false)).toBe("Compact conversation");
+      act(() => tree.unmount());
+    }
+  });
+
   it("renders agent boundaries as conversation notices instead of tool activity", () => {
     const activity: ActivityMessage = {
       kind: "activity",
