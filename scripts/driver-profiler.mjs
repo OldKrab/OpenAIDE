@@ -4,7 +4,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** Linked Task worktrees share the primary checkout's local Driver diagnostics. */
+export function primaryCheckoutRoot(checkout) {
+  try {
+    const common = execFileSync("git", ["-C", checkout, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return path.basename(common) === ".git" ? path.dirname(common) : checkout;
+  } catch { return checkout; } // Standalone copies retain their own capture root.
+}
+
+const repo = primaryCheckoutRoot(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
 const defaults = {
   unit: "openaide-web-driver-5474.service",
   flush: true,

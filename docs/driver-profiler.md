@@ -3,7 +3,8 @@
 `scripts/driver-profiler.mjs` is a standalone Linux collector for the local Driver.
 It attaches to the running Web Shell without restarting Driver and follows the
 Driver systemd cgroup across restarts. Run it as a separate user service, outside
-the Driver cgroup, using a stable checkout and Node 24 or later.
+the Driver cgroup, using a stable checkout and Node 24 or later. Commands invoked
+from linked Task worktrees resolve the primary checkout's capture directory.
 
 Capture includes one-second process/thread CPU counters, resident memory, I/O
 counters, thread states and kernel wait channels, machine resource pressure,

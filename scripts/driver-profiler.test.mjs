@@ -1,10 +1,28 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { watch } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { expiredSegment, parseProcessStat, safeRecord, snapshot } from "./driver-profiler.mjs";
+import { expiredSegment, parseProcessStat, primaryCheckoutRoot, safeRecord, snapshot } from "./driver-profiler.mjs";
+
+test("linked worktree sessions resolve the primary checkout's Driver capture", async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "openaide-profiler-worktree-test-"));
+  const primary = path.join(fixture, "primary");
+  const linked = path.join(fixture, "linked");
+  try {
+    execFileSync("git", ["init", "--initial-branch=shushakov/profiler-fixture", primary], { stdio: "ignore" });
+    await writeFile(path.join(primary, "fixture.txt"), "fixture");
+    execFileSync("git", ["-C", primary, "add", "fixture.txt"], { stdio: "ignore" });
+    execFileSync("git", ["-C", primary, "-c", "user.name=Test Fixture", "-c", "user.email=test@example.invalid",
+      "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "fixture"], { stdio: "ignore" });
+    execFileSync("git", ["-C", primary, "worktree", "add", "--detach", linked], { stdio: "ignore" });
+    assert.equal(primaryCheckoutRoot(primary), primary);
+    assert.equal(primaryCheckoutRoot(linked), primary);
+    assert.equal(primaryCheckoutRoot(fixture), fixture);
+  } finally { await rm(fixture, { recursive: true }); }
+});
 
 test("correlated timings survive while prompts, paths, arbitrary errors and URLs are omitted", () => {
   const record = safeRecord({ timestamp_ms: 2000, event: "rpc_request_completed", fields: {
