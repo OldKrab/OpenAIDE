@@ -69,6 +69,13 @@ export function activityStatusLabel(status: ActivityMessage["status"]) {
   return undefined;
 }
 
+/** Keeps the source activity's Agent-owned title when reasoning Tools are grouped for display. */
+export function activityStepWithTitle<T extends ActivityStep>(step: T, title: string | undefined): T {
+  const providedTitle = title?.trim();
+  if (step.kind !== "tool" || step.name !== "think" || !providedTitle || providedTitle === "Tool activity") return step;
+  return { ...step, input_summary: providedTitle };
+}
+
 export function activityStepLabel(step: ActivityStep) {
   if (step.kind === "thought") return "Thought";
   if (step.kind === "command") return step.command_label;
@@ -85,7 +92,7 @@ export function activityStepLabel(step: ActivityStep) {
   }
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return subject ?? humanizeToolName(step.name);
-  if (step.name === "think") return "Reasoning tool";
+  if (step.name === "think") return step.input_summary?.trim() || "Reasoning tool";
   if (step.name === "switch_mode") return subject ? `Switch mode to ${subject}` : "Switch mode";
   if (step.name === "web_search" && subject) return `Web search: ${subject}`;
   const action = toolActionLabel(step.name);
@@ -162,7 +169,7 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
   }
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return progressLabel("Running", subject ?? humanizeToolName(step.name));
-  if (step.name === "think") return "Using reasoning tool";
+  if (step.name === "think") return step.input_summary?.trim() || "Using reasoning tool";
   if (step.name === "web_search") return progressLabel(subject ? "Searching the web for" : "Searching the web", subject ?? "");
   const actions: Record<string, string> = {
     skill: "Activating",
@@ -208,7 +215,7 @@ export function activityStepCompletedLabel(step: ActivityStep) {
   if (step.status === "interrupted") return progressLabel("Interrupted", subject ?? humanizeToolName(step.name));
   if (step.status === "error") return progressLabel("Failed to use", subject ?? humanizeToolName(step.name));
   if (isExecuteTool(step)) return progressLabel("Ran", subject ?? "command");
-  if (step.name === "think") return "Used reasoning tool";
+  if (step.name === "think") return step.input_summary?.trim() || "Used reasoning tool";
   if (step.name === "web_search") return progressLabel(subject ? "Searched the web for" : "Searched the web", subject ?? "");
   const actions: Record<string, string> = {
     skill: "Activated",

@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@openaide/app-shell-contracts";
+import { activityStepWithTitle } from "./activityLabels";
 
 type ActivityChatMessage = ChatMessage & { message: Extract<ChatMessage["message"], { kind: "activity" }> };
 type ThoughtChatMessage = ChatMessage & {
@@ -86,11 +87,14 @@ function coalesceActivityRun(run: ActivityRunMessage[]): ChatMessage {
   const first = run[0];
   const last = run.at(-1) ?? first;
   const activities = run.flatMap((item) => (item.message.kind === "activity" ? [item.message] : []));
-  const steps = run.flatMap((item) =>
-    item.message.kind === "agent_message"
-      ? [{ kind: "thought" as const, message_id: item.message.id, text: thoughtText(item.message), streaming: false }]
-      : item.message.steps,
-  );
+  const steps = run.flatMap((item) => {
+    const message = item.message;
+    if (message.kind === "agent_message") {
+      return [{ kind: "thought" as const, message_id: message.id, text: thoughtText(message), streaming: false }];
+    }
+    const title = message.steps.length === 1 ? message.title : undefined;
+    return message.steps.map((step) => activityStepWithTitle(step, title));
+  });
   // The latest activity owns the live state; individual steps preserve failures.
   const status: ActivityChatMessage["message"]["status"] =
     activities.at(-1)?.status === "running" ? "running" : "completed";

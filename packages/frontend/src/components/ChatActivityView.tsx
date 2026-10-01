@@ -12,6 +12,7 @@ import {
   activityStepPreview,
   activityStepSemanticTitle,
   activityStepStatus,
+  activityStepWithTitle,
   activitySummary,
   activityToolKind,
   type ActivityStepSemanticTitle,
@@ -157,7 +158,7 @@ export function ActivityStepRow({
       : undefined;
   const details = step.kind === "tool" ? (artifactState?.details ?? step.details) : undefined;
   const displayStep: ActivityStep =
-    step.kind === "tool" ? presentToolStep(step, details) : step;
+    activityStepWithTitle(step.kind === "tool" ? presentToolStep(step, details) : step, legacyToolName);
   const label = activityStepLabel(displayStep);
   const semanticTitle = activityStepSemanticTitle(displayStep);
   const title = semanticTitle ? <SemanticStepTitle title={semanticTitle} /> : label;
