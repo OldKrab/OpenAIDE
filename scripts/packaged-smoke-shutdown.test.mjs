@@ -144,6 +144,23 @@ test("already closed Windows process needs neither taskkill nor a watchdog", asy
   });
 });
 
+test("Windows reports open stdio after root exit without targeting a stale PID", async () => {
+  const child = processFixture();
+  const observed = observeSmokeProcess(child);
+  child.exit(1);
+  const clock = controlledClock();
+  let killCalls = 0;
+  const stopping = shutdownSmokeProcess(child, observed, {
+    platform: "win32", clock,
+    spawnProcess() { killCalls += 1; throw new Error("unexpected taskkill"); },
+  });
+  const rejected = assert.rejects(stopping, /"exit":1.*"closed":false.*"stdout_open":true/);
+  (await clock.next()).expire();
+  await rejected;
+  assert.equal(killCalls, 0, "a dead root cannot identify its former tree");
+  assert.equal(clock.pending.size, 0);
+});
+
 test("cannot report successful cleanup while a killed taskkill helper remains unclosed", async () => {
   const child = processFixture();
   const observed = observeSmokeProcess(child);
@@ -236,7 +253,12 @@ async function startPipeTree(t) {
   return { child, observed, descendantPid };
 }
 
-test("real inherited pipe distinguishes root exit from closure using IPC barriers", { timeout: 30_000 }, async (t) => {
+// Node's Windows stdio transport does not retain this pipe on root exit. Keep
+// the actual inherited-POSIX-pipe reproduction here; the controlled-event test
+// above covers the dead-root/open-stdio invariant on every platform.
+test("POSIX inherited pipe distinguishes root exit from closure using IPC barriers", {
+  skip: process.platform === "win32", timeout: 30_000,
+}, async (t) => {
   const { child, observed } = await startPipeTree(t);
   const exited = once(child, "exit", { signal: t.signal });
   child.send("exit");
