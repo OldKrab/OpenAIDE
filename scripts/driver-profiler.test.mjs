@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { expiredSegment, parseProcessStat, primaryCheckoutRoot, safeRecord, snapshot } from "./driver-profiler.mjs";
+import { expiredSegment, parseProcessStat, primaryCheckoutRoot, safeRecord, selectWebShell, snapshot } from "./driver-profiler.mjs";
 
 test("linked worktree sessions resolve the primary checkout's Driver capture", async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), "openaide-profiler-worktree-test-"));
@@ -90,4 +90,20 @@ test("snapshot flush request waits for collector acknowledgment even during star
     assert.equal(JSON.parse(await readFile(path.join(saved, "manifest.json"), "utf8")).cpu_flush_outcome, "success");
     assert.ok((await readdir(saved)).includes(profile));
   } finally { watcher?.close(); await rm(fixture, { recursive: true }); }
+});
+
+test("a transient process with Web Shell argv never displaces the attached Web Shell", () => {
+  // The attached inspector target stays selected while it lives, whatever pid order the cgroup lists.
+  assert.equal(selectWebShell([{ pid: 416812, ppid: 1 }, { pid: 936412, ppid: 1 }], 416812), 416812);
+  assert.equal(selectWebShell([{ pid: 936412, ppid: 1 }, { pid: 416812, ppid: 1 }], 416812), 416812);
+});
+
+test("without an attachment, the Web Shell is the root of its own process family", () => {
+  assert.equal(selectWebShell([{ pid: 936412, ppid: 416812 }, { pid: 416812, ppid: 1 }]), 416812);
+  assert.equal(selectWebShell([{ pid: 936412, ppid: 1 }, { pid: 416812, ppid: 1 }]), 416812);
+  assert.equal(selectWebShell([]), undefined);
+});
+
+test("process stat exposes the parent pid", () => {
+  assert.equal(parseProcessStat("12 (node) S 7 12 12 0 -1 0 0 0 0 0 5 6 0 0 20 0 1 0 99 0 321").ppid, 7);
 });

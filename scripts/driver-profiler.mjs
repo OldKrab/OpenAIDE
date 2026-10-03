@@ -48,7 +48,19 @@ export function expiredSegment(name, now, options = defaults) {
 
 export function parseProcessStat(text) {
   const values = text.slice(text.lastIndexOf(")") + 2).trim().split(/\s+/);
-  return { state: values[0], cpu_ticks: Number(values[11]) + Number(values[12]), start_ticks: values[19], rss_pages: Number(values[21]) };
+  return { state: values[0], ppid: Number(values[1]), cpu_ticks: Number(values[11]) + Number(values[12]), start_ticks: values[19], rss_pages: Number(values[21]) };
+}
+
+/**
+ * Chooses the single Web Shell to profile among processes whose argv matches it.
+ * A live attachment wins so a transient helper cannot evict a healthy inspector;
+ * otherwise the family root (oldest, not a child of another match) is selected.
+ */
+export function selectWebShell(candidates, attachedPid) {
+  if (attachedPid !== undefined && candidates.some(item => item.pid === attachedPid)) return attachedPid;
+  const pids = new Set(candidates.map(item => item.pid));
+  const roots = candidates.filter(item => !pids.has(item.ppid));
+  return (roots.length ? roots : candidates).map(item => item.pid).sort((a, b) => a - b)[0];
 }
 
 function classified(error) { return /^[A-Z][A-Z0-9_]+$/.test(error?.code ?? "") ? error.code : "operation_failed"; }
@@ -102,7 +114,7 @@ async function processSample(pid, previous, ticksPerSecond, pageSize) {
   const last = previous.get(identity);
   previous.set(identity, { ticks: info.cpu_ticks, time: started });
   const result = {
-    pid: Number(pid), process_instance: identity, state: info.state,
+    pid: Number(pid), ppid: info.ppid, process_instance: identity, state: info.state,
     cpu_percent: last ? Math.round((info.cpu_ticks - last.ticks) / ticksPerSecond / ((started - last.time) / 1000) * 1000) / 10 : null,
     rss_bytes: info.rss_pages * pageSize,
   };
@@ -221,17 +233,18 @@ export async function run(options = defaults) {
       if (!cgroup.startsWith("/user.slice/")) throw new Error("driver_unavailable");
       const pids = (await readFile(`/sys/fs/cgroup${cgroup}/cgroup.procs`, "utf8")).trim().split(/\s+/).filter(pid => /^\d+$/.test(pid));
       const processes = [];
-      let webPid;
+      const webCandidates = [];
       for (const pid of pids) {
         try {
           const sample = await processSample(pid, previous, ticksPerSecond, pageSize);
           const command = (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0");
           sample.role = command.some(arg => arg === "src/dev-server.mjs") ? "web_shell"
             : command[0]?.endsWith("/openaide-app-server") ? "app_server" : "driver_child";
-          if (sample.role === "web_shell") webPid = Number(pid);
+          if (sample.role === "web_shell") webCandidates.push({ pid: Number(pid), ppid: sample.ppid });
           processes.push(sample);
         } catch (error) { if (!["ENOENT", "ESRCH"].includes(error.code)) throw error; }
       }
+      const webPid = selectWebShell(webCandidates, inspector?.pid);
       const active = new Set(processes.map(item => item.process_instance));
       for (const key of previous.keys()) if (!active.has(key)) previous.delete(key);
       if (inspector && inspector.pid !== webPid) { inspector.close(); inspector = undefined; }

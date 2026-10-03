@@ -17,7 +17,7 @@ pub(super) struct ProcessIdleTimeouts {
 impl Default for ProcessIdleTimeouts {
     fn default() -> Self {
         Self {
-            short: Duration::from_secs(60),
+            short: Duration::from_secs(6 * 60),
             long: Duration::from_secs(30 * 60),
         }
     }
@@ -214,3 +214,7 @@ impl ConnectTo<Client> for RetainedAgent {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "acp_process_lifetime_tests.rs"]
+mod tests;
