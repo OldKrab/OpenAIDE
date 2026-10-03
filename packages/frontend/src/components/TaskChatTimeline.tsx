@@ -114,6 +114,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
         onPointerDown={chatScroll.onPointerDown}
         onPointerUp={chatScroll.onPointerUp}
         onScroll={chatScroll.onScroll}
+        onScrollEnd={chatScroll.onScrollEnd}
         onWheel={chatScroll.onWheel}
         ref={setMessageListRef}
         >
