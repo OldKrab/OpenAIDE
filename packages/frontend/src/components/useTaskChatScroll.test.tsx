@@ -7,6 +7,7 @@ import type { TaskChatScrollState } from "../state/store";
 const virtualizerOptions = vi.hoisted(() => ({
   latest: undefined as { anchorTo?: "end" | "start" } | undefined,
   scrollToIndex: vi.fn(),
+  reportedDistanceFromEnd: undefined as number | undefined,
 }));
 
 vi.mock("@tanstack/react-virtual", async () => {
@@ -31,6 +32,7 @@ vi.mock("@tanstack/react-virtual", async () => {
   function createVirtualizer(optionsRef: { current: Options }) {
     const element = () => optionsRef.current.getScrollElement();
     const distanceFromEnd = () => {
+      if (virtualizerOptions.reportedDistanceFromEnd !== undefined) return virtualizerOptions.reportedDistanceFromEnd;
       const viewport = element();
       return viewport ? Math.max(0, viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) : 0;
     };
@@ -77,6 +79,7 @@ describe("useTaskChatScroll", () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     virtualizerOptions.latest = undefined;
     virtualizerOptions.scrollToIndex.mockClear();
+    virtualizerOptions.reportedDistanceFromEnd = undefined;
   });
 
   afterEach(() => {
@@ -192,6 +195,74 @@ describe("useTaskChatScroll", () => {
 
     expect(messageList.scrollTop).toBe(320);
     expect(messageListView(tree)).toBeTruthy();
+  });
+
+  for (const input of ["wheel", "keyboard", "touch", "stale virtualizer"]) {
+    it(`returns to latest after ${input} scrolling reaches the end over multiple events`, () => {
+      const windowEvents = new EventTarget();
+      vi.stubGlobal("window", windowEvents);
+      const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+      const onScrollState = vi.fn();
+      const tree = renderHarness(messageList, { onScrollState });
+      const viewport = messageListView(tree);
+      act(() => {
+        viewport.props.onWheel({ deltaY: -300 });
+        messageList.scrollTop = 700;
+        viewport.props.onScroll({ currentTarget: messageList });
+      });
+      act(() => {
+        if (input === "wheel" || input === "stale virtualizer") viewport.props.onWheel({ deltaY: 300 });
+        if (input === "keyboard") viewport.props.onKeyDown({
+          key: "End", currentTarget: messageList, target: messageList,
+        });
+        if (input === "touch") {
+          viewport.props.onPointerDown({ pointerType: "touch", clientY: 400 });
+          windowEvents.dispatchEvent(Object.assign(new Event("pointermove"), {
+            pointerType: "touch", clientY: 200,
+          }));
+          viewport.props.onPointerCancel();
+        }
+        messageList.scrollTop = 850;
+        viewport.props.onScroll({ currentTarget: messageList });
+      });
+      act(() => {
+        messageList.scrollTop = 1000;
+        // Native listener ordering may leave TanStack one scroll event behind React.
+        if (input === "stale virtualizer") virtualizerOptions.reportedDistanceFromEnd = 150;
+        viewport.props.onScroll({ currentTarget: messageList });
+      });
+      const savedScrollState = onScrollState.mock.calls.at(-1)![0];
+      expect(savedScrollState.ownership).toBe("following");
+      virtualizerOptions.reportedDistanceFromEnd = undefined;
+      act(() => tree.unmount());
+
+      const returnedList = scrollNode({ clientHeight: 400, scrollHeight: 1800 });
+      const returnedTree = renderHarness(returnedList, { savedScrollState });
+      expect(returnedList.scrollTop).toBe(1400);
+      act(() => returnedTree.unmount());
+    });
+  }
+
+  it("keeps reader ownership when layout reaches the end after the gesture has settled", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const onScrollState = vi.fn();
+    const tree = renderHarness(messageList, { onScrollState });
+    const viewport = messageListView(tree);
+    act(() => {
+      viewport.props.onWheel({ deltaY: -300 });
+      messageList.scrollTop = 700;
+      viewport.props.onScroll({ currentTarget: messageList });
+      viewport.props.onWheel({ deltaY: 100 });
+      messageList.scrollTop = 800;
+      viewport.props.onScroll({ currentTarget: messageList });
+      viewport.props.onScrollEnd();
+    });
+    act(() => {
+      messageList.scrollHeight = 1200;
+      viewport.props.onScroll({ currentTarget: messageList });
+    });
+    expect(onScrollState).toHaveBeenLastCalledWith({ ownership: "reading", scrollTop: 800 });
+    act(() => tree.unmount());
   });
 
   it("automatically requests earlier history only while estimated Chat is underfilled", () => {
@@ -452,6 +523,7 @@ function Harness({
         onPointerDown={chatScroll.onPointerDown}
         onPointerUp={chatScroll.onPointerUp}
         onScroll={chatScroll.onScroll}
+        onScrollEnd={chatScroll.onScrollEnd}
         onWheel={chatScroll.onWheel}
         ref={chatScroll.messageListRef}
       />
