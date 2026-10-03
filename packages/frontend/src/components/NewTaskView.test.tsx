@@ -1,4 +1,4 @@
-import { act, create } from "react-test-renderer";
+import { act, create, type ReactTestInstance } from "react-test-renderer";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
@@ -543,7 +543,7 @@ describe("NewTaskView", () => {
     );
 
     const status = tree.root.findByProps({ className: "composer-options-status" });
-    expect(status.children).toContain("Connecting to Codex…");
+    expect(statusLabel(status)).toBe("Connecting to Codex…");
     expect(status.parent?.props.className).toContain("composer-adaptive-options");
     expect(textContent(tree)).toContain("Connecting to Codex…");
     expect(textContent(tree)).not.toContain("Preparing task");
@@ -575,7 +575,7 @@ describe("NewTaskView", () => {
 
     const status = tree.root.findByProps({ className: "composer-options-status" });
     expect(status.props["aria-busy"]).toBe(true);
-    expect(status.children).toContain("Installing the Codex integration…");
+    expect(statusLabel(status)).toBe("Installing the Codex integration…");
     expect(textContent(tree)).not.toContain("Loading options…");
   });
 
@@ -609,7 +609,7 @@ describe("NewTaskView", () => {
     );
 
     const status = tree.root.findByProps({ className: "composer-options-status error" });
-    expect(status.children).toContain("Couldn’t load options");
+    expect(statusLabel(status)).toBe("Couldn’t load options");
     expect(status.parent?.props.className).toContain("composer-adaptive-options");
     expect(textContent(tree)).not.toContain("Preparing task");
     act(() => status.findByType("button").props.onClick());
@@ -1409,6 +1409,10 @@ function textContent(tree: ReturnType<typeof render>) {
     .flatMap((node) => node.children)
     .filter((child): child is string => typeof child === "string")
     .join(" ");
+}
+
+function statusLabel(status: ReactTestInstance) {
+  return status.findByProps({ className: "composer-options-status-label" }).children.join("");
 }
 
 function composerEditor(tree: ReturnType<typeof render>) {

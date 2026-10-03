@@ -180,5 +180,7 @@ try {
   await shutdownSmokeProcess(child, observed, {
     onEvent: (event) => console.error(JSON.stringify(event)),
   });
-  await rm(stateParent, { recursive: true, force: true });
+  // Windows releases handles of the terminated process tree asynchronously, so
+  // the first removal can still find the temporary state locked.
+  await rm(stateParent, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
