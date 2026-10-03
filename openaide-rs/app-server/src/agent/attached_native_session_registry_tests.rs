@@ -70,3 +70,31 @@ fn disconnected_session_attachment_is_not_reported_as_active() {
     assert!(!registry.contains(&key));
     assert!(registry.get(&key).is_none());
 }
+
+#[test]
+fn closing_a_stopped_session_discards_the_dead_handle() {
+    let registry = AttachedNativeSessionRegistry::new();
+    let key = AgentSessionKey::new("agent", "session");
+    registry
+        .insert_started_session(key.clone(), stopped_attachment())
+        .expect("insert session");
+
+    registry
+        .close_session(&key)
+        .expect("a stopped attachment has nothing left to close");
+    assert!(registry.remove(&key).is_none());
+}
+
+#[test]
+fn closing_a_disconnected_session_discards_the_dead_handle() {
+    let registry = AttachedNativeSessionRegistry::new();
+    let key = AgentSessionKey::new("agent", "session");
+    registry
+        .insert_started_session(key.clone(), disconnected_attachment())
+        .expect("insert session");
+
+    registry
+        .close_session(&key)
+        .expect("a disconnected attachment has nothing left to close");
+    assert!(registry.remove(&key).is_none());
+}

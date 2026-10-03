@@ -133,7 +133,21 @@ impl AttachedNativeSessionRegistry {
     pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.remove_event_sink(session);
         if let Some(attachment) = self.remove(session) {
-            attachment.close()?;
+            if let Err(error) = attachment.close() {
+                // A stopped process or dropped attachment has no ACP session left to
+                // close. Failing here would block the replacement load that recovers it.
+                if attachment.is_running() {
+                    return Err(error);
+                }
+                crate::logging::warn(
+                    "acp_dead_session_handle_evicted",
+                    serde_json::json!({
+                        "agent_id": session.agent_id(),
+                        "session_id": session.session_id(),
+                        "operation": "session-close",
+                    }),
+                );
+            }
         }
         Ok(())
     }
