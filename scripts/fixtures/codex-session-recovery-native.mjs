@@ -10,6 +10,7 @@ const thread = {
   createdAt: 1, updatedAt: 1, cwd: fixture.cwd, modelProvider: "openai",
   path: fixture.historyPath ?? null, turns: [], historyMode: "legacy", status: { type: "idle" }, source: "appServer",
 };
+const childThread = { ...thread, id: "child-fixture", sessionId: "child-fixture", path: null, turns: [] };
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const model = (id, isDefault) => ({
   id, model: id, displayName: id, description: id, isDefault,
@@ -67,7 +68,14 @@ for await (const line of createInterface({ input: process.stdin })) {
       }, 20);
       break;
     }
-    case "thread/read": result = { thread }; break;
+    case "thread/read": result = { thread: request.params.threadId === childThread.id ? childThread : thread }; break;
+    case "thread/items/list": {
+      const selected = request.params.threadId === childThread.id ? childThread : thread;
+      let data = selected.turns.flatMap((turn) => turn.items.map((item) => ({ turnId: turn.id, item })));
+      if (request.params.sortDirection === "desc") data.reverse();
+      result = { data: data.slice(0, request.params.limit ?? data.length), nextCursor: null };
+      break;
+    }
     case "thread/goal/get": result = { goal: null }; break;
     case "thread/unsubscribe": result = {}; break;
     case "turn/start": {
@@ -79,6 +87,10 @@ for await (const line of createInterface({ input: process.stdin })) {
       } })}\n`);
       const turn = { id: `turn-fixture-${++turnNumber}`, items: [], status: "inProgress", error: null };
       result = { turn };
+      if (fixture.subagents) {
+        setImmediate(() => emitSubagentTurn(turn));
+        break;
+      }
       if (params.input.some((item) => item.text === "Steering race fixture")) {
         steeringTurn = turn;
         break;
@@ -103,4 +115,33 @@ for await (const line of createInterface({ input: process.stdin })) {
       continue;
   }
   send({ id: request.id, result });
+}
+
+/** Drives the maintained adapter's real Codex-to-ACP native and legacy paths. */
+function emitSubagentTurn(turn) {
+  const spawn = {
+    type: "collabAgentToolCall", id: "spawn-fixture", tool: "spawnAgent", status: "completed",
+    senderThreadId: thread.id, receiverThreadIds: [childThread.id],
+    agentsStates: { [childThread.id]: { status: "running", message: null } },
+    prompt: "Review the fixture", model: null, reasoningEffort: null,
+  };
+  const childMessage = { type: "agentMessage", id: "child-result", text: "Packaged child result", phase: "final_answer" };
+  const wait = { ...spawn, id: "wait-fixture", tool: "wait", receiverThreadIds: [],
+    agentsStates: { [childThread.id]: { status: "completed", message: childMessage.text } }, prompt: null };
+  const event = (method, threadId, turnId, item) => send({ method, params: { threadId, turnId, item } });
+  event("item/started", thread.id, turn.id, { ...spawn, status: "inProgress" });
+  event("item/completed", thread.id, turn.id, spawn);
+  event("item/started", childThread.id, "child-turn", childMessage);
+  send({ method: "item/agentMessage/delta", params: {
+    threadId: childThread.id, turnId: "child-turn", itemId: childMessage.id, delta: childMessage.text,
+  } });
+  event("item/completed", childThread.id, "child-turn", childMessage);
+  const childTurn = { id: "child-turn", items: [childMessage], status: "completed", error: null };
+  childThread.turns = [childTurn];
+  send({ method: "turn/completed", params: { threadId: childThread.id, turn: childTurn } });
+  event("item/started", thread.id, turn.id, { ...wait, status: "inProgress" });
+  event("item/completed", thread.id, turn.id, wait);
+  const completed = { ...turn, items: [spawn, wait], status: "completed" };
+  thread.turns.push(completed);
+  send({ method: "turn/completed", params: { threadId: thread.id, turn: completed } });
 }

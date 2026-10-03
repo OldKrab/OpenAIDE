@@ -16,7 +16,7 @@ const recoveryFailure = (code, fresh = false) => Object.assign(new Error(fresh
 const writeRecoveryLog = (event) => console.error(JSON.stringify(event));
 
 /**
- * Version-scoped bridge for Codex 0.153.3 native history. Its resume RPC restores
+ * Version-scoped bridge for Codex 0.159.2 and earlier native history. Its resume RPC restores
  * model/approval history but rebuilds sandbox permissions from current config.
  * Read the native-owned rollout before resume can append those new defaults;
  * no OpenAIDE option cache or global Codex configuration is replayed or changed.
@@ -41,7 +41,20 @@ export async function resumeNativeSession(client, params, { log = writeRecoveryL
   if (active != null && (!onlyKeys(active, ["id", "extends"]) || typeof active.id !== "string")) throw unsupported();
   if (saved.network !== undefined || (active?.id
     && !active.id.startsWith(":") && saved.permission_profile?.network === "enabled")) throw unsupported();
-  const { workspacePolicy, ...overrides } = await restorePermissions(saved, params);
+  const validationStarted = Date.now();
+  const validationFields = { operation: "codex.native_policy_validate", session_id: params.threadId, attempt: 1 };
+  log({ ...validationFields, phase: "start" });
+  let restored;
+  try {
+    restored = await restorePermissions(saved, params);
+  } catch (error) {
+    log({ ...validationFields, phase: "terminal", outcome: "failure",
+      duration_ms: Date.now() - validationStarted, error_code: "unsupported_permissions" });
+    throw error;
+  }
+  log({ ...validationFields, phase: "terminal", outcome: "success",
+    duration_ms: Date.now() - validationStarted, error_code: null });
+  const { workspacePolicy, ...overrides } = restored;
   const response = await client.threadResume({ ...params, ...overrides, approvalPolicy, approvalsReviewer });
   if (workspacePolicy) {
     const started = Date.now();
@@ -298,8 +311,13 @@ async function restoreWorkspace(saved, params) {
   const expectedProtected = new Set([...writes].flatMap((root) => [".git", ".agents", ".codex"].map((name) => path.join(root, name))));
   const gitDirectory = await worktreeGitDirectory(cwd);
   if (gitDirectory) expectedProtected.add(gitDirectory);
-  if (!rootRead || !writes.has(cwd) || protectedPaths.size !== expectedProtected.size
-    || [...expectedProtected].some((entry) => !protectedPaths.has(entry))) throw unsupported();
+  // Codex 0.159 adds read/skip protection for AWS credentials. Accept both
+  // complete native shapes so older histories remain recoverable; the current
+  // native constructor also applies its newer protection to those histories.
+  const currentProtected = new Set([...expectedProtected, ...[...writes].map((root) => path.join(root, ".aws"))]);
+  const matches = (expected) => protectedPaths.size === expected.size
+    && [...expected].every((entry) => protectedPaths.has(entry));
+  if (!rootRead || !writes.has(cwd) || (!matches(expectedProtected) && !matches(currentProtected))) throw unsupported();
   // Native legacy workspace construction owns these protected read/skip rules.
   // Named-profile grammar cannot encode skip; only this exact canonical shape
   // may use the legacy constructor. Any custom carveout fails before resume.

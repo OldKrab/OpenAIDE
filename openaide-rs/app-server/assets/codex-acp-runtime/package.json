@@ -3,5 +3,8 @@
   "private": true,
   "dependencies": {
     "@openaide/codex-acp": "2.0.0"
+  },
+  "overrides": {
+    "@openai/codex": "0.159.2"
   }
 }

@@ -114,6 +114,40 @@ function workspaceSettings(cwd = path.resolve(os.tmpdir(), "native-project")) {
   return value;
 }
 
+test("native workspace reconstruction accepts native AWS credential protection", async () => {
+  const saved = workspaceSettings();
+  const policy = saved.payload.thread_settings;
+  policy.permission_profile.file_system.entries.push({
+    path: { type: "path", path: path.join(policy.cwd, ".aws") },
+    access: "read", missing_path_behavior: "skip",
+  });
+  await withHistory([saved], async (client, calls) => {
+    await recovery.resumeNativeSession(client, { threadId: "session" }, { log() {} });
+    assert.equal(calls[1].params.sandbox, "read-only");
+    assert.deepEqual(calls[2].params.sandboxPolicy, {
+      type: "workspaceWrite", writableRoots: [], networkAccess: false,
+      excludeTmpdirEnvVar: false, excludeSlashTmp: false,
+    });
+  });
+});
+
+test("unsupported permission shapes report a safe validation failure before resume", async () => {
+  await withHistory([settings({ ...restricted, future_rule: false })], async (client, calls, history) => {
+    const events = [];
+    await assert.rejects(recovery.resumeNativeSession(client, { threadId: "session" }, {
+      log: (event) => { if (event.operation === "codex.native_policy_validate") events.push(event); },
+    }), /Cannot safely restore/);
+    assert.deepEqual(calls.map(call => call.method), ["read"]);
+    assert.deepEqual(events.map(event => event.phase), ["start", "terminal"]);
+    assert.equal(events[1].outcome, "failure");
+    assert.equal(events[1].error_code, "unsupported_permissions");
+    assert.equal(events[1].session_id, "session");
+    assert.equal(events[1].attempt, 1);
+    assert.equal(typeof events[1].duration_ms, "number");
+    assert.ok(!JSON.stringify(events).includes(history));
+  });
+});
+
 test("native workspace reconstruction preserves protected skip rules and duplicate entries", async () => {
   const saved = workspaceSettings();
   await withHistory([saved], async (client, calls) => {

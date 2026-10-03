@@ -278,10 +278,15 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
             crate::logging::info(
                 "acp_native_subagents_negotiated",
                 serde_json::json!({
+                    "operation_id": attachment_lifetime.operation_id(),
                     "agent_id": config.agent_id,
                     "client_enabled": client_enabled,
                     "agent_advertised": agent_advertised,
                     "negotiated": negotiated,
+                    "reason_code": if !client_enabled { "client_disabled" }
+                        else if !agent_advertised { "agent_unsupported" }
+                        else { "bilateral_support" },
+                    "duration_ms": connection_started_at.elapsed().as_millis(),
                 }),
             );
             if let Some(first_open) = first_open {
