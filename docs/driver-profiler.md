@@ -6,7 +6,7 @@ Driver systemd cgroup across restarts. Run it as a separate user service, outsid
 the Driver cgroup, using a stable checkout and Node 24 or later. Commands invoked
 from linked Task worktrees resolve the primary checkout's capture directory.
 
-Capture includes one-second process/thread CPU counters, resident memory, I/O
+Capture includes one-second process/thread CPU counters (with parent pids), resident memory, I/O
 counters, thread states and kernel wait channels, machine resource pressure,
 allowlisted App Server/Web Shell lifecycle logs with correlation identifiers,
 and 100 Hz Web Shell JavaScript CPU samples in 30-second `.cpuprofile` segments.
