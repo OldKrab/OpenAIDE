@@ -92,6 +92,13 @@ body[data-input-modality="pointer"] button:focus-visible {
     display: none;
   }
 
+  /* The shared navigator moves into this compact header. Its accessible name
+     and menu retain the full selected identity inside the existing touch target. */
+  body[data-shell="web"] .mobile-workbench-bar .subagent-switcher-value,
+  body[data-shell="web"] .mobile-workbench-bar .subagent-count {
+    display: none;
+  }
+
   body[data-shell="web"] .mobile-workbench-bar span {
     min-width: 0;
     display: grid;

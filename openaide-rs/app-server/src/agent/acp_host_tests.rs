@@ -1,6 +1,42 @@
 use crate::protocol::host::HostBridge;
 
-use super::{initialize_request, initialize_request_with_subagents};
+use super::{
+    initialize_request, initialize_request_with_subagents, native_subagents_enabled_with_override,
+};
+
+#[test]
+fn native_subagents_are_advertised_without_a_rollout_flag() {
+    for override_value in [None, Some(""), Some("  "), Some("1"), Some(" TRUE ")] {
+        let value = serde_json::to_value(initialize_request_with_subagents(
+            &HostBridge::disabled(),
+            native_subagents_enabled_with_override(override_value),
+        ))
+        .unwrap();
+        assert_eq!(
+            value["clientCapabilities"]["subagents"],
+            serde_json::json!({})
+        );
+        assert_eq!(
+            value["clientCapabilities"]["_meta"]["openaide"]["nativeSubagentSessions"],
+            true
+        );
+    }
+}
+
+#[test]
+fn native_subagent_rollback_omits_both_wire_capabilities() {
+    for override_value in ["0", "false", " FALSE ", "invalid"] {
+        let value = serde_json::to_value(initialize_request_with_subagents(
+            &HostBridge::disabled(),
+            native_subagents_enabled_with_override(Some(override_value)),
+        ))
+        .unwrap();
+        assert!(value["clientCapabilities"].get("subagents").is_none());
+        assert!(value["clientCapabilities"]["_meta"]
+            .get("openaide")
+            .is_none());
+    }
+}
 
 #[test]
 fn form_elicitation_is_advertised_without_shell_host_capabilities() {
@@ -38,7 +74,7 @@ fn terminal_auth_is_advertised_when_the_app_shell_host_is_available() {
 }
 
 #[test]
-fn draft_subagents_are_advertised_only_at_the_explicit_activation_boundary() {
+fn disabling_native_subagents_omits_the_canonical_and_sdk_bridge_capabilities() {
     let disabled = serde_json::to_value(initialize_request_with_subagents(
         &HostBridge::disabled(),
         false,

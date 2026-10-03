@@ -1,5 +1,6 @@
 import { Check, ChevronDown } from "lucide-react";
 import { useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import type { SubagentCatalogEntrySnapshot } from "@openaide/app-server-client";
 import type { AgentIconId } from "@openaide/app-shell-contracts";
 
@@ -13,6 +14,7 @@ export function SubagentNavigator({
   entries,
   onSelect,
   selectedId,
+  target,
   unseen,
 }: {
   /** Identity of the Task's own Agent, shown while the navigator is on its main history. */
@@ -22,6 +24,8 @@ export function SubagentNavigator({
   entries: SubagentCatalogEntrySnapshot[];
   onSelect: (subagentId?: string) => void;
   selectedId?: string;
+  /** Compact App Shell headers host the same navigator when Task chrome is hidden. */
+  target?: HTMLElement | null;
   unseen: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
@@ -33,7 +37,7 @@ export function SubagentNavigator({
     onSelect(subagentId);
   };
 
-  return (
+  const navigator = (
     <div className="subagent-navigator">
       <PopupMenu
         className="subagent-menu"
@@ -46,7 +50,7 @@ export function SubagentNavigator({
             {...props}
             aria-label={`Switch agent. Currently viewing ${selected?.name ?? "Main Agent"}`}
             className="subagent-switcher-trigger"
-            title="Switch agent history"
+            title={`Switch agent history. Currently viewing ${selected?.name ?? "Main Agent"}`}
             type="button"
           >
             {selected ? (
@@ -109,6 +113,7 @@ export function SubagentNavigator({
       </PopupMenu>
     </div>
   );
+  return target ? createPortal(navigator, target) : navigator;
 }
 
 function hierarchyDepths(entries: SubagentCatalogEntrySnapshot[]) {

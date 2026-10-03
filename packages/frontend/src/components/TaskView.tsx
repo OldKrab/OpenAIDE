@@ -538,6 +538,7 @@ export function TaskView({
               entries={subagentEntries}
               onSelect={subagents.selectSubagent}
               selectedId={subagents.selectedSubagentId}
+              target={headerActionsTarget}
               unseen={subagents.unseen}
             />
           ) : undefined}

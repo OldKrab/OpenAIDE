@@ -5,6 +5,7 @@ import path from "node:path";
 import { smokeCodexSessionRecovery } from "./smoke-codex-session-recovery.mjs";
 import { smokeCodexNativeRecovery } from "./smoke-codex-native-recovery.mjs";
 import { observeSmokeProcess, shutdownSmokeProcess } from "./packaged-smoke-shutdown.mjs";
+import { smokeCodexSubagents } from "./smoke-codex-subagents.mjs";
 
 const [binaryPath, workspaceRoot] = process.argv.slice(2);
 if (!binaryPath || !workspaceRoot) {
@@ -166,6 +167,7 @@ try {
     const modules = path.join(runtimesRoot, runtimes[0].name, "node_modules");
     const adapter = path.join(modules, "@openaide", "codex-acp", "dist", "index.js");
     await smokeCodexSessionRecovery(adapter);
+    await smokeCodexSubagents(adapter);
     // The managed package's launcher selects its pinned platform binary. This
     // covers native policy persistence as well as the adapter's wire requests.
     await smokeCodexNativeRecovery(path.join(modules, "@openai", "codex", "bin", "codex.js"), adapter);
