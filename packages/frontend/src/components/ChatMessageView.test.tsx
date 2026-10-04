@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
-import { act, create } from "react-test-renderer";
+import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActivityToolDetails, AgentMessagePart, Attachment, ChatMessage, PermissionOption } from "@openaide/app-shell-contracts";
 
@@ -1326,67 +1326,70 @@ describe("ChatRow", () => {
 
   it("renders web search as its own compact tool row", async () => {
     const { ActivityStepRow } = await import("./ChatActivityView");
-    const html = renderToStaticMarkup(
-      ActivityStepRow({
-        step: {
-          kind: "tool",
-          name: "web_search",
-          status: "completed",
-          input_summary: "Saint Petersburg weather tomorrow",
-          details: {
-            locations: [],
-            content: [],
-            input: {
-              command: [],
-              query: "Saint Petersburg weather tomorrow",
-              queries: [
-                "Saint Petersburg weather tomorrow",
-                "Санкт-Петербург погода завтра",
-              ],
-              fields: [{ name: "type", value: { kind: "string", value: "webSearch" } }],
-            },
+    const row = ActivityStepRow({
+      step: {
+        kind: "tool",
+        name: "web_search",
+        status: "completed",
+        input_summary: "Saint Petersburg weather tomorrow",
+        details: {
+          locations: [],
+          content: [],
+          input: {
+            command: [],
+            query: "Saint Petersburg weather tomorrow",
+            queries: [
+              "Saint Petersburg weather tomorrow",
+              "Санкт-Петербург погода завтра",
+            ],
+            fields: [{ name: "type", value: { kind: "string", value: "webSearch" } }],
           },
         },
-        taskId: "task_1",
-      }),
-    );
+      },
+      taskId: "task_1",
+    });
 
-    expect(html).toContain("lucide-earth activity-kind-icon");
-    expect(html).toContain("Web search: Saint Petersburg weather tomorrow");
-    expect(html).toContain("activity-tool-web-search-detail");
-    expect(html).toContain('class="web-search-tool-queries"');
-    expect(html).toContain("Saint Petersburg weather tomorrow</li>");
-    expect(html).toContain("Санкт-Петербург погода завтра</li>");
-    expect(html).not.toContain("No matches in .");
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(row); });
+    const disclosure = tree.root.findByType("button");
+    expect(renderedText(disclosure)).toBe("Web search: Saint Petersburg weather tomorrow");
+    expect(disclosure.props["aria-expanded"]).toBe(false);
+    await act(async () => disclosure.props.onClick());
+    expect(disclosure.props["aria-expanded"]).toBe(true);
+    expect(tree.root.findAllByType("li").map(renderedText)).toEqual([
+      "Saint Petersburg weather tomorrow",
+      "Санкт-Петербург погода завтра",
+    ]);
+    expect(renderedText(tree.root)).not.toContain("No matches in .");
+    await act(async () => tree.unmount());
   });
 
   it("reclassifies persisted generic searches when their web-search details load", async () => {
     const { ActivityStepRow } = await import("./ChatActivityView");
-    const html = renderToStaticMarkup(
-      ActivityStepRow({
-        step: {
-          kind: "tool",
-          name: "search",
-          status: "completed",
-          input_summary: "id exec-internal, type webSearch",
-          details: {
-            locations: [],
-            content: [],
-            input: {
-              command: [],
-              fields: [{ name: "type", value: { kind: "string", value: "webSearch" } }],
-            },
+    const row = ActivityStepRow({
+      step: {
+        kind: "tool",
+        name: "search",
+        status: "completed",
+        input_summary: "id exec-internal, type webSearch",
+        details: {
+          locations: [],
+          content: [],
+          input: {
+            command: [],
+            fields: [{ name: "type", value: { kind: "string", value: "webSearch" } }],
           },
         },
-        taskId: "task_1",
-      }),
-    );
+      },
+      taskId: "task_1",
+    });
 
-    expect(html).toContain('class="activity-step tool-web_search completed"');
-    expect(html).toContain("lucide-earth activity-kind-icon");
-    expect(html).toContain('<span class="activity-step-title" title="Web search">Web search</span>');
-    expect(html).not.toContain("exec-internal");
-    expect(html).not.toContain("No matches in .");
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(row); });
+    expect(renderedText(tree.root.findByType("button"))).toBe("Web search");
+    expect(renderedText(tree.root)).not.toContain("exec-internal");
+    expect(renderedText(tree.root)).not.toContain("No matches in .");
+    await act(async () => tree.unmount());
   });
 
   it("aligns thinking and summary-only tools with expandable activity rows", async () => {
@@ -1897,6 +1900,10 @@ describe("ChatRow", () => {
     expect(onRespond).toHaveBeenCalledWith("request_p1", "allow_once");
   });
 });
+
+function renderedText(node: ReactTestInstance): string {
+  return node.children.map((child) => typeof child === "string" ? child : renderedText(child)).join("");
+}
 
 function findElement(element: ReactNode, predicate: (element: ReactElement<Record<string, any>>) => boolean) {
   const matches = findElements(element, predicate);
