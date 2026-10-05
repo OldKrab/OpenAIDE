@@ -15,6 +15,7 @@ on:
   push:
     branches: [main, 'android/**']
   pull_request:
+    paths: ['apps/android/**', '.github/workflows/android.yml']
 
 permissions:
   contents: read
