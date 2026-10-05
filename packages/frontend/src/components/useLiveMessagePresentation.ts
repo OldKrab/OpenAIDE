@@ -9,18 +9,38 @@ type Reveal = {
 };
 
 const FRAME_MS = 16;
-const MAX_PRESENTATION_LAG_MS = 96;
+// A steady trickle is shown almost as it arrives.
+const MIN_PRESENTATION_LAG_MS = 96;
+// Agents often deliver a whole paragraph at once. It is typed out at a
+// readable pace instead of appearing as a block, but never later than this.
+const MAX_PRESENTATION_LAG_MS = 800;
+const COMFORTABLE_CHARS_PER_SECOND = 500;
 const CARET_SETTLE_MS = 240;
+// Agents also deliver text in regular batches with a pause between them. A
+// batch is spread across the pause that recent arrivals predict, with a margin
+// so that a slightly late batch does not show as a stall.
+const ARRIVAL_GAP_MARGIN = 1.15;
+const ARRIVAL_GAP_DECAY = 0.85;
+// A longer silence is a new phase of the turn, not the rhythm of a stream.
+const ARRIVAL_GAP_LIMIT_MS = 1_500;
+// How far a frame may run ahead to end on a whole word.
+const WORD_BOUNDARY_REACH = 24;
 
-/** Keeps ephemeral streaming animation local to the one Chat row it can change. */
+/**
+ * Keeps ephemeral streaming animation local to the one Chat row it can change.
+ * `urgent` shortens the reveal: something that needs the user's answer follows
+ * the message, so its text must not trail behind.
+ */
 export function useLiveMessagePresentation({
   enabled,
   eventCursor,
   parts,
+  urgent = false,
 }: {
   enabled: boolean;
   eventCursor?: string;
   parts: AgentMessagePart[];
+  urgent?: boolean;
 }) {
   const animationAllowed = useLiveTextAnimationAllowed();
   const shouldAnimate = enabled && animationAllowed;
@@ -31,13 +51,20 @@ export function useLiveMessagePresentation({
   const previousText = useRef(shouldAnimate && eventCursor ? "" : authoritativeText);
   const [reveal, setReveal] = useState<Reveal | undefined>();
   const revealRef = useRef<Reveal | undefined>(undefined);
+  const arrivals = useRef<{ lastAt?: number; expectedGapMs: number }>({ expectedGapMs: 0 });
   const pendingReveal = shouldAnimate
     && eventCursor
     && consumedCursor.current !== eventCursor
     && authoritativeText.startsWith(previousText.current)
     && authoritativeText.length > previousText.current.length
       ? {
-          deadlineAt: Date.now() + MAX_PRESENTATION_LAG_MS,
+          deadlineAt: revealDeadline(
+            Date.now(),
+            revealRef.current?.deadlineAt,
+            authoritativeText.length - previousText.current.length,
+            arrivals.current.expectedGapMs,
+            urgent,
+          ),
           text: authoritativeText,
           visibleLength: Math.min(
             revealRef.current?.visibleLength ?? previousText.current.length,
@@ -64,16 +91,34 @@ export function useLiveMessagePresentation({
       return;
     }
     consumedCursor.current = eventCursor;
+    const arrivedAt = Date.now();
+    arrivals.current = observeArrival(arrivals.current, arrivedAt);
     const visibleLength = Math.min(revealRef.current?.visibleLength ?? priorText.length, authoritativeText.length);
     const next = {
-      deadlineAt: Date.now() + MAX_PRESENTATION_LAG_MS,
+      deadlineAt: revealDeadline(
+        arrivedAt,
+        revealRef.current?.deadlineAt,
+        authoritativeText.length - priorText.length,
+        arrivals.current.expectedGapMs,
+        urgent,
+      ),
       text: authoritativeText,
       visibleLength,
     };
     revealRef.current = next;
     setReveal(next);
     previousText.current = authoritativeText;
-  }, [authoritativeText, eventCursor, shouldAnimate]);
+  }, [authoritativeText, eventCursor, shouldAnimate, urgent]);
+
+  useLayoutEffect(() => {
+    const current = revealRef.current;
+    if (!urgent || !current) return;
+    // The frame loop reads the ref, so the running reveal just ends sooner.
+    revealRef.current = {
+      ...current,
+      deadlineAt: Math.min(current.deadlineAt, Date.now() + MIN_PRESENTATION_LAG_MS),
+    };
+  }, [urgent]);
 
   const presenting = reveal !== undefined;
   useEffect(() => {
@@ -96,7 +141,7 @@ export function useLiveMessagePresentation({
         );
         const visibleLength = tick >= current.deadlineAt
           ? current.text.length
-          : Math.min(current.text.length, current.visibleLength + Math.ceil(remaining / framesRemaining));
+          : wholeWordLength(current.text, current.visibleLength + Math.ceil(remaining / framesRemaining));
         const next = {
           ...current,
           visibleLength,
@@ -152,6 +197,56 @@ function canAnimateLiveText() {
   if (typeof document !== "undefined" && document.visibilityState === "hidden") return false;
   return typeof window === "undefined" || typeof window.matchMedia !== "function"
     || !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * New text joins a running reveal without restarting it, so a trickle that
+ * follows a paragraph cannot keep pushing the paragraph's end away. Each piece
+ * of text is therefore visible within the maximum lag of its own arrival.
+ */
+function revealDeadline(
+  now: number,
+  runningDeadline: number | undefined,
+  addedLength: number,
+  expectedGapMs: number,
+  urgent: boolean,
+) {
+  if (urgent) return now + MIN_PRESENTATION_LAG_MS;
+  const paced = (addedLength / COMFORTABLE_CHARS_PER_SECOND) * 1_000;
+  const untilNextArrival = expectedGapMs * ARRIVAL_GAP_MARGIN;
+  const lag = Math.min(
+    MAX_PRESENTATION_LAG_MS,
+    Math.max(MIN_PRESENTATION_LAG_MS, paced, untilNextArrival),
+  );
+  return Math.max(runningDeadline ?? 0, now + lag);
+}
+
+/**
+ * Tracks the longest recent pause between arrivals. A batch can itself arrive
+ * as several quick updates, so the pause that matters is the peak, held and
+ * slowly released, not the average.
+ */
+function observeArrival(
+  arrivals: { lastAt?: number; expectedGapMs: number },
+  now: number,
+) {
+  const gap = arrivals.lastAt === undefined ? undefined : now - arrivals.lastAt;
+  if (gap === undefined || gap > ARRIVAL_GAP_LIMIT_MS) return { lastAt: now, expectedGapMs: 0 };
+  return {
+    lastAt: now,
+    expectedGapMs: Math.max(gap, arrivals.expectedGapMs * ARRIVAL_GAP_DECAY),
+  };
+}
+
+/** Ends a frame on a whole word and never inside a surrogate pair. */
+function wholeWordLength(text: string, length: number) {
+  if (length >= text.length) return text.length;
+  const reach = Math.min(text.length, length + WORD_BOUNDARY_REACH);
+  for (let index = length; index < reach; index += 1) {
+    if (/\s/.test(text[index] ?? "")) return index;
+  }
+  const previous = text.charCodeAt(length - 1);
+  return previous >= 0xd800 && previous <= 0xdbff ? length + 1 : length;
 }
 
 function scheduleFrame(callback: () => void) {
