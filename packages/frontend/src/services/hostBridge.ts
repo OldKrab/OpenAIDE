@@ -98,6 +98,9 @@ export function getBackendConnection() {
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy") {
     return createReliableWebProxyBackendConnection({
       endpointUrl: bootstrap.appServerConnection.endpointUrl,
+      ...(bootstrap.appServerConnection.transport
+        ? { transport: bootstrap.appServerConnection.transport }
+        : {}),
       connectionId: createTransportConnectionId(),
       logger: createFrontendDiagnosticsLogger(),
       subscribeToWake: subscribeToBrowserWake,

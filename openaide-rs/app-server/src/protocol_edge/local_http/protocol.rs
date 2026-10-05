@@ -14,19 +14,17 @@ use crate::protocol_edge::{
 
 use super::event_streams::{EventStreamLease, EventStreamRegistry};
 use super::reliable_upload_chunks::{
-    AppendError as ReliableChunkError, AppendOutcome as ReliableChunkOutcome,
-    ReliableUploadChunkRegistry,
+    AppendOutcome as ReliableChunkOutcome, ReliableUploadChunkRegistry,
 };
-use super::sessions::{AcceptClientFrame, PollError, ReliableSessionRegistry};
+#[cfg(test)]
+use super::session_dispatch::handle_reliable_session_upload;
+use super::session_dispatch::{
+    accept_reliable_session_upload, dispatch_reliable_session_upload, handle_reliable_session_open,
+    handle_reliable_session_poll, is_agent_authenticate_request, reliable_chunk_error_response,
+    reliable_upload_rejection,
+};
 use super::{auth_status, empty_response, json_response, AuthStatus, LocalHttpResponse};
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReliableUpload {
-    session_id: String,
-    sequence: u64,
-    message: Value,
-}
+use crate::protocol_edge::reliable_session::ReliableSessionRegistry;
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,10 +37,10 @@ struct ReliableUploadChunk {
 }
 
 pub struct LocalHttpProtocolHandler {
-    gateway: SharedRpcGateway,
-    auth_token: String,
+    pub(super) gateway: SharedRpcGateway,
+    pub(super) auth_token: String,
     event_streams: EventStreamRegistry,
-    sessions: ReliableSessionRegistry,
+    pub(super) sessions: ReliableSessionRegistry,
     upload_chunks: ReliableUploadChunkRegistry,
 }
 
@@ -65,10 +63,14 @@ impl LocalHttpProtocolHandler {
         server_id: impl Into<String>,
     ) -> Self {
         Self {
-            gateway,
             auth_token: auth_token.into(),
             event_streams: EventStreamRegistry::default(),
-            sessions: ReliableSessionRegistry::new(server_id),
+            // Session frames and gateway deliveries wake the same waiting links.
+            sessions: ReliableSessionRegistry::with_delivery_signal(
+                server_id,
+                gateway.delivery_signal(),
+            ),
+            gateway,
             upload_chunks: ReliableUploadChunkRegistry::default(),
         }
     }
@@ -373,7 +375,7 @@ impl LocalHttpProtocolHandler {
     }
 }
 
-fn handle_local_http_protocol(
+pub(super) fn handle_local_http_protocol(
     authorization: Option<&str>,
     expected_token: &str,
     connection_id: Option<&str>,
@@ -396,6 +398,17 @@ fn handle_local_http_protocol(
             )),
         );
     };
+    dispatch_protocol_message(connection_id, body, dispatch, drain_events)
+}
+
+/// Dispatches one JSON-RPC message for an already authenticated connection.
+/// Shared by plain HTTP requests and by links that authenticate once per link.
+pub(super) fn dispatch_protocol_message(
+    connection_id: ConnectionId,
+    body: &str,
+    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+    drain_events: impl FnOnce(&ConnectionId) -> Vec<crate::protocol_edge::GatewayEventDelivery>,
+) -> LocalHttpResponse {
     let value = match serde_json::from_str::<Value>(body) {
         Ok(value) => value,
         Err(error) => return protocol_rejection("malformed_json", wire_value(parse_error(error))),
@@ -513,179 +526,6 @@ fn handle_local_http_protocol(
     }
 }
 
-fn reliable_chunk_error_response(error: ReliableChunkError) -> LocalHttpResponse {
-    let rejection_code = match error {
-        ReliableChunkError::InvalidChunk => Some("invalid_chunk"),
-        ReliableChunkError::InvalidUtf8 => Some("invalid_chunk_utf8"),
-        _ => None,
-    };
-    if let Some(rejection_code) = rejection_code {
-        return reliable_upload_rejection(rejection_code, "chunk");
-    }
-    let status = match error {
-        ReliableChunkError::ChunkTooLarge | ReliableChunkError::UploadTooLarge => 413,
-        ReliableChunkError::MetadataMismatch | ReliableChunkError::OffsetMismatch => 409,
-        ReliableChunkError::StateUnavailable => 500,
-        ReliableChunkError::InvalidChunk | ReliableChunkError::InvalidUtf8 => unreachable!(),
-    };
-    empty_response(status)
-}
-
-fn handle_reliable_session_open(
-    authorization: Option<&str>,
-    expected_token: &str,
-    connection_id: Option<&str>,
-    sessions: &ReliableSessionRegistry,
-) -> LocalHttpResponse {
-    match auth_status(authorization, expected_token) {
-        AuthStatus::Authorized => {}
-        AuthStatus::Missing => return empty_response(401),
-        AuthStatus::Invalid => return empty_response(403),
-    }
-    let raw_connection_id = connection_id;
-    let Some(connection_id) = valid_connection_id(raw_connection_id) else {
-        return empty_response(400);
-    };
-    let opened = sessions.open(connection_id);
-    json_response(
-        200,
-        json!({
-            "transportVersion": 1,
-            "sessionId": opened.session_id,
-            "serverId": opened.server_id,
-        }),
-    )
-}
-
-#[cfg(test)]
-fn handle_reliable_session_upload(
-    authorization: Option<&str>,
-    expected_token: &str,
-    connection_id: Option<&str>,
-    body: &str,
-    sessions: &ReliableSessionRegistry,
-    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
-) -> LocalHttpResponse {
-    let accepted = match accept_reliable_session_upload(
-        authorization,
-        expected_token,
-        connection_id,
-        body,
-        sessions,
-    ) {
-        Ok(accepted) => accepted,
-        Err(response) => return response,
-    };
-    dispatch_reliable_session_upload(
-        authorization,
-        expected_token,
-        connection_id,
-        accepted,
-        sessions,
-        dispatch,
-    )
-}
-
-struct AcceptedReliableUpload {
-    session_id: String,
-    message: Value,
-}
-
-fn accept_reliable_session_upload(
-    authorization: Option<&str>,
-    expected_token: &str,
-    connection_id: Option<&str>,
-    body: &str,
-    sessions: &ReliableSessionRegistry,
-) -> Result<AcceptedReliableUpload, LocalHttpResponse> {
-    match auth_status(authorization, expected_token) {
-        AuthStatus::Authorized => {}
-        AuthStatus::Missing => return Err(empty_response(401)),
-        AuthStatus::Invalid => return Err(empty_response(403)),
-    }
-    let raw_connection_id = connection_id;
-    let Some(connection_id) = valid_connection_id(raw_connection_id) else {
-        return Err(reliable_upload_rejection("invalid_connection_id", "single"));
-    };
-    let upload = match serde_json::from_str::<ReliableUpload>(body) {
-        Ok(upload) => upload,
-        Err(_) => {
-            return Err(reliable_upload_rejection(
-                "invalid_upload_envelope",
-                "single",
-            ))
-        }
-    };
-    let session_id = upload.session_id.clone();
-    let mut accepted_message = None;
-    let accepted = sessions.accept_client_frame(
-        &session_id,
-        &connection_id,
-        upload.sequence,
-        upload.message,
-        |message| {
-            accepted_message = Some(message);
-        },
-    );
-    match accepted {
-        AcceptClientFrame::Duplicate => return Err(empty_response(204)),
-        AcceptClientFrame::Gap { expected } => {
-            return Err(json_response(409, json!({ "expectedSequence": expected })))
-        }
-        AcceptClientFrame::UnknownSession => return Err(empty_response(410)),
-        AcceptClientFrame::WrongConnection => return Err(empty_response(403)),
-        AcceptClientFrame::Accepted => {}
-    }
-    let Some(message) = accepted_message else {
-        return Err(empty_response(500));
-    };
-    Ok(AcceptedReliableUpload {
-        session_id,
-        message,
-    })
-}
-
-fn dispatch_reliable_session_upload(
-    authorization: Option<&str>,
-    expected_token: &str,
-    connection_id: Option<&str>,
-    accepted: AcceptedReliableUpload,
-    sessions: &ReliableSessionRegistry,
-    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
-) -> LocalHttpResponse {
-    let response = handle_local_http_protocol(
-        authorization,
-        expected_token,
-        connection_id,
-        &accepted.message.to_string(),
-        dispatch,
-        |_| Vec::new(),
-    );
-    if response.status != 200 {
-        if response.status == 400 {
-            let reason_code =
-                response_code(&response).unwrap_or_else(|| "nested_protocol_rejected".to_string());
-            log_reliable_upload_rejection(&reason_code, "single");
-        }
-        return response;
-    }
-    if let Ok(value) = serde_json::from_str::<Value>(&response.body) {
-        for message in value.as_array().cloned().unwrap_or_else(|| vec![value]) {
-            sessions.enqueue_server_message(&accepted.session_id, message);
-        }
-    }
-    empty_response(204)
-}
-
-fn is_agent_authenticate_request(message: &Value) -> bool {
-    let Ok(request) = serde_json::from_value::<WireRequest>(message.clone()) else {
-        return false;
-    };
-    request.jsonrpc == "2.0"
-        && matches!(request.id, WireRequestId::Request(_))
-        && request.method.as_deref() == Some(AGENT_AUTHENTICATE)
-}
-
 /// Adds a stable, non-sensitive reason to protocol-level HTTP 400 responses.
 fn protocol_rejection(reason_code: &'static str, mut value: Value) -> LocalHttpResponse {
     crate::logging::warn(
@@ -696,95 +536,6 @@ fn protocol_rejection(reason_code: &'static str, mut value: Value) -> LocalHttpR
         object.insert("code".to_string(), json!(reason_code));
     }
     json_response(400, value)
-}
-
-fn reliable_upload_rejection(
-    reason_code: &'static str,
-    upload_kind: &'static str,
-) -> LocalHttpResponse {
-    log_reliable_upload_rejection(reason_code, upload_kind);
-    json_response(400, json!({ "code": reason_code }))
-}
-
-fn log_reliable_upload_rejection(reason_code: &str, upload_kind: &'static str) {
-    crate::logging::warn(
-        "reliable_session_upload_rejected",
-        json!({
-            "reason_code": reason_code,
-            "upload_kind": upload_kind,
-        }),
-    );
-}
-
-fn response_code(response: &LocalHttpResponse) -> Option<String> {
-    serde_json::from_str::<Value>(&response.body)
-        .ok()?
-        .get("code")?
-        .as_str()
-        .map(str::to_string)
-}
-
-fn handle_reliable_session_poll(
-    authorization: Option<&str>,
-    expected_token: &str,
-    connection_id: Option<&str>,
-    session_id: &str,
-    after: u64,
-    sessions: &ReliableSessionRegistry,
-    receive: impl FnOnce(
-        &ConnectionId,
-    ) -> Option<(
-        Vec<crate::protocol_edge::GatewayEventDelivery>,
-        Vec<crate::server_requests::ServerRequestDelivery>,
-    )>,
-) -> LocalHttpResponse {
-    match auth_status(authorization, expected_token) {
-        AuthStatus::Authorized => {}
-        AuthStatus::Missing => return empty_response(401),
-        AuthStatus::Invalid => return empty_response(403),
-    }
-    let Some(connection_id) = valid_connection_id(connection_id) else {
-        crate::logging::warn(
-            "reliable_session_poll_rejected",
-            json!({ "reason_code": "invalid_connection_id" }),
-        );
-        return json_response(400, json!({ "code": "invalid_connection_id" }));
-    };
-    if sessions.connection_id(session_id).as_ref() != Some(&connection_id) {
-        return empty_response(410);
-    }
-    let Some((events, mut server_requests)) = receive(&connection_id) else {
-        return empty_response(410);
-    };
-    // Task-scoped permissions and questions are shared product state. Their
-    // snapshots/events fan out to every eligible client; only client-targeted
-    // capabilities remain reverse RPC requests.
-    server_requests.retain(|request| {
-        !matches!(
-            request.envelope.method.as_str(),
-            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
-                | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
-        )
-    });
-    for message in event_wire_messages(connection_id.clone(), events)
-        .into_iter()
-        .chain(server_request_wire_messages(connection_id, server_requests))
-    {
-        sessions.enqueue_server_message(
-            session_id,
-            serde_json::to_value(message).expect("wire message serializes"),
-        );
-    }
-    match sessions.poll(session_id, after) {
-        Ok(batch) if batch.frames.is_empty() => empty_response(204),
-        Ok(batch) => json_response(
-            200,
-            serde_json::to_value(batch).expect("session batch serializes"),
-        ),
-        Err(PollError::UnknownSession) => empty_response(410),
-        Err(PollError::InvalidAcknowledgement) => empty_response(409),
-        Err(PollError::ReplayExpired) => json_response(409, json!({ "resyncRequired": true })),
-    }
 }
 
 fn side_effect_messages(

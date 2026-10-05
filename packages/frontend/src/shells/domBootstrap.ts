@@ -97,11 +97,13 @@ export function appServerConnection(): WebviewAppServerConnection | undefined {
   if (!value) return undefined;
   try {
     const record = JSON.parse(value) as Record<string, unknown>;
+    // An unknown transport falls back to HTTP, which every shell serves.
+    const transport = record.transport === "webSocket" ? { transport: "webSocket" as const } : {};
     if (record.kind === "localHttp" && typeof record.endpointUrl === "string" && typeof record.authToken === "string") {
-      return { kind: "localHttp", endpointUrl: record.endpointUrl, authToken: record.authToken };
+      return { kind: "localHttp", endpointUrl: record.endpointUrl, authToken: record.authToken, ...transport };
     }
     if (record.kind === "webProxy" && typeof record.endpointUrl === "string") {
-      return { kind: "webProxy", endpointUrl: record.endpointUrl };
+      return { kind: "webProxy", endpointUrl: record.endpointUrl, ...transport };
     }
   } catch {
     return undefined;

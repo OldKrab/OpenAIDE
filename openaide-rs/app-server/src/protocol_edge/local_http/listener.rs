@@ -8,15 +8,20 @@ use thiserror::Error;
 use super::{LocalHttpAppHandler, LocalHttpProbeHandler, LocalHttpResponse};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(750);
+/// Bounds liveness renewal and time-driven deliveries when nothing signals.
+const POLL_FALLBACK_WAKE: Duration = Duration::from_millis(250);
 
 mod http;
+mod session_socket;
 mod uploads;
 mod viewer_downloads;
+mod websocket;
 
 use http::{
     read_http_request, write_event_stream_data, write_event_stream_headers,
     write_event_stream_heartbeat, write_file_download, write_http_response,
 };
+use session_socket::handle_session_socket;
 use uploads::handle_file_upload;
 
 pub struct LocalHttpProbeListener {
@@ -102,6 +107,9 @@ pub(crate) struct LocalHttpRequest {
     pub after_header_present: bool,
     pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
+    pub websocket_upgrade: bool,
+    pub websocket_key: Option<String>,
+    pub websocket_version: Option<String>,
     pub content_length: usize,
     pub initial_body: Vec<u8>,
     pub body: String,
@@ -111,7 +119,7 @@ pub fn handle_app_stream(
     stream: &mut TcpStream,
     handler: &LocalHttpAppHandler,
 ) -> Result<(), LocalHttpProbeListenerError> {
-    handle_stream_with_routes(
+    handle_stream_with_socket_route(
         stream,
         |request| {
             handler.handle(
@@ -124,6 +132,7 @@ pub fn handle_app_stream(
         |_stream, request| Ok(handle_session_poll(handler, request)),
         |stream, request| handle_file_upload(stream, handler, request),
         |stream, request| handle_file_download(stream, handler, request),
+        |stream, request| handle_session_socket(stream, handler, request),
     )
 }
 
@@ -165,6 +174,39 @@ fn handle_stream_with_routes(
     upload: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
     download: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
 ) -> Result<(), LocalHttpProbeListenerError> {
+    handle_stream_with_socket_route(
+        stream,
+        handler,
+        push,
+        receive,
+        upload,
+        download,
+        |stream, _request| {
+            write_http_response(
+                stream,
+                &LocalHttpResponse {
+                    status: 400,
+                    body: String::new(),
+                },
+            )
+        },
+    )
+}
+
+/// `socket` takes over the connection for a WebSocket upgrade; every other
+/// route answers one request and closes.
+fn handle_stream_with_socket_route(
+    stream: &mut TcpStream,
+    handler: impl FnOnce(LocalHttpRequest) -> LocalHttpResponse,
+    push: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
+    receive: impl FnOnce(
+        &mut TcpStream,
+        LocalHttpRequest,
+    ) -> Result<LocalHttpResponse, LocalHttpProbeListenerError>,
+    upload: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
+    download: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
+    socket: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
+) -> Result<(), LocalHttpProbeListenerError> {
     let request = match read_http_request(stream) {
         Ok(request) => LocalHttpRequest {
             method: request.method,
@@ -182,6 +224,9 @@ fn handle_stream_with_routes(
             after_header_present: request.after_header_present,
             after_sequence: request.after_sequence,
             accepts_event_stream: request.accepts_event_stream,
+            websocket_upgrade: request.websocket_upgrade,
+            websocket_key: request.websocket_key,
+            websocket_version: request.websocket_version,
             content_length: request.content_length,
             initial_body: request.initial_body,
             body: request.body,
@@ -202,6 +247,9 @@ fn handle_stream_with_routes(
             return Err(error);
         }
     };
+    if request.method == "GET" && request.websocket_upgrade {
+        return socket(stream, request);
+    }
     if request.method == "GET"
         && request
             .target
@@ -366,17 +414,21 @@ fn handle_session_poll(
         .after_sequence
         .expect("validated reliable-session poll has an acknowledgement");
     let deadline = std::time::Instant::now() + Duration::from_secs(25);
+    let signal = handler.delivery_signal();
     loop {
+        // Snapshot before polling so a delivery queued meanwhile still wakes.
+        let seen = signal.generation();
         let response = handler.poll_session(
             request.authorization.as_deref(),
             request.connection_id.as_deref(),
             session_id,
             after,
         );
-        if response.status != 204 || std::time::Instant::now() >= deadline {
+        let now = std::time::Instant::now();
+        if response.status != 204 || now >= deadline {
             return response;
         }
-        std::thread::sleep(Duration::from_millis(16));
+        signal.wait_changed(seen, POLL_FALLBACK_WAKE.min(deadline - now));
     }
 }
 
