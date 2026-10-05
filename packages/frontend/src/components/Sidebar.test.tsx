@@ -1836,7 +1836,7 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "project-task-group-new" })).toHaveLength(0);
   });
 
-  it("shows the first five workspace groups and reveals more workspaces in batches", () => {
+  it("shows the first five project groups and reveals more projects in batches", () => {
     const projects = Array.from({ length: 7 }, (_, index) => ({
       projectId: `project_${index + 1}`,
       label: `Project ${index + 1}`,
@@ -1854,12 +1854,31 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findAllByProps({ className: "project-task-group" })).toHaveLength(5);
-    expect(tree.root.findByProps({ className: "project-more" }).children.join("")).toBe("Show 2 more workspaces");
+    expect(tree.root.findByProps({ className: "project-more" }).children.join("")).toBe("Show 2 more projects");
 
     act(() => tree.root.findByProps({ className: "project-more" }).props.onClick());
 
     expect(tree.root.findAllByProps({ className: "project-task-group" })).toHaveLength(7);
     expect(tree.root.findAllByProps({ className: "project-more" })).toHaveLength(0);
+  });
+
+  it("presents further pages of an unfinished project search as more searching", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessions={{ ...nativeSessions(), hasMoreProjectIds: ["project_1"] }}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        searchQuery="smoke"
+        showArchived={false}
+        tasks={[
+          task({ task_id: "task_1", project_id: "project_1", project_label: "OpenAIDE", title: "QA smoke test" }),
+        ]}
+      />,
+    );
+
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Search more tasks");
+    expect(tree.root.findByProps({ className: "project-task-group-counts" }).children.join("")).toBe("1 found so far");
   });
 
   it("filters empty project groups by project label while searching", () => {

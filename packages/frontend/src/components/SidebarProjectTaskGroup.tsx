@@ -27,6 +27,8 @@ type SidebarProjectTaskGroupProps = {
   nativeSessionMutations: import("../state/store").AppState["nativeSessionMutations"];
   nativeSessionsAdoptingSessionId?: string;
   nativeSessionsHaveMore: boolean;
+  /** The rows are search matches, so further pages extend the search rather than the list. */
+  searching?: boolean;
   loading: boolean;
   canManageWorktrees: boolean;
   forkableAgentIds?: ReadonlySet<string>;
@@ -72,6 +74,7 @@ export function SidebarProjectTaskGroup({
   nativeSessionMutations,
   nativeSessionsAdoptingSessionId,
   nativeSessionsHaveMore,
+  searching = false,
   loading,
   canManageWorktrees,
   forkableAgentIds = new Set(),
@@ -117,7 +120,7 @@ export function SidebarProjectTaskGroup({
   const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
   const countSummary = loading
     ? "Loading…"
-    : projectGroupCountSummary(taskRows.length, nativeSessions.length);
+    : projectGroupCountSummary(taskRows.length, nativeSessions.length, searching && nativeSessionsHaveMore);
   const projectPreview = {
     kind: "project" as const,
     state: countSummary || "No tasks",
@@ -250,7 +253,7 @@ export function SidebarProjectTaskGroup({
               onClick={() => onLoadMore(hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize)}
               type="button"
             >
-              Load more
+              {searching ? "Search more tasks" : "Load more"}
             </button>
           ) : null}
         </div>
@@ -259,7 +262,13 @@ export function SidebarProjectTaskGroup({
   );
 }
 
-function projectGroupCountSummary(taskCount: number, sessionCount: number) {
+function projectGroupCountSummary(taskCount: number, sessionCount: number, partialSearch: boolean) {
   const totalCount = taskCount + sessionCount;
-  return totalCount ? `${totalCount} ${totalCount === 1 ? "task" : "tasks"}` : "";
+  if (!totalCount) {
+    return "";
+  }
+  // An unfinished search has matched only the pages read so far; a bare count reads as final.
+  return partialSearch
+    ? `${totalCount} found so far`
+    : `${totalCount} ${totalCount === 1 ? "task" : "tasks"}`;
 }
