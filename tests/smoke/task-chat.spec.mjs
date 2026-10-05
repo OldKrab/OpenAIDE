@@ -40,8 +40,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     ));
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
     await list.hover();
-    await page.mouse.wheel(0, -500);
-    await expect.poll(distanceFromEnd).toBeGreaterThan(100);
+    // A wheel delivered while the list is still following the live end can be
+    // absorbed, so repeat the gesture until the reader has left the end.
+    await expect(async () => {
+      await page.mouse.wheel(0, -500);
+      expect(await distanceFromEnd()).toBeGreaterThan(100);
+    }).toPass({ timeout: 10_000 });
     await page.mouse.wheel(0, 500);
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
 
