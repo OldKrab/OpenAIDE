@@ -1,5 +1,7 @@
 .task-work-stack {
   --oa-chat-scrollbar-edge-gap: 4px;
+  /* Matches the global scrollbar track that the stable Chat gutter reserves. */
+  --oa-chat-scrollbar-width: 10px;
   --oa-chat-readable-half-width: 380px;
   /* Keeps the 42px message navigator and an 8px visual gap before Plan's padded card. */
   --oa-chat-ancillary-lane: 54px;
@@ -99,6 +101,24 @@ body[data-shell="desktop"] .task-work-stack[data-desktop-window="macos"] > .task
   width: calc(100% + var(--oa-chat-inline-gutter) + var(--oa-chat-inline-gutter) - var(--oa-chat-scrollbar-edge-gap));
   justify-self: start;
   margin-inline: calc(0px - var(--oa-chat-inline-gutter));
+}
+
+/*
+ * The shell above leaves the column gutter, so the list restores it: Chat content and
+ * Composer then share both edges at every pane width. The end inset gives back the
+ * scroll track and yields to the message navigator's lane when that needs more room.
+ */
+@media (min-width: 761px) {
+  .task-conversation > .message-list-shell > .message-list {
+    --oa-chat-content-inset: max(
+      var(--oa-chat-inline-gutter),
+      calc((100% + var(--oa-chat-scrollbar-edge-gap) - 760px) / 2)
+    );
+    padding-inline: var(--oa-chat-content-inset) max(
+      var(--oa-chat-navigator-lane, 0px),
+      calc(var(--oa-chat-content-inset) - var(--oa-chat-scrollbar-edge-gap) - var(--oa-chat-scrollbar-width))
+    );
+  }
 }
 
 .task-plan-column {

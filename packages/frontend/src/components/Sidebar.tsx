@@ -339,6 +339,7 @@ export const Sidebar = memo(function Sidebar({
                 nativeSessionsHaveMore={
                   !showArchived && nativeSessions.hasMoreProjectIds?.includes(group.key) === true
                 }
+                searching={hasSearchQuery}
                 loading={
                   !showArchived && nativeSessions.loadingProjectIds?.includes(group.key) === true
                 }
@@ -464,7 +465,7 @@ export const Sidebar = memo(function Sidebar({
             onClick={() => setVisibleProjectLimit((current) => current + maxVisibleProjects)}
             type="button"
           >
-            Show {Math.min(maxVisibleProjects, hiddenProjectCount)} more workspaces
+            Show {Math.min(maxVisibleProjects, hiddenProjectCount)} more projects
           </button>
         ) : null}
       </div></div></SidebarTaskPreviewProvider>
