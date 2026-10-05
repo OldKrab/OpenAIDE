@@ -85,6 +85,11 @@ pub(super) async fn run(
                 };
                 config_requests.abandon();
                 let connection = active_session.connection();
+                // Reported before the request so a catalog page can never observe the
+                // Agent's close-time write ahead of the App Server's own record of it.
+                report_own_session_operation(
+                    session_event_sink.as_ref(), &request_agent_id, "session_close_started",
+                );
                 close_active_session(
                     connection,
                     active_session.session_id().clone(),
@@ -92,6 +97,9 @@ pub(super) async fn run(
                     trace.as_ref(),
                 )
                 .await;
+                report_own_session_operation(
+                    session_event_sink.as_ref(), &request_agent_id, "session_close_completed",
+                );
                 let _ = reply_tx.send(Ok(()));
                 break;
             }
@@ -112,6 +120,9 @@ pub(super) async fn run(
                         let _ = reply_tx.send(Ok(session_snapshot.clone()));
                     }
                     AcpSessionCommand::SetEventSink { sink } => {
+                        // The first sink follows the session/new, load, or resume that
+                        // created this attachment; later ones only replace the consumer.
+                        let follows_session_open = session_event_sink.is_none();
                         sink_registration.set(sink.clone());
                         attach_session_event_sink_with_catalog_snapshot(
                             &mut session_event_sink,
@@ -127,6 +138,11 @@ pub(super) async fn run(
                             request_agent_id.clone(),
                             sink,
                         ));
+                        if follows_session_open {
+                            report_own_session_operation(
+                                session_event_sink.as_ref(), &request_agent_id, "session_opened",
+                            );
+                        }
                     }
                     AcpSessionCommand::Load { request, reply_tx } => {
                         if !config_requests.can_replace_attachment() {
@@ -190,6 +206,9 @@ pub(super) async fn run(
                         if result.is_ok() {
                             idle_close_eligible = true;
                         }
+                        report_own_session_operation(
+                            session_event_sink.as_ref(), &request_agent_id, "session_loaded",
+                        );
                         let _ = reply_tx.send(result);
                     }
                     AcpSessionCommand::Prompt {
@@ -308,6 +327,9 @@ pub(super) async fn run(
                 if let Some(catalog) = response.finish_with_session_sink(session_event_sink.as_deref()) {
                     config_catalog = catalog;
                 }
+                report_own_session_operation(
+                    session_event_sink.as_ref(), &request_agent_id, "session_config_option_set",
+                );
                 session_snapshot = session_with_catalog_snapshots(
                     &session_snapshot, &config_catalog, &commands_catalog,
                 );
@@ -346,6 +368,9 @@ pub(super) async fn run(
                     }),
                 );
                 let connection = active_session.connection();
+                report_own_session_operation(
+                    session_event_sink.as_ref(), &request_agent_id, "session_close_started",
+                );
                 if tokio::time::timeout(
                     IDLE_SESSION_CLOSE_TIMEOUT,
                     close_active_session(
@@ -367,6 +392,9 @@ pub(super) async fn run(
                         }),
                     );
                 }
+                report_own_session_operation(
+                    session_event_sink.as_ref(), &request_agent_id, "session_close_completed",
+                );
                 break;
             }
         }
@@ -376,6 +404,26 @@ pub(super) async fn run(
     }
 
     Ok(())
+}
+
+/// Tells the session owner that the App Server just issued a lifecycle request.
+/// The owner's record is advisory, so a failed report must not end the attachment.
+fn report_own_session_operation(
+    sink: Option<&Arc<dyn AgentSessionEventSink>>,
+    agent_id: &str,
+    operation: &'static str,
+) {
+    let Some(sink) = sink else { return };
+    if let Err(error) = sink.own_session_operation(operation) {
+        crate::logging::warn(
+            "acp_own_session_operation_report_failed",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "operation": operation,
+                "error_code": error.code(),
+            }),
+        );
+    }
 }
 
 struct SessionSinkRegistration {

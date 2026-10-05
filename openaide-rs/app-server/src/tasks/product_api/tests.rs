@@ -3785,6 +3785,91 @@ fn newer_catalog_activity_marks_reload_available_without_loading_the_live_attach
 }
 
 #[test]
+fn catalog_activity_is_external_only_beyond_the_last_own_session_operation() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    store.write_task(&task).unwrap();
+    store
+        .append_message(
+            "task-existing",
+            ChatMessage {
+                cursor: "m:1".to_string(),
+                identity: "cached:current".to_string(),
+                message_type: "agent_message".to_string(),
+                message_id: "cached-message".to_string(),
+                message: NormalizedMessage::AgentMessage {
+                    id: "cached:current".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "Cached history.".to_string(),
+                    }],
+                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                },
+            },
+        )
+        .unwrap();
+    // The session was opened or closed long after the last stored history.
+    let own_operation_at = store
+        .local_history_updated_at("task-existing")
+        .unwrap()
+        .parse::<u128>()
+        .unwrap()
+        + 60_000;
+    let mut task = store.read_task("task-existing").unwrap();
+    task.message_history_version = store.message_history_version("task-existing").unwrap();
+    task.native_session_own_activity_at = Some(own_operation_at.to_string());
+    store.write_task(&task).unwrap();
+    let activity_before = task.last_activity;
+    let listed = |activity: u128| AgentListedSession {
+        session_id: "native-session".to_string(),
+        cwd: "/tmp/openaide-unit-workspace/app".to_string(),
+        title: None,
+        last_activity: Some(activity.to_string()),
+        updated_at: Some(activity.to_string()),
+    };
+    let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![listed(own_operation_at + 2_000)]),
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.refresh_native_session_catalogs().unwrap();
+
+    let task = store.read_task("task-existing").unwrap();
+    assert_eq!(task.native_session_reload_requirement, None);
+    assert_eq!(task.last_activity, activity_before);
+    assert!(matches!(
+        api.history_sync.history_sync_snapshot("task-existing"),
+        TaskHistorySyncSnapshot::Idle { .. }
+    ));
+
+    let external_activity = own_operation_at + 6_000;
+    *agent.listed_sessions.lock().unwrap() = vec![listed(external_activity)];
+    api.refresh_native_session_catalogs().unwrap();
+
+    let task = store.read_task("task-existing").unwrap();
+    assert_eq!(
+        task.native_session_reload_requirement
+            .map(|requirement| requirement.observed_activity_at),
+        Some(external_activity.to_string())
+    );
+    assert_eq!(task.last_activity, external_activity.to_string());
+    assert!(matches!(
+        api.history_sync.history_sync_snapshot("task-existing"),
+        TaskHistorySyncSnapshot::ReloadAvailable { .. }
+    ));
+}
+
+#[test]
 fn listing_does_not_refresh_last_activity_for_an_in_progress_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -9362,6 +9447,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         config_options_catalog: None,
         native_session_data_freshness: Default::default(),
         native_session_reload_requirement: None,
+        native_session_own_activity_at: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

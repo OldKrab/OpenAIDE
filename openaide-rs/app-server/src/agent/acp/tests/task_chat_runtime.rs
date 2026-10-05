@@ -842,6 +842,87 @@ fn steering_keeps_task_active_when_primary_is_cancelled() {
     api.shutdown().expect("shutdown task runtime");
 }
 
+#[test]
+fn agent_bookkeeping_on_idle_close_is_not_reported_as_an_external_change() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let activity_path = temp.path().join("native-activity");
+    // The idle window must exceed the catalog comparison tolerance, so the Agent's
+    // close-time write lands well after the last local history write.
+    let Some((api, store, workspace_root)) = task_chat_fixture_with_runtime(
+        &temp,
+        "message_ids",
+        ServerRequestRuntime::new(),
+        vec![(
+            "OPENAIDE_TASK_CHAT_ACTIVITY_FILE".to_string(),
+            activity_path.to_string_lossy().to_string(),
+        )],
+        Some(Duration::from_millis(5_500)),
+    ) else {
+        return;
+    };
+    let project_id = project_id_for_workspace(&workspace_root);
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id.clone(),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+    api.send(send_params(&task_id, "respond twice"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+    let activity_before_close = store.read_task(task_id.as_str()).unwrap().last_activity;
+    let list_sessions = || {
+        api.list_agent_sessions(AgentListSessionsParams {
+            agent_id: AgentId::from("codex"),
+            project_id: project_id.clone(),
+            cursor: None,
+        })
+        .expect("list Native Sessions");
+    };
+
+    // The fixture writes its timestamp while handling the idle session/close.
+    let close_deadline = Instant::now() + Duration::from_secs(30);
+    while !activity_path.exists() {
+        assert!(Instant::now() < close_deadline, "idle close never happened");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    list_sessions();
+
+    let task = store.read_task(task_id.as_str()).unwrap();
+    assert_eq!(task.native_session_reload_requirement, None);
+    assert_eq!(task.last_activity, activity_before_close);
+
+    // Activity that no App Server operation explains is still an external change.
+    let external_activity =
+        (crate::time::activity_millis(&crate::time::now_string()).unwrap() + 60_000).to_string();
+    fs::write(&activity_path, &external_activity).expect("external activity");
+    list_sessions();
+
+    let task = store.read_task(task_id.as_str()).unwrap();
+    assert_eq!(
+        task.native_session_reload_requirement
+            .map(|requirement| requirement.observed_activity_at),
+        Some(external_activity.clone())
+    );
+    assert_eq!(task.last_activity, external_activity);
+    api.shutdown().expect("shutdown task runtime");
+}
+
 fn task_chat_fixture(
     temp: &tempfile::TempDir,
     mode: &str,
@@ -853,6 +934,16 @@ fn task_chat_fixture_with_requests(
     temp: &tempfile::TempDir,
     mode: &str,
     server_requests: ServerRequestRuntime,
+) -> Option<(TaskProductApi, Store, String)> {
+    task_chat_fixture_with_runtime(temp, mode, server_requests, Vec::new(), None)
+}
+
+fn task_chat_fixture_with_runtime(
+    temp: &tempfile::TempDir,
+    mode: &str,
+    server_requests: ServerRequestRuntime,
+    extra_env: Vec<(String, String)>,
+    session_idle_timeout: Option<Duration>,
 ) -> Option<(TaskProductApi, Store, String)> {
     if Command::new("python3").arg("--version").output().is_err() {
         return None;
@@ -866,8 +957,15 @@ fn task_chat_fixture_with_requests(
         agent_id: "codex".to_string(),
         command: "python3".to_string(),
         args: vec![script_path.to_string_lossy().to_string()],
-        env: vec![("OPENAIDE_TASK_CHAT_MODE".to_string(), mode.to_string())],
+        env: std::iter::once(("OPENAIDE_TASK_CHAT_MODE".to_string(), mode.to_string()))
+            .chain(extra_env)
+            .collect(),
         secret_env: Vec::new(),
+    };
+    let runtime = AcpAgentRuntime::new(config.clone());
+    let runtime = match session_idle_timeout {
+        Some(timeout) => runtime.with_session_idle_timeout(timeout),
+        None => runtime,
     };
     let store = Store::open(temp.path().join("store")).expect("store");
     let projects = ConfiguredProjectRoots::from_workspace_roots([workspace_root.clone()]);
@@ -877,8 +975,8 @@ fn task_chat_fixture_with_requests(
             store.clone(),
             projects,
         )),
-        AgentRegistry::codex(config.clone()),
-        Arc::new(AcpAgentRuntime::new(config)),
+        AgentRegistry::codex(config),
+        Arc::new(runtime),
         TaskUpdateNotifier::disabled(),
         server_requests,
     )
@@ -1031,6 +1129,7 @@ import sys
 import time
 
 mode = os.environ.get("OPENAIDE_TASK_CHAT_MODE", "message_ids")
+activity_file = os.environ.get("OPENAIDE_TASK_CHAT_ACTIVITY_FILE")
 session_id = "task-chat-session"
 prompt_count = 0
 pending_primary_id = None
@@ -1124,7 +1223,11 @@ for line in sys.stdin:
         respond(message, {"sessionId": session_id})
     elif method == "session/list":
         cwd = message.get("params", {}).get("cwd") or os.getcwd()
-        respond(message, {"sessions": [{"sessionId": session_id, "cwd": cwd, "title": "Task chat session"}]})
+        listed = {"sessionId": session_id, "cwd": cwd, "title": "Task chat session"}
+        if activity_file and os.path.exists(activity_file):
+            with open(activity_file) as handle:
+                listed["updatedAt"] = handle.read().strip()
+        respond(message, {"sessions": [listed]})
     elif method == "session/load":
         if mode == "active_writer":
             write({
@@ -1262,6 +1365,14 @@ for line in sys.stdin:
     elif method == "session/close":
         if pending_primary_id is not None:
             respond({"id": pending_primary_id}, {"stopReason": "end_turn"})
+        if activity_file:
+            # Real Agents flush session bookkeeping while closing, which advances the
+            # listed timestamp without adding history. Stay alive so the following
+            # session/list observes that write.
+            with open(activity_file, "w") as handle:
+                handle.write(str(int(time.time() * 1000)))
+            respond(message, {})
+            continue
         respond(message, {})
         break
 "#

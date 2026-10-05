@@ -482,6 +482,13 @@ pub trait AgentSessionEventSink: Send + Sync {
         Ok(())
     }
 
+    /// Reports an App Server-initiated lifecycle request on this session. Agents may
+    /// rewrite session bookkeeping for it and advance their listed timestamp without
+    /// changing history, so the owner needs the time to explain that activity.
+    fn own_session_operation(&self, _operation: &'static str) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
     fn subagent_spawned(
         &self,
         _event: crate::agent::events::AgentNativeSubagentSpawned,

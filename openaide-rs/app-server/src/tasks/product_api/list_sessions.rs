@@ -23,6 +23,9 @@ pub(super) struct NativeCatalogRefreshCoordinator {
 
 pub(super) const MAX_CONCURRENT_CATALOG_LISTINGS: usize = 20;
 
+/// How long after an App Server write the Agent's listed timestamp may still trail it.
+const OWN_ACTIVITY_TOLERANCE_MS: i128 = 5_000;
+
 /// A permit spans one Agent request; unwinding also releases capacity.
 struct CatalogListingPermit<'a>(&'a (Mutex<usize>, Condvar));
 
@@ -392,22 +395,17 @@ impl TaskProductApi {
             .filter_map(|value| crate::time::activity_millis(value).map(|time| (time, value)))
             .max_by_key(|(time, _)| *time)
             .map(|(_, value)| value.to_string());
-            let deferred_reload_activity = native_activity
-                .as_ref()
-                .filter(|activity| {
-                    let Some(native_time) = crate::time::activity_millis(activity) else {
-                        return false;
-                    };
-                    let Ok(local_history_updated_at) =
-                        self.store.local_history_updated_at(&record.task_id)
-                    else {
-                        return false;
-                    };
-                    crate::time::activity_millis(&local_history_updated_at)
-                        .is_some_and(|local_time| native_time > local_time.saturating_add(5_000))
-                })
-                .cloned();
+            let native_time = native_activity
+                .as_deref()
+                .and_then(crate::time::activity_millis);
+            let local_history_time = self
+                .store
+                .local_history_updated_at(&record.task_id)
+                .ok()
+                .as_deref()
+                .and_then(crate::time::activity_millis);
             let reload_requirement_changed = std::cell::Cell::new(false);
+            let own_operation_time = std::cell::Cell::new(None);
             self.mutations
                 .commit_existing_task(&record.task_id, TaskCommitOptions::metadata(), |ctx| {
                     let task = ctx.task_mut();
@@ -418,9 +416,22 @@ impl TaskProductApi {
                     {
                         return Ok(TaskMutationResult::Unchanged);
                     }
+                    // The App Server's own writes are the baseline: history it stored and
+                    // session requests it issued. Agent activity shortly after either is
+                    // that Agent's bookkeeping for them, not a change made elsewhere.
+                    let own_time = task
+                        .native_session_own_activity_at
+                        .as_deref()
+                        .and_then(crate::time::activity_millis);
+                    own_operation_time.set(own_time);
+                    let baseline = local_history_time.max(own_time);
+                    let exceeds_baseline = native_time.zip(baseline).map(|(native, baseline)| {
+                        native > baseline.saturating_add(OWN_ACTIVITY_TOLERANCE_MS)
+                    });
                     let mut changed = false;
                     if let Some(native_activity) = &native_activity {
                         if !task_has_live_work(task)
+                            && exceeds_baseline != Some(false)
                             && crate::time::activity_millis(native_activity)
                                 .zip(crate::time::activity_millis(&task.last_activity))
                                 .is_some_and(|(native, current)| native > current)
@@ -432,7 +443,8 @@ impl TaskProductApi {
                     if matches!(task.lifecycle, TaskLifecycle::Open)
                         && matches!(task.status, TaskStatus::Inactive)
                         && task.active_turn_id.is_none()
-                        && deferred_reload_activity.as_ref().is_some_and(|activity| {
+                        && exceeds_baseline == Some(true)
+                        && native_activity.as_ref().is_some_and(|activity| {
                             task.mark_native_session_reload_required(activity.clone())
                         })
                     {
@@ -447,6 +459,22 @@ impl TaskProductApi {
                 })
                 .map_err(protocol_error_from_runtime)?;
             if reload_requirement_changed.get() {
+                // The gaps show whether a wrong report came from an App Server operation
+                // that was never recorded or from Agent activity outside the tolerance.
+                crate::logging::info(
+                    "native_session_external_activity_detected",
+                    serde_json::json!({
+                        "task_id": record.task_id,
+                        "agent_id": agent_id,
+                        "session_id": expected_session_id,
+                        "since_own_operation_ms": native_time
+                            .zip(own_operation_time.get())
+                            .map(|(native, own)| (native - own).to_string()),
+                        "since_local_history_ms": native_time
+                            .zip(local_history_time)
+                            .map(|(native, local)| (native - local).to_string()),
+                    }),
+                );
                 self.publish_history_sync(
                     &record.task_id,
                     self.history_sync.reload_available_snapshot(&record.task_id),
