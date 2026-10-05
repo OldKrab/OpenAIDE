@@ -1218,6 +1218,112 @@ fn native_session_update_is_persisted_after_prompt_completion() {
 }
 
 #[test]
+fn live_compaction_updates_one_durable_row_and_projects_its_lifecycle() {
+    use crate::agent::events::AgentCompactionChange;
+    use crate::protocol::model::CompactionStatus;
+    use openaide_app_server_protocol::snapshot::{
+        ChatItemStatus, CompactionStatusSnapshot, MessagePart,
+    };
+
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    let compaction = |change| AgentEvent::Compaction {
+        compaction_id: "cmp_1".to_string(),
+        change,
+    };
+    let update = |status, summary| {
+        compaction(AgentCompactionChange::Update {
+            status,
+            summary,
+            error: AgentMetadataField::Unchanged,
+        })
+    };
+    let committed = || {
+        store
+            .task_journal()
+            .submit(crate::storage::task_journal::TaskWrite::barrier("task_1"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        store.read_messages("task_1").unwrap()
+    };
+
+    sink.session_update(update(
+        CompactionStatus::InProgress,
+        AgentMetadataField::Unchanged,
+    ))
+    .unwrap();
+    let in_progress = committed();
+    assert_eq!(in_progress.len(), 1);
+    assert_eq!(
+        crate::snapshots::task_snapshot::project_chat_item(&in_progress[0].chat).status,
+        ChatItemStatus::Streaming
+    );
+
+    sink.session_update(compaction(AgentCompactionChange::SummaryChunk {
+        text: "Retained ".to_string(),
+    }))
+    .unwrap();
+    sink.session_update(compaction(AgentCompactionChange::SummaryChunk {
+        text: "context".to_string(),
+    }))
+    .unwrap();
+    sink.session_update(update(
+        CompactionStatus::Completed,
+        AgentMetadataField::Unchanged,
+    ))
+    .unwrap();
+
+    let messages = committed();
+    assert_eq!(messages.len(), 1, "every update patches the same row");
+    assert_eq!(messages[0].chat.identity, "acp:session_1:compaction:cmp_1");
+    assert_eq!(messages[0].sequence, in_progress[0].sequence);
+    let item = crate::snapshots::task_snapshot::project_chat_item(&messages[0].chat);
+    assert_eq!(item.status, ChatItemStatus::Complete);
+    assert!(matches!(
+        item.parts.as_slice(),
+        [MessagePart::Compaction {
+            status: CompactionStatusSnapshot::Completed,
+            summary: Some(summary),
+            error: None,
+        }] if summary == "Retained context"
+    ));
+}
+
+#[test]
+fn compaction_from_a_stale_native_session_is_ignored() {
+    use crate::agent::events::AgentCompactionChange;
+    use crate::protocol::model::CompactionStatus;
+
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "stale_session".to_string(),
+        server_requests,
+    );
+
+    sink.session_update(AgentEvent::Compaction {
+        compaction_id: "cmp_1".to_string(),
+        change: AgentCompactionChange::Update {
+            status: CompactionStatus::Completed,
+            summary: AgentMetadataField::Unchanged,
+            error: AgentMetadataField::Unchanged,
+        },
+    })
+    .unwrap();
+
+    assert!(store.read_messages("task_1").unwrap().is_empty());
+}
+
+#[test]
 fn prompt_completion_leaves_running_agent_activity_open_for_later_session_updates() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();

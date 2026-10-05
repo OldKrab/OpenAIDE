@@ -115,6 +115,25 @@ pub enum MessagePart {
     ClosedPlan {
         entries: Vec<AgentPlanEntrySnapshot>,
     },
+    /// An Agent-owned context compaction. `summary` is user-displayable
+    /// Markdown supplied by the Agent, absent until or unless it provides one.
+    Compaction {
+        status: CompactionStatusSnapshot,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum CompactionStatusSnapshot {
+    InProgress,
+    Completed,
+    Failed,
+    Cancelled,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

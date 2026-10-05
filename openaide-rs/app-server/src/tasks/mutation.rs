@@ -18,6 +18,7 @@ use crate::tasks::runtime_state::RuntimeState;
 
 mod commit;
 mod create_validation;
+mod message_lookup;
 mod stream_text;
 
 use create_validation::TaskCreationValidationContext;

@@ -6,9 +6,14 @@ use crate::agent::acp_schema::{ContentBlock, SessionUpdate};
 use crate::agent::acp_codex_subagent::{
     project_codex_collaboration, CodexSubagentProjection, CodexSubagentState,
 };
+use crate::agent::acp_compaction_projection::{
+    apply_compaction_change, project_compaction_summary_chunk, project_compaction_update,
+};
 use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_live_prompt_projection::project_plan_entry;
-use crate::agent::acp_message_identity::{stable_agent_message_id, stable_message_id};
+use crate::agent::acp_message_identity::{
+    stable_agent_message_id, stable_compaction_id, stable_message_id,
+};
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
@@ -199,8 +204,36 @@ impl ReplayBuffer {
                 };
                 self.replace_plan(entries, created_at);
             }
+            SessionUpdate::CompactionUpdate(update) => {
+                self.end_anonymous_text_run();
+                let (compaction_id, change) = project_compaction_update(update);
+                self.apply_compaction(&compaction_id, change, created_at);
+            }
+            SessionUpdate::CompactionSummaryChunk(chunk) => {
+                self.end_anonymous_text_run();
+                if let Some((compaction_id, change)) = project_compaction_summary_chunk(chunk) {
+                    self.apply_compaction(&compaction_id, change, created_at);
+                }
+            }
             _ => self.end_anonymous_text_run(),
         }
+    }
+
+    /// The first update fixes the compaction's timeline position; later updates
+    /// patch that same row in place.
+    fn apply_compaction(
+        &mut self,
+        compaction_id: &str,
+        change: crate::agent::events::AgentCompactionChange,
+        created_at: &str,
+    ) {
+        let id = stable_compaction_id(&self.session_id, compaction_id);
+        let existing = self
+            .messages
+            .iter()
+            .find(|message| message.identity() == id);
+        let message = apply_compaction_change(&id, existing, change, created_at);
+        self.upsert(message);
     }
 
     fn replace_plan(

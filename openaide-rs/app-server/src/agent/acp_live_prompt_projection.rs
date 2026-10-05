@@ -10,6 +10,9 @@ use serde_json::json;
 use crate::agent::acp_codex_subagent::{
     project_codex_collaboration, CodexSubagentProjection, CodexSubagentState,
 };
+use crate::agent::acp_compaction_projection::{
+    project_compaction_summary_chunk, project_compaction_update,
+};
 use crate::agent::acp_config_projection::normalize_config_options;
 use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_terminal_output_adapter::terminal_append;
@@ -21,9 +24,9 @@ use crate::agent::acp_tool_call_projection::{
 };
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
-    AgentContextUsage, AgentEvent, AgentPermissionOption, AgentPermissionOptionKind,
-    AgentPermissionOutcome, AgentPermissionRequest, AgentToolCallRef, AgentToolUpdate,
-    AgentUsageCost,
+    AgentCompactionChange, AgentContextUsage, AgentEvent, AgentPermissionOption,
+    AgentPermissionOptionKind, AgentPermissionOutcome, AgentPermissionRequest, AgentToolCallRef,
+    AgentToolUpdate, AgentUsageCost,
 };
 use crate::agent::tool_details::{tool_call_event, tool_kind_name};
 use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
@@ -348,6 +351,32 @@ impl LivePromptProjection {
                     return Ok(());
                 };
                 self.sink.emit(AgentEvent::Plan(AgentPlan { entries }))?;
+            }
+            SessionUpdate::CompactionUpdate(update) => {
+                let (compaction_id, change) = project_compaction_update(update);
+                if let AgentCompactionChange::Update { status, .. } = &change {
+                    logging::info(
+                        "acp_compaction_update_projected",
+                        json!({
+                            "agent_id": self.agent_id.as_str(),
+                            "compaction_id": compaction_id,
+                            "status": format!("{status:?}"),
+                        }),
+                    );
+                }
+                self.sink.emit(AgentEvent::Compaction {
+                    compaction_id,
+                    change,
+                })?;
+            }
+            SessionUpdate::CompactionSummaryChunk(chunk) => {
+                // Chunks are high-frequency and carry content, so they are not logged.
+                if let Some((compaction_id, change)) = project_compaction_summary_chunk(chunk) {
+                    self.sink.emit(AgentEvent::Compaction {
+                        compaction_id,
+                        change,
+                    })?;
+                }
             }
             _ => {}
         }

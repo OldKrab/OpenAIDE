@@ -4,6 +4,7 @@ import type { ActivityStep, ActivityToolDetails, AgentCommandsCatalog, AgentMess
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
+import { CompactionView } from "./CompactionView";
 import { ChatActivityView } from "./ChatActivityView";
 import { MessageCopyAction } from "./chatMessageActions";
 import { ChatPermissionCard } from "./ChatPermissionCard";
@@ -107,6 +108,9 @@ export const ChatRow = memo(function ChatRow({
   }
   if (body.kind === "completed_plan") {
     return <CompletedPlanView entries={body.entries} />;
+  }
+  if (body.kind === "compaction") {
+    return <CompactionView error={body.error} status={body.status} summary={body.summary} />;
   }
   if (body.kind === "closed_plan") {
     return <ClosedPlanView entries={body.entries} />;

@@ -106,24 +106,25 @@ use crate::snapshot::{
     AgentPlanSnapshot, AgentPlanStatusSnapshot, AgentSetupReason, AgentSignInFlow,
     AgentSignInPhase, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus,
     AgentSummary, AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole,
-    ChatSnapshot, ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
-    NativeSessionReference, NativeSessionSummary, NewTaskDefaultsSnapshot,
-    PendingAgentConfigChange, PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
-    ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion, QuestionMessageAction,
-    QuestionMessageState, QueuedMessageAttachmentSnapshot, QueuedMessageSnapshot, RecoveryAction,
-    RecoverySnapshot, ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    SubagentActivitySnapshot, SubagentCapabilitiesSnapshot, SubagentCatalogEntrySnapshot,
-    SubagentCatalogSnapshot, SubagentDetailSnapshot, SubagentHistoryAvailability,
-    SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason, TaskContextUsage,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueuePauseSnapshot,
-    TaskMessageQueueSnapshot, TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState,
-    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationAction, TaskPreparationSnapshot,
-    TaskPreparationStep, TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker,
-    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
-    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
-    TaskTurnUsage, TaskUsageCost, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
-    ToolPresentationActionSnapshot, ToolPresentationSnapshot, ToolSearchTargetSnapshot,
+    ChatSnapshot, ClientSnapshot, ClientSnapshotScope, CompactionStatusSnapshot,
+    LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
+    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
+    QuestionMessageAction, QuestionMessageState, QueuedMessageAttachmentSnapshot,
+    QueuedMessageSnapshot, RecoveryAction, RecoverySnapshot, ServerCapabilities, ServerSnapshot,
+    SettingsSnapshot, StateRootSnapshot, SubagentActivitySnapshot, SubagentCapabilitiesSnapshot,
+    SubagentCatalogEntrySnapshot, SubagentCatalogSnapshot, SubagentDetailSnapshot,
+    SubagentHistoryAvailability, SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
+    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
+    TaskMessageQueuePauseSnapshot, TaskMessageQueueSnapshot, TaskNavigationEntry,
+    TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPermissionPolicy,
+    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
+    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
+    ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -651,6 +652,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ChatItem>(output, config);
     push_decl::<ChatRole>(output, config);
     push_decl::<ChatItemStatus>(output, config);
+    push_decl::<CompactionStatusSnapshot>(output, config);
     push_decl::<MessagePart>(output, config);
     push_decl::<QuestionMessageState>(output, config);
     push_decl::<QuestionMessageAction>(output, config);

@@ -25,3 +25,8 @@ pub(crate) fn stable_agent_message_id(
         }
     }
 }
+
+/// Agent-owned compaction ids are unique only within their Native Session.
+pub(crate) fn stable_compaction_id(session_id: &str, compaction_id: &str) -> String {
+    format!("acp:{session_id}:compaction:{compaction_id}")
+}

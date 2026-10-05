@@ -1,9 +1,9 @@
 use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::{
     ActivityStatus as ProtocolActivityStatus, ActivityStepSnapshot, AttachmentKind,
-    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, MessagePart, QuestionMessageAction,
-    QuestionMessageState, SubagentActivitySnapshot, ToolPermissionDecisionSnapshot,
-    ToolPermissionOutcomeSnapshot,
+    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, CompactionStatusSnapshot, MessagePart,
+    QuestionMessageAction, QuestionMessageState, SubagentActivitySnapshot,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
 };
 use openaide_app_server_protocol::task::{
     ActivityToolContent as ProtocolActivityToolContent,
@@ -17,8 +17,8 @@ use std::sync::LazyLock;
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
-    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, NormalizedMessage, QuestionAction,
-    QuestionState,
+    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, CompactionStatus,
+    NormalizedMessage, QuestionAction, QuestionState,
 };
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
@@ -130,6 +130,31 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             ChatItemStatus::Interrupted,
             vec![MessagePart::Text {
                 text: message.clone(),
+            }],
+        ),
+        NormalizedMessage::Compaction {
+            status,
+            summary,
+            error,
+            ..
+        } => (
+            ChatRole::System,
+            match status {
+                CompactionStatus::InProgress => ChatItemStatus::Streaming,
+                CompactionStatus::Failed => ChatItemStatus::Failed,
+                CompactionStatus::Cancelled => ChatItemStatus::Interrupted,
+                CompactionStatus::Completed | CompactionStatus::Unknown => ChatItemStatus::Complete,
+            },
+            vec![MessagePart::Compaction {
+                status: match status {
+                    CompactionStatus::InProgress => CompactionStatusSnapshot::InProgress,
+                    CompactionStatus::Completed => CompactionStatusSnapshot::Completed,
+                    CompactionStatus::Failed => CompactionStatusSnapshot::Failed,
+                    CompactionStatus::Cancelled => CompactionStatusSnapshot::Cancelled,
+                    CompactionStatus::Unknown => CompactionStatusSnapshot::Unknown,
+                },
+                summary: summary.clone(),
+                error: error.clone(),
             }],
         ),
     }

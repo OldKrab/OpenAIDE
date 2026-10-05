@@ -1,6 +1,7 @@
+use crate::agent::AgentMetadataField;
 use crate::protocol::model::{
     ActivityStatus, ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
-    AgentPlan, ConfigOptionsCatalog, ToolPresentation,
+    AgentPlan, CompactionStatus, ConfigOptionsCatalog, ToolPresentation,
 };
 
 #[derive(Debug, Clone)]
@@ -31,8 +32,26 @@ pub enum AgentEvent {
     ConfigOptionsChanged(ConfigOptionsCatalog),
     CommandsChanged(AgentCommandsCatalog),
     Plan(AgentPlan),
+    /// One ordered change to an Agent-owned context compaction. The ACP
+    /// `compactionId` is the only identity; it never depends on a Turn.
+    Compaction {
+        compaction_id: String,
+        change: AgentCompactionChange,
+    },
     ContextUsage(AgentContextUsage),
     TurnUsage(AgentTurnUsage),
+}
+
+/// A normalized ACP compaction patch. Omitted fields keep their stored value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentCompactionChange {
+    Update {
+        status: CompactionStatus,
+        summary: AgentMetadataField<String>,
+        error: AgentMetadataField<String>,
+    },
+    /// Text appended to the retained summary of an in-progress compaction.
+    SummaryChunk { text: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

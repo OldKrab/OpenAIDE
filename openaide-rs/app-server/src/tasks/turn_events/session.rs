@@ -339,6 +339,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             AgentEvent::ConfigOptionsChanged(_)
             | AgentEvent::CommandsChanged(_)
             | AgentEvent::ContextUsage(_)
+            | AgentEvent::Compaction { .. }
             | AgentEvent::TurnUsage(_) => {}
             other => {
                 let message = crate::agent::normalizer::normalize_event(other, &now);

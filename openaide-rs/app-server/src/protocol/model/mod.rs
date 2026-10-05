@@ -18,8 +18,8 @@ pub use agent::{
     ConfigOptionsCatalog, ConfigOptionsStatus,
 };
 pub use chat::{
-    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, InterruptionReason, MessagePage,
-    NormalizedMessage, QuestionAction, QuestionState,
+    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, CompactionStatus,
+    InterruptionReason, MessagePage, NormalizedMessage, QuestionAction, QuestionState,
 };
 pub use permission::{
     PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall,

@@ -85,6 +85,30 @@ pub enum NormalizedMessage {
         created_at: String,
         recoverable: bool,
     },
+    /// One Agent-owned context compaction, updated in place by its ACP
+    /// `compactionId`. The summary is the Agent's user-displayable text, never
+    /// the model-facing continuation prompt.
+    Compaction {
+        id: String,
+        status: CompactionStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        created_at: String,
+    },
+}
+
+/// Lifecycle of a context compaction. `Unknown` preserves forward compatibility
+/// with ACP statuses this build does not recognize without inferring behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionStatus {
+    InProgress,
+    Completed,
+    Failed,
+    Cancelled,
+    Unknown,
 }
 
 impl NormalizedMessage {
@@ -104,6 +128,7 @@ impl NormalizedMessage {
             NormalizedMessage::ClosedPlan { .. } => "closed_plan",
             NormalizedMessage::Question { .. } => "question",
             NormalizedMessage::Interruption { .. } => "interruption",
+            NormalizedMessage::Compaction { .. } => "compaction",
         }
     }
 
@@ -115,7 +140,8 @@ impl NormalizedMessage {
             | NormalizedMessage::CompletedPlan { id, .. }
             | NormalizedMessage::ClosedPlan { id, .. }
             | NormalizedMessage::Question { id, .. }
-            | NormalizedMessage::Interruption { id, .. } => id.clone(),
+            | NormalizedMessage::Interruption { id, .. }
+            | NormalizedMessage::Compaction { id, .. } => id.clone(),
         }
     }
 
@@ -127,7 +153,8 @@ impl NormalizedMessage {
             | NormalizedMessage::CompletedPlan { created_at, .. }
             | NormalizedMessage::ClosedPlan { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
-            | NormalizedMessage::Interruption { created_at, .. } => created_at.clone(),
+            | NormalizedMessage::Interruption { created_at, .. }
+            | NormalizedMessage::Compaction { created_at, .. } => created_at.clone(),
         };
         match self {
             NormalizedMessage::User { created_at, .. }
@@ -136,9 +163,8 @@ impl NormalizedMessage {
             | NormalizedMessage::CompletedPlan { created_at, .. }
             | NormalizedMessage::ClosedPlan { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
-            | NormalizedMessage::Interruption { created_at, .. } => {
-                *created_at = existing_created_at
-            }
+            | NormalizedMessage::Interruption { created_at, .. }
+            | NormalizedMessage::Compaction { created_at, .. } => *created_at = existing_created_at,
         }
     }
 
