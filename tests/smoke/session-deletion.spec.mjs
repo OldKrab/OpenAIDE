@@ -20,7 +20,7 @@ test.afterEach(async ({}, testInfo) => {
   }
 });
 
-test("Archive explains local retention and Delete removes archived history from both viewing clients", async ({ page, browser }, testInfo) => {
+test("Archive acts immediately and Delete removes archived history from both viewing clients", async ({ page, browser }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 850 });
   await prepare(page);
   await send(page, "smoke:basic");
@@ -28,9 +28,6 @@ test("Archive explains local retention and Delete removes archived history from 
   const taskUrl = page.url();
   await openMenu(page, "Smoke task");
   await page.getByRole("menuitem", { name: "Archive task", exact: true }).click();
-  const archive = page.getByRole("dialog", { name: "Archive task?" });
-  await expect(archive).toContainText("Its Agent history stays available");
-  await archive.getByRole("button", { name: "Archive task", exact: true }).click();
   await expect(page).toHaveURL(/\/new-task/);
   await page.getByRole("button", { name: "Archive", exact: true }).click();
   const row = page.getByRole("listitem").filter({ hasText: "Smoke task" }).first();
