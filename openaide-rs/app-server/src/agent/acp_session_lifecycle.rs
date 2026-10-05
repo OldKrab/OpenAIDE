@@ -14,6 +14,7 @@ pub(super) use crate::agent::acp_session_capabilities::{
     validate_initialize_protocol, validate_load_session_capability,
     validate_resume_session_capability,
 };
+use crate::agent::acp_session_meta::session_request_meta;
 pub(super) use crate::agent::acp_session_requests::request_session_list;
 use crate::agent::acp_session_requests::{
     request_load_session, request_new_session, request_resume_session,
@@ -40,6 +41,7 @@ pub(super) type LoadReplayCaptures = Arc<Mutex<HashMap<String, LoadReplayCapture
 
 pub(super) async fn start_active_session(
     connection: &ConnectionTo<Agent>,
+    agent_id: &str,
     cwd: PathBuf,
     initialize: &InitializeResponse,
     preferred_auth_method_id: Option<&str>,
@@ -58,6 +60,7 @@ pub(super) async fn start_active_session(
         initialize,
         preferred_auth_method_id,
         mcp_servers,
+        session_request_meta(agent_id),
         trace,
     )
     .await?;
@@ -119,6 +122,7 @@ pub(super) async fn load_active_session(
         initialize,
         preferred_auth_method_id,
         mcp_servers,
+        session_request_meta(agent_id),
         trace,
     )
     .await
@@ -185,6 +189,7 @@ pub(super) async fn resume_active_session(
         initialize,
         preferred_auth_method_id,
         mcp_servers,
+        session_request_meta(agent_id),
         trace,
     )
     .await

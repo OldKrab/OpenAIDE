@@ -1472,6 +1472,7 @@ fn start_active_session_does_not_implicitly_authenticate_or_retry() {
                     .await?;
                 let result = start_active_session(
                     &connection,
+                    "codex",
                     env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
                     &initialize,
                     Some("codex-login"),
