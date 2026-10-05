@@ -121,6 +121,7 @@ impl<'a> AcpSessionRunner<'a> {
     ) -> Result<(AcpActiveSession, Vec<SessionConfigOption>), agent_client_protocol::Error> {
         start_active_session(
             self.connection,
+            self.agent_id,
             cwd,
             &self.initialize,
             self.auth_method_id,

@@ -6,19 +6,24 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::agent::acp_schema::{
-    ContentBlock, ContentChunk, CreateTerminalRequest, KillTerminalRequest, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
-    PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionUpdate, SubagentSessionCapabilities,
-    SubagentSpawnedUpdate, TerminalOutputRequest, TextContent, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, WaitForTerminalExitRequest, WriteTextFileRequest,
+    AgentCapabilities, ContentBlock, ContentChunk, CreateTerminalRequest, InitializeResponse,
+    KillTerminalRequest, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PermissionOption, PermissionOptionKind, ProtocolVersion,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
+    SessionResumeCapabilities, SessionUpdate, SubagentSessionCapabilities, SubagentSpawnedUpdate,
+    TerminalOutputRequest, TextContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{Client, UntypedMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::acp_elicitation_wire::ElicitationCreateResponse;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
-use crate::agent::acp_session_lifecycle::LoadReplayCapture;
+use crate::agent::acp_session_lifecycle::{
+    load_active_session, resume_active_session, start_active_session, LoadActiveSessionRequest,
+    LoadReplayCapture, ResumeActiveSessionRequest,
+};
 use crate::agent::acp_trace::AcpTraceState;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
@@ -51,6 +56,14 @@ struct MalformedElicitationRequest {
     mode: String,
     message: String,
     requested_schema: serde_json::Value,
+}
+
+type RecordedSessionMeta = (&'static str, Option<serde_json::Value>);
+
+/// Records the `_meta` of every session request, keyed by ACP method.
+#[derive(Clone, Default)]
+struct SessionMetaRecordingAgent {
+    requests: Arc<Mutex<Vec<RecordedSessionMeta>>>,
 }
 
 #[derive(Clone)]
@@ -260,6 +273,50 @@ impl agent_client_protocol::ConnectTo<Client> for MalformedElicitationConnection
                 let _ = self.done_tx.send(());
                 Ok(())
             })
+    }
+}
+
+impl agent_client_protocol::ConnectTo<Client> for SessionMetaRecordingAgent {
+    fn connect_to(
+        self,
+        client: impl agent_client_protocol::ConnectTo<Agent>,
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
+        let (new_requests, load_requests, resume_requests) = (
+            self.requests.clone(),
+            self.requests.clone(),
+            self.requests.clone(),
+        );
+        Agent
+            .builder()
+            .name("session-meta-recording-test-agent")
+            .on_receive_request(
+                async move |request: NewSessionRequest, responder, _connection| {
+                    let meta = request.meta.map(serde_json::Value::Object);
+                    new_requests.lock().unwrap().push(("session/new", meta));
+                    responder.respond(NewSessionResponse::new("session_1"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: LoadSessionRequest, responder, _connection| {
+                    let meta = request.meta.map(serde_json::Value::Object);
+                    load_requests.lock().unwrap().push(("session/load", meta));
+                    responder.respond(LoadSessionResponse::new())
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: ResumeSessionRequest, responder, _connection| {
+                    let meta = request.meta.map(serde_json::Value::Object);
+                    resume_requests
+                        .lock()
+                        .unwrap()
+                        .push(("session/resume", meta));
+                    responder.respond(ResumeSessionResponse::new())
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .connect_to(client)
     }
 }
 
@@ -804,4 +861,84 @@ fn raw_plan_validation_rejects_the_whole_snapshot_when_one_entry_is_malformed() 
 
     assert!(raw_plan_update_is_valid(&valid).is_ok());
     assert!(raw_plan_update_is_valid(&malformed).is_err());
+}
+
+#[test]
+fn session_requests_ask_the_claude_adapter_for_summarized_thinking() {
+    let expected = serde_json::json!({
+        "claudeCode": {
+            "options": { "thinking": { "type": "adaptive", "display": "summarized" } },
+        },
+    });
+    for (agent_id, expected_meta) in [("claude-code", Some(expected)), ("codex", None)] {
+        let agent = SessionMetaRecordingAgent::default();
+        let requests = agent.requests.clone();
+        let initialize = InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(
+            AgentCapabilities::new()
+                .load_session(true)
+                .session_capabilities(
+                    SessionCapabilities::new().resume(SessionResumeCapabilities::new()),
+                ),
+        );
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            connect_acp_session_client(
+                agent,
+                connection_context(HostBridge::disabled(), Arc::default()),
+                async |connection| {
+                    start_active_session(
+                        &connection,
+                        agent_id,
+                        "/".into(),
+                        &initialize,
+                        None,
+                        Vec::new(),
+                        None,
+                    )
+                    .await?;
+                    load_active_session(
+                        &connection,
+                        &initialize,
+                        &Arc::default(),
+                        None,
+                        LoadActiveSessionRequest {
+                            agent_id,
+                            session_id: "session_1".to_string(),
+                            cwd: "/".into(),
+                            mcp_servers: Vec::new(),
+                            preferred_auth_method_id: None,
+                        },
+                    )
+                    .await
+                    .expect("session/load succeeds");
+                    resume_active_session(
+                        &connection,
+                        &initialize,
+                        None,
+                        ResumeActiveSessionRequest {
+                            agent_id,
+                            session_id: "session_1".to_string(),
+                            cwd: "/".into(),
+                            mcp_servers: Vec::new(),
+                            preferred_auth_method_id: None,
+                        },
+                    )
+                    .await
+                    .expect("session/resume succeeds");
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+        });
+
+        let recorded = requests.lock().unwrap().clone();
+        assert_eq!(
+            recorded,
+            ["session/new", "session/load", "session/resume"]
+                .map(|method| (method, expected_meta.clone()))
+                .to_vec(),
+            "{agent_id}"
+        );
+    }
 }

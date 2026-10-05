@@ -36,6 +36,7 @@ pub(crate) mod acp_session_capabilities;
 pub(crate) mod acp_session_catalogs;
 pub(crate) mod acp_session_connection;
 pub(crate) mod acp_session_lifecycle;
+pub(crate) mod acp_session_meta;
 pub(crate) mod acp_session_opening;
 pub(crate) mod acp_session_paths;
 pub(crate) mod acp_session_requests;
