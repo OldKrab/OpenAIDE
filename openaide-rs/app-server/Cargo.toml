@@ -36,7 +36,7 @@ zstd.workspace = true
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal"] }
+nix = { version = "0.31", features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

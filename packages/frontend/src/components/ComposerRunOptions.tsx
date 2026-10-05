@@ -81,7 +81,9 @@ export function ComposerRunOptions({
           role={catalogFailed ? "alert" : "status"}
         >
           {catalogLoading ? <LoaderCircle aria-hidden size={12} /> : catalogFailed ? <CircleAlert aria-hidden size={12} /> : null}
-          {catalogLoading ? loadingLabel ?? "Loading options…" : catalogFailed ? "Couldn’t load options" : "Options unavailable"}
+          <span className="composer-options-status-label">
+            {catalogLoading ? loadingLabel ?? "Loading options…" : catalogFailed ? "Couldn’t load options" : "Options unavailable"}
+          </span>
           {onRetryConfigOptions && (catalogFailed || configOptions?.status === "stale") ? (
             <button onClick={onRetryConfigOptions} type="button">
               {catalogFailed ? "Retry" : "Reload options"}

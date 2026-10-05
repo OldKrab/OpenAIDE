@@ -26,6 +26,60 @@ test.afterEach(async ({}, testInfo) => {
 });
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`restores latest after switching Tasks at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await openPreparedNewTask(page);
+    for (let index = 0; index < 16; index += 1) {
+      await send(page, index === 12 ? "smoke:navigation-long-message" : `Scroll restoration message ${index}`);
+      await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    }
+    const taskPath = new URL(page.url()).pathname;
+    const list = page.locator(".message-list");
+    const distanceFromEnd = () => list.evaluate((element) => (
+      element.scrollHeight - element.clientHeight - element.scrollTop
+    ));
+    await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
+    await list.hover();
+    await page.mouse.wheel(0, -500);
+    await expect.poll(distanceFromEnd).toBeGreaterThan(100);
+    await page.mouse.wheel(0, 500);
+    await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
+
+    // Exercise shell navigation without reloading the client or its scroll cache.
+    await page.evaluate(() => {
+      history.pushState(null, "", "/new-task");
+      dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(page.getByLabel("New task")).toBeVisible();
+    await send(page, "Another Task");
+    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    const otherClient = await page.context().newPage();
+    try {
+      await otherClient.goto(`${harness.baseUrl}${taskPath}`);
+      await send(otherClient, "Message received while the Task was away");
+      await expect(otherClient.getByLabel("Task status: Idle")).toHaveCount(1);
+    } finally {
+      await otherClient.close();
+    }
+    await page.evaluate((path) => {
+      history.pushState(null, "", path);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, taskPath);
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
+    const settledDistances = await list.evaluate(async (element) => {
+      const distances = [];
+      for (let frame = 0; frame < 30; frame += 1) {
+        await new Promise(requestAnimationFrame);
+        distances.push(element.scrollHeight - element.clientHeight - element.scrollTop);
+      }
+      return distances;
+    });
+    expect(Math.max(...settledDistances.slice(-10))).toBeLessThanOrEqual(2);
+  });
+}
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`schedules a message and retains it across reload at ${viewport.width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await openPreparedNewTask(page);

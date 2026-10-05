@@ -141,20 +141,54 @@ fn string_field<'a>(value: Option<&'a serde_json::Value>, key: &str) -> Option<&
 
 /// Sanitizes recognized Codex collaboration tools before generic Tool detail projection.
 pub(super) fn project_codex_collaboration(tool_call: &ToolCall) -> Option<AgentToolCall> {
-    let collaboration = tool_call
+    let metadata = tool_call
         .meta
-        .as_ref()?
-        .get("codex")?
-        .get("collaboration")?;
-    let tool = collaboration.get("tool")?.as_str()?;
-    let (title, input_summary) = match tool {
-        "wait" => ("Wait for subagents", None),
-        _ => return None,
-    };
+        .as_ref()
+        .and_then(|meta| meta.get("codex"))
+        .and_then(|codex| codex.get("collaboration"));
+    if let Some(metadata) = metadata {
+        match metadata.get("tool").and_then(serde_json::Value::as_str) {
+            Some("wait") => {}
+            // These collaboration Tools intentionally retain their Agent-owned
+            // generic presentation; they cannot prove a child lifecycle.
+            Some("spawnAgent" | "sendInput" | "followupTask" | "resumeAgent" | "closeAgent") => {
+                return None;
+            }
+            _ => return collaboration_fallback(tool_call, "unsupported_collaboration_metadata"),
+        }
+    } else {
+        // Codex ACP 2.x omits vendor metadata. The exact wire title alone is
+        // insufficient: require the structured collaboration input as well.
+        if tool_call.title != "wait" {
+            return None;
+        }
+        let input = tool_call.raw_input.as_ref()?;
+        let has_collaboration_fields = ["senderThreadId", "receiverThreadIds", "agentsStates"]
+            .iter()
+            .any(|field| input.get(field).is_some());
+        if !has_collaboration_fields {
+            return None;
+        }
+        let valid = string_field(Some(input), "senderThreadId")
+            .is_some_and(|id| !id.trim().is_empty())
+            && input
+                .get("receiverThreadIds")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|ids| {
+                    ids.iter()
+                        .all(|id| id.as_str().is_some_and(|id| !id.trim().is_empty()))
+                })
+            && input
+                .get("agentsStates")
+                .is_some_and(serde_json::Value::is_object);
+        if !valid {
+            return collaboration_fallback(tool_call, "invalid_collaboration_input");
+        }
+    }
     Some(AgentToolCall {
         tool_call_id: tool_call.tool_call_id.to_string(),
         scope_id: None,
-        title: title.to_string(),
+        title: "Wait for subagents".to_string(),
         kind: "collaboration".to_string(),
         status: match tool_call.status {
             ToolCallStatus::Pending => AgentToolCallStatus::Pending,
@@ -164,10 +198,28 @@ pub(super) fn project_codex_collaboration(tool_call: &ToolCall) -> Option<AgentT
             _ => AgentToolCallStatus::Pending,
         },
         presentation: None,
-        input_summary,
+        input_summary: None,
         output_preview: None,
         details: None,
     })
+}
+
+fn collaboration_fallback(
+    tool_call: &ToolCall,
+    reason_code: &'static str,
+) -> Option<AgentToolCall> {
+    // Never include the Tool title or payload: collaboration input can contain
+    // delegated instructions, thread paths, and arbitrary Agent error text.
+    crate::logging::warn(
+        "acp_codex_collaboration_projection_fallback",
+        serde_json::json!({
+            "agent_id": "codex",
+            "tool_call_id": tool_call.tool_call_id.to_string(),
+            "outcome_kind": "generic_tool",
+            "reason_code": reason_code,
+        }),
+    );
+    None
 }
 
 fn activity_status(status: &ToolCallStatus) -> ActivityStatus {

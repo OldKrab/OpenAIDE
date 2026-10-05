@@ -32,9 +32,22 @@
   font-weight: 550;
   line-height: 1;
   white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Narrow Composers truncate the explanation so the recovery action stays inside
+   the option row instead of covering the neighboring controls. */
+.composer-options-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Keep descenders inside the clipped single-line box. */
+  line-height: 1.3;
 }
 
 .composer-options-status svg {
+  flex: 0 0 auto;
   animation: composer-options-status-spin 1.15s linear infinite;
 }
 
@@ -52,6 +65,7 @@
   padding: 3px 8px;
   font: inherit;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 
 @keyframes composer-options-status-spin {

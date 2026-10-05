@@ -5,6 +5,8 @@ import readline from "node:readline";
 const sessions = new Map();
 const history = new Map();
 const pendingClientRequests = new Map();
+const supportsNativeSubagents = process.argv.includes("--native-subagents");
+let nativeSubagentsNegotiated = false;
 const nativeSessionScenario = process.argv.includes("--active-writer") ? "active-writer" : undefined;
 let nextSession = 1;
 let nextClientRequest = 1;
@@ -38,12 +40,17 @@ async function handleRequestOrNotification(message) {
   const params = message.params ?? {};
   switch (message.method) {
     case "initialize":
+      nativeSubagentsNegotiated = supportsNativeSubagents
+        && params.clientCapabilities?.subagents !== undefined;
       respond(message.id, {
         protocolVersion: params.protocolVersion ?? 1,
         agentCapabilities: {
           loadSession: true,
           promptCapabilities: { image: true, embeddedContext: true },
-          sessionCapabilities: { close: {}, list: {}, delete: {} },
+          sessionCapabilities: {
+            close: {}, list: {}, delete: {},
+            ...(supportsNativeSubagents ? { subagents: {} } : {}),
+          },
         },
         authMethods: [],
         agentInfo: { name: "OpenAIDE Test Agent", version: "1" },
@@ -154,6 +161,36 @@ async function runPrompt(message) {
   const text = promptText(message.params.prompt);
   const prompt = { id: message.id, cancelled: false };
   session.activePrompts.set(String(message.id), prompt);
+
+  if (text.includes("smoke:native-subagents")) {
+    if (!nativeSubagentsNegotiated) {
+      textUpdate(sessionId, "agent_message_chunk", "Native Subagent capability was not negotiated");
+    } else {
+      const childId = `${sessionId}:reviewer:${promptNumber}`;
+      const nestedId = `${childId}:details`;
+      update(sessionId, {
+        sessionUpdate: "subagent_spawned", subagentSessionId: childId,
+        name: "Reviewer", task: "Review the implementation", capabilities: {},
+      });
+      textUpdate(childId, "agent_thought_chunk", "Checking the implementation", "child-thought");
+      update(childId, {
+        sessionUpdate: "subagent_spawned", subagentSessionId: nestedId,
+        name: "Detail reviewer", task: "Check a nested detail", capabilities: {},
+      });
+      textUpdate(nestedId, "agent_message_chunk", "Nested review result", "nested-result");
+      update(childId, {
+        sessionUpdate: "subagent_state_update", subagentSessionId: nestedId, state: "completed",
+      });
+      textUpdate(childId, "agent_message_chunk", "Child review result", "child-result");
+      update(sessionId, {
+        sessionUpdate: "subagent_state_update", subagentSessionId: childId, state: "completed",
+      });
+      textUpdate(sessionId, "agent_message_chunk", "Main review result", `main-${promptNumber}`);
+    }
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
 
   if (text.includes("smoke:file-viewer-layout")) {
     const downloadPath = text.split("\n")

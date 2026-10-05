@@ -37,7 +37,8 @@ fn initialize_request_with_subagents(
     );
     if native_subagents {
         // SDK 1.4 strips the draft standard field before Codex ACP can inspect it.
-        // This namespaced fallback is temporary until ACP PR #1992 ships in the SDK.
+        // TODO: Remove this namespaced bridge when the released ACP SDK preserves
+        // canonical Subagent capabilities, so negotiation has only one wire form.
         meta.insert(
             "openaide".to_string(),
             serde_json::json!({ "nativeSubagentSessions": true }),
@@ -83,12 +84,25 @@ fn initialize_request_with_subagents(
     )
 }
 
-/// Internal rollback boundary for the draft capability. It is deliberately not
-/// a user preference and is evaluated only when a new ACP connection initializes.
+/// Native inspection is enabled across App Shells by default. The internal
+/// rollback override affects only newly initialized ACP connections.
 pub(crate) fn native_subagents_enabled() -> bool {
-    std::env::var("OPENAIDE_ACP_NATIVE_SUBAGENTS")
-        .ok()
-        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true"))
+    native_subagents_enabled_with_override(
+        std::env::var("OPENAIDE_ACP_NATIVE_SUBAGENTS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn native_subagents_enabled_with_override(value: Option<&str>) -> bool {
+    // Local launchers forward an unset override as an empty value. Treat it as
+    // the default; an explicit false or invalid override stays disabled.
+    value.is_none_or(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "" | "1" | "true"
+        )
+    })
 }
 
 pub(crate) async fn read_text_file_from_host(

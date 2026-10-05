@@ -31,6 +31,7 @@ Read the narrow source of truth before changing its area:
 - Record state transitions and waits that can explain user-visible latency. Keep healthy polling loops quiet; log the poll wake, timeout, retry, terminal failure, and meaningful batch instead of every iteration.
 - Keep diagnostics metadata-only and production-safe: redact prompts, content, secrets, tokens, credentials, environment values, paths, URLs, and free-form error messages. Make loggers injectable where tests need to assert success, failure, and retry paths.
 - When diagnosing a delay, follow one correlation identifier across every layer and verify the first and last event for each lifecycle stage before proposing a cause.
+- For a slow flow on the local Driver, first freeze the rolling capture with `node scripts/driver-profiler.mjs snapshot`, then follow [the profiler investigation guide](docs/driver-profiler.md) and verify its coverage and freshness.
 
 ## Prove
 

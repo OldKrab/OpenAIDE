@@ -3,8 +3,9 @@ import type { KeyboardEvent, PointerEvent, UIEvent, WheelEvent } from "react";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import type { VirtualizerOptions } from "@tanstack/react-virtual";
 import type { TaskChatScrollState } from "../state/store";
+import { isChatViewportAtEnd, isVerticalScrollbarPointer, keyboardScrollDirection, nestedControlOwnsScrollKey } from "./taskChatScrollInput";
+import type { ScrollIntent } from "./taskChatScrollInput";
 
-type ScrollIntent = "towardEarlier" | "towardLatest";
 type PointerScrollGesture =
   | { kind: "scrollbar" }
   | { kind: "touch"; lastClientY: number };
@@ -43,7 +44,6 @@ export type UserMessageNavigation = {
 
 const SHOW_JUMP_TO_LATEST_DISTANCE_PX = 96;
 const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
-const OVERLAY_SCROLLBAR_HIT_WIDTH_PX = 10;
 const AUTO_FILL_HISTORY_BUFFER_PX = 120;
 const MAX_AUTO_FILL_PAGES = 4;
 const CHAT_ROW_ESTIMATE_PX = 72;
@@ -320,10 +320,14 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
 
   const setScrollOwnership = useCallback((ownership: TaskChatScrollState["ownership"]) => {
     if (scrollOwnershipRef.current === ownership) return;
+    console.info("chat_scroll_ownership_changed", {
+      task_id: taskId, previous: scrollOwnershipRef.current,
+      ownership, intent: scrollIntentRef.current ?? "none",
+    });
     scrollOwnershipRef.current = ownership;
     setScrollOwnershipState(ownership);
     persistScrollState(ownership);
-  }, [persistScrollState]);
+  }, [persistScrollState, taskId]);
 
   const loadEarlier = useCallback((cursor: string) => {
     const messageList = messageListRef.current;
@@ -342,6 +346,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       : undefined;
     // Paging backward is explicit reading intent even when a restored offset
     // reached the control without first producing a wheel/pointer gesture.
+    scrollIntentRef.current = undefined;
     setScrollOwnership("reading");
     const requestId = onLoadEarlier(cursor);
     if (requestId === undefined) prependAnchorRef.current = undefined;
@@ -439,6 +444,9 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     }
     const messageList = messageListRef.current;
     lastScrollTopRef.current = messageList?.scrollTop;
+    console.info("chat_scroll_restore_requested", {
+      task_id: taskId, ownership, saved_offset: savedScrollState?.scrollTop ?? 0,
+    });
     updateJumpToLatestVisibility();
   }, [taskId]);
 
@@ -503,11 +511,13 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     const gesture = pointerGestureRef.current;
     if (!gesture) return;
     pointerGestureRef.current = undefined;
-    scrollIntentRef.current = undefined;
-    if (gesture.kind === "scrollbar" && virtualizer.isAtEnd(2)) {
+    // Touch cancellation hands scrolling to the browser; momentum still owns
+    // the same direction until scrollend, even after the finger is released.
+    if (gesture.kind === "scrollbar") scrollIntentRef.current = undefined;
+    if (gesture.kind === "scrollbar" && isChatViewportAtEnd(messageListRef.current)) {
       setScrollOwnership("following");
     }
-  }, [setScrollOwnership, virtualizer]);
+  }, [setScrollOwnership]);
 
   const trackTouchGesture = useCallback((event: globalThis.PointerEvent) => {
     const gesture = pointerGestureRef.current;
@@ -555,16 +565,20 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     if (
       scrollOwnershipRef.current === "reading"
       && scrollIntentRef.current === "towardLatest"
-      && virtualizer.isAtEnd(2)
+      && isChatViewportAtEnd(messageList)
     ) {
       setScrollOwnership("following");
+      scrollIntentRef.current = undefined;
     }
-    scrollIntentRef.current = undefined;
     lastScrollTopRef.current = messageList.scrollTop;
     updateJumpToLatestVisibility();
     updateCurrentUserMessage();
     persistScrollState();
-  }, [persistScrollState, setScrollIntent, setScrollOwnership, updateCurrentUserMessage, updateJumpToLatestVisibility, virtualizer]);
+  }, [persistScrollState, setScrollIntent, setScrollOwnership, updateCurrentUserMessage, updateJumpToLatestVisibility]);
+
+  // One input may produce many animated scroll events. End the intent only
+  // when that motion settles, so later layout changes cannot reclaim Follow.
+  const onScrollEnd = useCallback(() => { scrollIntentRef.current = undefined; }, []);
 
   const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     if (event.deltaY === 0) return;
@@ -575,12 +589,12 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       setScrollOwnership("reading");
     } else {
       setScrollIntent("towardLatest");
-      if (virtualizer.isAtEnd(2)) {
+      if (isChatViewportAtEnd(messageListRef.current)) {
         scrollIntentRef.current = undefined;
         setScrollOwnership("following");
       }
     }
-  }, [cancelUserMessageScroll, setScrollIntent, setScrollOwnership, virtualizer]);
+  }, [cancelUserMessageScroll, setScrollIntent, setScrollOwnership]);
 
   const onKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (
@@ -597,13 +611,14 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     setScrollIntent(direction);
     if (direction === "towardEarlier") {
       setScrollOwnership("reading");
-    } else if (virtualizer.isAtEnd(2)) {
+    } else if (isChatViewportAtEnd(messageListRef.current)) {
       scrollIntentRef.current = undefined;
       setScrollOwnership("following");
     }
-  }, [cancelUserMessageScroll, setScrollIntent, setScrollOwnership, virtualizer]);
+  }, [cancelUserMessageScroll, setScrollIntent, setScrollOwnership]);
 
   const onPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    scrollIntentRef.current = undefined;
     const gesture = event.pointerType === "touch"
       ? { kind: "touch" as const, lastClientY: event.clientY }
       : (isVerticalScrollbarPointer(event) ? { kind: "scrollbar" as const } : undefined);
@@ -625,6 +640,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
 
   // Overlay expansion is reading intent: preserve the viewport before its scroll range changes.
   const pauseFollowing = useCallback(() => {
+    scrollIntentRef.current = undefined;
     setScrollOwnership("reading");
   }, [setScrollOwnership]);
 
@@ -637,6 +653,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   const navigateToUserMessage = useCallback((anchor: UserMessageAnchor) => {
     const index = userMessageAnchors.findIndex((candidate) => candidate.key === anchor.key);
     if (index < 0) return;
+    scrollIntentRef.current = undefined;
     setScrollOwnership("reading");
     userMessageNavigationLockRef.current = anchor.key;
     setCurrentUserMessageKey(anchor.key);
@@ -765,6 +782,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     onPointerDown,
     onPointerUp: finishPointerGesture,
     onScroll,
+    onScrollEnd,
     onWheel,
     pauseFollowing,
     showJumpToLatest,
@@ -779,6 +797,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     onKeyDown,
     onPointerDown,
     onScroll,
+    onScrollEnd,
     onWheel,
     pauseFollowing,
     showJumpToLatest,
@@ -786,16 +805,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     virtualItems,
     virtualizer,
   ]);
-}
-
-function keyboardScrollDirection(key: string, shiftKey: boolean): ScrollIntent | undefined {
-  if (key === "PageUp" || key === "Home" || key === "ArrowUp" || (key === " " && shiftKey)) {
-    return "towardEarlier";
-  }
-  if (key === "PageDown" || key === "End" || key === "ArrowDown" || (key === " " && !shiftKey)) {
-    return "towardLatest";
-  }
-  return undefined;
 }
 
 function firstVisibleMessageAnchor(messageList: HTMLDivElement) {
@@ -811,27 +820,6 @@ function firstVisibleMessageAnchor(messageList: HTMLDivElement) {
 
 function sameKeys(left: readonly string[], right: readonly string[]) {
   return left.length === right.length && left.every((key, index) => key === right[index]);
-}
-
-function nestedControlOwnsScrollKey(target: EventTarget, viewport: HTMLDivElement) {
-  if (target === viewport) return false;
-  const closest = (target as { closest?: (selector: string) => Element | null }).closest;
-  if (typeof closest !== "function") return true;
-  return Boolean(closest.call(
-    target,
-    "a[href], button, input, select, summary, textarea, [contenteditable='true'], [role='listbox'], [role='slider']",
-  ));
-}
-
-function isVerticalScrollbarPointer(event: PointerEvent<HTMLDivElement>) {
-  if (event.pointerType !== "mouse") return false;
-  if (event.currentTarget.scrollHeight <= event.currentTarget.clientHeight) return false;
-  const scrollbarWidth = Math.max(
-    event.currentTarget.offsetWidth - event.currentTarget.clientWidth,
-    OVERLAY_SCROLLBAR_HIT_WIDTH_PX,
-  );
-  const bounds = event.currentTarget.getBoundingClientRect();
-  return event.clientX >= bounds.right - scrollbarWidth && event.clientX <= bounds.right;
 }
 
 function prefersReducedMotion() {

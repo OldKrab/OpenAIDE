@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { smokeCodexSessionRecovery } from "./smoke-codex-session-recovery.mjs";
 import { smokeCodexNativeRecovery } from "./smoke-codex-native-recovery.mjs";
+import { observeSmokeProcess, shutdownSmokeProcess } from "./packaged-smoke-shutdown.mjs";
+import { smokeCodexSubagents } from "./smoke-codex-subagents.mjs";
 
 const [binaryPath, workspaceRoot] = process.argv.slice(2);
 if (!binaryPath || !workspaceRoot) {
@@ -59,26 +61,12 @@ let stderr = "";
 let stdoutBuffer = "";
 let nextRequestId = 1;
 const pending = new Map();
-const closed = new Promise((resolve) => {
-  child.once("close", (code, signal) => {
-    const error = new Error(`App Server exited before the smoke completed (code=${code}, signal=${signal})`);
-    for (const waiter of pending.values()) waiter.reject(error);
-    pending.clear();
-    resolve();
-  });
+const observed = observeSmokeProcess(child);
+child.once("close", (code, signal) => {
+  const error = new Error(`App Server exited before the smoke completed (code=${code}, signal=${signal})`);
+  for (const waiter of pending.values()) waiter.reject(error);
+  pending.clear();
 });
-
-async function waitForClose(timeoutMs) {
-  let timer;
-  try {
-    return await Promise.race([
-      closed.then(() => true),
-      new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
 child.once("error", (error) => {
@@ -179,6 +167,7 @@ try {
     const modules = path.join(runtimesRoot, runtimes[0].name, "node_modules");
     const adapter = path.join(modules, "@openaide", "codex-acp", "dist", "index.js");
     await smokeCodexSessionRecovery(adapter);
+    await smokeCodexSubagents(adapter);
     // The managed package's launcher selects its pinned platform binary. This
     // covers native policy persistence as well as the adapter's wire requests.
     await smokeCodexNativeRecovery(path.join(modules, "@openai", "codex", "bin", "codex.js"), adapter);
@@ -190,26 +179,10 @@ try {
 } catch (error) {
   throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
 } finally {
-  // EOF can let the Windows parent exit before its native descendants release
-  // inherited pipes and the temporary cwd. Terminate the owned tree while its
-  // parent is still addressable; taskkill cannot find a tree after parent exit.
-  if (process.platform === "win32" && child.exitCode === null && child.signalCode === null) {
-    await new Promise((resolve, reject) => {
-      const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-        stdio: "ignore", windowsHide: true, timeout: 5_000,
-      });
-      killer.once("error", reject);
-      // A concurrent exit may produce a nonzero result; observe closure below.
-      killer.once("close", resolve);
-    });
-  } else if (!child.stdin.destroyed) child.stdin.end();
-  if (!await waitForClose(10_000)) {
-    if (process.platform !== "win32" && child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-    if (!await waitForClose(5_000)) {
-      throw new Error(`App Server shutdown timed out (exit=${child.exitCode}, signal=${child.signalCode}); temporary smoke state was retained`);
-    }
-  }
-  await rm(stateParent, { recursive: true, force: true });
+  await shutdownSmokeProcess(child, observed, {
+    onEvent: (event) => console.error(JSON.stringify(event)),
+  });
+  // Windows releases handles of the terminated process tree asynchronously, so
+  // the first removal can still find the temporary state locked.
+  await rm(stateParent, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
