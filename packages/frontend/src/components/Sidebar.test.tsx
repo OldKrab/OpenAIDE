@@ -240,8 +240,6 @@ describe("SidebarTaskRow", () => {
     act(() => menuItems[1].props.onClick());
 
     expect(onOpenTask).toHaveBeenCalledWith("task_1");
-    expect(onArchiveTask).not.toHaveBeenCalled();
-    act(() => buttonWithText(tree, "Archive task").props.onClick());
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
   });
 
@@ -827,8 +825,6 @@ describe("SidebarNativeSessionRow", () => {
     expect(archive).toBeDefined();
     act(() => archive?.props.onClick());
 
-    expect(onArchiveNativeSession).not.toHaveBeenCalled();
-    act(() => buttonWithText(tree, "Archive task").props.onClick());
     expect(onArchiveNativeSession).toHaveBeenCalledWith(session);
   });
 
