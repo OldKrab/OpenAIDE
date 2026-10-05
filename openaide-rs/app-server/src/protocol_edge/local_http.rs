@@ -16,7 +16,8 @@ mod file_upload;
 pub mod listener;
 mod protocol;
 mod reliable_upload_chunks;
-mod sessions;
+mod session_dispatch;
+mod session_link;
 
 pub use protocol::LocalHttpProtocolHandler;
 
@@ -90,6 +91,34 @@ impl LocalHttpAppHandler {
     ) -> Result<event_streams::EventStreamLease, LocalHttpResponse> {
         self.protocol
             .begin_event_stream(authorization, connection_id)
+    }
+
+    pub(crate) fn open_session_link(
+        &self,
+        authorization: Option<&str>,
+        connection_id: Option<&str>,
+        resume_session_id: Option<&str>,
+        received_through: u64,
+    ) -> Result<session_link::SessionLink, session_link::LinkClose> {
+        self.protocol.open_session_link(
+            authorization,
+            connection_id,
+            resume_session_id,
+            received_through,
+        )
+    }
+
+    /// A link dispatches frames itself, so it reports each one here to keep
+    /// the drain-after-last-client check that request handling performs.
+    pub(crate) fn client_frame_handled(&self) {
+        if self.probe.gateway.should_shutdown_after_last_client() {
+            let _ = self.probe.replacement_requested.send(());
+        }
+    }
+
+    /// Wake source for a held poll waiting on this server's deliveries.
+    pub(crate) fn delivery_signal(&self) -> super::DeliverySignal {
+        self.probe.gateway.delivery_signal()
     }
 
     pub(crate) fn poll_session(

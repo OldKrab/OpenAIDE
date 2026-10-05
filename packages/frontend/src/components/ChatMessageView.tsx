@@ -37,6 +37,7 @@ export const ChatRow = memo(function ChatRow({
   showStreamingCaret = false,
   liveTextEventCursor,
   presentLiveText = false,
+  hurryLiveText = false,
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
@@ -57,6 +58,8 @@ export const ChatRow = memo(function ChatRow({
   showStreamingCaret?: boolean;
   liveTextEventCursor?: string;
   presentLiveText?: boolean;
+  /** A Permission or Question is waiting, so live text must not trail it. */
+  hurryLiveText?: boolean;
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
   const referenceRootRef = useRef<HTMLDivElement | null>(null);
@@ -85,6 +88,7 @@ export const ChatRow = memo(function ChatRow({
     return (
       <AgentMessageRow
         body={body}
+        hurryLiveText={hurryLiveText}
         liveTextEventCursor={liveTextEventCursor}
         onCloseImage={() => setOpenImage(undefined)}
         onOpenImage={setOpenImage}
@@ -148,6 +152,7 @@ export const ChatRow = memo(function ChatRow({
 
 function AgentMessageRow({
   body,
+  hurryLiveText,
   liveTextEventCursor,
   onCloseImage,
   onOpenImage,
@@ -156,6 +161,7 @@ function AgentMessageRow({
   showStreamingCaret,
 }: {
   body: Extract<ChatMessage["message"], { kind: "agent_message" }>;
+  hurryLiveText: boolean;
   liveTextEventCursor?: string;
   onCloseImage: () => void;
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
@@ -167,9 +173,11 @@ function AgentMessageRow({
     enabled: presentLiveText,
     eventCursor: liveTextEventCursor,
     parts: body.parts,
+    urgent: hurryLiveText,
   });
   const streaming = showStreamingCaret || presentation.streaming;
-  const text = agentMessageText(presentation.parts);
+  // Copy takes the received text, not the part of it revealed so far.
+  const text = agentMessageText(body.parts);
   const content = (
     <AgentMessageParts
       muted={body.role === "thought"}

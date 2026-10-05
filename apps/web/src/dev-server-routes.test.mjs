@@ -58,6 +58,16 @@ test("injects web shell connection metadata into direct archive loads", () => {
   assert.match(injected, /data-app-server-connection="[^"]*&quot;kind&quot;:&quot;webProxy&quot;/);
 });
 
+test("selects the WebSocket transport only when the shell asks for it", () => {
+  const html = '<html><body><div id="root"></div></body></html>';
+
+  assert.doesNotMatch(injectBootstrap(html, webRoute("/")), /transport/);
+  assert.match(
+    injectBootstrap(html, webRoute("/"), { appServerTransport: "webSocket" }),
+    /&quot;transport&quot;:&quot;webSocket&quot;/,
+  );
+});
+
 test("injects instance label and title for distinguishable deployed instances", () => {
   const html = '<html><head><title>OpenAIDE</title></head><body><div id="root"></div></body></html>';
   const injected = injectBootstrap(html, webRoute("/"), {

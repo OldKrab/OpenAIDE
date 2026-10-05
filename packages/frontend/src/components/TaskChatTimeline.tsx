@@ -95,6 +95,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
     setMessageListElement(element);
   }, [chatScroll.messageListRef]);
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
+  const awaitsUserAnswer = items.some(isPendingUserAnswer);
   const virtualItems = chatScroll.virtualItems;
   const measureChangedChatContent = useCallback((content: HTMLElement) => {
     const row = content.closest<HTMLElement>(".message-list-virtual-row");
@@ -171,6 +172,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                 ) : row.kind === "message" ? (
                   <ChatRow
                     commandCatalog={commandCatalog}
+                    hurryLiveText={awaitsUserAnswer}
                     liveTextEventCursor={liveTextCursorForMessage(
                       liveTextPresentation,
                       latestTextMessageIds,
@@ -300,6 +302,12 @@ export function isLiveTextMessage(
 ) {
   if (message.message.kind !== "agent_message") return false;
   return presentation?.[message.message.role]?.messageId === message.message_id;
+}
+
+/** A row the user must answer; live text above it stops trailing behind. */
+function isPendingUserAnswer(item: ChatMessage) {
+  const body = item.message;
+  return (body.kind === "permission" || body.kind === "elicitation") && body.state === "pending";
 }
 
 function latestTextMessageIdsByChannel(items: ChatMessage[]) {

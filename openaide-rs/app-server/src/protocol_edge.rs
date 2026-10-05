@@ -7,11 +7,13 @@ use openaide_app_server_protocol::client::{
 mod agent_handlers;
 mod attachment_handlers;
 mod client_handlers;
+mod delivery_signal;
 mod diagnostics_handlers;
 mod file_viewer_handlers;
 pub mod local_http;
 mod messages;
 mod project_handlers;
+pub(crate) mod reliable_session;
 mod responses;
 mod routing;
 mod server_request_handlers;
@@ -25,6 +27,7 @@ mod task_config_handlers;
 mod task_handlers;
 mod worktree_handlers;
 
+pub use delivery_signal::DeliverySignal;
 pub(crate) use messages::event_deliveries;
 pub use messages::{GatewayEventDelivery, GatewayOutcome, GatewayResponse, InboundProtocolMessage};
 pub use shared_gateway::SharedRpcGateway;

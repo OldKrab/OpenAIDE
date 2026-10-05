@@ -10,72 +10,45 @@ import type {
 import { createAppServerSession } from "./appServerSession.js";
 import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.js";
 import {
-  CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
-  type AppServerEvent,
   type InitializeParams,
   type InitializeResult,
-  type ProtocolMethod,
   type RequestMeta,
-  type RequestParamsByMethod,
-  type ResponseEnvelope,
-  type ResponseResultByMethod,
-  type ServerRequestMethod,
-  type ServerRequestParamsByMethod,
-  type ServerRequestResponseResultByMethod,
 } from "./generated/protocol.js";
-import { AppServerProtocolError, errorEnvelopeFromUnknown } from "./protocolError.js";
+import { createHttpLinkOpener, type ReliableHttpFetch } from "./httpTransportLink.js";
+import { AppServerProtocolError } from "./protocolError.js";
 import {
-  createRpcPeer,
-  RpcResponseError,
-  type RpcMessageChannel,
-  type RpcNotificationMap,
-  type RpcRequestMap,
-} from "./rpcPeer.js";
+  createReliableSessionChannel,
+  type ReliableSessionChannel,
+} from "./reliableSessionChannel.js";
 import {
-  createReliableHttpMessageChannel,
-  isReliableHttpReceiveStalled,
-  isReliableHttpReplayExpired,
-  isReliableHttpSessionExpired,
-  reliableHttpErrorDiagnosticFields,
-  type ReliableHttpFetch,
-  type ReliableHttpMessageChannel,
-} from "./reliableHttpChannel.js";
+  createInternalReliableBackendConnection,
+  diagnosticErrorFields,
+  notifyListeners,
+} from "./rpcBackendConnection.js";
+import { transportLinkCloseKind, type TransportLinkOpener } from "./transportLink.js";
+import {
+  createWebSocketLinkOpener,
+  type TransportWebSocket,
+} from "./webSocketTransportLink.js";
 
-type ClientRequests = RpcRequestMap & {
-  [M in ProtocolMethod]: {
-    params: RequestParamsByMethod[M];
-    result: ResponseEnvelope<ResponseResultByMethod[M]>;
-  };
-};
+export {
+  createReliableBackendConnection,
+  type ReliableBackendConnectionOptions,
+} from "./rpcBackendConnection.js";
 
-type ServerRequests = RpcRequestMap & {
-  [M in ServerRequestMethod]: {
-    params: ServerRequestParamsByMethod[M];
-    result: ServerRequestResponseResultByMethod[M];
-  };
-};
-
-type ServerNotifications = RpcNotificationMap & {
-  "app/event": { params: AppServerEvent };
-};
-
-export type ReliableBackendConnectionOptions = {
-  channel: RpcMessageChannel & { close?(): void };
-  heartbeatIntervalMs?: number;
-  connectionId?: string;
-  logger?: DiagnosticsLogger;
-};
-
-type InternalReliableBackendConnectionOptions = ReliableBackendConnectionOptions & {
-  onRequestError?: (error: unknown, method: ProtocolMethod) => void;
-};
+/** The carrier of the reliable session. Recovery behaves the same on both. */
+export type ReliableBackendTransport = "http" | "webSocket";
 
 export type ReliableLocalHttpBackendConnectionOptions = {
   endpointUrl: string;
   authToken: string;
   connectionId: string;
+  /** Defaults to HTTP, which every supported host and network can carry. */
+  transport?: ReliableBackendTransport;
   fetch?: ReliableHttpFetch;
+  /** Supplies the socket for the WebSocket transport; defaults to the global one. */
+  createWebSocket?: (url: string) => TransportWebSocket;
   heartbeatIntervalMs?: number;
   retryDelayMs?: number;
   receiveTimeoutMs?: number;
@@ -287,22 +260,13 @@ function createReliableHttpBackendConnection(
     logger.info("backend_transport_generation_created", {
       connection_id: options.connectionId,
       endpoint_revision: generationEndpointRevision,
+      transport: options.transport ?? "http",
     });
-    const channel = createReliableHttpMessageChannel({
-      endpointUrl: endpoint.endpointUrl,
+    const channel = createReliableSessionChannel({
+      openLink: createLinkOpener(),
       connectionId: options.connectionId,
-      deferReceiveUntilFirstUpload: true,
-      ...(endpoint.authToken ? { authToken: endpoint.authToken } : {}),
-      ...(options.fetch ? { fetch: options.fetch } : {}),
-      ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
-      ...(options.receiveTimeoutMs === undefined
-        ? {}
-        : { receiveTimeoutMs: options.receiveTimeoutMs }),
-      ...(options.maxConsecutiveReceiveTimeouts === undefined
-        ? {}
-        : { maxConsecutiveReceiveTimeouts: options.maxConsecutiveReceiveTimeouts }),
       logger,
-      ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
+      ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
     });
     let generation: HttpConnectionGeneration;
     const connection = createInternalReliableBackendConnection({
@@ -322,6 +286,36 @@ function createReliableHttpBackendConnection(
       handleGenerationError(generation, error);
     });
     return generation;
+  }
+
+  /** The only place that knows which carrier a generation's session uses. */
+  function createLinkOpener(): TransportLinkOpener {
+    if (options.transport === "webSocket") {
+      return createWebSocketLinkOpener({
+        endpointUrl: endpoint.endpointUrl,
+        connectionId: options.connectionId,
+        logger,
+        ...(endpoint.authToken ? { authToken: endpoint.authToken } : {}),
+        ...(options.createWebSocket ? { createSocket: options.createWebSocket } : {}),
+        ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
+      });
+    }
+    return createHttpLinkOpener({
+      endpointUrl: endpoint.endpointUrl,
+      connectionId: options.connectionId,
+      deferReceiveUntilFirstUpload: true,
+      ...(endpoint.authToken ? { authToken: endpoint.authToken } : {}),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+      ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
+      ...(options.receiveTimeoutMs === undefined
+        ? {}
+        : { receiveTimeoutMs: options.receiveTimeoutMs }),
+      ...(options.maxConsecutiveReceiveTimeouts === undefined
+        ? {}
+        : { maxConsecutiveReceiveTimeouts: options.maxConsecutiveReceiveTimeouts }),
+      logger,
+      ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
+    });
   }
 
   function bindGeneration(generation: HttpConnectionGeneration) {
@@ -388,20 +382,24 @@ function createReliableHttpBackendConnection(
   function handleGenerationError(generation: HttpConnectionGeneration, error: unknown) {
     if (closed || generation !== active) return;
     let invalidation: (BackendGenerationInvalidation & { message: string }) | undefined;
-    if (isReliableHttpSessionExpired(error)) {
+    const closeKind = transportLinkCloseKind(error);
+    if (closeKind === "sessionExpired") {
+      // TODO: rename `httpSessionExpired` in BackendGenerationInvalidation to a
+      // carrier-neutral reason; it now also covers a WebSocket session and the
+      // name leaks one transport into every consumer of the invalidation.
       invalidation = {
         reason: "httpSessionExpired",
-        message: "HTTP RPC session expired",
+        message: "RPC session expired",
       };
-    } else if (isReliableHttpReplayExpired(error)) {
+    } else if (closeKind === "replayExpired") {
       invalidation = {
         reason: "serverReplayExpired",
-        message: "HTTP RPC server replay history expired",
+        message: "RPC server replay history expired",
       };
-    } else if (isReliableHttpReceiveStalled(error)) {
+    } else if (closeKind === "receiveStalled") {
       invalidation = {
         reason: "receiveStalled",
-        message: "HTTP RPC receive remained stalled",
+        message: "RPC receive remained stalled",
       };
     }
     if (!invalidation || !initializeParams) {
@@ -560,222 +558,14 @@ function createReliableHttpBackendConnection(
 }
 
 type HttpConnectionGeneration = {
-  channel: ReliableHttpMessageChannel;
+  channel: ReliableSessionChannel;
   connection: BackendConnection;
   endpointRevision: number;
   unsubscribeError?: BackendUnsubscribe;
   unsubscribeEvent?: BackendUnsubscribe;
 };
 
-/** Adapts the generated App Server contract onto the transport-independent peer. */
-export function createReliableBackendConnection(
-  options: ReliableBackendConnectionOptions,
-): BackendConnection {
-  return createInternalReliableBackendConnection(options);
-}
-
-function createInternalReliableBackendConnection(
-  options: InternalReliableBackendConnectionOptions,
-): BackendConnection {
-  const logger = options.logger ?? createDiagnosticsLogger();
-  const connectionContext = connectionDiagnosticFields(options.connectionId);
-  const peer = createRpcPeer<
-    ClientRequests,
-    RpcNotificationMap,
-    ServerRequests,
-    ServerNotifications
-  >(options.channel);
-  const eventListeners = new Set<BackendEventListener>();
-  const generationInvalidationListeners = new Set<
-    (event: BackendGenerationInvalidation) => void
-  >();
-  const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
-  const recoveryFailureListeners = new Set<(event: BackendRecoveryFailure) => void>();
-  let initialized = false;
-  let initializePromise: Promise<InitializeResult> | undefined;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  let heartbeatFailureCount = 0;
-  let heartbeatFailureActive = false;
-  let heartbeatPending = false;
-  let requestSequence = 0;
-
-  // RpcPeer owns the single protocol handler. Backend consumers are independent
-  // projections of that notification stream and therefore need local multicast.
-  peer.handleNotification("app/event", (event) => {
-    notifyListeners(eventListeners, event, logger, "app_event");
-  });
-
-  const connection: BackendConnection = {
-    initialize(params: InitializeParams, meta?: RequestMeta) {
-      if (initializePromise) return initializePromise;
-      initializePromise = sendRequest(CLIENT_INITIALIZE, params, meta).then((result) => {
-        initialized = true;
-        startHeartbeat();
-        return result;
-      });
-      return initializePromise;
-    },
-    request(method, params, meta) {
-      if (!initialized) return Promise.reject(new Error("Backend connection is not initialized"));
-      return sendRequest(method, params, meta);
-    },
-    handleRequest(method, handler) {
-      return peer.handleRequest(method, (params, context) => handler(params as never, {
-        requestId: String(context.requestId) as import("./generated/protocol.js").RequestId,
-        scope: context.scope,
-        signal: context.signal,
-      })) as BackendUnsubscribe;
-    },
-    handleNotification(_method, handler) {
-      eventListeners.add(handler);
-      return () => eventListeners.delete(handler);
-    },
-    handleGenerationInvalidated(handler) {
-      generationInvalidationListeners.add(handler);
-      return () => generationInvalidationListeners.delete(handler);
-    },
-    handleRecoveryBaseline(handler) {
-      recoveryBaselineListeners.add(handler);
-      return () => recoveryBaselineListeners.delete(handler);
-    },
-    handleRecoveryFailed(handler) {
-      recoveryFailureListeners.add(handler);
-      return () => recoveryFailureListeners.delete(handler);
-    },
-    close() {
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = undefined;
-      initialized = false;
-      logger.info("backend_rpc_connection_closed", connectionContext);
-      peer.close();
-      options.channel.close?.();
-      eventListeners.clear();
-      generationInvalidationListeners.clear();
-      recoveryBaselineListeners.clear();
-      recoveryFailureListeners.clear();
-    },
-  };
-  return connection;
-
-  async function sendRequest<M extends ProtocolMethod>(
-    method: M,
-    params: RequestParamsByMethod[M],
-    meta?: RequestMeta,
-  ): Promise<ResponseResultByMethod[M]> {
-    const operationId = `client-rpc-${++requestSequence}`;
-    const logRequest = method !== CLIENT_HEARTBEAT;
-    const startedAt = Date.now();
-    if (logRequest) {
-      logger.info("backend_rpc_request_started", {
-        ...connectionContext,
-        operation_id: operationId,
-        method,
-        has_client_request_id: Boolean(meta?.clientRequestId),
-      });
-    }
-    try {
-      const response = await peer.request(method, params, meta === undefined ? undefined : {
-        meta,
-      }) as unknown as ResponseEnvelope<
-        ResponseResultByMethod[M]
-      >;
-      if (logRequest) {
-        logger.info("backend_rpc_request_completed", {
-          ...connectionContext,
-          operation_id: operationId,
-          method,
-          duration_ms: Date.now() - startedAt,
-        });
-      }
-      return response.result;
-    } catch (error) {
-      let requestError = error;
-      if (error instanceof RpcResponseError) {
-        const envelope = errorEnvelopeFromUnknown(error.responseError);
-        if (envelope) requestError = new AppServerProtocolError(envelope);
-      }
-      options.onRequestError?.(requestError, method);
-      if (logRequest) {
-        logger.warn("backend_rpc_request_failed", {
-          ...connectionContext,
-          operation_id: operationId,
-          method,
-          duration_ms: Date.now() - startedAt,
-          ...diagnosticErrorFields(requestError),
-        });
-      }
-      throw requestError;
-    }
-  }
-
-  function startHeartbeat() {
-    if (heartbeat) clearInterval(heartbeat);
-    heartbeat = setInterval(() => {
-      if (!initialized || heartbeatPending) return;
-      heartbeatPending = true;
-      void sendRequest(CLIENT_HEARTBEAT, {})
-        .then(() => {
-          if (!heartbeatFailureActive) return;
-          const recoveredAfterFailureCount = heartbeatFailureCount;
-          heartbeatFailureActive = false;
-          heartbeatFailureCount = 0;
-          logger.info("backend_heartbeat_recovered", {
-            ...connectionContext,
-            failure_count: recoveredAfterFailureCount,
-          });
-        })
-        .catch((error) => {
-          heartbeatFailureCount += 1;
-          if (!heartbeatFailureActive) {
-            heartbeatFailureActive = true;
-            logger.warn("backend_heartbeat_failed", {
-              ...connectionContext,
-              failure_count: heartbeatFailureCount,
-              ...diagnosticErrorFields(error),
-            });
-          }
-        })
-        .finally(() => {
-          heartbeatPending = false;
-        });
-    }, options.heartbeatIntervalMs ?? 5_000);
-  }
-}
-
 function isNotInitialized(error: unknown) {
   return error instanceof AppServerProtocolError
     && error.protocolError.code === "notInitialized";
-}
-
-function diagnosticErrorFields(error: unknown) {
-  return {
-    error_kind: error instanceof Error && error.name ? error.name : typeof error,
-    ...(error instanceof AppServerProtocolError
-      ? { error_code: error.protocolError.code }
-      : {}),
-    ...reliableHttpErrorDiagnosticFields(error),
-  };
-}
-
-function connectionDiagnosticFields(connectionId: string | undefined) {
-  return connectionId === undefined ? {} : { connection_id: connectionId };
-}
-
-function notifyListeners<T>(
-  listeners: Iterable<(event: T) => void>,
-  event: T,
-  logger: DiagnosticsLogger,
-  listenerKind: string,
-) {
-  for (const listener of listeners) {
-    try {
-      listener(event);
-    } catch (error) {
-      // Recovery ownership must not depend on the health of an independent observer.
-      logger.error("backend_lifecycle_listener_failed", {
-        listener_kind: listenerKind,
-        error_kind: error instanceof Error && error.name ? error.name : typeof error,
-      });
-    }
-  }
 }

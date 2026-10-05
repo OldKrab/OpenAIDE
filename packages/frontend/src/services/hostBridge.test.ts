@@ -408,6 +408,51 @@ describe("host bridge", () => {
     );
   });
 
+  it("opens a same-origin WebSocket when the shell bootstrap selects that transport", async () => {
+    const socketUrls: string[] = [];
+    vi.stubGlobal("WebSocket", class {
+      constructor(url: string) {
+        socketUrls.push(url);
+      }
+      close() {}
+      send() {}
+    });
+    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("location", { href: "https://openaide.example/task/task-1" });
+    vi.stubGlobal("crypto", { randomUUID: () => "client-web" });
+    vi.stubGlobal("sessionStorage", memoryStorage());
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "web",
+          navigationMode: "project",
+          surface: "navigation",
+          appServerConnection: JSON.stringify({
+            kind: "webProxy",
+            endpointUrl: "/__openaide-app-server/probe",
+            transport: "webSocket",
+          }),
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      location: { pathname: "/" },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const { getBackendConnection } = await installedHostBridge();
+    const connection = getBackendConnection();
+
+    expect(socketUrls).toHaveLength(1);
+    expect(socketUrls[0]).toMatch(
+      /^wss:\/\/openaide\.example\/__openaide-app-server\/probe\?connectionId=[\w-]+$/,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    await connection?.close();
+  });
+
   it.each(["visibility", "native"])("replays queued events after %s resume", async (resume) => {
     const documentListeners = new Map<string, () => void>();
     const windowListeners = new Map<string, () => void>();

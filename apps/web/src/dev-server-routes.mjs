@@ -1,7 +1,11 @@
-const browserConnection = {
-  kind: "webProxy",
-  endpointUrl: "/__openaide-app-server/probe",
-};
+/** An absent transport means HTTP, so older frontends keep working. */
+function browserConnection(transport) {
+  return {
+    kind: "webProxy",
+    endpointUrl: "/__openaide-app-server/probe",
+    ...(transport === "webSocket" ? { transport } : {}),
+  };
+}
 
 const webRoutes = [
   { pattern: /^\/(?:new-task)?$/, surface: "task" },
@@ -21,7 +25,7 @@ export function injectBootstrap(html, route, presentation = {}) {
     route.nativeSessionId ? `data-native-session-id="${escapeAttribute(route.nativeSessionId)}"` : undefined,
     route.archived ? 'data-archived="true"' : undefined,
     presentation.instanceLabel ? `data-instance-label="${escapeAttribute(presentation.instanceLabel)}"` : undefined,
-    `data-app-server-connection="${escapeAttribute(JSON.stringify(browserConnection))}"`,
+    `data-app-server-connection="${escapeAttribute(JSON.stringify(browserConnection(presentation.appServerTransport)))}"`,
   ].filter(Boolean).join(" ");
   const titled = presentation.title ? injectTitle(html, presentation.title) : html;
   if (/<body([^>]*)>/i.test(html)) {

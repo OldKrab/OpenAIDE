@@ -10,6 +10,7 @@ import {
   parseAppServerHandoffConnection,
 } from "@openaide/app-server-client";
 import { createAppServerManager } from "./app-server-manager.mjs";
+import { createAppServerSocketProxy } from "./dev-server-app-server-socket.mjs";
 import {
   allowedHostNamesFromEnv,
   appServerHeaders,
@@ -46,6 +47,8 @@ const allowedHosts = allowedHostNamesFromEnv(process.env.OPENAIDE_WEB_ALLOWED_HO
 const authConfig = authConfigFromEnv();
 const instanceLabel = process.env.OPENAIDE_WEB_INSTANCE_LABEL?.trim();
 const webPresentation = {
+  // HTTP remains selectable for a network path that cannot carry WebSockets.
+  appServerTransport: process.env.OPENAIDE_WEB_TRANSPORT === "http" ? "http" : "webSocket",
   instanceLabel,
   title: process.env.OPENAIDE_WEB_TITLE?.trim() || (instanceLabel ? `OpenAIDE ${instanceLabel}` : "OpenAIDE"),
 };
@@ -102,6 +105,15 @@ const prototypeViteProxy = prototypePort === undefined
     });
 
 const mobileStatus = createMobileStatus(appServerManager.listTasks);
+const appServerSocketProxy = createAppServerSocketProxy({
+  startAppServer,
+  currentEndpoint() {
+    const connection = appServerManager.currentConnection();
+    const url = appServerManager.currentUrl();
+    return connection && url ? { url, authToken: connection.authToken } : undefined;
+  },
+  logger,
+});
 const server = http.createServer(async (req, res) => {
   try {
     if (!isAllowedHost(req.headers.host, allowedHosts)) {
@@ -178,7 +190,7 @@ server.on("upgrade", (req, socket, head) => {
     }
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
     if (url.pathname.startsWith("/__openaide-app-server/")) {
-      socket.destroy();
+      void appServerSocketProxy(req, socket, head, url).catch(() => socket.destroy());
       return;
     }
     if (isPrototypePath(url.pathname)) {

@@ -9,7 +9,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const defaultAgentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-agent.mjs");
 
 /** Starts an isolated real Web, App Server, and deterministic ACP Agent stack. */
-export async function startFullStackHarness({ agentArgs = [], frontend = "web", agentFixture = defaultAgentFixture } = {}) {
+export async function startFullStackHarness({ agentArgs = [], frontend = "web", agentFixture = defaultAgentFixture, webTransport } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-smoke-"));
   const staticRoot = path.join(root, "static");
   try {
@@ -61,6 +61,7 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web", 
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(root, "runtime"),
       OPENAIDE_WEB_STATE_ROOT: path.join(root, "state"),
       OPENAIDE_WEB_STATIC_ROOT: staticRoot,
+      ...(webTransport ? { OPENAIDE_WEB_TRANSPORT: webTransport } : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

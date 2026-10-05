@@ -4,7 +4,7 @@ Status: accepted
 
 OpenAIDE presents one transport-independent peer API to Frontend and App Server code. Either peer may send a typed request or notification. A request handler's return value is its response; product code does not inspect envelopes or call a separate `respond()` operation. App events are notifications. Permission and Question decisions are ordinary typed client requests with atomic first-wins resolution in App Server.
 
-The browser transport is a logical session over finite HTTP because supported IDE networks may reject WebSockets. A client opens a session, serializes sequenced JSON-RPC frames through `POST`, and receives the single ordered server-to-client stream through held `GET` polls. Upload responses are transport acknowledgements only and never carry JSON-RPC messages.
+The browser transport is a logical session whose first carrier is finite HTTP, which works on networks that reject WebSockets. A client opens a session, serializes sequenced JSON-RPC frames through `POST`, and receives the single ordered server-to-client stream through held `GET` polls. Upload responses are transport acknowledgements only and never carry JSON-RPC messages.
 
 Each direction has an independent contiguous sequence. Retrying an upload repeats the identical frame; App Server acknowledges duplicates without dispatching them again. Poll acknowledgement is the highest fully applied server sequence, so an ambiguous poll can replay frames safely. Request IDs correlate RPC only and are not transport sequence numbers.
 
@@ -18,4 +18,16 @@ Suspension can also expire either the finite HTTP session or the initialized pro
 
 The connection adapter publishes replacement initialization success or terminal failure to the logical `AppServerSession`. That session is the recovery boundary presented to Frontend: it invalidates every active scope replica, installs fresh baselines, and holds later product requests behind one barrier until the full active replica set is coherent. This rule is transport-independent and prevents each screen or subscription from inventing its own reconnect lifecycle.
 
-The HTTP adapter is replaceable. A future WebSocket, IDE IPC, streaming-fetch, or WebTransport adapter must preserve the same peer and sequencing semantics, so product code is independent of physical transport.
+## Links
+
+The reliable session is separate from the carrier that moves its frames. On both peers a session owns the sequences, the unacknowledged frames, duplicate suppression, and resumption; a link is a duplex carrier that sends a sequenced frame, delivers the peer's frames, and reports acknowledgements and its own end. The link contract is push-shaped in both directions, so a carrier is free to deliver a frame the moment it exists; polling is a detail of the HTTP link, not of the contract. A link classifies its end as interrupted, session expired, replay expired, receive stalled, or rejected. Only an interrupted link is resumed: the session opens a new link with its session identity and receive cursor, the peer answers with its own cursor, and each side resends what the other has not applied. Every other end is terminal for the session and is handled by the connection adapter as described above.
+
+The HTTP link is the finite-request carrier described above. It hides temporary failures inside itself and therefore never reports an interruption. Receive polls bypass the HTTP cache, because a browser serialises identical cacheable requests across the windows of one profile and a held poll in one window would otherwise delay another.
+
+The WebSocket link carries one session over one socket. The client opens it with a `hello` naming the transport version, connection, optional session to resume, and receive cursor; App Server answers `ready` with the session, its `serverId`, and its own cursor. Frames and acknowledgements then flow in both directions as separate messages, and acknowledgements may be coalesced. App Server reports a definite decision through a close code: `4000` superseded by a newer link of the same session, `4400` protocol violation, `4401` unauthorized, `4403` forbidden, `4409` replay expired, `4410` session expired. Any other end of the socket is an interruption. The credential travels in the upgrade request's `Authorization` header when a shell proxies the socket and otherwise in the `hello`; it is never part of the address.
+
+Both peers probe the socket. App Server pings on a fixed interval and closes a socket that stays silent past its idle deadline; the client answers from its message handler, which keeps a link alive in a runtime whose timers are throttled. The client also pings, replaces a socket whose pong is late, and probes with a shorter deadline when the runtime wakes or the network returns.
+
+The App Shell selects the link in its bootstrap; an absent selection means HTTP. HTTP stays available because some networks between a browser and App Server reject WebSocket upgrades. A failed first open is terminal for the session on either link, and the client does not switch links by itself.
+
+A further IDE IPC, streaming-fetch, or WebTransport link must preserve the same session semantics, so product code stays independent of physical transport.

@@ -98,7 +98,7 @@ describe("TaskView timeline presentation", () => {
     expect(firstPaint).toContain("chat-streaming-caret");
   });
 
-  it("does not let a large received suffix build a visible presentation backlog", async () => {
+  it("bounds the visible presentation backlog of a large received suffix", async () => {
     const { TaskView } = await import("./TaskView");
     const initial = snapshotWithAuthoritativeTail(true);
     let tree!: ReactTestRenderer;
@@ -124,7 +124,8 @@ describe("TaskView timeline presentation", () => {
     });
 
     expect(JSON.stringify(tree.toJSON())).not.toContain("END-OF-CHUNK");
-    for (let frame = 0; frame < 6; frame += 1) {
+    // A large suffix is paced, but its end is visible within the lag cap.
+    for (let frame = 0; frame < 42; frame += 1) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(20);
       });
@@ -184,7 +185,8 @@ describe("TaskView timeline presentation", () => {
     });
 
     expect(JSON.stringify(tree.toJSON())).not.toContain("with a later substantial chunk");
-    for (let frame = 0; frame < 5; frame += 1) {
+    // The chunk is spread across the pause its arrival rhythm predicts.
+    for (let frame = 0; frame < 8; frame += 1) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(20);
       });

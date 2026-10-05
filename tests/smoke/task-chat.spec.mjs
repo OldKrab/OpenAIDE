@@ -40,8 +40,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     ));
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
     await list.hover();
-    await page.mouse.wheel(0, -500);
-    await expect.poll(distanceFromEnd).toBeGreaterThan(100);
+    // A wheel delivered while the list is still following the live end can be
+    // absorbed, so repeat the gesture until the reader has left the end.
+    await expect(async () => {
+      await page.mouse.wheel(0, -500);
+      expect(await distanceFromEnd()).toBeGreaterThan(100);
+    }).toPass({ timeout: 10_000 });
     await page.mouse.wheel(0, 500);
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
 
@@ -859,7 +863,8 @@ test("waits for the Agent message to complete before rendering Mermaid", async (
   await send(page, "smoke:mermaid-preview");
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   const chat = page.getByLabel("Task chat");
-  await expect(chat.locator(".agent-mermaid")).toHaveCount(1, { timeout: 30_000 });
+  // A diagram still loading shows its source, which the streaming check below would also match.
+  await expect(chat.locator('.agent-mermaid[data-mode="diagram"]')).toHaveCount(1, { timeout: 30_000 });
 
   await send(page, "smoke:mermaid-streaming");
 
@@ -1020,6 +1025,20 @@ test("shows a complete long Task title in a compact hover preview", async ({ pag
 });
 
 test("recovers an open Task composer once after client liveness expires", async ({ page }) => {
+  // The fault is injected at the HTTP probe route, which only the HTTP carrier
+  // crosses; the default WebSocket carrier would never reach it.
+  const defaultHarness = harness;
+  const httpHarness = await startFullStackHarness({ webTransport: "http" });
+  harness = httpHarness;
+  try {
+    await recoversComposerAfterLivenessExpiry(page);
+  } finally {
+    harness = defaultHarness;
+    await httpHarness.close();
+  }
+});
+
+async function recoversComposerAfterLivenessExpiry(page) {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");
 
@@ -1040,7 +1059,7 @@ test("recovers an open Task composer once after client liveness expires", async 
   } finally {
     await stopExpiryFault();
   }
-});
+}
 
 test("keeps a live permission visible while later ACP updates arrive and resolves it", async ({ page }) => {
   await openPreparedNewTask(page);

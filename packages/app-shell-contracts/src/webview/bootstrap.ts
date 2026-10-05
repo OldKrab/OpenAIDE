@@ -9,13 +9,18 @@ export type AppShellBootstrap = {
   navigationMode: "project" | "currentProject";
 };
 
+/** The carrier a shell offers for the App Server session; absent means HTTP. */
+export type WebviewAppServerTransport = "http" | "webSocket";
+
 export type WebviewAppServerConnection = {
   kind: "localHttp";
   endpointUrl: string;
   authToken: string;
+  transport?: WebviewAppServerTransport;
 } | {
   kind: "webProxy";
   endpointUrl: string;
+  transport?: WebviewAppServerTransport;
 };
 
 /** One-shot presentation request carried by any App Shell into Settings. */

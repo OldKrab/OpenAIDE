@@ -24,6 +24,9 @@ pub(super) struct HttpRequest {
     pub after_header_present: bool,
     pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
+    pub websocket_upgrade: bool,
+    pub websocket_key: Option<String>,
+    pub websocket_version: Option<String>,
     pub content_length: usize,
     pub initial_body: Vec<u8>,
     pub body: String,
@@ -60,6 +63,10 @@ pub(super) fn read_http_request(
             .split(',')
             .any(|item| item.trim() == "text/event-stream")
     });
+    let websocket_upgrade = header_value(&headers, "upgrade")
+        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+    let websocket_key = header_value(&headers, "sec-websocket-key").map(str::to_string);
+    let websocket_version = header_value(&headers, "sec-websocket-version").map(str::to_string);
     let content_length = content_length(&headers, &method)?;
     let is_upload = target
         .split('?')
@@ -106,6 +113,9 @@ pub(super) fn read_http_request(
         after_header_present,
         after_sequence,
         accepts_event_stream,
+        websocket_upgrade,
+        websocket_key,
+        websocket_version,
         content_length,
         initial_body,
         body,
