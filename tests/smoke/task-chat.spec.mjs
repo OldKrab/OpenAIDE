@@ -859,7 +859,8 @@ test("waits for the Agent message to complete before rendering Mermaid", async (
   await send(page, "smoke:mermaid-preview");
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   const chat = page.getByLabel("Task chat");
-  await expect(chat.locator(".agent-mermaid")).toHaveCount(1, { timeout: 30_000 });
+  // A diagram still loading shows its source, which the streaming check below would also match.
+  await expect(chat.locator('.agent-mermaid[data-mode="diagram"]')).toHaveCount(1, { timeout: 30_000 });
 
   await send(page, "smoke:mermaid-streaming");
 
