@@ -1021,6 +1021,20 @@ test("shows a complete long Task title in a compact hover preview", async ({ pag
 });
 
 test("recovers an open Task composer once after client liveness expires", async ({ page }) => {
+  // The fault is injected at the HTTP probe route, which only the HTTP carrier
+  // crosses; the default WebSocket carrier would never reach it.
+  const defaultHarness = harness;
+  const httpHarness = await startFullStackHarness({ webTransport: "http" });
+  harness = httpHarness;
+  try {
+    await recoversComposerAfterLivenessExpiry(page);
+  } finally {
+    harness = defaultHarness;
+    await httpHarness.close();
+  }
+});
+
+async function recoversComposerAfterLivenessExpiry(page) {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");
 
@@ -1041,7 +1055,7 @@ test("recovers an open Task composer once after client liveness expires", async 
   } finally {
     await stopExpiryFault();
   }
-});
+}
 
 test("keeps a live permission visible while later ACP updates arrive and resolves it", async ({ page }) => {
   await openPreparedNewTask(page);
