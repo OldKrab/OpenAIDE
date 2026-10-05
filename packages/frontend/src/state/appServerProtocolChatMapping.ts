@@ -108,6 +108,19 @@ export function systemInterruptionItem(
 
 function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessage {
   const text = textFromParts(item.parts);
+  const compaction = item.parts.find(
+    (part): part is Extract<MessagePart, { kind: "compaction" }> => part.kind === "compaction",
+  );
+  if (compaction) {
+    return {
+      kind: "compaction",
+      id: item.messageId,
+      status: compaction.status === "inProgress" ? "in_progress" : compaction.status,
+      ...(compaction.summary ? { summary: compaction.summary } : {}),
+      ...(compaction.error ? { error: compaction.error } : {}),
+      created_at: createdAt,
+    };
+  }
   const completedPlan = item.parts.find(
     (part): part is Extract<MessagePart, { kind: "completedPlan" }> => part.kind === "completedPlan",
   );

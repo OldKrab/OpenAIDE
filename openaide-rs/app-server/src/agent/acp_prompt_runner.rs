@@ -171,6 +171,34 @@ pub(super) async fn run_prompt(
                     context.trace.as_ref(),
                 )
                 .await;
+                // ACP orders updates before the close response, but nothing reads them
+                // while the close request is in flight. Deliver them to the session owner
+                // before the close caller is released, so a settled close never loses
+                // output the Agent already sent.
+                if let Err(error) = project_preceding_session_updates(
+                    active_session,
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    session_projection.clone(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
+                    config_catalog,
+                    commands_catalog,
+                )
+                .await
+                {
+                    logging::warn(
+                        "acp_close_preceding_updates_failed",
+                        json!({
+                            "agent_id": context.agent_id,
+                            "task_id": active_prompt.task_id(),
+                            "active_session_id": active_session_id.as_str(),
+                            "error_kind": error.reason(),
+                            "error_code": error.code(),
+                        }),
+                    );
+                }
                 let _ = reply_tx.send(Ok(()));
                 logging::warn(
                     "acp_prompt_session_closed",

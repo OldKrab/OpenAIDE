@@ -22,9 +22,13 @@ export type NormalizedMessage =
   | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
   | { kind: "completed_plan"; id: string; entries: AgentPlanEntry[]; created_at: string }
   | { kind: "closed_plan"; id: string; entries: AgentPlanEntry[]; created_at: string }
+  | { kind: "compaction"; id: string; status: CompactionStatus; summary?: string; error?: string; created_at: string }
   | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision; resolution_message?: string }
   | ElicitationMessage
   | { kind: "interruption"; id: string; reason: InterruptionReason; message: string; created_at: string; recoverable: boolean };
+
+/** Agent-owned context compaction lifecycle; `unknown` preserves a status this client does not recognize. */
+export type CompactionStatus = "in_progress" | "completed" | "failed" | "cancelled" | "unknown";
 
 export type Attachment = {
   /** Stable identity from the App Server projection; labels are not unique. */

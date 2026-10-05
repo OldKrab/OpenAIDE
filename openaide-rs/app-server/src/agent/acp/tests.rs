@@ -70,6 +70,7 @@ use std::time::{Duration, Instant};
 
 mod active_session_runtime;
 mod codex_collaboration;
+mod compaction;
 #[cfg(unix)]
 mod process_idle_runtime;
 mod steering_runtime;

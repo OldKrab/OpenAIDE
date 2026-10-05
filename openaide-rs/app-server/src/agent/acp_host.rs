@@ -2,13 +2,14 @@ use std::time::Duration;
 
 use crate::agent::acp_schema::{
     AuthCapabilities, BooleanConfigOptionCapabilities, ClientCapabilities,
-    ClientSessionCapabilities, CreateTerminalRequest, CreateTerminalResponse,
-    ElicitationCapabilities, ElicitationFormCapabilities, ElicitationUrlCapabilities,
-    FileSystemCapabilities, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
-    ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    ReleaseTerminalResponse, SessionConfigOptionsCapabilities, SubagentCapabilities,
-    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    ClientSessionCapabilities, CompactionCapabilities, CreateTerminalRequest,
+    CreateTerminalResponse, ElicitationCapabilities, ElicitationFormCapabilities,
+    ElicitationUrlCapabilities, FileSystemCapabilities, InitializeRequest, KillTerminalRequest,
+    KillTerminalResponse, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, SessionConfigOptionsCapabilities,
+    SubagentCapabilities, TerminalOutputRequest, TerminalOutputResponse,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 
 use crate::agent::acp_trace::AcpTraceSession;
@@ -53,9 +54,16 @@ fn initialize_request_with_subagents(
         // Cursor uses this ACP extension to expose model parameters (such as
         // thinking effort and fast mode) as independent session options.
         .meta(meta)
-        .session(ClientSessionCapabilities::new().config_options(
-            SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
-        ))
+        .session(
+            ClientSessionCapabilities::new()
+                .config_options(
+                    SessionConfigOptionsCapabilities::new()
+                        .boolean(BooleanConfigOptionCapabilities::new()),
+                )
+                // Compaction rows are keyed by the Agent's compaction id, so
+                // live and replayed history project to the same Chat row.
+                .compaction(CompactionCapabilities::new()),
+        )
         .elicitation(elicitation);
     let capabilities = if native_subagents {
         capabilities.subagents(SubagentCapabilities::new())

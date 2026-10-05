@@ -425,6 +425,12 @@ Submit, user Cancel, and prompt cancellation close the request for every client.
 
 During live work, App Server intentionally ignores ACP `user_message_chunk` because it already persisted the User message before `session/prompt`; an Agent echo must not duplicate it. During `session/load`, user-message chunks reconstruct Native Session history, grouped by native `messageId` when present, including supported non-text content.
 
+### Context compaction
+
+App Server advertises ACP `session.compaction` to every Agent and projects `compaction_update` and `compaction_summary_chunk` into one durable Compaction Chat row keyed by the Agent's `compactionId`. The first update fixes the row's timeline position; later updates and summary chunks change it in place (omitted patch fields are unchanged, `null` clears, and a value replaces), and a terminal-first update during `session/load` is valid. Live work and replay share one projection, so reload matches the live view. A status App Server does not recognize is preserved as unknown rather than inferred.
+
+Frontend renders a quiet divider row: "Compacting context…" while in progress, "Context compacted" when complete, a failure line with the Agent's error, and the Agent's summary collapsed behind an expander. The summary is model-facing and is never a User message. Compaction rows are session-scoped like other Chat items and are skipped for native Subagent child sessions.
+
 ### Context usage
 
 App Server projects standard ACP `usage_update` values and optional prompt-response token usage as process-local state for the Task's bound Native Session. Context used, capacity, and optional cumulative cost come from `usage_update`; processed, input, output, reasoning, cache-read, and cache-write totals come from prompt responses when the Agent supplies them. Agent-private `_meta` values are never interpreted as usage. Task snapshots and contiguous Task deltas publish the latest values, and process recovery or Native Session replacement clears them rather than presenting stale telemetry.

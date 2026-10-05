@@ -1184,6 +1184,37 @@ describe("App Server Protocol state mapping", () => {
       created_at: "2026-06-27T12:00:00.000Z",
     });
   });
+
+  it("maps an Agent context compaction row without treating it as a user message", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMessages: true,
+        items: [{
+          messageId: "acp:s:compaction:c1" as MessageId,
+          role: "system",
+          status: "streaming",
+          parts: [{ kind: "compaction", status: "inProgress", summary: null, error: null }],
+        }, {
+          messageId: "acp:s:compaction:c2" as MessageId,
+          role: "system",
+          status: "complete",
+          parts: [{ kind: "compaction", status: "completed", summary: "Goal: ship", error: null }],
+        }],
+      },
+    }));
+
+    expect(mapping.snapshot.chat.items[0]?.message).toEqual({
+      kind: "compaction",
+      id: "acp:s:compaction:c1",
+      status: "in_progress",
+      created_at: "2026-06-27T12:00:00.000Z",
+    });
+    expect(mapping.snapshot.chat.items[1]?.message).toMatchObject({
+      kind: "compaction",
+      status: "completed",
+      summary: "Goal: ship",
+    });
+  });
 });
 
 function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): ProtocolTaskSnapshot {

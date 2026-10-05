@@ -1,4 +1,5 @@
 mod commands;
+mod compaction;
 mod config;
 mod permissions;
 mod questions;
@@ -168,6 +169,14 @@ impl TaskSessionEventSink {
         if let AgentEvent::Plan(plan) = event {
             self.finish_anonymous_text_routes();
             return self.update_plan(plan, &now);
+        }
+        if let AgentEvent::Compaction {
+            compaction_id,
+            change,
+        } = event
+        {
+            self.finish_anonymous_text_routes();
+            return self.update_compaction(&compaction_id, change, &now);
         }
         if let AgentEvent::MessageChunk {
             role,
