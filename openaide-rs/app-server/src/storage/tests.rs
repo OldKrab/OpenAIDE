@@ -1298,6 +1298,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         config_options_catalog: None,
         native_session_data_freshness: Default::default(),
         native_session_reload_requirement: None,
+        native_session_own_activity_at: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,

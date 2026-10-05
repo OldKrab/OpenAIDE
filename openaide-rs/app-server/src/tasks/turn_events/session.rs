@@ -53,6 +53,35 @@ impl AgentSessionEventSink for TaskSessionEventSink {
         )
     }
 
+    fn own_session_operation(&self, operation: &'static str) -> Result<(), RuntimeError> {
+        let at = now_string();
+        let result = self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                Ok(if ctx.task_mut().record_own_native_session_activity(&at) {
+                    TaskMutationResult::Changed
+                } else {
+                    TaskMutationResult::Unchanged
+                })
+            },
+        );
+        // The Agent layer classifies and logs a failure; this is the success record.
+        result.map(|_| {
+            crate::logging::info(
+                "native_session_own_operation_recorded",
+                serde_json::json!({
+                    "task_id": self.task_id,
+                    "session_id": self.session_id,
+                    "operation": operation,
+                }),
+            );
+        })
+    }
+
     fn metadata_changed(&self, update: AgentSessionMetadataUpdate) -> Result<(), RuntimeError> {
         let catalog_title = match &update.title {
             AgentMetadataField::Unchanged => None,
