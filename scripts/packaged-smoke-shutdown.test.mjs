@@ -48,6 +48,70 @@ function processFixture() {
   return child;
 }
 
+// The process listing is unavailable, so only the tree kill addresses the tree.
+const noListing = async () => null;
+
+/** A taskkill fixture that closes as soon as it is spawned and records its target. */
+function closingKillers(targets) {
+  return (command, args) => {
+    assert.equal(command, "taskkill");
+    targets.push(Number(args[1]));
+    const killer = processFixture();
+    queueMicrotask(() => killer.close());
+    return killer;
+  };
+}
+
+test("Windows ends descendants that left the tree taskkill walked", async () => {
+  const child = processFixture();
+  const observed = observeSmokeProcess(child);
+  const clock = controlledClock();
+  const events = [];
+  const root = { pid: 42, ppid: 1, created: 100n, name: "app-server.exe" };
+  const adapter = { pid: 50, ppid: 42, created: 110n, name: "node.exe" };
+  // Spawned by the adapter while the tree kill ran, and outlives its parent.
+  const escaped = { pid: 60, ppid: 50, created: 120n, name: "codex.exe" };
+  // A reused parent pid: created before the owned process that now has it.
+  const unrelated = { pid: 70, ppid: 50, created: 105n, name: "unrelated.exe" };
+  const listings = [[root, adapter, unrelated], [escaped, unrelated], [unrelated]];
+  const targets = [];
+  const stopping = shutdownSmokeProcess(child, observed, {
+    platform: "win32", clock, onEvent: (event) => events.push(event),
+    listProcesses: async () => listings.shift(),
+    spawnProcess: closingKillers(targets),
+  });
+  assert.equal((await clock.next()).ms, 5_000);
+  assert.equal((await clock.next()).ms, 5_000);
+  assert.equal((await clock.next()).ms, 15_000);
+  child.close(1);
+  await stopping;
+  assert.deepEqual(targets, [42, 60]);
+  const sweep = events.find((event) => event.outcome === "tree_sweep_finished").sweep;
+  assert.deepEqual(sweep, { outcome: "clear", passes: 2, killed: 1, orphans_since_start: ["unrelated.exe"] });
+  assert.equal(clock.pending.size, 0);
+});
+
+test("Windows names descendants it could not end", async () => {
+  const child = processFixture();
+  const observed = observeSmokeProcess(child);
+  const clock = controlledClock();
+  const root = { pid: 42, ppid: 1, created: 100n, name: "app-server.exe" };
+  const stuck = { pid: 50, ppid: 42, created: 110n, name: "node.exe" };
+  const targets = [];
+  const stopping = shutdownSmokeProcess(child, observed, {
+    platform: "win32", clock,
+    listProcesses: async () => [root, stuck],
+    spawnProcess: closingKillers(targets),
+  });
+  const rejected = assert.rejects(stopping, /"sweep":\{"outcome":"survivors","killed":10,"survivors":\["app-server.exe","node.exe"\]\}/);
+  for (let helper = 0; helper < 11; helper += 1) assert.equal((await clock.next()).ms, 5_000);
+  const closureDeadline = await clock.next();
+  child.exit(1);
+  closureDeadline.expire();
+  await rejected;
+  assert.equal(clock.pending.size, 0);
+});
+
 test("Windows waits for App Server close after taskkill closes, without sending EOF", async () => {
   const child = processFixture();
   const observed = observeSmokeProcess(child);
@@ -56,7 +120,7 @@ test("Windows waits for App Server close after taskkill closes, without sending 
   const events = [];
   let completed = false;
   const stopping = shutdownSmokeProcess(child, observed, {
-    platform: "win32", clock, onEvent: (event) => events.push(event),
+    platform: "win32", clock, listProcesses: noListing, onEvent: (event) => events.push(event),
     spawnProcess(command, args, options) {
       assert.equal(command, "taskkill");
       assert.deepEqual(args, ["/PID", "42", "/T", "/F"]);
@@ -74,7 +138,7 @@ test("Windows waits for App Server close after taskkill closes, without sending 
   child.close(1);
   await stopping;
   assert.equal(clock.pending.size, 0);
-  assert.deepEqual(events.map((event) => event.outcome), ["started", "tree_kill_finished", "closed"]);
+  assert.deepEqual(events.map((event) => event.outcome), ["started", "tree_kill_finished", "tree_sweep_finished", "closed"]);
 });
 
 test("Windows accepts a concurrent close even when taskkill reports a missing process", async () => {
@@ -83,7 +147,7 @@ test("Windows accepts a concurrent close even when taskkill reports a missing pr
   const killer = processFixture();
   const clock = controlledClock();
   const stopping = shutdownSmokeProcess(child, observed, {
-    platform: "win32", clock, spawnProcess: () => killer,
+    platform: "win32", clock, listProcesses: noListing, spawnProcess: () => killer,
   });
   await clock.next();
   child.close();
@@ -99,7 +163,7 @@ for (const scenario of ["nonzero", "spawn_error", "timeout"]) {
     const killer = processFixture();
     const clock = controlledClock();
     const stopping = shutdownSmokeProcess(child, observed, {
-      platform: "win32", clock, spawnProcess: () => killer,
+      platform: "win32", clock, listProcesses: noListing, spawnProcess: () => killer,
     });
     const rejected = assert.rejects(stopping, (error) => {
       assert.match(error.message, /temporary smoke state was retained/);
@@ -167,7 +231,7 @@ test("cannot report successful cleanup while a killed taskkill helper remains un
   const killer = processFixture();
   const clock = controlledClock();
   const stopping = shutdownSmokeProcess(child, observed, {
-    platform: "win32", clock, spawnProcess: () => killer,
+    platform: "win32", clock, listProcesses: noListing, spawnProcess: () => killer,
   });
   const rejected = assert.rejects(stopping, /cleanup helper did not close.*"closed":false/);
   child.close();
