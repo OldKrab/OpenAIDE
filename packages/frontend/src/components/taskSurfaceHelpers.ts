@@ -47,8 +47,15 @@ export function taskWorkingStatusLabel(
   const reversedUserIndex = [...items].reverse().findIndex((item) => item.message.kind === "user");
   const currentTurnItems = reversedUserIndex === -1 ? items : items.slice(items.length - reversedUserIndex);
   const latestWork = [...currentTurnItems].reverse().find((item) => {
-    return item.message.kind === "activity" || item.message.kind === "agent_message";
+    return item.message.kind === "activity"
+      || item.message.kind === "agent_message"
+      || item.message.kind === "compaction";
   });
+  if (latestWork?.message.kind === "compaction") {
+    // An in-progress Compaction row is itself the live indicator; a second footer would compete with
+    // it. Once it ends, the Tool that preceded it is no longer what the Agent is doing.
+    return latestWork.message.status === "in_progress" ? undefined : "Working";
+  }
   if (latestWork?.message.kind === "agent_message") {
     return latestWork.message.role === "thought" ? "Thinking" : "Writing response";
   }
