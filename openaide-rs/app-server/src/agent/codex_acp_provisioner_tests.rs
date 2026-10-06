@@ -1,6 +1,5 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use fs2::FileExt;
 use tempfile::TempDir;
@@ -42,7 +41,7 @@ fn explicit_codex_launch_times_out_while_another_process_owns_provisioning() {
     let provisioner = CodexAcpProvisioner::with_installer_and_timeout(
         storage.path().to_path_buf(),
         Arc::new(RecordingInstaller::default()),
-        Duration::from_millis(20),
+        crate::test_sync::EXPIRES,
     );
 
     let error = provisioner
@@ -136,7 +135,7 @@ fn concurrent_explicit_codex_launches_wait_for_one_shared_installation() {
             .expect("report waiting launch result");
     });
     assert!(matches!(
-        waiter_completed_rx.recv_timeout(Duration::from_millis(50)),
+        waiter_completed_rx.recv_timeout(crate::test_sync::ABSENCE_WINDOW),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout)
     ));
 
@@ -148,7 +147,7 @@ fn concurrent_explicit_codex_launches_wait_for_one_shared_installation() {
         .expect("installation owner thread")
         .expect("installation owner launch");
     waiter_completed_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("waiting launch should finish after installation")
         .expect("waiting launch should reuse installation");
     waiter.join().expect("waiting launch thread");
@@ -399,7 +398,7 @@ await writeFile(path.join(dist, 'openaide-session-recovery.mjs'), 'export const 
         .unwrap();
         super::runtime_patch::apply(
             destination,
-            std::time::Instant::now() + Duration::from_secs(5),
+            std::time::Instant::now() + crate::test_sync::WATCHDOG,
         )
     }
 }

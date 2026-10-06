@@ -286,6 +286,7 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             name,
             status,
             presentation,
+            description,
             input_summary,
             output_preview,
             detail_artifact_id,
@@ -304,6 +305,7 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
                         .collect(),
                 }
             }),
+            description: description.clone(),
             input_summary: input_summary.clone(),
             output_preview: output_preview.clone(),
             detail_artifact_id: detail_artifact_id.clone(),

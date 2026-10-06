@@ -112,6 +112,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     startOffset: number;
     targetOffset: number;
   } | undefined>(undefined);
+  const retiringFollowRef = useRef(false);
   const scrollOwnershipRef = useRef<TaskChatScrollState["ownership"]>(
     savedScrollState?.ownership ?? "following",
   );
@@ -133,6 +134,9 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   const scrollToFn = useCallback<NonNullable<
     VirtualizerOptions<HTMLDivElement, HTMLDivElement>["scrollToFn"]
   >>((offset, scrollOptions, instance) => {
+    // Retiring a follow only replaces TanStack's tracked target; the reader's
+    // own input moves the viewport.
+    if (retiringFollowRef.current) return;
     const active = smoothScrollRef.current;
     if (active && userMessageScrollActiveRef.current) {
       // TanStack may downgrade a measurement correction to `auto` near the
@@ -331,8 +335,20 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     });
     scrollOwnershipRef.current = ownership;
     setScrollOwnershipState(ownership);
+    const messageList = messageListRef.current;
+    if (ownership === "reading" && messageList) {
+      // TanStack keeps reconciling the last follow until its end target is
+      // stable. Replace that target with the reader's position, otherwise the
+      // next measurement or viewport change returns them to latest.
+      retiringFollowRef.current = true;
+      try {
+        virtualizer.scrollToOffset(messageList.scrollTop, { behavior: "auto" });
+      } finally {
+        retiringFollowRef.current = false;
+      }
+    }
     persistScrollState(ownership);
-  }, [persistScrollState, taskId]);
+  }, [persistScrollState, taskId, virtualizer]);
 
   const loadEarlier = useCallback((cursor: string) => {
     const messageList = messageListRef.current;

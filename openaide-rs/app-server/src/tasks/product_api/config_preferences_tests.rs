@@ -44,7 +44,7 @@ impl AgentRuntime for SlowPreferencesAgent {
             .release
             .lock()
             .unwrap()
-            .recv_timeout(Duration::from_secs(5));
+            .recv_timeout(crate::test_sync::WATCHDOG);
         Ok(mode_config_catalog("agent-full-access"))
     }
 }
@@ -80,7 +80,7 @@ fn live_options_are_visible_before_saved_preferences_finish() {
                 workspace_root: None,
             })
             .unwrap();
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
         let pending = api
             .open_for_test(TaskOpenParams {
                 task_id: created.task.task_id.clone(),

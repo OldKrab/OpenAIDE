@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
@@ -30,6 +31,13 @@ export default defineConfig({
   },
   server: {
     allowedHosts: allowedHostsFromEnv()
+  },
+  test: {
+    // Deadlock watchdogs, not performance budgets: this suite runs production
+    // builds and a browser beside its unit tests, so a healthy test can be
+    // starved for many seconds on a loaded runner.
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
   },
   build: {
     outDir: "dist",

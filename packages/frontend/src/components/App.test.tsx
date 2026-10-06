@@ -95,6 +95,18 @@ describe("task working status label", () => {
     ).toBe("Reading DESIGN.md");
   });
 
+  it("yields the live footer to an in-progress Compaction row and drops the Tool that preceded it", () => {
+    const tool = namedToolActivity("m11", "read", "DESIGN.md", "completed");
+
+    expect(taskWorkingStatusLabel([tool, compactionMessage("m12", "in_progress")], "active", false)).toBeUndefined();
+    expect(taskWorkingStatusLabel([tool, compactionMessage("m12", "completed")], "active", false)).toBe("Working");
+    expect(taskWorkingStatusLabel([tool, compactionMessage("m12", "failed")], "active", false)).toBe("Working");
+    expect(
+      taskWorkingStatusLabel([tool, compactionMessage("m12", "completed"), thoughtMessage("m13")], "active", false),
+    ).toBe("Thinking");
+    expect(taskWorkingStatusLabel([tool, compactionMessage("m12", "in_progress")], "stopping", false)).toBe("Stopping");
+  });
+
   it("does not expose ACP collaboration metadata while waiting for a subagent", () => {
     const label = taskWorkingStatusLabel([collaborationWaitActivity("m6")], "active", false);
 
@@ -237,6 +249,16 @@ function agentMessage(id: string, text: string): ChatMessage {
       parts: [{ kind: "text", text }],
       created_at: "2026-05-17T00:00:01Z",
     },
+  };
+}
+
+function compactionMessage(id: string, status: "in_progress" | "completed" | "failed"): ChatMessage {
+  return {
+    cursor: `cursor_${id}`,
+    identity: id,
+    message_type: "compaction",
+    message_id: id,
+    message: { kind: "compaction", id, status, created_at: "2026-05-17T00:00:01Z" },
   };
 }
 

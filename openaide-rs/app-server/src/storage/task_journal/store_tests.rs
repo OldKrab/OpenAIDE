@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 use std::{
     collections::HashMap,
     io::{Read, Seek, SeekFrom, Write},
@@ -60,7 +59,7 @@ fn worker_panic_resolves_receipt_and_emits_the_sole_root_fatal_signal() {
     assert!(!faults.pending(), "worker fault was not reached");
 
     let fatal = fatal_events
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("process supervisor receives root-wide failure");
     assert_eq!(fatal.reason, "worker_panicked");
     assert!(
@@ -69,7 +68,7 @@ fn worker_panic_resolves_receipt_and_emits_the_sole_root_fatal_signal() {
     );
     assert!(
         fatal_events
-            .recv_timeout(Duration::from_millis(20))
+            .recv_timeout(crate::test_sync::ABSENCE_WINDOW)
             .is_err(),
         "one worker death emits exactly one fatal signal"
     );
@@ -104,7 +103,7 @@ fn quarantine_write_failure_stops_the_root_instead_of_being_ignored() {
         .expect_err("uncertain commit must fail");
     assert_eq!(
         fatal_events
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .reason,
         "worker_panicked"
@@ -320,6 +319,7 @@ fn released_tool_presentation_snapshot_migrates_when_task_opens() {
                             crate::protocol::model::ToolPresentationKind::Read,
                             vec!["preview.png".to_string()],
                         )),
+                        description: None,
                         input_summary: Some("preview.png".to_string()),
                         output_preview: None,
                         detail_artifact_id: None,
@@ -417,6 +417,7 @@ fn released_search_presentation_snapshot_migrates_when_task_opens() {
                                 target: crate::protocol::model::ToolSearchTarget::Contents,
                             }],
                         }),
+                        description: None,
                         input_summary: Some("FramedRecord".to_string()),
                         output_preview: None,
                         detail_artifact_id: None,
@@ -504,6 +505,7 @@ fn released_tool_presentation_journal_migrates_when_task_opens() {
                             crate::protocol::model::ToolPresentationKind::Read,
                             vec!["preview.png".to_string()],
                         )),
+                        description: None,
                         input_summary: Some("preview.png".to_string()),
                         output_preview: None,
                         detail_artifact_id: None,
@@ -589,6 +591,7 @@ fn task_with_view_presentation_still_opens() {
                             crate::protocol::model::ToolPresentationKind::Read,
                             vec!["preview.png".to_string()],
                         )),
+                        description: None,
                         input_summary: Some("preview.png".to_string()),
                         output_preview: None,
                         detail_artifact_id: None,
@@ -1161,7 +1164,8 @@ fn replacing_a_large_message_history_completes_without_quadratic_delay() {
             )
             .unwrap();
     });
-    let outcome = finished.recv_timeout(Duration::from_secs(5));
+    // timing: contract — replacement stays bounded; a quadratic pass exceeds any budget.
+    let outcome = finished.recv_timeout(crate::test_sync::WATCHDOG);
     if outcome.is_err() {
         // The worker owns the write, so let it finish before reporting the
         // bounded user-visible latency failure.

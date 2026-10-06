@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -144,13 +143,13 @@ fn dispatcher_unblocks_pending_host_bridge_request() {
     let storage = tempfile::tempdir().expect("temp storage");
     let runtime = Runtime::new_with_agent(storage.path().to_path_buf(), Arc::new(MockAgent))
         .expect("runtime");
-    let (host_bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (host_bridge, requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let mut dispatcher = ShellControlDispatcher::new_with_host(runtime, host_bridge.clone());
 
     let pending =
         std::thread::spawn(move || host_bridge.request("host/test", Some(json!({ "ok": true }))));
     let request = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("host request should be emitted");
     assert_eq!(request.id, RpcId::String("host_1".to_string()));
 

@@ -167,6 +167,9 @@ pub struct AgentToolCall {
     pub kind: String,
     pub status: AgentToolCallStatus,
     pub presentation: Option<ToolPresentation>,
+    /// Agent-authored purpose of an execute Tool. ACP has no field for it, so it
+    /// is present only when the Agent's own input carries one.
+    pub description: Option<String>,
     pub input_summary: Option<String>,
     pub output_preview: Option<String>,
     pub details: Option<Box<ActivityToolDetails>>,

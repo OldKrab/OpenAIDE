@@ -283,7 +283,8 @@ describe("ACP host terminal handlers", () => {
       expect(spawnMocks.execFile).toHaveBeenCalledWith(
         expect.stringMatching(/\\System32\\taskkill\.exe$/i),
         ["/PID", "23456", "/T", "/F"],
-        expect.objectContaining({ windowsHide: true, timeout: 2_000 }),
+        // timing: data — the option value passed to the spawned command.
+      expect.objectContaining({ windowsHide: true, timeout: 2_000 }),
         expect.any(Function),
       );
       manager.kill(terminalRef(created));

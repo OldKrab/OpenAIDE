@@ -12,6 +12,8 @@ fn support_export_download_returns_bytes_without_global_tls_initialization() {
     use std::net::TcpListener;
     use std::time::{Duration, Instant};
 
+    const WATCHDOG: Duration = Duration::from_secs(30);
+
     // The updater enables reqwest's provider-free Rustls backend. Export must
     // still construct its own client before any other Desktop operation runs,
     // even though its authenticated download uses loopback HTTP rather than TLS.
@@ -24,19 +26,19 @@ fn support_export_download_returns_bytes_without_global_tls_initialization() {
     )
     .unwrap();
     let server = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + WATCHDOG;
         let mut stream = loop {
             match listener.accept() {
                 Ok((stream, _)) => break stream,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     assert!(Instant::now() < deadline, "download did not connect");
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(Duration::from_millis(10)); // timing: poll
                 }
                 Err(error) => panic!("download listener failed: {error}"),
             }
         };
         stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(WATCHDOG))
             .unwrap();
         let mut request = Vec::new();
         while !request.ends_with(b"\r\n\r\n") {

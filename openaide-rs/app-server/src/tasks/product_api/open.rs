@@ -181,6 +181,7 @@ impl TaskProductApi {
                             generation: generation.value(),
                         },
                     );
+                        log_open_load_started(&task, generation.value(), "reload_requirement");
                         api.native_sessions
                             .refresh_history(HistoryRefreshRequest {
                                 task: task.clone(),
@@ -273,6 +274,7 @@ impl TaskProductApi {
                                 generation: generation.value(),
                             },
                         );
+                        log_open_load_started(&task, generation.value(), "resume_unsupported");
                         let refreshed_at = crate::time::now_string();
                         let native_updated_at = refreshed_at.parse::<u128>().map_err(|_| {
                             protocol_error_from_runtime(RuntimeError::Internal(
@@ -414,6 +416,19 @@ impl TaskProductApi {
             );
         }
     }
+}
+
+/// Names which open-time recovery chose `session/load`, matching the user-triggered reload event.
+fn log_open_load_started(task: &TaskRecord, generation: u64, trigger: &'static str) {
+    logging::info(
+        "native_session_reload_started",
+        serde_json::json!({
+            "task_id": task.task_id,
+            "agent_id": task.agent_id,
+            "generation": generation,
+            "trigger": trigger,
+        }),
+    );
 }
 
 fn task_allows_history_recovery(task: &TaskRecord) -> bool {

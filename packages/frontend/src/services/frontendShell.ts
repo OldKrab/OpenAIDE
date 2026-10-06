@@ -112,6 +112,16 @@ export type FileViewerDownloads = {
   save(request: { handle: string; label: string; operationId: string }, signal: AbortSignal): Promise<FileViewerDownloadResult>;
 };
 
+export type FileViewerContentResult =
+  | { kind: "bytes"; bytes: ArrayBuffer }
+  | { kind: "tooLarge" | "notFound" | "permissionDenied" | "notAFile" | "unavailable" };
+
+/** Reads the current file under the viewer handle's authority for an in-app preview.
+ * The shell refuses a file above `maxBytes` before buffering it. */
+export type FileViewerContent = {
+  read(request: { handle: string; maxBytes: number; operationId: string }, signal: AbortSignal): Promise<FileViewerContentResult>;
+};
+
 export type FrontendFileAcquisition =
   | {
       kind: "webUpload";
@@ -191,6 +201,8 @@ export type FrontendShell = {
   fileViewer?: true;
   /** Web-only download affordance; omitted shells keep their existing file-link behavior. */
   fileViewerDownloads?: FileViewerDownloads;
+  /** Byte access for previews rendered by Frontend (PDF); omitted shells show the fallback. */
+  fileViewerContent?: FileViewerContent;
 };
 
 let installedShell: FrontendShell | undefined;

@@ -21,6 +21,9 @@ pub(super) fn download(
         .to_string();
     let phase = if query_value(&request.target, "check").as_deref() == Some("1") {
         "check"
+    } else if query_value(&request.target, "preview").as_deref() == Some("1") {
+        // The Frontend reads the same bytes for an in-app preview instead of a saved file.
+        "preview"
     } else {
         "transfer"
     };

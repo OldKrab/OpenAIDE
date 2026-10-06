@@ -1,3 +1,4 @@
+// timing-file: contract — an ignored benchmark that measures storage latency.
 //! Reproducible comparison for the rewrite-heavy incident workload.
 //!
 //! Run with:
@@ -32,6 +33,11 @@ use openaide_app_server::tasks::TaskService;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tempfile::TempDir;
+
+// The crate's shared test synchronization vocabulary.
+#[allow(dead_code)]
+#[path = "../src/test_sync.rs"]
+mod test_sync;
 
 const HISTORY_BYTES: usize = 4 * 1024 * 1024;
 const FULL_DELTA_COUNT: usize = 10_002;
@@ -406,14 +412,9 @@ fn benchmark_product_stop() -> Duration {
             context: Vec::new(),
         })
         .expect("start product Stop fixture");
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !agent.started.load(Ordering::Acquire) && Instant::now() < deadline {
-        thread::yield_now();
-    }
-    assert!(
-        agent.started.load(Ordering::Acquire),
-        "Agent prompt did not start"
-    );
+    test_sync::wait_until("the Stop fixture prompt to start", || {
+        agent.started.load(Ordering::Acquire)
+    });
 
     let started = Instant::now();
     let stopped = service

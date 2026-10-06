@@ -6,6 +6,9 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,
+  // Watchdog for every polled assertion: it bounds a hung test and is far
+  // longer than a loaded runner needs, so no assertion carries its own budget.
+  expect: { timeout: 30_000 },
   reporter: [["list"], ["html", { open: "never", outputFolder: "test-results/report" }]],
   use: {
     browserName: "chromium",

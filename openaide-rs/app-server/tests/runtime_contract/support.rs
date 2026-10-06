@@ -11,12 +11,8 @@ fn one_response(dispatcher: &mut ShellControlDispatcher, request: Value) -> Valu
     serde_json::from_str(&responses[0]).unwrap()
 }
 
-fn wait_until(mut predicate: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !predicate() {
-        assert!(Instant::now() < deadline, "timed out waiting for predicate");
-        thread::sleep(Duration::from_millis(10));
-    }
+fn wait_until(predicate: impl FnMut() -> bool) {
+    crate::test_sync::wait_until("predicate", predicate);
 }
 
 fn has_running_activity(snapshot: &TaskSnapshot) -> bool {
@@ -38,11 +34,10 @@ fn has_interruption_reason(
     })
 }
 
-struct CountingAgent {
-    calls: Arc<AtomicUsize>,
-}
+/// Holds every prompt until it is cancelled.
+struct CancelledOnlyAgent;
 
-impl AgentRuntime for CountingAgent {
+impl AgentRuntime for CancelledOnlyAgent {
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         Ok(AgentSession::new(request.agent_id, "session_counting"))
     }
@@ -50,19 +45,10 @@ impl AgentRuntime for CountingAgent {
     fn prompt(
         &self,
         prompt: AgentPrompt,
-        sink: Arc<dyn AgentEventSink>,
+        _sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
-        // Keep the prompt active until the cancellation path under test reaches it.
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !prompt.cancellation.is_cancelled() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(5));
-        }
-        if prompt.cancellation.is_cancelled() {
-            return Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled);
-        }
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        sink.emit(agent_text_event("counted response"))?;
-        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
+        crate::test_sync::hold_while(|| !prompt.cancellation.is_cancelled());
+        Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled)
     }
 }
 
@@ -119,13 +105,8 @@ impl AgentRuntime for WaitingAgent {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.started.fetch_add(1, Ordering::SeqCst);
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !prompt.cancellation.is_cancelled() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(5));
-        }
-        if prompt.cancellation.is_cancelled() {
-            self.cancelled.fetch_add(1, Ordering::SeqCst);
-        }
+        crate::test_sync::hold_while(|| !prompt.cancellation.is_cancelled());
+        self.cancelled.fetch_add(1, Ordering::SeqCst);
         sink.emit(agent_text_event("should not be stored"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled)
     }
@@ -295,7 +276,6 @@ impl AgentRuntime for DelayedAgent {
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
-        thread::sleep(Duration::from_millis(80));
         sink.emit(agent_text_event("delayed response"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
@@ -347,6 +327,7 @@ impl AgentRuntime for ToolCallUpdateAgent {
             kind: "read".to_string(),
             status: AgentToolCallStatus::InProgress,
             presentation: None,
+            description: None,
             input_summary: Some("config.toml".to_string()),
             output_preview: None,
             details: None,
@@ -358,6 +339,7 @@ impl AgentRuntime for ToolCallUpdateAgent {
             kind: "read".to_string(),
             status: AgentToolCallStatus::Completed,
             presentation: None,
+            description: None,
             input_summary: Some("config.toml".to_string()),
             output_preview: Some("Found configuration".to_string()),
             details: None,
@@ -389,6 +371,7 @@ impl AgentRuntime for ChunkedTextAgent {
             kind: "execute".to_string(),
             status: AgentToolCallStatus::Completed,
             presentation: None,
+            description: None,
             input_summary: Some("pwd".to_string()),
             output_preview: Some("/home/user".to_string()),
             details: None,
@@ -423,6 +406,7 @@ impl AgentRuntime for MessageIdSpanningToolAgent {
             kind: "execute".to_string(),
             status: AgentToolCallStatus::Completed,
             presentation: None,
+            description: None,
             input_summary: None,
             output_preview: None,
             details: None,

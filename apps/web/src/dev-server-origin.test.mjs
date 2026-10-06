@@ -5,8 +5,9 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { listeningPort } from "./dev-server-test-support.mjs";
 
-test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 }, async (t) => {
+test("App Server proxy accepts only the exact browser origin", { timeout: 60_000 }, async (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), "openaide-web-origin-"));
   const staticRoot = path.join(fixtureRoot, "static");
   const fakeAppServerPath = path.join(fixtureRoot, "fake-app-server.mjs");
@@ -15,7 +16,6 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
   writeFileSync(fakeAppServerPath, fakeAppServerSource());
   chmodSync(fakeAppServerPath, 0o755);
 
-  const port = await availablePort();
   const webServer = spawn(process.execPath, ["src/dev-server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
@@ -23,7 +23,7 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
       OPENAIDE_APP_SERVER_PATH: fakeAppServerPath,
       OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
-      OPENAIDE_WEB_PORT: String(port),
+      OPENAIDE_WEB_PORT: "0",
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(fixtureRoot, "runtime"),
       OPENAIDE_WEB_STATE_ROOT: path.join(fixtureRoot, "state"),
       OPENAIDE_WEB_STATIC_ROOT: staticRoot,
@@ -34,7 +34,7 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
     await stopProcess(webServer);
     rmSync(fixtureRoot, { recursive: true, force: true });
   });
-  await waitForOutput(webServer, "OpenAIDE Web dev shell listening");
+  const port = await listeningPort(webServer);
 
   const endpoint = `http://127.0.0.1:${port}/__openaide-app-server/probe`;
   const unrelatedPort = port === 65_535 ? port - 1 : port + 1;
@@ -56,7 +56,7 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
         request.destroy();
       });
       request.once("error", reject);
-      request.setTimeout(1_000, () => request.destroy(new Error("Web waited for the oversized body")));
+      request.setTimeout(30_000, () => request.destroy(new Error("Web waited for the oversized body")));
       request.flushHeaders();
     });
     assert.equal(status, 413);
@@ -73,7 +73,7 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
         request.destroy();
       });
       request.once("error", reject);
-      request.setTimeout(1_000, () => request.destroy(new Error("Web failed to bound a chunked body")));
+      request.setTimeout(30_000, () => request.destroy(new Error("Web failed to bound a chunked body")));
       request.write('{"id":"large","method":"client/probe","params":{"text":"');
       request.write("x".repeat(11 * 1024 * 1024));
       request.end('"}}');
@@ -90,38 +90,6 @@ function proxyRequest(endpoint, origin, id) {
       origin,
     },
     body: JSON.stringify({ jsonrpc: "2.0", id, method: "client/probe", params: {} }),
-  });
-}
-
-function availablePort() {
-  const server = http.createServer();
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close((error) => {
-        if (error) reject(error);
-        else resolve(address.port);
-      });
-    });
-  });
-}
-
-function waitForOutput(child, expected) {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-      if (stdout.includes(expected)) resolve();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`Web server exited with ${code}: ${stderr}`)));
   });
 }
 

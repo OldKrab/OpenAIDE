@@ -209,8 +209,10 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`OpenAIDE Web dev shell listening on http://${host}:${port}`);
-  logger.info("web_server_listening", { port, host });
+  // Port 0 leaves the choice to the OS, so report the port actually bound.
+  const boundPort = server.address().port;
+  console.log(`OpenAIDE Web dev shell listening on http://${host}:${boundPort}`);
+  logger.info("web_server_listening", { port: boundPort, host });
   if (authConfig.enabled) {
     console.log("OpenAIDE Web authentication is enabled.");
   } else {

@@ -115,7 +115,7 @@ fn replacing_task_runtime_routes_terminal_commits_to_the_new_notifier() {
         .unwrap();
 
     let update = second_notifications
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("replacement runtime receives terminal publication");
     assert!(matches!(
         update.kind,
@@ -1067,10 +1067,10 @@ fn terminal_stream_revalidates_session_after_waiting_for_the_mutation_lock() {
     });
 
     assert!(finished
-        .recv_timeout(std::time::Duration::from_millis(100))
+        .recv_timeout(crate::test_sync::ABSENCE_WINDOW)
         .is_err());
     drop(guard);
-    let outcome = finished.recv_timeout(std::time::Duration::from_secs(1));
+    let outcome = finished.recv_timeout(crate::test_sync::WATCHDOG);
     worker.join().unwrap();
     assert!(outcome
         .expect("terminal admission must resume after the workflow mutation")

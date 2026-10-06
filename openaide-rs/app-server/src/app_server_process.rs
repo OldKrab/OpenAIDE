@@ -81,7 +81,21 @@ pub fn publish_local_http_probe_endpoint(
     state_root: &StateRoot,
     runtime_root: &Path,
 ) -> Result<PublishedAppServerEndpoint, AppServerEndpointPublishError> {
-    let listener = LocalHttpProbeListener::bind_loopback()?;
+    publish_local_http_probe_listener(
+        LocalHttpProbeListener::bind_loopback()?,
+        gateway,
+        state_root,
+        runtime_root,
+    )
+}
+
+/// Publishes an already bound listener, so a test can choose its I/O timeout.
+fn publish_local_http_probe_listener(
+    listener: LocalHttpProbeListener,
+    gateway: SharedRpcGateway,
+    state_root: &StateRoot,
+    runtime_root: &Path,
+) -> Result<PublishedAppServerEndpoint, AppServerEndpointPublishError> {
     let address = listener.local_addr()?;
     let auth_token = process_token();
     let replacement_token = process_token();
