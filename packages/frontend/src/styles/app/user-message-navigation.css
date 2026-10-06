@@ -367,7 +367,7 @@ body[data-input-modality="keyboard"] .user-message-navigator:focus-within:not([d
 
   .message-list-shell:has(.user-message-navigator) > .message-list {
     --oa-chat-navigator-lane: 58px;
-    padding-inline-end: 58px;
+    --message-list-gutter-end: 58px;
   }
 }
 
@@ -378,7 +378,7 @@ body[data-input-modality="keyboard"] .user-message-navigator:focus-within:not([d
 
   .message-list-shell:has(.user-message-navigator) > .message-list {
     --oa-chat-navigator-lane: 24px;
-    padding-inline-end: 24px;
+    --message-list-gutter-end: 24px;
   }
 
   .user-message-navigation-entry {

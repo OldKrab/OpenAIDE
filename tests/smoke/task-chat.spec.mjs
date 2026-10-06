@@ -292,7 +292,9 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
     const block = element.closest(".chat-user-block");
     const virtualRow = element.closest(".message-list-virtual-row");
     if (!block || !virtualRow) throw new Error("Virtualized User message structure is incomplete.");
-    return virtualRow.getBoundingClientRect().right - block.getBoundingClientRect().right;
+    // The row owns the reading gutter as padding, so the message aligns to its content edge.
+    const rowContentRight = virtualRow.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(virtualRow).paddingRight);
+    return rowContentRight - block.getBoundingClientRect().right;
   });
   expect(userMessageAlignment).toBeCloseTo(0, 0);
   await expect(chat.getByText("Smoke answer", { exact: true })).toBeVisible();

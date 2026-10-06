@@ -112,9 +112,10 @@ body[data-shell="desktop"] .task-work-stack[data-desktop-window="macos"] > .task
   .task-conversation > .message-list-shell > .message-list {
     --oa-chat-content-inset: max(
       var(--oa-chat-inline-gutter),
-      calc((100% + var(--oa-chat-scrollbar-edge-gap) - 760px) / 2)
+      calc((100cqi + var(--oa-chat-scrollbar-edge-gap) - 760px) / 2)
     );
-    padding-inline: var(--oa-chat-content-inset) max(
+    --message-list-gutter-start: var(--oa-chat-content-inset);
+    --message-list-gutter-end: max(
       var(--oa-chat-navigator-lane, 0px),
       calc(var(--oa-chat-content-inset) - var(--oa-chat-scrollbar-edge-gap) - var(--oa-chat-scrollbar-width))
     );

@@ -47,7 +47,12 @@ const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
 const AUTO_FILL_HISTORY_BUFFER_PX = 120;
 const MAX_AUTO_FILL_PAGES = 4;
 const CHAT_ROW_ESTIMATE_PX = 72;
-const CHAT_ROW_GAP_PX = 8;
+/**
+ * Spacing after each Chat row. Rows render it as their own padding instead of a
+ * virtualizer gap: an uncovered gap belongs to no row, so a drag-selection
+ * crossing it would lose its place and jump to an end of the list.
+ */
+export const CHAT_ROW_GAP_PX = 8;
 const CHAT_START_PADDING_PX = 24;
 const CHAT_END_PADDING_PX = 64;
 const CHAT_INITIAL_RECT = { width: 760, height: 600 };
@@ -196,16 +201,16 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     anchorTo: "start",
     count: itemKeys.length,
     directDomUpdates: true,
-    estimateSize: () => CHAT_ROW_ESTIMATE_PX,
+    estimateSize: () => CHAT_ROW_ESTIMATE_PX + CHAT_ROW_GAP_PX,
     followOnAppend: scrollOwnership === "following",
-    gap: CHAT_ROW_GAP_PX,
     getItemKey,
     getScrollElement: () => messageListRef.current,
     // Avoid a blank first render before the App Shell viewport is measured.
     initialRect: CHAT_INITIAL_RECT,
     overscan: userMessageScrollTargetIndex === undefined ? 4 : 12,
     paddingStart: CHAT_START_PADDING_PX,
-    paddingEnd: CHAT_END_PADDING_PX,
+    // The last row's own trailing spacing is part of the end padding.
+    paddingEnd: CHAT_END_PADDING_PX - CHAT_ROW_GAP_PX,
     scrollEndThreshold: 2,
     scrollToFn,
     // Range changes must commit before paint so a far navigation never exposes

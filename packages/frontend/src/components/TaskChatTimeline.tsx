@@ -22,7 +22,7 @@ import {
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
-import { useTaskChatScroll } from "./useTaskChatScroll";
+import { CHAT_ROW_GAP_PX, useTaskChatScroll } from "./useTaskChatScroll";
 import { UserMessageNavigator } from "./UserMessageNavigator";
 
 export type TaskChatTimelineRow =
@@ -126,6 +126,9 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
         >
         <ChatContentSizeChangeContext.Provider value={measureChangedChatContent}>
           <div className="message-list-virtualizer" ref={chatScroll.virtualizer.containerRef}>
+            {/* Rows are out of flow, so a drag-selection that leaves them above or below
+                needs an in-flow edge to resolve to; without one it jumps to the list start. */}
+            <div aria-hidden="true" className="message-list-selection-edge" />
             {virtualItems.map((virtualRow) => {
               const row = rows[virtualRow.index];
               if (!row) return null;
@@ -148,7 +151,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                 }
                 key={virtualRow.key}
                 ref={chatScroll.virtualizer.measureElement}
-                style={{ position: "absolute", top: 0, left: 0 }}
+                style={{ position: "absolute", top: 0, left: 0, paddingBlockEnd: CHAT_ROW_GAP_PX }}
               >
                 {row.kind === "archived" ? (
                   <div className="archived-task-notice" role="status">
@@ -213,6 +216,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
               </div>
               );
             })}
+            <div aria-hidden="true" className="message-list-selection-edge" />
           </div>
         </ChatContentSizeChangeContext.Provider>
       </div>

@@ -1,6 +1,7 @@
 @media (max-width: 760px) {
   .message-list {
-    padding-inline: var(--oa-chat-inline-gutter);
+    --message-list-gutter-start: var(--oa-chat-inline-gutter);
+    --message-list-gutter-end: var(--oa-chat-inline-gutter);
     scrollbar-gutter: auto;
   }
 
