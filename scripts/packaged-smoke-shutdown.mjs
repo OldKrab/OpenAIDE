@@ -110,6 +110,26 @@ const SWEEP_PASSES = 5;
  * `before` was taken is outside this attribution; `orphans_since_start`
  * names the candidates when closure still does not arrive.
  */
+/** Orphan entries behind a sweep report; the report itself carries names only. */
+const ORPHANS = new WeakMap();
+
+/**
+ * Ends the orphans a clear sweep named, once the pipes are proven still held.
+ * Ownership here is inferred (started after the App Server, parent gone), so it
+ * runs only after closure failed with every traceable descendant already ended.
+ * TODO: have the App Server own its descendants through a Job Object with
+ * KILL_ON_JOB_CLOSE; ownership then becomes exact and this inference can go.
+ */
+async function endWindowsOrphans(sweep, listProcesses, spawnProcess, clock) {
+  const orphans = ORPHANS.get(sweep) ?? [];
+  if (orphans.length === 0) return { outcome: "none", killed: 0 };
+  const now = await listProcesses();
+  if (!now) return { outcome: "list_failed", killed: 0 };
+  const alive = orphans.filter((orphan) => now.some((entry) => entry.pid === orphan.pid && entry.created === orphan.created));
+  for (const entry of alive) await killWindowsTree(entry.pid, spawnProcess, clock);
+  return { outcome: "killed", killed: alive.length, names: alive.map((entry) => entry.name).slice(0, 20) };
+}
+
 async function sweepWindowsDescendants(rootPid, before, listProcesses, spawnProcess, clock) {
   const root = before?.find((entry) => entry.pid === rootPid);
   if (!root) return { outcome: "unlisted" };
@@ -135,11 +155,12 @@ async function sweepWindowsDescendants(rootPid, before, listProcesses, spawnProc
     alive = now.filter((entry) => owned.get(entry.pid) === entry.created);
     if (alive.length === 0) {
       const living = new Set(now.map((entry) => entry.pid));
-      // Names only: these are the processes that could still hold the pipes.
-      const orphans = now
-        .filter((entry) => entry.created >= root.created && !living.has(entry.ppid))
-        .map((entry) => entry.name);
-      return { outcome: "clear", passes: pass, killed, orphans_since_start: orphans.slice(0, 20) };
+      // These are the processes that could still hold the pipes: their parent
+      // exited before any listing, so no parent link ties them to the tree.
+      const orphans = now.filter((entry) => entry.created >= root.created && !living.has(entry.ppid));
+      const report = { outcome: "clear", passes: pass, killed, orphans_since_start: orphans.map((entry) => entry.name).slice(0, 20) };
+      ORPHANS.set(report, orphans);
+      return report;
     }
     for (const entry of alive) {
       await killWindowsTree(entry.pid, spawnProcess, clock);
@@ -185,6 +206,14 @@ export async function shutdownSmokeProcess(child, observed, {
     if (await waitForClose(observed, 15_000, clock)) {
       emit("closed", { taskkill, sweep });
       return;
+    }
+    if (sweep?.outcome === "clear") {
+      const orphans = await endWindowsOrphans(sweep, listProcesses, spawnProcess, clock);
+      emit("orphans_ended", { taskkill, sweep, orphans });
+      if (orphans.killed > 0 && await waitForClose(observed, 15_000, clock)) {
+        emit("closed", { taskkill, sweep, orphans });
+        return;
+      }
     }
   } else {
     if (!child.stdin.destroyed) child.stdin.end();
