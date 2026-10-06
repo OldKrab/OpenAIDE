@@ -10,6 +10,8 @@
 
 .composer-attachment-list {
   min-width: 0;
+  /* Tiles measure reorder slots against the list. */
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -22,6 +24,26 @@
   border: 1px solid var(--oa-border);
   border-radius: var(--oa-radius-md);
   background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));
+}
+
+.composer-attachment-list[data-reorderable="true"] > [data-attachment-id] {
+  cursor: grab;
+  user-select: none;
+}
+
+.composer-attachment-list[data-reorderable="true"] .composer-image-open {
+  cursor: inherit;
+}
+
+.composer-attachment-list[data-dragging="true"],
+.composer-attachment-list[data-dragging="true"] * {
+  cursor: grabbing !important;
+}
+
+.composer-attachment-tile[data-dragging="true"] {
+  z-index: 2;
+  border-color: color-mix(in oklch, var(--oa-focus) 60%, var(--oa-border));
+  box-shadow: 0 8px 20px color-mix(in oklch, var(--oa-text) 16%, transparent);
 }
 
 .composer-attachment-list[data-layout="single"] .composer-attachment-tile {
@@ -39,12 +61,16 @@
   height: 64px;
 }
 
-.composer-file-attachment {
+/* File cards read as name plus kind; they stretch to a neighbouring Image's row height. */
+.composer-attachment-list .composer-attachment-tile.composer-file-attachment {
+  width: 184px;
+  max-width: 100%;
+  height: auto;
+  min-height: 56px;
   align-items: center;
   color: var(--oa-muted);
-  display: grid;
-  justify-items: center;
-  padding: 12px 9px 8px;
+  display: flex;
+  padding: 8px 32px 8px 10px;
 }
 
 .composer-file-upload progress {
@@ -58,18 +84,11 @@
 
 .composer-file-upload[data-state="error"] {
   border-color: color-mix(in oklch, var(--oa-danger) 48%, var(--oa-border));
-  min-height: 80px;
-  min-width: 104px;
 }
 
 .composer-file-upload-error {
-  align-items: center;
   color: var(--oa-danger);
-  display: inline-flex;
-  font-size: 10px;
-  gap: 3px;
-  line-height: 1.2;
-  white-space: nowrap;
+  font-size: 11px;
 }
 
 .composer-file-upload-retry {
@@ -78,8 +97,7 @@
   border-radius: var(--oa-radius-sm);
   color: var(--oa-text);
   font: inherit;
-  margin-left: 2px;
-  padding: 2px 3px;
+  padding: 0 3px;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -99,61 +117,183 @@
 
 .composer-file-attachment-main {
   align-items: center;
-  display: grid;
-  gap: 7px;
-  justify-items: center;
+  display: flex;
+  gap: 9px;
   min-width: 0;
   width: 100%;
 }
 
+.composer-file-attachment-icon {
+  /* The kind colour tints its own plate, so the card stays calm while kinds stay scannable. */
+  background: color-mix(in oklch, currentColor 13%, transparent);
+  border-radius: var(--oa-radius-sm);
+  display: grid;
+  flex: 0 0 auto;
+  height: 34px;
+  place-items: center;
+  width: 34px;
+}
+
+.composer-file-attachment-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
 .composer-file-attachment-label {
   color: var(--oa-text);
-  font-size: 11px;
-  max-width: 100%;
+  display: -webkit-box;
+  font-size: 12px;
+  line-height: 1.3;
   overflow: hidden;
-  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* A status needs the second row, so the name gives it up. */
+.composer-file-attachment-text:has(.context-token-status, .composer-file-upload-error) .composer-file-attachment-label {
+  display: block;
+  overflow-wrap: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.composer-file-attachment-kind {
+  color: var(--oa-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-file-attachment-text > .context-token-status,
+.composer-file-upload-error {
+  display: block;
+  line-height: 1.3;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.composer-file-attachment-text > .context-token-status > svg,
+.composer-file-upload-error > svg {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -1.5px;
+}
+
+.composer-attachment-grip,
 .composer-file-reveal,
-.composer-file-remove {
+.composer-file-remove,
+.composer-image-remove {
   align-items: center;
-  background: color-mix(in oklch, var(--oa-panel) 88%, transparent);
-  border: 1px solid color-mix(in oklch, var(--oa-border) 82%, transparent);
+  border: 0;
   border-radius: 999px;
-  color: var(--oa-text);
   display: inline-flex;
-  height: 24px;
+  height: 22px;
   justify-content: center;
   padding: 0;
   position: absolute;
-  width: 24px;
+  transition: background-color 120ms ease-out, color 120ms ease-out, opacity 120ms ease-out;
+  width: 22px;
+}
+
+/* On a card the actions own a quiet column; over an Image they need their own backing. */
+.composer-file-reveal,
+.composer-file-remove {
+  background: transparent;
+  color: var(--oa-muted);
 }
 
 .composer-file-remove {
-  right: 4px;
-  top: 4px;
+  right: 5px;
+  top: 5px;
 }
 
 .composer-file-reveal {
-  bottom: 4px;
-  right: 4px;
+  bottom: 5px;
+  right: 5px;
 }
 
 .composer-file-reveal:hover:not(:disabled),
 .composer-file-remove:hover:not(:disabled) {
-  background: var(--oa-panel);
+  background: color-mix(in oklch, var(--oa-text) 10%, transparent);
+  color: var(--oa-text);
 }
 
+.composer-attachment-grip {
+  background: color-mix(in oklch, var(--oa-panel) 86%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--oa-border) 80%, transparent);
+  color: var(--oa-text);
+  cursor: grab;
+  left: 4px;
+  top: 4px;
+  /* Touch reordering starts here so the tile body keeps native list scrolling. */
+  touch-action: none;
+}
+
+@media (hover: hover) {
+  /* Over an Image the controls wait for intent so the thumbnail stays unobstructed. */
+  .composer-attachment-grip,
+  .composer-image-remove {
+    opacity: 0;
+  }
+
+  .composer-attachment-tile:hover :is(.composer-attachment-grip, .composer-image-remove),
+  :is(.composer-attachment-grip, .composer-image-remove):focus-visible,
+  .composer-image-attachment:focus-within .composer-image-remove,
+  .composer-attachment-tile[data-dragging="true"] .composer-attachment-grip {
+    opacity: 1;
+  }
+
+  /* With a pointer the grip takes the icon plate's place instead of covering the name. */
+  .composer-file-attachment .composer-attachment-grip {
+    background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));
+    border-radius: var(--oa-radius-sm);
+    box-shadow: inset 0 0 0 1px var(--oa-border);
+    height: 34px;
+    left: 10px;
+    top: calc(50% - 17px);
+    width: 34px;
+  }
+}
+
+.composer-attachment-grip:focus-visible,
 .composer-file-reveal:focus-visible,
 .composer-file-remove:focus-visible {
   outline: 1px solid var(--oa-focus);
-  outline-offset: -2px;
+  outline-offset: -1px;
+}
+
+.composer-file-reveal:disabled,
+.composer-file-remove:disabled,
+.composer-image-remove:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Image tiles keep the picture's own proportions within a row-height strip. */
+.composer-attachment-list .composer-attachment-tile.composer-image-attachment {
+  --composer-image-height: 64px;
+  width: auto;
+  max-width: 100%;
+  height: var(--composer-image-height);
+  background: color-mix(in oklch, var(--oa-text) 6%, var(--oa-bg));
+  flex: 0 0 auto;
+}
+
+.composer-attachment-list[data-layout="pair"] .composer-attachment-tile.composer-image-attachment {
+  --composer-image-height: 80px;
+}
+
+.composer-attachment-list[data-layout="single"] .composer-attachment-tile.composer-image-attachment {
+  --composer-image-height: 104px;
 }
 
 .composer-image-open {
-  width: 100%;
   height: 100%;
   border: 0;
   background: transparent;
@@ -163,34 +303,38 @@
 }
 
 .composer-image-preview {
-  width: 100%;
+  width: auto;
   height: 100%;
+  /* Only extreme panoramas and tall captures get cropped; the lightbox shows the whole Image. */
+  min-width: calc(var(--composer-image-height) * 0.75);
+  max-width: calc(var(--composer-image-height) * 2.2);
   display: block;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: top center;
+  transition: transform 160ms ease-out;
 }
 
 .composer-image-remove {
   position: absolute;
   top: 4px;
   right: 4px;
-  width: 26px;
-  height: 26px;
-  border: 1px solid color-mix(in oklch, var(--oa-border) 82%, transparent);
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--oa-panel) 88%, transparent);
+  width: 20px;
+  height: 20px;
+  background: color-mix(in oklch, var(--oa-panel) 86%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--oa-border) 80%, transparent);
   color: var(--oa-text);
-  display: grid;
-  place-items: center;
-  padding: 0;
 }
 
+.composer-attachment-grip:hover,
 .composer-image-remove:hover:not(:disabled) {
   background: var(--oa-panel);
 }
 
-.composer-image-remove:disabled {
-  cursor: default;
-  opacity: 0.5;
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .composer-image-open:hover .composer-image-preview {
+    transform: scale(1.04);
+  }
 }
 
 .composer-image-attachment > .context-token-status {
@@ -434,6 +578,13 @@
   max-width: none;
   max-height: none;
   object-fit: contain;
+  /*
+   * The element box is stage-sized with the Image fitted inside, so the edge comes from a
+   * filter that follows the painted pixels. It must survive a backdrop-coloured Image.
+   */
+  filter:
+    drop-shadow(0 0 1px color-mix(in oklch, var(--oa-text) 55%, transparent))
+    drop-shadow(0 10px 28px color-mix(in oklch, black 20%, transparent));
 }
 
 .attachment-preview-stage.is-interacting img {

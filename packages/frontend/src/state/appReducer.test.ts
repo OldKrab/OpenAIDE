@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ActivityStep, AgentSettingsRecord, ChatMessage, MessagePage, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import { appReducer } from "./appReducer";
 import { renderedChat } from "./chatPaging";
+import { newTaskDraftAttachments } from "./composerOptions";
 import { createInitialState } from "./store";
 
 type PermissionChatMessage = ChatMessage & {
@@ -22,6 +23,53 @@ describe("app reducer composer state", () => {
 
     expect(state.taskInputs.task_1).toMatchObject({ prompt: "Keep this draft", context: [] });
     expect(state.taskInputs.task_1.error).toBeUndefined();
+  });
+
+  it("moves a Task draft attachment and keeps the order fixed while a Send is pending", () => {
+    let state = createInitialState();
+    for (const label of ["a.md", "b.md", "c.md"]) {
+      state = appReducer(state, {
+        type: "taskInput:attachment:add",
+        taskId: "task_1",
+        attachment: { kind: "file", label, path: `/workspace/${label}` },
+      });
+    }
+    const labels = () => state.taskInputs.task_1.context.map((attachment) => attachment.label);
+    const [first] = state.taskInputs.task_1.context;
+
+    state = appReducer(state, {
+      type: "taskInput:attachment:move", taskId: "task_1", attachmentId: first.local_id, targetIndex: 2,
+    });
+    expect(labels()).toEqual(["b.md", "c.md", "a.md"]);
+
+    state = appReducer(state, { type: "taskInput:submit", taskId: "task_1" });
+    state = appReducer(state, {
+      type: "taskInput:attachment:move", taskId: "task_1", attachmentId: first.local_id, targetIndex: 0,
+    });
+    expect(labels()).toEqual(["b.md", "c.md", "a.md"]);
+  });
+
+  it("orders the New Task draft across its client and Prepared Task sources", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "newTask:attachment:add",
+      attachment: { kind: "image", label: "shot.png" },
+    });
+    const image = state.newTask.context[0];
+    const prepared = [
+      { kind: "file" as const, label: "notes.md", local_id: "attachment_file_1" },
+      { kind: "file" as const, label: "trace.log", local_id: "attachment_file_2" },
+    ];
+    const labels = () => newTaskDraftAttachments(state.newTask, prepared).map((attachment) => attachment.label);
+    expect(labels()).toEqual(["shot.png", "notes.md", "trace.log"]);
+
+    state = appReducer(state, {
+      type: "newTask:attachment:order",
+      order: ["attachment_file_1", image.local_id],
+    });
+
+    // A row added after the reorder keeps arrival order behind the ranked rows.
+    expect(labels()).toEqual(["notes.md", "shot.png", "trace.log"]);
   });
 
   it("clears a New Task error on dismissal or draft correction", () => {

@@ -1,6 +1,6 @@
 import type { ActivityToolDetails, Attachment, MessagePage } from "@openaide/app-shell-contracts";
 import { mergePageState } from "./chatPaging";
-import { invalidateAppServerAttachments, localAttachment, selectionWithProject } from "./composerOptions";
+import { invalidateAppServerAttachments, localAttachment, moveAttachment, selectionWithProject } from "./composerOptions";
 import type { ComposerAttachment } from "./composerOptions";
 import type { AppAction } from "./appReducer";
 import { configOptionsCatalogKey } from "./configOptionState";
@@ -12,6 +12,7 @@ type TaskInteractionAction =
   | { type: "taskInput:attachment:add"; taskId: string; attachment: Attachment }
   | { type: "taskInput:attachment:addAppServer"; taskId: string; attachment: ComposerAttachment }
   | { type: "taskInput:attachment:remove"; taskId: string; attachmentId: string }
+  | { type: "taskInput:attachment:move"; taskId: string; attachmentId: string; targetIndex: number }
   | { type: "taskInput:clear"; taskId: string }
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:sendError"; taskId: string; message?: string }
@@ -138,6 +139,19 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
             context: input.context.filter((attachment) => attachment.local_id !== action.attachmentId),
             error: undefined,
           },
+        },
+      };
+    }
+    case "taskInput:attachment:move": {
+      const input = state.taskInputs[action.taskId];
+      if (!input || input.pending || input.queueTake) return state;
+      const context = moveAttachment(input.context, action.attachmentId, action.targetIndex);
+      if (context === input.context) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: { ...input, context },
         },
       };
     }

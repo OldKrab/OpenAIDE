@@ -128,6 +128,45 @@ export function appServerAttachment(
   };
 }
 
+/** Moves one draft row to `targetIndex`; row order is the order Send delivers within each content kind. */
+export function moveAttachment(
+  attachments: ComposerAttachment[],
+  attachmentId: string,
+  targetIndex: number,
+): ComposerAttachment[] {
+  const fromIndex = attachments.findIndex((attachment) => attachment.local_id === attachmentId);
+  if (fromIndex < 0) return attachments;
+  const clampedIndex = Math.max(0, Math.min(targetIndex, attachments.length - 1));
+  if (clampedIndex === fromIndex) return attachments;
+  const reordered = [...attachments];
+  const [attachment] = reordered.splice(fromIndex, 1);
+  reordered.splice(clampedIndex, 0, attachment);
+  return reordered;
+}
+
+/** Merges both New Task draft sources into the one ordered list the Composer renders and sends. */
+export function newTaskDraftAttachments(
+  newTask: { context: ComposerAttachment[]; contextOrder?: string[] },
+  preparedTaskAttachments: ComposerAttachment[] = [],
+): ComposerAttachment[] {
+  const merged = [
+    ...newTask.context,
+    ...preparedTaskAttachments.filter((prepared) =>
+      !newTask.context.some((local) => local.local_id === prepared.local_id)),
+  ];
+  if (!newTask.contextOrder) return merged;
+  // Rows added after the last reorder keep arrival order behind the ranked rows.
+  const rank = new Map(newTask.contextOrder.map((id, index) => [id, index]));
+  return merged
+    .map((attachment, index) => ({ attachment, index }))
+    .sort((left, right) => (
+      (rank.get(left.attachment.local_id) ?? Number.MAX_SAFE_INTEGER)
+        - (rank.get(right.attachment.local_id) ?? Number.MAX_SAFE_INTEGER)
+      || left.index - right.index
+    ))
+    .map(({ attachment }) => attachment);
+}
+
 export function protocolAttachments(attachments: ComposerAttachment[]): Attachment[] {
   return attachments.map(({
     local_id: localId,

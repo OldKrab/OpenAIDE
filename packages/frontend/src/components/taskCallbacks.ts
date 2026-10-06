@@ -202,6 +202,10 @@ export function createTaskCallbacks({
         scope: { kind: "toolDetail", taskId: taskId as TaskId, artifactId },
       });
     },
+    moveAttachment: (attachmentId, targetIndex) => {
+      if (!state.snapshot) return;
+      dispatch({ type: "taskInput:attachment:move", taskId: state.snapshot.task.task_id, attachmentId, targetIndex });
+    },
     removeAttachment: (attachmentId) => {
       if (!state.snapshot) return;
       const taskId = state.snapshot.task.task_id;

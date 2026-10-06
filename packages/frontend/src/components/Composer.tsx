@@ -3,6 +3,7 @@ import { ComposerContextUsageControl } from "./ContextUsageIndicator";
 import { ComposerSchedule } from "./ComposerSchedule";
 import { ArrowUp, CircleAlert, CircleStop, ListPlus, LoaderCircle, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { useComposerFileDrop } from "./useComposerFileDrop";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
 import {
@@ -65,6 +66,7 @@ type ComposerProps = {
   onDismissError?: () => void;
   onUnsupportedImageAttachment?: (message?: string) => void;
   onRevealAttachment?: (attachmentId: string) => Promise<void> | void;
+  onMoveAttachment?: (attachmentId: string, targetIndex: number) => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
@@ -104,6 +106,7 @@ export function Composer({
   onDismissError,
   onUnsupportedImageAttachment,
   onRevealAttachment,
+  onMoveAttachment,
   onRemoveAttachment,
   onSelectAgent,
   onSelectConfigOption,
@@ -129,6 +132,7 @@ export function Composer({
   const [editorRenderRevision, setEditorRenderRevision] = useState(0);
   const [fileUploads, setFileUploads] = useState<ComposerFileUpload[]>([]);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
+  const composerRef = useRef<HTMLElement | null>(null);
   const configMutationSequenceRef = useRef(0);
   const fileDropHandlerRef = useRef<((files: File[]) => void) | undefined>(undefined);
   const draftRef = useRef(prompt);
@@ -387,10 +391,36 @@ export function Composer({
     queueEditorSelection(nextText.length);
   }, [composerHistory, disabled, onChange, quoteRequest]);
 
+  const fileDropActive = useComposerFileDrop(composerRef, {
+    disabled,
+    onFiles: (dropped) => {
+      const images = dropped.filter((file) => file.type.startsWith("image/"));
+      const files = dropped.filter((file) => !file.type.startsWith("image/"));
+      if (images.length > 0) {
+        if (!imageAttachmentsAllowed) {
+          onUnsupportedImageAttachment?.("This Agent does not accept images.");
+        } else if (!fileBrowser?.attachImage) {
+          onUnsupportedImageAttachment?.("Images can be attached after the Task is open.");
+        } else {
+          const draft = { prompt: draftRef.current, context: attachments };
+          void attachEveryImage(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
+            onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to attach image."));
+          });
+        }
+      }
+      if (files.length > 0) {
+        if (fileDropHandlerRef.current) fileDropHandlerRef.current(files);
+        else onUnsupportedImageAttachment?.("Files can be attached after the Task is open.");
+      }
+    },
+  });
+
   return (
     <section
+      ref={composerRef}
       className="composer"
       aria-label="Message composer"
+      data-file-drop={fileDropActive ? true : undefined}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           setOpenMenu(undefined);
@@ -404,6 +434,7 @@ export function Composer({
         attachments={attachments}
         disabled={disabled}
         imageAttachmentsAllowed={imageAttachmentsAllowed}
+        onMoveAttachment={onMoveAttachment}
         onRemoveAttachment={onRemoveAttachment}
         onRevealAttachment={onRevealAttachment}
         uploads={fileUploads}
@@ -419,30 +450,6 @@ export function Composer({
           syncDraft(value);
           onChange(value);
           updateCompletionPickers(value, cursor);
-        }}
-        onDrop={(event) => {
-          if (disabled) return;
-          const dropped = Array.from(event.dataTransfer.files ?? []);
-          if (dropped.length === 0) return;
-          event.preventDefault();
-          const images = dropped.filter((file) => file.type.startsWith("image/"));
-          const files = dropped.filter((file) => !file.type.startsWith("image/"));
-          if (images.length > 0) {
-            if (!imageAttachmentsAllowed) {
-              onUnsupportedImageAttachment?.("This Agent does not accept images.");
-            } else if (!fileBrowser?.attachImage) {
-              onUnsupportedImageAttachment?.("Images can be attached after the Task is open.");
-            } else {
-              const draft = { prompt: draftRef.current, context: attachments };
-              void attachEveryImage(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
-                onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to attach image."));
-              });
-            }
-          }
-          if (files.length > 0) {
-            if (fileDropHandlerRef.current) fileDropHandlerRef.current(files);
-            else onUnsupportedImageAttachment?.("Files can be attached after the Task is open.");
-          }
         }}
         onPointerDown={() => {
           setOpenMenu(undefined);

@@ -28,6 +28,22 @@ describe("ImagePreviewViewport", () => {
     expect(viewportImage(tree.root).props.style.transform).not.toContain("scale(");
   });
 
+  it("opens a small raster image no larger than its own pixels when native fit is requested", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ImagePreviewViewport image={{ label: "small.png", url: "data:image/png;base64,aW1hZ2U=" }} nativeFit />,
+        { createNodeMock: viewportNodeMock },
+      );
+    });
+
+    act(() => viewportImage(tree.root).props.onLoad({ currentTarget: { naturalHeight: 120, naturalWidth: 300 } }));
+
+    expect(viewportImage(tree.root).props.style.width).toContain("300px");
+    expect(viewportImage(tree.root).props.style.height).toContain("120px");
+    expect(tree.root.findByProps({ "aria-label": "Reset image zoom" }).children.join("")).toBe("Fit");
+  });
+
   it("allows detailed inspection beyond five times the fitted size", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {

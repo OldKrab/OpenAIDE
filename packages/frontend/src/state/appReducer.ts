@@ -126,10 +126,12 @@ type AppActionPayload =
   | { type: "newTask:worktree"; worktreeId?: string; label: string; path: string; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string }
+  | { type: "newTask:attachment:order"; order: string[] }
   | { type: "taskInput:prompt"; taskId: string; prompt: string }
   | { type: "taskInput:attachment:add"; taskId: string; attachment: Attachment }
   | { type: "taskInput:attachment:addAppServer"; taskId: string; attachment: ComposerAttachment }
   | { type: "taskInput:attachment:remove"; taskId: string; attachmentId: string }
+  | { type: "taskInput:attachment:move"; taskId: string; attachmentId: string; targetIndex: number }
   | { type: "taskInput:clear"; taskId: string }
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:sendError"; taskId: string; message?: string }

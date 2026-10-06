@@ -45,12 +45,18 @@ export function ImagePreviewViewport({
   onClose,
   contentNoun = "image",
   imageClassName = "attachment-preview-image",
+  nativeFit = false,
   toolbarActions,
 }: {
   image: ImagePreviewViewportSource;
   onClose?: () => void;
   contentNoun?: string;
   imageClassName?: string;
+  /**
+   * Stops Fit from enlarging a raster image past one image pixel per device pixel, so a
+   * small screenshot opens sharp at its captured size. Vector content should keep filling.
+   */
+  nativeFit?: boolean;
   toolbarActions?: ReactNode;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -61,6 +67,22 @@ export function ImagePreviewViewport({
   const pressedImageRef = useRef(false);
   const [view, setView] = useState(FITTED_VIEW);
   const [interacting, setInteracting] = useState(false);
+  const [nativeSize, setNativeSize] = useState<{ width: number; height: number }>();
+
+  const measureNativeSize = (element: HTMLImageElement | null) => {
+    if (!nativeFit || !element?.naturalWidth || !element.naturalHeight) return;
+    const density = globalThis.devicePixelRatio || 1;
+    const width = element.naturalWidth / density;
+    const height = element.naturalHeight / density;
+    setNativeSize((current) => current?.width === width && current.height === height ? current : { width, height });
+    // The fitted box just changed; pan limits must be measured again.
+    fittedImageSizeRef.current = undefined;
+  };
+
+  // A cached image can finish loading before React attaches the load handler.
+  useEffect(() => {
+    if (imageRef.current?.complete) measureNativeSize(imageRef.current);
+  }, [image.url, nativeFit]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -208,10 +230,16 @@ export function ImagePreviewViewport({
     });
   };
 
+  const fitHeight = "100% - var(--attachment-preview-image-height-inset)";
+  const fitWidth = "100% - var(--attachment-preview-image-width-inset)";
   const imageStyle: CSSProperties = {
-    height: `calc((100% - var(--attachment-preview-image-height-inset)) * ${view.scale})`,
+    height: nativeSize
+      ? `calc(min(${fitHeight}, ${nativeSize.height}px) * ${view.scale})`
+      : `calc((${fitHeight}) * ${view.scale})`,
     transform: `translate3d(calc(-50% + ${view.x}px), calc(-50% + ${view.y}px), 0)`,
-    width: `calc((100% - var(--attachment-preview-image-width-inset)) * ${view.scale})`,
+    width: nativeSize
+      ? `calc(min(${fitWidth}, ${nativeSize.width}px) * ${view.scale})`
+      : `calc((${fitWidth}) * ${view.scale})`,
   };
   const isCenteredFit = view.scale === FIT_SCALE && view.x === 0 && view.y === 0;
 
@@ -282,6 +310,7 @@ export function ImagePreviewViewport({
           alt={image.label}
           className={imageClassName}
           draggable={false}
+          onLoad={(event) => measureNativeSize(event.currentTarget)}
           ref={imageRef}
           src={image.url}
           style={imageStyle}

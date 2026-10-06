@@ -114,6 +114,7 @@ export function MermaidDiagram({ source }: { source: string }) {
         <AttachmentImagePreviewLightbox
           contentNoun="diagram"
           image={{ label, url: success.url }}
+          nativeFit={false}
           onClose={() => setExpanded(false)}
           toolbarActions={(
             <button

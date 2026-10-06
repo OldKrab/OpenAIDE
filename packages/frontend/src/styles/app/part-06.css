@@ -18,6 +18,12 @@
   padding: 12px 13px 10px;
 }
 
+/* Files dragged anywhere over the Task surface land in this Composer. */
+.composer[data-file-drop="true"] {
+  border-color: var(--oa-focus);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--oa-focus) 22%, transparent);
+}
+
 .task-surface:not(.new-task-surface) .composer {
   min-height: 88px;
   max-height: 50dvh;

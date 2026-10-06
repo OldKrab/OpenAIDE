@@ -1592,6 +1592,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
       },
       newTask: {
         cancel: vi.fn(),
+        orderAttachments: vi.fn(),
         removeAttachment: vi.fn(),
         selectConfigOption: vi.fn(),
         submit: vi.fn(),
@@ -1625,6 +1626,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         loadToolImagePreview: vi.fn(async () => undefined),
         subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
+        moveAttachment: vi.fn(),
         removeAttachment: vi.fn(),
         removeQueueMessage: vi.fn(),
         takeQueueMessage: vi.fn(),
