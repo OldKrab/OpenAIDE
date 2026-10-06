@@ -176,7 +176,7 @@ _Avoid_: Files panel as the column name, treating File Viewer as that column's o
 The Web/Desktop Task Page destination for workspace directory browsing, filename/content search, and read-only working-change review through the existing File Viewer. VS Code uses its native file navigation and editor.
 
 **File Viewer**:
-A read-only reader in Project files that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface. It shares the wide Project files destination with the navigator. On narrow screens users move between list and reader. Back to conversation restores the mounted Chat and Composer draft.
+A read-only reader in Project files that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface and, in Web, PDF documents with selectable text. It shares the wide Project files destination with the navigator. On narrow screens users move between list and reader. Back to conversation restores the mounted Chat and Composer draft.
 _Avoid_: Treating a browser download or file-manager reveal as the File Viewer, live editor, global editor pane, naming the Task Panel after files
 
 **File Tab**:

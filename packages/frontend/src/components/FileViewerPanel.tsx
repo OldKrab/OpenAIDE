@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowLeft, Copy, Download, FileCode2, FileText, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, Copy, Download, FileCode2, FileText, FileType2, Image, LoaderCircle, PanelRight, PanelRightClose, RefreshCw, X } from "lucide-react";
 import type { FileViewerError, FileViewerSnapshot } from "@openaide/app-server-client";
 import type { FileViewerTab } from "./useTaskFileViewer";
 import { FileCodeReader } from "./FileCodeReader";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { copyText } from "./clipboard";
 import { ImagePreviewViewport } from "./ImagePreviewViewport";
+import { PdfPreview } from "./PdfPreview";
 import { applyTaskPanelRatio, setLayoutResizing } from "./layoutResize";
 import { currentFrontendShell, type FileViewerDownloads } from "../services/frontendShell";
 import { useFileViewerDownload } from "./useFileViewerDownload";
@@ -320,6 +321,9 @@ function ViewerBody({
             />
           </div>
         ) : null}
+        {tab.kind === "pdf" ? (
+          <PdfPreview onClose={onClose} onRefresh={onRefresh} tab={tab} />
+        ) : null}
         {tab.kind === "source" && tab.text ? (
           <SourceView onQuote={onQuote} tab={tab} />
         ) : null}
@@ -362,6 +366,7 @@ function tabIcon(tab: FileViewerTab) {
   if (tab.kind === "pending") return <LoaderCircle className="file-viewer-pending-icon" size={12} />;
   if (tab.kind === "markdown") return <FileText size={12} />;
   if (tab.kind === "image") return <Image size={12} />;
+  if (tab.kind === "pdf") return <FileType2 size={12} />;
   return <FileCode2 size={12} />;
 }
 

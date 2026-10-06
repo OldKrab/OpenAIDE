@@ -9,7 +9,7 @@ import { test } from "vitest";
 const execFileAsync = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 
-test("a custom frontend output directory receives the app and Diagram renderer", async () => {
+test("a custom frontend output directory receives the app, Diagram renderer, and PDF renderer", async () => {
   const outDir = await mkdtemp(path.join(tmpdir(), "openaide-frontend-build-"));
   try {
     await execFileAsync("npm", ["run", "build", "--", "--outDir", outDir, "--emptyOutDir"], {
@@ -22,6 +22,7 @@ test("a custom frontend output directory receives the app and Diagram renderer",
       access(path.join(outDir, "assets", "index.js")),
       access(path.join(outDir, "mermaid-renderer.html")),
       access(path.join(outDir, "mermaid-renderer.js")),
+      access(path.join(outDir, "pdf-renderer.js")),
     ]);
   } finally {
     await rm(outDir, { recursive: true, force: true });
