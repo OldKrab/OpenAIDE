@@ -155,6 +155,7 @@ export function TaskView({
   onRetryConnection,
   onRetryConfigOptions,
   onRevealAttachment,
+  onMoveAttachment,
   onRemoveAttachment,
   onRemoveQueueMessage,
   onReloadNativeSession,
@@ -213,6 +214,7 @@ export function TaskView({
   onRetryConnection?: () => void;
   onRetryConfigOptions?: () => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
+  onMoveAttachment?: (attachmentId: string, targetIndex: number) => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onRemoveQueueMessage?: (queuedMessageId: string) => void;
   onReloadNativeSession?: () => Promise<void>;
@@ -525,6 +527,7 @@ export function TaskView({
     <section
       aria-label="Task chat"
       className="task-surface task-work-stack"
+      data-composer-drop-scope
       data-desktop-window={desktopWindow?.platform}
       data-project-files={projectFilesOpen}
     >
@@ -715,6 +718,7 @@ export function TaskView({
               onDismissError={taskInput.error ? intents.dismissError : undefined}
               onUnsupportedImageAttachment={intents.reportAttachmentError}
               onRevealAttachment={onRevealAttachment}
+              onMoveAttachment={onMoveAttachment}
               onRemoveAttachment={onRemoveAttachment}
               onRetryConfigOptions={onRetryConfigOptions}
               onSelectConfigOption={onSelectConfigOption}

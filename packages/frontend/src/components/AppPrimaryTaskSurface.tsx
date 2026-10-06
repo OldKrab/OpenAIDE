@@ -181,6 +181,7 @@ export function AppPrimaryTaskSurface({
         onRetryConnection={retryTaskOpen}
         onRetryConfigOptions={controller.retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
+        onMoveAttachment={callbacks.task.moveAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
         onRemoveQueueMessage={callbacks.task.removeQueueMessage}
         onReloadNativeSession={callbacks.task.reloadNativeSession}
@@ -232,6 +233,7 @@ export function AppPrimaryTaskSurface({
       onLoadComposerHistory={callbacks.newTask.loadComposerHistory}
       onManageWorktrees={workspaceRecovery?.manageWorktrees}
       onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
+      onOrderAttachments={callbacks.newTask.orderAttachments}
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onRemoveProject={onRemoveProject}
       onRetryPreparation={() => callbacks.newTask.submit()}

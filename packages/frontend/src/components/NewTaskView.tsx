@@ -5,6 +5,8 @@ import {
   agentOptions,
   appServerAttachmentHandles,
   appServerComposerImages,
+  moveAttachment,
+  newTaskDraftAttachments,
   type AgentOption,
   type ComposerSelection,
   type ProjectOption,
@@ -61,6 +63,7 @@ export function NewTaskView({
   state,
   onSelectConfigOption,
   onCancelTask,
+  onOrderAttachments,
   onRemoveAttachment,
   onSubmitTask,
   agents,
@@ -95,6 +98,7 @@ export function NewTaskView({
   onResolveConfigPreferences?: (action: "retry" | "useCurrentSettings") => Promise<void>;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
+  onOrderAttachments?: (order: string[]) => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSubmitTask: (draft: { prompt: string; context: AppState["newTask"]["context"] }) => void;
   agents?: AgentOption[];
@@ -162,11 +166,7 @@ export function NewTaskView({
   const preparedTaskAttachments = state.preparedTaskInput?.context ?? [];
   const composerAttachments = state.newTask.submitting
     ? state.newTask.pending?.context ?? []
-    : [
-        ...state.newTask.context,
-        ...preparedTaskAttachments.filter((prepared) =>
-          !state.newTask.context.some((local) => local.local_id === prepared.local_id)),
-      ];
+    : newTaskDraftAttachments(state.newTask, preparedTaskAttachments);
   const externalPrompt = state.newTask.submitting
     ? state.newTask.pending?.prompt ?? ""
     : state.newTask.prompt;
@@ -264,6 +264,10 @@ export function NewTaskView({
       onChange={intents.changePrompt}
       onDismissError={state.newTask.error ? intents.dismissError : undefined}
       onUnsupportedImageAttachment={intents.reportAttachmentError}
+      onMoveAttachment={onOrderAttachments ? (attachmentId, targetIndex) => {
+        const reordered = moveAttachment(composerAttachments, attachmentId, targetIndex);
+        if (reordered !== composerAttachments) onOrderAttachments(reordered.map((attachment) => attachment.local_id));
+      } : undefined}
       onRemoveAttachment={onRemoveAttachment}
       onSelectAgent={(agentId) => {
         intents.selectAgent(agentId, agentChoices.find((agent) => agent.id === agentId)?.label);
@@ -301,6 +305,7 @@ export function NewTaskView({
     <section
       className="task-surface new-task-surface"
       aria-label="New task"
+      data-composer-drop-scope
       onKeyDown={(event) => {
         if (event.key === "Escape") setOpenContextMenu(undefined);
       }}

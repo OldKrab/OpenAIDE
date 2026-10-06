@@ -58,6 +58,7 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
         { kind: "project", projectId: projectId as ProjectId },
       );
     },
+    orderAttachments: (order) => dispatch({ type: "newTask:attachment:order", order }),
     removeAttachment: (attachmentId) => {
       // Failed first Send can restore the same row into both draft sources;
       // removal must clear the client copy as well as the prepared-Task copy.

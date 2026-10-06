@@ -51,7 +51,8 @@ type NewTaskAction =
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
   | { type: "newTask:worktree"; worktreeId?: string; label: string; path: string; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
-  | { type: "newTask:attachment:remove"; attachmentId: string };
+  | { type: "newTask:attachment:remove"; attachmentId: string }
+  | { type: "newTask:attachment:order"; order: string[] };
 
 export function reduceNewTaskState(state: AppState, action: AppAction): AppState | undefined {
   if (!isNewTaskAction(action)) return undefined;
@@ -405,6 +406,8 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           context: state.newTask.context.filter((attachment) => attachment.local_id !== action.attachmentId),
         },
       };
+    case "newTask:attachment:order":
+      return { ...state, newTask: { ...state.newTask, contextOrder: action.order } };
   }
 }
 

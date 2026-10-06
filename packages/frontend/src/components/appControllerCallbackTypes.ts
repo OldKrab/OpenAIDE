@@ -111,6 +111,8 @@ export type NewTaskCallbacks = {
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   loadComposerHistory?: () => Promise<string[]>;
+  /** Records the complete row order of the merged New Task draft. */
+  orderAttachments: (order: string[]) => void;
   removeAttachment: (attachmentId: string) => void;
   selectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   submit: (draft?: NewTaskDraftInput) => void;
@@ -136,6 +138,7 @@ export type TaskCallbacks = {
   /** Lazily loads a validated workspace image without exposing a caller-selected path. */
   loadToolImagePreview: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   revealAttachment: (attachmentId: string) => Promise<void>;
+  moveAttachment: (attachmentId: string, targetIndex: number) => void;
   removeAttachment: (attachmentId: string) => void;
   removeQueueMessage: (queuedMessageId: string) => Promise<void>;
   reloadNativeSession?: () => Promise<void>;

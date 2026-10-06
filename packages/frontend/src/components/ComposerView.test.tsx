@@ -69,7 +69,7 @@ describe("Composer view behavior", () => {
     act(() => {
       renderer = create(composerElement(), {
         createNodeMock: (element) => element.type === "section"
-          ? { contains: () => true }
+          ? { addEventListener: vi.fn(), closest: () => null, contains: () => true, removeEventListener: vi.fn() }
           : null,
       });
     });
@@ -428,14 +428,33 @@ describe("Composer view behavior", () => {
       attachmentMode: "webUpload",
       attachFiles: vi.fn(async () => undefined),
     };
-    const renderer = renderComposer({ fileBrowser, prompt: "Inspect" });
+    // The Composer listens on the surrounding Task surface, so a drop over Chat attaches too.
+    const surface = new Map<string, (event: unknown) => void>();
+    let renderer: ReturnType<typeof create> | undefined;
+    act(() => {
+      renderer = create(composerElement({ fileBrowser, prompt: "Inspect" }), {
+        createNodeMock: (element) => (element.props as { className?: string }).className === "composer"
+          ? {
+              closest: () => ({
+                addEventListener: (type: string, listener: (event: unknown) => void) => surface.set(type, listener),
+                removeEventListener: vi.fn(),
+              }),
+            }
+          : null,
+      });
+    });
+    if (!renderer) throw new Error("Composer renderer was not created");
     const preventDefault = vi.fn();
 
-    act(() => textarea(renderer.root).props.onDrop({
-      dataTransfer: { files: [image, file] },
+    act(() => surface.get("dragover")!({ dataTransfer: { types: ["Files"] }, preventDefault: vi.fn() }));
+    expect(renderer.root.findByProps({ className: "composer" }).props["data-file-drop"]).toBe(true);
+
+    act(() => surface.get("drop")!({
+      dataTransfer: { files: [image, file], types: ["Files"] },
       preventDefault,
     }));
     await settleRenderer();
+    expect(renderer.root.findByProps({ className: "composer" }).props["data-file-drop"]).toBeUndefined();
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(fileBrowser.attachImage).toHaveBeenCalledWith(image, expect.objectContaining({ prompt: "Inspect" }));

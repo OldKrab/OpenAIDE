@@ -22,11 +22,14 @@ export function AttachmentImagePreviewLightbox({
   image,
   onClose,
   contentNoun,
+  nativeFit = true,
   toolbarActions,
 }: {
   image: AttachmentImagePreviewSource;
   onClose: () => void;
   contentNoun?: string;
+  /** Raster Images open no larger than their own pixels; vector callers opt out to fill the stage. */
+  nativeFit?: boolean;
   toolbarActions?: ReactNode;
 }) {
   return (
@@ -46,6 +49,7 @@ export function AttachmentImagePreviewLightbox({
         <ImagePreviewViewport
           contentNoun={contentNoun}
           image={image}
+          nativeFit={nativeFit}
           onClose={onClose}
           toolbarActions={toolbarActions}
         />

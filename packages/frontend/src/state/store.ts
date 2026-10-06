@@ -66,6 +66,11 @@ export type NewTaskState = {
   question: string;
   submitting: boolean;
   context: ComposerAttachment[];
+  /**
+   * Row order chosen by the user. The New Task draft spans this state and the
+   * Prepared Task's input, so the order lives beside them instead of in either list.
+   */
+  contextOrder?: string[];
   pending?: {
     prompt: string;
     context: ComposerAttachment[];
