@@ -11,43 +11,12 @@ const defaultAgentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-a
 /** Starts an isolated real Web, App Server, and deterministic ACP Agent stack. */
 export async function startFullStackHarness({ agentArgs = [], frontend = "web", agentFixture = defaultAgentFixture, webTransport } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-smoke-"));
-  const staticRoot = path.join(root, "static");
+  // Global setup built the frontends and the App Server once for the run.
+  const staticRoot = process.env[frontend === "desktop" ? "OPENAIDE_SMOKE_STATIC_ROOT_DESKTOP" : "OPENAIDE_SMOKE_STATIC_ROOT_WEB"];
+  if (!staticRoot) throw new Error("Smoke build outputs are missing: run the specs through the Playwright config, whose global setup builds them.");
   // Tests order the Agent fixture through gate files here instead of delays.
   const gateRoot = path.join(root, "gates");
   await mkdir(gateRoot);
-  try {
-    await run("npm", ["run", "build:typescript-deps"]);
-    if (frontend === "desktop") {
-      await run("npm", [
-        "exec",
-        "--workspace",
-        "openaide-frontend",
-        "vite",
-        "--",
-        "build",
-        "--config",
-        path.join(repoRoot, "tests/smoke/desktop-shell/vite.config.mjs"),
-        "--outDir",
-        staticRoot,
-        "--emptyOutDir",
-      ]);
-    } else {
-      await run("npm", [
-        "run",
-        "build",
-        "--workspace",
-        "openaide-frontend",
-        "--",
-        "--outDir",
-        staticRoot,
-        "--emptyOutDir",
-      ]);
-    }
-    await run("cargo", ["build", "-p", "openaide-app-server"]);
-  } catch (error) {
-    await rm(root, { recursive: true, force: true });
-    throw error;
-  }
 
   const logs = [];
   const server = spawn(process.execPath, [path.join(repoRoot, "apps/web/src/dev-server.mjs")], {
@@ -161,22 +130,6 @@ function createProbeClient(baseUrl, connectionId) {
       return result?.result?.result ?? result?.result;
     },
   };
-}
-
-async function run(command, args) {
-  const child = spawn(command, args, {
-    cwd: repoRoot,
-    env: environmentWithoutOpenAideState(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  child.stdout.on("data", (chunk) => { output += chunk; });
-  child.stderr.on("data", (chunk) => { output += chunk; });
-  const code = await new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", resolve);
-  });
-  if (code !== 0) throw new Error(`${command} ${args.join(" ")} failed (${code}):\n${output}`);
 }
 
 async function waitForServer(baseUrl, child, logs) {

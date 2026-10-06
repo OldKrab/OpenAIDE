@@ -45,6 +45,8 @@ Place input that must land inside a specific frame from inside the page, at an o
 
 Prove behavior at the lightest boundary that shows it. A test that launches a browser, a process, or a production build runs under the watchdog.
 
+Build in the suite's global setup, which has no deadline and runs once; a hook or test starts what is already built. Playwright smoke builds live in `tests/smoke/global-setup.mjs`.
+
 ## Ports
 
 The process that serves a port binds it: start it on port 0 and read the bound port from its output. For an address that must refuse connections, keep the port owned by a socket that is not listening for as long as the test needs the refusal.

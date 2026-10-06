@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/smoke",
+  globalSetup: "./tests/smoke/global-setup.mjs",
   testMatch: ["session-deletion.spec.mjs", "config-preferences.spec.mjs", "task-chat.spec.mjs", "native-subagents.spec.mjs", "desktop-new-task.spec.mjs", "file-viewer-layout.spec.mjs", "web-secret-vault.spec.mjs"],
   fullyParallel: false,
   forbidOnly: true,
