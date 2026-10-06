@@ -91,6 +91,35 @@ test("Windows ends descendants that left the tree taskkill walked", async () => 
   assert.equal(clock.pending.size, 0);
 });
 
+test("Windows ends an orphan that still holds the pipes after the tree is gone", async () => {
+  const child = processFixture();
+  const observed = observeSmokeProcess(child);
+  const clock = controlledClock();
+  const events = [];
+  const root = { pid: 42, ppid: 1, created: 100n, name: "app-server.exe" };
+  // Its parent exited before the first listing, so no parent link reaches the tree.
+  const orphan = { pid: 77, ppid: 999, created: 120n, name: "git.exe" };
+  const listings = [[root, orphan], [orphan], [orphan]];
+  const targets = [];
+  const stopping = shutdownSmokeProcess(child, observed, {
+    platform: "win32", clock, onEvent: (event) => events.push(event),
+    listProcesses: async () => listings.shift(),
+    spawnProcess: closingKillers(targets),
+  });
+  assert.equal((await clock.next()).ms, 5_000);
+  const closureDeadline = await clock.next();
+  assert.deepEqual(targets, [42], "an orphan is left alone until closure has failed");
+  child.exit(1);
+  closureDeadline.expire();
+  assert.equal((await clock.next()).ms, 5_000);
+  assert.equal((await clock.next()).ms, 15_000);
+  child.close(1);
+  await stopping;
+  assert.deepEqual(targets, [42, 77]);
+  assert.deepEqual(events.find((event) => event.outcome === "orphans_ended").orphans, { outcome: "killed", killed: 1, names: ["git.exe"] });
+  assert.equal(clock.pending.size, 0);
+});
+
 test("Windows names descendants it could not end", async () => {
   const child = processFixture();
   const observed = observeSmokeProcess(child);
