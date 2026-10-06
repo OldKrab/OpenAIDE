@@ -37,4 +37,30 @@ describe("skill tool details", () => {
     expect(html).not.toContain("alert(1)");
     expect(html).not.toContain("read-tool-line-number");
   });
+
+  it("shows the request passed to an Agent-native skill activation", async () => {
+    const { ChatToolDetails } = await import("./ChatToolDetailsView");
+    const details: ActivityToolDetails = {
+      locations: [],
+      content: [],
+      input: {
+        command: [],
+        queries: [],
+        fields: [
+          { name: "args", value: { kind: "string", value: "Redesign the compaction row" } },
+          { name: "skill", value: { kind: "string", value: "prototype" } },
+        ],
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      <ChatToolDetails
+        details={details}
+        step={{ kind: "tool", name: "skill", status: "completed", input_summary: "prototype" }}
+      />,
+    );
+
+    expect(html).toContain('<p class="skill-tool-args">Redesign the compaction row</p>');
+    expect(html).not.toContain("No skill instructions returned.");
+  });
 });

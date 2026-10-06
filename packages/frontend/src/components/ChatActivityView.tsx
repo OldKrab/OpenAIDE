@@ -434,8 +434,9 @@ function presentToolStep(
 ): Extract<ActivityStep, { kind: "tool" }> {
   const name = toolPresentationName(step.name, details, step.output_preview);
   const output = details ? readDetailOutput(details, step.output_preview) : step.output_preview ?? "";
+  // A skill read is named by its document; an Agent-native activation only by its input.
   const inputSummary = name === "skill"
-    ? skillDocumentName(output)
+    ? skillDocumentName(output) ?? step.input_summary
     : name === "web_search" && step.name !== "web_search"
       ? details?.input?.query
       : step.input_summary;

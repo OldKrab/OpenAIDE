@@ -302,6 +302,40 @@ describe("ChatActivityView", () => {
     );
   });
 
+  it("titles an Agent-native skill activation by the name the App Server provides", () => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_claude_skill",
+      title: "Load skill: prototype",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [
+        {
+          kind: "tool",
+          tool_call_id: "claude_skill",
+          name: "skill",
+          status: "completed",
+          input_summary: "prototype",
+          output_preview: "Launching skill: prototype",
+          permission_outcomes: [],
+        },
+      ],
+    };
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+
+    expect(tree.root.findByProps({ className: "activity-step-title" }).children.join("")).toContain(
+      "Activated prototype skill",
+    );
+  });
+
   it("routes a skill-shaped Cursor read through the skill renderer", () => {
     const skillDocument = [
       "---",
