@@ -13,6 +13,7 @@ fn projects_legacy_user_data_image_markdown_as_typed_message_parts() {
             created_at: "2026-07-16T00:00:00Z".to_string(),
             attachments: vec![],
         },
+        timing: Default::default(),
     });
 
     assert_eq!(
@@ -48,6 +49,7 @@ fn projects_thought_messages_as_system_chat_items() {
             }],
             created_at: "2026-06-29T10:00:00Z".to_string(),
         },
+        timing: Default::default(),
     });
 
     assert_eq!(item.role, ChatRole::System);
@@ -126,6 +128,7 @@ fn projects_one_agent_message_as_one_ordered_chat_item() {
             ],
             created_at: "2026-06-29T10:00:00Z".to_string(),
         },
+        timing: Default::default(),
     });
 
     assert_eq!(item.role, ChatRole::Agent);

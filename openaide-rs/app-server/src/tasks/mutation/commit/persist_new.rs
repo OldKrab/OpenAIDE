@@ -18,6 +18,9 @@ pub(super) fn persist_new_task(
         .lock()
         .expect("runtime state poisoned")
         .next_revision_candidate();
+    // Only a Task created by a live prompt witnessed its first rows; an adopted
+    // native session arrives as history and stays untimed.
+    let witnessed_live = task.active_turn_started_at.is_some();
     let mut stored_messages = Vec::with_capacity(initial_messages.len());
     let mut artifact_replacements = Vec::new();
     for (index, mut message) in initial_messages.into_iter().enumerate() {
@@ -33,6 +36,11 @@ pub(super) fn persist_new_task(
                 message_id: identity.clone(),
                 identity,
                 message_type: message.message_type().to_string(),
+                timing: if witnessed_live {
+                    crate::tasks::mutation::observed_timing::first_observation(&message)
+                } else {
+                    Default::default()
+                },
                 message,
             },
         });

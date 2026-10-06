@@ -3739,6 +3739,7 @@ fn newer_catalog_activity_marks_reload_available_without_loading_the_live_attach
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -3808,6 +3809,7 @@ fn catalog_activity_is_external_only_beyond_the_last_own_session_operation() {
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -3941,6 +3943,7 @@ fn explicit_reload_replaces_history_and_clears_the_captured_requirement() {
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -4086,6 +4089,7 @@ fn open_loads_once_when_resume_is_unsupported() {
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -4219,6 +4223,7 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -4327,6 +4332,7 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -4418,6 +4424,7 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -4515,6 +4522,7 @@ fn open_known_session_does_not_wait_for_catalog_listing() {
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -4995,6 +5003,7 @@ fn deferred_open_load_failure_preserves_the_explicit_reload_requirement() {
                     }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -5121,6 +5130,7 @@ fn open_resumes_native_session_when_cached_history_is_fresh() {
                     }],
                     created_at: "2026-01-02T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -8417,6 +8427,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
                     }],
                     created_at: "2025-12-31T00:00:00.000Z".to_string(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -9538,6 +9549,7 @@ fn append_old_completed_turn(store: &Store, task_id: &str) {
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                     attachments: Vec::new(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -9560,6 +9572,7 @@ fn append_old_completed_turn(store: &Store, task_id: &str) {
                         level: Some("info".to_string()),
                     }],
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();
@@ -9582,6 +9595,7 @@ fn append_running_turn(store: &Store, task_id: &str, turn_id: &str) {
                     collapsed: true,
                     steps: Vec::new(),
                 },
+                timing: Default::default(),
             },
         )
         .unwrap();

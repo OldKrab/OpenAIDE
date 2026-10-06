@@ -46,6 +46,7 @@ pub(crate) fn append_normalized_to_store(
         identity,
         message_type: message.message_type().to_string(),
         message,
+        timing: Default::default(),
     };
     store.append_message(task_id, chat)
 }

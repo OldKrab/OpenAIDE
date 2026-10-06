@@ -252,6 +252,8 @@ function sameTaskNavigationSummary(left: TaskSummary, right: TaskSummary) {
     && left.status === right.status
     && left.has_messages === right.has_messages
     && left.unread === right.unread
+    && left.active_turn_started_at === right.active_turn_started_at
+    && left.attention?.event_id === right.attention?.event_id
     && left.created_at === right.created_at
     && left.updated_at === right.updated_at
     && left.last_activity === right.last_activity

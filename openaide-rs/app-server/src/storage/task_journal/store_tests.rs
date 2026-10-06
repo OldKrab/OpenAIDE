@@ -151,6 +151,7 @@ fn task_catalog_lists_metadata_without_replaying_corrupt_chat_history() {
                     }],
                     created_at: "2026-07-20T00:00:00Z".to_string(),
                 },
+                timing: Default::default(),
             },
         });
     projection.message_meta.message_count = 1;
@@ -250,6 +251,7 @@ fn pre_upgrade_subagent_activity_without_events_still_opens() {
                         events: vec![crate::protocol::model::SubagentActivity::Delegated],
                     }],
                 },
+                timing: Default::default(),
             },
         });
     projection.message_meta.message_count = 1;
@@ -327,6 +329,7 @@ fn released_tool_presentation_snapshot_migrates_when_task_opens() {
                         permission_outcomes: Vec::new(),
                     }],
                 },
+                timing: Default::default(),
             },
         });
     projection.message_meta.message_count = 1;
@@ -425,6 +428,7 @@ fn released_search_presentation_snapshot_migrates_when_task_opens() {
                         permission_outcomes: Vec::new(),
                     }],
                 },
+                timing: Default::default(),
             },
         });
     projection.message_meta.message_count = 1;
@@ -513,6 +517,7 @@ fn released_tool_presentation_journal_migrates_when_task_opens() {
                         permission_outcomes: Vec::new(),
                     }],
                 },
+                timing: Default::default(),
             },
         });
     projection.message_meta.message_count = 1;
@@ -599,6 +604,7 @@ fn task_with_view_presentation_still_opens() {
                         permission_outcomes: Vec::new(),
                     }],
                 },
+                timing: Default::default(),
             },
         });
     projection.message_meta.message_count = 1;
@@ -1138,6 +1144,7 @@ fn replacing_a_large_message_history_completes_without_quadratic_delay() {
                     }],
                     created_at: "2026-07-21T00:00:00Z".to_string(),
                 },
+                timing: Default::default(),
             },
         })
         .collect();

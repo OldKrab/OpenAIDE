@@ -142,6 +142,10 @@ impl TaskTransitions {
                         active_work_ended = true;
                         return Ok(TaskMutationResult::Changed);
                     }
+                    if result.is_ok() {
+                        // Before a queued successor can replace the turn fields.
+                        ctx.close_turn_on_final_answer(&now)?;
+                    }
                     match &result {
                         Ok(AgentPromptOutcome::EndTurn) => {
                             ctx.finish_running_activity(
@@ -292,6 +296,7 @@ fn accept_queued_turn(
             created_at: now.to_string(),
             attachments: queued.chat_attachments.clone(),
         },
+        timing: Default::default(),
     });
     let mut activity = crate::tasks::lifecycle::running_turn_message(now);
     let NormalizedMessage::Activity { id, .. } = &mut activity else {
@@ -306,6 +311,7 @@ fn accept_queued_turn(
         message_type: "activity".to_string(),
         message_id: format!("message_{}", uuid::Uuid::new_v4()),
         message: activity,
+        timing: Default::default(),
     });
 
     let task = ctx.task_mut();

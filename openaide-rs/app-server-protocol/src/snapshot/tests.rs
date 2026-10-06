@@ -68,6 +68,7 @@ fn chat_is_part_based() {
                 },
             },
         ],
+        timing: None,
     };
 
     let value = serde_json::to_value(item).unwrap();

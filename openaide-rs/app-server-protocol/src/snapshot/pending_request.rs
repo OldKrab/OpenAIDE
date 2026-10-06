@@ -15,6 +15,9 @@ pub struct PendingRequestSnapshot {
     pub permission: Option<PermissionRequestParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question: Option<QuestionRequestParams>,
+    /// When the App Server opened the request, as epoch milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

@@ -6,6 +6,7 @@ import type {
   ElicitationValue,
 } from "@openaide/app-shell-contracts";
 import { QuestionField } from "./QuestionField";
+import { RequestWait } from "./timeMarks";
 import { initialQuestionValues, submittedQuestionValues, validateQuestionValues, type QuestionValues } from "./questionFormModel";
 
 export type QuestionResponseState = { responding: boolean; error?: string };
@@ -59,7 +60,7 @@ function PendingQuestion({
       noValidate
       onSubmit={(event) => { event.preventDefault(); submit(); }}
     >
-      <QuestionHeader icon="pending" prompt={elicitation.prompt} status={responding ? "Responding" : "Waiting"} />
+      <QuestionHeader icon="pending" prompt={elicitation.prompt} requestedAt={elicitation.requested_at} status={responding ? "Responding" : "Waiting"} />
       <div className="question-fields">
         {elicitation.fields.map((field) => (
           <QuestionField
@@ -131,10 +132,13 @@ function ResolvedQuestion({ elicitation }: { elicitation: ElicitationMessage }) 
 function QuestionHeader({
   icon,
   prompt,
+  requestedAt,
   status,
 }: {
   icon: "pending" | "answered" | "closed" | "error";
   prompt: string;
+  /** When the pending Question was opened, so its header can show how long it has waited. */
+  requestedAt?: string;
   status: string;
 }) {
   return (
@@ -144,7 +148,9 @@ function QuestionHeader({
         <strong>{status === "Waiting" || status === "Responding" ? "Question" : status}</strong>
         <small>{prompt}</small>
       </span>
-      {(status === "Waiting" || status === "Responding") ? <span className="question-state">{status}</span> : null}
+      {status === "Waiting" && requestedAt
+        ? <RequestWait className="question-state" label="Waiting" since={requestedAt} />
+        : (status === "Waiting" || status === "Responding") ? <span className="question-state">{status}</span> : null}
     </header>
   );
 }

@@ -1,9 +1,10 @@
 use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::{
     ActivityStatus as ProtocolActivityStatus, ActivityStepSnapshot, AttachmentKind,
-    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, CompactionStatusSnapshot, MessagePart,
-    QuestionMessageAction, QuestionMessageState, SubagentActivitySnapshot,
-    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
+    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatItemTiming, ChatRole,
+    CompactionStatusSnapshot, MessagePart, QuestionMessageAction, QuestionMessageState,
+    SubagentActivitySnapshot, TimeSpanSnapshot, ToolPermissionDecisionSnapshot,
+    ToolPermissionOutcomeSnapshot,
 };
 use openaide_app_server_protocol::task::{
     ActivityToolContent as ProtocolActivityToolContent,
@@ -17,8 +18,8 @@ use std::sync::LazyLock;
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
-    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, CompactionStatus,
-    NormalizedMessage, QuestionAction, QuestionState,
+    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, ChatTiming, CompactionStatus,
+    NormalizedMessage, ObservedSpan, QuestionAction, QuestionState,
 };
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
@@ -29,7 +30,23 @@ pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
         role,
         status,
         parts,
+        timing: project_timing(&message.timing),
     }
+}
+
+fn project_timing(timing: &ChatTiming) -> Option<ChatItemTiming> {
+    if timing.is_empty() {
+        return None;
+    }
+    let span = |span: &ObservedSpan| TimeSpanSnapshot {
+        started_at: span.started_at.clone(),
+        ended_at: span.ended_at.clone(),
+    };
+    Some(ChatItemTiming {
+        sent_at: timing.sent_at.clone(),
+        run: timing.run.as_ref().map(span),
+        closed_turn: timing.closed_turn.as_ref().map(span),
+    })
 }
 
 fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Vec<MessagePart>) {

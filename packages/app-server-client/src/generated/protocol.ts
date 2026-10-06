@@ -1179,7 +1179,12 @@ export type NativeSessionSummary = { reference: NativeSessionReference, projectI
 
 export type NativeSessionReference = { agentId: AgentId, sessionId: string, };
 
-export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, lifecycle: TaskLifecycle, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, pinned?: boolean, attention?: TaskAttentionEvent | null, hasMessages: boolean, worktreeId?: WorktreeId | null,
+export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, lifecycle: TaskLifecycle, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, pinned?: boolean, attention?: TaskAttentionEvent | null,
+/**
+ * Start of the turn the Agent is working on, so Navigation can show how
+ * long a Task has been running without loading its Chat.
+ */
+activeTurnStartedAt?: string | null, hasMessages: boolean, worktreeId?: WorktreeId | null,
 /**
  * Availability is independent of Task runtime status so history remains readable.
  */
@@ -1287,11 +1292,33 @@ export type TaskSendBlockerKind = "taskPreparing" | "taskRunning" | "agentConfig
 
 export type ChatSnapshot = { items: Array<ChatItem>, hasMoreBefore?: boolean, hasMessages: boolean, startCursor?: MessageId | null, endCursor?: MessageId | null, };
 
-export type ChatItem = { messageId: MessageId, turnId?: TurnId | null, role: ChatRole, status: ChatItemStatus, parts: Array<MessagePart>, };
+export type ChatItem = { messageId: MessageId, turnId?: TurnId | null, role: ChatRole, status: ChatItemStatus, parts: Array<MessagePart>,
+/**
+ * Times the App Server observed for this row while it was live. Absent for
+ * history it did not witness, such as a reloaded native session.
+ */
+timing?: ChatItemTiming | null, };
 
 export type ChatRole = "user" | "agent" | "system";
 
 export type ChatItemStatus = "complete" | "streaming" | "failed" | "interrupted";
+
+export type ChatItemTiming = {
+/**
+ * When the user's message was accepted.
+ */
+sentAt?: string | null,
+/**
+ * How long this row's own work ran: one Activity or one compaction.
+ */
+run?: TimeSpanSnapshot | null,
+/**
+ * The turn this row closed: set on the turn's final Agent answer, or on the
+ * interruption that ended it.
+ */
+closedTurn?: TimeSpanSnapshot | null, };
+
+export type TimeSpanSnapshot = { startedAt: string, endedAt?: string | null, };
 
 export type CompactionStatusSnapshot = "inProgress" | "completed" | "failed" | "cancelled" | "unknown";
 
@@ -1331,7 +1358,11 @@ export type RecoveryAction = "continue" | "reuseLastPrompt";
 
 export type SettingsSnapshot = { sections: Array<SettingsSection>, preferences?: AppPreferencesResult | null, runtime?: RuntimeSettingsResult | null, };
 
-export type PendingRequestSnapshot = { requestId: RequestId, scope: PendingRequestScope, kind: PendingRequestKind, title: string, permission?: PermissionRequestParams | null, question?: QuestionRequestParams | null, };
+export type PendingRequestSnapshot = { requestId: RequestId, scope: PendingRequestScope, kind: PendingRequestKind, title: string, permission?: PermissionRequestParams | null, question?: QuestionRequestParams | null,
+/**
+ * When the App Server opened the request, as epoch milliseconds.
+ */
+createdAt?: string | null, };
 
 export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientInstanceId, } | { "kind": "task", taskId: TaskId, };
 

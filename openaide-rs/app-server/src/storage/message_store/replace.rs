@@ -47,6 +47,7 @@ impl Store {
                         .cloned()
                         .unwrap_or_else(|| Uuid::new_v4().to_string()),
                     message,
+                    timing: Default::default(),
                 },
             });
         }

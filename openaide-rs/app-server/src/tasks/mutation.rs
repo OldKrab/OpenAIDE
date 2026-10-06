@@ -19,6 +19,7 @@ use crate::tasks::runtime_state::RuntimeState;
 mod commit;
 mod create_validation;
 mod message_lookup;
+mod observed_timing;
 mod stream_text;
 
 use create_validation::TaskCreationValidationContext;
@@ -128,6 +129,7 @@ impl TaskMutationContext<'_> {
                 message_id: identity.clone(),
                 identity,
                 message_type: message.message_type().to_string(),
+                timing: observed_timing::first_observation(&message),
                 message,
             },
         };
@@ -149,6 +151,9 @@ impl TaskMutationContext<'_> {
             .map(|stored| stored.sequence + 1)
             .unwrap_or(1);
         message.cursor = cursor::from_sequence(sequence);
+        if message.timing.is_empty() {
+            message.timing = observed_timing::first_observation(&message.message);
+        }
         let stored = StoredMessage {
             sequence,
             chat: message,
@@ -212,6 +217,7 @@ impl TaskMutationContext<'_> {
             identity,
             message_type: message.message_type().to_string(),
             message,
+            timing: Default::default(),
         };
         let stored = if let Some(stored) = self
             .projection
@@ -224,6 +230,11 @@ impl TaskMutationContext<'_> {
             chat.cursor = stored.chat.cursor.clone();
             chat.message_id = stored.chat.message_id.clone();
             chat.message.preserve_created_at_from(&stored.chat.message);
+            chat.timing = observed_timing::carried_over(
+                &stored.chat.timing,
+                &chat.message,
+                &crate::time::now_string(),
+            );
             stored.chat = chat;
             stored.clone()
         } else {
@@ -234,6 +245,7 @@ impl TaskMutationContext<'_> {
                 .map(|message| message.sequence + 1)
                 .unwrap_or(1);
             chat.cursor = cursor::from_sequence(sequence);
+            chat.timing = observed_timing::first_observation(&chat.message);
             let stored = StoredMessage { sequence, chat };
             self.projection.messages.push(stored.clone());
             stored
@@ -297,6 +309,7 @@ impl TaskMutationContext<'_> {
                     identity,
                     message_type: message.message_type().to_string(),
                     message,
+                    timing: Default::default(),
                 },
             };
             self.projection.messages.push(stored.clone());
@@ -336,7 +349,7 @@ impl TaskMutationContext<'_> {
             .map(|message| {
                 (
                     message.chat.identity.clone(),
-                    message.chat.message_id.clone(),
+                    (message.chat.message_id.clone(), message.chat.timing.clone()),
                 )
             })
             .collect::<std::collections::HashMap<_, _>>();
@@ -346,17 +359,21 @@ impl TaskMutationContext<'_> {
                 .extend(extract_tool_artifacts(&mut message));
             let sequence = index as u64 + 1;
             let identity = message.identity();
+            // A reloaded row keeps the timing observed for the same identity and
+            // otherwise has none: native history carries no App Server times.
+            let (message_id, timing) = existing_ids
+                .get(&identity)
+                .cloned()
+                .unwrap_or_else(|| (uuid::Uuid::new_v4().to_string(), Default::default()));
             stored_messages.push(StoredMessage {
                 sequence,
                 chat: ChatMessage {
                     cursor: cursor::from_sequence(sequence),
-                    message_id: existing_ids
-                        .get(&identity)
-                        .cloned()
-                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    message_id,
                     identity,
                     message_type: message.message_type().to_string(),
                     message,
+                    timing,
                 },
             });
         }
@@ -370,9 +387,10 @@ impl TaskMutationContext<'_> {
         &mut self,
         status: ActivityStatus,
     ) -> Result<bool, RuntimeError> {
+        let now = crate::time::now_string();
         let mut changed = Vec::new();
         for stored in self.projection.messages.iter_mut().rev() {
-            if finish_running_activity(&mut stored.chat.message, status) {
+            if observed_timing::finish_running_activity(&mut stored.chat, status, &now) {
                 changed.push(stored.clone());
             }
         }
@@ -399,10 +417,14 @@ impl TaskMutationContext<'_> {
             .iter_mut()
             .find(|stored| stored.chat.identity == identity)
         {
-            Some(stored) => finish_running_activity(&mut stored.chat.message, status)
-                .then(|| stored.clone())
-                .into_iter()
-                .collect(),
+            Some(stored) => observed_timing::finish_running_activity(
+                &mut stored.chat,
+                status,
+                &crate::time::now_string(),
+            )
+            .then(|| stored.clone())
+            .into_iter()
+            .collect(),
             _ => Vec::new(),
         };
         if !changed.is_empty() {
@@ -480,39 +502,6 @@ fn record_permission_outcome(
         outcomes.push(outcome);
     }
     vec![stored.clone()]
-}
-
-fn finish_running_activity(message: &mut NormalizedMessage, status: ActivityStatus) -> bool {
-    let NormalizedMessage::Activity {
-        status: activity_status,
-        steps,
-        ..
-    } = message
-    else {
-        return false;
-    };
-    if *activity_status != ActivityStatus::Running {
-        return false;
-    }
-    *activity_status = status;
-    for step in steps {
-        match step {
-            ActivityStep::Tool {
-                status: step_status,
-                ..
-            }
-            | ActivityStep::Command {
-                status: step_status,
-                ..
-            }
-            | ActivityStep::Subagent {
-                status: step_status,
-                ..
-            } if *step_status == ActivityStatus::Running => *step_status = status,
-            _ => {}
-        }
-    }
-    true
 }
 
 impl TaskMutations {

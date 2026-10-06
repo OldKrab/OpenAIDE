@@ -25,6 +25,40 @@ pub struct ChatMessage {
     pub message_type: String,
     pub message_id: String,
     pub message: NormalizedMessage,
+    /// App Server-clock observations for this row. Stored beside the message so
+    /// an Agent update that replaces the message cannot erase them.
+    #[serde(default, skip_serializing_if = "ChatTiming::is_empty")]
+    pub timing: ChatTiming,
+}
+
+/// Times the App Server witnessed for one Chat row. Each field stays absent
+/// unless the App Server saw the moment itself, so rows saved before timing
+/// existed and rows rebuilt from a native session carry none.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ChatTiming {
+    /// When a user message was accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<String>,
+    /// The row's own work: one Activity or one compaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<ObservedSpan>,
+    /// The turn this row closed, set on its final Agent answer or interruption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_turn: Option<ObservedSpan>,
+}
+
+impl ChatTiming {
+    pub fn is_empty(&self) -> bool {
+        self.sent_at.is_none() && self.run.is_none() && self.closed_turn.is_none()
+    }
+}
+
+/// Epoch-millisecond bounds; `ended_at` is absent while the work is running.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ObservedSpan {
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -142,6 +176,28 @@ impl NormalizedMessage {
             | NormalizedMessage::Question { id, .. }
             | NormalizedMessage::Interruption { id, .. }
             | NormalizedMessage::Compaction { id, .. } => id.clone(),
+        }
+    }
+
+    /// Whether the row represents work that has not settled yet.
+    pub fn is_in_progress(&self) -> bool {
+        match self {
+            NormalizedMessage::Activity { status, .. } => *status == ActivityStatus::Running,
+            NormalizedMessage::Compaction { status, .. } => *status == CompactionStatus::InProgress,
+            _ => false,
+        }
+    }
+
+    pub fn created_at(&self) -> &str {
+        match self {
+            NormalizedMessage::User { created_at, .. }
+            | NormalizedMessage::AgentMessage { created_at, .. }
+            | NormalizedMessage::Activity { created_at, .. }
+            | NormalizedMessage::CompletedPlan { created_at, .. }
+            | NormalizedMessage::ClosedPlan { created_at, .. }
+            | NormalizedMessage::Question { created_at, .. }
+            | NormalizedMessage::Interruption { created_at, .. }
+            | NormalizedMessage::Compaction { created_at, .. } => created_at,
         }
     }
 

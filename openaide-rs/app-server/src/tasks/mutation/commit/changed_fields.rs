@@ -22,6 +22,7 @@ pub(super) fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> Change
         || original.status != task.status
         || original.unread != task.unread
         || original.attention != task.attention
+        || original.active_turn_started_at != task.active_turn_started_at
         || original.updated_at != task.updated_at
         || original.last_activity != task.last_activity
         || original.agent_id != task.agent_id

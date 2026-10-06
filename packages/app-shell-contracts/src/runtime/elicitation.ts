@@ -65,6 +65,8 @@ export type ElicitationMessage = {
   prompt: string;
   state: "pending" | "resolved" | "cancelled" | "error";
   created_at: string;
+  /** When the App Server opened the request; absent once it is only durable history. */
+  requested_at?: string;
   fields: ElicitationField[];
   answers?: ElicitationAnswer[];
   error?: string;

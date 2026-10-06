@@ -86,6 +86,15 @@
   font-weight: 500;
 }
 
+.request-wait {
+  grid-column: 3;
+  justify-self: end;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .permission-state {
   max-width: min(34ch, 44vw);
   min-width: 0;

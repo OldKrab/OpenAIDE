@@ -548,6 +548,43 @@
   opacity: 1;
 }
 
+/* Time information in a message's hover row. A duration carries the timer glyph; a bare clock
+   time never does, so "how long" and "when" cannot be confused. */
+.chat-action-time,
+.chat-message-clock {
+  color: var(--oa-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chat-action-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-end: 4px;
+}
+
+.chat-action-time > svg {
+  flex: none;
+  opacity: 0.8;
+}
+
+/* An inline spacer reserves room on the answer's last line only, so the hover duration never
+   lands on text and the paragraph keeps its full measure. */
+.chat-agent-block:has(.chat-action-time) > .chat-agent:nth-last-child(2) > p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 96px;
+}
+
+.chat-stop-duration {
+  color: var(--oa-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .chat-message-action {
   width: 20px;
   min-height: 16px;
@@ -616,6 +653,10 @@
     justify-self: start;
     margin-block-start: 4px;
     opacity: 1;
+  }
+
+  .chat-agent-block:has(.chat-action-time) > .chat-agent:nth-last-child(2) > p:last-child::after {
+    content: none;
   }
 
   .agent-markdown-copy {

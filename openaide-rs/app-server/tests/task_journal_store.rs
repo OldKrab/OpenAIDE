@@ -1229,6 +1229,7 @@ fn agent_message(identity: &str, text: &str) -> StoredMessage {
                 }],
                 created_at: "2026-07-20T00:00:00Z".to_string(),
             },
+            timing: Default::default(),
         },
     }
 }

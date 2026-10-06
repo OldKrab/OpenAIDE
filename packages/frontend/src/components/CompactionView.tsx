@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronRight, ChevronUp, CircleAlert } from "lucide-react";
-import type { CompactionStatus } from "@openaide/app-shell-contracts";
+import type { CompactionStatus, TimeSpan } from "@openaide/app-shell-contracts";
 import { AgentMarkdown } from "./AgentMarkdown";
 import {
   ELAPSED_VISIBLE_AFTER_SECONDS,
@@ -8,6 +8,7 @@ import {
   formatElapsedDuration,
   useElapsedSeconds,
 } from "./elapsedDuration";
+import { CompactionDuration } from "./timeMarks";
 
 const STATUS_LABEL: Record<CompactionStatus, string> = {
   in_progress: "Compacting context…",
@@ -28,6 +29,7 @@ export function CompactionView({
   error,
   live = false,
   liveStartedAt,
+  run,
   status,
   summary,
 }: {
@@ -35,6 +37,8 @@ export function CompactionView({
   /** The Task's turn is running, so an in-progress row animates and carries the elapsed time. */
   live?: boolean;
   liveStartedAt?: string;
+  /** How long the compaction itself took, when the App Server watched it run. */
+  run?: TimeSpan;
   status: CompactionStatus;
   summary?: string;
 }) {
@@ -52,6 +56,7 @@ export function CompactionView({
     <>
       {failed ? <CircleAlert aria-hidden="true" className="compaction-failed-icon" size={13} /> : <CompactionGlyph />}
       <span className="compaction-label-text">{STATUS_LABEL[status]}</span>
+      {status === "in_progress" ? null : <CompactionDuration run={run} />}
       {summary ? <ChevronRight aria-hidden="true" className="compaction-chevron" size={12} /> : null}
     </>
   );

@@ -28,6 +28,16 @@
     padding-inline-end: 44px;
   }
 
+  /* The always-visible duration sits beside Copy; the last line keeps room for both. */
+  .chat-agent-block:has(.chat-action-time) > .chat-agent:nth-last-child(2) > p:last-child {
+    padding-inline-end: 0;
+  }
+
+  .chat-agent-block:has(.chat-action-time) > .chat-agent:nth-last-child(2) > p:last-child::after {
+    content: "";
+    width: 116px;
+  }
+
   .chat-agent-block > .chat-message-actions {
     position: absolute;
     inset-inline-end: 0;

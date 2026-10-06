@@ -29,6 +29,37 @@ pub struct ChatItem {
     pub role: ChatRole,
     pub status: ChatItemStatus,
     pub parts: Vec<MessagePart>,
+    /// Times the App Server observed for this row while it was live. Absent for
+    /// history it did not witness, such as a reloaded native session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<ChatItemTiming>,
+}
+
+/// App Server-clock facts about one Chat row. Every field is optional because
+/// each is recorded only when the App Server witnessed the moment itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatItemTiming {
+    /// When the user's message was accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<String>,
+    /// How long this row's own work ran: one Activity or one compaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<TimeSpanSnapshot>,
+    /// The turn this row closed: set on the turn's final Agent answer, or on the
+    /// interruption that ended it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_turn: Option<TimeSpanSnapshot>,
+}
+
+/// Epoch-millisecond bounds on the App Server clock. `ended_at` is absent while
+/// the work is still running.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeSpanSnapshot {
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

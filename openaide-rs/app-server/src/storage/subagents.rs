@@ -305,6 +305,7 @@ impl Store {
                     identity,
                     message_type: message.message_type().to_string(),
                     message,
+                    timing: Default::default(),
                 },
             });
             advance_history_meta(history);
@@ -392,6 +393,7 @@ impl Store {
                     identity,
                     message_type: message.message_type().to_string(),
                     message,
+                    timing: Default::default(),
                 },
             });
             advance_history_meta(history);

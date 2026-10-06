@@ -5,6 +5,7 @@ import type { ToolImagePreview } from "@openaide/app-server-client";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { CompactionView } from "./CompactionView";
+import { SentClock, StoppedTurnDuration, TurnDuration, formatClockTime, settledSpanSeconds } from "./timeMarks";
 import { ChatActivityView } from "./ChatActivityView";
 import { MessageCopyAction } from "./chatMessageActions";
 import { ChatPermissionCard } from "./ChatPermissionCard";
@@ -83,7 +84,13 @@ export const ChatRow = memo(function ChatRow({
           />
         ) : null}
         {hasText ? <UserMessageText commandCatalog={commandCatalog} text={body.text} /> : null}
-        {hasText ? <MessageCopyAction align="end" text={body.text} /> : null}
+        {hasText || formatClockTime(body.sent_at) ? (
+          <MessageCopyAction
+            align="end"
+            leading={<SentClock at={body.sent_at} />}
+            text={hasText ? body.text : undefined}
+          />
+        ) : null}
         <ReferenceHoverLayer contentKey={body.text} rootRef={referenceRootRef} />
         {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
       </div>
@@ -123,7 +130,8 @@ export const ChatRow = memo(function ChatRow({
       <CompactionView
         error={body.error}
         live={compactionLive}
-        liveStartedAt={compactionLiveStartedAt}
+        liveStartedAt={body.run && !body.run.ended_at ? body.run.started_at : compactionLiveStartedAt}
+        run={body.run}
         status={body.status}
         summary={body.summary}
       />
@@ -136,11 +144,19 @@ export const ChatRow = memo(function ChatRow({
     if (body.recoverable) {
       return (
         <section className="recovery-banner" role="status">
-          <span>{body.message}</span>
+          <span>
+            {body.message}
+            <StoppedTurnDuration turn={body.closed_turn} />
+          </span>
         </section>
       );
     }
-    return <p className="chat-system">{body.message}</p>;
+    return (
+      <p className="chat-system">
+        {body.message}
+        <StoppedTurnDuration turn={body.closed_turn} />
+      </p>
+    );
   }
   if (body.kind === "permission") {
     return (
@@ -191,6 +207,8 @@ function AgentMessageRow({
   const streaming = showStreamingCaret || presentation.streaming;
   // Copy takes the received text, not the part of it revealed so far.
   const text = agentMessageText(body.parts);
+  // A streaming answer has not closed its turn; the live indicator owns the time until it does.
+  const closedTurn = streaming || settledSpanSeconds(body.closed_turn) === undefined ? undefined : body.closed_turn;
   const content = (
     <AgentMessageParts
       muted={body.role === "thought"}
@@ -219,7 +237,9 @@ function AgentMessageRow({
     <>
       <div className="chat-agent-block" aria-busy={streaming || undefined}>
         {content}
-        {text ? <MessageCopyAction text={text} /> : null}
+        {text || closedTurn ? (
+          <MessageCopyAction leading={<TurnDuration turn={closedTurn} />} text={text || undefined} />
+        ) : null}
       </div>
       {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={onCloseImage} /> : null}
     </>

@@ -1593,6 +1593,7 @@ fn task_open_returns_storage_backed_task_snapshot_after_initialize() {
                         created_at: "2026-01-01T00:00:00.000Z".to_string(),
                         attachments: Vec::new(),
                     },
+                    timing: Default::default(),
                 },
             )
             .unwrap();
@@ -2396,6 +2397,7 @@ fn task_cancel_clears_active_turn_after_initialize() {
                         collapsed: true,
                         steps: Vec::new(),
                     },
+                    timing: Default::default(),
                 },
             )
             .unwrap();

@@ -405,6 +405,7 @@ function mapProtocolTaskSummaryWithWarnings(
         reason: summary.attention.reason,
         occurred_at: summary.attention.occurredAt,
       } : undefined,
+      active_turn_started_at: summary.activeTurnStartedAt ?? undefined,
       created_at: summary.updatedAt,
       updated_at: summary.updatedAt,
       last_activity: lastActivity,
