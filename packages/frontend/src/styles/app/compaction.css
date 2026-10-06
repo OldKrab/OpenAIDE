@@ -1,80 +1,128 @@
-/* Context compaction Chat row: a quiet divider; the model-facing summary is collapsed by default. */
+/* Context compaction Chat row: a boundary rule with its label on the line. Opening the model-facing
+   summary bends the rule into a frame, so the text visibly belongs to the label that closes it. */
 .compaction-row {
-  width: min(560px, 100%);
+  --compaction-rule: color-mix(in oklch, var(--oa-border) 46%, transparent);
+  width: 100%;
   min-width: 0;
   margin: 0;
-  color: var(--oa-muted);
+  padding-block: 4px;
+  color: color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text));
 }
 
-.compaction-heading {
-  width: fit-content;
-  max-width: 100%;
-  min-height: 24px;
-  box-sizing: border-box;
+.compaction-head {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 2px;
+  gap: 8px;
+}
+
+/* Each half-rule is the lower half of the head, so its top edge runs through the label's centre
+   and its outer edge can become the frame's side. */
+.compaction-rule {
+  position: relative;
+  min-width: 12px;
+  height: 12px;
+  flex: 1 1 32px;
+  align-self: flex-end;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-top-color: var(--compaction-rule);
+  border-bottom: 0;
+  transition: border-color 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.compaction-row[data-open="true"] .compaction-rule:first-child {
+  border-left-color: var(--compaction-rule);
+  border-top-left-radius: 10px;
+}
+
+.compaction-row[data-open="true"] .compaction-rule:last-child {
+  border-right-color: var(--compaction-rule);
+  border-top-right-radius: 10px;
+}
+
+.compaction-label {
+  min-width: 0;
+  max-width: calc(100% - 40px);
+  min-height: 24px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
-  border-radius: var(--oa-radius-sm);
+  border-radius: 999px;
+  padding: 2px 8px;
   background: transparent;
-  color: color-mix(in oklch, var(--oa-muted) 84%, var(--oa-text));
-  font-size: 12px;
-  text-align: left;
+  color: inherit;
+  font-size: 12.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  transition:
+    background-color 150ms cubic-bezier(.22, 1, .36, 1),
+    color 150ms cubic-bezier(.22, 1, .36, 1);
 }
 
-button.compaction-heading:hover {
-  background: color-mix(in oklch, var(--oa-raised) 64%, transparent);
-}
-
-button.compaction-heading:focus-visible {
-  outline: 1px solid var(--oa-focus);
-  outline-offset: 1px;
-}
-
-.compaction-heading > svg,
-.compaction-heading > span:first-of-type {
+.compaction-label > svg {
   flex: none;
 }
 
-.compaction-heading > span:first-of-type {
-  white-space: nowrap;
+.compaction-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.compaction-row[data-open="false"] .agent-plan-chevron {
-  transform: rotate(-90deg);
+button.compaction-label:hover {
+  background: color-mix(in oklch, var(--oa-muted) 9%, transparent);
+  color: var(--oa-text);
+}
+
+button.compaction-label:focus-visible,
+.compaction-collapse:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.compaction-chevron {
+  transition: transform 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.compaction-row[data-open="true"] .compaction-chevron {
+  transform: rotate(90deg);
+}
+
+.compaction-failed-icon,
+.compaction-error {
+  color: var(--oa-danger);
 }
 
 .compaction-error {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oa-danger);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.compaction-failed-icon {
-  color: var(--oa-danger);
-}
-
-.compaction-spinner {
-  animation: task-state-spin 1s linear infinite;
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .compaction-disclosure {
   display: grid;
   grid-template-rows: 1fr;
+  box-sizing: border-box;
   overflow: hidden;
+  border: 1px solid var(--compaction-rule);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
   visibility: visible;
   transition:
     grid-template-rows 180ms cubic-bezier(.22, 1, .36, 1),
+    border-color 180ms cubic-bezier(.22, 1, .36, 1),
     visibility 0s linear;
 }
 
 .compaction-disclosure[data-open="false"] {
   grid-template-rows: 0fr;
+  border-color: transparent;
   visibility: hidden;
-  transition-delay: 0s, 180ms;
+  transition-delay: 0s, 0s, 180ms;
 }
 
 .compaction-disclosure-content {
@@ -86,15 +134,143 @@ button.compaction-heading:focus-visible {
 .compaction-summary {
   max-height: 320px;
   overflow-y: auto;
-  padding: 6px 8px 2px;
+  padding: 6px 16px;
+  color: color-mix(in oklch, var(--oa-muted) 55%, var(--oa-text));
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.compaction-summary > :first-child {
+  margin-top: 0;
+}
+
+.compaction-summary > :last-child {
+  margin-bottom: 0;
+}
+
+.compaction-summary ul,
+.compaction-summary ol {
+  padding-left: 18px;
+}
+
+/* A second way out at the end of a long summary, where the label has scrolled away. */
+.compaction-collapse {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--oa-muted);
   font-size: 12px;
 }
 
+.compaction-collapse:hover {
+  background: color-mix(in oklch, var(--oa-muted) 7%, transparent);
+  color: var(--oa-text);
+}
+
+/* Live: the row stands in for the working footer, so it takes the footer's separation from
+   history. Both half-rules flow toward the label, as if the line itself were pressed together. */
+.compaction-row[data-live="true"] {
+  margin-top: 20px;
+}
+
+.compaction-row[data-live="true"] .compaction-label {
+  font-size: 13px;
+}
+
+.compaction-row[data-live="true"] .compaction-rule {
+  border-top-color: transparent;
+}
+
+.compaction-row[data-live="true"] .compaction-rule::before {
+  content: "";
+  position: absolute;
+  inset: -1px 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, var(--compaction-rule) 0%, var(--oa-muted) 50%, var(--compaction-rule) 100%);
+  background-size: 200% 100%;
+  animation: compaction-sweep 1.8s linear infinite;
+}
+
+.compaction-row[data-live="true"] .compaction-rule:last-child::before {
+  animation-direction: reverse;
+}
+
+.compaction-row[data-live="true"] .compaction-label-text {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text)) 0%,
+    var(--oa-text) 50%,
+    color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text)) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: compaction-sweep 1.8s linear infinite;
+}
+
+.compaction-row[data-live="true"] .compaction-glyph-top {
+  animation: compaction-press-down 1.2s cubic-bezier(.22, 1, .36, 1) infinite;
+}
+
+.compaction-row[data-live="true"] .compaction-glyph-bottom {
+  animation: compaction-press-up 1.2s cubic-bezier(.22, 1, .36, 1) infinite;
+}
+
+.compaction-elapsed {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes compaction-sweep {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@keyframes compaction-press-down {
+  0% { transform: translateY(-3px); opacity: .3; }
+  60%, 100% { transform: translateY(1px); opacity: 1; }
+}
+
+@keyframes compaction-press-up {
+  0% { transform: translateY(3px); opacity: .3; }
+  60%, 100% { transform: translateY(-1px); opacity: 1; }
+}
+
+@media (max-width: 760px) {
+  .compaction-label {
+    min-height: 36px;
+  }
+
+  .compaction-rule {
+    height: 18px;
+  }
+
+  .compaction-collapse {
+    min-height: 36px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .compaction-spinner {
+  .compaction-row[data-live="true"] .compaction-rule::before,
+  .compaction-row[data-live="true"] .compaction-label-text,
+  .compaction-row[data-live="true"] .compaction-glyph-top,
+  .compaction-row[data-live="true"] .compaction-glyph-bottom {
     animation: none;
   }
 
+  .compaction-row[data-live="true"] .compaction-label-text {
+    background: none;
+    color: inherit;
+  }
+
+  .compaction-rule,
+  .compaction-chevron,
   .compaction-disclosure {
     transition: none;
   }

@@ -20,10 +20,37 @@ function render(props: Parameters<typeof CompactionView>[0]) {
 }
 
 describe("CompactionView", () => {
-  it("shows progress without an expander until a summary exists", () => {
+  it("shows a stale in-progress row as a static rule without an expander", () => {
     const tree = render({ status: "in_progress" });
 
     expect(JSON.stringify(tree.toJSON())).toContain("Compacting context…");
+    expect(tree.root.findByProps({ className: "compaction-row" }).props["data-live"]).toBe(false);
+    expect(tree.root.findAllByType("button")).toHaveLength(0);
+    expect(tree.root.findAllByType("time")).toHaveLength(0);
+  });
+
+  it("becomes the live indicator with elapsed time while the turn runs", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:01:30Z"));
+    try {
+      const tree = render({ live: true, liveStartedAt: "2026-01-01T00:00:00Z", status: "in_progress" });
+
+      expect(tree.root.findByProps({ className: "compaction-row" }).props["data-live"]).toBe(true);
+      expect(tree.root.findByProps({ role: "status" }).props["aria-live"]).toBe("polite");
+      expect(tree.root.findByType("time").props).toMatchObject({ children: "1:30", dateTime: "PT90S" });
+      // A partial summary must not make the live indicator a disclosure.
+      const streaming = render({ live: true, status: "in_progress", summary: "Goal:" });
+      expect(streaming.root.findAllByType("button")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats a finished row as static even while the turn keeps running", () => {
+    const tree = render({ live: true, liveStartedAt: "2026-01-01T00:00:00Z", status: "completed" });
+
+    expect(tree.root.findByProps({ className: "compaction-row" }).props["data-live"]).toBe(false);
+    expect(tree.root.findAllByType("time")).toHaveLength(0);
     expect(tree.root.findAllByType("button")).toHaveLength(0);
   });
 
@@ -43,6 +70,11 @@ describe("CompactionView", () => {
 
     expect(tree.root.findByProps({ "aria-label": "Collapse context summary" }).props["aria-expanded"]).toBe(true);
     expect(tree.root.findByProps({ className: "compaction-disclosure" }).props["data-open"]).toBe(true);
+
+    // The frame offers a second way out below a long summary.
+    act(() => tree.root.findByProps({ className: "compaction-collapse" }).props.onClick());
+
+    expect(tree.root.findByProps({ "aria-label": "Expand context summary" }).props["aria-expanded"]).toBe(false);
   });
 
   it("surfaces the failure reason", () => {

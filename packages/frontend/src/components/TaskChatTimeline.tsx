@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { ArrowDown, Check, CircleAlert } from "lucide-react";
 import type {
   ActivityStep,
@@ -11,12 +11,17 @@ import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskLiveTextPresentation } from "../state/store";
 import { ChatContentSizeChangeContext } from "./ChatActivityView";
 import { ChatRow } from "./ChatMessageView";
+import {
+  ELAPSED_VISIBLE_AFTER_SECONDS,
+  elapsedDurationLabel,
+  formatElapsedDuration,
+  useElapsedSeconds,
+} from "./elapsedDuration";
 import { QuoteSelectionAction } from "./QuoteSelectionAction";
 import {
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
-import { timestampMillis } from "./taskSurfaceHelpers";
 import { useTaskChatScroll } from "./useTaskChatScroll";
 import { UserMessageNavigator } from "./UserMessageNavigator";
 
@@ -172,6 +177,10 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                 ) : row.kind === "message" ? (
                   <ChatRow
                     commandCatalog={commandCatalog}
+                    compactionLive={isLiveCompaction(row.message, taskStatus)}
+                    compactionLiveStartedAt={
+                      isLiveCompaction(row.message, taskStatus) ? workingStartedAt : undefined
+                    }
                     hurryLiveText={awaitsUserAnswer}
                     liveTextEventCursor={liveTextCursorForMessage(
                       liveTextPresentation,
@@ -296,6 +305,16 @@ function liveTextCursorForMessage(
   return signal?.messageId === message.message_id ? signal.eventCursor : undefined;
 }
 
+/**
+ * An in-progress Compaction row is the live indicator only while its turn runs. Scoped to that row
+ * so a Task status change does not re-render every memoized Chat row.
+ */
+function isLiveCompaction(message: ChatMessage, taskStatus: TaskSnapshot["task"]["status"]) {
+  return taskStatus === "active"
+    && message.message.kind === "compaction"
+    && message.message.status === "in_progress";
+}
+
 export function isLiveTextMessage(
   presentation: TaskLiveTextPresentation | undefined,
   message: ChatMessage,
@@ -333,7 +352,7 @@ function TimelineStatus({
   startedAt?: string;
 }) {
   const elapsedSeconds = useElapsedSeconds(kind === "progress" ? startedAt : undefined);
-  const visibleElapsed = elapsedSeconds !== undefined && elapsedSeconds >= 5
+  const visibleElapsed = elapsedSeconds !== undefined && elapsedSeconds >= ELAPSED_VISIBLE_AFTER_SECONDS
     ? formatElapsedDuration(elapsedSeconds)
     : undefined;
   return (
@@ -365,35 +384,4 @@ function TimelineStatus({
   );
 }
 
-/** Keeps clock ticks inside the live footer so the surrounding Chat timeline stays stable. */
-function useElapsedSeconds(startedAt?: string) {
-  const startedAtMs = startedAt ? timestampMillis(startedAt) : Number.NaN;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    setNow(Date.now());
-    if (Number.isNaN(startedAtMs)) return undefined;
-    const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000);
-    return () => globalThis.clearInterval(timer);
-  }, [startedAtMs]);
-  if (Number.isNaN(startedAtMs)) return undefined;
-  return Math.max(0, Math.floor((now - startedAtMs) / 1_000));
-}
-
-export function formatElapsedDuration(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function elapsedDurationLabel(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  return [
-    hours ? `${hours} hour${hours === 1 ? "" : "s"}` : undefined,
-    minutes ? `${minutes} minute${minutes === 1 ? "" : "s"}` : undefined,
-    `${seconds} second${seconds === 1 ? "" : "s"}`,
-  ].filter(Boolean).join(" ");
-}
+export { formatElapsedDuration };
