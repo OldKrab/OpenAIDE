@@ -2841,6 +2841,7 @@ fn task_tool_image_preview_returns_validated_artifact_image_through_protocol() {
                 name: "read".to_string(),
                 status: crate::protocol::model::ActivityStatus::Completed,
                 presentation: None,
+                description: None,
                 input_summary: None,
                 output_preview: None,
                 detail_artifact_id: None,

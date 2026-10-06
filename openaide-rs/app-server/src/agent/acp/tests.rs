@@ -1022,6 +1022,7 @@ fn replay_projects_each_recorded_codex_subagent_tool_with_agent_owned_copy() {
                 [crate::protocol::model::ActivityStep::Tool {
                     name,
                     status: ActivityStatus::Completed,
+                    description: None,
                     input_summary: None,
                     details: None,
                     ..

@@ -74,6 +74,7 @@ fn modern_codex_wait_replay_retains_one_completed_collaboration_row() {
             [crate::protocol::model::ActivityStep::Tool {
                 name,
                 status: ActivityStatus::Completed,
+                description: None,
                 input_summary: None,
                 output_preview: None,
                 details: None,

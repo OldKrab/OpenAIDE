@@ -198,6 +198,7 @@ pub(super) fn project_codex_collaboration(tool_call: &ToolCall) -> Option<AgentT
             _ => AgentToolCallStatus::Pending,
         },
         presentation: None,
+        description: None,
         input_summary: None,
         output_preview: None,
         details: None,

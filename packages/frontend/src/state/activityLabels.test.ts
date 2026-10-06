@@ -342,6 +342,31 @@ description: Read-only review
     ).toBe("Ran 2 commands");
   });
 
+  it("titles an execute tool with the agent description and keeps the command for failures", () => {
+    const step = {
+      kind: "tool",
+      name: "execute",
+      status: "completed",
+      description: "Rename the scroll gap import",
+      input_summary: "sed -i 20s/a/b/ useTaskChatScroll.ts",
+    } as const;
+
+    expect(activityStepLabel(step)).toBe("Rename the scroll gap import");
+    expect(activityStepProgressLabel({ ...step, status: "running" })).toBe("Rename the scroll gap import");
+    expect(activityStepCompletedLabel(step)).toBe("Rename the scroll gap import");
+    expect(activityStepCompletedLabel({ ...step, status: "error" })).toBe(
+      "Failed to use sed -i 20s/a/b/ useTaskChatScroll.ts",
+    );
+    expect(activitySummary(activity("Commands", "completed", [step]))).toBe("Ran command");
+    // A proven semantic presentation outranks the Agent's free-form purpose line.
+    expect(
+      activityStepLabel({
+        ...step,
+        presentation: { actions: [{ kind: "read", subjects: ["notes.md"] }] },
+      }),
+    ).toBe("Read notes.md");
+  });
+
   it("does not classify execute tools as searches from words in their commands", () => {
     expect(
       activitySummary(
