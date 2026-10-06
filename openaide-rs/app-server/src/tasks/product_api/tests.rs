@@ -2868,6 +2868,7 @@ fn adopting_native_session_persists_replayed_tool_details_with_the_new_task() {
                 name: "edit".to_string(),
                 status: ActivityStatus::Completed,
                 presentation: None,
+                description: None,
                 input_summary: None,
                 output_preview: None,
                 detail_artifact_id: None,

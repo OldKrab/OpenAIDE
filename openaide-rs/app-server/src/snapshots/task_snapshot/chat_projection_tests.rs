@@ -70,6 +70,7 @@ fn projects_execute_presentation_without_reclassifying_the_tool() {
             crate::protocol::model::ToolPresentationKind::Skill,
             vec!["tdd".to_string(), "impeccable".to_string()],
         )),
+        description: None,
         input_summary: Some("sed -n ...".to_string()),
         output_preview: Some("skill contents".to_string()),
         detail_artifact_id: None,

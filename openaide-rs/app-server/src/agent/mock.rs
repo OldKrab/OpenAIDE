@@ -109,6 +109,7 @@ impl AgentRuntime for MockAgent {
                 kind: "edit".to_string(),
                 status: AgentToolCallStatus::Pending,
                 presentation: None,
+                description: None,
                 input_summary: None,
                 output_preview: None,
                 details: None,

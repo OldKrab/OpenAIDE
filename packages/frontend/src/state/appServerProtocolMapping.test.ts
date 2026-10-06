@@ -402,6 +402,7 @@ describe("App Server Protocol state mapping", () => {
                   },
                 ],
               },
+              description: "Read the skill and find its styles",
               inputSummary: "sed -n ...",
               permissionOutcomes: [],
             }],
@@ -415,6 +416,7 @@ describe("App Server Protocol state mapping", () => {
       steps: [{
         kind: "tool",
         name: "execute",
+        description: "Read the skill and find its styles",
         presentation: {
           actions: [
             { kind: "skill", subjects: ["diagnosing-bugs"] },
