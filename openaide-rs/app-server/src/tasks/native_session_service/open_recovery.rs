@@ -92,6 +92,7 @@ impl NativeSessionService {
             .map(str::trim)
             .filter(|title| !title.is_empty())
             .map(str::to_string);
+        let observed_activity = native_session.last_activity.or(native_session.updated_at);
         let session_state = OpenedSessionTaskState {
             session: session_start.session().clone(),
             metadata_is_authoritative: true,
@@ -125,7 +126,14 @@ impl NativeSessionService {
                 task.current_plan = replayed_plan.current_plan.clone();
                 task.completed_plan_message_id = replayed_plan.completed_plan_message_id.clone();
                 task.updated_at = refreshed_at.clone();
-                task.last_activity = refreshed_at.clone();
+                // Replay is not session activity: only the Agent's own newer clock may
+                // advance the time that orders Navigation and bounds cleanup cutoffs.
+                if let Some(observed) = observed_activity.as_ref().filter(|observed| {
+                    crate::time::activity_millis(observed)
+                        > crate::time::activity_millis(&task.last_activity)
+                }) {
+                    task.last_activity = observed.clone();
+                }
                 if let Some(observed_activity_at) = &clear_reload_requirement_through {
                     task.clear_native_session_reload_requirement_through(observed_activity_at);
                 }

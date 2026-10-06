@@ -3995,6 +3995,10 @@ fn explicit_reload_replaces_history_and_clears_the_captured_requirement() {
         .unwrap()
         .native_session_reload_requirement
         .is_none());
+    assert_eq!(
+        store.read_task("task-existing").unwrap().last_activity,
+        native_updated_at.to_string()
+    );
     assert!(matches!(
         store.read_messages("task-existing").unwrap().as_slice(),
         [message] if matches!(
@@ -4010,9 +4014,10 @@ fn open_with_a_deferred_requirement_loads_once_without_resuming_first() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
+    task.last_activity = "2026-01-01T00:00:00.000Z".to_string();
     task.native_session_reload_requirement = Some(
         crate::storage::records::TaskNativeSessionReloadRequirement {
-            observed_activity_at: crate::time::now_string(),
+            observed_activity_at: "2026-01-03T00:00:00.000Z".to_string(),
         },
     );
     store.write_task(&task).unwrap();
@@ -4049,6 +4054,10 @@ fn open_with_a_deferred_requirement_loads_once_without_resuming_first() {
     });
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 0);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store.read_task("task-existing").unwrap().last_activity,
+        "2026-01-03T00:00:00.000Z"
+    );
 }
 
 #[test]
@@ -4177,6 +4186,7 @@ fn open_loads_once_when_resume_is_unsupported() {
     let record = store.read_task("task-existing").unwrap();
     assert!(!record.unread);
     assert!(record.native_session_reload_requirement.is_none());
+    assert_eq!(record.last_activity, "2026-01-01T00:00:00.000Z");
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
