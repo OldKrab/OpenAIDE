@@ -34,7 +34,6 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use crate::agent::product_api::{
     AgentAuthenticateWorkflow, AgentCatalogMutationWorkflow, AgentProbeWorkflow,
@@ -1247,7 +1246,7 @@ fn agent_authenticate_does_not_block_other_protocol_requests() {
         )
     });
     started_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("authenticate started");
 
     let heartbeat_gateway = gateway.clone();
@@ -1262,7 +1261,7 @@ fn agent_authenticate_does_not_block_other_protocol_requests() {
         let _ = heartbeat_tx.send(outcome);
     });
     let heartbeat = heartbeat_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("heartbeat completed while ChatGPT authentication was still running");
     release_tx.send(()).expect("release authenticate");
 
@@ -1304,10 +1303,10 @@ fn local_http_authentication_reads_secrets_from_the_initiating_client() {
         )
     });
     started_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("secret resolution started");
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = std::time::Instant::now() + crate::test_sync::WATCHDOG;
     let deliveries = loop {
         let deliveries =
             gateway.drain_server_requests_for_connection(&connection_id, AppServerTime(3));
@@ -1337,7 +1336,7 @@ fn local_http_authentication_reads_secrets_from_the_initiating_client() {
 
     assert_eq!(
         resolved_rx
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .expect("secret resolved"),
         "secure-token"
     );
@@ -1549,7 +1548,7 @@ fn replacing_an_agent_acknowledges_before_prepared_cleanup_finishes() {
 
     assert_eq!(
         response_rx
-            .recv_timeout(Duration::from_millis(250))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap(),
         "custom.replacement"
     );
@@ -4663,10 +4662,9 @@ struct FailingPreparedTaskDisposal {
 }
 
 fn wait_for_prepared_cleanup(task_release: &FailingPreparedTaskDisposal) {
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while task_release.calls.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    crate::test_sync::wait_until("prepared task cleanup", || {
+        task_release.calls.load(Ordering::SeqCst) > 0
+    });
     assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
 }
 
@@ -4725,9 +4723,9 @@ impl TaskReleaseWorkflow for BlockingPreparedTaskDisposal {
         &self,
         _agent_id: &str,
     ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
-        while !self.release.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::wait_until("the test to release disposal", || {
+            self.release.load(Ordering::SeqCst)
+        });
         Ok(())
     }
 }

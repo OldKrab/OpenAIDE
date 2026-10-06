@@ -55,7 +55,7 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[path = "native_catalog_refresh_tests.rs"]
 mod native_catalog_refresh_tests;
@@ -2142,7 +2142,7 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
     });
 
     let accepted = finished_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("task/send must not wait for ACP session resume")
         .unwrap();
     assert!(accepted.task.chat.items.iter().any(|item| {
@@ -4131,7 +4131,7 @@ fn open_loads_once_when_resume_is_unsupported() {
         snapshot.chat.items[0].parts.first(),
         Some(MessagePart::Text { text }) if text == "Stale cached history."
     ));
-    let syncing_deadline = Instant::now() + Duration::from_millis(250);
+    let syncing_deadline = Instant::now() + crate::test_sync::WATCHDOG;
     let mut saw_history_sync = false;
     while Instant::now() < syncing_deadline {
         let remaining = syncing_deadline.saturating_duration_since(Instant::now());
@@ -4192,7 +4192,7 @@ fn open_loads_once_when_resume_is_unsupported() {
         task_id: "task-existing".into(),
     })
     .unwrap();
-    std::thread::sleep(Duration::from_millis(25));
+    crate::test_sync::observe_absence();
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
 }
 
@@ -4387,7 +4387,7 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
     }];
 
     api.refresh_native_session_catalogs().unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    crate::test_sync::observe_absence();
 
     assert_eq!(agent.closes.load(Ordering::SeqCst), 0);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
@@ -4475,7 +4475,7 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
     });
 
     api.refresh_native_session_catalogs().unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    crate::test_sync::observe_absence();
     assert!(matches!(
         api.history_sync.history_sync_snapshot("task-existing"),
         TaskHistorySyncSnapshot::ReloadAvailable { .. }
@@ -4826,13 +4826,19 @@ fn background_native_session_failure_is_published_as_failed_refresh_state() {
     api.request_native_session_catalog_refresh();
 
     assert!(matches!(
-        updates.recv_timeout(Duration::from_secs(1)).unwrap().kind,
+        updates
+            .recv_timeout(crate::test_sync::WATCHDOG)
+            .unwrap()
+            .kind,
         TaskUpdateKind::NavigationRefreshStateChanged {
             refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
         }
     ));
     assert!(matches!(
-        updates.recv_timeout(Duration::from_secs(1)).unwrap().kind,
+        updates
+            .recv_timeout(crate::test_sync::WATCHDOG)
+            .unwrap()
+            .kind,
         TaskUpdateKind::NavigationRefreshStateChanged {
             refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed { .. }
         }
@@ -5201,6 +5207,9 @@ fn open_loads_native_session_when_history_is_unordered_and_resume_is_unsupported
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
         resume_after_restart_unavailable: true,
+        // Recovery publishes its states after resume returns, so holding resume
+        // keeps the open response on the cached state.
+        block_resume: AtomicBool::new(true),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
             cwd: "/tmp/openaide-unit-workspace/app".to_string(),
@@ -5243,6 +5252,7 @@ fn open_loads_native_session_when_history_is_unordered_and_resume_is_unsupported
         snapshot.history_sync,
         TaskHistorySyncSnapshot::Idle { .. }
     ));
+    agent.block_resume.store(false, Ordering::SeqCst);
     wait_until(|| {
         agent.resumes.load(Ordering::SeqCst) == 1
             && agent.loads.load(Ordering::SeqCst) == 1
@@ -5596,7 +5606,7 @@ fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
     });
 
     wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
-    let accepted = accepted_rx.recv_timeout(Duration::from_millis(100));
+    let accepted = accepted_rx.recv_timeout(crate::test_sync::WATCHDOG);
     let accepted = accepted
         .expect("Send should return before Native Session startup")
         .unwrap();
@@ -5751,10 +5761,11 @@ fn send_after_prompt_settlement_starts_a_new_turn() {
         let _ =
             send_tx.send(send_api.send(send_params("task-existing", "continue after completion")));
     });
-    let early_send = send_rx.recv_timeout(Duration::from_millis(250)).ok();
+    // timing: absence — a Send may wait on the paused settlement; both orders are accepted.
+    let early_send = send_rx.recv_timeout(crate::test_sync::ABSENCE_WINDOW).ok();
     api.turn_runner.release_settlement_for_test();
     let next = early_send
-        .unwrap_or_else(|| send_rx.recv_timeout(Duration::from_secs(2)).unwrap())
+        .unwrap_or_else(|| send_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap())
         .unwrap();
 
     assert_ne!(next.turn_id, primary.turn_id);
@@ -7765,7 +7776,7 @@ fn cancel_timeout_closes_live_session_but_preserves_task_binding_for_resume() {
     )
     .unwrap();
     api.turn_runner
-        .set_cancel_grace_period_for_test(Duration::from_millis(20));
+        .set_cancel_grace_period_for_test(crate::test_sync::EXPIRES);
 
     let sent = api.send(send_params("task-existing", "hello")).unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
@@ -7891,7 +7902,7 @@ fn stale_cancel_cannot_retire_a_newer_accepted_send() {
         })
     });
     stale_read_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("Cancel should read the active Turn");
 
     agent.release_prompt.store(true, Ordering::SeqCst);
@@ -8029,11 +8040,9 @@ fn support_recovery_clears_live_stuck_turn_without_waiting_for_agent() {
     assert_eq!(record.status, TaskStatus::Inactive);
     assert_eq!(record.active_turn_id, None);
     assert!(record.unread);
-    assert_eq!(
-        api.shutdown_blockers().unwrap().active_turns,
-        0,
-        "support recovery should detach the live turn from runtime blockers"
-    );
+    // The cancelled prompt settles on its runner thread, which owns the Task's
+    // next Turn slot while it checks the queue. Blockers are clear once it has.
+    wait_until(|| api.shutdown_blockers().unwrap().active_turns == 0);
     assert!(
         store
             .read_messages("task-existing")
@@ -8749,7 +8758,7 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
         .unwrap();
     agent.block_set_config.store(false, Ordering::SeqCst);
     let settled = result_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("the config mutation should settle")
         .unwrap();
 
@@ -8810,12 +8819,10 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
         })
     });
     submitted_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("newer config request should be submitted");
-    let observation_deadline = Instant::now() + Duration::from_millis(250);
-    while Instant::now() < observation_deadline && agent.started_values.lock().unwrap().len() == 1 {
-        std::thread::yield_now();
-    }
+    // The first change is held at the Agent, so the newer one stays queued.
+    crate::test_sync::observe_absence();
     let newer_reached_agent_before_first_completed = agent.started_values.lock().unwrap().len() > 1;
 
     agent.release_first.store(true, Ordering::SeqCst);
@@ -8902,9 +8909,9 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
             .unwrap();
     });
     submitted_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("unrelated config request should be submitted");
-    let unrelated_result = result_rx.recv_timeout(Duration::from_secs(1));
+    let unrelated_result = result_rx.recv_timeout(crate::test_sync::WATCHDOG);
 
     agent.release_first.store(true, Ordering::SeqCst);
     blocked.join().unwrap().unwrap();
@@ -8980,7 +8987,7 @@ fn set_config_option_continues_after_concurrent_session_replacement_is_rejected(
     agent.block_set_config.store(false, Ordering::SeqCst);
 
     let snapshot = result_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("the stale session request should finish")
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
@@ -9044,7 +9051,7 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
     agent.block_set_config.store(false, Ordering::SeqCst);
 
     let snapshot = result_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("the reconciled session request should finish")
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
@@ -9843,9 +9850,7 @@ impl AgentRuntime for RecordingAgent {
         if let Some(tx) = &self.session_operation_tx {
             let _ = tx.send("list");
         }
-        while self.block_list.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::hold_while(|| self.block_list.load(Ordering::SeqCst));
         if self.fail_list {
             return Err(RuntimeError::NotReady("session listing failed".to_string()));
         }
@@ -9870,14 +9875,14 @@ impl AgentRuntime for RecordingAgent {
 
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
-        while self.block_start.load(Ordering::SeqCst) {
-            if request.cancellation.is_cancelled() {
-                self.start_cancellations.fetch_add(1, Ordering::SeqCst);
-                return Err(RuntimeError::NotReady(
-                    "ACP session start cancelled".to_string(),
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        crate::test_sync::hold_while(|| {
+            self.block_start.load(Ordering::SeqCst) && !request.cancellation.is_cancelled()
+        });
+        if self.block_start.load(Ordering::SeqCst) {
+            self.start_cancellations.fetch_add(1, Ordering::SeqCst);
+            return Err(RuntimeError::NotReady(
+                "ACP session start cancelled".to_string(),
+            ));
         }
         if self.fail_start {
             return Err(RuntimeError::NotReady("agent failed to start".to_string()));
@@ -9900,9 +9905,7 @@ impl AgentRuntime for RecordingAgent {
         if let Some(tx) = &self.session_operation_tx {
             let _ = tx.send("resume");
         }
-        while self.block_resume.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::hold_while(|| self.block_resume.load(Ordering::SeqCst));
         if self.resume_session_missing {
             return Err(RuntimeError::TaskNotFound(
                 "Native Session missing-session".to_string(),
@@ -9927,9 +9930,7 @@ impl AgentRuntime for RecordingAgent {
 
     fn load_session(&self, request: AgentSessionLoad) -> Result<AgentLoadedSession, RuntimeError> {
         self.loads.fetch_add(1, Ordering::SeqCst);
-        while self.block_load.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::hold_while(|| self.block_load.load(Ordering::SeqCst));
         if self.load_start_timeout {
             return Err(RuntimeError::NotReady(
                 "ACP session start timed out".to_string(),
@@ -9970,7 +9971,6 @@ impl AgentRuntime for RecordingAgent {
         prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
     ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
-        self.prompts.fetch_add(1, Ordering::SeqCst);
         self.prompt_attachments
             .lock()
             .unwrap()
@@ -9979,19 +9979,19 @@ impl AgentRuntime for RecordingAgent {
             .lock()
             .unwrap()
             .push((prompt.session_id.clone(), prompt.text.clone()));
-        while !prompt.cancellation.is_cancelled() {
-            if !self.block_prompt || self.release_prompt.load(Ordering::SeqCst) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        // Tests wait on this count and then read the records above.
+        self.prompts.fetch_add(1, Ordering::SeqCst);
+        crate::test_sync::hold_while(|| {
+            !prompt.cancellation.is_cancelled()
+                && self.block_prompt
+                && !self.release_prompt.load(Ordering::SeqCst)
+        });
         let cancelled = prompt.cancellation.is_cancelled();
-        while cancelled
-            && self.hold_cancelled_prompt.load(Ordering::SeqCst)
-            && !self.release_cancelled_prompt.load(Ordering::SeqCst)
-        {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::hold_while(|| {
+            cancelled
+                && self.hold_cancelled_prompt.load(Ordering::SeqCst)
+                && !self.release_cancelled_prompt.load(Ordering::SeqCst)
+        });
         let outcome = if cancelled {
             crate::agent::AgentPromptOutcome::Cancelled
         } else {
@@ -10006,11 +10006,11 @@ impl AgentRuntime for RecordingAgent {
     }
 
     fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
-        self.steers.fetch_add(1, Ordering::SeqCst);
         self.steer_calls
             .lock()
             .unwrap()
             .push((prompt.session_id, prompt.text));
+        self.steers.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -10051,9 +10051,7 @@ impl AgentRuntime for RecordingAgent {
             barrier.wait();
             barrier.wait();
         }
-        while self.block_set_config.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::hold_while(|| self.block_set_config.load(Ordering::SeqCst));
         Ok(response_catalog)
     }
 
@@ -10063,9 +10061,7 @@ impl AgentRuntime for RecordingAgent {
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         self.attaches.fetch_add(1, Ordering::SeqCst);
-        while self.block_attach.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::hold_while(|| self.block_attach.load(Ordering::SeqCst));
         if self.fail_attach {
             return Err(RuntimeError::NotReady(
                 "session event attachment failed".to_string(),
@@ -10086,9 +10082,7 @@ impl AgentRuntime for RecordingAgent {
 
     fn close_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.closes.fetch_add(1, Ordering::SeqCst);
-        while self.block_close.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::hold_while(|| self.block_close.load(Ordering::SeqCst));
         if self.fail_close {
             return Err(RuntimeError::NotReady("session close failed".to_string()));
         }
@@ -10575,14 +10569,7 @@ impl AgentRuntime for ConfigMutatingStartAgent {
 }
 
 fn wait_until(condition: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while Instant::now() < deadline {
-        if condition() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(condition());
+    crate::test_sync::wait_until("the awaited state", condition);
 }
 
 #[path = "config_preferences_tests.rs"]

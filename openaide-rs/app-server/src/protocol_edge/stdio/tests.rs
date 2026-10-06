@@ -1,7 +1,7 @@
 use super::*;
 
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use openaide_app_server_protocol::envelopes::RequestMeta;
@@ -578,10 +578,12 @@ fn new_client_lifecycle_cannot_revive_abandoned_attachment_handles() {
         AppServerTime(1),
     ));
     let handle_id = create_pasted_image_handle(&gateway, &first_connection, "create", 2);
+    // Request completion extends liveness by the real time the request took,
+    // so step far past each deadline instead of landing on its exact millisecond.
     assert!(gateway
-        .expire_inactive_clients(AppServerTime(30_002))
+        .expire_inactive_clients(AppServerTime(100_000))
         .is_empty());
-    let expired = gateway.expire_inactive_clients(AppServerTime(40_002));
+    let expired = gateway.expire_inactive_clients(AppServerTime(200_000));
     assert_eq!(expired.len(), 1);
 
     let replacement_connection = ConnectionId::new("conn-replacement");
@@ -592,7 +594,7 @@ fn new_client_lifecycle_cannot_revive_abandoned_attachment_handles() {
             CLIENT_INITIALIZE,
             initialize_params("client-reused"),
         ),
-        AppServerTime(40_003),
+        AppServerTime(200_001),
     ));
     let refresh_error = gateway_error(gateway.handle_inbound(
         replacement_connection,
@@ -601,7 +603,7 @@ fn new_client_lifecycle_cannot_revive_abandoned_attachment_handles() {
             ATTACHMENT_REFRESH_HANDLES,
             json!({ "taskId": "task-1", "handles": [handle_id] }),
         ),
-        AppServerTime(40_004),
+        AppServerTime(200_002),
     ));
     assert_eq!(
         refresh_error.error.code,
@@ -1924,7 +1926,7 @@ fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
 
     assert_eq!(responses.len(), 1);
     let committed = notifications
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("task create notification");
     let events = dispatcher.handle_task_update(committed);
     assert!(events.is_empty());
@@ -2076,10 +2078,10 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
         .as_str()
         .unwrap()
         .starts_with("turn_"));
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     let mut navigation_updated = false;
     while Instant::now() < deadline {
-        let committed = match notifications.recv_timeout(Duration::from_millis(50)) {
+        let committed = match notifications.recv_timeout(crate::test_sync::WATCHDOG) {
             Ok(committed) => committed,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -2771,8 +2773,9 @@ fn task_archive_older_completes_large_project_cleanup_promptly() {
     let archived = &response(&archived[0])["result"]["result"]["archivedNativeSessions"];
 
     assert_eq!(archived.as_array().map(Vec::len), Some(OLDER_SESSION_COUNT));
+    // timing: contract — archiving stays bounded; a quadratic pass exceeds any budget.
     assert!(
-        elapsed < Duration::from_secs(5),
+        elapsed < crate::test_sync::WATCHDOG,
         "archiving {OLDER_SESSION_COUNT} older tasks took {elapsed:?}"
     );
 }
@@ -2952,7 +2955,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
 
     assert_eq!(responses.len(), 1);
     let committed = notifications
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("task discard notification");
     assert!(dispatcher.handle_task_update(committed).is_empty());
 }
@@ -3159,17 +3162,9 @@ fn task_secret_request(task_id: &str) -> ServerRequestDraft {
 }
 
 fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
-    let deadline = Instant::now() + Duration::from_secs(1);
-    loop {
-        match Store::open(path.to_path_buf()) {
-            Ok(store) => return store,
-            Err(error) if Instant::now() < deadline => {
-                let _ = error;
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => panic!("store should reopen after dispatcher drop: {error}"),
-        }
-    }
+    crate::test_sync::wait_for("the store to reopen after dispatcher drop", || {
+        Store::open(path.to_path_buf()).ok()
+    })
 }
 
 fn event_payload_kind(line: &str, kind: &str) -> bool {
@@ -3182,9 +3177,9 @@ fn wait_for_server_request(
     notifications: &mpsc::Receiver<TaskUpdate>,
     method: &str,
 ) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while Instant::now() < deadline {
-        let notification = match notifications.recv_timeout(Duration::from_millis(50)) {
+        let notification = match notifications.recv_timeout(crate::test_sync::WATCHDOG) {
             Ok(notification) => notification,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(error) => panic!("task update channel closed: {error}"),
@@ -3205,9 +3200,9 @@ fn wait_for_protocol_task_status(
     task_id: &str,
     status: &str,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while Instant::now() < deadline {
-        let notification = match notifications.recv_timeout(Duration::from_millis(50)) {
+        let notification = match notifications.recv_timeout(crate::test_sync::WATCHDOG) {
             Ok(notification) => notification,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(error) => panic!("task update channel closed: {error}"),

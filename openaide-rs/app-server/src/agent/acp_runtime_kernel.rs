@@ -241,8 +241,24 @@ impl AcpRuntimeKernel {
     }
 
     #[cfg(test)]
+    pub(super) fn set_session_idle_timeout(&self, timeout: Duration) {
+        self.active_sessions.set_session_idle_timeout(timeout);
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_session_idle_close_timeout(&mut self, timeout: Duration) {
+        self.active_sessions
+            .with_session_idle_close_timeout(timeout);
+    }
+
+    #[cfg(test)]
     pub(super) fn with_process_idle_timeouts(&mut self, short: Duration, long: Duration) {
         self.active_sessions.with_process_idle_timeouts(short, long);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_process_idle_timeouts(&self, short: Duration, long: Duration) {
+        self.active_sessions.set_process_idle_timeouts(short, long);
     }
 
     #[cfg(test)]

@@ -40,13 +40,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     ));
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
     await list.hover();
-    // A wheel delivered while the list is still following the live end can be
-    // absorbed, so repeat the gesture until the reader has left the end.
-    await expect(async () => {
-      await page.mouse.wheel(0, -500);
-      expect(await distanceFromEnd()).toBeGreaterThan(100);
-    }).toPass({ timeout: 10_000 });
-    await page.mouse.wheel(0, 500);
+    // A wheel scrolls asynchronously. Send one gesture and wait for its
+    // effect: repeating it would compound and leave the list at an unknown offset.
+    await page.mouse.wheel(0, -500);
+    await expect.poll(distanceFromEnd).toBeGreaterThan(100);
+    // Return by more than the distance travelled so reaching the end does not
+    // depend on the exact offset the first gesture settled at.
+    await page.mouse.wheel(0, 5_000);
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
 
     // Exercise shell navigation without reloading the client or its scroll cache.
@@ -82,6 +82,51 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(Math.max(...settledDistances.slice(-10))).toBeLessThanOrEqual(2);
   });
 }
+
+test("keeps a reader's position when they scroll during a follow", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPreparedNewTask(page);
+  for (let index = 0; index < 8; index += 1) {
+    await send(page, index === 4 ? "smoke:navigation-long-message" : `Follow interruption message ${index}`);
+    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+  }
+  const list = page.locator(".message-list");
+  const distanceFromEnd = () => list.evaluate((element) => (
+    element.scrollHeight - element.clientHeight - element.scrollTop
+  ));
+  await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
+  // Chat follows a viewport resize from its own observer. This observer is
+  // registered later, so it runs in the same frame directly after that follow
+  // and places the reader's input before the follow has settled. Real input
+  // cannot be timed into that frame from outside the page.
+  await list.evaluate((element) => {
+    const observer = new ResizeObserver(() => {
+      if (element.clientHeight === window.readerInputHeight) return;
+      observer.disconnect();
+      element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -500 }));
+      element.scrollTop -= 500;
+      window.readerInputApplied = true;
+    });
+    window.readerInputHeight = element.clientHeight;
+    observer.observe(element);
+  });
+  await page.setViewportSize({ width: 1440, height: 850 });
+  await page.waitForFunction(() => window.readerInputApplied === true);
+  await expect.poll(distanceFromEnd).toBeGreaterThan(100);
+  // A later layout change must not resume the follow the reader interrupted.
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await expect.poll(() => list.evaluate((element) => element.clientHeight < window.readerInputHeight - 60))
+    .toBe(true);
+  const distances = await list.evaluate(async (element) => {
+    const samples = [];
+    for (let frame = 0; frame < 30; frame += 1) {
+      await new Promise(requestAnimationFrame);
+      samples.push(element.scrollHeight - element.clientHeight - element.scrollTop);
+    }
+    return samples;
+  });
+  expect(Math.min(...distances)).toBeGreaterThan(100);
+});
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`schedules a message and retains it across reload at ${viewport.width}px`, async ({ page }, testInfo) => {
@@ -536,6 +581,8 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions, hasRail = t
 
 test("keeps an Agent link clickable while its message is streaming", async ({ page }) => {
   await openPreparedNewTask(page);
+  await harness.hold("streaming-link-pressed");
+  await harness.hold("streaming-link-clicked");
   await send(page, "smoke:streaming-link-click");
 
   const link = page.getByRole("link", { name: "Streaming link" });
@@ -555,10 +602,12 @@ test("keeps an Agent link clickable while its message is streaming", async ({ pa
   const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();
+  await harness.release("streaming-link-pressed");
   await expect(page.getByText("Second paragraph arrives while the link is pressed.", { exact: true })).toBeVisible();
   await page.mouse.up();
 
   await expect.poll(() => page.evaluate(() => window.__openaideStreamingLinkClicks)).toBe(1);
+  await harness.release("streaming-link-clicked");
 });
 
 test("uses a mobile context button and keeps the desktop meter on the rounded edge", async ({ page }) => {
@@ -758,7 +807,7 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const diagram = page.locator(".agent-mermaid");
-  await expect(diagram.locator(".agent-mermaid-image")).toBeVisible({ timeout: 30_000 });
+  await expect(diagram.locator(".agent-mermaid-image")).toBeVisible();
   const copySource = diagram.getByRole("button", { name: "Copy source" });
   await expect(copySource).toBeVisible();
   expect((await copySource.boundingBox())?.width).toBeLessThanOrEqual(30);
@@ -864,14 +913,16 @@ test("waits for the Agent message to complete before rendering Mermaid", async (
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   const chat = page.getByLabel("Task chat");
   // A diagram still loading shows its source, which the streaming check below would also match.
-  await expect(chat.locator('.agent-mermaid[data-mode="diagram"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(chat.locator('.agent-mermaid[data-mode="diagram"]')).toHaveCount(1);
 
+  await harness.hold("mermaid-streaming");
   await send(page, "smoke:mermaid-streaming");
 
   await expect(chat.locator("code.language-mermaid")).toBeVisible();
   await expect(chat.locator(".agent-mermaid")).toHaveCount(1);
-  await expect(page.getByLabel("Task status: Idle")).toBeVisible({ timeout: 10_000 });
-  await expect(chat.locator(".agent-mermaid")).toHaveCount(2, { timeout: 30_000 });
+  await harness.release("mermaid-streaming");
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+  await expect(chat.locator(".agent-mermaid")).toHaveCount(2);
 });
 
 async function expectPreviewToFit(page, stage) {
@@ -950,8 +1001,10 @@ test("keeps a Task actions popup interactive after the pointer leaves its row", 
     observer.observe(document.body, { childList: true, subtree: true });
   });
   await row.hover();
+  // timing: absence — the hover preview has time to arm before the menu opens.
   await page.waitForTimeout(250);
   await row.getByRole("button", { name: "Task actions for Smoke task" }).click();
+  // timing: absence — outlasts the preview delay; the open menu must keep it closed.
   await page.waitForTimeout(1_100);
 
   const menu = page.getByRole("menu", { name: "Task actions for Smoke task" });
@@ -1383,6 +1436,7 @@ async function maximumVirtualRowOverlapDuring(page, action) {
   });
 
   await action();
+  // timing: absence — frames sampled after the action; more frames only strengthen it.
   await page.waitForTimeout(300);
   return page.evaluate(() => {
     window.__openaideVirtualRowOverlap.active = false;
@@ -1583,7 +1637,7 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
       await Promise.race([
         boundary,
         new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error(describeFailure())), 10_000);
+          timeout = setTimeout(() => reject(new Error(describeFailure())), 30_000);
         }),
       ]);
     } finally {

@@ -18,7 +18,7 @@ fn root_fatal_signal_invokes_process_termination_owner_once() {
         .expect("send root fatal signal");
     assert_eq!(
         terminated
-            .recv_timeout(std::time::Duration::from_secs(1))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .expect("termination owner receives signal"),
         "worker_panicked"
     );

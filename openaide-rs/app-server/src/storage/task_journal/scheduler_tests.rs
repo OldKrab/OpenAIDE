@@ -1,7 +1,6 @@
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use super::*;
 
@@ -160,7 +159,9 @@ fn draining_a_batch_releases_a_producer_blocked_by_byte_capacity() {
             .expect("report admission result");
     });
     started.recv().expect("producer started");
-    assert!(result.recv_timeout(Duration::from_millis(50)).is_err());
+    assert!(result
+        .recv_timeout(crate::test_sync::ABSENCE_WINDOW)
+        .is_err());
 
     let NextWork::Batch { task_id, writes } = scheduler.next() else {
         panic!("expected capacity-releasing batch");
@@ -168,7 +169,7 @@ fn draining_a_batch_releases_a_producer_blocked_by_byte_capacity() {
     assert_eq!(task_id, "task");
     assert_eq!(writes.len(), 1);
     assert!(result
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("producer released after drain")
         .is_ok());
     producer.join().expect("producer thread");
@@ -196,14 +197,16 @@ fn shutdown_releases_blocked_producers_and_rejects_new_writes() {
             .expect("report admission result");
     });
     started.recv().expect("producer started");
-    assert!(result.recv_timeout(Duration::from_millis(50)).is_err());
+    assert!(result
+        .recv_timeout(crate::test_sync::ABSENCE_WINDOW)
+        .is_err());
 
     let (shutdown_reply, _shutdown_receipt) = mpsc::channel();
     scheduler
         .request_shutdown(shutdown_reply)
         .expect("request shutdown");
     assert!(result
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("blocked producer released")
         .is_err());
     let (reply, _receipt) = mpsc::channel();

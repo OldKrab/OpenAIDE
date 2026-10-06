@@ -1,7 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
 
 use openaide_app_server::agent::events::{AgentEvent, AgentToolCall, AgentToolCallStatus};
 use openaide_app_server::agent::mock::MockAgent;
@@ -30,6 +28,11 @@ use openaide_app_server::transport::shell_control::ShellControlDispatcher;
 use openaide_app_server::Runtime;
 use serde_json::{json, Value};
 use tempfile::TempDir;
+
+// The crate's shared test synchronization vocabulary.
+#[allow(dead_code)]
+#[path = "../src/test_sync.rs"]
+mod test_sync;
 
 include!("runtime_contract/agent_setup.rs");
 include!("runtime_contract/activity_stream.rs");

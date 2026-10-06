@@ -428,6 +428,10 @@ pub(super) async fn run_prompt(
         }
     };
 
+    // A session cancel requested during this prompt targets this prompt. Consume it
+    // here so the idle session cannot forward it to the Agent ahead of the next prompt.
+    while cancel_rx.try_recv().is_ok() {}
+
     // Retire every still-pending response from lifecycle ownership. The session-level
     // update consumer remains attached and continues accepting late updates.
     active_prompt.mark_settled(PromptSettlementKind::RunnerExit);

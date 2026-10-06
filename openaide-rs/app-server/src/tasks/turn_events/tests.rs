@@ -1401,7 +1401,7 @@ fn terminal_only_tool_updates_are_durable_without_task_revision() {
         .unwrap();
     }
     let published = notifications
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("terminal-only durability publishes without a later Task mutation");
     assert!(matches!(
         published.kind,
@@ -1458,7 +1458,7 @@ fn terminal_append_immediately_before_task_change_is_published_once() {
     let updates = (0..2)
         .map(|_| {
             notifications
-                .recv_timeout(std::time::Duration::from_secs(1))
+                .recv_timeout(crate::test_sync::WATCHDOG)
                 .expect("terminal and Task changes are both published")
                 .kind
         })
@@ -1536,7 +1536,7 @@ fn mixed_tool_update_publishes_one_atomic_detail_delta() {
     let changed = (0..2)
         .find_map(|_| {
             let update = notifications
-                .recv_timeout(std::time::Duration::from_secs(1))
+                .recv_timeout(crate::test_sync::WATCHDOG)
                 .expect("mixed update publication");
             match update.kind {
                 TaskUpdateKind::Changed(change) => Some(change),
@@ -1617,7 +1617,7 @@ fn preceding_stream_and_mixed_update_share_one_atomic_tool_delta() {
     .unwrap();
 
     let update = notifications
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("one atomic mixed Tool update");
     let TaskUpdateKind::Changed(changed) = update.kind else {
         panic!("structured Tool publisher must own the coalesced artifact delta");
@@ -1993,7 +1993,7 @@ fn agent_text_chunks_batch_durable_writes_without_losing_ordered_chat_updates() 
 
     sink.emit(agent_text_event("start")).unwrap();
     notifications
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("initial Agent message is published");
     let syncs_before_chunks = store.task_journal().durability_sync_calls();
 
@@ -2033,7 +2033,7 @@ fn agent_text_chunks_batch_durable_writes_without_losing_ordered_chat_updates() 
     let mut latest_revision = 1;
     while latest_revision < task.revision {
         let update = notifications
-            .recv_timeout(std::time::Duration::from_secs(1))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .expect("durable streamed Chat update is published");
         latest_revision = latest_revision.max(update.revision);
     }
@@ -2322,9 +2322,9 @@ fn permission_request_splits_active_agent_text_run() {
     let permission_thread = std::thread::spawn(move || {
         permission_sink.request_permission(permission_request("permission_1"))
     });
-    while server_requests.pending_count() == 0 {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::test_sync::wait_until("the permission request", || {
+        server_requests.pending_count() > 0
+    });
     answer_permission(&server_requests, "task_1", "allow");
     permission_thread
         .join()
@@ -2359,9 +2359,9 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
     let permission_thread = std::thread::spawn(move || {
         permission_sink.request_permission(permission_request("permission_1"))
     });
-    while server_requests.pending_count() == 0 {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::test_sync::wait_until("the permission request", || {
+        server_requests.pending_count() > 0
+    });
 
     let (emit_done_tx, emit_done_rx) = std::sync::mpsc::channel();
     let event_sink = sink.clone();
@@ -2370,7 +2370,7 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
         let _ = emit_done_tx.send(result);
     });
     let emitted_while_waiting = emit_done_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .is_ok();
 
     answer_permission(&server_requests, "task_1", "allow");

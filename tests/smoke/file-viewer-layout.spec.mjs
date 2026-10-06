@@ -227,7 +227,7 @@ test("shows a bounded photo preview with zoom and original download", async ({ p
     await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
     const viewer = page.getByRole("complementary", { name: "File Viewer" });
     const image = viewer.getByRole("img", { name: filename, exact: true });
-    await expect(image).toBeVisible({ timeout: 30_000 });
+    await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
     await expect(viewer.getByText("Reduced image preview", { exact: true })).toBeVisible();
     const dimensions = await image.evaluate((img) => ({ width: img.naturalWidth, height: img.naturalHeight }));

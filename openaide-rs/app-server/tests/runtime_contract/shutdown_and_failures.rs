@@ -285,14 +285,16 @@ fn shutdown_stops_active_turn_without_failed_task_state() {
 
     service.shutdown().unwrap();
     wait_until(|| state.0.lock().unwrap().prompt_returned);
-    thread::sleep(Duration::from_millis(25));
 
-    let snapshot = service
-        .snapshot(TaskSnapshotParams {
-            task_id,
-            tail_limit: 100,
-        })
-        .unwrap();
+    let snapshot = crate::test_sync::wait_for("the shut down Turn to settle", || {
+        service
+            .snapshot(TaskSnapshotParams {
+                task_id: task_id.clone(),
+                tail_limit: 100,
+            })
+            .ok()
+            .filter(|snapshot| snapshot.task.status == TaskStatus::Inactive)
+    });
     assert_eq!(snapshot.task.status, TaskStatus::Inactive);
     assert!(has_interruption_reason(&snapshot, |reason| {
         matches!(reason, InterruptionReason::Canceled)
@@ -484,12 +486,8 @@ fn task_updates_emit_typed_task_updates() {
             .unwrap_or(false)
     });
 
-    let updates = (0..3)
-        .filter_map(|_| receiver.recv_timeout(Duration::from_secs(1)).ok())
-        .collect::<Vec<_>>();
     assert!(
-        updates
-            .iter()
+        std::iter::from_fn(|| receiver.recv_timeout(crate::test_sync::WATCHDOG).ok())
             .any(|update| update.task_id == task_id),
         "expected task update for task"
     );

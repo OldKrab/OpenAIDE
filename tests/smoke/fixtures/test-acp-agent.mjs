@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import readline from "node:readline";
+import { released } from "./gate.mjs";
 
 const sessions = new Map();
 const history = new Map();
@@ -313,7 +314,7 @@ async function runPrompt(message) {
       "```mermaid\nflowchart LR\n  A[Streaming] --> B[Complete]\n```",
       `agent-${promptNumber}`,
     );
-    await delay(5_000);
+    await released("mermaid-streaming");
     respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
     session.activePrompts.delete(String(message.id));
     return;
@@ -336,14 +337,14 @@ async function runPrompt(message) {
       "[Streaming link](https://example.com)\n\nFirst paragraph.",
       `agent-${promptNumber}`,
     );
-    await delay(400);
+    await released("streaming-link-pressed");
     textUpdate(
       sessionId,
       "agent_message_chunk",
       "\n\nSecond paragraph arrives while the link is pressed.",
       `agent-${promptNumber}`,
     );
-    await delay(400);
+    await released("streaming-link-clicked");
     respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
     session.activePrompts.delete(String(message.id));
     return;
@@ -398,7 +399,7 @@ async function runPrompt(message) {
   }
 
   textUpdate(sessionId, "agent_thought_chunk", "Inspecting ", `thought-${promptNumber}`);
-  await delay(16);
+  await paceFrame();
   textUpdate(sessionId, "agent_thought_chunk", "the request", `thought-${promptNumber}`);
   toolUpdate(sessionId, {
     sessionUpdate: "tool_call",
@@ -408,7 +409,7 @@ async function runPrompt(message) {
     status: "in_progress",
     rawInput: { path: "README.md" },
   });
-  await delay(16);
+  await paceFrame();
   toolUpdate(sessionId, {
     sessionUpdate: "tool_call_update",
     toolCallId: `tool-${promptNumber}`,
@@ -417,7 +418,7 @@ async function runPrompt(message) {
     rawOutput: { ok: true },
   });
   textUpdate(sessionId, "agent_message_chunk", "Smoke ", `agent-${promptNumber}`);
-  await delay(16);
+  await paceFrame();
   textUpdate(sessionId, "agent_message_chunk", "answer", `agent-${promptNumber}`);
   const title = text === "smoke:long-title"
     ? "A deliberately long task title segment that remains readable in the compact hover preview. ".repeat(12).trim()
@@ -549,6 +550,7 @@ function log(message) {
   process.stderr.write(`[test-acp-agent] ${message}\n`);
 }
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Paces streamed chunks into separate frames; tests wait on gates and outcomes. */
+function paceFrame() {
+  return new Promise((resolve) => setTimeout(resolve, 16)); // timing: data
 }

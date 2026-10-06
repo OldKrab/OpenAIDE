@@ -1,7 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc;
-use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -54,7 +53,7 @@ impl Server {
     fn connect(&self, authorization: Option<&str>) -> Client {
         let mut stream = TcpStream::connect(self.address).expect("connect");
         stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(crate::test_sync::WATCHDOG))
             .expect("read timeout");
         let authorization = authorization
             .map(|value| format!("Authorization: {value}\r\n"))

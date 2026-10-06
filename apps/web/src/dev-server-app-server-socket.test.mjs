@@ -141,10 +141,10 @@ async function upgradeStatus(port, path) {
 }
 
 async function waitFor(condition) {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 30_000;
   while (!condition()) {
     if (Date.now() > deadline) throw new Error("condition was not met");
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 5)); // timing: poll
   }
 }
 

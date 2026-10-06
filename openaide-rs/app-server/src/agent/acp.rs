@@ -88,6 +88,18 @@ impl AcpAgentRuntime {
         self
     }
 
+    /// Replaces the idle timeout for open and later attachments alike.
+    #[cfg(test)]
+    fn set_session_idle_timeout(&self, timeout: std::time::Duration) {
+        self.kernel.set_session_idle_timeout(timeout);
+    }
+
+    #[cfg(test)]
+    fn with_session_idle_close_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.kernel.with_session_idle_close_timeout(timeout);
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn with_process_idle_timeouts(
         mut self,
@@ -96,6 +108,16 @@ impl AcpAgentRuntime {
     ) -> Self {
         self.kernel.with_process_idle_timeouts(short, long);
         self
+    }
+
+    /// Replaces retention for running and later Agent processes alike.
+    #[cfg(test)]
+    pub(crate) fn set_process_idle_timeouts(
+        &self,
+        short: std::time::Duration,
+        long: std::time::Duration,
+    ) {
+        self.kernel.set_process_idle_timeouts(short, long);
     }
 
     #[cfg(test)]

@@ -130,7 +130,7 @@ describe("VS Code Task notification registration", () => {
 });
 
 function attentionTask(): import("@openaide/app-server-client").TaskSummary {
-  const occurredAt = new Date(Date.now() + 1_000).toISOString();
+  const occurredAt = new Date(Date.now() + 1_000).toISOString(); // timing: data
   return {
     taskId: "task-1" as import("@openaide/app-server-client").TaskId,
     projectId: "project-1" as import("@openaide/app-server-client").ProjectId,

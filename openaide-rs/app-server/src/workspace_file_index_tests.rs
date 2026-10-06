@@ -1,5 +1,4 @@
 use std::fs;
-use std::time::Duration;
 
 use tempfile::TempDir;
 
@@ -17,7 +16,7 @@ fn indexes_effective_git_files_and_ranks_paths() {
     fs::write(workspace.path().join(".gitignore"), "target/\n").unwrap();
     fs::write(workspace.path().join(".ignore"), "kept-by-dot-ignore.txt\n").unwrap();
 
-    let index = WorkspaceFileIndex::new(2, Duration::from_secs(60));
+    let index = WorkspaceFileIndex::new(2, crate::test_sync::NEVER);
     let empty = index.search(workspace.path(), "");
     assert_eq!(empty.state, WorkspaceFileIndexState::Ready);
     assert!(
@@ -43,14 +42,14 @@ fn indexes_effective_git_files_and_ranks_paths() {
 fn git_metadata_changes_do_not_refresh_workspace_results() {
     let workspace = git_workspace();
     write(workspace.path(), "README.md");
-    let index = WorkspaceFileIndex::new(2, Duration::from_secs(60));
+    let index = WorkspaceFileIndex::new(2, crate::test_sync::NEVER);
     assert_eq!(
         index.search(workspace.path(), "readme").state,
         WorkspaceFileIndexState::Ready
     );
 
     write(workspace.path(), ".git/HEAD");
-    std::thread::sleep(Duration::from_millis(50));
+    crate::test_sync::observe_absence();
 
     assert_eq!(
         index.search(workspace.path(), "readme").state,
@@ -62,23 +61,13 @@ fn git_metadata_changes_do_not_refresh_workspace_results() {
 fn watcher_marks_changed_workspace_for_refresh() {
     let workspace = git_workspace();
     write(workspace.path(), "README.md");
-    let index = WorkspaceFileIndex::new(2, Duration::from_secs(60));
+    let index = WorkspaceFileIndex::new(2, crate::test_sync::NEVER);
     assert!(index.search(workspace.path(), "new-file").paths.is_empty());
 
     write(workspace.path(), "src/new-file.rs");
-    let mut saw_refresh = false;
-    let mut saw_file = false;
-    for _ in 0..40 {
-        let search = index.search(workspace.path(), "new-file");
-        saw_refresh |= search.state == WorkspaceFileIndexState::Refreshing;
-        saw_file |= search.paths == ["src/new-file.rs"];
-        if saw_file {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    assert!(saw_refresh || saw_file);
-    assert!(saw_file);
+    crate::test_sync::wait_until("the watcher to index the new file", || {
+        index.search(workspace.path(), "new-file").paths == ["src/new-file.rs"]
+    });
 }
 
 #[test]
@@ -86,7 +75,7 @@ fn forget_drops_a_cached_workspace() {
     let workspace = git_workspace();
     write(workspace.path(), "old.rs");
     let canonical = workspace.path().canonicalize().unwrap();
-    let index = WorkspaceFileIndex::new(2, Duration::from_secs(60));
+    let index = WorkspaceFileIndex::new(2, crate::test_sync::NEVER);
     assert_eq!(index.search(workspace.path(), "old").paths, ["old.rs"]);
 
     index.forget(&canonical);

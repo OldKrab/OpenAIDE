@@ -4,6 +4,8 @@ import http from "node:http";
 import test from "node:test";
 import { createAppServerManager } from "./app-server-manager.mjs";
 
+const WATCHDOG_MS = 30_000;
+
 test("concurrent App Server starts share one spawned runtime", async () => {
   const children = [];
   const handoff = deferred();
@@ -227,25 +229,22 @@ test("failed heartbeat invalidates the connection so a later start hands off aga
   assert.equal(manager.currentConnection(), undefined);
 });
 
-test("a stalled shell initialization releases its handoff for a later retry", { timeout: 3_000 }, async (t) => {
-  let accept = false;
-  const server = http.createServer((request, response) => {
-    if (!accept) return;
-    const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
-    request.on("end", () => {
-      const message = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      response.end(JSON.stringify({ id: message.id, result: {} }));
-    });
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => { server.closeAllConnections(); server.close(); });
+test("a stalled shell initialization releases its handoff for a later retry", async (t) => {
+  // The shell request timeout runs on a mocked clock, so the stalled request
+  // expires exactly when the test says and the retry cannot expire at all.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const stalled = deferred();
+  let stall = true;
   const children = [];
   const manager = createAppServerManager({
-    readHandoffConnection: async () => ({
-      authToken: "test-token",
-      endpointUrl: `http://127.0.0.1:${server.address().port}/rpc`,
-    }),
+    readHandoffConnection: async () => ({ authToken: "test-token", endpointUrl: "http://127.0.0.1:1234/rpc" }),
+    requestAppServer: async (_connection, _connectionId, _body, { signal }) => {
+      if (!stall) return {};
+      stalled.resolve();
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
     shellRequestTimeoutMs: 50,
     spawnAppServer: () => {
       const child = childProcess();
@@ -255,10 +254,13 @@ test("a stalled shell initialization releases its handoff for a later retry", { 
   });
   t.after(() => manager.clearConnection());
 
-  await assert.rejects(manager.startAppServer(), { name: "TimeoutError" });
+  const firstStart = manager.startAppServer();
+  await stalled.promise;
+  t.mock.timers.tick(50);
+  await assert.rejects(firstStart, { name: "TimeoutError" });
   assert.equal(manager.currentConnection(), undefined);
   assert.equal(children[0].killed, true);
-  accept = true;
+  stall = false;
   await manager.startAppServer();
   assert.ok(manager.currentConnection());
 });
@@ -366,7 +368,7 @@ function waitFor(predicate) {
         resolve();
         return;
       }
-      if (Date.now() - started > 200) {
+      if (Date.now() - started > WATCHDOG_MS) {
         clearInterval(timer);
         reject(new Error("timed out waiting for condition"));
       }

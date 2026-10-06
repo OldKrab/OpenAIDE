@@ -122,7 +122,7 @@ test("explains when a Native Session is already open in another window", async (
     name: "Open Session open elsewhere",
     exact: true,
   }).first();
-  await expect(openExternalSession).toBeVisible({ timeout: 10_000 });
+  await expect(openExternalSession).toBeVisible();
   await openExternalSession.evaluate((element) => element.click());
 
   const conflict = page.locator('section[aria-label="Session open elsewhere"]');

@@ -27,4 +27,4 @@ test("a custom frontend output directory receives the app, Diagram renderer, and
   } finally {
     await rm(outDir, { recursive: true, force: true });
   }
-}, 30_000);
+});
