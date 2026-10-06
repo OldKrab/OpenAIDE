@@ -7,6 +7,16 @@
   gap: 4px;
 }
 
+.skill-tool-args {
+  max-width: min(68ch, 100%);
+  margin: 0;
+  color: var(--oa-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .skill-tool-markdown.chat-agent {
   width: auto;
   max-width: min(68ch, 100%);

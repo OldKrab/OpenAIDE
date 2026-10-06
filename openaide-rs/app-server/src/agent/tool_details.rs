@@ -6,8 +6,8 @@ use std::ffi::OsStr;
 use crate::agent::command_presentation::infer_execute_presentation;
 use crate::agent::events::{AgentEvent, AgentToolCall, AgentToolCallStatus};
 use crate::agent::tool_details_io::{
-    tool_input_description, tool_input_detail, tool_input_summary, tool_output_detail,
-    truncate_preview,
+    tool_input_description, tool_input_detail, tool_input_string_field, tool_input_summary,
+    tool_output_detail, truncate_preview,
 };
 use crate::protocol::model::{
     ActivityToolContent, ActivityToolDetails, ActivityToolLocation, ToolPresentation,
@@ -52,7 +52,26 @@ fn tool_presentation(tool_call: &ToolCall) -> (String, Option<String>) {
             return ("skill".to_string(), Some(skill_name));
         }
     }
+    if let Some(skill_name) = claude_skill_name(tool_call) {
+        return ("skill".to_string(), Some(skill_name));
+    }
     (kind, tool_input_summary(tool_call.raw_input.as_ref()))
+}
+
+/// Claude activates a skill through its own `Skill` tool instead of reading
+/// `SKILL.md`. The adapter reports it as an `other` tool, so the tool name it
+/// attaches in `_meta.claudeCode.toolName` is the only stable identity.
+fn claude_skill_name(tool_call: &ToolCall) -> Option<String> {
+    let tool_name = tool_call
+        .meta
+        .as_ref()?
+        .get("claudeCode")?
+        .get("toolName")?
+        .as_str()?;
+    if tool_name != "Skill" {
+        return None;
+    }
+    tool_input_string_field(tool_call.raw_input.as_ref(), "skill").filter(|name| !name.is_empty())
 }
 
 fn structured_tool_presentation(

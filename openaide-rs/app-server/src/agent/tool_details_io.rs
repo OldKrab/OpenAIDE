@@ -130,6 +130,13 @@ pub(super) fn tool_output_detail(value: &Value) -> Option<ActivityToolOutput> {
     }
 }
 
+/// Reads one named string argument as a sanitized, label-sized summary.
+pub(super) fn tool_input_string_field(raw_input: Option<&Value>, key: &str) -> Option<String> {
+    let value = tool_input_object(raw_input?)?.get(key)?;
+    value.as_str()?;
+    tool_input_field_summary(key, value)
+}
+
 /// Reads the purpose an Agent attached to its own command input. Claude's shell
 /// tools send `description`; Agents without it keep the command title.
 pub(super) fn tool_input_description(raw_input: Option<&Value>) -> Option<String> {
