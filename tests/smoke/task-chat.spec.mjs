@@ -40,13 +40,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     ));
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
     await list.hover();
-    // A wheel delivered while the list is still following the live end can be
-    // absorbed, so repeat the gesture until the reader has left the end.
-    await expect(async () => {
-      await page.mouse.wheel(0, -500);
-      expect(await distanceFromEnd()).toBeGreaterThan(100);
-    }).toPass({ timeout: 10_000 });
-    await page.mouse.wheel(0, 500);
+    // A wheel scrolls asynchronously. Send one gesture and wait for its
+    // effect: repeating it would compound and leave the list at an unknown offset.
+    await page.mouse.wheel(0, -500);
+    await expect.poll(distanceFromEnd).toBeGreaterThan(100);
+    // Return by more than the distance travelled so reaching the end does not
+    // depend on the exact offset the first gesture settled at.
+    await page.mouse.wheel(0, 5_000);
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
 
     // Exercise shell navigation without reloading the client or its scroll cache.
@@ -82,6 +82,51 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(Math.max(...settledDistances.slice(-10))).toBeLessThanOrEqual(2);
   });
 }
+
+test("keeps a reader's position when they scroll during a follow", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPreparedNewTask(page);
+  for (let index = 0; index < 8; index += 1) {
+    await send(page, index === 4 ? "smoke:navigation-long-message" : `Follow interruption message ${index}`);
+    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+  }
+  const list = page.locator(".message-list");
+  const distanceFromEnd = () => list.evaluate((element) => (
+    element.scrollHeight - element.clientHeight - element.scrollTop
+  ));
+  await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
+  // Chat follows a viewport resize from its own observer. This observer is
+  // registered later, so it runs in the same frame directly after that follow
+  // and places the reader's input before the follow has settled. Real input
+  // cannot be timed into that frame from outside the page.
+  await list.evaluate((element) => {
+    const observer = new ResizeObserver(() => {
+      if (element.clientHeight === window.readerInputHeight) return;
+      observer.disconnect();
+      element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -500 }));
+      element.scrollTop -= 500;
+      window.readerInputApplied = true;
+    });
+    window.readerInputHeight = element.clientHeight;
+    observer.observe(element);
+  });
+  await page.setViewportSize({ width: 1440, height: 850 });
+  await page.waitForFunction(() => window.readerInputApplied === true);
+  await expect.poll(distanceFromEnd).toBeGreaterThan(100);
+  // A later layout change must not resume the follow the reader interrupted.
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await expect.poll(() => list.evaluate((element) => element.clientHeight < window.readerInputHeight - 60))
+    .toBe(true);
+  const distances = await list.evaluate(async (element) => {
+    const samples = [];
+    for (let frame = 0; frame < 30; frame += 1) {
+      await new Promise(requestAnimationFrame);
+      samples.push(element.scrollHeight - element.clientHeight - element.scrollTop);
+    }
+    return samples;
+  });
+  expect(Math.min(...distances)).toBeGreaterThan(100);
+});
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`schedules a message and retains it across reload at ${viewport.width}px`, async ({ page }, testInfo) => {

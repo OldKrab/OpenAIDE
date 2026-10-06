@@ -14,7 +14,7 @@ fn request_serializes_to_host_and_accepts_response() {
     });
 
     let outbound = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("host request should be emitted");
     assert_eq!(outbound.jsonrpc, "2.0");
     assert_eq!(outbound.method, "fs/read_text_file");
@@ -55,7 +55,7 @@ fn request_until_can_wait_without_default_timeout_and_cancel() {
     });
 
     requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("host request should be emitted");
     cancelled.store(true, Ordering::SeqCst);
 

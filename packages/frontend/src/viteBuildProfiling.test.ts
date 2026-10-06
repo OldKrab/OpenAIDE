@@ -26,4 +26,4 @@ test("local role bundle preserves function names for browser profiling", async (
     else process.env.OPENAIDE_WEB_DEBUG_BUILD = previousDebugBuild;
     await rm(outDir, { recursive: true, force: true });
   }
-}, 20_000);
+});

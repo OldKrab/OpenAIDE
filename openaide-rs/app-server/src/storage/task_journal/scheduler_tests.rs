@@ -168,7 +168,7 @@ fn draining_a_batch_releases_a_producer_blocked_by_byte_capacity() {
     assert_eq!(task_id, "task");
     assert_eq!(writes.len(), 1);
     assert!(result
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("producer released after drain")
         .is_ok());
     producer.join().expect("producer thread");
@@ -203,7 +203,7 @@ fn shutdown_releases_blocked_producers_and_rejects_new_writes() {
         .request_shutdown(shutdown_reply)
         .expect("request shutdown");
     assert!(result
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("blocked producer released")
         .is_err());
     let (reply, _receipt) = mpsc::channel();

@@ -49,7 +49,7 @@ fn acquiring_after_restart_recovers_an_unloaded_empty_codex_session() {
         .unwrap();
     assert_eq!(acquired.task.task_id.as_str(), "task-prepared");
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     loop {
         let snapshot = api
             .open_for_test(TaskOpenParams {
@@ -198,10 +198,17 @@ fn first_send_after_idle_process_expiry_recovers_empty_session_without_duplicate
         },
     })
     .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     loop {
         let current = snapshot();
-        if current.task.has_messages && current.task.status == ProtocolTaskStatus::Idle {
+        // An accepted Send is Idle with messages before its Turn starts, so
+        // wait for the replacement's reply rather than for that state alone.
+        let replied = current.chat.items.iter().any(|item| {
+            item.parts
+                .iter()
+                .any(|part| matches!(part, MessagePart::Text { text } if text == "Recovered"))
+        });
+        if replied && current.task.status == ProtocolTaskStatus::Idle {
             break;
         }
         assert!(
@@ -232,7 +239,7 @@ fn first_send_after_idle_process_expiry_recovers_empty_session_without_duplicate
 
 #[cfg(unix)]
 fn wait_for_idle_recovery(stage: &str, ready: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while !ready() {
         assert!(Instant::now() < deadline, "timed out waiting for {stage}");
         std::thread::sleep(Duration::from_millis(10));

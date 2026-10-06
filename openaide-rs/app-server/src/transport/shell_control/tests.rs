@@ -150,7 +150,7 @@ fn dispatcher_unblocks_pending_host_bridge_request() {
     let pending =
         std::thread::spawn(move || host_bridge.request("host/test", Some(json!({ "ok": true }))));
     let request = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("host request should be emitted");
     assert_eq!(request.id, RpcId::String("host_1".to_string()));
 

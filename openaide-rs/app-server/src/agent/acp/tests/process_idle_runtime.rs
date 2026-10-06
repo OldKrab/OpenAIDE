@@ -427,7 +427,7 @@ fn pending_agent_request_suspends_expiration_until_client_response() {
     let (host, requests) = HostBridge::channel();
     let runtime = fixture_with_host(&temp, "host_request", host.clone());
     let pid = list_pid(&runtime, temp.path());
-    let request = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+    let request = requests.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
     assert_eq!(request.method, "fs/read_text_file");
     thread::sleep(SHORT_IDLE * 3);
     assert!(

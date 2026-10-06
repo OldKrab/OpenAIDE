@@ -17,7 +17,7 @@ fn terminal_runs_configured_command_accepts_input_and_requires_zero_exit() {
         }, TurnCancellation::new())
         });
         let mut sent_input = false;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + crate::test_sync::WATCHDOG;
         while !worker.is_finished() {
             assert!(Instant::now() < deadline, "terminal exchange timed out");
             for pending in requests.pending_for_client(&client) {
@@ -90,7 +90,7 @@ fn assert_terminal_interrupted(disconnect: bool) {
             worker_token,
         )
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while requests.pending_for_client(&client).is_empty() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));

@@ -2142,7 +2142,7 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
     });
 
     let accepted = finished_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("task/send must not wait for ACP session resume")
         .unwrap();
     assert!(accepted.task.chat.items.iter().any(|item| {
@@ -4815,13 +4815,19 @@ fn background_native_session_failure_is_published_as_failed_refresh_state() {
     api.request_native_session_catalog_refresh();
 
     assert!(matches!(
-        updates.recv_timeout(Duration::from_secs(1)).unwrap().kind,
+        updates
+            .recv_timeout(crate::test_sync::WATCHDOG)
+            .unwrap()
+            .kind,
         TaskUpdateKind::NavigationRefreshStateChanged {
             refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
         }
     ));
     assert!(matches!(
-        updates.recv_timeout(Duration::from_secs(1)).unwrap().kind,
+        updates
+            .recv_timeout(crate::test_sync::WATCHDOG)
+            .unwrap()
+            .kind,
         TaskUpdateKind::NavigationRefreshStateChanged {
             refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed { .. }
         }
@@ -5585,7 +5591,7 @@ fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
     });
 
     wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
-    let accepted = accepted_rx.recv_timeout(Duration::from_millis(100));
+    let accepted = accepted_rx.recv_timeout(crate::test_sync::WATCHDOG);
     let accepted = accepted
         .expect("Send should return before Native Session startup")
         .unwrap();
@@ -5743,7 +5749,7 @@ fn send_after_prompt_settlement_starts_a_new_turn() {
     let early_send = send_rx.recv_timeout(Duration::from_millis(250)).ok();
     api.turn_runner.release_settlement_for_test();
     let next = early_send
-        .unwrap_or_else(|| send_rx.recv_timeout(Duration::from_secs(2)).unwrap())
+        .unwrap_or_else(|| send_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap())
         .unwrap();
 
     assert_ne!(next.turn_id, primary.turn_id);
@@ -7880,7 +7886,7 @@ fn stale_cancel_cannot_retire_a_newer_accepted_send() {
         })
     });
     stale_read_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("Cancel should read the active Turn");
 
     agent.release_prompt.store(true, Ordering::SeqCst);
@@ -8738,7 +8744,7 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
         .unwrap();
     agent.block_set_config.store(false, Ordering::SeqCst);
     let settled = result_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("the config mutation should settle")
         .unwrap();
 
@@ -8799,7 +8805,7 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
         })
     });
     submitted_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("newer config request should be submitted");
     let observation_deadline = Instant::now() + Duration::from_millis(250);
     while Instant::now() < observation_deadline && agent.started_values.lock().unwrap().len() == 1 {
@@ -8891,9 +8897,9 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
             .unwrap();
     });
     submitted_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("unrelated config request should be submitted");
-    let unrelated_result = result_rx.recv_timeout(Duration::from_secs(1));
+    let unrelated_result = result_rx.recv_timeout(crate::test_sync::WATCHDOG);
 
     agent.release_first.store(true, Ordering::SeqCst);
     blocked.join().unwrap().unwrap();
@@ -8969,7 +8975,7 @@ fn set_config_option_continues_after_concurrent_session_replacement_is_rejected(
     agent.block_set_config.store(false, Ordering::SeqCst);
 
     let snapshot = result_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("the stale session request should finish")
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
@@ -9033,7 +9039,7 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
     agent.block_set_config.store(false, Ordering::SeqCst);
 
     let snapshot = result_rx
-        .recv_timeout(Duration::from_millis(250))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("the reconciled session request should finish")
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
@@ -10564,7 +10570,7 @@ impl AgentRuntime for ConfigMutatingStartAgent {
 }
 
 fn wait_until(condition: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while Instant::now() < deadline {
         if condition() {
             return;

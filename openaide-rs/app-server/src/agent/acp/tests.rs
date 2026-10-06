@@ -360,7 +360,7 @@ fn read_text_file_request_round_trips_through_host_bridge() {
     });
 
     let outbound = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("read request should be sent to host");
     assert_eq!(outbound.method, "fs/read_text_file");
     assert_eq!(outbound.params.as_ref().unwrap()["sessionId"], "session_1");
@@ -401,7 +401,7 @@ fn write_text_file_request_accepts_null_host_response() {
     });
 
     let outbound = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("write request should be sent to host");
     assert_eq!(outbound.method, "fs/write_text_file");
     assert_eq!(outbound.params.as_ref().unwrap()["content"], "updated\n");
@@ -437,7 +437,7 @@ fn terminal_create_request_round_trips_through_host_bridge() {
     });
 
     let outbound = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("terminal create request should be sent to host");
     assert_eq!(outbound.method, "terminal/create");
     assert_eq!(outbound.params.as_ref().unwrap()["command"], "npm");
@@ -481,7 +481,7 @@ fn terminal_wait_request_can_be_cancelled_without_deadline() {
     });
 
     let outbound = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("terminal wait request should be sent to host");
     assert_eq!(outbound.method, "terminal/wait_for_exit");
     cancelled.store(true, Ordering::SeqCst);
@@ -1645,7 +1645,10 @@ fn probe_timeout_cancels_hanging_agent_process() {
             AgentProbeRequest {
                 agent_id: "codex".to_string(),
             },
-            Duration::from_millis(200),
+            // The shell must launch and record its pid before this expires.
+            // TODO: expire the probe from the test once the pid is recorded; a
+            // wall-clock allowance still loses to a sufficiently starved runner.
+            Duration::from_secs(2),
         )
         .unwrap_err();
     let error_text = error.to_string();
@@ -1655,18 +1658,17 @@ fn probe_timeout_cancels_hanging_agent_process() {
         error_text.contains("ACP Agent probe timed out"),
         "{error_text}"
     );
-    assert!(started.elapsed() < Duration::from_secs(2));
+    // The probe returns on its own deadline, well before the Agent's 30 s sleep.
+    assert!(started.elapsed() < Duration::from_secs(15));
     let pid = fs::read_to_string(&pid_file).expect("agent pid file");
-    for _ in 0..20 {
-        if !process_exists(pid.trim()) {
-            break;
-        }
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
+    while process_exists(pid.trim()) {
+        assert!(
+            Instant::now() < deadline,
+            "hanging probe process stayed alive"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
-    assert!(
-        !process_exists(pid.trim()),
-        "hanging probe process stayed alive"
-    );
 }
 
 #[test]

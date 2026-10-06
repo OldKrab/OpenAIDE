@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tempfile::TempDir;
 
@@ -164,7 +164,7 @@ impl ShutdownContinuationAgent {
 
     fn wait_until(&self, predicate: impl Fn(&ShutdownContinuationState) -> bool) {
         let (state_lock, changed) = &*self.state;
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + crate::test_sync::WATCHDOG;
         let mut state = state_lock.lock().expect("shutdown state poisoned");
         while !predicate(&state) {
             let remaining = deadline
@@ -237,7 +237,7 @@ impl StorageFailureCancellationAgent {
     }
 
     fn wait_until(&self, condition: impl Fn(&StorageFailureCancellationState) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + crate::test_sync::WATCHDOG;
         let (state, changed) = &*self.state;
         let mut state = state.lock().unwrap();
         while !condition(&state) {

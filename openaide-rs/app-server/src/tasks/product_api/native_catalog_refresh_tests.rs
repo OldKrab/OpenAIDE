@@ -52,7 +52,7 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
     loop {
-        let update = updates.recv_timeout(Duration::from_secs(5)).unwrap();
+        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
         if matches!(
             update.kind,
             TaskUpdateKind::NavigationRefreshStateChanged {

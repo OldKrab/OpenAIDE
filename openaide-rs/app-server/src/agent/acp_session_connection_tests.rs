@@ -107,7 +107,7 @@ impl AgentEventSink for DelayedPermissionSink {
         self.release_rx
             .lock()
             .expect("permission release lock poisoned")
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .expect("permission should be released");
         Ok(AgentPermissionOutcome::Cancelled)
     }
@@ -365,7 +365,7 @@ impl agent_client_protocol::ConnectTo<Client> for PermissionThenUpdateConnection
 }
 
 async fn wait_for_done(done_rx: mpsc::Receiver<()>) -> agent_client_protocol::Result<()> {
-    tokio::task::spawn_blocking(move || done_rx.recv_timeout(Duration::from_secs(1)))
+    tokio::task::spawn_blocking(move || done_rx.recv_timeout(crate::test_sync::WATCHDOG))
         .await
         .map_err(agent_client_protocol::util::internal_error)?
         .map_err(agent_client_protocol::util::internal_error)
@@ -472,7 +472,7 @@ fn expect_host_request(
     method: &str,
 ) -> crate::protocol::host::HostRequest {
     let request = requests
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .unwrap_or_else(|_| panic!("{method} request should route through host bridge"));
     assert_eq!(request.method, method);
     assert_eq!(request.params.as_ref().unwrap()["sessionId"], "session_1");
@@ -626,7 +626,7 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
             async |_connection| {
                 tokio::task::spawn_blocking(move || {
                     requested_rx
-                        .recv_timeout(Duration::from_secs(1))
+                        .recv_timeout(crate::test_sync::WATCHDOG)
                         .expect("permission request should reach the host");
                     std::thread::sleep(Duration::from_millis(600));
                     let _ = release_tx.send(());

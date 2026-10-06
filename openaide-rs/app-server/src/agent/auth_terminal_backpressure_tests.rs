@@ -36,7 +36,7 @@ fn a_login_which_does_not_read_stdin_remains_cancellable() {
         );
         finished.send(result).unwrap();
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     // The marker is an explicit barrier: the process has disabled canonical input and is
     // deliberately not reading. Pasted bytes must not block the lifecycle worker.
     while !ready.exists() {
@@ -72,7 +72,7 @@ fn a_login_which_does_not_read_stdin_remains_cancellable() {
     }
     cancel.token.cancel();
     assert!(completion
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("cancel completes")
         .is_err());
     worker.join().unwrap();

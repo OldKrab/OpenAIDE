@@ -60,7 +60,7 @@ fn worker_panic_resolves_receipt_and_emits_the_sole_root_fatal_signal() {
     assert!(!faults.pending(), "worker fault was not reached");
 
     let fatal = fatal_events
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("process supervisor receives root-wide failure");
     assert_eq!(fatal.reason, "worker_panicked");
     assert!(
@@ -104,7 +104,7 @@ fn quarantine_write_failure_stops_the_root_instead_of_being_ignored() {
         .expect_err("uncertain commit must fail");
     assert_eq!(
         fatal_events
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .reason,
         "worker_panicked"

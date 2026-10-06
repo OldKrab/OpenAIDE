@@ -40,4 +40,4 @@ it("keeps portrait Markdown images proportional and inside Chat on desktop and p
   } finally {
     await browser.close();
   }
-}, 20_000);
+});

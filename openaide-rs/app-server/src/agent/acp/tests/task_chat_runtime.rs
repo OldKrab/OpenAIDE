@@ -1076,7 +1076,7 @@ fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id
 
 fn auto_allow_permission(server_requests: &ServerRequestRuntime, task_id: &str) {
     let task_id = TaskId::from(task_id);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     loop {
         let pending = server_requests.pending_for_task(&task_id);
         if let Some(request) = pending.first() {
@@ -1101,7 +1101,7 @@ fn auto_allow_permission(server_requests: &ServerRequestRuntime, task_id: &str) 
 }
 
 fn wait_until(mut predicate: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while !predicate() {
         assert!(Instant::now() < deadline, "timed out waiting for predicate");
         std::thread::sleep(Duration::from_millis(10));
@@ -1109,7 +1109,7 @@ fn wait_until(mut predicate: impl FnMut() -> bool) {
 }
 
 fn reopen_store_after_fixture_shutdown(root: std::path::PathBuf) -> Store {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     loop {
         match Store::open(root.clone()) {
             Ok(store) => return store,

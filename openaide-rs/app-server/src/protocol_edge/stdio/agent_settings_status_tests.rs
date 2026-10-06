@@ -49,7 +49,7 @@ fn native_session_start_marks_the_agent_connected_in_settings() {
         "acquire should create a Prepared Task: {acquired}"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     let mut attempt = 0;
     loop {
         attempt += 1;

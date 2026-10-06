@@ -162,7 +162,7 @@ fn a_newer_identical_catalog_observation_survives_an_older_complete_scan() {
         let api = api.clone();
         move || api.refresh_native_session_catalogs()
     });
-    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
     record(); // A newer response proved existence even though all metadata is identical.
     release_tx.send(()).unwrap();
     worker.join().unwrap().unwrap();
@@ -187,7 +187,7 @@ impl AgentRuntime for BlockingHistoryAgent {
             self.release
                 .lock()
                 .unwrap()
-                .recv_timeout(Duration::from_secs(5))
+                .recv_timeout(crate::test_sync::WATCHDOG)
                 .unwrap();
         }
         Ok(AgentListSessionsResult {
@@ -293,7 +293,7 @@ fn changing_the_agent_catalog_invalidates_in_flight_absence_evidence() {
         let api = api.clone();
         move || api.refresh_native_session_catalogs()
     });
-    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
     api.agent_registry
         .replace(AgentRegistry::default_built_ins());
     release_tx.send(()).unwrap();

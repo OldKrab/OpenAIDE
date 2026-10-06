@@ -405,7 +405,7 @@ fn image_preview_admission_does_not_block_protocol_requests() {
             .to_string(),
         )
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     let mut started = false;
     while Instant::now() < deadline {
         if logs.snapshot().iter().any(|line| {
@@ -429,7 +429,7 @@ fn image_preview_admission_does_not_block_protocol_requests() {
         );
         sender.send(response).unwrap();
     });
-    let heartbeat = receiver.recv_timeout(Duration::from_secs(1));
+    let heartbeat = receiver.recv_timeout(crate::test_sync::WATCHDOG);
     // Always release and join before asserting, so a red test cannot strand other image tests.
     drop(permit);
     let image = image_thread.join().unwrap();

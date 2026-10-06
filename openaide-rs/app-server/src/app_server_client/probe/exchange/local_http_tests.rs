@@ -34,7 +34,10 @@ fn posts_probe_request_with_auth_and_returns_json_response() {
             "result": {}
         }))
     );
-    let request = server.request.recv_timeout(Duration::from_secs(1)).unwrap();
+    let request = server
+        .request
+        .recv_timeout(crate::test_sync::WATCHDOG)
+        .unwrap();
     assert!(request.starts_with("POST /probe HTTP/1.1\r\n"));
     assert!(request.contains("Authorization: Bearer token\r\n"));
     assert!(request.contains("Content-Type: application/json\r\n"));
