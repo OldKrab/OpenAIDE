@@ -58,17 +58,41 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding-inline: max(0px, calc((100% - 760px) / 2));
+  /* Measured against the shell container so the scroller and its rows resolve the same gutter. */
+  --message-list-gutter-start: max(0px, calc((100cqi - 760px) / 2));
+  --message-list-gutter-end: var(--message-list-gutter-start);
+  padding-inline: var(--message-list-gutter-start) var(--message-list-gutter-end);
   scrollbar-gutter: stable;
+}
+
+/* Virtual rows are out of flow, so a drag-selection that leaves the reading
+   column over scroller padding has no content to resolve against and jumps to
+   the first rendered row. Rows own the gutter instead, keeping the pointer
+   inside the row whose line it is level with. Rules that reshape the gutter set
+   the two custom properties, never the scroller's padding. */
+.message-list:has(> .message-list-virtualizer) {
+  padding-inline: 0;
 }
 
 .message-list-virtualizer {
   width: 100%;
   position: relative;
+  /* Pins the selection edges to the top and bottom; rows stay absolutely positioned. */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* In-flow anchors before and after the rows in document order, so a selection
+   dragged past either end extends to that end. */
+.message-list-selection-edge {
+  flex: 0 0 1px;
+  pointer-events: none;
 }
 
 .message-list-virtual-row {
   width: 100%;
+  padding-inline: var(--message-list-gutter-start) var(--message-list-gutter-end);
   display: flex;
   flex-direction: column;
 }
