@@ -65,6 +65,8 @@ pub enum FileViewerKind {
     Markdown,
     Source,
     Image,
+    /// Identified by signature only; the Frontend renders the bytes it obtains from its App Shell.
+    Pdf,
     Binary,
     Error,
 }

@@ -930,7 +930,7 @@ export type FileViewerSnapshot = { handle: FileViewerHandleId, displayPath: stri
  */
 truncated: boolean, error?: FileViewerError | null, focusLine?: number | null, };
 
-export type FileViewerKind = "markdown" | "source" | "image" | "binary" | "error";
+export type FileViewerKind = "markdown" | "source" | "image" | "pdf" | "binary" | "error";
 
 export type FileViewerError = "notFound" | "permissionDenied" | "notAFile" | "unsupported" | "unreadable";
 
