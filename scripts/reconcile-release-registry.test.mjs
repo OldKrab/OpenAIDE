@@ -119,10 +119,9 @@ test("publishes independent platform packages concurrently", async () => {
       async publish() {
         started += 1;
         if (started === 2) releasePublishers();
-        await Promise.race([
-          publishersStarted,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("publishers ran serially")), 100)),
-        ]);
+        // A serial publisher never starts the second upload, so this never
+        // settles and the runner fails the test as unfinished.
+        await publishersStarted;
       },
     });
     assert.equal(started, 2);

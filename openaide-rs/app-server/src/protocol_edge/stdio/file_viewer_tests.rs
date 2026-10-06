@@ -181,7 +181,7 @@ fn download_request(
     });
     let mut socket = TcpStream::connect(address).unwrap();
     socket
-        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .set_read_timeout(Some(crate::test_sync::WATCHDOG))
         .unwrap();
     let auth = authorization
         .map(|value| format!("Authorization: {value}\r\n"))
@@ -364,7 +364,7 @@ fn file_viewer_previews_large_photos_but_downloads_the_original() {
 #[test]
 fn image_preview_admission_does_not_block_protocol_requests() {
     use crate::protocol_edge::local_http::LocalHttpAppHandler;
-    use std::time::{Duration, Instant};
+
     let temp = tempfile::TempDir::new().unwrap();
     image::RgbImage::new(2, 2)
         .save(temp.path().join("photo.png"))
@@ -405,18 +405,12 @@ fn image_preview_admission_does_not_block_protocol_requests() {
             .to_string(),
         )
     });
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    let mut started = false;
-    while Instant::now() < deadline {
-        if logs.snapshot().iter().any(|line| {
+    crate::test_sync::wait_until("the image request to reach admission", || {
+        logs.snapshot().iter().any(|line| {
             line["event"] == "file_viewer_open_started"
                 && line["fields"]["request_id"] == "image-admission-open"
-        }) {
-            started = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        })
+    });
     let (sender, receiver) = std::sync::mpsc::channel();
     let heartbeat_thread = std::thread::spawn(move || {
         let response = handler.handle(
@@ -434,7 +428,6 @@ fn image_preview_admission_does_not_block_protocol_requests() {
     drop(permit);
     let image = image_thread.join().unwrap();
     heartbeat_thread.join().unwrap();
-    assert!(started, "image request did not reach admission");
     assert!(
         heartbeat.is_ok(),
         "image conversion blocked unrelated protocol traffic"

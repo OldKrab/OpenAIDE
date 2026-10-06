@@ -86,14 +86,9 @@ impl Fixture {
     }
 
     fn wait_for(&self, method: &str, count: usize) {
-        let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-        while self.calls(method).len() < count {
-            assert!(
-                Instant::now() < deadline,
-                "missing {method} request {count}"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        crate::test_sync::wait_until(&format!("{method} request {count}"), || {
+            self.calls(method).len() >= count
+        });
     }
 
     fn control(&self, action: &str) {
@@ -109,17 +104,12 @@ impl Fixture {
     }
 
     fn wait_for_delivery_failure(&self) {
-        let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-        while !self.sink.events().iter().any(|event| {
-            matches!(event,
+        crate::test_sync::wait_until("delivery failure must be visible", || {
+            self.sink.events().iter().any(|event| {
+                matches!(event,
             AgentEvent::Activity { title, .. } if title == "Message delivery was not confirmed")
-        }) {
-            assert!(
-                Instant::now() < deadline,
-                "delivery failure must be visible"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
+            })
+        });
     }
 }
 

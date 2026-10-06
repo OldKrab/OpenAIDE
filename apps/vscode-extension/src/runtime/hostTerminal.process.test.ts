@@ -11,6 +11,9 @@ const workspace = vi.hoisted(() => ({
 }));
 vi.mock("vscode", () => ({ workspace }));
 
+// Real processes run under the shared watchdog instead of the unit-test default.
+vi.setConfig({ testTimeout: 30_000 });
+
 // /proc distinguishes a terminated orphan awaiting init's reap from a process
 // that can still execute work. These tests use real processes and inherited pipes.
 describe.skipIf(process.platform !== "linux")("terminal process ownership", () => {
@@ -120,10 +123,10 @@ describe.skipIf(process.platform !== "linux")("terminal process ownership", () =
 });
 
 async function until(check: () => boolean | Promise<boolean>) {
-  const deadline = Date.now() + 3_500;
+  const deadline = Date.now() + 30_000;
   while (!(await check())) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for terminal process lifecycle");
-    await delay(20);
+    await delay(20); // timing: poll
   }
 }
 

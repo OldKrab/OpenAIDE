@@ -44,7 +44,7 @@ impl AgentRuntime for SlowPreferencesAgent {
             .release
             .lock()
             .unwrap()
-            .recv_timeout(Duration::from_secs(5));
+            .recv_timeout(crate::test_sync::WATCHDOG);
         Ok(mode_config_catalog("agent-full-access"))
     }
 }

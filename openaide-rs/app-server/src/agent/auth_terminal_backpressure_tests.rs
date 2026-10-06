@@ -36,19 +36,11 @@ fn a_login_which_does_not_read_stdin_remains_cancellable() {
         );
         finished.send(result).unwrap();
     });
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     // The marker is an explicit barrier: the process has disabled canonical input and is
     // deliberately not reading. Pasted bytes must not block the lifecycle worker.
-    while !ready.exists() {
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    crate::test_sync::wait_until("the auth terminal process to be ready", || ready.exists());
     let mut responded = std::collections::HashSet::new();
-    while responded.len() < 2 {
-        assert!(
-            Instant::now() < deadline,
-            "terminal I/O blocked control exchange"
-        );
+    crate::test_sync::wait_until("control exchange despite blocked terminal I/O", || {
         for request in requests.pending_for_client(&client) {
             if !responded.insert(request.request_id.clone()) {
                 continue;
@@ -68,8 +60,8 @@ fn a_login_which_does_not_read_stdin_remains_cancellable() {
                 AppServerTime::now(),
             );
         }
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        responded.len() >= 2
+    });
     cancel.token.cancel();
     assert!(completion
         .recv_timeout(crate::test_sync::WATCHDOG)

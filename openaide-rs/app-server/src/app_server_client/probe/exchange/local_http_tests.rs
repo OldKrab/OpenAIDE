@@ -1,7 +1,6 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
-use std::time::Duration;
 
 use serde_json::json;
 
@@ -14,7 +13,7 @@ fn posts_probe_request_with_auth_and_returns_json_response() {
     let server = TestServer::spawn(json_response(
         r#"{"jsonrpc":"2.0","id":"client_probe","result":{}}"#,
     ));
-    let mut exchange = LocalHttpProbeExchange::with_timeout(Duration::from_secs(1));
+    let mut exchange = LocalHttpProbeExchange::with_timeout(crate::test_sync::WATCHDOG);
     let runtime_endpoint = runtime_endpoint(&server.address);
 
     let response = exchange
@@ -55,7 +54,7 @@ fn complete_content_length_response_does_not_wait_for_eof() {
     let server = TestServer::spawn_keep_open(json_response(
         r#"{"jsonrpc":"2.0","id":"client_probe","result":{}}"#,
     ));
-    let mut exchange = LocalHttpProbeExchange::with_timeout(Duration::from_secs(1));
+    let mut exchange = LocalHttpProbeExchange::with_timeout(crate::test_sync::WATCHDOG);
     let runtime_endpoint = runtime_endpoint(&server.address);
 
     assert!(matches!(
@@ -77,7 +76,7 @@ fn auth_statuses_map_to_auth_failed() {
         let server = TestServer::spawn(format!(
             "HTTP/1.1 {status} Nope\r\nContent-Length: 0\r\n\r\n"
         ));
-        let mut exchange = LocalHttpProbeExchange::with_timeout(Duration::from_secs(1));
+        let mut exchange = LocalHttpProbeExchange::with_timeout(crate::test_sync::WATCHDOG);
         let runtime_endpoint = runtime_endpoint(&server.address);
 
         assert_eq!(
@@ -96,7 +95,7 @@ fn auth_statuses_map_to_auth_failed() {
 
 #[test]
 fn non_loopback_address_fails_before_sending_token() {
-    let mut exchange = LocalHttpProbeExchange::with_timeout(Duration::from_millis(100));
+    let mut exchange = LocalHttpProbeExchange::with_timeout(crate::test_sync::WATCHDOG);
     let runtime_endpoint = runtime_endpoint("http://192.0.2.1:1234/probe");
 
     let error = exchange
@@ -114,7 +113,7 @@ fn non_loopback_address_fails_before_sending_token() {
 #[test]
 fn accepted_then_stalled_response_maps_to_unreachable() {
     let server = TestServer::spawn_stalled();
-    let mut exchange = LocalHttpProbeExchange::with_timeout(Duration::from_millis(100));
+    let mut exchange = LocalHttpProbeExchange::with_timeout(crate::test_sync::EXPIRES);
     let runtime_endpoint = runtime_endpoint(&server.address);
 
     assert_eq!(
@@ -132,10 +131,12 @@ fn accepted_then_stalled_response_maps_to_unreachable() {
 
 #[test]
 fn connection_failure_maps_to_unreachable() {
+    // A connected client socket owns its local port without listening on it, so
+    // the port refuses connections and stays out of every other test's reach.
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = format!("http://{}/probe", listener.local_addr().unwrap());
-    drop(listener);
-    let mut exchange = LocalHttpProbeExchange::with_timeout(Duration::from_millis(100));
+    let port_owner = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let address = format!("http://{}/probe", port_owner.local_addr().unwrap());
+    let mut exchange = LocalHttpProbeExchange::with_timeout(crate::test_sync::WATCHDOG);
     let runtime_endpoint = runtime_endpoint(&address);
 
     assert_eq!(
@@ -153,7 +154,7 @@ fn connection_failure_maps_to_unreachable() {
 
 #[test]
 fn malformed_address_response_or_json_fails_probe() {
-    let mut exchange = LocalHttpProbeExchange::with_timeout(Duration::from_secs(1));
+    let mut exchange = LocalHttpProbeExchange::with_timeout(crate::test_sync::WATCHDOG);
     let invalid_scheme = runtime_endpoint("https://127.0.0.1:1/probe");
     assert!(exchange
         .exchange(
@@ -231,11 +232,9 @@ impl TestServer {
                 }
                 ServerMode::KeepOpenAfterWrite => {
                     stream.write_all(response.as_bytes()).unwrap();
-                    std::thread::sleep(Duration::from_millis(250));
+                    hold_until_client_closes(&mut stream);
                 }
-                ServerMode::Stall => {
-                    std::thread::sleep(Duration::from_millis(250));
-                }
+                ServerMode::Stall => hold_until_client_closes(&mut stream),
             }
         });
         Self {
@@ -243,6 +242,12 @@ impl TestServer {
             request: request_rx,
         }
     }
+}
+
+/// Keeps the connection open for as long as the client keeps its side open.
+fn hold_until_client_closes(stream: &mut std::net::TcpStream) {
+    let mut rest = Vec::new();
+    let _ = stream.read_to_end(&mut rest);
 }
 
 enum ServerMode {

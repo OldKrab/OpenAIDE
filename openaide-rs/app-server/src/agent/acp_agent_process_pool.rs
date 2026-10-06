@@ -32,7 +32,7 @@ pub(super) struct AcpAgentProcessPool {
     registry: AgentRegistryHandle,
     host_bridge: HostBridge,
     processes: Arc<Mutex<HashMap<String, AcpAgentProcessClient>>>,
-    idle_timeouts: ProcessIdleTimeouts,
+    idle_timeouts: tokio::sync::watch::Sender<ProcessIdleTimeouts>,
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
     list_timeout: Duration,
     codex_provisioner: Option<CodexAcpProvisioner>,
@@ -72,7 +72,7 @@ impl AcpAgentProcessPool {
             registry,
             host_bridge,
             processes: Arc::default(),
-            idle_timeouts: ProcessIdleTimeouts::default(),
+            idle_timeouts: tokio::sync::watch::Sender::new(ProcessIdleTimeouts::default()),
             auth_environments: Mutex::new(HashMap::new()),
             list_timeout: DEFAULT_LIST_TIMEOUT,
             codex_provisioner: None,
@@ -93,7 +93,14 @@ impl AcpAgentProcessPool {
 
     #[cfg(test)]
     pub(super) fn with_process_idle_timeouts(&mut self, short: Duration, long: Duration) {
-        self.idle_timeouts = ProcessIdleTimeouts { short, long };
+        self.set_process_idle_timeouts(short, long);
+    }
+
+    /// Replaces retention for running and later processes alike.
+    #[cfg(test)]
+    pub(super) fn set_process_idle_timeouts(&self, short: Duration, long: Duration) {
+        self.idle_timeouts
+            .send_replace(ProcessIdleTimeouts { short, long });
     }
 
     #[cfg(test)]
@@ -521,7 +528,7 @@ impl AcpAgentProcessPool {
         let (control_tx, control_rx) = tokio_mpsc::unbounded_channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let terminal_error = Arc::new(Mutex::new(None));
-        let lifetime = AcpProcessLifetime::new(self.idle_timeouts);
+        let lifetime = AcpProcessLifetime::following(self.idle_timeouts.subscribe());
         let operation = lifetime.acquire().expect("new process admits startup");
         let process = AcpAgentProcessClient {
             open_tx: open_tx.clone(),

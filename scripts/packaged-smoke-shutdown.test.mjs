@@ -223,7 +223,7 @@ async function startPipeTree(t) {
       if (process.platform === "win32") {
         if (child.exitCode === null && child.signalCode === null) {
           spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-            stdio: "ignore", windowsHide: true, timeout: 5_000,
+            stdio: "ignore", windowsHide: true, timeout: 30_000,
           });
         }
       } else {
@@ -242,7 +242,7 @@ async function startPipeTree(t) {
     await Promise.race([
       observed.closed,
       new Promise((_, reject) => {
-        const timer = setTimeout(() => reject(new Error("fixture cleanup did not close")), 5_000);
+        const timer = setTimeout(() => reject(new Error("fixture cleanup did not close")), 30_000);
         observed.closed.then(() => clearTimeout(timer));
       }),
     ]);

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{mpsc, Arc, Barrier};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::agent::acp_active_session_manager::AcpActiveSessionManager;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
@@ -65,6 +65,13 @@ fn fixture_runtime_with_secret_env(
         secret_env,
     });
     Some((runtime, log_path))
+}
+
+/// Releases a fixture step that waits on `await_release` with the same suffix.
+fn release_fixture(log_path: &Path, suffix: &str) {
+    let mut gate = log_path.as_os_str().to_owned();
+    gate.push(suffix);
+    fs::write(gate, "release").expect("release fixture gate");
 }
 
 fn fixture_runtime_with_prompt_mode(
@@ -337,43 +344,25 @@ fn read_fixture_methods(log_path: &Path) -> Vec<String> {
 }
 
 fn wait_for_method(log_path: &Path, method: &str) {
-    let started = Instant::now();
-    while started.elapsed() < crate::test_sync::WATCHDOG {
-        if read_fixture_methods(log_path)
-            .iter()
-            .any(|seen| seen == method)
-        {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("timed out waiting for fixture method {method}");
+    wait_for_method_count(log_path, method, 1);
 }
 
 fn wait_for_method_count(log_path: &Path, method: &str, expected_count: usize) {
-    let started = Instant::now();
-    while started.elapsed() < crate::test_sync::WATCHDOG {
-        let count = read_fixture_methods(log_path)
-            .iter()
-            .filter(|seen| seen.as_str() == method)
-            .count();
-        if count >= expected_count {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("timed out waiting for {expected_count} fixture calls to {method}");
+    crate::test_sync::wait_until(
+        &format!("{expected_count} fixture calls to {method}"),
+        || {
+            read_fixture_methods(log_path)
+                .iter()
+                .filter(|seen| seen.as_str() == method)
+                .count()
+                >= expected_count
+        },
+    );
 }
 
-fn wait_until(mut predicate: impl FnMut() -> bool) {
-    let started = Instant::now();
-    while started.elapsed() < crate::test_sync::WATCHDOG {
-        if predicate() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("timed out waiting for fixture condition");
+#[track_caller]
+fn wait_until(predicate: impl FnMut() -> bool) {
+    crate::test_sync::wait_until("fixture condition", predicate);
 }
 
 #[derive(Debug)]
@@ -472,6 +461,15 @@ def log(method):
 
 if "OPENAIDE_SECRET_TEST" in os.environ:
     log("secret:" + os.environ["OPENAIDE_SECRET_TEST"])
+
+def await_release(suffix):
+    # Tests order the fixture with a release file instead of a delay. A missing
+    # release is a test defect, so the fixture exits instead of continuing.
+    deadline = time.monotonic() + 120
+    while not os.path.exists(log_path + suffix):
+        if time.monotonic() >= deadline:
+            sys.exit(3)
+        time.sleep(0.01)  # timing: poll
 
 def respond_id(message_id, result):
     sys.stdout.write(json.dumps({
@@ -649,18 +647,12 @@ for line in sys.stdin:
     elif method == "session/list":
         if prompt_mode == "concurrent_list":
             def release_listing(request):
-                deadline = time.monotonic() + 10
-                while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
-                    time.sleep(0.01)
+                await_release(".release-list")
                 respond(request, {"sessions": []})
             threading.Thread(target=release_listing, args=(message,), daemon=True).start()
             continue
-        if prompt_mode == "blocked_list":
-            deadline = time.monotonic() + 10
-            while not os.path.exists(log_path + ".release-list") and time.monotonic() < deadline:
-                time.sleep(0.01)
-        if prompt_mode == "pending_prompt_and_slow_list":
-            time.sleep(0.2)
+        if prompt_mode in ("blocked_list", "pending_prompt_and_slow_list"):
+            await_release(".release-list")
         respond(message, {"sessions": []})
         if prompt_mode == "pending_prompt_and_slow_list" and pending_prompt_ids:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
@@ -683,7 +675,7 @@ for line in sys.stdin:
             request_terminal("prompt-terminal-create-1")
             request_terminal("prompt-terminal-create-2")
         elif prompt_mode in ("wait_for_cancel", "pending_prompt_and_slow_list", "prompt_ends_before_config_response", "config_waits_for_cancel", "prompt_ends_before_close_response") or (
-            prompt_mode == "delay_first_cancel_response" and prompt_request_count == 1
+            prompt_mode == "hold_first_cancel_response" and prompt_request_count == 1
         ):
             pending_prompt_ids.append(message.get("id"))
         elif prompt_mode == "primary_ends_while_steer_pending" and prompt_request_count == 1:
@@ -700,7 +692,7 @@ for line in sys.stdin:
             notify_text_chunk("late response text")
         elif prompt_mode == "late_text_after_prompt_return":
             respond(message, {"stopReason": "end_turn"})
-            time.sleep(0.25)
+            await_release(".release-late-text")
             notify_text_chunk("session-owned late text")
         elif prompt_mode == "title_during_prompt":
             notify_title("Title from active turn")
@@ -726,6 +718,7 @@ for line in sys.stdin:
                 "usage": {"totalTokens": 999, "inputTokens": 111, "outputTokens": 888},
             })
         if config_response_delay > 0:
+            # timing: contract — the response arrives later than a past, shorter deadline.
             time.sleep(config_response_delay)
         config_id = params.get("configId", "model")
         value = params.get("value", "gpt-5")
@@ -778,8 +771,8 @@ for line in sys.stdin:
             }],
         })
     elif method == "session/cancel":
-        if prompt_mode == "delay_first_cancel_response":
-            time.sleep(0.3)
+        if prompt_mode == "hold_first_cancel_response":
+            await_release(".release-cancel")
         while pending_prompt_ids:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "cancelled"})
         while pending_config_messages:
@@ -946,7 +939,7 @@ fn new_native_session_waits_for_history_before_idle_close() {
     let Some((runtime, log_path)) = fixture_runtime(&temp, "idle-session") else {
         return;
     };
-    let runtime = runtime.with_session_idle_timeout(Duration::from_millis(50));
+    let runtime = runtime.with_session_idle_timeout(crate::test_sync::EXPIRES);
 
     let session = runtime
         .start_session(start_request("task-idle-session", cwd_string()))
@@ -956,7 +949,8 @@ fn new_native_session_waits_for_history_before_idle_close() {
         .attach_session_event_sink(&session.key(), session_sink.clone())
         .expect("attach session sink");
 
-    std::thread::sleep(Duration::from_millis(100));
+    // A session without durable history is held open until its first prompt.
+    crate::test_sync::outlast(crate::test_sync::EXPIRES);
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new"]
@@ -996,7 +990,8 @@ fn resumed_native_session_is_closed_after_the_idle_timeout() {
     let Some((runtime, log_path)) = fixture_runtime(&temp, "idle-session") else {
         return;
     };
-    let runtime = runtime.with_session_idle_timeout(Duration::from_millis(50));
+    // The attachment stays open until the test has attached its sink.
+    let runtime = runtime.with_session_idle_timeout(crate::test_sync::NEVER);
 
     let resumed = runtime
         .resume_session(AgentSessionResume {
@@ -1021,6 +1016,7 @@ fn resumed_native_session_is_closed_after_the_idle_timeout() {
             updated_at: AgentMetadataField::Unchanged,
         }]
     );
+    runtime.set_session_idle_timeout(crate::test_sync::EXPIRES);
     wait_for_method(&log_path, "session/close");
     assert_eq!(
         read_fixture_methods(&log_path),
@@ -1058,7 +1054,7 @@ fn active_prompt_suspends_native_session_idle_expiration() {
             ],
             secret_env: Vec::new(),
         })
-        .with_session_idle_timeout(Duration::from_millis(50)),
+        .with_session_idle_timeout(crate::test_sync::EXPIRES),
     );
     let session = runtime
         .start_session(start_request("task-idle-running", cwd_string()))
@@ -1082,7 +1078,8 @@ fn active_prompt_suspends_native_session_idle_expiration() {
     });
     wait_for_method(&log_path, "session/prompt");
 
-    std::thread::sleep(Duration::from_millis(100));
+    // The fixture holds the prompt until it is cancelled.
+    crate::test_sync::outlast(crate::test_sync::EXPIRES);
     assert!(!read_fixture_methods(&log_path)
         .iter()
         .any(|method| method == "session/close"));
@@ -1123,12 +1120,13 @@ fn idle_timeout_does_not_close_when_the_agent_lacks_close_capability() {
         ],
         secret_env: Vec::new(),
     })
-    .with_session_idle_timeout(Duration::from_millis(50));
+    .with_session_idle_timeout(crate::test_sync::EXPIRES);
     let session = runtime
         .start_session(start_request("task-idle-without-close", cwd_string()))
         .expect("start session");
 
-    std::thread::sleep(Duration::from_millis(100));
+    // Without the close capability no expiry can produce a close request.
+    crate::test_sync::outlast(crate::test_sync::EXPIRES);
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new"]
@@ -1277,11 +1275,11 @@ fn attached_session_resume_does_not_wait_for_discovery() {
             }));
         }
     });
-    let early_result = resumed_rx.recv_timeout(Duration::from_secs(2));
+    let early_result = resumed_rx.recv_timeout(crate::test_sync::WATCHDOG);
     let reused_during_discovery = early_result.is_ok();
     // Release the real ACP request before asserting so a regression cannot leave
     // blocked threads or child processes behind.
-    fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+    release_fixture(&log_path, ".release-list");
     discovery
         .join()
         .expect("discovery thread")
@@ -1318,7 +1316,7 @@ fn session_listing_timeout_does_not_disconnect_active_prompt() {
     ) else {
         return;
     };
-    let runtime = Arc::new(runtime.with_list_timeout(Duration::from_millis(50)));
+    let runtime = Arc::new(runtime.with_list_timeout(crate::test_sync::EXPIRES));
     let session = runtime
         .start_session(start_request("task-active-during-list", cwd_string()))
         .expect("start session");
@@ -1353,6 +1351,8 @@ fn session_listing_timeout_does_not_disconnect_active_prompt() {
         error.to_string(),
         "runtime not ready: ACP session listing timed out"
     );
+    // The Agent held the listing past its deadline; it now answers and ends the prompt.
+    release_fixture(&log_path, ".release-list");
     assert_eq!(
         prompt_handle.join().expect("prompt thread").unwrap(),
         AgentPromptOutcome::EndTurn
@@ -1500,7 +1500,7 @@ fn env_var_authentication_relaunches_with_secure_host_values() {
     let script_path = temp.path().join("fixture_agent.py");
     let log_path = temp.path().join("fixture.log");
     fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
-    let (host_bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(2));
+    let (host_bridge, requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let response_bridge = host_bridge.clone();
     let host = std::thread::spawn(move || {
         let request = requests
@@ -1618,7 +1618,7 @@ fn terminal_authentication_reconnects_without_sending_acp_authenticate() {
     let script_path = temp.path().join("fixture_agent.py");
     let log_path = temp.path().join("fixture.log");
     fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
-    let (host_bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(2));
+    let (host_bridge, requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let response_bridge = host_bridge.clone();
     let host = std::thread::spawn(move || {
         let request = requests
@@ -1732,11 +1732,11 @@ fn session_sink_receives_text_update_after_prompt_has_returned() {
         )
         .expect("prompt");
     assert!(prompt_sink.events().is_empty());
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    while session_sink.events().is_empty() {
-        assert!(Instant::now() < deadline, "late session update timed out");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    // The Agent sends the text only now, after the prompt has returned.
+    release_fixture(&log_path, ".release-late-text");
+    crate::test_sync::wait_until("late session update timed out", || {
+        !session_sink.events().is_empty()
+    });
     runtime
         .close_session(&session.key())
         .expect("close session");
@@ -2148,7 +2148,7 @@ fn authentication_wait_does_not_block_another_agents_session_start() {
             let _ = started_tx.send(runtime.start_session(request));
         }
     });
-    let early_result = started_rx.recv_timeout(Duration::from_secs(2));
+    let early_result = started_rx.recv_timeout(crate::test_sync::WATCHDOG);
     let started_during_authentication = early_result.is_ok();
     runtime
         .cancel_authentication("agent-a")
@@ -2224,12 +2224,9 @@ fn different_agents_may_own_the_same_native_session_id() {
     runtime
         .attach_session_event_sink(&agent_b.key(), agent_b_sink.clone())
         .expect("attach Agent B session sink");
-    let metadata_deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    while (agent_a_sink.metadata_updates().is_empty() || agent_b_sink.metadata_updates().is_empty())
-        && Instant::now() < metadata_deadline
-    {
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    wait_until(|| {
+        !agent_a_sink.metadata_updates().is_empty() && !agent_b_sink.metadata_updates().is_empty()
+    });
     assert_eq!(
         agent_a_sink.metadata_updates()[0].title,
         AgentMetadataField::Value("agent-a title".to_string())
@@ -2322,8 +2319,9 @@ fn different_agents_may_own_the_same_native_session_id() {
         .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("Agent A prompt returned")
         .expect("Agent A prompt cancelled cleanly");
+    // Agent B's fixture holds its prompt until that session is cancelled.
     assert!(matches!(
-        agent_b_prompt_rx.recv_timeout(Duration::from_millis(100)),
+        agent_b_prompt_rx.recv_timeout(crate::test_sync::ABSENCE_WINDOW),
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
     runtime
@@ -2339,16 +2337,12 @@ fn different_agents_may_own_the_same_native_session_id() {
     runtime
         .close_session(&agent_a.key())
         .expect("close Agent A session");
-    let agent_a_resume = runtime.resume_session(AgentSessionResume {
-        agent_id: "agent-a".to_string(),
-        task_id: "task-agent-a".to_string(),
-        session_id: agent_a.session_id.clone(),
-        cwd: cwd_string(),
-        model_id: None,
-        cancellation: TurnCancellation::new(),
-        secret_resolver: None,
-    });
-    assert!(agent_a_resume.is_err());
+    // Only Agent A's process saw the close. Agent B's attachment is still the
+    // live one, so resuming it returns that session without reaching the wire.
+    wait_for_method(&agent_a_log, "session/close");
+    assert!(!read_fixture_methods(&agent_b_log)
+        .iter()
+        .any(|line| line == "session/close"));
     runtime
         .resume_session(AgentSessionResume {
             agent_id: "agent-b".to_string(),
@@ -2405,10 +2399,7 @@ fn session_title_update_before_sink_attachment_is_delivered() {
         .attach_session_event_sink(&session.key(), sink.clone())
         .expect("attach session sink");
 
-    let started = Instant::now();
-    while sink.metadata_updates().is_empty() && started.elapsed() < crate::test_sync::WATCHDOG {
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    wait_until(|| !sink.metadata_updates().is_empty());
     assert_eq!(
         sink.metadata_updates(),
         vec![AgentSessionMetadataUpdate {
@@ -2449,10 +2440,7 @@ fn session_title_update_during_prompt_is_delivered_to_session_sink() {
         )
         .expect("prompt");
 
-    let started = Instant::now();
-    while sink.metadata_updates().is_empty() && started.elapsed() < crate::test_sync::WATCHDOG {
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    wait_until(|| !sink.metadata_updates().is_empty());
     assert_eq!(
         sink.metadata_updates(),
         vec![AgentSessionMetadataUpdate {
@@ -2612,7 +2600,7 @@ fn cancelled_prompt_settles_before_session_accepts_next_prompt() {
     let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
         &temp,
         "cancel-then-send-session",
-        "delay_first_cancel_response",
+        "hold_first_cancel_response",
     ) else {
         return;
     };
@@ -2662,6 +2650,10 @@ fn cancelled_prompt_settles_before_session_accepts_next_prompt() {
             )
         }
     });
+
+    // The Agent answers the cancelled prompt only now, after both the session
+    // cancel and the next prompt were issued against the unsettled one.
+    release_fixture(&log_path, ".release-cancel");
 
     first_prompt
         .join()
@@ -2729,7 +2721,7 @@ fn cancel_session_kills_and_releases_owned_host_terminals_before_returning() {
     let script_path = temp.path().join("fixture_agent.py");
     let log_path = temp.path().join("fixture.log");
     fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
-    let (host_bridge, host_requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (host_bridge, host_requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let (observed, host_handle) = run_terminal_host(host_bridge.clone(), host_requests, 2);
     let runtime = Arc::new(AcpAgentRuntime::new_with_host(
         AcpAgentConfig {
@@ -2829,7 +2821,7 @@ fn timed_out_session_start_cleans_up_terminals_created_during_partial_start() {
     let script_path = temp.path().join("fixture_agent.py");
     let log_path = temp.path().join("fixture.log");
     fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
-    let (host_bridge, host_requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (host_bridge, host_requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let (observed, host_handle) = run_terminal_host(host_bridge.clone(), host_requests, 1);
     let mut manager = AcpActiveSessionManager::new(
         AgentRegistry::codex(AcpAgentConfig {
@@ -2855,10 +2847,10 @@ fn timed_out_session_start_cleans_up_terminals_created_during_partial_start() {
         host_bridge,
         AcpAuthMethodCache::default(),
     );
-    // The fixture must launch and create its terminal before this expires.
-    // TODO: expire the start from the test once the terminal is observed; a
-    // wall-clock allowance still loses to a sufficiently starved runner.
-    manager.with_start_timeout(Duration::from_secs(3));
+    // TODO: expire the start from the test once the terminal is observed; this
+    // allowance is sized against fixture startup, which no gate can order.
+    // timing: expiry — the fixture must launch and create its terminal before this expires.
+    manager.with_start_timeout(Duration::from_secs(10));
 
     let error = match manager.start_session(start_request("task-partial-terminal", cwd_string())) {
         Ok(_) => panic!("session start should time out"),
@@ -2947,12 +2939,13 @@ fn second_prompt_is_rejected_while_prior_prompt_is_running() {
         }
     });
 
-    std::thread::sleep(Duration::from_millis(100));
+    // The fixture holds the first prompt until cancelled, so the rejection is
+    // observed while that prompt is still active.
+    let second_result = second_result_rx.recv_timeout(crate::test_sync::WATCHDOG);
     let prompt_method_count = read_fixture_methods(&log_path)
         .iter()
         .filter(|method| method.as_str() == "session/prompt")
         .count();
-    let second_result = second_result_rx.recv_timeout(Duration::from_millis(250));
     runtime
         .cancel_session(&session.key())
         .expect("cancel session");
@@ -3286,7 +3279,7 @@ fn timed_out_config_response_cannot_deadlock_attachment_reload() {
             let _ = load_tx.send(runtime.load_session(request));
         }
     });
-    let early_result = load_rx.recv_timeout(Duration::from_secs(2));
+    let early_result = load_rx.recv_timeout(crate::test_sync::WATCHDOG);
     let safely_rejected = matches!(
         &early_result,
         Ok(Err(RuntimeError::NotReady(message))) if message.contains("updating configuration")
@@ -3670,16 +3663,14 @@ fn duplicate_active_session_id_keeps_original_session_active() {
 #[test]
 fn auth_required_session_open_waits_for_explicit_user_authentication() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((mut manager, log_path)) = fixture_manager(&temp, "__second_new_error__") else {
+    let Some((manager, log_path)) = fixture_manager(&temp, "__second_new_error__") else {
         return;
     };
-    manager.with_start_timeout(Duration::from_millis(750));
     let cwd = cwd_string();
 
     let first = manager
         .start_session(start_request("task-open-error-one", cwd.clone()))
         .expect("first start");
-    let started = Instant::now();
     let error = match manager.start_session(start_request("task-open-error-two", cwd)) {
         Ok(session) => panic!(
             "second start unexpectedly succeeded: {}",
@@ -3688,7 +3679,7 @@ fn auth_required_session_open_waits_for_explicit_user_authentication() {
         Err(error) => error.to_string(),
     };
 
-    assert!(started.elapsed() < Duration::from_millis(500), "{error}");
+    // Waiting for authentication instead would end in the start timeout's error.
     assert_eq!(
         error,
         "agent authentication required: Authentication required. Open Settings and authenticate this Agent before starting a Task."
@@ -3770,7 +3761,8 @@ fn start_session_while_existing_prompt_is_running_reuses_agent_process() {
         HostBridge::disabled(),
         AcpAuthMethodCache::default(),
     );
-    manager.with_start_timeout(Duration::from_millis(750));
+    // A start queued behind the held prompt ends in this timeout's error.
+    manager.with_start_timeout(crate::test_sync::WATCHDOG);
     let runtime = Arc::new(manager);
     let cwd = cwd_string();
 
@@ -3796,12 +3788,10 @@ fn start_session_while_existing_prompt_is_running_reuses_agent_process() {
     });
     wait_for_method(&log_path, "session/prompt");
 
-    let started = Instant::now();
     let second = runtime
         .start_session(start_request("task-running-two", cwd))
         .expect("second start should not wait for first prompt to finish");
 
-    assert!(started.elapsed() < Duration::from_millis(500));
     assert_eq!(first.session_id, "counter-session-1");
     assert_eq!(second.session_id, "counter-session-2");
 
@@ -4095,10 +4085,10 @@ fn deletion_reaches_agent_while_history_listing_is_pending() {
                 }));
             }
         });
-        let early_result = deleted_rx.recv_timeout(Duration::from_secs(2));
+        let early_result = deleted_rx.recv_timeout(crate::test_sync::WATCHDOG);
         let deleted_during_listing = matches!(early_result, Ok(Ok(())));
         // Release discovery and join workers even when Delete incorrectly waits for it.
-        fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+        release_fixture(&log_path, ".release-list");
         discovery
             .join()
             .expect("discovery thread")
@@ -4142,27 +4132,14 @@ fn independent_history_reads_reach_agent_while_another_listing_is_pending() {
         }));
     }
     // The fixture acknowledges entry by logging the method and holds every response
-    // behind the release file. The deadline is only a deadlock watchdog.
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    let entered = loop {
-        let count = read_fixture_methods(&log_path)
-            .iter()
-            .filter(|method| *method == "session/list")
-            .count();
-        if count == 3 || Instant::now() >= deadline {
-            break count;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    fs::write(log_path.with_extension("log.release-list"), "release").unwrap();
+    // behind the release file, so three entries prove independent Projects do not
+    // queue behind one history read.
+    wait_for_method_count(&log_path, "session/list", 3);
+    release_fixture(&log_path, ".release-list");
     for worker in workers {
         worker.join().unwrap().unwrap();
     }
     runtime.shutdown().unwrap();
-    assert_eq!(
-        entered, 3,
-        "independent Projects must not queue behind one history read"
-    );
     assert_eq!(
         read_fixture_methods(&log_path)
             .iter()
@@ -4234,7 +4211,7 @@ fn active_session_start_timeout_reports_stable_error() {
         HostBridge::disabled(),
         AcpAuthMethodCache::default(),
     );
-    manager.with_start_timeout(Duration::from_millis(20));
+    manager.with_start_timeout(crate::test_sync::EXPIRES);
 
     let error = match manager.start_session(start_request("task-start-timeout", cwd_string())) {
         Ok(session) => panic!(
@@ -4281,14 +4258,14 @@ fn session_start_retry_launches_a_fresh_process_after_timeout() {
         HostBridge::disabled(),
         AcpAuthMethodCache::default(),
     );
-    manager.with_start_timeout(Duration::from_secs(1));
-
     let first = manager
         .start_session(start_request("task-before-timeout", cwd_string()))
         .expect("first session");
     manager
         .close_session(&first.key())
         .expect("close first session");
+    // Only the start the fixture hangs on runs against an expiry.
+    manager.with_start_timeout(crate::test_sync::EXPIRES);
     let timeout = match manager.start_session(start_request("task-timeout", cwd_string())) {
         Ok(session) => panic!(
             "reused fixture process unexpectedly started {}",
@@ -4300,20 +4277,13 @@ fn session_start_retry_launches_a_fresh_process_after_timeout() {
         timeout.to_string(),
         "runtime not ready: ACP session start timed out"
     );
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    let terminal = loop {
-        if let Some(entry) = diagnostic_logs.snapshot().into_iter().find(|entry| {
+    let terminal = crate::test_sync::wait_for("requested ACP shutdown diagnostic", || {
+        diagnostic_logs.snapshot().into_iter().find(|entry| {
             entry["event"] == "acp_agent_connection_completed"
                 && entry["fields"]["outcome_kind"] == "requested_shutdown"
-        }) {
-            break entry;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "missing requested ACP shutdown diagnostic"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    };
+        })
+    });
+    manager.with_start_timeout(crate::test_sync::WATCHDOG);
     assert_eq!(terminal["fields"]["exit_code"], serde_json::Value::Null);
     assert_eq!(terminal["fields"]["exit_signal"], serde_json::Value::Null);
 
@@ -4410,31 +4380,23 @@ fn active_prompt_process_termination(
             Arc::new(CapturingEventSink::default()),
         )
         .expect_err("process exit must interrupt the prompt");
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     let mut observed = Vec::new();
-    let terminal = loop {
-        observed.extend(diagnostic_logs.snapshot());
-        if let Some(entry) = observed
-            .iter()
-            .find(|entry| {
-                let terminal_event = entry["event"] == "acp_agent_connection_completed"
-                    || entry["event"] == "acp_agent_connection_failed";
-                let expected_termination = expected_exit_code
-                    .is_some_and(|status| entry["fields"]["exit_code"] == status)
-                    || expected_exit_signal
-                        .is_some_and(|signal| entry["fields"]["exit_signal"] == signal);
-                terminal_event && expected_termination
-            })
-            .cloned()
-        {
-            break entry;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "missing ACP terminal diagnostic for {task_id}; observed {observed:?}"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    };
+    let terminal =
+        crate::test_sync::wait_for(&format!("ACP terminal diagnostic for {task_id}"), || {
+            observed.extend(diagnostic_logs.snapshot());
+            observed
+                .iter()
+                .find(|entry| {
+                    let terminal_event = entry["event"] == "acp_agent_connection_completed"
+                        || entry["event"] == "acp_agent_connection_failed";
+                    let expected_termination = expected_exit_code
+                        .is_some_and(|status| entry["fields"]["exit_code"] == status)
+                        || expected_exit_signal
+                            .is_some_and(|signal| entry["fields"]["exit_signal"] == signal);
+                    terminal_event && expected_termination
+                })
+                .cloned()
+        });
 
     Some(terminal)
 }

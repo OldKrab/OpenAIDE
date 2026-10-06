@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::agent::acp_active_prompt::{cancel_active_prompt, send_steering_prompt_request};
 use crate::agent::acp_config_options_apply::SessionConfigRequests;
@@ -24,8 +23,6 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentCommandsCatalog, ConfigOptionsCatalog, ConfigOptionsStatus};
 use agent_client_protocol::SessionMessage;
 
-const IDLE_SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
-
 use super::{AcpSessionCommand, AttachedNativeSessionRunInput};
 
 pub(super) async fn run(
@@ -44,7 +41,7 @@ pub(super) async fn run(
         current_prompts,
         trace,
         session_event_sinks,
-        session_idle_timeout,
+        session_idle: mut session_idle_policy,
         process_lifetime,
     } = runtime;
     let OpenedAcpSession {
@@ -73,7 +70,8 @@ pub(super) async fn run(
         session_id,
         sinks: session_event_sinks,
     };
-    let idle_deadline = tokio::time::sleep(session_idle_timeout);
+    let mut session_idle = *session_idle_policy.borrow_and_update();
+    let idle_deadline = tokio::time::sleep(session_idle.idle);
     tokio::pin!(idle_deadline);
 
     loop {
@@ -353,6 +351,11 @@ pub(super) async fn run(
                     &commands_catalog,
                 );
             }
+            // The policy's owner outlives its attachments. Once it is gone the
+            // branch stays disabled and the last policy keeps applying.
+            Ok(()) = session_idle_policy.changed() => {
+                session_idle = *session_idle_policy.borrow_and_update();
+            }
             () = &mut idle_deadline, if supports_session_close && idle_close_eligible => {
                 // Autonomous cleanup has no external caller guard. Retain the
                 // process until this request completes or its own deadline expires.
@@ -364,7 +367,7 @@ pub(super) async fn run(
                     serde_json::json!({
                         "agent_id": request_agent_id,
                         "session_id": idle_session_id.to_string(),
-                        "idle_timeout_ms": session_idle_timeout.as_millis(),
+                        "idle_timeout_ms": session_idle.idle.as_millis(),
                     }),
                 );
                 let connection = active_session.connection();
@@ -372,7 +375,7 @@ pub(super) async fn run(
                     session_event_sink.as_ref(), &request_agent_id, "session_close_started",
                 );
                 if tokio::time::timeout(
-                    IDLE_SESSION_CLOSE_TIMEOUT,
+                    session_idle.close,
                     close_active_session(
                         connection,
                         idle_session_id.clone(),
@@ -388,7 +391,7 @@ pub(super) async fn run(
                         serde_json::json!({
                             "agent_id": request_agent_id,
                             "session_id": idle_session_id.to_string(),
-                            "close_timeout_ms": IDLE_SESSION_CLOSE_TIMEOUT.as_millis(),
+                            "close_timeout_ms": session_idle.close.as_millis(),
                         }),
                     );
                 }
@@ -400,7 +403,7 @@ pub(super) async fn run(
         }
         idle_deadline
             .as_mut()
-            .reset(tokio::time::Instant::now() + session_idle_timeout);
+            .reset(tokio::time::Instant::now() + session_idle.idle);
     }
 
     Ok(())

@@ -454,7 +454,7 @@ fn reliable_upload_acknowledges_authenticate_before_cancel_completes_it() {
         .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("authentication started");
 
-    let acknowledgement = ack_rx.recv_timeout(std::time::Duration::from_millis(100));
+    let acknowledgement = ack_rx.recv_timeout(crate::test_sync::WATCHDOG);
     if acknowledgement.is_err() {
         workflow.release();
     }

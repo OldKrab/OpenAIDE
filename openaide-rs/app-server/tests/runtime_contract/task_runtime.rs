@@ -52,10 +52,7 @@ fn passive_snapshot_does_not_call_agent() {
 #[test]
 fn cancel_stops_pending_agent_turn() {
     let tmp = TempDir::new().unwrap();
-    let calls = Arc::new(AtomicUsize::new(0));
-    let agent = Arc::new(CountingAgent {
-        calls: calls.clone(),
-    });
+    let agent = Arc::new(CancelledOnlyAgent);
     let store = Store::open(tmp.path().join("store")).unwrap();
     let service = TaskService::new(store, agent);
 
@@ -105,7 +102,8 @@ fn cancel_stops_pending_agent_turn() {
             .unwrap_or(false)
     });
 
-    thread::sleep(Duration::from_millis(140));
+    // The cancelled prompt has returned without output; nothing can still arrive.
+    crate::test_sync::observe_absence();
     let passive = service
         .snapshot(TaskSnapshotParams {
             task_id: snapshot.task.task_id,
@@ -114,7 +112,6 @@ fn cancel_stops_pending_agent_turn() {
         .unwrap();
     assert_eq!(passive.task.status, TaskStatus::Inactive);
     assert!(!has_running_activity(&passive));
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(!passive
         .chat
         .items

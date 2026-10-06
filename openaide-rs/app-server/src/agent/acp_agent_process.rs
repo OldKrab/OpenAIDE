@@ -109,7 +109,8 @@ pub(super) struct AcpAgentProcessOpen {
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) terminal_owner_id: AcpTerminalOwnerId,
     /// Releases inactive Agent resources without coupling lifetime to Task pages.
-    pub(super) session_idle_timeout: std::time::Duration,
+    pub(super) session_idle:
+        tokio::sync::watch::Receiver<crate::agent::attached_native_session::SessionIdleTimeouts>,
 }
 
 pub(super) struct AcpAgentProcessInput {
@@ -674,7 +675,7 @@ async fn open_on_shared_process(
         auth_method_id,
         trace,
         terminal_owner_id,
-        session_idle_timeout,
+        session_idle,
     } = open;
     terminal_registry.begin_open(terminal_owner_id);
     let terminal_owner = terminal_registry.owner(terminal_owner_id);
@@ -764,7 +765,7 @@ async fn open_on_shared_process(
             current_prompts: current_prompts_for_task,
             trace,
             session_event_sinks: session_event_sinks_for_task,
-            session_idle_timeout,
+            session_idle,
             process_lifetime,
         })
         .await;

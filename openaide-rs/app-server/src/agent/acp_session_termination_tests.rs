@@ -2,7 +2,6 @@ use super::*;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::agent::acp_schema::{
     CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
@@ -94,21 +93,13 @@ fn enabled_trace(temp: &tempfile::TempDir) -> AcpTraceSession {
 }
 
 fn wait_for_trace_content(trace_root: &std::path::Path) -> String {
-    let started = Instant::now();
-    loop {
-        if let Ok(entries) = std::fs::read_dir(trace_root) {
-            for entry in entries.flatten() {
-                let content = std::fs::read_to_string(entry.path()).expect("trace content");
-                if content.contains("session/") {
-                    return content;
-                }
-            }
-        }
-        if started.elapsed() > Duration::from_secs(1) {
-            panic!("trace content was not written");
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    crate::test_sync::wait_for("trace content", || {
+        std::fs::read_dir(trace_root)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+            .find(|content| content.contains("session/"))
+    })
 }
 
 fn assert_trace_pair(content: &str, event: &str, direction: &str) {

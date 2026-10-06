@@ -17,9 +17,7 @@ fn terminal_runs_configured_command_accepts_input_and_requires_zero_exit() {
         }, TurnCancellation::new())
         });
         let mut sent_input = false;
-        let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-        while !worker.is_finished() {
-            assert!(Instant::now() < deadline, "terminal exchange timed out");
+        crate::test_sync::wait_until("the terminal exchange to finish", || {
             for pending in requests.pending_for_client(&client) {
                 // The broker rejects another client even with the correct request id.
                 assert!(matches!(
@@ -51,8 +49,8 @@ fn terminal_runs_configured_command_accepts_input_and_requires_zero_exit() {
                     sent_input = true;
                 }
             }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+            worker.is_finished()
+        });
         assert_eq!(worker.join().unwrap().is_ok(), exit == 0);
         assert_eq!(requests.pending_count(), 0);
     }
@@ -90,11 +88,9 @@ fn assert_terminal_interrupted(disconnect: bool) {
             worker_token,
         )
     });
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    while requests.pending_for_client(&client).is_empty() {
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    crate::test_sync::wait_until("the auth terminal request", || {
+        !requests.pending_for_client(&client).is_empty()
+    });
     if disconnect {
         requests.observe_transport_unavailable(&client, AppServerTime::now());
     } else {

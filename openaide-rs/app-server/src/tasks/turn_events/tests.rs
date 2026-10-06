@@ -2314,9 +2314,9 @@ fn permission_request_splits_active_agent_text_run() {
     let permission_thread = std::thread::spawn(move || {
         permission_sink.request_permission(permission_request("permission_1"))
     });
-    while server_requests.pending_count() == 0 {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::test_sync::wait_until("the permission request", || {
+        server_requests.pending_count() > 0
+    });
     answer_permission(&server_requests, "task_1", "allow");
     permission_thread
         .join()
@@ -2351,9 +2351,9 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
     let permission_thread = std::thread::spawn(move || {
         permission_sink.request_permission(permission_request("permission_1"))
     });
-    while server_requests.pending_count() == 0 {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::test_sync::wait_until("the permission request", || {
+        server_requests.pending_count() > 0
+    });
 
     let (emit_done_tx, emit_done_rx) = std::sync::mpsc::channel();
     let event_sink = sink.clone();
@@ -2362,7 +2362,7 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
         let _ = emit_done_tx.send(result);
     });
     let emitted_while_waiting = emit_done_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .is_ok();
 
     answer_permission(&server_requests, "task_1", "allow");

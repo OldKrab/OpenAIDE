@@ -1,9 +1,7 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use crate::agent::acp_schema::{
     AgentCapabilities, ContentBlock, ContentChunk, CreateTerminalRequest, InitializeResponse,
@@ -68,7 +66,7 @@ struct SessionMetaRecordingAgent {
 
 #[derive(Clone)]
 struct PermissionThenUpdateConnectionTestAgent {
-    permission_finished: Arc<AtomicBool>,
+    permission_finished: Arc<tokio::sync::Notify>,
 }
 
 struct DelayedPermissionSink {
@@ -347,7 +345,7 @@ impl agent_client_protocol::ConnectTo<Client> for PermissionThenUpdateConnection
                 ));
                 connection.spawn(async move {
                     permission_request.block_task().await?;
-                    permission_finished.store(true, Ordering::Release);
+                    permission_finished.notify_one();
                     Ok(())
                 })?;
                 connection.send_notification(SessionNotification::new(
@@ -356,9 +354,7 @@ impl agent_client_protocol::ConnectTo<Client> for PermissionThenUpdateConnection
                         TextContent::new("still streaming"),
                     ))),
                 ))?;
-                while !self.permission_finished.load(Ordering::Acquire) {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
+                self.permission_finished.notified().await;
                 Ok(())
             })
     }
@@ -371,45 +367,21 @@ async fn wait_for_done(done_rx: mpsc::Receiver<()>) -> agent_client_protocol::Re
         .map_err(agent_client_protocol::util::internal_error)
 }
 
-fn wait_for_replay_update(replay: &LoadReplayCaptures, session_id: &str) -> Vec<SessionUpdate> {
-    let started = std::time::Instant::now();
-    loop {
-        let updates = replay
-            .lock()
-            .expect("load replay lock poisoned")
-            .get(session_id)
-            .expect("load replay should remain active")
-            .updates
-            .clone();
-        if !updates.is_empty() {
-            return updates;
-        }
-        if started.elapsed() > Duration::from_secs(1) {
-            return updates;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+fn replay_updates(replay: &LoadReplayCaptures, session_id: &str) -> Option<Vec<SessionUpdate>> {
+    let updates = replay
+        .lock()
+        .expect("load replay lock poisoned")
+        .get(session_id)
+        .expect("load replay should remain active")
+        .updates
+        .clone();
+    (!updates.is_empty()).then_some(updates)
 }
 
-async fn wait_for_replay_update_async(
-    replay: &LoadReplayCaptures,
-    session_id: &str,
-    timeout: Duration,
-) -> Vec<SessionUpdate> {
-    let started = std::time::Instant::now();
-    loop {
-        let updates = replay
-            .lock()
-            .expect("load replay lock poisoned")
-            .get(session_id)
-            .expect("load replay should remain active")
-            .updates
-            .clone();
-        if !updates.is_empty() || started.elapsed() >= timeout {
-            return updates;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+fn wait_for_replay_update(replay: &LoadReplayCaptures, session_id: &str) -> Vec<SessionUpdate> {
+    crate::test_sync::wait_for("a load replay update", || {
+        replay_updates(replay, session_id)
+    })
 }
 
 fn connection_context(
@@ -479,34 +451,12 @@ fn expect_host_request(
     request
 }
 
-fn wait_for_trace_file(trace_dir: &std::path::Path) -> std::path::PathBuf {
-    let started = std::time::Instant::now();
-    loop {
-        if let Ok(mut entries) = std::fs::read_dir(trace_dir) {
-            if let Some(Ok(entry)) = entries.next() {
-                return entry.path();
-            }
-        }
-        if started.elapsed() > Duration::from_secs(1) {
-            panic!("trace file");
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
 fn wait_for_trace_content(trace_dir: &std::path::Path) -> String {
-    let trace_file = wait_for_trace_file(trace_dir);
-    let started = std::time::Instant::now();
-    loop {
-        let content = std::fs::read_to_string(&trace_file).expect("trace content");
-        if !content.is_empty() {
-            return content;
-        }
-        if started.elapsed() > Duration::from_secs(1) {
-            return content;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    crate::test_sync::wait_for("trace content", || {
+        let entry = std::fs::read_dir(trace_dir).ok()?.next()?.ok()?;
+        let content = std::fs::read_to_string(entry.path()).ok()?;
+        (!content.is_empty()).then_some(content)
+    })
 }
 
 #[test]
@@ -605,7 +555,7 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
     let replay = load_replay.clone();
     let (requested_tx, requested_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
-    let permission_finished = Arc::new(AtomicBool::new(false));
+    let permission_finished = Arc::new(tokio::sync::Notify::new());
     let sink = Arc::new(DelayedPermissionSink {
         requested_tx,
         release_rx: Mutex::new(release_rx),
@@ -628,18 +578,18 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
                     requested_rx
                         .recv_timeout(crate::test_sync::WATCHDOG)
                         .expect("permission request should reach the host");
-                    std::thread::sleep(Duration::from_millis(600));
-                    let _ = release_tx.send(());
-                });
-                let updates = wait_for_replay_update_async(
-                    &replay,
-                    "streaming_session",
-                    Duration::from_millis(250),
-                )
-                .await;
-                assert_eq!(updates.len(), 1, "later update was dispatch-blocked");
+                })
+                .await
+                .unwrap();
+                // The permission stays pending until both later messages are dispatched.
+                let updates =
+                    crate::test_sync::wait_for_async("the update behind the permission", || {
+                        replay_updates(&replay, "streaming_session")
+                    })
+                    .await;
+                assert_eq!(updates.len(), 1);
                 let opened = tokio::time::timeout(
-                    Duration::from_millis(250),
+                    crate::test_sync::WATCHDOG,
                     _connection
                         .send_request(NewSessionRequest::new(
                             std::env::current_dir().unwrap_or_else(|_| "/".into()),
@@ -649,7 +599,7 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
                 .await
                 .expect("session/new response was dispatch-blocked")?;
                 assert_eq!(opened.session_id.to_string(), "opened_during_permission");
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                let _ = release_tx.send(());
                 Ok(())
             },
         )
@@ -660,7 +610,7 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
 
 #[test]
 fn connection_registers_all_agent_to_client_host_handlers() {
-    let (host_bridge, host_requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (host_bridge, host_requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let host_bridge_for_thread = host_bridge.clone();
     let (done_tx, done_rx) = mpsc::channel();
     let handle = run_connection_in_thread(host_bridge_for_thread, done_rx, done_tx);

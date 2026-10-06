@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import net from "node:net";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listeningPort } from "../../apps/web/src/dev-server-test-support.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const defaultAgentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-agent.mjs");
@@ -12,6 +12,9 @@ const defaultAgentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-a
 export async function startFullStackHarness({ agentArgs = [], frontend = "web", agentFixture = defaultAgentFixture, webTransport } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-smoke-"));
   const staticRoot = path.join(root, "static");
+  // Tests order the Agent fixture through gate files here instead of delays.
+  const gateRoot = path.join(root, "gates");
+  await mkdir(gateRoot);
   try {
     await run("npm", ["run", "build:typescript-deps"]);
     if (frontend === "desktop") {
@@ -46,8 +49,6 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web", 
     throw error;
   }
 
-  const webPort = await freePort();
-  const baseUrl = `http://127.0.0.1:${webPort}`;
   const logs = [];
   const server = spawn(process.execPath, [path.join(repoRoot, "apps/web/src/dev-server.mjs")], {
     cwd: repoRoot,
@@ -56,7 +57,7 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web", 
       OPENAIDE_APP_SERVER_PATH: path.resolve(repoRoot, process.env.CARGO_TARGET_DIR ?? "target", "debug/openaide-app-server"),
       OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
-      OPENAIDE_WEB_PORT: String(webPort),
+      OPENAIDE_WEB_PORT: "0",
       OPENAIDE_WEB_PROJECT_ROOTS: repoRoot,
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(root, "runtime"),
       OPENAIDE_WEB_STATE_ROOT: path.join(root, "state"),
@@ -65,10 +66,13 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web", 
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const listening = listeningPort(server);
   capture(server.stdout, logs, "web");
   capture(server.stderr, logs, "web:error");
 
+  let baseUrl;
   try {
+    baseUrl = `http://127.0.0.1:${await listening}`;
     await waitForServer(baseUrl, server, logs);
     const setup = createProbeClient(baseUrl, `smoke-setup-${Date.now()}`);
     const initialized = await setup.request("client/initialize", {
@@ -84,7 +88,7 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web", 
       commandLine: [process.execPath, agentFixture, ...agentArgs].join(" "),
       command: process.execPath,
       args: [agentFixture, ...agentArgs],
-      env: {},
+      env: { OPENAIDE_SMOKE_GATE_ROOT: gateRoot },
       secretEnv: [],
       enabled: true,
     });
@@ -110,6 +114,14 @@ export async function startFullStackHarness({ agentArgs = [], frontend = "web", 
     baseUrl,
     stateRoot: path.join(root, "state"),
     logs,
+    /** Closes the named gate; the Agent fixture holds wherever it awaits it. */
+    async hold(gate) {
+      await writeFile(path.join(gateRoot, gate), "");
+    },
+    /** Opens the named gate. */
+    async release(gate) {
+      await rm(path.join(gateRoot, gate), { force: true });
+    },
     async close() {
       await stopProcess(server);
       await rm(root, { recursive: true, force: true });
@@ -179,7 +191,7 @@ async function waitForServer(baseUrl, child, logs) {
     } catch {
       // The Vite and App Server children become ready independently.
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100)); // timing: poll
   }
   throw new Error(`Web server did not become ready${lastResponse ? ` (${lastResponse})` : ""}.`);
 }
@@ -198,20 +210,8 @@ async function stopProcess(child) {
   child.kill("SIGTERM");
   await Promise.race([
     new Promise((resolve) => child.once("exit", resolve)),
+    // timing: expiry — teardown grace before SIGKILL; no assertion depends on it.
     new Promise((resolve) => setTimeout(resolve, 5_000)),
   ]);
   if (child.exitCode === null) child.kill("SIGKILL");
-}
-
-async function freePort() {
-  const server = net.createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : undefined;
-  await new Promise((resolve) => server.close(resolve));
-  if (!port) throw new Error("Failed to allocate a test port");
-  return port;
 }

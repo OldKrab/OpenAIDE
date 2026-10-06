@@ -49,31 +49,27 @@ fn acquiring_after_restart_recovers_an_unloaded_empty_codex_session() {
         .unwrap();
     assert_eq!(acquired.task.task_id.as_str(), "task-prepared");
 
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    loop {
+    let snapshot = crate::test_sync::wait_for("preparation to finish", || {
         let snapshot = api
             .open_for_test(TaskOpenParams {
                 task_id: acquired.task.task_id.clone(),
             })
             .unwrap();
-        if !matches!(
+        (!matches!(
             snapshot.preparation,
             TaskPreparationSnapshot::Preparing { .. }
-        ) {
-            assert!(
-                matches!(
-                    snapshot.send_capability.state,
-                    TaskSendCapabilityState::Ready
-                ),
-                "the first acquire must recover without a user retry: {:?}",
-                snapshot.preparation
-            );
-            assert!(!snapshot.task.has_messages);
-            break;
-        }
-        assert!(Instant::now() < deadline, "preparation did not finish");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+        ))
+        .then_some(snapshot)
+    });
+    assert!(
+        matches!(
+            snapshot.send_capability.state,
+            TaskSendCapabilityState::Ready
+        ),
+        "the first acquire must recover without a user retry: {:?}",
+        snapshot.preparation
+    );
+    assert!(!snapshot.task.has_messages);
     let events: Vec<serde_json::Value> = std::fs::read_dir(trace_directory)
         .unwrap()
         .flat_map(|entry| {
@@ -151,13 +147,14 @@ fn first_send_after_idle_process_expiry_recovers_empty_session_without_duplicate
             env: Vec::new(),
             secret_env: Vec::new(),
         })
-        .with_process_idle_timeouts(Duration::from_millis(200), Duration::from_millis(800)),
+        // The test enables idle expiry only once preparation has finished.
+        .with_process_idle_timeouts(crate::test_sync::NEVER, crate::test_sync::NEVER),
     );
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
         AgentRegistry::default_built_ins(),
-        agent,
+        agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
@@ -181,6 +178,7 @@ fn first_send_after_idle_process_expiry_recovers_empty_session_without_duplicate
         )
     });
     let original_pid = std::fs::read_to_string(&pid_file).unwrap();
+    agent.set_process_idle_timeouts(crate::test_sync::EXPIRES, crate::test_sync::EXPIRES);
     wait_for_idle_recovery("process expiration", || {
         !std::process::Command::new("kill")
             .args(["-0", &original_pid])
@@ -188,6 +186,8 @@ fn first_send_after_idle_process_expiry_recovers_empty_session_without_duplicate
             .is_ok_and(|result| result.status.success())
     });
     assert!(!snapshot().task.has_messages);
+    // The replacement process must outlive the recovery it serves.
+    agent.set_process_idle_timeouts(crate::test_sync::NEVER, crate::test_sync::NEVER);
 
     api.send(TaskSendParams {
         task_id: acquired.task.task_id.clone(),
@@ -198,26 +198,17 @@ fn first_send_after_idle_process_expiry_recovers_empty_session_without_duplicate
         },
     })
     .unwrap();
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    loop {
+    // An accepted Send is Idle with messages before its Turn starts, so
+    // wait for the replacement's reply rather than for that state alone.
+    crate::test_sync::wait_until("the first Send to complete", || {
         let current = snapshot();
-        // An accepted Send is Idle with messages before its Turn starts, so
-        // wait for the replacement's reply rather than for that state alone.
         let replied = current.chat.items.iter().any(|item| {
             item.parts
                 .iter()
                 .any(|part| matches!(part, MessagePart::Text { text } if text == "Recovered"))
         });
-        if replied && current.task.status == ProtocolTaskStatus::Idle {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "first Send did not complete: {:?}",
-            current
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+        replied && current.task.status == ProtocolTaskStatus::Idle
+    });
     let delivered: Vec<serde_json::Value> = std::fs::read_to_string(&prompts)
         .unwrap()
         .lines()
@@ -239,11 +230,7 @@ fn first_send_after_idle_process_expiry_recovers_empty_session_without_duplicate
 
 #[cfg(unix)]
 fn wait_for_idle_recovery(stage: &str, ready: impl Fn() -> bool) {
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    while !ready() {
-        assert!(Instant::now() < deadline, "timed out waiting for {stage}");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    crate::test_sync::wait_until(stage, ready);
 }
 
 #[cfg(unix)]

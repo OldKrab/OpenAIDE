@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn request_serializes_to_host_and_accepts_response() {
-    let (bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (bridge, requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
 
     let bridge_for_request = bridge.clone();
     let pending = std::thread::spawn(move || {
@@ -44,6 +44,7 @@ fn request_until_can_wait_without_default_timeout_and_cancel() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
+    // timing: expiry — the bridge default has long passed when the request is cancelled.
     let (bridge, requests) = HostBridge::channel_with_timeout(Duration::from_millis(1));
     let cancelled = Arc::new(AtomicBool::new(false));
     let request_cancelled = cancelled.clone();

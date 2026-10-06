@@ -8,7 +8,6 @@ use crate::server_requests::ServerRequestAnswer;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::server_requests::ShellNotificationLevel;
 use serde_json::json;
-use std::time::Duration;
 
 use super::ServerRequestRuntime;
 
@@ -103,7 +102,7 @@ fn waitable_client_request_returns_accepted_response() {
     );
 
     let result = runtime
-        .wait_client_response(&opened.request_id, Duration::from_secs(1))
+        .wait_client_response(&opened.request_id, crate::test_sync::WATCHDOG)
         .expect("accepted response");
     assert_eq!(result, json!({ "value": "secret-value" }));
 }
@@ -153,7 +152,7 @@ fn waitable_client_request_timeout_interrupts_pending_request() {
         .expect("open request");
 
     let error = runtime
-        .wait_client_response(&opened.request_id, Duration::from_millis(1))
+        .wait_client_response(&opened.request_id, crate::test_sync::EXPIRES)
         .unwrap_err();
 
     assert!(error.to_string().contains("timed out"));
@@ -199,7 +198,7 @@ fn waitable_task_request_delivers_when_task_responder_subscribes() {
     );
 
     let result = runtime
-        .wait_client_response(&opened.request_id, Duration::from_secs(1))
+        .wait_client_response(&opened.request_id, crate::test_sync::WATCHDOG)
         .expect("accepted response");
     assert_eq!(result, json!({ "value": "secret-value" }));
 }

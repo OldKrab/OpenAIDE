@@ -17,6 +17,11 @@ use openaide_app_server::storage::task_journal::{
 };
 use tempfile::TempDir;
 
+// The crate's shared test synchronization vocabulary.
+#[allow(dead_code)]
+#[path = "../src/test_sync.rs"]
+mod test_sync;
+
 #[test]
 fn a_committed_task_survives_store_restart() {
     let root = TempDir::new().expect("create state root");
@@ -1096,7 +1101,7 @@ fn append_failure_freezes_only_the_affected_task() {
     assert!(error.to_string().contains("Task storage is frozen"));
     assert_eq!(
         failures
-            .recv_timeout(std::time::Duration::from_secs(1))
+            .recv_timeout(test_sync::WATCHDOG)
             .expect("write failure is reported to runtime safety monitors")
             .task_id,
         "task_frozen"

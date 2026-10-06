@@ -9,6 +9,7 @@ use super::{AttachmentOwner, AttachmentRuntime, AttachmentRuntimeError};
 
 #[test]
 fn abandoned_attachment_resource_ttl_is_thirty_minutes() {
+    // timing: data — the configured value, compared and never waited on.
     assert_eq!(AttachmentRuntime::new().ttl, Duration::from_secs(30 * 60));
 }
 

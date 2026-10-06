@@ -581,6 +581,8 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions, hasRail = t
 
 test("keeps an Agent link clickable while its message is streaming", async ({ page }) => {
   await openPreparedNewTask(page);
+  await harness.hold("streaming-link-pressed");
+  await harness.hold("streaming-link-clicked");
   await send(page, "smoke:streaming-link-click");
 
   const link = page.getByRole("link", { name: "Streaming link" });
@@ -600,10 +602,12 @@ test("keeps an Agent link clickable while its message is streaming", async ({ pa
   const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();
+  await harness.release("streaming-link-pressed");
   await expect(page.getByText("Second paragraph arrives while the link is pressed.", { exact: true })).toBeVisible();
   await page.mouse.up();
 
   await expect.poll(() => page.evaluate(() => window.__openaideStreamingLinkClicks)).toBe(1);
+  await harness.release("streaming-link-clicked");
 });
 
 test("uses a mobile context button and keeps the desktop meter on the rounded edge", async ({ page }) => {
@@ -803,7 +807,7 @@ test("fits and inspects a Mermaid diagram inline and expanded without source dea
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 
   const diagram = page.locator(".agent-mermaid");
-  await expect(diagram.locator(".agent-mermaid-image")).toBeVisible({ timeout: 30_000 });
+  await expect(diagram.locator(".agent-mermaid-image")).toBeVisible();
   const copySource = diagram.getByRole("button", { name: "Copy source" });
   await expect(copySource).toBeVisible();
   expect((await copySource.boundingBox())?.width).toBeLessThanOrEqual(30);
@@ -909,14 +913,16 @@ test("waits for the Agent message to complete before rendering Mermaid", async (
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
   const chat = page.getByLabel("Task chat");
   // A diagram still loading shows its source, which the streaming check below would also match.
-  await expect(chat.locator('.agent-mermaid[data-mode="diagram"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(chat.locator('.agent-mermaid[data-mode="diagram"]')).toHaveCount(1);
 
+  await harness.hold("mermaid-streaming");
   await send(page, "smoke:mermaid-streaming");
 
   await expect(chat.locator("code.language-mermaid")).toBeVisible();
   await expect(chat.locator(".agent-mermaid")).toHaveCount(1);
-  await expect(page.getByLabel("Task status: Idle")).toBeVisible({ timeout: 10_000 });
-  await expect(chat.locator(".agent-mermaid")).toHaveCount(2, { timeout: 30_000 });
+  await harness.release("mermaid-streaming");
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+  await expect(chat.locator(".agent-mermaid")).toHaveCount(2);
 });
 
 async function expectPreviewToFit(page, stage) {
@@ -995,8 +1001,10 @@ test("keeps a Task actions popup interactive after the pointer leaves its row", 
     observer.observe(document.body, { childList: true, subtree: true });
   });
   await row.hover();
+  // timing: absence — the hover preview has time to arm before the menu opens.
   await page.waitForTimeout(250);
   await row.getByRole("button", { name: "Task actions for Smoke task" }).click();
+  // timing: absence — outlasts the preview delay; the open menu must keep it closed.
   await page.waitForTimeout(1_100);
 
   const menu = page.getByRole("menu", { name: "Task actions for Smoke task" });
@@ -1428,6 +1436,7 @@ async function maximumVirtualRowOverlapDuring(page, action) {
   });
 
   await action();
+  // timing: absence — frames sampled after the action; more frames only strengthen it.
   await page.waitForTimeout(300);
   return page.evaluate(() => {
     window.__openaideVirtualRowOverlap.active = false;
@@ -1628,7 +1637,7 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
       await Promise.race([
         boundary,
         new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error(describeFailure())), 10_000);
+          timeout = setTimeout(() => reject(new Error(describeFailure())), 30_000);
         }),
       ]);
     } finally {

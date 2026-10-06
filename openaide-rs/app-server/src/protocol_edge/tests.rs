@@ -34,7 +34,6 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use crate::agent::product_api::{
     AgentAuthenticateWorkflow, AgentCatalogMutationWorkflow, AgentProbeWorkflow,
@@ -4663,10 +4662,9 @@ struct FailingPreparedTaskDisposal {
 }
 
 fn wait_for_prepared_cleanup(task_release: &FailingPreparedTaskDisposal) {
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    while task_release.calls.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    crate::test_sync::wait_until("prepared task cleanup", || {
+        task_release.calls.load(Ordering::SeqCst) > 0
+    });
     assert_eq!(task_release.calls.load(Ordering::SeqCst), 1);
 }
 
@@ -4725,9 +4723,9 @@ impl TaskReleaseWorkflow for BlockingPreparedTaskDisposal {
         &self,
         _agent_id: &str,
     ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
-        while !self.release.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        crate::test_sync::wait_until("the test to release disposal", || {
+            self.release.load(Ordering::SeqCst)
+        });
         Ok(())
     }
 }

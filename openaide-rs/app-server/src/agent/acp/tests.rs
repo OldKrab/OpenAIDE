@@ -66,7 +66,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 mod active_session_runtime;
 mod codex_collaboration;
@@ -345,7 +345,7 @@ fn initialize_advertises_client_methods_only_when_host_bridge_is_enabled() {
 
 #[test]
 fn read_text_file_request_round_trips_through_host_bridge() {
-    let (bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (bridge, requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let request_bridge = bridge.clone();
     let pending = std::thread::spawn(move || {
         tokio::runtime::Runtime::new()
@@ -388,7 +388,7 @@ fn read_text_file_request_round_trips_through_host_bridge() {
 
 #[test]
 fn write_text_file_request_accepts_null_host_response() {
-    let (bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (bridge, requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let request_bridge = bridge.clone();
     let pending = std::thread::spawn(move || {
         tokio::runtime::Runtime::new()
@@ -419,7 +419,7 @@ fn write_text_file_request_accepts_null_host_response() {
 
 #[test]
 fn terminal_create_request_round_trips_through_host_bridge() {
-    let (bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(1));
+    let (bridge, requests) = HostBridge::channel_with_timeout(crate::test_sync::WATCHDOG);
     let request_bridge = bridge.clone();
     let pending = std::thread::spawn(move || {
         tokio::runtime::Runtime::new()
@@ -430,7 +430,7 @@ fn terminal_create_request_round_trips_through_host_bridge() {
                 CreateTerminalRequest::new("session_1", "npm")
                     .args(vec!["test".to_string()])
                     .cwd(Some(PathBuf::from("/workspace/app"))),
-                Some(Duration::from_secs(1)),
+                Some(crate::test_sync::WATCHDOG),
                 || false,
                 None,
             ))
@@ -463,6 +463,7 @@ fn terminal_create_request_round_trips_through_host_bridge() {
 fn terminal_wait_request_can_be_cancelled_without_deadline() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    // timing: expiry — the bridge default has long passed when the request is cancelled.
     let (bridge, requests) = HostBridge::channel_with_timeout(Duration::from_millis(1));
     let cancelled = Arc::new(AtomicBool::new(false));
     let request_bridge = bridge.clone();
@@ -1620,57 +1621,6 @@ fn load_active_session_captures_replayed_updates_before_response() {
     });
 }
 
-#[cfg(unix)]
-#[test]
-fn probe_timeout_cancels_hanging_agent_process() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let pid_file = temp.path().join("agent.pid");
-    let runtime = AcpAgentRuntime::new(AcpAgentConfig {
-        agent_id: "codex".to_string(),
-        command: "sh".to_string(),
-        args: vec![
-            "-c".to_string(),
-            "printf '%s' $$ > \"$PID_FILE\"; sleep 30".to_string(),
-        ],
-        env: vec![(
-            "PID_FILE".to_string(),
-            pid_file.to_string_lossy().to_string(),
-        )],
-        secret_env: Vec::new(),
-    });
-
-    let started = Instant::now();
-    let error = runtime
-        .probe_with_timeout(
-            AgentProbeRequest {
-                agent_id: "codex".to_string(),
-            },
-            // The shell must launch and record its pid before this expires.
-            // TODO: expire the probe from the test once the pid is recorded; a
-            // wall-clock allowance still loses to a sufficiently starved runner.
-            Duration::from_secs(2),
-        )
-        .unwrap_err();
-    let error_text = error.to_string();
-
-    assert!(matches!(error, RuntimeError::NotReady(_)));
-    assert!(
-        error_text.contains("ACP Agent probe timed out"),
-        "{error_text}"
-    );
-    // The probe returns on its own deadline, well before the Agent's 30 s sleep.
-    assert!(started.elapsed() < Duration::from_secs(15));
-    let pid = fs::read_to_string(&pid_file).expect("agent pid file");
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    while process_exists(pid.trim()) {
-        assert!(
-            Instant::now() < deadline,
-            "hanging probe process stayed alive"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
 #[test]
 fn normalized_session_cwd_uses_absolute_fallback_for_no_workspace() {
     assert!(normalized_session_cwd("").is_absolute());
@@ -1691,7 +1641,7 @@ fn probe_reports_missing_agent_command_as_setup_error() {
             AgentProbeRequest {
                 agent_id: "codex".to_string(),
             },
-            Duration::from_millis(200),
+            crate::test_sync::WATCHDOG,
         )
         .unwrap_err()
         .to_string();
@@ -1705,22 +1655,32 @@ fn probe_reports_missing_agent_command_as_setup_error() {
 
 #[test]
 fn close_tasks_run_in_parallel() {
+    // Each task finishes only once all three have started, which sequential
+    // execution can never satisfy.
+    let started = Arc::new((Mutex::new(0_usize), std::sync::Condvar::new()));
     let completed = Arc::new(AtomicUsize::new(0));
-    let start = Instant::now();
     close_in_parallel(
         (0..3)
             .map(|_| {
+                let started = started.clone();
                 let completed = completed.clone();
                 Box::new(move || {
-                    thread::sleep(Duration::from_millis(100));
-                    completed.fetch_add(1, Ordering::SeqCst);
+                    let (count, changed) = &*started;
+                    let mut count = count.lock().unwrap();
+                    *count += 1;
+                    changed.notify_all();
+                    let (_count, wait) = changed
+                        .wait_timeout_while(count, crate::test_sync::WATCHDOG, |count| *count < 3)
+                        .unwrap();
+                    if !wait.timed_out() {
+                        completed.fetch_add(1, Ordering::SeqCst);
+                    }
                 }) as Box<dyn FnOnce() + Send + 'static>
             })
             .collect(),
     );
 
     assert_eq!(completed.load(Ordering::SeqCst), 3);
-    assert!(start.elapsed() < Duration::from_millis(250));
 }
 
 #[test]
@@ -3236,9 +3196,4 @@ fn command_catalog(command_name: &str) -> AgentCommandsCatalog {
                 UnstructuredCommandInput::new("query"),
             ))]),
     )
-}
-
-#[cfg(unix)]
-fn process_exists(pid: &str) -> bool {
-    Path::new("/proc").join(pid).exists()
 }

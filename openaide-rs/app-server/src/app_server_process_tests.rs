@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -10,27 +10,28 @@ use crate::app_server_client::runner::{
 };
 use crate::app_server_client::StorageWriterState;
 use crate::client_lifecycle::AppServerTime;
+use crate::protocol_edge::local_http::listener::LocalHttpProbeListener;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 use crate::storage_runtime::{EndpointRecordStore, StateRoot};
 
 use super::{
     expire_local_http_clients, native_session_catalog_refresh_due,
-    publish_local_http_probe_endpoint, request_shutdown_after_last_client,
-    task_storage_maintenance_due,
+    publish_local_http_probe_endpoint, publish_local_http_probe_listener,
+    request_shutdown_after_last_client, task_storage_maintenance_due,
 };
 
 #[test]
 fn native_session_catalog_periodic_refresh_is_due_after_five_minutes() {
-    assert!(!native_session_catalog_refresh_due(Duration::from_secs(
-        299
-    )));
-    assert!(native_session_catalog_refresh_due(Duration::from_secs(300)));
+    let due = |seconds| native_session_catalog_refresh_due(Duration::from_secs(seconds)); // timing: data
+    assert!(!due(299));
+    assert!(due(300));
 }
 
 #[test]
 fn task_storage_maintenance_is_due_every_six_hours() {
-    assert!(!task_storage_maintenance_due(Duration::from_secs(21_599)));
-    assert!(task_storage_maintenance_due(Duration::from_secs(21_600)));
+    let due = |seconds| task_storage_maintenance_due(Duration::from_secs(seconds)); // timing: data
+    assert!(!due(21_599));
+    assert!(due(21_600));
 }
 
 #[test]
@@ -119,7 +120,12 @@ fn published_local_http_endpoint_accepts_next_request_while_one_connection_is_sl
     let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root.clone());
     let endpoint_records = EndpointRecordStore::new(runtime_dir.path());
 
-    let _published = publish_local_http_probe_endpoint(
+    // The slow connection never times out, so the next request is answered only
+    // if it is served without waiting for the slow one.
+    let _published = publish_local_http_probe_listener(
+        LocalHttpProbeListener::bind_loopback()
+            .unwrap()
+            .with_timeout(crate::test_sync::NEVER),
         dispatcher.shared_gateway(),
         &state_root,
         runtime_dir.path(),
@@ -131,7 +137,6 @@ fn published_local_http_endpoint_accepts_next_request_while_one_connection_is_sl
         .expect("endpoint record");
 
     let stalled = open_partial_post(&record.endpoints[0].address, &record.auth_token);
-    let started = Instant::now();
     let response = post_json(
         &record.endpoints[0].address,
         &record.auth_token,
@@ -146,10 +151,6 @@ fn published_local_http_endpoint_accepts_next_request_while_one_connection_is_sl
     );
     drop(stalled);
 
-    assert!(
-        started.elapsed() < Duration::from_millis(500),
-        "second request should not wait for the stalled connection"
-    );
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
 }
 
@@ -376,6 +377,9 @@ fn post_json(address: &str, token: &str, connection_id: Option<&str>, body: &str
         body.len()
     );
     let mut stream = TcpStream::connect(authority).unwrap();
+    stream
+        .set_read_timeout(Some(crate::test_sync::WATCHDOG))
+        .unwrap();
     stream.write_all(wire.as_bytes()).unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();

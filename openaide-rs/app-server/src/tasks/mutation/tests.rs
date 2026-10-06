@@ -1067,7 +1067,7 @@ fn terminal_stream_revalidates_session_after_waiting_for_the_mutation_lock() {
     });
 
     assert!(finished
-        .recv_timeout(std::time::Duration::from_millis(100))
+        .recv_timeout(crate::test_sync::ABSENCE_WINDOW)
         .is_err());
     drop(guard);
     let outcome = finished.recv_timeout(crate::test_sync::WATCHDOG);

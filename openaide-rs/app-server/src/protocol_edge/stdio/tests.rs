@@ -1,7 +1,7 @@
 use super::*;
 
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use openaide_app_server_protocol::envelopes::RequestMeta;
@@ -2081,7 +2081,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     let mut navigation_updated = false;
     while Instant::now() < deadline {
-        let committed = match notifications.recv_timeout(Duration::from_millis(50)) {
+        let committed = match notifications.recv_timeout(crate::test_sync::WATCHDOG) {
             Ok(committed) => committed,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -2773,8 +2773,9 @@ fn task_archive_older_completes_large_project_cleanup_promptly() {
     let archived = &response(&archived[0])["result"]["result"]["archivedNativeSessions"];
 
     assert_eq!(archived.as_array().map(Vec::len), Some(OLDER_SESSION_COUNT));
+    // timing: contract — archiving stays bounded; a quadratic pass exceeds any budget.
     assert!(
-        elapsed < Duration::from_secs(5),
+        elapsed < crate::test_sync::WATCHDOG,
         "archiving {OLDER_SESSION_COUNT} older tasks took {elapsed:?}"
     );
 }
@@ -3160,17 +3161,9 @@ fn task_secret_request(task_id: &str) -> ServerRequestDraft {
 }
 
 fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
-    let deadline = Instant::now() + crate::test_sync::WATCHDOG;
-    loop {
-        match Store::open(path.to_path_buf()) {
-            Ok(store) => return store,
-            Err(error) if Instant::now() < deadline => {
-                let _ = error;
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => panic!("store should reopen after dispatcher drop: {error}"),
-        }
-    }
+    crate::test_sync::wait_for("the store to reopen after dispatcher drop", || {
+        Store::open(path.to_path_buf()).ok()
+    })
 }
 
 fn event_payload_kind(line: &str, kind: &str) -> bool {
@@ -3185,7 +3178,7 @@ fn wait_for_server_request(
 ) -> Value {
     let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while Instant::now() < deadline {
-        let notification = match notifications.recv_timeout(Duration::from_millis(50)) {
+        let notification = match notifications.recv_timeout(crate::test_sync::WATCHDOG) {
             Ok(notification) => notification,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(error) => panic!("task update channel closed: {error}"),
@@ -3208,7 +3201,7 @@ fn wait_for_protocol_task_status(
 ) {
     let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while Instant::now() < deadline {
-        let notification = match notifications.recv_timeout(Duration::from_millis(50)) {
+        let notification = match notifications.recv_timeout(crate::test_sync::WATCHDOG) {
             Ok(notification) => notification,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(error) => panic!("task update channel closed: {error}"),
