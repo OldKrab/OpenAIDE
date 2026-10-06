@@ -124,7 +124,7 @@ fn app_server_handoff_survives_launcher_disconnect_while_another_client_is_attac
     drop(stdout);
     drop(child.stdin.take());
 
-    std::thread::sleep(Duration::from_millis(250));
+    crate::test_sync::observe_absence();
     assert!(
         child.try_wait().expect("read handoff status").is_none(),
         "App Server must not be owned by the launching extension host"
@@ -749,18 +749,10 @@ fn wait_until_task_send_ready(
     connection_id: &str,
     task_id: &str,
 ) -> Value {
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
+    crate::test_sync::wait_for("task send readiness", || {
         let task = open_task(endpoint_url, auth_token, connection_id, task_id);
-        if task["sendCapability"]["state"] == "ready" {
-            return task;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for task send readiness: {task}"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
+        (task["sendCapability"]["state"] == "ready").then_some(task)
+    })
 }
 
 fn first_project_id(initialize_response: &Value) -> String {
@@ -807,7 +799,7 @@ fn wait_for_runtime_stdout_line(stdout: std::process::ChildStdout) -> String {
         let mut lines = std::io::BufRead::lines(std::io::BufReader::new(stdout));
         let _ = tx.send(lines.next());
     });
-    rx.recv_timeout(Duration::from_secs(2))
+    rx.recv_timeout(crate::test_sync::WATCHDOG)
         .expect("runtime did not write a response")
         .expect("runtime stdout closed before response")
         .expect("runtime stdout line")

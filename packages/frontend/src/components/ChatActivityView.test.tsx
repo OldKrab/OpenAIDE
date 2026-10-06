@@ -426,6 +426,52 @@ describe("ChatActivityView", () => {
     expect(tree.root.findAllByProps({ className: "activity-step-preview" })).toHaveLength(0);
   });
 
+  it("shows the agent description as an execute row title with the command as tooltip", () => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_described_execute",
+      title: "sed -i 20s/a/b/ notes.txt",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [
+        {
+          kind: "tool",
+          tool_call_id: "described_execute",
+          detail_artifact_id: "artifact_described",
+          name: "execute",
+          status: "completed",
+          description: "Rename the marker",
+          input_summary: "sed -i 20s/a/b/ notes.txt",
+          permission_outcomes: [],
+        },
+        {
+          kind: "tool",
+          tool_call_id: "plain_execute",
+          detail_artifact_id: "artifact_plain",
+          name: "execute",
+          status: "completed",
+          input_summary: "git diff",
+          permission_outcomes: [],
+        },
+      ],
+    };
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+
+    const described = tree.root.findByProps({ className: "activity-step-title" });
+    expect(described.props.title).toBe("sed -i 20s/a/b/ notes.txt");
+    expect(described.children).toEqual(["Rename the marker"]);
+    // Agents that send no description keep the command title.
+    const commands = tree.root.findAllByProps({ className: "activity-step-command" });
+    expect(commands.map((command) => command.children)).toEqual([["git diff"]]);
+  });
+
   it("does not expose command output in the collapsed activity row", () => {
     const activity: ActivityMessage = {
       kind: "activity",

@@ -1,21 +1,25 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { listeningPort } from "./dev-server-test-support.mjs";
 
-test("Web stays live while a slow App Server handoff becomes ready", { timeout: 12_000 }, async (t) => {
+// Bounds a hung wait; never sized to how long startup usually takes.
+const WATCHDOG_MS = 30_000;
+
+test("Web stays live while a slow App Server handoff becomes ready", { timeout: 60_000 }, async (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), "openaide-web-startup-"));
   const staticRoot = path.join(fixtureRoot, "static");
   const fakeAppServerPath = path.join(fixtureRoot, "slow-app-server.mjs");
   mkdirSync(staticRoot);
   writeFileSync(path.join(staticRoot, "index.html"), "<html><body>OpenAIDE starting</body></html>");
-  writeFileSync(fakeAppServerPath, slowAppServerSource());
+  const handoffGate = path.join(fixtureRoot, "handoff-gate");
+  writeFileSync(handoffGate, "");
+  writeFileSync(fakeAppServerPath, slowAppServerSource(handoffGate));
   chmodSync(fakeAppServerPath, 0o755);
 
-  const port = await availablePort();
   const webServer = spawn(process.execPath, ["src/dev-server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
@@ -23,7 +27,7 @@ test("Web stays live while a slow App Server handoff becomes ready", { timeout: 
       OPENAIDE_APP_SERVER_PATH: fakeAppServerPath,
       OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
-      OPENAIDE_WEB_PORT: String(port),
+      OPENAIDE_WEB_PORT: "0",
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(fixtureRoot, "runtime"),
       OPENAIDE_WEB_STATE_ROOT: path.join(fixtureRoot, "state"),
       OPENAIDE_WEB_STATIC_ROOT: staticRoot,
@@ -35,7 +39,7 @@ test("Web stays live while a slow App Server handoff becomes ready", { timeout: 
     rmSync(fixtureRoot, { recursive: true, force: true });
   });
 
-  await waitForOutput(webServer, "OpenAIDE Web dev shell listening", 2_000);
+  const port = await listeningPort(webServer);
   const origin = `http://127.0.0.1:${port}`;
   const live = await fetch(`${origin}/livez`);
   const starting = await fetch(`${origin}/readyz`);
@@ -48,10 +52,11 @@ test("Web stays live while a slow App Server handoff becomes ready", { timeout: 
   assert.equal(page.status, 200);
   assert.match(await page.text(), /OpenAIDE starting/);
 
-  await waitUntilReady(`${origin}/readyz`, 8_000);
+  rmSync(handoffGate);
+  await waitUntilReady(`${origin}/readyz`, WATCHDOG_MS);
 });
 
-test("Web survives a malformed handoff and can retry a repaired App Server", { timeout: 8_000 }, async (t) => {
+test("Web survives a malformed handoff and can retry a repaired App Server", { timeout: 60_000 }, async (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), "openaide-web-invalid-handoff-"));
   const staticRoot = path.join(fixtureRoot, "static");
   const fakeAppServerPath = path.join(fixtureRoot, "app-server.mjs");
@@ -60,7 +65,6 @@ test("Web survives a malformed handoff and can retry a repaired App Server", { t
   writeFileSync(fakeAppServerPath, '#!/usr/bin/env node\nconsole.log("invalid handoff");\n');
   chmodSync(fakeAppServerPath, 0o755);
 
-  const port = await availablePort();
   const webServer = spawn(process.execPath, ["src/dev-server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
@@ -68,7 +72,7 @@ test("Web survives a malformed handoff and can retry a repaired App Server", { t
       OPENAIDE_APP_SERVER_PATH: fakeAppServerPath,
       OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
-      OPENAIDE_WEB_PORT: String(port),
+      OPENAIDE_WEB_PORT: "0",
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(fixtureRoot, "runtime"),
       OPENAIDE_WEB_STATE_ROOT: path.join(fixtureRoot, "state"),
       OPENAIDE_WEB_STATIC_ROOT: staticRoot,
@@ -80,31 +84,23 @@ test("Web survives a malformed handoff and can retry a repaired App Server", { t
     rmSync(fixtureRoot, { recursive: true, force: true });
   });
 
-  await waitForOutput(webServer, "app_server_handoff_failed", 2_000);
+  const [port] = await Promise.all([
+    listeningPort(webServer),
+    waitForOutput(webServer, "app_server_handoff_failed"),
+  ]);
   const origin = `http://127.0.0.1:${port}`;
   assert.equal((await fetch(`${origin}/livez`)).status, 200);
   assert.match(await (await fetch(origin)).text(), /OpenAIDE recovery/);
 
-  writeFileSync(fakeAppServerPath, slowAppServerSource(0));
-  await waitUntilReady(`${origin}/readyz`, 3_000);
+  writeFileSync(fakeAppServerPath, slowAppServerSource(path.join(fixtureRoot, "open-gate"), 0));
+  await waitUntilReady(`${origin}/readyz`, WATCHDOG_MS);
 });
 
-function availablePort() {
-  const server = http.createServer();
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close((error) => error ? reject(error) : resolve(address.port));
-    });
-  });
-}
-
-function waitForOutput(child, expected, timeoutMs) {
+function waitForOutput(child, expected) {
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
-    const timeout = setTimeout(() => reject(new Error(`Web did not listen within ${timeoutMs}ms: ${stderr}`)), timeoutMs);
+    const timeout = setTimeout(() => reject(new Error(`Web did not print "${expected}": ${stderr}`)), WATCHDOG_MS);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
@@ -138,7 +134,7 @@ async function waitUntilReady(url, timeoutMs) {
       assert.equal(await response.text(), "ready");
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50)); // timing: poll
   }
   throw new Error(`Web did not become ready within ${timeoutMs}ms`);
 }
@@ -151,8 +147,11 @@ function stopProcess(child) {
   });
 }
 
-function slowAppServerSource(delayMs = 5_500) {
+// Holds the handoff while the gate file exists, so "starting" is observed at a
+// gate. The delay keeps the handoff later than the shell heartbeat interval.
+function slowAppServerSource(gate, delayMs = 5_500) {
   return `#!/usr/bin/env node
+import { existsSync } from "node:fs";
 import http from "node:http";
 const authToken = "test-token-that-is-long-enough-for-handoff";
 const server = http.createServer((request, response) => {
@@ -164,11 +163,15 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }));
   });
 });
-setTimeout(() => server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({
+// timing: contract — the handoff arrives later than the shell heartbeat interval.
+await new Promise((resolve) => setTimeout(resolve, ${delayMs}));
+// timing: poll
+while (existsSync(${JSON.stringify(gate)})) await new Promise((resolve) => setTimeout(resolve, 10));
+server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({
   kind: "localHttp",
   endpointUrl: \`http://127.0.0.1:\${server.address().port}/rpc\`,
   authToken,
-}))), ${delayMs});
+})));
 process.once("SIGTERM", () => server.close(() => process.exit(0)));
 `;
 }

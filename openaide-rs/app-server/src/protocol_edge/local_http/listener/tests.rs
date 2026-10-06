@@ -2,7 +2,6 @@ use std::io::{Error, ErrorKind};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
-use std::time::Duration;
 
 use super::*;
 
@@ -217,7 +216,7 @@ fn incomplete_request_timeout_closes_without_a_terminal_http_rejection() {
 
     let server = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        configure_timeouts(&stream, Duration::from_millis(20)).unwrap();
+        configure_timeouts(&stream, crate::test_sync::EXPIRES).unwrap();
         let error = handle_stream(&mut stream, |_request| {
             panic!("a partial request must not reach protocol handling")
         })
@@ -229,7 +228,7 @@ fn incomplete_request_timeout_closes_without_a_terminal_http_rejection() {
     stream
         .write_all(b"POST /probe HTTP/1.1\r\nContent-Length: 10\r\n\r\n{")
         .unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    // The read returns once the server gives up on the partial request and closes.
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
     server.join().unwrap();

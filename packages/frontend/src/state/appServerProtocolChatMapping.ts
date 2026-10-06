@@ -354,6 +354,7 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
     name: step.name,
     status: activityStatusFromProtocol(step.status),
     ...(presentation ? { presentation } : {}),
+    ...(step.description ? { description: step.description } : {}),
     input_summary: step.inputSummary ?? activityTitle,
     output_preview: step.outputPreview ?? undefined,
     detail_artifact_id: step.detailArtifactId ?? undefined,

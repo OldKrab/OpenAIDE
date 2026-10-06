@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use openaide_app_server_protocol::methods::{
     CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, TASK_ACQUIRE,
 };
@@ -49,18 +47,14 @@ fn native_session_start_marks_the_agent_connected_in_settings() {
         "acquire should create a Prepared Task: {acquired}"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(2);
     let mut attempt = 0;
-    loop {
-        attempt += 1;
-        if codex_settings_status(&mut dispatcher, &format!("poll-{attempt}")) == "connected" {
-            return;
-        }
-        if Instant::now() >= deadline {
-            panic!("Settings should show Codex as connected after Native Session start");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    crate::test_sync::wait_until(
+        "Settings to show Codex as connected after Native Session start",
+        || {
+            attempt += 1;
+            codex_settings_status(&mut dispatcher, &format!("poll-{attempt}")) == "connected"
+        },
+    );
 }
 
 fn init_request(id: &str, client_id: &str) -> String {

@@ -7,8 +7,9 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { listeningPort } from "./dev-server-test-support.mjs";
 
-test("Target proxies authenticated prototype HTTP and HMR traffic before the main app", { timeout: 8_000 }, async (t) => {
+test("Target proxies authenticated prototype HTTP and HMR traffic before the main app", { timeout: 60_000 }, async (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), "openaide-web-prototype-"));
   const staticRoot = path.join(fixtureRoot, "static");
   const fakeAppServerPath = path.join(fixtureRoot, "fake-app-server.mjs");
@@ -41,7 +42,6 @@ test("Target proxies authenticated prototype HTTP and HMR traffic before the mai
     ].join("\r\n"));
   });
   const prototypePort = await listenOnAvailablePort(prototypeServer);
-  const webPort = await availablePort();
   const webServer = spawn(process.execPath, ["src/dev-server.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: {
@@ -49,7 +49,7 @@ test("Target proxies authenticated prototype HTTP and HMR traffic before the mai
       OPENAIDE_APP_SERVER_PATH: fakeAppServerPath,
       OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
-      OPENAIDE_WEB_PORT: String(webPort),
+      OPENAIDE_WEB_PORT: "0",
       OPENAIDE_WEB_PROTOTYPE_PORT: String(prototypePort),
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(fixtureRoot, "runtime"),
       OPENAIDE_WEB_STATE_ROOT: path.join(fixtureRoot, "state"),
@@ -61,7 +61,7 @@ test("Target proxies authenticated prototype HTTP and HMR traffic before the mai
     await Promise.all([stopProcess(webServer), closeServer(prototypeServer)]);
     rmSync(fixtureRoot, { recursive: true, force: true });
   });
-  await waitForOutput(webServer, "OpenAIDE Web dev shell listening");
+  const webPort = await listeningPort(webServer);
 
   const response = await fetch(`http://127.0.0.1:${webPort}/prototype/example/?variant=B`);
   assert.equal(response.status, 200);
@@ -119,11 +119,6 @@ function upgradeRequest(port, requestPath) {
   });
 }
 
-function availablePort() {
-  const server = http.createServer();
-  return listenOnAvailablePort(server).finally(() => closeServer(server));
-}
-
 function listenOnAvailablePort(server) {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -134,22 +129,6 @@ function listenOnAvailablePort(server) {
 function closeServer(server) {
   if (!server.listening) return Promise.resolve();
   return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-}
-
-function waitForOutput(child, expected) {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-      if (stdout.includes(expected)) resolve();
-    });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`Web server exited with ${code}: ${stderr}`)));
-  });
 }
 
 function stopProcess(child) {

@@ -43,9 +43,7 @@ fn catalog_list_finishing_after_sign_in_starts_preserves_the_running_flow() {
                 cursor: None,
             })
         });
-        observed
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .unwrap();
+        observed.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
         statuses
             .begin_authentication("codex", "chatgpt", false)
             .unwrap();

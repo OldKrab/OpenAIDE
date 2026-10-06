@@ -301,5 +301,9 @@ fn default_runtime_root() -> PathBuf {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
+mod test_sync;
+
+#[cfg(test)]
 #[path = "storage_fatal_supervisor_tests.rs"]
 mod storage_fatal_supervisor_tests;

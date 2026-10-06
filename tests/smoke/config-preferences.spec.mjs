@@ -37,15 +37,19 @@ test("shows live preferences and explicit recovery at wide and narrow widths", a
 
   for (const [width, action] of [[1280, "Retry"], [390, "Use current settings"]]) {
     await page.setViewportSize({ width, height: 800 });
+    await harness.hold("session-new");
+    await harness.hold("preference-failure");
     await page.goto(`${harness.baseUrl}/new-task`);
     await expect(page.getByText("Connecting to OpenAIDE Test Agent…", { exact: true })).toBeVisible();
     const editor = page.getByRole("textbox", { name: "Message", exact: true });
     await editor.fill("smoke:basic");
+    await harness.release("session-new");
     await expect(page.getByText("Applying your preferences…", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Balanced → Verbose, updating Agent option", { exact: true }).filter({ visible: true })).toHaveAttribute("aria-disabled", "true");
     await expect(page.getByLabel("Send message", { exact: true })).toBeDisabled();
     await expect(editor).toBeEditable();
     await page.screenshot({ path: info.outputPath(`preferences-${width}-applying.png`) });
+    await harness.release("preference-failure");
     await expect(page.getByText("Couldn’t apply your preferences.", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Send message", { exact: true })).toBeDisabled();
     await page.screenshot({ path: info.outputPath(`preferences-${width}-failed.png`) });

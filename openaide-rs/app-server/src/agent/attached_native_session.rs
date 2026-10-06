@@ -19,7 +19,10 @@ use crate::agent::{
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 
+mod idle_policy;
 mod runtime;
+
+pub(super) use idle_policy::SessionIdleTimeouts;
 
 /// Inputs consumed by the attachment's private event loop.
 ///
@@ -38,7 +41,7 @@ pub(super) struct AttachedNativeSessionRunInput {
     pub(super) current_prompts: Arc<Mutex<std::collections::HashMap<String, LivePromptProjection>>>,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
-    pub(super) session_idle_timeout: Duration,
+    pub(super) session_idle: tokio::sync::watch::Receiver<SessionIdleTimeouts>,
     pub(super) process_lifetime: AcpProcessLifetime,
 }
 

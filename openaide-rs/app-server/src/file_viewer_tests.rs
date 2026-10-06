@@ -54,3 +54,19 @@ fn relative_href_from_handle_opens_sibling_without_a_client_path() {
     assert_eq!(notes.text.as_deref(), Some("# Notes\n"));
     assert_ne!(notes.handle, readme.handle);
 }
+
+#[test]
+fn pdf_signature_opens_as_pdf_without_snapshot_bytes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // The signature decides, not the name: text after it must not become a source snapshot.
+    std::fs::write(dir.path().join("report"), "%PDF-1.7\nplain text body\n").unwrap();
+    let registry = FileViewerRegistry::new();
+
+    let snapshot = registry.open(&client(), dir.path().to_str().unwrap(), "report", None);
+
+    assert_eq!(snapshot.kind, FileViewerKind::Pdf);
+    assert_eq!(snapshot.error, None);
+    assert_eq!(snapshot.text, None);
+    assert_eq!(snapshot.preview, None);
+    assert!(!snapshot.truncated);
+}

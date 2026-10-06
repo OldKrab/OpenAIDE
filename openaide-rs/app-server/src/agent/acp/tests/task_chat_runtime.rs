@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use openaide_app_server_protocol::agent::AgentListSessionsParams;
 use openaide_app_server_protocol::ids::{AgentId, TaskId};
@@ -766,11 +766,14 @@ fn steering_end_turn_makes_the_task_idle_when_primary_never_returns() {
 
     api.send(send_params(&task_id, "start primary work"))
         .expect("send primary prompt");
+    // A Task is Active before its primary prompt reaches the Agent, and only
+    // a prompt the Agent holds can be steered.
+    // TODO: a Send in that window is accepted as steering and then dropped
+    // with only a log line. Decide what the Task does with it, then cover it.
     wait_until(|| {
-        store
-            .read_task(task_id.as_str())
-            .map(|task| task.status == TaskStatus::Active && task.active_turn_id.is_some())
-            .unwrap_or(false)
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Primary prompt received")
     });
     api.send(send_params(&task_id, "replace it with this"))
         .expect("send steering prompt");
@@ -787,8 +790,17 @@ fn steering_end_turn_makes_the_task_idle_when_primary_never_returns() {
 #[test]
 fn steering_keeps_task_active_when_primary_is_cancelled() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "steering_primary_cancelled")
-    else {
+    let gate_path = temp.path().join("steering-turn-release");
+    let Some((api, store, workspace_root)) = task_chat_fixture_with_runtime(
+        &temp,
+        "steering_primary_cancelled",
+        ServerRequestRuntime::new(),
+        vec![(
+            "OPENAIDE_TASK_CHAT_GATE".to_string(),
+            gate_path.to_string_lossy().to_string(),
+        )],
+        None,
+    ) else {
         return;
     };
     let created = api
@@ -810,11 +822,12 @@ fn steering_keeps_task_active_when_primary_is_cancelled() {
 
     api.send(send_params(&task_id, "start primary work"))
         .expect("send primary prompt");
+    // A Task is Active before its primary prompt reaches the Agent, and only
+    // a prompt the Agent holds can be steered.
     wait_until(|| {
-        store
-            .read_task(task_id.as_str())
-            .map(|task| task.status == TaskStatus::Active && task.active_turn_id.is_some())
-            .unwrap_or(false)
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Primary prompt received")
     });
     api.send(send_params(&task_id, "redirect the work"))
         .expect("send steering prompt");
@@ -824,6 +837,9 @@ fn steering_keeps_task_active_when_primary_is_cancelled() {
             .iter()
             .any(|(_, text)| text == "Primary prompt superseded")
     });
+    // The fixture answered the primary prompt as cancelled before this chunk and
+    // holds the steering turn open until released.
+    crate::test_sync::observe_absence();
     assert_eq!(
         store
             .read_task(task_id.as_str())
@@ -832,6 +848,7 @@ fn steering_keeps_task_active_when_primary_is_cancelled() {
         TaskStatus::Active,
         "primary cancellation must not settle an accepted steering turn"
     );
+    fs::write(&gate_path, "").expect("release steering turn");
 
     wait_until(|| {
         store
@@ -856,6 +873,7 @@ fn agent_bookkeeping_on_idle_close_is_not_reported_as_an_external_change() {
             "OPENAIDE_TASK_CHAT_ACTIVITY_FILE".to_string(),
             activity_path.to_string_lossy().to_string(),
         )],
+        // timing: contract — the catalog compares activity with a tolerance this exceeds.
         Some(Duration::from_millis(5_500)),
     ) else {
         return;
@@ -896,11 +914,7 @@ fn agent_bookkeeping_on_idle_close_is_not_reported_as_an_external_change() {
     };
 
     // The fixture writes its timestamp while handling the idle session/close.
-    let close_deadline = Instant::now() + Duration::from_secs(30);
-    while !activity_path.exists() {
-        assert!(Instant::now() < close_deadline, "idle close never happened");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    crate::test_sync::wait_until("idle close never happened", || activity_path.exists());
     list_sessions();
 
     let task = store.read_task(task_id.as_str()).unwrap();
@@ -1076,50 +1090,38 @@ fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id
 
 fn auto_allow_permission(server_requests: &ServerRequestRuntime, task_id: &str) {
     let task_id = TaskId::from(task_id);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let pending = server_requests.pending_for_task(&task_id);
-        if let Some(request) = pending.first() {
-            assert!(matches!(
-                server_requests.handle_response_from_scopes(
-                    AttachmentOwner::test_client_instance_id(),
-                    request.request_id.clone(),
-                    ServerRequestAnswer::Result(serde_json::json!({ "optionId": "allow-once" })),
-                    &[ResponderScope::Task(task_id.clone())],
-                    AppServerTime(1),
-                ),
-                crate::server_requests::ResponseOutcome::Accepted { .. }
-            ));
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for permission request"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    let request = crate::test_sync::wait_for("a permission request", || {
+        server_requests
+            .pending_for_task(&task_id)
+            .into_iter()
+            .next()
+    });
+    assert!(matches!(
+        server_requests.handle_response_from_scopes(
+            AttachmentOwner::test_client_instance_id(),
+            request.request_id.clone(),
+            ServerRequestAnswer::Result(serde_json::json!({ "optionId": "allow-once" })),
+            &[ResponderScope::Task(task_id.clone())],
+            AppServerTime(1),
+        ),
+        crate::server_requests::ResponseOutcome::Accepted { .. }
+    ));
 }
 
-fn wait_until(mut predicate: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !predicate() {
-        assert!(Instant::now() < deadline, "timed out waiting for predicate");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+#[track_caller]
+fn wait_until(predicate: impl FnMut() -> bool) {
+    crate::test_sync::wait_until("predicate", predicate);
 }
 
 fn reopen_store_after_fixture_shutdown(root: std::path::PathBuf) -> Store {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
+    // Detached ACP fixture teardown releases its last Store clone asynchronously.
+    crate::test_sync::wait_for("the Store lock to be released", || {
         match Store::open(root.clone()) {
-            Ok(store) => return store,
-            Err(StoreOpenError::LockedByLiveServer) if Instant::now() < deadline => {
-                // Allow detached ACP fixture teardown to release its last Store clone.
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            Ok(store) => Some(store),
+            Err(StoreOpenError::LockedByLiveServer) => None,
             Err(error) => panic!("reopen store after fixture shutdown: {error}"),
         }
-    }
+    })
 }
 
 fn task_chat_agent_script() -> &'static str {
@@ -1130,6 +1132,12 @@ import time
 
 mode = os.environ.get("OPENAIDE_TASK_CHAT_MODE", "message_ids")
 activity_file = os.environ.get("OPENAIDE_TASK_CHAT_ACTIVITY_FILE")
+gate_file = os.environ.get("OPENAIDE_TASK_CHAT_GATE")
+
+def await_release():
+    # The test orders the fixture with a release file instead of a delay.
+    while not os.path.exists(gate_file):
+        time.sleep(0.01)  # timing: poll
 session_id = "task-chat-session"
 prompt_count = 0
 pending_primary_id = None
@@ -1259,18 +1267,16 @@ for line in sys.stdin:
                 continue
             respond(message, {"stopReason": "end_turn"})
             continue
-        if mode == "steering_end_turn" and prompt_count == 1:
-            pending_primary_id = message.get("id")
-            continue
-        if mode == "steering_primary_cancelled" and prompt_count == 1:
+        if mode in ("steering_end_turn", "steering_primary_cancelled") and prompt_count == 1:
+            # Tells the test that the primary prompt is the Agent's active one.
+            update_chunk("agent_message_chunk", "Primary prompt received", "primary")
             pending_primary_id = message.get("id")
             continue
         if mode == "steering_primary_cancelled" and prompt_count == 2:
             respond({"id": pending_primary_id}, {"stopReason": "cancelled"})
             pending_primary_id = None
-            time.sleep(0.2)
             update_chunk("agent_message_chunk", "Primary prompt superseded", "superseded")
-            time.sleep(0.5)
+            await_release()
             respond(message, {"stopReason": "end_turn"})
             continue
         if mode == "content_blocks":

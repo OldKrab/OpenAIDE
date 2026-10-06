@@ -8,7 +8,12 @@ import {
   type FileViewerSnapshot,
   type TaskId,
 } from "@openaide/app-server-client";
-import type { FileViewerDownloads, FileViewerDownloadResult } from "../services/frontendShell";
+import type {
+  FileViewerContent,
+  FileViewerContentResult,
+  FileViewerDownloads,
+  FileViewerDownloadResult,
+} from "../services/frontendShell";
 
 type FileViewerConnection = Pick<BackendConnection, "request">;
 
@@ -29,6 +34,27 @@ export async function downloadFileViewer(
     // Shell/network errors are classified here; free-form error text never reaches diagnostics.
   }
   console.info(`file_viewer_download_completed operation_id=${operationId} attempt=1 outcome=${signal.aborted ? "cancelled" : result} duration_ms=${Math.round(performance.now() - startedAt)}`);
+  return result;
+}
+
+/** Preview bytes are ephemeral presentation input; the shell enforces `maxBytes` before buffering. */
+export async function readFileViewerContent(
+  content: FileViewerContent,
+  handle: string,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<FileViewerContentResult> {
+  const operationId = crypto.randomUUID();
+  const startedAt = performance.now();
+  console.info(`file_viewer_content_read_started operation_id=${operationId} attempt=1`);
+  let result: FileViewerContentResult = { kind: "unavailable" };
+  try {
+    result = await content.read({ handle, maxBytes, operationId }, signal);
+  } catch {
+    // Shell/network errors are classified here; free-form error text never reaches diagnostics.
+  }
+  const bytes = result.kind === "bytes" ? ` bytes=${result.bytes.byteLength}` : "";
+  console.info(`file_viewer_content_read_completed operation_id=${operationId} attempt=1 outcome=${signal.aborted ? "cancelled" : result.kind}${bytes} duration_ms=${Math.round(performance.now() - startedAt)}`);
   return result;
 }
 

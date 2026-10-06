@@ -451,10 +451,10 @@ fn reliable_upload_acknowledges_authenticate_before_cancel_completes_it() {
         let _ = ack_tx.send(response);
     });
     started_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("authentication started");
 
-    let acknowledgement = ack_rx.recv_timeout(std::time::Duration::from_millis(100));
+    let acknowledgement = ack_rx.recv_timeout(crate::test_sync::WATCHDOG);
     if acknowledgement.is_err() {
         workflow.release();
     }
@@ -482,7 +482,7 @@ fn reliable_upload_acknowledges_authenticate_before_cancel_completes_it() {
     assert_eq!(cancelled.status, 204);
     workflow
         .cancelled()
-        .recv_timeout(std::time::Duration::from_secs(1))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("cancel reached the authentication workflow");
 }
 

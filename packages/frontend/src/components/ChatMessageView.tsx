@@ -34,12 +34,17 @@ export const ChatRow = memo(function ChatRow({
   taskId,
   toolDetails,
   commandCatalog,
+  compactionLive = false,
+  compactionLiveStartedAt,
   showStreamingCaret = false,
   liveTextEventCursor,
   presentLiveText = false,
   hurryLiveText = false,
 }: {
   commandCatalog?: AgentCommandsCatalog;
+  /** Whether the Task's turn is running, so an in-progress Compaction row is the live indicator. */
+  compactionLive?: boolean;
+  compactionLiveStartedAt?: string;
   message: ChatMessage;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onOpenSubagent?: (subagentId: string) => void;
@@ -114,7 +119,15 @@ export const ChatRow = memo(function ChatRow({
     return <CompletedPlanView entries={body.entries} />;
   }
   if (body.kind === "compaction") {
-    return <CompactionView error={body.error} status={body.status} summary={body.summary} />;
+    return (
+      <CompactionView
+        error={body.error}
+        live={compactionLive}
+        liveStartedAt={compactionLiveStartedAt}
+        status={body.status}
+        summary={body.summary}
+      />
+    );
   }
   if (body.kind === "closed_plan") {
     return <ClosedPlanView entries={body.entries} />;

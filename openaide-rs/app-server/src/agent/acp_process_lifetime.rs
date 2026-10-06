@@ -3,11 +3,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::{AcpAgent, Agent, Channel, Client, ConnectTo, RawJsonRpcMessage};
-use tokio::sync::Notify;
+use tokio::sync::{watch, Notify};
 use tokio::time::Instant;
 
 use crate::agent::acp_schema::{RequestId, Response};
 
+/// Retention policy shared by every process of a pool. It is a live value so
+/// a change applies to running processes as well as later ones.
 #[derive(Clone, Copy)]
 pub(super) struct ProcessIdleTimeouts {
     pub(super) short: Duration,
@@ -31,7 +33,7 @@ pub(super) struct AcpProcessLifetime(Arc<Lifetime>);
 struct Lifetime {
     state: Mutex<State>,
     changed: Notify,
-    timeouts: ProcessIdleTimeouts,
+    timeouts: watch::Receiver<ProcessIdleTimeouts>,
     operation_id: String,
 }
 
@@ -44,7 +46,14 @@ struct State {
 }
 
 impl AcpProcessLifetime {
+    /// A lifetime under a fixed retention policy.
+    #[cfg(test)]
     pub(super) fn new(timeouts: ProcessIdleTimeouts) -> Self {
+        Self::following(watch::Sender::new(timeouts).subscribe())
+    }
+
+    /// A lifetime that follows its pool's retention policy.
+    pub(super) fn following(timeouts: watch::Receiver<ProcessIdleTimeouts>) -> Self {
         Self(Arc::new(Lifetime {
             state: Mutex::new(State {
                 last_activity: Instant::now(),
@@ -118,7 +127,7 @@ impl AcpProcessLifetime {
                         serde_json::json!({
                             "operation": "agent/process_lifetime",
                             "operation_id": self.operation_id(),
-                            "idle_timeout_ms": self.0.timeouts.long.as_millis(),
+                            "idle_timeout_ms": self.0.timeouts.borrow().long.as_millis(),
                         }),
                     );
                 }
@@ -140,14 +149,16 @@ impl AcpProcessLifetime {
     /// timeout/cancellation. Tracking their wire IDs would pin the process forever
     /// when an Agent never replies. Agent requests remain pending until we respond.
     pub(super) async fn expired(&self) -> Duration {
+        let mut timeouts = self.0.timeouts.clone();
         loop {
             let changed = self.0.changed.notified();
             let deadline = {
+                let policy = *timeouts.borrow_and_update();
                 let mut state = self.0.state.lock().expect("ACP lifetime poisoned");
                 let timeout = if state.long_retention {
-                    self.0.timeouts.long
+                    policy.long
                 } else {
-                    self.0.timeouts.short
+                    policy.short
                 };
                 if state.admitted_operations > 0 || !state.agent_requests.is_empty() {
                     None
@@ -160,12 +171,22 @@ impl AcpProcessLifetime {
                     Some(deadline)
                 }
             };
+            // A pool that is gone can no longer change the policy.
+            let policy_changed = async {
+                if timeouts.changed().await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            };
             match deadline {
                 Some(deadline) => tokio::select! {
                     _ = changed => {},
+                    _ = policy_changed => {},
                     _ = tokio::time::sleep_until(deadline) => {},
                 },
-                None => changed.await,
+                None => tokio::select! {
+                    _ = changed => {},
+                    _ = policy_changed => {},
+                },
             }
         }
     }
@@ -209,7 +230,14 @@ impl ConnectTo<Client> for RetainedAgent {
             },
         );
         tokio::select! {
-            result = agent_future => result,
+            // A process that exits cleanly completes its transport without an error,
+            // which would leave the connection serving a dead process. The Agent is
+            // never expected to end first, so report every such end as a failure.
+            result = agent_future => result.and_then(|()| {
+                Err(agent_client_protocol::util::internal_error(
+                    "Process exited with exit status: 0",
+                ))
+            }),
             result = async { tokio::try_join!(client_future, bridge).map(|_| ()) } => result,
         }
     }

@@ -6,8 +6,8 @@ use std::ffi::OsStr;
 use crate::agent::command_presentation::infer_execute_presentation;
 use crate::agent::events::{AgentEvent, AgentToolCall, AgentToolCallStatus};
 use crate::agent::tool_details_io::{
-    tool_input_detail, tool_input_string_field, tool_input_summary, tool_output_detail,
-    truncate_preview,
+    tool_input_description, tool_input_detail, tool_input_string_field, tool_input_summary,
+    tool_output_detail, truncate_preview,
 };
 use crate::protocol::model::{
     ActivityToolContent, ActivityToolDetails, ActivityToolLocation, ToolPresentation,
@@ -27,9 +27,12 @@ pub(crate) fn tool_call_event(tool_call: &ToolCall) -> AgentEvent {
         tool_call_id: tool_call.tool_call_id.to_string(),
         scope_id: None,
         title: tool_call.title.clone(),
-        kind,
+        kind: kind.clone(),
         status: tool_status(tool_call.status),
         presentation,
+        description: (kind == "execute")
+            .then(|| tool_input_description(tool_call.raw_input.as_ref()))
+            .flatten(),
         input_summary,
         output_preview: tool_output_preview(tool_call),
         details: tool_details(tool_call),

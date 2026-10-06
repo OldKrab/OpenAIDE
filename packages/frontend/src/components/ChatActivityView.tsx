@@ -15,6 +15,7 @@ import {
   activityStepWithTitle,
   activitySummary,
   activityToolKind,
+  executeDescription,
   type ActivityStepSemanticTitle,
 } from "../state/activityLabels";
 import { hasToolDetails, toolKindClass } from "../state/toolDetailsViewModel";
@@ -392,9 +393,12 @@ function LiveToolDetailDisclosure({
     };
   }, [artifactId, detailsAvailable, open]);
   const semanticTitle = activityStepSemanticTitle(step);
+  // An Agent-described command reads as prose; the command itself stays in the tooltip and details.
+  const description = executeDescription(step);
+  const commandRow = step.name === "execute" && !step.presentation && !description;
   const commandTitle = semanticTitle
     ? <SemanticStepTitle title={semanticTitle} />
-    : step.name === "execute" && !step.presentation
+    : commandRow
       ? <CommandStepTitle command={activityStepLabel(step)} status={step.status} />
       : activityStepLabel(step);
   return (
@@ -408,8 +412,8 @@ function LiveToolDetailDisclosure({
             disclosure
             icon={activityStepIcon(step, legacyToolName)}
             label={commandTitle}
-            titleClassName={semanticTitle ? "semantic" : step.name === "execute" && !step.presentation ? "command" : undefined}
-            tooltip={semanticTitle?.tooltip ?? activityStepLabel(step)}
+            titleClassName={semanticTitle ? "semantic" : commandRow ? "command" : undefined}
+            tooltip={semanticTitle?.tooltip ?? (description ? step.input_summary : undefined) ?? activityStepLabel(step)}
           />
           {metadata}
         </>

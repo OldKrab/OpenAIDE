@@ -170,9 +170,18 @@ async fn open_acp_session_inner<'a>(
             let (active_session, initial_options) = match start_result {
                 Ok(session) => session,
                 Err(error) => {
-                    let _ = context
-                        .start_error_tx
-                        .send(Err(crate::agent::acp_errors::acp_request_error(&error)));
+                    // A closed transport means the process ended, not that the Agent
+                    // rejected the request. Leave the reply unsent so the opener sees
+                    // the ended process and retries on a fresh one, whichever of the
+                    // request failure and the process teardown is observed first.
+                    // TODO: load and resume flatten this error to a message before it
+                    // reaches here, so their retry still depends on that ordering.
+                    // Carry the ACP error through their runners and apply this check.
+                    if !agent_client_protocol::is_incoming_transport_closed(&error) {
+                        let _ = context
+                            .start_error_tx
+                            .send(Err(crate::agent::acp_errors::acp_request_error(&error)));
+                    }
                     return Err(error);
                 }
             };

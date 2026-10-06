@@ -16,6 +16,13 @@ await runVite([
   ...withoutEmptyOutDir(forwardedArguments),
   "--emptyOutDir=false",
 ]);
+await runVite([
+  "build",
+  "--config",
+  "vite.pdf-renderer.config.ts",
+  ...withoutEmptyOutDir(forwardedArguments),
+  "--emptyOutDir=false",
+]);
 
 function withoutEmptyOutDir(arguments_) {
   return arguments_.filter((argument) => argument !== "--emptyOutDir" && !argument.startsWith("--emptyOutDir="));

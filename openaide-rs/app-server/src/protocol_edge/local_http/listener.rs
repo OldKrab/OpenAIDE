@@ -45,6 +45,12 @@ impl LocalHttpProbeListener {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     pub fn local_addr(&self) -> Result<SocketAddr, LocalHttpProbeListenerError> {
         Ok(self.listener.local_addr()?)
     }

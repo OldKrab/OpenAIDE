@@ -13,6 +13,11 @@ use openaide_app_server_protocol::worktree::{
 };
 use tempfile::TempDir;
 
+// The crate's shared test synchronization vocabulary.
+#[allow(dead_code)]
+#[path = "../src/test_sync.rs"]
+mod test_sync;
+
 #[test]
 fn discovers_repository_worktrees_with_stable_opaque_identity() {
     let fixture = GitFixture::new();
@@ -399,8 +404,7 @@ fn background_creation_returns_an_operation_and_publishes_completion() {
         .operations
         .iter()
         .any(|operation| operation.operation_id == started.operation_id));
-    let completed = (0..12)
-        .filter_map(|_| updates.recv_timeout(std::time::Duration::from_secs(1)).ok())
+    let completed = std::iter::from_fn(|| updates.recv_timeout(test_sync::WATCHDOG).ok())
         .find(|snapshot| {
             snapshot.operations.iter().any(|operation| {
                 operation.operation_id == started.operation_id

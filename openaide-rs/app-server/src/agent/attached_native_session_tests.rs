@@ -58,7 +58,7 @@ fn attachment_stopped_error_keeps_generic_fallback_without_terminal_error() {
 
 #[test]
 fn prompt_returns_terminal_error_while_attachment_reply_is_pending() {
-    let (command_tx, _command_rx) = tokio_mpsc::unbounded_channel();
+    let (command_tx, mut command_rx) = tokio_mpsc::unbounded_channel();
     let (config_tx, _config_rx) = tokio_mpsc::unbounded_channel();
     let (cancel_tx, _cancel_rx) = tokio_mpsc::unbounded_channel();
     let (close_tx, _close_rx) = tokio_mpsc::unbounded_channel();
@@ -75,7 +75,8 @@ fn prompt_returns_terminal_error_while_attachment_reply_is_pending() {
     let error_writer = terminal_error.clone();
 
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(150));
+        // The prompt is admitted and awaiting its reply once its command arrives.
+        let _pending = command_rx.blocking_recv();
         *error_writer
             .lock()
             .expect("ACP terminal error lock poisoned") =

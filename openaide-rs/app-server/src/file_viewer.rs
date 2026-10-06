@@ -205,6 +205,7 @@ enum LoadedFile {
         bytes: Vec<u8>,
         reduced: bool,
     },
+    Pdf,
     Binary,
 }
 
@@ -232,6 +233,10 @@ fn load_path(path: &Path) -> Result<LoadedFile, FileViewerError> {
             bytes: preview.bytes,
             reduced: preview.reduced,
         });
+    }
+    // The snapshot carries no PDF bytes: parsing stays in the Frontend's sandboxed renderer.
+    if probe.starts_with(b"%PDF-") {
+        return Ok(LoadedFile::Pdf);
     }
     let mut bytes = probe;
     file.take(TEXT_PREFIX_BYTES + 1)
@@ -281,6 +286,7 @@ fn apply_loaded(snapshot: &mut FileViewerSnapshot, loaded: LoadedFile) {
                 data_url: format!("data:{media_type};base64,{encoded}"),
             });
         }
+        LoadedFile::Pdf => snapshot.kind = FileViewerKind::Pdf,
         LoadedFile::Binary => {
             snapshot.kind = FileViewerKind::Binary;
             snapshot.error = Some(FileViewerError::Unsupported);

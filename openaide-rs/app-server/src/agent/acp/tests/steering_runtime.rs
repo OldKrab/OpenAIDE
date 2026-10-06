@@ -86,14 +86,9 @@ impl Fixture {
     }
 
     fn wait_for(&self, method: &str, count: usize) {
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while self.calls(method).len() < count {
-            assert!(
-                Instant::now() < deadline,
-                "missing {method} request {count}"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        crate::test_sync::wait_until(&format!("{method} request {count}"), || {
+            self.calls(method).len() >= count
+        });
     }
 
     fn control(&self, action: &str) {
@@ -109,17 +104,12 @@ impl Fixture {
     }
 
     fn wait_for_delivery_failure(&self) {
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while !self.sink.events().iter().any(|event| {
-            matches!(event,
+        crate::test_sync::wait_until("delivery failure must be visible", || {
+            self.sink.events().iter().any(|event| {
+                matches!(event,
             AgentEvent::Activity { title, .. } if title == "Message delivery was not confirmed")
-        }) {
-            assert!(
-                Instant::now() < deadline,
-                "delivery failure must be visible"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
+            })
+        });
     }
 }
 
@@ -151,7 +141,7 @@ fn advertised_steering_injects_without_finishing_the_prompt() {
     fixture.control("finish");
     assert_eq!(
         result
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .unwrap(),
         AgentPromptOutcome::EndTurn
@@ -181,7 +171,7 @@ fn assert_prompt_fallback(mode: &str) {
     fixture.control("finish");
     assert_eq!(
         result
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .unwrap(),
         AgentPromptOutcome::EndTurn
@@ -217,7 +207,7 @@ fn assert_late_steering(mode: &str) {
     fixture.control("finish");
     assert_eq!(
         result
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .unwrap(),
         AgentPromptOutcome::EndTurn
@@ -244,7 +234,7 @@ fn method_not_found_falls_back_and_disables_the_extension_for_the_attachment() {
     fixture.control("finish");
     assert_eq!(
         result
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .unwrap(),
         AgentPromptOutcome::EndTurn
@@ -269,7 +259,7 @@ fn failed_or_ambiguous_steering_never_replays_the_message() {
         fixture.control("finish");
         assert_eq!(
             result
-                .recv_timeout(Duration::from_secs(3))
+                .recv_timeout(crate::test_sync::WATCHDOG)
                 .unwrap()
                 .unwrap(),
             AgentPromptOutcome::EndTurn
@@ -288,7 +278,7 @@ fn extension_acceptance_does_not_suppress_primary_cancellation() {
     fixture.control("finish_cancelled");
     assert_eq!(
         result
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .unwrap(),
         AgentPromptOutcome::Cancelled
@@ -309,7 +299,7 @@ fn cancellation_does_not_wait_for_a_stalled_steering_acknowledgment() {
         .unwrap();
     assert_eq!(
         result
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .unwrap(),
         AgentPromptOutcome::Cancelled
@@ -335,7 +325,7 @@ fn concurrent_steering_is_delivered_in_order() {
     fixture.control("finish");
     assert_eq!(
         result
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .unwrap(),
         AgentPromptOutcome::EndTurn

@@ -43,7 +43,7 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
     let expected = 3 * BUILT_IN_AGENT_METADATA.len();
     let mut entered = 0;
     for _ in 0..expected {
-        if entered_rx.recv_timeout(Duration::from_secs(2)).is_err() {
+        if entered_rx.recv_timeout(crate::test_sync::WATCHDOG).is_err() {
             break;
         }
         entered += 1;
@@ -52,7 +52,7 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
     loop {
-        let update = updates.recv_timeout(Duration::from_secs(5)).unwrap();
+        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
         if matches!(
             update.kind,
             TaskUpdateKind::NavigationRefreshStateChanged {
@@ -156,15 +156,25 @@ fn publish_status_updates_until_settled(
     api: &TaskProductApi,
     updates: &AgentStatusUpdateReceiver,
 ) -> bool {
-    for _ in 0..32 {
-        match updates.recv_timeout(Duration::from_millis(100)) {
-            Ok(()) => api.request_native_session_catalog_refresh(),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                if !api.native_session_catalog().refreshing() =>
-            {
-                return true;
+    // The bound counts the refreshes that status updates feed, not elapsed time:
+    // a slow refresh keeps the loop waiting and never reads as an endless one.
+    let mut fed_refreshes = 0;
+    while fed_refreshes < 32 {
+        // timing: absence — a quiet window after the refresh ended means it settled.
+        match updates.recv_timeout(crate::test_sync::ABSENCE_WINDOW) {
+            Ok(()) => {
+                fed_refreshes += 1;
+                api.request_native_session_catalog_refresh();
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // A refresh that never ends is caught by the watchdog here.
+                wait_until(|| !api.native_session_catalog().refreshing());
+                if updates.try_recv().is_err() {
+                    return true;
+                }
+                fed_refreshes += 1;
+                api.request_native_session_catalog_refresh();
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }

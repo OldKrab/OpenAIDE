@@ -45,3 +45,5 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 tauri-winres = "=0.3.6"
 
 [dev-dependencies]
+# Paused time lets deadline contracts run on a controlled clock.
+tokio = { workspace = true, features = ["test-util"] }

@@ -10,7 +10,7 @@ use crate::agent::acp_agent_process_pool::AcpAgentProcessPool;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwnerId;
 use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
-use crate::agent::attached_native_session::AttachedNativeSession;
+use crate::agent::attached_native_session::{AttachedNativeSession, SessionIdleTimeouts};
 use crate::agent::attached_native_session_registry::AttachedNativeSessionRegistry;
 use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
@@ -27,14 +27,13 @@ use crate::protocol::model::{
 };
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const MAX_SESSION_OPEN_ATTEMPTS: usize = 2;
 
 pub(super) struct AcpActiveSessionManager {
     auth_method_cache: AcpAuthMethodCache,
     trace_state: AcpTraceState,
     start_timeout: Duration,
-    session_idle_timeout: Duration,
+    session_idle: tokio::sync::watch::Sender<SessionIdleTimeouts>,
     sessions: AttachedNativeSessionRegistry,
     processes: AcpAgentProcessPool,
 }
@@ -50,7 +49,7 @@ impl AcpActiveSessionManager {
             auth_method_cache,
             trace_state: AcpTraceState::disabled(std::path::Path::new(".")),
             start_timeout: DEFAULT_START_TIMEOUT,
-            session_idle_timeout: DEFAULT_SESSION_IDLE_TIMEOUT,
+            session_idle: tokio::sync::watch::Sender::new(SessionIdleTimeouts::default()),
             sessions: AttachedNativeSessionRegistry::new(),
             processes: AcpAgentProcessPool::new(registry, host_bridge),
         }
@@ -71,12 +70,30 @@ impl AcpActiveSessionManager {
 
     #[cfg(test)]
     pub(super) fn with_session_idle_timeout(&mut self, session_idle_timeout: Duration) {
-        self.session_idle_timeout = session_idle_timeout;
+        self.set_session_idle_timeout(session_idle_timeout);
+    }
+
+    /// Replaces the idle timeout for open and later attachments alike.
+    #[cfg(test)]
+    pub(super) fn set_session_idle_timeout(&self, session_idle_timeout: Duration) {
+        self.session_idle
+            .send_modify(|timeouts| timeouts.idle = session_idle_timeout);
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_session_idle_close_timeout(&mut self, timeout: Duration) {
+        self.session_idle
+            .send_modify(|timeouts| timeouts.close = timeout);
     }
 
     #[cfg(test)]
     pub(super) fn with_process_idle_timeouts(&mut self, short: Duration, long: Duration) {
         self.processes.with_process_idle_timeouts(short, long);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_process_idle_timeouts(&self, short: Duration, long: Duration) {
+        self.processes.set_process_idle_timeouts(short, long);
     }
 
     #[cfg(test)]
@@ -274,7 +291,7 @@ impl AcpActiveSessionManager {
                 auth_method_id,
                 trace,
                 terminal_owner_id: AcpTerminalOwnerId::next(),
-                session_idle_timeout: self.session_idle_timeout,
+                session_idle: self.session_idle.subscribe(),
             };
             let process_session = self.processes.open_session(&agent_id, process_open)?;
 

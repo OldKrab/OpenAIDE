@@ -24,6 +24,8 @@ pub mod storage_runtime;
 pub mod task_events;
 pub(crate) mod task_recovery;
 pub mod tasks;
+#[cfg(test)]
+pub(crate) mod test_sync;
 pub mod time;
 pub mod transport;
 pub(crate) mod workspace_file_index;

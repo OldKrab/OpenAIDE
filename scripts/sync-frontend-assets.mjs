@@ -6,6 +6,8 @@ export function syncFrontendAssets(source, target) {
   rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });
   cpSync(source, target, { recursive: true });
+  // VS Code opens files natively and has no File Viewer; keep its PDF renderer out of the VSIX.
+  rmSync(resolve(target, "pdf-renderer.js"), { force: true });
 
   // Vite's root-relative asset URLs suit web routes, while VS Code webviews
   // require resources to resolve beside the copied stylesheet.

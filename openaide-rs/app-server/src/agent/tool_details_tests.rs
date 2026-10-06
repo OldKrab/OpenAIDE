@@ -67,3 +67,50 @@ fn claude_skill_tool_is_a_skill_activation_named_by_its_input() {
     };
     assert_eq!(other.kind, "other");
 }
+
+#[test]
+fn execute_tool_carries_agent_description_beside_the_command() {
+    let described = tool_call_event(
+        &ToolCall::new("tool-1", "sed -i s/a/b/ notes.txt")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({
+                "command": "sed -i s/a/b/ notes.txt",
+                "description": "  Rename the marker with token=secret  ",
+            })),
+    );
+    let AgentEvent::ToolCall(described) = described else {
+        panic!("expected tool event");
+    };
+    assert_eq!(
+        described.description.as_deref(),
+        Some("Rename the marker with token=[redacted]")
+    );
+    assert_eq!(
+        described.input_summary.as_deref(),
+        Some("sed -i s/a/b/ notes.txt")
+    );
+
+    let undescribed = tool_call_event(
+        &ToolCall::new("tool-2", "Shell command")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": "ls" })),
+    );
+    let AgentEvent::ToolCall(undescribed) = undescribed else {
+        panic!("expected tool event");
+    };
+    assert_eq!(undescribed.description, None);
+
+    // Only execute Tools own a purpose line; other kinds keep their subject title.
+    let fetch = tool_call_event(
+        &ToolCall::new("tool-3", "Fetch")
+            .kind(ToolKind::Fetch)
+            .raw_input(serde_json::json!({
+                "url": "https://example.com",
+                "description": "Read the page",
+            })),
+    );
+    let AgentEvent::ToolCall(fetch) = fetch else {
+        panic!("expected tool event");
+    };
+    assert_eq!(fetch.description, None);
+}

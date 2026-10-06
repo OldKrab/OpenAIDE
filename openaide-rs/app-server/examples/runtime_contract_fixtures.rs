@@ -59,6 +59,7 @@ fn main() {
                         name: "read".to_string(),
                         status: ActivityStatus::Completed,
                         presentation: None,
+                        description: None,
                         input_summary: Some("README.md".to_string()),
                         output_preview: Some("content".to_string()),
                         detail_artifact_id: Some("artifact_1".to_string()),

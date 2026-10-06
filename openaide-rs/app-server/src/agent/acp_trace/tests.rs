@@ -6,6 +6,21 @@ use super::naming::trace_enabled;
 use super::retention::TracePolicy;
 use super::{AcpTraceSession, AcpTraceState};
 
+// timing: data — a retention age no test file reaches.
+const MAX_AGE: Duration = Duration::from_secs(60);
+
+/// Orders a file before later writes without depending on write timing.
+fn backdate(path: &std::path::Path) {
+    // timing: data — older than a fresh file, younger than `MAX_AGE`.
+    let modified = std::time::SystemTime::now() - Duration::from_secs(30);
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+}
+
 #[test]
 fn trace_enabled_accepts_explicit_developer_values() {
     assert!(trace_enabled(Some("1")));
@@ -50,7 +65,7 @@ fn trace_file_stays_bounded_and_ends_with_a_complete_truncation_record() {
         TracePolicy {
             max_file_bytes,
             max_total_bytes: 16 * 1_024,
-            max_age: Duration::from_secs(60),
+            max_age: MAX_AGE,
         },
     );
     state.set_enabled(true).unwrap();
@@ -88,7 +103,7 @@ fn enabling_trace_prunes_oldest_closed_files_to_the_total_budget() {
     let oldest = directory.join("oldest.jsonl");
     let newest = directory.join("newest.jsonl");
     std::fs::write(&oldest, vec![b'a'; 600]).unwrap();
-    std::thread::sleep(Duration::from_millis(10));
+    backdate(&oldest);
     std::fs::write(&newest, vec![b'b'; 600]).unwrap();
 
     let state = AcpTraceState::disabled_with_policy(
@@ -96,7 +111,7 @@ fn enabling_trace_prunes_oldest_closed_files_to_the_total_budget() {
         TracePolicy {
             max_file_bytes: 1_024,
             max_total_bytes: 600,
-            max_age: Duration::from_secs(60),
+            max_age: MAX_AGE,
         },
     );
     state.set_enabled(true).unwrap();
@@ -113,7 +128,7 @@ fn disabled_trace_state_still_prunes_existing_files_on_startup() {
     let oldest = directory.join("oldest.jsonl");
     let newest = directory.join("newest.jsonl");
     std::fs::write(&oldest, vec![b'a'; 600]).unwrap();
-    std::thread::sleep(Duration::from_millis(10));
+    backdate(&oldest);
     std::fs::write(&newest, vec![b'b'; 600]).unwrap();
 
     let state = AcpTraceState::disabled_with_policy(
@@ -121,7 +136,7 @@ fn disabled_trace_state_still_prunes_existing_files_on_startup() {
         TracePolicy {
             max_file_bytes: 1_024,
             max_total_bytes: 600,
-            max_age: Duration::from_secs(60),
+            max_age: MAX_AGE,
         },
     );
 
@@ -138,7 +153,7 @@ fn pending_trace_bytes_remain_counted_during_another_retention_scan() {
         TracePolicy {
             max_file_bytes: 1_024,
             max_total_bytes: 1_000,
-            max_age: Duration::from_secs(60),
+            max_age: MAX_AGE,
         },
     );
     state.set_enabled(true).unwrap();
@@ -156,6 +171,7 @@ fn closed_trace_older_than_seven_days_is_pruned() {
     let tmp = tempfile::TempDir::new().unwrap();
     let trace = tmp.path().join("expired.jsonl");
     std::fs::write(&trace, b"closed trace").unwrap();
+    // timing: data — a clock reading past the retention age.
     let now = std::time::SystemTime::now() + Duration::from_secs(8 * 24 * 60 * 60);
 
     super::retention::prune(tmp.path(), &HashSet::new(), TracePolicy::default(), now).unwrap();

@@ -227,7 +227,7 @@ test("shows a bounded photo preview with zoom and original download", async ({ p
     await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
     const viewer = page.getByRole("complementary", { name: "File Viewer" });
     const image = viewer.getByRole("img", { name: filename, exact: true });
-    await expect(image).toBeVisible({ timeout: 30_000 });
+    await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
     await expect(viewer.getByText("Reduced image preview", { exact: true })).toBeVisible();
     const dimensions = await image.evaluate((img) => ({ width: img.naturalWidth, height: img.naturalHeight }));
@@ -249,6 +249,72 @@ test("shows a bounded photo preview with zoom and original download", async ({ p
     ]);
     expect(download.suggestedFilename()).toBe(filename);
     expect(await readFile(await download.path())).toEqual(original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("renders a PDF with selectable text inside the sandboxed viewer", async ({ page }) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "openaide-pdf-test-"));
+  const filename = "report.pdf";
+  const pdfPath = path.join(directory, filename);
+  try {
+    const original = pdfFixture(["OpenAIDE first page", "OpenAIDE second page"]);
+    await writeFile(pdfPath, original);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${harness.baseUrl}/new-task`);
+    await expect(page.getByLabel("New task")).toBeVisible();
+    const agent = page.getByLabel("Task start context").locator(".new-task-context-anchor-agent > button");
+    if ((await agent.textContent())?.trim() !== "OpenAIDE Test Agent") {
+      await agent.click();
+      await page.getByRole("menu", { name: "Agent" }).getByRole("menuitemradio", { name: /OpenAIDE Test Agent/ }).click({ force: true });
+    }
+    await page.getByRole("textbox", { name: "Message" }).fill(`smoke:file-viewer-layout\ndownload-file:${pdfPath}`);
+    await page.getByLabel("Send message").click();
+    await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
+    const viewer = page.getByRole("complementary", { name: "File Viewer" });
+    await expect(viewer.getByText("Page 1 of 2", { exact: true })).toBeVisible({ timeout: 30_000 });
+    const frame = viewer.locator("iframe");
+    await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+    const pdf = viewer.frameLocator("iframe");
+    // The text layer is what makes the rendered page selectable and searchable.
+    await expect(pdf.locator(".textLayer").first()).toContainText("OpenAIDE first page");
+    const inked = () => pdf.locator(".page canvas").first().evaluate((canvas) => {
+      const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+      for (let index = 0; index < data.length; index += 4) if (data[index] < 128 && data[index + 3] > 0) return true;
+      return false;
+    });
+    await expect.poll(inked, "The first page painted no glyphs").toBe(true);
+    const fittedWidth = (await pdf.locator(".page").first().boundingBox()).width;
+    await viewer.getByRole("button", { name: "Zoom PDF in", exact: true }).click();
+    await expect(viewer.getByRole("button", { name: "Fit PDF to width" })).toHaveText(/^\d+%$/);
+    await expect.poll(async () => (await pdf.locator(".page").first().boundingBox()).width).toBeGreaterThan(fittedWidth);
+    await viewer.getByRole("button", { name: "Fit PDF to width" }).click();
+    await expect(viewer.getByRole("button", { name: "Fit PDF to width" })).toHaveText("Fit");
+    await pdf.locator("#container").evaluate((container) => container.scrollTo(0, container.scrollHeight));
+    await expect(viewer.getByText("Page 2 of 2", { exact: true })).toBeVisible();
+    const plan = page.locator(".task-plan-drawer-trigger");
+    if (await plan.isVisible() && await plan.getAttribute("aria-expanded") === "true") await plan.click();
+    await page.screenshot({ path: path.join(shots, "wide-pdf-preview.png"), animations: "disabled" });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.screenshot({ path: path.join(shots, "wide-pdf-preview-dark.png"), animations: "disabled" });
+    await page.emulateMedia({ colorScheme: "light" });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    // A fitted document follows the narrower panel instead of overflowing it sideways.
+    await expect.poll(async () => (await pdf.locator(".page").first().boundingBox()).width).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: path.join(shots, "phone-pdf-preview.png"), animations: "disabled" });
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      viewer.getByRole("button", { name: "Download file", exact: true }).click(),
+    ]);
+    expect(await readFile(await download.path())).toEqual(original);
+
+    // Refresh rereads the current bytes: a file that stopped being a PDF document fails in place.
+    await writeFile(pdfPath, "%PDF-1.4\nnot a document\n");
+    await viewer.getByRole("button", { name: "Refresh snapshot", exact: true }).click();
+    await expect(viewer.getByRole("alert")).toContainText("Invalid PDF");
+    await page.screenshot({ path: path.join(shots, "phone-pdf-invalid.png"), animations: "disabled" });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -359,4 +425,32 @@ async function photoFixture(page) {
   });
   // Trailing bytes leave a valid JPEG while reproducing the former 5 MiB source rejection.
   return Buffer.concat([Buffer.from(dataUrl.split(",")[1], "base64"), Buffer.alloc(6 * 1024 * 1024)]);
+}
+
+/** A minimal text-only PDF, one line per page, with a correct cross-reference table. */
+function pdfFixture(pageTexts) {
+  const kids = pageTexts.map((_, index) => `${4 + index * 2} 0 R`).join(" ");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${kids}] /Count ${pageTexts.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  for (const [index, text] of pageTexts.entries()) {
+    const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + index * 2} 0 R >>`,
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    );
+  }
+  let body = "%PDF-1.4\n";
+  const offsets = objects.map((object, index) => {
+    const offset = body.length;
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return offset;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(body, "latin1");
 }
