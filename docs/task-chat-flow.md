@@ -353,6 +353,19 @@ An explicit fenced `mermaid` block in an ordinary completed Agent message may re
 
 While an active turn has a live status footer, Frontend shows its elapsed wall time from the App Server-authored running-turn timestamp. The timer appears after five seconds, updates locally once per second, and never changes authoritative Task state or rerenders unchanged Chat rows. It remains a single trailing item separated from the truncating status label by a quiet vertical hairline. Completed and inactive turns show no live timer.
 
+App Server stamps the times it observes itself and persists them with the Task: when a User message was accepted, when a turn started and closed, when a Tool, Command, Subagent step, or Compaction started and ended, and when a Permission or Question was raised. Every stamp is optional. Frontend never derives a time from Agent content or from its own clock, so history loaded from an Agent session, rows written before stamping existed, and native Subagent child sessions show no time rather than a guessed one.
+
+Frontend presents these as quiet marks that never read as Agent text. A duration carries a timer glyph or sits in a labelled slot; a bare clock time always means "when".
+
+- The answer that closes a turn shows the turn's duration beside its Copy action, on hover and always on touch; its tooltip adds the finish time. The answer's last line reserves room so the mark never covers text. A stopped turn appends its duration to the interruption line, always visible.
+- A User message shows its send time as a clock beside its Copy action on hover.
+- A finished Compaction row shows its duration after its label.
+- A pending Permission or Question shows a live `waiting m:ss`. A resolved request shows no wait time.
+- A timed step in an expanded group shows its duration at the row's trailing edge on hover; a running step's time is always visible and ticks. A group header shows the span from its first step's start to its last step's end on hover without taking header width: it trails the header, or overlays the header's end when the header fills the row.
+- Task Navigation shows a live running or waiting time before the Task's status indicator, only while the Task is running or waiting for a Permission or Answer.
+
+Live marks read `m:ss`; settled durations read `42s`, `4m 12s`, or `1h 04m`. Each live mark ticks locally and rerenders only itself.
+
 Protocol-to-view mapping preserves object identity for unchanged Chat items and derived uninterrupted Tool and Thought groups. Task Navigation changes only when a navigation-visible summary field changes. Frontend retains the cached Chat replica while mounting only a bounded, stable-keyed visible range. Mounted rows stay in normal document flow so streaming text and animated disclosure growth push neighboring rows without collision; the virtualizer measures those rows and owns offscreen spacing and end geometry while Frontend retains Follow-versus-Reading intent. **Load earlier** captures the first visible retained message and restores that same message at the same viewport offset after the prepend; the persistent paging control is never the reading anchor.
 
 Thought presentation separates adjacent complete bold Markdown chunks that ACP delivered without whitespace. During Codex `session/load`, the adapter discards an anonymous Agent or Thought text chunk when the identical chunk was already replayed with a native message id. Frontend also hides those anonymous replay copies when presenting history persisted before this normalization.
@@ -433,7 +446,7 @@ App Server advertises ACP `session.compaction` to every Agent and projects `comp
 
 Frontend renders the row as a boundary rule: a hairline across the Chat column with a centered label and a compaction glyph that no Tool uses. "Context compacted" marks completion, a failure shows the Agent's error beneath the label, and cancelled or unrecognized lifecycles are labeled without implying completion. Only a row with a summary is interactive. Its summary stays collapsed; expanding it turns the rule into a frame around the text with the label on its top edge, and both the label and a **Hide summary** action at the end of the frame collapse it. The summary is model-facing and is never a User message.
 
-While the Task is working, an in-progress Compaction row is the live indicator: it animates in place, carries the elapsed turn time, and the live footer is absent so compaction is never presented as the latest Tool. The row keeps its timeline position when it finishes. After a compaction ends, the live footer reads `Working` until later Agent work arrives, instead of returning to the Tool that preceded the compaction. An in-progress row whose Task is not working renders as a static "Compacting context…" rule. Compaction rows are session-scoped like other Chat items and are skipped for native Subagent child sessions.
+While the Task is working, an in-progress Compaction row is the live indicator: it animates in place, carries the elapsed turn time, and the live footer is absent so compaction is never presented as the latest Tool. The row keeps its timeline position when it finishes and then shows how long the compaction took when App Server observed both ends. After a compaction ends, the live footer reads `Working` until later Agent work arrives, instead of returning to the Tool that preceded the compaction. An in-progress row whose Task is not working renders as a static "Compacting context…" rule. Compaction rows are session-scoped like other Chat items and are skipped for native Subagent child sessions.
 
 ### Context usage
 

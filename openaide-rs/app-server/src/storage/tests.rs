@@ -533,6 +533,7 @@ fn pages_upgrade_saved_view_image_envelopes_to_view_presentations() {
                 permission_outcomes: Vec::new(),
             }],
         },
+        timing: Default::default(),
     };
     store
         .persist_tool_artifacts(task_id, &mut message.message)
@@ -612,6 +613,7 @@ fn pages_enrich_legacy_execute_presentation_without_changing_saved_tools() {
                 execute_step("build-call", "cargo test -p openaide-app-server"),
             ],
         },
+        timing: Default::default(),
     };
     store
         .persist_tool_artifacts(task_id, &mut message.message)
@@ -699,6 +701,7 @@ fn pages_enrich_legacy_execute_presentation_from_inline_details() {
             collapsed: true,
             steps: vec![execute_step("read-call", "cat PRODUCT.md")],
         },
+        timing: Default::default(),
     };
     write_stored_messages(
         &store,
@@ -755,6 +758,7 @@ fn pages_refresh_existing_execute_presentation_from_saved_details() {
             collapsed: true,
             steps: vec![step],
         },
+        timing: Default::default(),
     };
     store
         .persist_tool_artifacts(task_id, &mut message.message)
@@ -966,6 +970,7 @@ fn chat_message(id: &str, text: &str) -> ChatMessage {
             created_at: "2026-07-01T00:00:00Z".to_string(),
             attachments: Vec::new(),
         },
+        timing: Default::default(),
     }
 }
 
@@ -983,6 +988,7 @@ fn agent_chat_message(id: &str, text: &str) -> ChatMessage {
             }],
             created_at: "2026-07-01T00:00:00Z".to_string(),
         },
+        timing: Default::default(),
     }
 }
 
@@ -1020,6 +1026,7 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
                 permission_outcomes: Vec::new(),
             }],
         },
+        timing: Default::default(),
     }
 }
 

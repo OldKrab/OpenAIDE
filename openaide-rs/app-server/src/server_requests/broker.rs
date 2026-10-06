@@ -119,6 +119,7 @@ impl ServerRequestBroker {
             title: draft.title,
             permission: permission_snapshot(&draft.method, &draft.params),
             question: question_snapshot(&draft.method, &draft.params),
+            created_at: Some(crate::time::now_string()),
         };
         let record = PendingRecord::new(
             snapshot.clone(),
@@ -297,6 +298,7 @@ fn scope_matches_responder(
         title: String::new(),
         permission: None,
         question: None,
+        created_at: None,
     };
     let record = PendingRecord::new(snapshot, method.to_string(), serde_json::Value::Null, []);
     record_matches_responder(&record, client_instance_id, scopes)

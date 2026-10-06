@@ -31,6 +31,7 @@ impl TaskProductApi {
                 created_at: created_at.to_string(),
                 attachments,
             },
+            timing: Default::default(),
         });
         Ok(())
     }
@@ -56,6 +57,7 @@ impl TaskProductApi {
             message_type: "activity".to_string(),
             message_id: format!("message_{}", Uuid::new_v4()),
             message,
+            timing: Default::default(),
         });
         Ok(())
     }

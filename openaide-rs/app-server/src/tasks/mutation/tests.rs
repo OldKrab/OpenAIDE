@@ -1010,7 +1010,7 @@ fn removing_a_worktree_disposes_its_leased_and_free_prepared_tasks_only() {
     assert!(!store.read_task("project-root").unwrap().tombstoned);
 }
 
-fn test_mutations(
+pub(super) fn test_mutations(
     initial_revision: u64,
 ) -> (tempfile::TempDir, Store, TaskMutations, TaskUpdateReceiver) {
     let dir = tempfile::tempdir().unwrap();
@@ -1093,7 +1093,7 @@ fn terminal_stream_revalidates_session_after_waiting_for_the_mutation_lock() {
     assert!(error.to_string().contains("stale Native Session"));
 }
 
-fn task_record(task_id: &str) -> TaskRecord {
+pub(super) fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
         title: crate::storage::records::TaskTitleState::from_title(

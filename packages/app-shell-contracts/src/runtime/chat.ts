@@ -17,15 +17,25 @@ export type ChatMessage = {
 };
 
 export type NormalizedMessage =
-  | { kind: "user"; id: string; text: string; created_at: string; attachments?: Attachment[] }
-  | { kind: "agent_message"; id: string; role: AgentMessageRole; parts: AgentMessagePart[]; created_at: string }
-  | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
+  | { kind: "user"; id: string; text: string; created_at: string; sent_at?: string; attachments?: Attachment[] }
+  | { kind: "agent_message"; id: string; role: AgentMessageRole; parts: AgentMessagePart[]; created_at: string; closed_turn?: TimeSpan }
+  | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[]; run?: TimeSpan }
   | { kind: "completed_plan"; id: string; entries: AgentPlanEntry[]; created_at: string }
   | { kind: "closed_plan"; id: string; entries: AgentPlanEntry[]; created_at: string }
-  | { kind: "compaction"; id: string; status: CompactionStatus; summary?: string; error?: string; created_at: string }
-  | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision; resolution_message?: string }
+  | { kind: "compaction"; id: string; status: CompactionStatus; summary?: string; error?: string; created_at: string; run?: TimeSpan }
+  | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; requested_at?: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision; resolution_message?: string }
   | ElicitationMessage
-  | { kind: "interruption"; id: string; reason: InterruptionReason; message: string; created_at: string; recoverable: boolean };
+  | { kind: "interruption"; id: string; reason: InterruptionReason; message: string; created_at: string; recoverable: boolean; closed_turn?: TimeSpan };
+
+/**
+ * A wall-clock span the App Server observed itself. Absent wherever it did not see the work
+ * happen, such as history loaded from an Agent session, so a missing span means "unknown".
+ */
+export type TimeSpan = {
+  started_at: string;
+  /** Absent while the work is still running. */
+  ended_at?: string;
+};
 
 /** Agent-owned context compaction lifecycle; `unknown` preserves a status this client does not recognize. */
 export type CompactionStatus = "in_progress" | "completed" | "failed" | "cancelled" | "unknown";
@@ -51,8 +61,8 @@ export type AgentMessagePart =
 export type ActivityStep =
   | { kind: "text"; text: string; level?: "info" | "warning" | "error" | "agent_boundary" }
   | { kind: "thought"; message_id?: string; text: string; streaming?: boolean }
-  | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; presentation?: ToolPresentation; description?: string; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails; permission_outcomes?: ToolPermissionOutcome[] }
-  | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string }
+  | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; presentation?: ToolPresentation; description?: string; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails; permission_outcomes?: ToolPermissionOutcome[]; run?: TimeSpan }
+  | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string; run?: TimeSpan }
   | {
       kind: "subagent";
       subagent_id?: string;
@@ -65,6 +75,7 @@ export type ActivityStep =
       thread_id?: string;
       raw_path?: string;
       activity?: string;
+      run?: TimeSpan;
     };
 
 export type SubagentActivity =

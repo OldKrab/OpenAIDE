@@ -364,6 +364,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 has_messages: false,
                 worktree_id: None,
                 workspace_available: true,
+                active_turn_started_at: None,
             },
             permission_policy: Default::default(),
             active_turn_started_at: None,

@@ -105,8 +105,8 @@ use crate::snapshot::{
     AgentConfigOptionValueSnapshot, AgentPlanEntrySnapshot, AgentPlanPrioritySnapshot,
     AgentPlanSnapshot, AgentPlanStatusSnapshot, AgentSetupReason, AgentSignInFlow,
     AgentSignInPhase, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus,
-    AgentSummary, AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole,
-    ChatSnapshot, ClientSnapshot, ClientSnapshotScope, CompactionStatusSnapshot,
+    AgentSummary, AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatItemTiming,
+    ChatRole, ChatSnapshot, ClientSnapshot, ClientSnapshotScope, CompactionStatusSnapshot,
     LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
     NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
     PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
@@ -122,7 +122,7 @@ use crate::snapshot::{
     TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
     TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost,
+    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost, TimeSpanSnapshot,
     ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
     ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
@@ -652,6 +652,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ChatItem>(output, config);
     push_decl::<ChatRole>(output, config);
     push_decl::<ChatItemStatus>(output, config);
+    push_decl::<ChatItemTiming>(output, config);
+    push_decl::<TimeSpanSnapshot>(output, config);
     push_decl::<CompactionStatusSnapshot>(output, config);
     push_decl::<MessagePart>(output, config);
     push_decl::<QuestionMessageState>(output, config);

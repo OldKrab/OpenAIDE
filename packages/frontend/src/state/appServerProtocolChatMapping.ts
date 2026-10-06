@@ -2,6 +2,7 @@ import type {
   ActivityStatus as ProtocolActivityStatus,
   ActivityStepSnapshot,
   ChatItem,
+  ChatItemTiming,
   MessagePart,
   PendingRequestSnapshot,
   PermissionRequestOptionKind,
@@ -18,6 +19,7 @@ import type {
   ChatMessage,
   NormalizedMessage,
   PermissionOptionKind,
+  TimeSpan,
   ToolPresentationAction,
 } from "@openaide/app-shell-contracts";
 import { mapPendingProtocolQuestion, mapProtocolQuestion } from "./questionProtocolMapping";
@@ -39,6 +41,7 @@ export function pendingRequestItems(requests: PendingRequestSnapshot[], createdA
       return [chatMessageFromProtocol(messageId, {
         ...mapPendingProtocolQuestion(request.requestId, request.question, createdAt),
         id: messageId,
+        ...(request.createdAt ? { requested_at: request.createdAt } : {}),
       })];
     }
     return [];
@@ -71,6 +74,7 @@ function permissionMessageFromPendingRequest(
     },
     state: "pending",
     created_at: createdAt,
+    ...(request.createdAt ? { requested_at: request.createdAt } : {}),
     options: params.options.map((option) => ({
       id: option.optionId,
       label: option.name,
@@ -106,8 +110,16 @@ export function systemInterruptionItem(
   return chatMessageFromProtocol(messageId, interruptionMessage(messageId, message, createdAt, recoverable));
 }
 
+/** The App Server omits a span it did not observe; an absent span stays absent rather than guessed. */
+function timeSpan(span: ChatItemTiming["run"]): TimeSpan | undefined {
+  if (!span) return undefined;
+  return { started_at: span.startedAt, ...(span.endedAt ? { ended_at: span.endedAt } : {}) };
+}
+
 function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessage {
   const text = textFromParts(item.parts);
+  const run = timeSpan(item.timing?.run);
+  const closedTurn = timeSpan(item.timing?.closedTurn);
   const compaction = item.parts.find(
     (part): part is Extract<MessagePart, { kind: "compaction" }> => part.kind === "compaction",
   );
@@ -119,6 +131,7 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       ...(compaction.summary ? { summary: compaction.summary } : {}),
       ...(compaction.error ? { error: compaction.error } : {}),
       created_at: createdAt,
+      ...(run ? { run } : {}),
     };
   }
   const completedPlan = item.parts.find(
@@ -160,11 +173,15 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       status: activityStatusFromProtocol(activity.status),
       created_at: createdAt,
       collapsed: activity.status !== "running",
-      steps: activitySteps(activity),
+      steps: activitySteps(activity, run),
+      ...(run ? { run } : {}),
     };
   }
   if (item.status === "interrupted") {
-    return interruptionMessage(item.messageId, text || "Task was interrupted.", createdAt, true);
+    return {
+      ...interruptionMessage(item.messageId, text || "Task was interrupted.", createdAt, true),
+      ...(closedTurn ? { closed_turn: closedTurn } : {}),
+    };
   }
 
   if (item.role === "user") {
@@ -173,6 +190,7 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       id: item.messageId,
       text,
       created_at: createdAt,
+      ...(item.timing?.sentAt ? { sent_at: item.timing.sentAt } : {}),
       attachments: attachmentsFromParts(item.parts),
     };
   }
@@ -193,13 +211,19 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       role: item.role === "system" ? "thought" : "agent",
       parts: agentParts,
       created_at: createdAt,
+      ...(closedTurn ? { closed_turn: closedTurn } : {}),
     };
   }
 
   return interruptionMessage(item.messageId, text || "Unsupported Chat message.", createdAt, false);
 }
 
-function interruptionMessage(id: string, message: string, createdAt: string, recoverable: boolean): NormalizedMessage {
+function interruptionMessage(
+  id: string,
+  message: string,
+  createdAt: string,
+  recoverable: boolean,
+): Extract<NormalizedMessage, { kind: "interruption" }> {
   return {
     kind: "interruption",
     id,
@@ -304,8 +328,16 @@ function firstQuestionPart(parts: MessagePart[]) {
   return parts.find((part): part is Extract<MessagePart, { kind: "question" }> => part.kind === "question");
 }
 
-function activitySteps(activity: Extract<MessagePart, { kind: "activity" }>): ActivityStep[] {
-  if (activity.steps?.length) return activity.steps.map((step) => activityStepFromProtocol(step, activity.title));
+function activitySteps(activity: Extract<MessagePart, { kind: "activity" }>, run?: TimeSpan): ActivityStep[] {
+  if (activity.steps?.length) {
+    const steps = activity.steps.map((step) => activityStepFromProtocol(step, activity.title));
+    // The App Server times a whole Activity row. Only a single-step row says how long that step
+    // took, and it keeps the time when adjacent rows are grouped for display.
+    const [only] = steps;
+    return run && steps.length === 1 && only && only.kind !== "text" && only.kind !== "thought"
+      ? [{ ...only, run }]
+      : steps;
+  }
   return [
     {
       kind: "text",

@@ -2033,6 +2033,7 @@ fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
                 role: ChatRole::System,
                 status: ChatItemStatus::Complete,
                 parts: Vec::new(),
+                timing: None,
             },
         }],
         vec![ToolDetailUpdate {
@@ -2629,6 +2630,7 @@ fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
         parts: vec![MessagePart::Text {
             text: "first".to_string(),
         }],
+        timing: None,
     };
     let updates = [
         committed_task_update(
@@ -4427,6 +4429,7 @@ impl TaskHistoryWorkflow for FixedTaskHistory {
                 parts: vec![openaide_app_server_protocol::snapshot::MessagePart::Text {
                     text: "older".to_string(),
                 }],
+                timing: None,
             }],
             has_before: false,
             total_count: 1,
@@ -4978,6 +4981,7 @@ fn committed_task_update(
                 has_messages: true,
                 worktree_id: None,
                 workspace_available: true,
+                active_turn_started_at: None,
             })),
         ),
     };
@@ -5023,6 +5027,7 @@ fn committed_task_status_update(
                     has_messages: true,
                     worktree_id: None,
                     workspace_available: true,
+                    active_turn_started_at: None,
                 }),
                 ..TaskChanges::default()
             },

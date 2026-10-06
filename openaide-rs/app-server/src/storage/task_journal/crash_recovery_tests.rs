@@ -259,6 +259,7 @@ fn streamed_chat_does_not_duplicate_unchanged_queued_content_in_its_recovery_rec
                 }],
                 created_at: "2026-09-05T00:00:00Z".to_string(),
             },
+            timing: Default::default(),
         },
     };
     projection.messages.push(stored.clone());
@@ -321,6 +322,7 @@ fn accept_user_message(store: &TaskJournalStore, projection: &mut TaskProjection
                 created_at: "2026-09-05T00:00:00Z".to_string(),
                 attachments: Vec::new(),
             },
+            timing: Default::default(),
         },
     };
     projection.messages.push(message.clone());

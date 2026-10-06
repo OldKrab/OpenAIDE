@@ -4,6 +4,7 @@ import type { ToolImagePreview } from "@openaide/app-server-client";
 import { toolKindClass } from "../state/toolDetailsViewModel";
 import { ActivityStepRow } from "./ChatActivityView";
 import { toolKindIcon } from "./chatToolIcons";
+import { RequestWait } from "./timeMarks";
 
 type ToolStep = Extract<ActivityStep, { kind: "tool" }>;
 
@@ -72,6 +73,7 @@ export function ChatPermissionCard({
         >
           <strong>{terminal ? display.title : "Approval required"}</strong>
         </span>
+        {!responding && !terminal ? <RequestWait since={permission.requested_at} /> : null}
         {responding || terminal ? (
           <span
             aria-atomic="true"

@@ -25,6 +25,7 @@ import { ChatToolDetails } from "./ChatToolDetailsView";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { toolKindIcon } from "./chatToolIcons";
 import { presentThoughtMarkdown } from "./thoughtPresentation";
+import { ActivityGroupTime, ActivityStepTime } from "./timeMarks";
 
 /** Lets disclosure commits synchronously update an enclosing measured Chat row. */
 export const ChatContentSizeChangeContext = createContext<((element: HTMLElement) => void) | undefined>(undefined);
@@ -64,6 +65,7 @@ export function ChatActivityView({
           <span className="activity-status-mark" aria-hidden="true" />
           <span>{activitySummary(activity)}</span>
           <small>{activityStatusLabel(activity.status)}</small>
+          <ActivityGroupTime fallback={activity.run} steps={activity.steps} />
         </>
       }
     >
@@ -174,6 +176,8 @@ export function ActivityStepRow({
       context={context === label ? undefined : context}
       permissionSummary={permissionSummary}
       status={status}
+      time={<ActivityStepTime step={step} />}
+      timed={step.kind !== "text" && step.kind !== "thought" && Boolean(step.run)}
     />
   );
   const className = `activity-step ${displayStep.kind === "tool"
@@ -548,12 +552,16 @@ function ActivityStepMetadata({
   context,
   permissionSummary,
   status,
+  time,
+  timed,
 }: {
   context?: string;
   permissionSummary?: { decision: "approved" | "rejected" | "cancelled"; label: string };
   status?: string;
+  time: ReactNode;
+  timed: boolean;
 }) {
-  if (!context && !permissionSummary && !status) return null;
+  if (!context && !permissionSummary && !status && !timed) return null;
   return (
     <span className="activity-step-meta">
       {context ? <small className="activity-step-context">{context}</small> : null}
@@ -564,6 +572,7 @@ function ActivityStepMetadata({
         </small>
       ) : null}
       {status ? <small className="activity-step-state">{status}</small> : null}
+      {time}
     </span>
   );
 }

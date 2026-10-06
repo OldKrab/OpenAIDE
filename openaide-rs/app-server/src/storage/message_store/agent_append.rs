@@ -51,6 +51,7 @@ impl Store {
                     message_type: message.message_type().to_string(),
                     message_id: identity,
                     message,
+                    timing: Default::default(),
                 },
             };
             projection.messages.push(stored.clone());

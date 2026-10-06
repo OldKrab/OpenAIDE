@@ -108,6 +108,10 @@ pub struct TaskSummary {
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<TaskAttentionEvent>,
+    /// Start of the turn the Agent is working on, so Navigation can show how
+    /// long a Task has been running without loading its Chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_turn_started_at: Option<String>,
     pub has_messages: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_id: Option<WorktreeId>,

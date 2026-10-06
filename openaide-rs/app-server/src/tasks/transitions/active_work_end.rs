@@ -69,6 +69,7 @@ pub(super) fn apply_active_work_end(
 ) -> Result<(), RuntimeError> {
     ctx.finish_running_activities(ActivityStatus::Interrupted)?;
     append_interruption(ctx, cause.reason(), &cause.message(), now.clone(), true)?;
+    ctx.close_turn_on_last_row(&now)?;
     let task = ctx.task_mut();
     if !task.message_queue.items.is_empty() {
         task.message_queue.pause = Some(match cause {

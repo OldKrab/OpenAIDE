@@ -293,6 +293,7 @@ fn chat_message(message: NormalizedMessage) -> ChatMessage {
         message_type: message.message_type().to_string(),
         message_id: format!("row_{}", message.identity()),
         message,
+        timing: Default::default(),
     }
 }
 
