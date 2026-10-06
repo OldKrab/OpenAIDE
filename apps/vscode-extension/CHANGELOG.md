@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.0 - 2026-10-06
+
+### Task and Chat
+- Show an in-progress Agent session compaction as the live indicator, animating in place with the elapsed time; a finished compaction is a hairline divider whose summary expands into a framed block.
+- Title command rows with the Agent's own description of the command.
+- Show Claude's Skill tool as a skill activation, including the arguments passed to the skill.
+- Keep a drag-selection in place when the pointer leaves the Chat rows instead of jumping to the start of the list.
+- Keep the reader's position when they scroll while Chat is following the latest message.
+- Keep a Task's activity time when its session history is reloaded, so opening an old Task no longer moves it to the top of Navigation.
+
+### Composer
+- Reorder unsent attachments by dragging a tile, by the touch grip, or with arrow keys.
+- Accept files dropped anywhere on the Task or New Task surface, highlighting the Composer during the drag.
+- Show file attachments as cards with a kind icon and caption, and Image tiles at their own proportions.
+- Stop Fit from enlarging a raster Image past its own pixels in the opened preview.
+
+### File Viewer
+- Preview PDF files in a sandboxed viewer with scrolling, zoom, and selectable text.
+
+### Agents
+- Always retry a new session on a fresh process when the Agent process ended during the request.
+- Update the Claude Agent ACP adapter to 0.85.1.
+
 ## 0.7.0 - 2026-10-06
 
 ### Agents
