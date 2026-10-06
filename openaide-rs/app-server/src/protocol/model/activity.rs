@@ -121,6 +121,10 @@ pub enum ActivityStep {
         status: ActivityStatus,
         #[serde(skip_serializing_if = "Option::is_none")]
         presentation: Option<ToolPresentation>,
+        /// Agent-authored purpose of an execute Tool. It replaces only the compact
+        /// title; the command stays in `input_summary` and the details.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         input_summary: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]

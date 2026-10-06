@@ -229,6 +229,9 @@ pub enum ActivityStepSnapshot {
         status: ActivityStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         presentation: Option<ToolPresentationSnapshot>,
+        /// Agent-authored purpose of an execute Tool, shown as its compact title.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_summary: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

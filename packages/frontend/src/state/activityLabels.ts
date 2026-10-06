@@ -91,7 +91,7 @@ export function activityStepLabel(step: ActivityStep) {
     );
   }
   const subject = toolSubjectLabel(step);
-  if (isExecuteTool(step)) return subject ?? humanizeToolName(step.name);
+  if (isExecuteTool(step)) return executeDescription(step) ?? subject ?? humanizeToolName(step.name);
   if (step.name === "think") return step.input_summary?.trim() || "Reasoning tool";
   if (step.name === "switch_mode") return subject ? `Switch mode to ${subject}` : "Switch mode";
   if (step.name === "web_search" && subject) return `Web search: ${subject}`;
@@ -167,6 +167,8 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
       presentationSubject(step.presentation) ?? "",
     );
   }
+  const description = executeDescription(step);
+  if (description) return description;
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return progressLabel("Running", subject ?? humanizeToolName(step.name));
   if (step.name === "think") return step.input_summary?.trim() || "Using reasoning tool";
@@ -214,7 +216,7 @@ export function activityStepCompletedLabel(step: ActivityStep) {
   const subject = toolSubjectLabel(step);
   if (step.status === "interrupted") return progressLabel("Interrupted", subject ?? humanizeToolName(step.name));
   if (step.status === "error") return progressLabel("Failed to use", subject ?? humanizeToolName(step.name));
-  if (isExecuteTool(step)) return progressLabel("Ran", subject ?? "command");
+  if (isExecuteTool(step)) return executeDescription(step) ?? progressLabel("Ran", subject ?? "command");
   if (step.name === "think") return step.input_summary?.trim() || "Used reasoning tool";
   if (step.name === "web_search") return progressLabel(subject ? "Searched the web for" : "Searched the web", subject ?? "");
   const actions: Record<string, string> = {
@@ -637,6 +639,15 @@ function toolActionLabel(name: string) {
 
 function isExecuteTool(step: Extract<ActivityStep, { kind: "tool" }>) {
   return step.name === "execute" || step.name === "exec_command";
+}
+
+/**
+ * The Agent's own purpose line for an Execute row. A proven semantic presentation
+ * still wins, and Agents that send no description keep the command title.
+ */
+export function executeDescription(step: ActivityStep) {
+  if (step.kind !== "tool" || !isExecuteTool(step) || step.presentation) return undefined;
+  return step.description?.trim() || undefined;
 }
 
 function progressLabel(action: string, subject: string) {
