@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.0 - 2026-10-06
+
+### Agents
+- Add Claude Code as a built-in Agent with shared terminal authentication.
+- Steer a running Agent with a follow-up message when the Agent supports ACP steering, falling back to the existing prompt queue otherwise.
+- Show summarized thinking from recent Claude models instead of an empty reasoning block.
+- Enable native Codex subagents by default and update the managed Codex ACP runtime to 2.0.0.
+- Return to the Agents list after creating a Custom Agent, and stop an Agent's process when it is disabled so re-enabling starts a fresh one.
+
+### Task and Chat
+- Schedule messages to be sent to a Task later.
+- Show Agent session compaction as a quiet divider row with a collapsible summary instead of a replayed User message.
+- Pace live Agent text to its arrival rhythm so the reveal keeps moving between batches instead of stalling.
+- Archive Tasks without a confirmation dialog; archived Tasks stay restorable and Delete still confirms.
+- Stop Tasks from demanding a reload and jumping to the top of the sidebar after OpenAIDE's own session operations.
+- Recover a Task reload after its Agent process has idle-exited instead of leaving stale options.
+- Restore the Chat scroll position correctly after returning to the latest message.
+- Align Chat rows with the Composer edges, and report "found so far" while a sidebar search still has pages to load.
+- Preserve reasoning Tool titles and keep Agent output that arrives just before a session closes.
+
+### Connection and performance
+- Carry the App Server connection over WebSocket where available, delivering updates as soon as they exist, with the HTTP carrier as fallback.
+- Keep Task Navigation subscriptions stable across route changes and improve native session discovery.
+- Keep the list-only Agent process warm for six minutes to avoid repeated cold starts.
+- Recover Desktop after system resume.
+
 ## 0.6.1 - 2026-09-16
 
 ### Desktop reliability
