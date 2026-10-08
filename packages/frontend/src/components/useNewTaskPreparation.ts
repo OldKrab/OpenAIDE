@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
+import { useEffect, useRef, useSyncExternalStore, type Dispatch, type MutableRefObject } from "react";
 import {
   TASK_ACQUIRE,
   TASK_ACQUIRE_IN_WORKTREE,
@@ -90,7 +90,12 @@ export function useNewTaskPreparation({
   }
   const retainedSnapshot = newTaskController.getSnapshot();
   const replacementTaskId = newTaskController.taskRequiringReplacement();
-  const preparationResetKey = newTaskController.preparationResetKey();
+  // A reset can arrive with no snapshot change, such as after an awaited discard,
+  // so it must schedule its own render and re-run the acquire effect.
+  const preparationResetKey = useSyncExternalStore(
+    newTaskController.subscribe,
+    () => newTaskController.preparationResetKey(),
+  );
   const previousPreparationResetKey = useRef(preparationResetKey);
   const preparationWasReset = previousPreparationResetKey.current !== preparationResetKey;
   previousPreparationResetKey.current = preparationResetKey;
@@ -251,6 +256,7 @@ export function useNewTaskPreparation({
     dispatch,
     pendingPreparation,
     preparationKey,
+    preparationResetKey,
     newTaskController,
     preparedTaskMatches,
     replicaEpoch,

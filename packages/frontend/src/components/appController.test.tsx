@@ -2,6 +2,7 @@ import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AGENT_LIST_SESSIONS,
+  AGENT_PROBE,
   ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_RELEASE,
   AppServerProtocolError,
@@ -1895,6 +1896,63 @@ describe("app controller mounted lifecycle", () => {
       .filter((method) => method === TASK_ACQUIRE || method === AGENT_LIST_SESSIONS);
     expect(startupRequests).toEqual([TASK_ACQUIRE]);
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new");
+  });
+
+  it("acquires a fresh Prepared Task after an Agent retry discards the current one", async () => {
+    let acquired = 0;
+    let settleRelease: (() => void) | undefined;
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_ACQUIRE) {
+        acquired += 1;
+        return {
+          task: {
+            ...protocolTaskSnapshot(`task_new_${acquired}`, "New task", { hasMessages: false }),
+            lifecycle: "prepared" as const,
+          },
+        };
+      }
+      if (method === AGENT_PROBE) {
+        return { agents: clientSnapshot({ includeActiveTask: false }).agents };
+      }
+      if (method === TASK_RELEASE) {
+        // The release acknowledgement arrives after React has rendered the discard.
+        return new Promise((resolve) => { settleRelease = () => resolve({}); });
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new_1");
+
+    let retry: Promise<boolean> | undefined;
+    await act(async () => {
+      retry = latestController?.callbacks.navigation.retryAgent("codex");
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.newTaskSnapshot).toBeUndefined();
+    await act(async () => {
+      settleRelease?.();
+      await retry;
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(2);
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new_2");
   });
 
   it("reports options loading while Prepared Task acquisition is pending", async () => {
