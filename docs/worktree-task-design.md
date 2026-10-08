@@ -231,6 +231,7 @@ The leased prepared-Task pool is implemented. The remaining decisions in this no
 
 - Discover all usable worktrees returned by Git's stable NUL-delimited porcelain listing, including worktrees created by other tools.
 - Projects whose roots are separate top-level worktrees of the same repository share one repository-scoped inventory and management surface.
+- A worktree that is itself a Project root owns the external Native Sessions found in it. Other Projects of the same repository discover sessions only in worktrees that are not Project roots.
 - Label worktrees as **Managed Worktree** or **External Worktree** by merging Git discovery with OpenAIDE metadata.
 - Any valid worktree may be selected as a Task Workspace.
 - A locked worktree remains selectable when its folder is available, but its locked state and optional Git-provided reason are visible and removal is disabled.

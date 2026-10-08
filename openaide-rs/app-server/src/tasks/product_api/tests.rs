@@ -3374,6 +3374,88 @@ fn targeted_native_catalog_refresh_assigns_sessions_to_the_most_specific_project
 }
 
 #[test]
+fn full_native_catalog_refresh_lists_a_worktree_project_only_for_itself() {
+    let temp = tempfile::tempdir().unwrap();
+    let main_root = temp.path().join("main");
+    let linked_root = temp.path().join("linked");
+    std::fs::create_dir(&main_root).unwrap();
+    git(&main_root, &["init", "-b", "main"]);
+    git(&main_root, &["config", "user.name", "OpenAIDE Test"]);
+    git(
+        &main_root,
+        &["config", "user.email", "test@example.invalid"],
+    );
+    std::fs::write(main_root.join("README.md"), "test\n").unwrap();
+    git(&main_root, &["add", "README.md"]);
+    git(&main_root, &["commit", "-m", "initial"]);
+    git(
+        &main_root,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "linked",
+            &linked_root.to_string_lossy(),
+        ],
+    );
+
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let configured_projects = ConfiguredProjectRoots::default();
+    configured_projects
+        .enable_persistence(store.clone())
+        .unwrap();
+    let main = configured_projects
+        .add_project(&main_root.to_string_lossy())
+        .unwrap();
+    let linked = configured_projects
+        .add_project(&linked_root.to_string_lossy())
+        .unwrap();
+    let resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
+    let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "linked-session".to_string(),
+            cwd: linked.workspace_root.clone(),
+            title: Some("Linked session".to_string()),
+            last_activity: None,
+            updated_at: None,
+        }]),
+        filter_listed_sessions_by_cwd: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new_with_server_requests_and_projects(
+        store,
+        Arc::new(resolver),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+        ServerRequestRuntime::new(),
+        configured_projects,
+    )
+    .unwrap();
+
+    api.refresh_native_session_catalogs().unwrap();
+
+    // Both Projects see both worktrees of the shared repository, yet each root is
+    // listed once, so the session's owner does not depend on listing order.
+    assert_eq!(
+        agent.list_calls.load(Ordering::SeqCst),
+        2 * BUILT_IN_AGENT_METADATA.len()
+    );
+    assert!(api
+        .native_session_catalog()
+        .project(main.project_id.as_str())
+        .is_empty());
+    assert!(api
+        .native_session_catalog()
+        .project(linked.project_id.as_str())
+        .iter()
+        .any(|entry| entry.reference.session_id == "linked-session"));
+}
+
+#[test]
 fn load_more_continues_past_a_page_containing_only_archived_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

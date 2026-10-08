@@ -92,6 +92,21 @@ impl TaskProductApi {
                 task.workspace_root.clone(),
             ));
         }
+        // A workspace that is a Project root lists only for that Project. Projects
+        // sharing a repository otherwise each claim its sessions through the other's
+        // worktree, and the catalog's single owner would follow listing order.
+        let project_roots = project_workspaces
+            .iter()
+            .filter(|(project_id, workspace_root)| {
+                crate::projects::project_id_for_workspace(workspace_root).as_str() == project_id
+            })
+            .map(|(project_id, workspace_root)| (workspace_root.clone(), project_id.clone()))
+            .collect::<HashMap<_, _>>();
+        project_workspaces.retain(|(project_id, workspace_root)| {
+            project_roots
+                .get(workspace_root)
+                .is_none_or(|owner| owner == project_id)
+        });
         let mut selected_project_ids = projects
             .iter()
             .filter(|project| {
