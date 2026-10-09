@@ -100,7 +100,8 @@ use crate::settings::{
     SettingsSkillRecord, SettingsSkillStatus, SettingsSkillsParams, SettingsSkillsResult,
 };
 use crate::snapshot::{
-    ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
+    ActivityStatus, ActivityStepSnapshot, AgentAccountLimitStatus, AgentAccountLimitWindow,
+    AgentAccountLimitWindowKind, AgentAccountLimits, AgentCapabilities, AgentCollectionSnapshot,
     AgentConfigOptionCurrentValue, AgentConfigOptionKind, AgentConfigOptionSnapshot,
     AgentConfigOptionValueSnapshot, AgentPlanEntrySnapshot, AgentPlanPrioritySnapshot,
     AgentPlanSnapshot, AgentPlanStatusSnapshot, AgentSetupReason, AgentSignInFlow,
@@ -599,6 +600,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentSignInFlow>(output, config);
     push_decl::<AgentSignInPhase>(output, config);
     push_decl::<AgentCapabilities>(output, config);
+    push_decl::<AgentAccountLimits>(output, config);
+    push_decl::<AgentAccountLimitWindow>(output, config);
+    push_decl::<AgentAccountLimitWindowKind>(output, config);
+    push_decl::<AgentAccountLimitStatus>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
     push_decl::<TaskNavigationGroup>(output, config);
     push_decl::<TaskNavigationRefreshState>(output, config);

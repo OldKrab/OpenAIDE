@@ -64,3 +64,52 @@ fn summary(id: &str, label: &str) -> AgentDefinitionSummary {
         source_kind: AgentSourceKind::BuiltIn,
     }
 }
+
+#[test]
+fn collection_publishes_account_limits_only_for_the_reporting_agent() {
+    use crate::agent::events::{
+        AgentAccountLimitUsage, AgentAccountLimitWindowId, AgentAccountLimitsChange,
+    };
+    use openaide_app_server_protocol::snapshot::AgentAccountLimitWindowKind;
+
+    let statuses = AgentStatusCache::default();
+    statuses.record_account_limits(
+        OPENCODE_AGENT_ID,
+        AgentAccountLimitsChange::Usage {
+            plan_label: None,
+            windows: vec![AgentAccountLimitUsage {
+                window: AgentAccountLimitWindowId {
+                    kind: AgentAccountLimitWindowKind::Weekly,
+                    model_label: None,
+                },
+                used_percent: 12,
+                resets_at_ms: Some(1_791_556_200_000),
+            }],
+        },
+    );
+
+    let snapshot = collection_from_registry_summaries_with_statuses(
+        vec![
+            summary(CODEX_AGENT_ID, "Codex"),
+            summary(OPENCODE_AGENT_ID, "OpenCode"),
+        ],
+        &statuses,
+    );
+
+    assert_eq!(snapshot.agents[0].account_limits, None);
+    let limits = snapshot.agents[1].account_limits.as_ref().expect("limits");
+    assert_eq!(limits.windows[0].used_percent, 12);
+    assert_eq!(
+        serde_json::to_value(&snapshot.agents[1]).unwrap()["accountLimits"]["windows"][0],
+        serde_json::json!({
+            "kind": "weekly",
+            "usedPercent": 12,
+            "resetsAtMs": 1_791_556_200_000u64,
+            "status": "ok"
+        })
+    );
+    assert!(serde_json::to_value(&snapshot.agents[0])
+        .unwrap()
+        .get("accountLimits")
+        .is_none());
+}

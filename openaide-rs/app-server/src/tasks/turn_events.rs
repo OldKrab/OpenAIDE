@@ -12,6 +12,7 @@ use crate::agent::events::{
     AgentContextUsage, AgentEvent, AgentPermissionOutcome, AgentPermissionRequest, AgentTurnUsage,
 };
 use crate::agent::normalizer::normalize_event;
+use crate::agent::status_cache::AgentStatusCache;
 use crate::agent::{AgentEventSink, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::NormalizedMessage;
@@ -100,6 +101,8 @@ pub(crate) struct TaskSessionEventSink {
     session_id: String,
     native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     server_requests: ServerRequestRuntime,
+    /// Receives account limits an Agent reports on this session; they belong to the Agent.
+    agent_statuses: AgentStatusCache,
     text_chunk_routes: TextChunkRoutes,
     subagent_text_chunk_routes: Mutex<HashMap<String, TextChunkRoutes>>,
     emission_lock: Mutex<()>,
@@ -118,6 +121,7 @@ impl TaskSessionEventSink {
             session_id: session_id.clone(),
             native_catalog: None,
             server_requests,
+            agent_statuses: AgentStatusCache::default(),
             text_chunk_routes: TextChunkRoutes::new(session_id),
             subagent_text_chunk_routes: Mutex::default(),
             emission_lock: Mutex::new(()),
@@ -129,6 +133,11 @@ impl TaskSessionEventSink {
         native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     ) -> Self {
         self.native_catalog = native_catalog;
+        self
+    }
+
+    pub(crate) fn with_agent_statuses(mut self, agent_statuses: AgentStatusCache) -> Self {
+        self.agent_statuses = agent_statuses;
         self
     }
 }
@@ -161,6 +170,12 @@ impl TaskSessionEventSink {
         if let AgentEvent::ContextUsage(usage) = event {
             self.finish_anonymous_text_routes();
             return self.update_context_usage(usage);
+        }
+        if let AgentEvent::AccountLimits(update) = event {
+            // Agent-level state: it changes no Task record and must not break a text route.
+            self.agent_statuses
+                .record_account_limits(&update.agent_id, update.change);
+            return Ok(());
         }
         if let AgentEvent::TurnUsage(usage) = event {
             self.finish_anonymous_text_routes();

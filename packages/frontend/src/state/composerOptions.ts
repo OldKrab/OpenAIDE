@@ -12,6 +12,8 @@ export type AgentOption = {
   status?: import("@openaide/app-server-client").AgentStatus;
   setupReason?: import("@openaide/app-server-client").AgentSetupReason;
   capabilities?: import("@openaide/app-server-client").AgentCapabilities;
+  /** Account-wide usage limits the Agent reported; shared by every Task of this Agent. */
+  accountLimits?: import("@openaide/app-server-client").AgentAccountLimits;
 };
 
 export type IsolationOption = {

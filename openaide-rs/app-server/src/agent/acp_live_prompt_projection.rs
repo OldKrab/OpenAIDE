@@ -7,6 +7,7 @@ use crate::agent::acp_schema::{
 };
 use serde_json::json;
 
+use crate::agent::acp_account_limits_projection::project_account_limits;
 use crate::agent::acp_codex_subagent::{
     project_codex_collaboration, CodexSubagentProjection, CodexSubagentState,
 };
@@ -24,9 +25,9 @@ use crate::agent::acp_tool_call_projection::{
 };
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
-    AgentCompactionChange, AgentContextUsage, AgentEvent, AgentPermissionOption,
-    AgentPermissionOptionKind, AgentPermissionOutcome, AgentPermissionRequest, AgentToolCallRef,
-    AgentToolUpdate, AgentUsageCost,
+    AgentAccountLimitsUpdate, AgentCompactionChange, AgentContextUsage, AgentEvent,
+    AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionOutcome,
+    AgentPermissionRequest, AgentToolCallRef, AgentToolUpdate, AgentUsageCost,
 };
 use crate::agent::tool_details::{tool_call_event, tool_kind_name};
 use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
@@ -333,6 +334,7 @@ impl LivePromptProjection {
                     )))?;
             }
             SessionUpdate::UsageUpdate(update) => {
+                self.emit_account_limits(update.meta.as_ref())?;
                 self.sink.emit(AgentEvent::ContextUsage(AgentContextUsage {
                     used_tokens: update.used,
                     capacity_tokens: update.size,
@@ -387,6 +389,33 @@ impl LivePromptProjection {
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Account limits are optional decoration on a usage update: a malformed value is logged
+    /// and dropped so it can never cost the Task its context usage.
+    fn emit_account_limits(
+        &self,
+        meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<(), RuntimeError> {
+        let projection = project_account_limits(meta);
+        if !projection.ignored.is_empty() {
+            logging::warn(
+                "acp_account_limits_ignored",
+                json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "keys": projection.ignored,
+                    "reason": "unrecognized shape",
+                }),
+            );
+        }
+        for change in projection.changes {
+            self.sink
+                .emit(AgentEvent::AccountLimits(AgentAccountLimitsUpdate {
+                    agent_id: self.agent_id.clone(),
+                    change,
+                }))?;
         }
         Ok(())
     }

@@ -1,3 +1,7 @@
+use openaide_app_server_protocol::snapshot::{
+    AgentAccountLimitStatus, AgentAccountLimitWindowKind,
+};
+
 use crate::agent::AgentMetadataField;
 use crate::protocol::model::{
     ActivityStatus, ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
@@ -40,6 +44,9 @@ pub enum AgentEvent {
     },
     ContextUsage(AgentContextUsage),
     TurnUsage(AgentTurnUsage),
+    /// Account-wide usage limits. They ride a Native Session's updates but describe the Agent's
+    /// account, so the consumer records them on the Agent and never on the Task.
+    AccountLimits(AgentAccountLimitsUpdate),
 }
 
 /// A normalized ACP compaction patch. Omitted fields keep their stored value.
@@ -115,6 +122,41 @@ pub struct AgentNativeSubagentStateUpdate {
     pub parent_native_session_id: String,
     pub native_session_id: String,
     pub state: AgentNativeSubagentState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentAccountLimitsUpdate {
+    pub agent_id: String,
+    pub change: AgentAccountLimitsChange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentAccountLimitsChange {
+    /// A full reading of every window the Agent meters. Windows it omits no longer apply.
+    Usage {
+        plan_label: Option<String>,
+        windows: Vec<AgentAccountLimitUsage>,
+    },
+    /// The Agent's verdict for one window, sent when a request was checked against it.
+    Signal {
+        window: AgentAccountLimitWindowId,
+        status: AgentAccountLimitStatus,
+        used_percent: Option<u8>,
+        resets_at_ms: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AgentAccountLimitWindowId {
+    pub kind: AgentAccountLimitWindowKind,
+    pub model_label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentAccountLimitUsage {
+    pub window: AgentAccountLimitWindowId,
+    pub used_percent: u8,
+    pub resets_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

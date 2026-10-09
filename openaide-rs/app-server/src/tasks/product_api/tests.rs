@@ -3245,6 +3245,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
         TaskUpdateNotifier::disabled(),
         ServerRequestRuntime::new(),
         configured_projects.clone(),
+        crate::agent::status_cache::AgentStatusCache::default(),
     )
     .unwrap();
     let project = configured_projects
@@ -3302,6 +3303,7 @@ fn full_native_catalog_refresh_discovers_sessions_in_known_task_workspaces() {
         TaskUpdateNotifier::disabled(),
         ServerRequestRuntime::new(),
         configured_projects,
+        crate::agent::status_cache::AgentStatusCache::default(),
     )
     .unwrap();
 
@@ -3348,6 +3350,7 @@ fn targeted_native_catalog_refresh_assigns_sessions_to_the_most_specific_project
         TaskUpdateNotifier::disabled(),
         ServerRequestRuntime::new(),
         configured_projects.clone(),
+        crate::agent::status_cache::AgentStatusCache::default(),
     )
     .unwrap();
     let parent = configured_projects
@@ -3450,6 +3453,7 @@ fn project_load_stops_after_the_requested_navigation_window() {
         TaskUpdateNotifier::disabled(),
         ServerRequestRuntime::new(),
         configured_projects,
+        crate::agent::status_cache::AgentStatusCache::default(),
     )
     .unwrap();
 
@@ -3505,6 +3509,7 @@ fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
         TaskUpdateNotifier::disabled(),
         ServerRequestRuntime::new(),
         configured_projects,
+        crate::agent::status_cache::AgentStatusCache::default(),
     )
     .unwrap();
 
@@ -3569,6 +3574,7 @@ fn exhausted_project_load_more_does_not_restart_agent_history() {
         TaskUpdateNotifier::disabled(),
         ServerRequestRuntime::new(),
         configured_projects,
+        crate::agent::status_cache::AgentStatusCache::default(),
     )
     .unwrap();
 

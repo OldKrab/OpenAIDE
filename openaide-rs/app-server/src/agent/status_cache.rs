@@ -2,9 +2,14 @@ use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 
 use openaide_app_server_protocol::snapshot::{
-    AgentCapabilities, AgentSetupReason, AgentSignInFlow, AgentSignInPhase, AgentStatus,
+    AgentAccountLimits, AgentCapabilities, AgentSetupReason, AgentSignInFlow, AgentSignInPhase,
+    AgentStatus,
 };
+use serde_json::json;
 
+use crate::agent::account_limits::{apply_account_limits_change, worst_status_name};
+use crate::agent::events::AgentAccountLimitsChange;
+use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentAuthMethodSummary, AgentProbeResult};
 
@@ -48,6 +53,9 @@ impl AgentStatusSnapshot {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentStatusCache {
     entries: Arc<Mutex<HashMap<String, AgentStatusSnapshot>>>,
+    /// Kept beside the status entries because probes and session outcomes replace a whole
+    /// status snapshot, while account limits only change when the Agent reports them.
+    account_limits: Arc<Mutex<HashMap<String, AgentAccountLimits>>>,
     updates: Option<mpsc::Sender<()>>,
 }
 
@@ -59,6 +67,7 @@ impl AgentStatusCache {
         (
             Self {
                 entries: Arc::default(),
+                account_limits: Arc::default(),
                 updates: Some(sender),
             },
             receiver,
@@ -180,6 +189,57 @@ impl AgentStatusCache {
         self.notify();
     }
 
+    pub(crate) fn account_limits(&self, agent_id: &str) -> Option<AgentAccountLimits> {
+        self.account_limits
+            .lock()
+            .expect("agent account limits poisoned")
+            .get(agent_id)
+            .cloned()
+    }
+
+    /// Applies one Agent report and publishes only when the visible value changed, so a turn
+    /// that leaves usage where it was does not wake every client.
+    pub(crate) fn record_account_limits(&self, agent_id: &str, change: AgentAccountLimitsChange) {
+        let source = match &change {
+            AgentAccountLimitsChange::Usage { .. } => "usage",
+            AgentAccountLimitsChange::Signal { .. } => "signal",
+        };
+        let mut limits = self
+            .account_limits
+            .lock()
+            .expect("agent account limits poisoned");
+        let previous = limits.get(agent_id);
+        let next = apply_account_limits_change(previous, change);
+        if previous == next.as_ref() {
+            return;
+        }
+        logging::info(
+            "agent_account_limits_changed",
+            json!({
+                "agent_id": agent_id,
+                "source": source,
+                "previous_status": worst_status_name(previous),
+                "status": worst_status_name(next.as_ref()),
+                "window_count": next.as_ref().map_or(0, |limits| limits.windows.len()),
+            }),
+        );
+        match next {
+            Some(next) => limits.insert(agent_id.to_string(), next),
+            None => limits.remove(agent_id),
+        };
+        drop(limits);
+        self.notify();
+    }
+
+    /// The limits describe the signed-in account, so they end with it.
+    fn forget_account_limits(&self, agent_id: &str) -> bool {
+        self.account_limits
+            .lock()
+            .expect("agent account limits poisoned")
+            .remove(agent_id)
+            .is_some()
+    }
+
     pub(crate) fn snapshot(&self, agent_id: &str) -> AgentStatusSnapshot {
         self.entries
             .lock()
@@ -252,6 +312,7 @@ impl AgentStatusCache {
         snapshot.sign_in = None;
         snapshot.status_before_authentication = None;
         drop(entries);
+        self.forget_account_limits(agent_id);
         self.notify();
     }
 
@@ -328,11 +389,13 @@ impl AgentStatusCache {
     }
 
     pub(crate) fn clear(&self, agent_id: &str) -> bool {
+        let forgot_limits = self.forget_account_limits(agent_id);
         self.entries
             .lock()
             .expect("agent status cache poisoned")
             .remove(agent_id)
             .is_some()
+            || forgot_limits
     }
 
     fn record(&self, agent_id: String, snapshot: AgentStatusSnapshot) {

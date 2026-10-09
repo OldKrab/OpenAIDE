@@ -1127,7 +1127,12 @@ icon: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabi
  * The one Sign-in Flow App Server is running (or last ran without success) for this Agent.
  * Absent when no flow is running and the last flow ended in success or cancellation.
  */
-signIn?: AgentSignInFlow | null, };
+signIn?: AgentSignInFlow | null,
+/**
+ * Usage windows of the account this Agent is signed in to. Absent until the Agent reports
+ * them; every Task of the Agent shares the same value.
+ */
+accountLimits?: AgentAccountLimits | null, };
 
 export type AgentStatus = "disconnected" | "installing" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed";
 
@@ -1154,6 +1159,34 @@ failure?: string | null, };
 export type AgentSignInPhase = "starting" | "awaitingUser" | "awaitingTerminal" | "failed";
 
 export type AgentCapabilities = { resumeTasks?: boolean, deleteNativeSessions?: boolean, forkNativeSessions?: boolean, };
+
+export type AgentAccountLimits = {
+/**
+ * Display name of the subscription plan when the Agent reports one, for example "Max".
+ */
+planLabel?: string | null,
+/**
+ * Ordered for display: the 5-hour window, the weekly window, then per-model weekly windows.
+ */
+windows: Array<AgentAccountLimitWindow>, };
+
+export type AgentAccountLimitWindow = { kind: AgentAccountLimitWindowKind,
+/**
+ * Only a `weeklyModel` window carries the model family it meters, for example "Opus".
+ */
+modelLabel?: string | null,
+/**
+ * Share of the window already used, 0 to 100.
+ */
+usedPercent: number,
+/**
+ * Unix epoch milliseconds at which the window resets. Absent when the Agent did not say.
+ */
+resetsAtMs?: number | null, status: AgentAccountLimitStatus, };
+
+export type AgentAccountLimitWindowKind = "fiveHour" | "weekly" | "weeklyModel";
+
+export type AgentAccountLimitStatus = "ok" | "warning" | "reached";
 
 export type TaskNavigationSnapshot = {
 /**

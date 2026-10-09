@@ -1,4 +1,6 @@
+pub(crate) mod account_limits;
 pub mod acp;
+mod acp_account_limits_projection;
 pub(crate) mod acp_active_prompt;
 pub(crate) mod acp_active_session_manager;
 mod acp_agent_authentication;

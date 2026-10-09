@@ -190,6 +190,7 @@ impl TaskProductApi {
             notifier,
             server_requests,
             ConfiguredProjectRoots::default(),
+            crate::agent::status_cache::AgentStatusCache::default(),
         )
     }
 
@@ -202,6 +203,7 @@ impl TaskProductApi {
         notifier: TaskUpdateNotifier,
         server_requests: ServerRequestRuntime,
         configured_projects: ConfiguredProjectRoots,
+        agent_statuses: crate::agent::status_cache::AgentStatusCache,
     ) -> Result<Self, RuntimeError> {
         let initial_revision = store.max_task_revision()?;
         let mutations = TaskMutations::new(
@@ -226,7 +228,8 @@ impl TaskProductApi {
                 session_operations.clone(),
             ),
         )
-        .with_native_catalog(native_catalog.clone());
+        .with_native_catalog(native_catalog.clone())
+        .with_agent_statuses(agent_statuses);
         let turn_acceptance = turn_runner.turn_acceptance();
         let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
         let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
