@@ -207,6 +207,9 @@ struct State {
     followup_deadline: Option<Instant>,
     /// Updates arrived during the hold and no `_session/turn_ended` followed.
     cycle_running: bool,
+    /// Stops the Agent confirmed during the hold whose acknowledgement line has
+    /// not arrived. The adapter writes it as agent text outside any cycle.
+    stop_acknowledgements_due: usize,
 }
 
 impl Default for BackgroundWork {
@@ -307,21 +310,39 @@ impl BackgroundWork {
 
     /// Any Chat-visible update during the hold belongs to a cycle the model
     /// started on its own: the prompt's own updates precede its response.
-    pub(super) fn session_update_observed(&self, update: &SessionUpdate) {
-        if !matches!(
-            update,
-            SessionUpdate::AgentMessageChunk(_)
-                | SessionUpdate::AgentThoughtChunk(_)
-                | SessionUpdate::ToolCall(_)
-                | SessionUpdate::ToolCallUpdate(_)
-                | SessionUpdate::Plan(_)
-        ) {
+    /// The acknowledgement of a stop App Server asked for is the exception: no
+    /// `_session/turn_ended` follows it.
+    // TODO: the adapter also writes its mode and Fast mode fallback lines as
+    // untagged agent text, which this still counts as a cycle nothing ends.
+    // Tell them apart once the adapter tags them or App Server takes its
+    // `notice` updates, and drop the acknowledgement count with them.
+    pub(super) fn session_update_observed(&self, session_id: &str, update: &SessionUpdate) {
+        let kind = match update {
+            SessionUpdate::AgentMessageChunk(_) => "agent_message_chunk",
+            SessionUpdate::AgentThoughtChunk(_) => "agent_thought_chunk",
+            SessionUpdate::ToolCall(_) => "tool_call",
+            SessionUpdate::ToolCallUpdate(_) => "tool_call_update",
+            SessionUpdate::Plan(_) => "plan",
+            _ => return,
+        };
+        let mut state = self.state();
+        if state.hold_started.is_none() {
             return;
         }
-        let mut state = self.state();
-        if state.hold_started.is_some() {
-            state.cycle_running = true;
-            state.followup_deadline = None;
+        if kind == "agent_message_chunk" && state.stop_acknowledgements_due > 0 {
+            state.stop_acknowledgements_due -= 1;
+            return;
+        }
+        state.followup_deadline = None;
+        if !std::mem::replace(&mut state.cycle_running, true) {
+            logging::info(
+                "acp_autonomous_cycle_observed",
+                json!({
+                    "session_id": session_id,
+                    "first_update": kind,
+                    "live_tasks": state.live_tasks.len(),
+                }),
+            );
         }
     }
 
@@ -339,11 +360,11 @@ impl BackgroundWork {
         );
     }
 
-    /// A new prompt took over completion ownership; its response ends its work.
-    pub(super) fn prompt_continued(&self) {
-        let mut state = self.state();
-        state.cycle_running = false;
-        state.followup_deadline = None;
+    /// A new prompt took over completion ownership, which ends the hold: its
+    /// updates are its own output, not a cycle, and its response decides anew
+    /// whether background work holds the turn.
+    pub(super) fn prompt_continued(&self, session_id: &str, task_id: &str) {
+        self.finish_hold(session_id, task_id, "prompt_continued");
     }
 
     /// Whether a settled `end_turn` must keep its turn open. The first `true`
@@ -411,12 +432,13 @@ impl BackgroundWork {
         }
     }
 
-    /// The prompt runner is leaving. Live commands stay tracked for the next
-    /// prompt; the cycle flags describe this hold only.
+    /// The prompt runner is leaving, or a continuation prompt took over. Live
+    /// commands stay tracked; the cycle flags describe this hold only.
     pub(super) fn finish_hold(&self, session_id: &str, task_id: &str, outcome: &'static str) {
         let mut state = self.state();
         state.cycle_running = false;
         state.followup_deadline = None;
+        state.stop_acknowledgements_due = 0;
         let Some(started) = state.hold_started.take() else {
             return;
         };
@@ -452,15 +474,40 @@ impl BackgroundWork {
         }
     }
 
-    /// Asks the Agent to stop one command without touching the turn. `Ok` means
-    /// the Agent answered; the command leaves the live set through its own
-    /// state update, which may already have arrived.
-    pub(super) async fn stop_task(
+    /// Stops one command for the user without touching the turn. The session
+    /// worker awaits the answer before it reads the updates the stop caused, so
+    /// the acknowledgement line is still ahead when the answer is counted.
+    pub(super) async fn stop_command(
+        &self,
         connection: &ConnectionTo<Agent>,
         session_id: &SessionId,
         trace: Option<&AcpTraceSession>,
         async_task_id: String,
     ) -> Result<(), RuntimeError> {
+        let stopped = Self::stop_task(connection, session_id, trace, async_task_id).await?;
+        if stopped {
+            self.stop_confirmed();
+        }
+        Ok(())
+    }
+
+    /// The Agent stopped a command on request and acknowledges it in Chat.
+    fn stop_confirmed(&self) {
+        let mut state = self.state();
+        if state.hold_started.is_some() {
+            state.stop_acknowledgements_due += 1;
+        }
+    }
+
+    /// Asks the Agent to stop one command. `Ok` means the Agent answered, with
+    /// whether it stopped a running command; the command leaves the live set
+    /// through its own state update, which may already have arrived.
+    async fn stop_task(
+        connection: &ConnectionTo<Agent>,
+        session_id: &SessionId,
+        trace: Option<&AcpTraceSession>,
+        async_task_id: String,
+    ) -> Result<bool, RuntimeError> {
         let started = Instant::now();
         logging::info(
             "acp_async_task_stop_started",
@@ -504,7 +551,7 @@ impl BackgroundWork {
             }),
         );
         match result {
-            Ok(Ok(_)) => Ok(()),
+            Ok(Ok(response)) => Ok(response.stopped),
             Ok(Err(error)) => Err(RuntimeError::NotReady(format!(
                 "Agent refused to stop the background command (code {})",
                 i32::from(error.code)
