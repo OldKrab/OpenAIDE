@@ -2,6 +2,6 @@
   "name": "openaide-claude-acp-policy",
   "private": true,
   "dependencies": {
-    "@openaide/claude-agent-acp": "1.2.0"
+    "@openaide/claude-agent-acp": "1.3.0"
   }
 }
