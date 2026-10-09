@@ -478,13 +478,21 @@ An Agent may answer `session/prompt` while a command it started in the backgroun
 
 When the owning prompt response is `end_turn` and background work remains, App Server keeps the Task turn open instead of publishing idle: the Task keeps the same active turn and shows as `background`. Background work remains while any reported background command is running or paused, while an Agent-started cycle that followed a background command is producing output, and for up to 60 seconds after a command completes or fails during the hold, which is the time the Agent has to start that cycle. A stopped command promises no follow-up. The turn settles as a normal `end_turn` when no background work remains.
 
-`background` is a displayed status of the held turn, not a separate lifecycle state. It means the Agent is not producing output, something it started is still running, and nothing needs the user. A held turn is `background` from the prompt response until background work ends, except while an Agent-started cycle is producing output, when it is `working` again. App Server publishes the number of running or paused background commands with the status; the count is zero during the 60-second follow-up time.
+`background` is a displayed status of the held turn, not a separate lifecycle state. It means the Agent is not producing output, something it started is still running, and nothing needs the user. A held turn is `background` from the prompt response until background work ends, except while an Agent-started cycle is producing output, when it is `working` again.
+
+App Server publishes the running and paused background commands of the active turn with the Task snapshot, in start order, whenever the Agent's report changes: while the prompt is still in flight as well as during the hold. Each command carries its description, a type label when it is not a shell command, the time App Server first saw it, whether it is paused, and the Tool call that started it when the Agent names one. The list is empty during the 60-second follow-up time. A command leaves the list when it ends. The list survives a page reload; like the active turn, it does not survive an App Server restart.
+
+When a command ends, App Server records its outcome (completed, failed, or stopped) on the Tool row that started it. The outcome is durable App Server state of that row and survives later Agent updates of the same Tool call. A command the Agent reports without a Tool call has no marked row.
 
 Entering `background` sets `unread`, at the prompt response and again whenever an Agent-started cycle ends with background work remaining, because an answer is ready to read. It creates no Task Attention Event: the finished event belongs to the settlement of the turn, when no background work remains.
 
-Frontend presents `background` as its own status. Task Navigation orders the Task with in-progress Tasks and marks it with a slow ring of grey dots instead of the in-progress spinner, plus the ordinary unread badge. The Task Page header says **Background**. Chat ends with one quiet row, **N background commands running**, or **Background command finished** when the count is zero. The Composer keeps Stop, labeled **Stop N background commands** while commands are running.
+Frontend presents `background` as its own status. Task Navigation orders the Task with in-progress Tasks and marks it with a slow ring of grey dots instead of the in-progress spinner, plus the ordinary unread badge. The Task Page header says **Background**. The Composer keeps Stop, labeled **Stop N background commands** while commands are running.
+
+Chat shows the command list as one quiet row whenever a command is alive, above the working indicator while the Agent is still answering. A single command is shown directly; several collapse to **N background commands running** and expand in place. An entry shows the description, the type label, the elapsed time, **Paused**, and **Stop**. A held turn with no live command shows **Background command finished**. The Tool row that started a command says **Running in background** while it is listed, then **Finished in background**, **Failed in background**, or **Stopped**.
 
 Apart from its presentation, the held turn is the ordinary active turn. Send steers it, and a `promptRequired` continuation takes over completion ownership. Queued Messages wait for it and advance only on its settlement. Idle Native Session release stays suspended. `task/cancel` sends `session/cancel`, asks the Agent to stop every running background command through `_session/async_task/stop`, and ends the turn as a user Stop without waiting for another prompt response. App Server restart terminates it like any other active turn.
+
+`task/stopBackgroundCommand` stops one listed command through `_session/async_task/stop` without touching the turn, also while the Agent is still answering. It needs no confirmation. App Server accepts the request once the command is listed and stoppable and reports the result through the list: the command leaves it when the Agent confirms, or stays with a failed-stop mark that Chat shows as **Couldn't stop** with a retry. Stopping the last command is not a user Stop: the held turn settles as a normal `end_turn`, raises the finished Task Attention Event, and advances Queued Messages.
 
 Limits of the reported signals are accepted rather than hidden:
 
@@ -492,7 +500,9 @@ Limits of the reported signals are accepted rather than hidden:
 - The Agent reports the end of its own cycle but not its start. A cycle that starts while the Task is idle, including one that follows a command which finished before the prompt response, is projected into Chat without changing Task status.
 - If the Agent never reports the end of a cycle it started, the Task stays `working` until Stop or the next Send.
 - The Agent may start no cycle after a command ends. The Task then stays `background` for the 60-second follow-up time before it becomes idle.
-- Background commands of Subagent child sessions do not hold the Task turn.
+- Background commands of Subagent child sessions do not hold the Task turn and are not listed.
+- A command that ends while no prompt is running gets its Tool row outcome with the next prompt. Commands stopped by `task/cancel` may get none.
+- Command progress and output are not shown.
 
 ### User cancellation and termination
 

@@ -192,6 +192,28 @@ impl TaskPermissionPolicy {
     }
 }
 
+/// One background command an Agent left running. Its text is Agent-authored
+/// content: clients show it and never log it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundCommandSnapshot {
+    /// Agent-scoped identity, valid for `task/stopBackgroundCommand`.
+    pub command_id: String,
+    pub description: String,
+    /// Agent-authored label for work that is not a shell command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind_label: Option<String>,
+    /// App Server time at which the command was first reported.
+    pub started_at: String,
+    pub paused: bool,
+    pub can_stop: bool,
+    /// The last `task/stopBackgroundCommand` for this command did not succeed.
+    pub stop_failed: bool,
+    /// The Tool row that started the command, once the Agent correlates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
@@ -202,9 +224,10 @@ pub struct TaskSnapshot {
     /// App Server-authored start of the active turn; absent when no turn is running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<String>,
-    /// Agent-reported background commands still running; present only while the Task is `background`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub background_command_count: Option<u32>,
+    /// Agent-reported background commands still alive in the active turn, in
+    /// the order the Agent started them. Independent of the `background` status.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub background_commands: Vec<BackgroundCommandSnapshot>,
     pub lifecycle: TaskLifecycle,
     pub revision: u64,
     pub preparation: TaskPreparationSnapshot,

@@ -1,0 +1,117 @@
+/* Background Work row: quiet like the working status, with no motion of its own. */
+.background-commands {
+  width: 100%;
+  margin-top: 32px;
+  color: var(--oa-muted);
+  font-size: 13px;
+}
+
+.message-list-virtual-row[data-row-kind="background"] + .message-list-virtual-row[data-row-kind="status"] .working-status {
+  margin-top: 10px;
+}
+
+.background-commands-summary {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.background-commands-label {
+  min-width: 0;
+}
+
+.background-commands-toggle {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.background-commands-toggle:hover,
+.background-commands-toggle:focus-visible {
+  color: var(--oa-text);
+}
+
+.background-commands-chevron {
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.background-commands-toggle[aria-expanded="true"] .background-commands-chevron {
+  transform: rotate(90deg);
+}
+
+.background-commands-list {
+  margin: 4px 0 0;
+  padding: 0 0 0 22px;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+.background-commands-list li {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+}
+
+.background-command {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.background-command-description {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklch, var(--oa-muted) 60%, var(--oa-text));
+  font-family: var(--oa-mono-font);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-command-kind,
+.background-command-state {
+  flex: none;
+  font-size: 12px;
+}
+
+.background-command-kind::first-letter {
+  text-transform: uppercase;
+}
+
+.background-command-state.failed {
+  color: var(--oa-danger);
+}
+
+.background-command-stop {
+  flex: none;
+  margin-left: auto;
+  border: 0;
+  padding: 0;
+  color: var(--oa-accent);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.background-command-stop:hover,
+.background-command-stop:focus-visible {
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .background-commands-chevron {
+    transition: none;
+  }
+}

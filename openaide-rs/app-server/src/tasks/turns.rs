@@ -1,3 +1,4 @@
+mod background_command;
 mod queue_settlement;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};

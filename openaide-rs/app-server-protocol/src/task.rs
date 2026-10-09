@@ -375,6 +375,20 @@ pub struct TaskCancelResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskStopBackgroundCommandParams {
+    pub task_id: TaskId,
+    /// `BackgroundCommandSnapshot.commandId` of a command in the active turn.
+    pub command_id: String,
+}
+
+/// The Agent accepted the stop. The command leaves `backgroundCommands`
+/// through the ordered Task change that follows; the turn itself continues.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStopBackgroundCommandResult {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskOpenParams {
     pub task_id: TaskId,
 }

@@ -309,7 +309,19 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             detail_artifact_id,
             details,
             permission_outcomes,
+            background_outcome,
         } => ActivityStepSnapshot::Tool {
+            background_outcome: background_outcome.map(|outcome| match outcome {
+                crate::protocol::model::BackgroundCommandOutcome::Completed => {
+                    openaide_app_server_protocol::snapshot::BackgroundCommandOutcome::Completed
+                }
+                crate::protocol::model::BackgroundCommandOutcome::Failed => {
+                    openaide_app_server_protocol::snapshot::BackgroundCommandOutcome::Failed
+                }
+                crate::protocol::model::BackgroundCommandOutcome::Stopped => {
+                    openaide_app_server_protocol::snapshot::BackgroundCommandOutcome::Stopped
+                }
+            }),
             tool_call_id: tool_call_id.clone(),
             name: name.clone(),
             status: project_activity_status(*status),

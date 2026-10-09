@@ -47,15 +47,37 @@ pub enum AgentEvent {
     /// Account-wide usage limits. They ride a Native Session's updates but describe the Agent's
     /// account, so the consumer records them on the Agent and never on the Task.
     AccountLimits(AgentAccountLimitsUpdate),
-    /// The answered prompt's turn is now held open only by background commands
-    /// (`Some`), or the Agent is producing output in it again (`None`).
-    BackgroundWork(Option<AgentBackgroundWork>),
+    /// The active turn's Background Work changed: its live commands, or whether
+    /// they alone hold the answered turn open.
+    BackgroundWork(AgentBackgroundWork),
+    /// A background command ended. Sent only for a command the Agent tied to
+    /// the Tool call that started it.
+    BackgroundCommandFinished {
+        tool_call_id: String,
+        outcome: crate::protocol::model::BackgroundCommandOutcome,
+    },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentBackgroundWork {
-    /// Zero while a finished command's follow-up cycle is still awaited.
-    pub live_commands: u32,
+    /// The prompt was answered and the Agent is not producing output: only
+    /// this work keeps the turn open.
+    pub held: bool,
+    /// Running or paused commands in spawn order. Empty while a finished
+    /// command's follow-up cycle is still awaited.
+    pub commands: Vec<AgentBackgroundCommand>,
+}
+
+/// One live background command. Its text is Agent-authored content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentBackgroundCommand {
+    pub command_id: String,
+    pub description: String,
+    /// Label for work that is not a shell command.
+    pub kind_label: Option<String>,
+    pub paused: bool,
+    pub can_stop: bool,
+    pub tool_call_id: Option<String>,
 }
 
 /// A normalized ACP compaction patch. Omitted fields keep their stored value.

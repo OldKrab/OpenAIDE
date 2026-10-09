@@ -197,6 +197,14 @@ impl AgentRuntime for AcpAgentRuntime {
         self.kernel.steer(prompt)
     }
 
+    fn stop_background_command(
+        &self,
+        session: &AgentSessionKey,
+        command_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.kernel.stop_background_command(session, command_id)
+    }
+
     fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.kernel.cancel_session(session)
     }

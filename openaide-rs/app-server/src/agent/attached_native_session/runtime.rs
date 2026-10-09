@@ -284,6 +284,12 @@ pub(super) async fn run(
                             );
                         }
                     }
+                    AcpSessionCommand::StopBackgroundCommand { reply_tx, .. } => {
+                        // No prompt is active, so no command is tracked as live.
+                        let _ = reply_tx.send(Err(RuntimeError::Conflict(
+                            "Background command is not running".to_string(),
+                        )));
+                    }
                     AcpSessionCommand::Delete { reply_tx, operation_id } => {
                         deletion.dispatch(
                             active_session.connection(),

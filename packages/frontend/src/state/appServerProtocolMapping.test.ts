@@ -109,6 +109,33 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("carries the live background commands of the active turn", () => {
+    const { snapshot } = mapProtocolTaskSnapshot(protocolSnapshot({
+      task: protocolSummary({ status: "background" }),
+      backgroundCommands: [{
+        commandId: "command-1",
+        description: "npm run dev",
+        kindLabel: "monitor",
+        startedAt: "1760000000000",
+        paused: true,
+        canStop: true,
+        stopFailed: true,
+        toolCallId: "call-1",
+      }],
+    }));
+
+    expect(snapshot.background_commands).toEqual([{
+      command_id: "command-1",
+      description: "npm run dev",
+      kind_label: "monitor",
+      started_at: "1760000000000",
+      paused: true,
+      can_stop: true,
+      stop_failed: true,
+      tool_call_id: "call-1",
+    }]);
+  });
+
   it("keeps stopping distinct from running", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ status: "stopping" }))).toMatchObject({
       status: "stopping",

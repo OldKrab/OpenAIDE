@@ -2842,6 +2842,7 @@ fn task_tool_image_preview_returns_validated_artifact_image_through_protocol() {
             created_at: "2026-01-01T00:00:01.000Z".to_string(),
             collapsed: true,
             steps: vec![ActivityStep::Tool {
+                background_outcome: None,
                 tool_call_id: Some("tool-image".to_string()),
                 name: "read".to_string(),
                 status: crate::protocol::model::ActivityStatus::Completed,

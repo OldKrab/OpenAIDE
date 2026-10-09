@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import {
   TASK_CLOSE_PLAN,
+  TASK_STOP_BACKGROUND_COMMAND,
   TASK_QUEUE_APPEND,
   TASK_QUEUE_REMOVE,
   TASK_QUEUE_RESUME,
@@ -82,6 +83,31 @@ describe("task mutation intents", () => {
       taskId: "task-a",
       message: "connection closed",
     }));
+  });
+
+  it("asks App Server to stop one background command and reports a rejected request", async () => {
+    const { stopBackgroundCommandIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("Background command is not running"));
+    const dispatch = vi.fn();
+
+    await stopBackgroundCommandIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch,
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot(), "command-1");
+
+    expect(request).toHaveBeenCalledWith(TASK_STOP_BACKGROUND_COMMAND, {
+      taskId: "task-a",
+      commandId: "command-1",
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:error",
+      taskId: "task-a",
+      message: "Background command is not running",
+    });
   });
 
   it("adds the exact composer draft to the durable queue", async () => {

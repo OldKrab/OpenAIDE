@@ -90,6 +90,7 @@ pub const FILE_VIEWER_OPEN_FROM_HANDLE: &str = "fileViewer/openFromHandle";
 pub const FILE_VIEWER_REFRESH: &str = "fileViewer/refresh";
 pub const FILE_VIEWER_RELEASE: &str = "fileViewer/release";
 pub const TASK_CANCEL: &str = "task/cancel";
+pub const TASK_STOP_BACKGROUND_COMMAND: &str = "task/stopBackgroundCommand";
 pub const TASK_OPEN: &str = "task/open";
 pub const TASK_RELOAD_NATIVE_SESSION: &str = "task/reloadNativeSession";
 pub const TASK_MARK_READ: &str = "task/markRead";
@@ -202,6 +203,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     FILE_VIEWER_REFRESH,
     FILE_VIEWER_RELEASE,
     TASK_CANCEL,
+    TASK_STOP_BACKGROUND_COMMAND,
     TASK_OPEN,
     TASK_MARK_READ,
     TASK_CHAT_PAGE,

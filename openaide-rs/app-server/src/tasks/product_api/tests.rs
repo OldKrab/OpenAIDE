@@ -2864,6 +2864,7 @@ fn adopting_native_session_persists_replayed_tool_details_with_the_new_task() {
             created_at: "2026-01-02T03:04:05.000Z".to_string(),
             collapsed: true,
             steps: vec![ActivityStep::Tool {
+                background_outcome: None,
                 tool_call_id: Some("tool-1".to_string()),
                 name: "edit".to_string(),
                 status: ActivityStatus::Completed,

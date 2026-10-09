@@ -103,7 +103,7 @@ pub(super) async fn run_prompt(
     let mut settled_by_response = false;
     let mut deletion = SessionDeleteRequest::default();
     let mut completed_prompt = None;
-    let mut reported_background = None;
+    let mut reported_background = AgentBackgroundWork::default();
     // Legacy prompt sets still settle on their first terminal response. With
     // the extension, resolve admitted deliveries before retiring their owner.
     let wait_for_steering = steering_requests.supported();
@@ -137,6 +137,20 @@ pub(super) async fn run_prompt(
         if cancel_sent && completed_prompt.is_some() && background_work.is_holding() {
             break Ok(AgentPromptOutcome::Cancelled);
         }
+        // A Tool row learns how its background command ended even when that
+        // end settles the turn below.
+        let finished = background_work
+            .take_finished()
+            .into_iter()
+            .try_for_each(|finished| {
+                sink.emit(AgentEvent::BackgroundCommandFinished {
+                    tool_call_id: finished.tool_call_id,
+                    outcome: finished.outcome,
+                })
+            });
+        if let Err(error) = finished {
+            break Err(error);
+        }
         // Agent-reported background work keeps a finished turn open. Checked
         // first: settling retires the prompt set and its steering admission.
         let held = !cancel_sent
@@ -150,14 +164,12 @@ pub(super) async fn run_prompt(
             settled_by_response = true;
             break completed_prompt.take().expect("completed prompt");
         }
-        // The turn continues. Tell the Task whether only background work holds
-        // it; a settling turn skips this so it never flashes back to running.
-        let background = held
-            .then(|| background_work.background_only())
-            .flatten()
-            .map(|live_commands| AgentBackgroundWork { live_commands });
+        // The turn continues. Tell the Task which commands are alive and
+        // whether they alone hold it; a settling turn skips this so it never
+        // flashes back to running.
+        let background = background_work.report(held);
         if background != reported_background {
-            reported_background = background;
+            reported_background = background.clone();
             if let Err(error) = sink.emit(AgentEvent::BackgroundWork(background)) {
                 break Err(error);
             }
@@ -287,6 +299,19 @@ pub(super) async fn run_prompt(
                         let _ = reply_tx.send(Err(RuntimeError::NotReady(
                             "ACP session already has an active prompt".to_string(),
                         )));
+                    }
+                    AcpSessionCommand::StopBackgroundCommand { command_id, reply_tx } => {
+                        // The turn keeps running; the command's own state
+                        // update removes it from the live set.
+                        let _ = reply_tx.send(
+                            BackgroundWork::stop_task(
+                                active_session.connection(),
+                                active_session.session_id(),
+                                context.trace.as_ref(),
+                                command_id,
+                            )
+                            .await,
+                        );
                     }
                     AcpSessionCommand::Prompt { done_tx, .. } => {
                         let _ = done_tx.send(Err(RuntimeError::NotReady(

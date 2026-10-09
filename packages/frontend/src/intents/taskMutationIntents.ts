@@ -2,6 +2,7 @@ import {
   AppServerProtocolError,
   TASK_CANCEL,
   TASK_CLOSE_PLAN,
+  TASK_STOP_BACKGROUND_COMMAND,
   TASK_QUEUE_APPEND,
   TASK_QUEUE_MOVE,
   TASK_QUEUE_REMOVE,
@@ -137,6 +138,30 @@ export async function reloadNativeSessionIntent(
     snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
     intent: "refresh",
   });
+}
+
+/** Asks App Server to stop one Background Work command; the Task turn keeps running. */
+export async function stopBackgroundCommandIntent(
+  dependencies: TaskMutationIntentDependencies,
+  snapshot: TaskSnapshot | undefined,
+  commandId: string,
+) {
+  if (!snapshot) return;
+  const taskId = snapshot.task.task_id;
+  try {
+    if (!dependencies.backendConnection?.request) throw new Error("App Server connection unavailable.");
+    // Success and Agent-side failure both arrive as ordered Task changes on the command.
+    await dependencies.backendConnection.request(TASK_STOP_BACKGROUND_COMMAND, {
+      taskId: taskId as TaskId,
+      commandId,
+    });
+  } catch (error) {
+    dependencies.dispatch({
+      type: "taskInput:error",
+      taskId,
+      message: taskMutationErrorMessage(error, "Unable to stop the background command."),
+    });
+  }
 }
 
 export async function closeTaskPlanIntent(

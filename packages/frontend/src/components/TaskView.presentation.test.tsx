@@ -1,7 +1,7 @@
 import { act, create } from "react-test-renderer";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
+import type { BackgroundCommand, ChatMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
 
 describe("TaskView timeline presentation", () => {
   beforeEach(() => {
@@ -460,30 +460,71 @@ describe("TaskView timeline presentation", () => {
     expect(onReloadNativeSession).toHaveBeenCalledTimes(1);
   });
 
-  it("presents a turn held by background commands as quiet open work that can still be stopped", async () => {
+  it("lists the commands holding a turn and stops one without ending the turn", async () => {
     const { TaskView } = await import("./TaskView");
     const held = snapshotWithAuthoritativeTail(true);
     held.task.status = "background";
-    held.background_command_count = 2;
-    held.active_turn_started_at = String(Date.now() - 60_000);
+    held.background_commands = [
+      backgroundCommand("command-1", "npm run dev"),
+      { ...backgroundCommand("command-2", "Watch the deploy"), kind_label: "monitor", paused: true },
+    ];
+    const onStopBackgroundCommand = vi.fn();
     let tree!: ReactTestRenderer;
 
     act(() => {
-      tree = create(<TaskView {...taskViewProps(held)} />);
+      tree = create(<TaskView {...taskViewProps(held)} onStopBackgroundCommand={onStopBackgroundCommand} />);
     });
 
+    // Collapsed: the count alone, with no working indicator and the whole-turn Stop in the Composer.
     expect(JSON.stringify(tree.toJSON())).toContain("2 background commands running");
-    expect(tree.root.findAllByProps({ className: "working-status working-status-background" })).toHaveLength(1);
+    expect(JSON.stringify(tree.toJSON())).not.toContain("npm run dev");
     expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(0);
-    expect(tree.root.findAllByProps({ className: "working-status-duration" })).toHaveLength(0);
     expect(tree.root.findAllByProps({ "aria-label": "Stop 2 background commands" }).length).toBeGreaterThan(0);
 
-    const awaitingFollowup = { ...held, background_command_count: 0 };
+    act(() => tree.root.findByProps({ className: "background-commands-toggle" }).props.onClick());
+    const expanded = JSON.stringify(tree.toJSON());
+    expect(expanded).toContain("npm run dev");
+    expect(expanded).toContain("Watch the deploy");
+    expect(expanded).toContain("monitor");
+    expect(expanded).toContain("Paused");
+
+    act(() => tree.root.findByProps({ "aria-label": "Stop background command: Watch the deploy" }).props.onClick());
+    expect(onStopBackgroundCommand).toHaveBeenCalledWith("command-2");
+
+    const awaitingFollowup = { ...held, background_commands: [] };
     act(() => {
-      tree.update(<TaskView {...taskViewProps(awaitingFollowup)} />);
+      tree.update(<TaskView {...taskViewProps(awaitingFollowup)} onStopBackgroundCommand={onStopBackgroundCommand} />);
     });
     expect(JSON.stringify(tree.toJSON())).toContain("Background command finished");
     expect(tree.root.findAllByProps({ "aria-label": "Stop task" }).length).toBeGreaterThan(0);
+  });
+
+  it("shows the only background command above the working indicator and keeps a failed stop on it", async () => {
+    const { TaskView } = await import("./TaskView");
+    const working = snapshotWithAuthoritativeTail(true);
+    working.active_turn_started_at = String(Date.now() - 60_000);
+    working.background_commands = [backgroundCommand("command-1", "npm run dev")];
+    const onStopBackgroundCommand = vi.fn();
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(working)} onStopBackgroundCommand={onStopBackgroundCommand} />);
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("npm run dev");
+    expect(rendered).not.toContain("background command running");
+    expect(rendered.indexOf("background-commands")).toBeLessThan(rendered.indexOf("working-status-dots"));
+    expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ "aria-label": "Stop task" }).length).toBeGreaterThan(0);
+
+    const failed = { ...working, background_commands: [{ ...working.background_commands[0], stop_failed: true }] };
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(failed)} onStopBackgroundCommand={onStopBackgroundCommand} />);
+    });
+    expect(JSON.stringify(tree.toJSON())).toContain("Couldn't stop");
+    act(() => tree.root.findByProps({ "aria-label": "Stop background command: npm run dev" }).props.onClick());
+    expect(onStopBackgroundCommand).toHaveBeenCalledWith("command-1");
   });
 
   it("presents a bare waiting fallback as blocked instead of working", async () => {
@@ -965,6 +1006,17 @@ function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
     send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision,
+  };
+}
+
+function backgroundCommand(commandId: string, description: string): BackgroundCommand {
+  return {
+    command_id: commandId,
+    description,
+    started_at: String(Date.now() - 5_000),
+    paused: false,
+    can_stop: true,
+    stop_failed: false,
   };
 }
 

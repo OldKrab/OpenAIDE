@@ -37,6 +37,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                         detail_artifact_id: None,
                         details: tool_call.details,
                         permission_outcomes: Vec::new(),
+                        background_outcome: None,
                     }],
                 })
             }
@@ -66,6 +67,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     detail_artifact_id: None,
                     details: None,
                     permission_outcomes: Vec::new(),
+                    background_outcome: None,
                 }],
             }),
             AgentEvent::Subagent(subagent) => {
@@ -107,7 +109,8 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
             | AgentEvent::ContextUsage(_)
             | AgentEvent::TurnUsage(_)
             | AgentEvent::AccountLimits(_)
-            | AgentEvent::BackgroundWork(_) => None,
+            | AgentEvent::BackgroundWork(_)
+            | AgentEvent::BackgroundCommandFinished { .. } => None,
         })
         .collect()
 }

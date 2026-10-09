@@ -388,6 +388,7 @@ fn persisted_tool_artifacts_keep_a_lightweight_file_summary() {
         created_at: "2026-07-02T00:00:00Z".to_string(),
         collapsed: true,
         steps: vec![ActivityStep::Tool {
+            background_outcome: None,
             tool_call_id: None,
             name: "edit".to_string(),
             status: ActivityStatus::Completed,
@@ -489,6 +490,7 @@ fn pages_upgrade_saved_view_image_envelopes_to_view_presentations() {
             created_at: "2026-07-02T00:00:00Z".to_string(),
             collapsed: true,
             steps: vec![ActivityStep::Tool {
+                background_outcome: None,
                 tool_call_id: Some("view-call".to_string()),
                 name: "read".to_string(),
                 status: ActivityStatus::Completed,
@@ -1005,6 +1007,7 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
             created_at: "2026-07-02T00:00:00Z".to_string(),
             collapsed: true,
             steps: vec![ActivityStep::Tool {
+                background_outcome: None,
                 tool_call_id: None,
                 name: "edit".to_string(),
                 status: ActivityStatus::Completed,
@@ -1032,6 +1035,7 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
 
 fn execute_step(tool_call_id: &str, command: &str) -> ActivityStep {
     ActivityStep::Tool {
+        background_outcome: None,
         tool_call_id: Some(tool_call_id.to_string()),
         name: "execute".to_string(),
         status: ActivityStatus::Completed,

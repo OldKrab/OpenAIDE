@@ -28,6 +28,7 @@ import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmen
 import {
   appendTaskQueueIntent,
   cancelTaskIntent,
+  stopBackgroundCommandIntent,
   closeTaskPlanIntent,
   removeTaskQueueMessageIntent,
   reloadNativeSessionIntent,
@@ -101,6 +102,20 @@ export function createTaskCallbacks({
         state.snapshot,
       );
       cancel();
+    },
+    stopBackgroundCommand: (commandId) => {
+      void stopBackgroundCommandIntent(
+        {
+          backendConnection,
+          clientInstanceId,
+          createSnapshotRequestId,
+          dispatch,
+          postHostMessage,
+          stateRootId: state.appServerStateRootId,
+        },
+        state.snapshot,
+        commandId,
+      );
     },
     closePlan: () => closeTaskPlanIntent(
       {

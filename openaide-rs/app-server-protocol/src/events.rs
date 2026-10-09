@@ -5,8 +5,8 @@ use crate::ids::{
     ClientInstanceId, EventCursor, MessageId, StateRootId, TaskId, WorktreeRepositoryId,
 };
 use crate::snapshot::{
-    AgentCollectionSnapshot, AgentPlanSnapshot, ChatItem, ChatSnapshot, ClientSnapshot,
-    PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
+    AgentCollectionSnapshot, AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot,
+    ClientSnapshot, PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
     SubagentHistorySnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage,
     TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot,
     TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationSnapshot,
@@ -147,9 +147,9 @@ pub struct TaskChanges {
     /// Present when the active-turn clock changes; inner `None` clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<Option<String>>,
-    /// Present with every Task summary change; inner `None` means the Task is not `background`.
+    /// Present with every Task summary change; replaces the whole list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub background_command_count: Option<Option<u32>>,
+    pub background_commands: Option<Vec<BackgroundCommandSnapshot>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<TaskLifecycle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

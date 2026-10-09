@@ -47,13 +47,45 @@ pub enum TaskStatus {
     Waiting,
 }
 
-/// Agent-reported Background Work holding an answered turn open. The Task stays
-/// `Active` for every workflow rule; only its client-visible status differs.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+/// Agent-reported Background Work of the active turn. The Task stays `Active`
+/// for every workflow rule; only its client-visible status differs.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TaskBackgroundWork {
-    /// Background commands still running or paused. Zero while a finished
-    /// command's follow-up cycle is still awaited.
-    pub live_commands: u32,
+    /// Only this work keeps the answered turn open: the Agent is not producing
+    /// output. Defaulted so a record written before the command list still loads.
+    #[serde(default)]
+    pub held: bool,
+    /// Commands still running or paused, in the order the Agent started them.
+    /// Empty while a finished command's follow-up cycle is still awaited.
+    #[serde(default)]
+    pub commands: Vec<TaskBackgroundCommand>,
+}
+
+/// One live background command. Its text is Agent-authored content.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskBackgroundCommand {
+    pub command_id: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind_label: Option<String>,
+    /// App Server time of the first report.
+    pub started_at: String,
+    pub paused: bool,
+    pub can_stop: bool,
+    /// The last user stop of this command did not succeed; a retry clears it.
+    #[serde(default)]
+    pub stop_failed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+/// How a background command ended, recorded on the Tool row that started it.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundCommandOutcome {
+    Completed,
+    Failed,
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

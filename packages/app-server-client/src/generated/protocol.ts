@@ -112,6 +112,7 @@ export const FILE_VIEWER_OPEN_FROM_HANDLE = "fileViewer/openFromHandle" as const
 export const FILE_VIEWER_REFRESH = "fileViewer/refresh" as const;
 export const FILE_VIEWER_RELEASE = "fileViewer/release" as const;
 export const TASK_CANCEL = "task/cancel" as const;
+export const TASK_STOP_BACKGROUND_COMMAND = "task/stopBackgroundCommand" as const;
 export const TASK_OPEN = "task/open" as const;
 export const TASK_RELOAD_NATIVE_SESSION = "task/reloadNativeSession" as const;
 export const TASK_MARK_READ = "task/markRead" as const;
@@ -940,6 +941,14 @@ export type TaskCancelParams = { taskId: TaskId, turnId?: TurnId | null, };
 
 export type TaskCancelResult = { task: TaskSnapshot, };
 
+export type TaskStopBackgroundCommandParams = { taskId: TaskId,
+/**
+ * `BackgroundCommandSnapshot.commandId` of a command in the active turn.
+ */
+commandId: string, };
+
+export type TaskStopBackgroundCommandResult = Record<symbol, never>;
+
 export type TaskChatPageParams = { taskId: TaskId, subagentId?: SubagentId | null, beforeCursor: MessageId, limit: number, };
 
 export type TaskChatPageResult = { taskId: TaskId, subagentId?: SubagentId | null, items: Array<ChatItem>, hasBefore: boolean, totalCount: number, revision: number, startCursor?: MessageId | null, endCursor?: MessageId | null, };
@@ -1082,9 +1091,9 @@ export type TaskChanges = { task?: TaskSummary | null,
  */
 activeTurnStartedAt?: string | null | null,
 /**
- * Present with every Task summary change; inner `None` means the Task is not `background`.
+ * Present with every Task summary change; replaces the whole list.
  */
-backgroundCommandCount?: number | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null,
+backgroundCommands?: Array<BackgroundCommandSnapshot> | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null,
 /**
  * Task-owned permission handling. Carried as a delta so an open replica
  * learns about `task/setPermissionPolicy` without a fresh baseline.
@@ -1236,6 +1245,28 @@ export type TaskLifecycle = "prepared" | "open" | "archived";
 
 export type TaskPermissionPolicy = "askEveryTime" | "autoApprove";
 
+export type BackgroundCommandSnapshot = {
+/**
+ * Agent-scoped identity, valid for `task/stopBackgroundCommand`.
+ */
+commandId: string, description: string,
+/**
+ * Agent-authored label for work that is not a shell command.
+ */
+kindLabel?: string | null,
+/**
+ * App Server time at which the command was first reported.
+ */
+startedAt: string, paused: boolean, canStop: boolean,
+/**
+ * The last `task/stopBackgroundCommand` for this command did not succeed.
+ */
+stopFailed: boolean,
+/**
+ * The Tool row that started the command, once the Agent correlates it.
+ */
+toolCallId?: string | null, };
+
 export type TaskSnapshot = { task: TaskSummary,
 /**
  * Durable user preference that applies to future Task permission requests.
@@ -1246,9 +1277,10 @@ permissionPolicy: TaskPermissionPolicy,
  */
 activeTurnStartedAt?: string | null,
 /**
- * Agent-reported background commands still running; present only while the Task is `background`.
+ * Agent-reported background commands still alive in the active turn, in
+ * the order the Agent started them. Independent of the `background` status.
  */
-backgroundCommandCount?: number | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, currentPlan?: AgentPlanSnapshot | null, messageQueue: TaskMessageQueueSnapshot, subagents: SubagentOverviewSnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+backgroundCommands?: Array<BackgroundCommandSnapshot>, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, currentPlan?: AgentPlanSnapshot | null, messageQueue: TaskMessageQueueSnapshot, subagents: SubagentOverviewSnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
 
 export type TaskMessageQueueSnapshot = { revision: number, pause?: TaskMessageQueuePauseSnapshot | null, items?: Array<QueuedMessageSnapshot>, };
 
@@ -1366,11 +1398,18 @@ export type QuestionMessageAction = "submit" | "cancel";
 
 export type ActivityStatus = "running" | "completed" | "interrupted" | "failed";
 
+export type BackgroundCommandOutcome = "completed" | "failed" | "stopped";
+
 export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, presentation?: ToolPresentationSnapshot | null,
 /**
  * Agent-authored purpose of an execute Tool, shown as its compact title.
  */
-description?: string | null, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, } | { "kind": "subagent", subagentId?: SubagentId | null, toolCallId?: string | null, title?: string | null, threadId?: string | null, rawPath?: string | null, activity?: string | null, name: string, path: Array<string>, status: ActivityStatus, events: Array<SubagentActivitySnapshot>, };
+description?: string | null, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>,
+/**
+ * How the background command this Tool started ended. A command still
+ * running is listed in `TaskSnapshot.backgroundCommands` instead.
+ */
+backgroundOutcome?: BackgroundCommandOutcome | null, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, } | { "kind": "subagent", subagentId?: SubagentId | null, toolCallId?: string | null, title?: string | null, threadId?: string | null, rawPath?: string | null, activity?: string | null, name: string, path: Array<string>, status: ActivityStatus, events: Array<SubagentActivitySnapshot>, };
 
 export type SubagentActivitySnapshot = "delegated" | "interacted" | "running" | "completed" | "failed" | "stopped";
 
@@ -1404,7 +1443,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof TASK_QUEUE_RESUME;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof TASK_QUEUE_RESUME;
 export type RequestParamsByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;
   [FILE_VIEWER_SEARCH]: ProjectFilesParams;
@@ -1498,6 +1537,7 @@ export type RequestParamsByMethod = {
   [FILE_VIEWER_REFRESH]: FileViewerRefreshParams;
   [FILE_VIEWER_RELEASE]: FileViewerReleaseParams;
   [TASK_CANCEL]: TaskCancelParams;
+  [TASK_STOP_BACKGROUND_COMMAND]: TaskStopBackgroundCommandParams;
   [TASK_OPEN]: TaskOpenParams;
   [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionParams;
   [TASK_MARK_READ]: TaskMarkReadParams;
@@ -1611,6 +1651,7 @@ export type ResponseResultByMethod = {
   [FILE_VIEWER_REFRESH]: FileViewerSnapshot;
   [FILE_VIEWER_RELEASE]: FileViewerReleaseResult;
   [TASK_CANCEL]: TaskCancelResult;
+  [TASK_STOP_BACKGROUND_COMMAND]: TaskStopBackgroundCommandResult;
   [TASK_OPEN]: TaskOpenResult;
   [TASK_RELOAD_NATIVE_SESSION]: TaskReloadNativeSessionResult;
   [TASK_MARK_READ]: TaskMarkReadResult;
@@ -1715,6 +1756,7 @@ export type TaskQueueResumeResponse = ResponseEnvelope<TaskQueueResumeResult>;
 export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionResult>;
 export type TaskSetPermissionPolicyResponse = ResponseEnvelope<TaskSetPermissionPolicyResult>;
 export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;
+export type TaskStopBackgroundCommandResponse = ResponseEnvelope<TaskStopBackgroundCommandResult>;
 export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;
 export type TaskReloadNativeSessionResponse = ResponseEnvelope<TaskReloadNativeSessionResult>;
 export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;

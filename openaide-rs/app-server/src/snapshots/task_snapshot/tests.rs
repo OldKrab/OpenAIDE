@@ -689,6 +689,7 @@ fn persist_tool_detail_with_paths(
         created_at: "2026-01-01T00:00:01.000Z".to_string(),
         collapsed: true,
         steps: vec![ActivityStep::Tool {
+            background_outcome: None,
             tool_call_id: Some(format!("tool-{activity_id}")),
             name: "read".to_string(),
             status: ActivityStatus::Completed,
@@ -740,6 +741,7 @@ fn persist_tool_detail_with_input(
         created_at: "2026-01-01T00:00:01.000Z".to_string(),
         collapsed: true,
         steps: vec![ActivityStep::Tool {
+            background_outcome: None,
             tool_call_id: Some(format!("tool-{activity_id}")),
             name: "read".to_string(),
             status: ActivityStatus::Completed,
@@ -821,6 +823,7 @@ fn activity_message(id: &str, tool_call_id: &str) -> NormalizedMessage {
         created_at: "2026-01-01T00:00:01.000Z".to_string(),
         collapsed: true,
         steps: vec![ActivityStep::Tool {
+            background_outcome: None,
             tool_call_id: Some(tool_call_id.to_string()),
             name: "shell".to_string(),
             status: ActivityStatus::Running,

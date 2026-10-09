@@ -157,6 +157,14 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
         self.inner.steer(prompt)
     }
 
+    fn stop_background_command(
+        &self,
+        session: &AgentSessionKey,
+        command_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.inner.stop_background_command(session, command_id)
+    }
+
     fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.inner.cancel_session(session)
     }

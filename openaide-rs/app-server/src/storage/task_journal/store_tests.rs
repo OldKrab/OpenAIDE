@@ -314,6 +314,7 @@ fn released_tool_presentation_snapshot_migrates_when_task_opens() {
                     created_at: "2026-07-29T00:00:00Z".to_string(),
                     collapsed: true,
                     steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        background_outcome: None,
                         tool_call_id: Some("read".to_string()),
                         name: "read".to_string(),
                         status: crate::protocol::model::ActivityStatus::Completed,
@@ -410,6 +411,7 @@ fn released_search_presentation_snapshot_migrates_when_task_opens() {
                     created_at: "2026-07-29T00:00:00Z".to_string(),
                     collapsed: true,
                     steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        background_outcome: None,
                         tool_call_id: Some("search".to_string()),
                         name: "search".to_string(),
                         status: crate::protocol::model::ActivityStatus::Completed,
@@ -502,6 +504,7 @@ fn released_tool_presentation_journal_migrates_when_task_opens() {
                     created_at: "2026-07-29T00:00:00Z".to_string(),
                     collapsed: true,
                     steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        background_outcome: None,
                         tool_call_id: Some("read".to_string()),
                         name: "read".to_string(),
                         status: crate::protocol::model::ActivityStatus::Completed,
@@ -589,6 +592,7 @@ fn task_with_view_presentation_still_opens() {
                     created_at: "2026-07-28T00:00:00Z".to_string(),
                     collapsed: true,
                     steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        background_outcome: None,
                         tool_call_id: Some("view_image".to_string()),
                         name: "read".to_string(),
                         status: crate::protocol::model::ActivityStatus::Completed,

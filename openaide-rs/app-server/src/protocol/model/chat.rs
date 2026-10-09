@@ -224,8 +224,9 @@ impl NormalizedMessage {
         }
     }
 
-    /// ACP tool updates replace the same activity row, while authorization outcomes
-    /// are App Server-owned history and must survive those replacements.
+    /// ACP tool updates replace the same activity row, while authorization and
+    /// background outcomes are App Server-owned history and must survive those
+    /// replacements.
     pub fn preserve_tool_permission_outcomes_from(&mut self, existing: &NormalizedMessage) {
         let (
             NormalizedMessage::Activity { steps, .. },
@@ -241,25 +242,31 @@ impl NormalizedMessage {
             let super::ActivityStep::Tool {
                 tool_call_id,
                 permission_outcomes,
+                background_outcome,
                 ..
             } = step
             else {
                 continue;
             };
-            let Some(existing_outcomes) = existing_steps.iter().find_map(|existing_step| {
-                let super::ActivityStep::Tool {
-                    tool_call_id: existing_id,
-                    permission_outcomes,
-                    ..
-                } = existing_step
-                else {
-                    return None;
-                };
-                (existing_id == tool_call_id).then_some(permission_outcomes)
-            }) else {
+            let Some((existing_outcomes, existing_background)) =
+                existing_steps.iter().find_map(|existing_step| {
+                    let super::ActivityStep::Tool {
+                        tool_call_id: existing_id,
+                        permission_outcomes,
+                        background_outcome,
+                        ..
+                    } = existing_step
+                    else {
+                        return None;
+                    };
+                    (existing_id == tool_call_id)
+                        .then_some((permission_outcomes, *background_outcome))
+                })
+            else {
                 continue;
             };
             *permission_outcomes = existing_outcomes.clone();
+            *background_outcome = existing_background;
         }
     }
 }

@@ -123,6 +123,15 @@ impl AttachedNativeSessionRegistry {
         self.require_session(&session)?.steer(prompt)
     }
 
+    pub(super) fn stop_background_command(
+        &self,
+        session: &AgentSessionKey,
+        command_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.require_session(session)?
+            .stop_background_command(command_id.to_string())
+    }
+
     pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         if let Some(attachment) = self.get(session) {
             attachment.cancel()?;

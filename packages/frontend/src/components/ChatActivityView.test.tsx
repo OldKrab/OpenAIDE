@@ -1,7 +1,7 @@
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NormalizedMessage } from "@openaide/app-shell-contracts";
-import { ChatActivityView } from "./ChatActivityView";
+import { BackgroundToolCallsContext, ChatActivityView } from "./ChatActivityView";
 import { coalesceAdjacentActivities } from "../state/chatActivityCoalescing";
 import { taskWorkingStatusLabel } from "./taskSurfaceHelpers";
 
@@ -37,6 +37,47 @@ describe("ChatActivityView", () => {
       expect(taskWorkingStatusLabel(items, "active", false)).toBe("Compact conversation");
       act(() => tree.unmount());
     }
+  });
+
+  it("marks the Tool that started a background command while it runs and with how it ended", () => {
+    const activity = (outcome?: "completed" | "failed" | "stopped"): ActivityMessage => ({
+      kind: "activity",
+      id: "background-tool",
+      title: "Start the server",
+      status: "completed",
+      created_at: "2026-10-01T00:00:00Z",
+      collapsed: false,
+      steps: [{
+        kind: "tool",
+        tool_call_id: "call-1",
+        name: "execute",
+        status: "completed",
+        background_outcome: outcome,
+      }],
+    });
+    const rendered = (live: string[], outcome?: "completed" | "failed" | "stopped") => {
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(
+          <BackgroundToolCallsContext.Provider value={new Set(live)}>
+            <ChatActivityView activity={activity(outcome)} taskId="task_1" />
+          </BackgroundToolCallsContext.Provider>,
+        );
+      });
+      const trigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+      if (trigger && !trigger.props["aria-expanded"]) act(() => trigger.props.onClick());
+      const text = JSON.stringify(tree.toJSON());
+      act(() => tree.unmount());
+      return text;
+    };
+
+    expect(rendered(["call-1"])).toContain("Running in background");
+    expect(rendered([])).not.toContain("background");
+    expect(rendered([], "completed")).toContain("Finished in background");
+    expect(rendered([], "failed")).toContain("Failed in background");
+    expect(rendered([], "stopped")).toContain("Stopped");
+    // The live list wins while the Agent still reports the command.
+    expect(rendered(["call-1"], "failed")).toContain("Running in background");
   });
 
   it("renders agent boundaries as conversation notices instead of tool activity", () => {

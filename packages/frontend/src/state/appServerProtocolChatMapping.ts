@@ -397,6 +397,7 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
       option_label: outcome.optionLabel ?? undefined,
       resolved_at: outcome.resolvedAt,
     })),
+    ...(step.backgroundOutcome ? { background_outcome: step.backgroundOutcome } : {}),
   };
 }
 

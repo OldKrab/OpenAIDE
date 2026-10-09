@@ -55,6 +55,7 @@ fn main() {
                         level: Some("info".to_string()),
                     },
                     ActivityStep::Tool {
+                        background_outcome: None,
                         tool_call_id: Some("tool_read_1".to_string()),
                         name: "read".to_string(),
                         status: ActivityStatus::Completed,

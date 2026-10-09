@@ -26,7 +26,8 @@ pub use permission::{
     PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall,
 };
 pub use task::{
-    AgentPlan, AgentPlanEntry, AgentPlanPriority, AgentPlanStatus, IsolationKind,
-    PendingTaskConfigChange, SettingsSummary, TaskBackgroundWork, TaskContextUsage, TaskSnapshot,
-    TaskStatus, TaskSummary, TaskTurnUsage, TaskUsageCost,
+    AgentPlan, AgentPlanEntry, AgentPlanPriority, AgentPlanStatus, BackgroundCommandOutcome,
+    IsolationKind, PendingTaskConfigChange, SettingsSummary, TaskBackgroundCommand,
+    TaskBackgroundWork, TaskContextUsage, TaskSnapshot, TaskStatus, TaskSummary, TaskTurnUsage,
+    TaskUsageCost,
 };

@@ -414,6 +414,18 @@ pub trait AgentRuntime: Send + Sync {
         ))
     }
 
+    /// Asks the Agent to stop one background command it reported, leaving
+    /// the active prompt running.
+    fn stop_background_command(
+        &self,
+        _session: &AgentSessionKey,
+        _command_id: &str,
+    ) -> Result<(), RuntimeError> {
+        Err(RuntimeError::CapabilityMissing(
+            "agent_background_command_stop".to_string(),
+        ))
+    }
+
     fn cancel_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         Ok(())
     }

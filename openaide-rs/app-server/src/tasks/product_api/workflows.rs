@@ -148,6 +148,12 @@ pub(crate) trait TaskCancelWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskCancelParams,
     ) -> Result<TaskSnapshot, ProtocolError>;
+    /// Stops one Background Work command and leaves the Task turn running.
+    fn stop_background_command_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskStopBackgroundCommandParams,
+    ) -> Result<(), ProtocolError>;
     fn recover_stuck_sessions(
         &self,
         params: SupportRecoverStuckSessionsParams,

@@ -189,6 +189,15 @@ impl AcpRuntimeKernel {
         self.active_sessions.steer(prompt)
     }
 
+    pub(super) fn stop_background_command(
+        &self,
+        session: &AgentSessionKey,
+        command_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.active_sessions
+            .stop_background_command(session, command_id)
+    }
+
     pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.active_sessions.cancel_session(session)
     }
