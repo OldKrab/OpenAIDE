@@ -207,6 +207,9 @@ struct State {
     followup_deadline: Option<Instant>,
     /// Updates arrived during the hold and no `_session/turn_ended` followed.
     cycle_running: bool,
+    /// The Agent has sent model output with a `messageId`, so text without one
+    /// is a line the Agent wrote itself.
+    names_messages: bool,
 }
 
 impl Default for BackgroundWork {
@@ -307,21 +310,45 @@ impl BackgroundWork {
 
     /// Any Chat-visible update during the hold belongs to a cycle the model
     /// started on its own: the prompt's own updates precede its response.
-    pub(super) fn session_update_observed(&self, update: &SessionUpdate) {
-        if !matches!(
-            update,
-            SessionUpdate::AgentMessageChunk(_)
-                | SessionUpdate::AgentThoughtChunk(_)
-                | SessionUpdate::ToolCall(_)
-                | SessionUpdate::ToolCallUpdate(_)
-                | SessionUpdate::Plan(_)
-        ) {
+    ///
+    /// Text the Agent writes itself is the exception, since no
+    /// `_session/turn_ended` follows it: the acknowledgement of a stopped
+    /// command, a mode or Fast mode fallback. The Claude adapter gives every
+    /// model message a `messageId` and its own lines none. An Agent that never
+    /// names a message keeps all of its text as cycle evidence.
+    pub(super) fn session_update_observed(&self, session_id: &str, update: &SessionUpdate) {
+        let (kind, named) = match update {
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                ("agent_message_chunk", Some(chunk.message_id.is_some()))
+            }
+            SessionUpdate::AgentThoughtChunk(chunk) => (
+                "agent_thought_chunk",
+                chunk.message_id.is_some().then_some(true),
+            ),
+            SessionUpdate::ToolCall(_) => ("tool_call", None),
+            SessionUpdate::ToolCallUpdate(_) => ("tool_call_update", None),
+            SessionUpdate::Plan(_) => ("plan", None),
+            _ => return,
+        };
+        let mut state = self.state();
+        match named {
+            Some(true) => state.names_messages = true,
+            Some(false) if state.names_messages => return,
+            Some(false) | None => {}
+        }
+        if state.hold_started.is_none() {
             return;
         }
-        let mut state = self.state();
-        if state.hold_started.is_some() {
-            state.cycle_running = true;
-            state.followup_deadline = None;
+        state.followup_deadline = None;
+        if !std::mem::replace(&mut state.cycle_running, true) {
+            logging::info(
+                "acp_autonomous_cycle_observed",
+                json!({
+                    "session_id": session_id,
+                    "first_update": kind,
+                    "live_tasks": state.live_tasks.len(),
+                }),
+            );
         }
     }
 
@@ -339,11 +366,11 @@ impl BackgroundWork {
         );
     }
 
-    /// A new prompt took over completion ownership; its response ends its work.
-    pub(super) fn prompt_continued(&self) {
-        let mut state = self.state();
-        state.cycle_running = false;
-        state.followup_deadline = None;
+    /// A new prompt took over completion ownership, which ends the hold: its
+    /// updates are its own output, not a cycle, and its response decides anew
+    /// whether background work holds the turn.
+    pub(super) fn prompt_continued(&self, session_id: &str, task_id: &str) {
+        self.finish_hold(session_id, task_id, "prompt_continued");
     }
 
     /// Whether a settled `end_turn` must keep its turn open. The first `true`
@@ -411,8 +438,8 @@ impl BackgroundWork {
         }
     }
 
-    /// The prompt runner is leaving. Live commands stay tracked for the next
-    /// prompt; the cycle flags describe this hold only.
+    /// The prompt runner is leaving, or a continuation prompt took over. Live
+    /// commands stay tracked; the cycle flags describe this hold only.
     pub(super) fn finish_hold(&self, session_id: &str, task_id: &str, outcome: &'static str) {
         let mut state = self.state();
         state.cycle_running = false;

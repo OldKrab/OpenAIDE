@@ -382,7 +382,8 @@ pub(super) async fn run_prompt(
                             break Err(error);
                         }
                         completed_prompt = None;
-                        background_work.prompt_continued();
+                        background_work
+                            .prompt_continued(active_session_id.as_str(), active_prompt.task_id());
                     }
                     SteeringAction::LegacyPrompt => {
                         if let Err(error) = send_steering_prompt_request(
@@ -731,7 +732,10 @@ pub(super) async fn dispatch_session_notification(
         })
         .await
         .if_notification(async move |notification: SessionNotification| {
-            updates.session_update_observed(&notification.update);
+            updates.session_update_observed(
+                &notification.session_id.to_string(),
+                &notification.update,
+            );
             *catalogs_sink
                 .lock()
                 .expect("ACP session catalog update lock poisoned") =
