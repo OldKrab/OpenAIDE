@@ -499,7 +499,7 @@ describe("TaskView timeline presentation", () => {
     expect(tree.root.findAllByProps({ "aria-label": "Stop task" }).length).toBeGreaterThan(0);
   });
 
-  it("shows the only background command above the working indicator and keeps a failed stop on it", async () => {
+  it("groups the only background command above the working indicator and keeps a failed stop on it", async () => {
     const { TaskView } = await import("./TaskView");
     const working = snapshotWithAuthoritativeTail(true);
     working.active_turn_started_at = String(Date.now() - 60_000);
@@ -512,8 +512,8 @@ describe("TaskView timeline presentation", () => {
     });
 
     const rendered = JSON.stringify(tree.toJSON());
-    expect(rendered).toContain("npm run dev");
-    expect(rendered).not.toContain("background command running");
+    expect(rendered).toContain("1 background command running");
+    expect(rendered).not.toContain("npm run dev");
     expect(rendered.indexOf("background-commands")).toBeLessThan(rendered.indexOf("working-status-dots"));
     expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(1);
     expect(tree.root.findAllByProps({ "aria-label": "Stop task" }).length).toBeGreaterThan(0);
@@ -522,6 +522,7 @@ describe("TaskView timeline presentation", () => {
     act(() => {
       tree.update(<TaskView {...taskViewProps(failed)} onStopBackgroundCommand={onStopBackgroundCommand} />);
     });
+    act(() => tree.root.findByProps({ className: "background-commands-toggle" }).props.onClick());
     expect(JSON.stringify(tree.toJSON())).toContain("Couldn't stop");
     act(() => tree.root.findByProps({ "aria-label": "Stop background command: npm run dev" }).props.onClick());
     expect(onStopBackgroundCommand).toHaveBeenCalledWith("command-1");
