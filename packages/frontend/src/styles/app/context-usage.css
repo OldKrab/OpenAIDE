@@ -195,6 +195,23 @@
     transform 320ms cubic-bezier(.16, 1, .3, 1);
 }
 
+/*
+ * With room in the Chat column the readout stands outside the Composer, right beside the fill it
+ * reads, where it covers neither the draft nor a control.
+ */
+.context-usage-tooltip[data-side="outside"] {
+  right: auto;
+  left: calc(100% + 6px);
+  top: clamp(8px, calc(100% - var(--context-usage-percent)), calc(100% - 8px));
+  background: none;
+  padding: 0;
+  transform: translate(-5px, -50%);
+}
+
+.context-usage-meter:is(:hover, :focus-visible) .context-usage-tooltip[data-side="outside"] {
+  transform: translate(0, -50%);
+}
+
 /* Opening the details replays the reading: the bar fills from empty to what is used. */
 @keyframes context-usage-fill {
   from { width: 0; }

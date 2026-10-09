@@ -19,11 +19,35 @@ import { AccountLimitsIndicator } from "./AccountLimitsIndicator";
 import { PopupPanel } from "./Popup";
 import { useBackNavigation } from "./useBackNavigation";
 
+/** Width the hover readout needs beside the Composer before it may leave the Composer. */
+const READOUT_ROOM_PX = 96;
+
 type UsageTone = "normal" | "high" | "critical";
 const ContextUsageControl = createContext<ReactNode>(null);
 
 export function ComposerContextUsageControl() {
   return useContext(ContextUsageControl);
+}
+
+/**
+ * Whether the Chat column leaves room to the right of the Composer for the hover readout. Outside
+ * it covers nothing; without room it stays inside, clear of the send control.
+ */
+function useReadoutRoom(hostRef: { current: HTMLDivElement | null }) {
+  const [outside, setOutside] = useState(false);
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    const column = host?.closest<HTMLElement>(".chat-column");
+    if (!host || !column || typeof ResizeObserver !== "function") return undefined;
+    const update = () =>
+      setOutside(column.getBoundingClientRect().right - host.getBoundingClientRect().right >= READOUT_ROOM_PX);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(column);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [hostRef]);
+  return outside;
 }
 
 function useCompactContextUsage() {
@@ -66,6 +90,7 @@ export function ComposerWithContextUsage({
     });
   const compact = useCompactContextUsage();
   const hostRef = useRef<HTMLDivElement>(null);
+  const readoutOutside = useReadoutRoom(hostRef);
   const detailsId = useId().replaceAll(":", "");
   const capacity = usage?.capacity_tokens ?? 0;
   const usagePercent = capacity > 0
@@ -156,6 +181,7 @@ export function ComposerWithContextUsage({
             {!detailsOpen ? (
               <span
                 className="context-usage-tooltip"
+                data-side={readoutOutside ? "outside" : "inside"}
                 role="tooltip"
                 style={{ "--context-usage-percent": `${usagePercent}%` } as CSSProperties}
               >
