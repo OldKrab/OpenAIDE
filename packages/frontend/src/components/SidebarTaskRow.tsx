@@ -21,6 +21,7 @@ import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { PopupMenu } from "./Popup";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
+import { TaskStateSpinner } from "./TaskStateSpinner";
 import { relativeTime } from "./taskSurfaceHelpers";
 import { TaskPreviewDetails, taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
 import type { NativeSessionMutationState } from "../state/store";
@@ -348,7 +349,7 @@ function TaskTrailingMeta({
           role="status"
           title={forkMutation.error}
         >
-          {forkMutation.state === "pending" ? <span className="task-state-spinner" />
+          {forkMutation.state === "pending" ? <TaskStateSpinner />
             : forkMutation.state === "created" && !forkMutation.error ? <Check size={12} />
               : <AlertCircle size={12} />}
           <span>{forkMutationLabel(forkMutation)}</span>
@@ -365,7 +366,7 @@ function TaskTrailingMeta({
           className="task-trailing-indicator task-pin-pending"
           role="img"
         >
-          <span className="task-state-spinner" />
+          <TaskStateSpinner />
         </span>
       ) : null}
       {worktreeName ? <span aria-label={`Worktree: ${worktreeName}`} className="task-worktree-marker" role="img" title={`Worktree: ${worktreeName}`}><GitBranch size={12} /></span> : null}
@@ -388,7 +389,7 @@ function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; tim
     const label = status === "stopping" ? "Stopping" : "In progress";
     return (
       <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>
-        <span className="task-state-spinner" />
+        <TaskStateSpinner />
       </span>
     );
   }
@@ -397,7 +398,7 @@ function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; tim
     const label = unread ? "Background, unread" : "Background";
     return (
       <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>
-        <span className="task-state-background" />
+        <TaskStateSpinner slow />
         {unread ? <span className="task-state-unread-badge" /> : null}
       </span>
     );
