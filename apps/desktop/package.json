@@ -14,13 +14,13 @@
   "dependencies": {
     "@openaide/app-server-client": "*",
     "@openaide/app-shell-contracts": "*",
-    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/api": "2.12.1",
     "@tauri-apps/plugin-dialog": "2.7.2",
-    "@tauri-apps/plugin-notification": "2.3.3",
-    "@tauri-apps/plugin-opener": "2.5.5"
+    "@tauri-apps/plugin-notification": "2.5.1",
+    "@tauri-apps/plugin-opener": "2.7.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.4",
+    "@tauri-apps/cli": "2.12.1",
     "@vitejs/plugin-react": "^6.1.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.2"
