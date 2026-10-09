@@ -1367,6 +1367,13 @@ def write(message):
 def respond(message, result):
     write({"jsonrpc": "2.0", "id": message.get("id"), "result": result})
 
+def agent_state(state):
+    write({
+        "jsonrpc": "2.0",
+        "method": "_session/state_changed",
+        "params": {"sessionId": session_id, "state": state},
+    })
+
 def update_raw(update):
     write({
         "jsonrpc": "2.0",
@@ -1503,18 +1510,17 @@ for line in sys.stdin:
             respond(message, {"stopReason": "end_turn"})
             continue
         if mode in ("background_followup", "background_stop"):
+            agent_state("running")
             update_chunk("agent_message_chunk", "Build started", "started")
             update_raw({"sessionUpdate": "async_task_spawned", "asyncTaskId": "build-1", "name": "npm run build", "canStop": True})
             respond(message, {"stopReason": "end_turn"})
+            agent_state("idle")
             if mode == "background_followup":
                 await_release()
                 update_raw({"sessionUpdate": "async_task_state_update", "asyncTaskId": "build-1", "state": "completed"})
+                agent_state("running")
                 update_chunk("agent_message_chunk", "Build finished", "finished")
-                write({
-                    "jsonrpc": "2.0",
-                    "method": "_session/turn_ended",
-                    "params": {"sessionId": session_id, "stopReason": "end_turn"},
-                })
+                agent_state("idle")
             continue
         if mode == "content_blocks":
             update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U=", "uri": "memory://diagram.png"}, "content-image")
@@ -1611,6 +1617,9 @@ for line in sys.stdin:
             handle.write(message.get("params", {}).get("asyncTaskId", ""))
         respond(message, {"stopped": True})
         update_raw({"sessionUpdate": "async_task_state_update", "asyncTaskId": message.get("params", {}).get("asyncTaskId", ""), "state": "stopped"})
+        # The adapter acknowledges the stop in Chat and repeats its state.
+        update_chunk("agent_message_chunk", "Task stopped by user", None)
+        agent_state("idle")
     elif method == "session/close":
         if pending_primary_id is not None:
             respond({"id": pending_primary_id}, {"stopReason": "end_turn"})

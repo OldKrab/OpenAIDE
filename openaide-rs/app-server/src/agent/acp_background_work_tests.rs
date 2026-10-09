@@ -48,27 +48,9 @@ fn live_ids(work: &BackgroundWork, turn_held: bool) -> (bool, Vec<String>) {
     (report.held, ids)
 }
 
-fn agent_text() -> SessionUpdate {
-    serde_json::from_value(json!({
-        "sessionUpdate": "agent_message_chunk",
-        "content": { "type": "text", "text": "The build passed." },
-    }))
-    .expect("agent message chunk")
-}
-
-/// Model output as the Claude adapter sends it: every chunk names its message.
-fn model_text() -> SessionUpdate {
-    serde_json::from_value(json!({
-        "sessionUpdate": "agent_message_chunk",
-        "messageId": "0f5d1c1e-6b1b-4d5e-9a57-3a1f0c2b7e11",
-        "content": { "type": "text", "text": "The build passed." },
-    }))
-    .expect("named agent message chunk")
-}
-
-fn turn_ended() -> TurnEndedNotification {
-    serde_json::from_value(json!({ "sessionId": "session-1", "stopReason": "end_turn" }))
-        .expect("turn ended notification")
+fn agent_state(state: &str) -> SessionStateNotification {
+    serde_json::from_value(json!({ "sessionId": "session-1", "state": state }))
+        .expect("session state notification")
 }
 
 #[test]
@@ -160,15 +142,15 @@ fn a_live_command_holds_the_turn_until_its_followup_cycle_ends() {
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
     assert!(work.holds_turn("session-1", "task-a"));
 
-    work.session_update_observed("session-1", &agent_text());
+    work.session_state_changed(&agent_state("running"));
     assert!(work.holds_turn("session-1", "task-a"));
 
-    work.turn_ended(&turn_ended());
+    work.session_state_changed(&agent_state("idle"));
     assert!(!work.holds_turn("session-1", "task-a"));
 }
 
 #[test]
-fn a_hold_is_background_only_until_the_agent_produces_output_again() {
+fn a_hold_is_background_only_until_the_agent_works_again() {
     let work = BackgroundWork::default();
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
     assert_eq!(
@@ -184,12 +166,14 @@ fn a_hold_is_background_only_until_the_agent_produces_output_again() {
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
     assert_eq!(live_ids(&work, true), (true, Vec::new()));
 
-    work.session_update_observed("session-1", &agent_text());
+    // A permission request inside the cycle is still the Agent working.
+    work.session_state_changed(&agent_state("running"));
+    work.session_state_changed(&agent_state("requires_action"));
     assert_eq!(live_ids(&work, true), (false, Vec::new()));
 
     // The cycle ended while a second command is still live.
     work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
-    work.turn_ended(&turn_ended());
+    work.session_state_changed(&agent_state("idle"));
     assert_eq!(live_ids(&work, true), (true, vec!["task-2".to_string()]));
 }
 
@@ -261,10 +245,11 @@ fn a_command_carries_its_details_and_reports_how_it_ended_to_its_tool_row() {
 #[test]
 fn a_command_that_ended_inside_the_prompt_does_not_hold_its_turn() {
     let work = BackgroundWork::default();
+    work.session_state_changed(&agent_state("running"));
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
-    // Updates of the prompt itself are not a cycle of their own.
-    work.session_update_observed("session-1", &agent_text());
+    // The response ends the prompt's work before the Agent reports `idle`.
+    work.prompt_answered();
 
     assert!(!work.holds_turn("session-1", "task-a"));
     assert!(!work.is_holding());
@@ -274,9 +259,16 @@ fn a_command_that_ended_inside_the_prompt_does_not_hold_its_turn() {
 fn a_stopped_command_promises_no_followup() {
     let work = BackgroundWork::default();
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
+    work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
     assert!(work.holds_turn("session-1", "task-a"));
 
+    // The Agent acknowledges each stop in Chat and repeats `idle`; neither is
+    // a cycle.
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Stopped));
+    work.session_state_changed(&agent_state("idle"));
+    assert_eq!(live_ids(&work, true), (true, vec!["task-2".to_string()]));
+
+    work.task_state_changed(&task_state("task-2", AsyncTaskState::Stopped));
     assert!(!work.holds_turn("session-1", "task-a"));
 }
 
@@ -292,14 +284,40 @@ fn a_followup_that_never_shows_releases_the_turn() {
 }
 
 #[test]
+fn a_command_that_finished_during_a_cycle_is_awaited_after_it() {
+    let work = BackgroundWork::default();
+    work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
+    work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
+    assert!(work.holds_turn("session-1", "task-a"));
+
+    work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
+    work.session_state_changed(&agent_state("running"));
+    // The second command ends while the first one's cycle is still running.
+    work.task_state_changed(&task_state("task-2", AsyncTaskState::Completed));
+    work.session_state_changed(&agent_state("idle"));
+    assert_eq!(
+        live_ids(&work, true),
+        (true, Vec::new()),
+        "its own cycle may still start"
+    );
+
+    work.session_state_changed(&agent_state("running"));
+    work.session_state_changed(&agent_state("idle"));
+    assert!(!work.holds_turn("session-1", "task-a"));
+}
+
+#[test]
 fn a_continuation_prompt_takes_over_from_a_running_cycle() {
     let work = BackgroundWork::default();
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
     assert!(work.holds_turn("session-1", "task-a"));
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
-    work.session_update_observed("session-1", &agent_text());
+    work.session_state_changed(&agent_state("running"));
 
+    // The prompt joins the cycle, so the Agent reports no new `running`.
     work.prompt_continued("session-1", "task-a");
+    assert!(!work.is_holding());
+    work.prompt_answered();
     assert!(!work.holds_turn("session-1", "task-a"));
 }
 
@@ -309,16 +327,18 @@ fn a_continuation_prompt_answering_during_a_hold_is_not_a_cycle() {
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
     assert!(work.holds_turn("session-1", "task-a"));
 
-    // The user steers the held turn; the answer is the prompt's own output.
+    // The user steers the held turn; the Agent works on the answer.
     work.prompt_continued("session-1", "task-a");
     assert!(!work.is_holding());
-    work.session_update_observed("session-1", &agent_text());
+    work.session_state_changed(&agent_state("running"));
+    work.prompt_answered();
 
     // Its response finds the command still running: background again.
     assert!(work.holds_turn("session-1", "task-a"));
     assert_eq!(live_ids(&work, true), (true, vec!["task-1".to_string()]));
 
     // No cycle follows a stopped command, so nothing is left to wait for.
+    work.session_state_changed(&agent_state("idle"));
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Stopped));
     assert!(!work.holds_turn("session-1", "task-a"));
 }
@@ -332,38 +352,4 @@ fn finishing_a_hold_keeps_live_commands_for_the_next_prompt() {
     work.finish_hold("session-1", "task-a", "cancelled");
     assert!(!work.is_holding());
     assert!(work.holds_turn("session-1", "task-b"));
-}
-
-#[test]
-fn a_line_the_agent_writes_itself_is_not_a_cycle() {
-    let work = BackgroundWork::default();
-    // The prompt's own answer shows that this Agent names its model messages.
-    work.session_update_observed("session-1", &model_text());
-    work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
-    work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
-    assert!(work.holds_turn("session-1", "task-a"));
-
-    // The user stops one command and the Agent acknowledges it in Chat.
-    work.task_state_changed(&task_state("task-1", AsyncTaskState::Stopped));
-    work.session_update_observed("session-1", &agent_text());
-    assert_eq!(
-        live_ids(&work, true),
-        (true, vec!["task-2".to_string()]),
-        "the turn is still held by the other command alone"
-    );
-
-    work.task_state_changed(&task_state("task-2", AsyncTaskState::Stopped));
-    work.session_update_observed("session-1", &agent_text());
-    assert!(!work.holds_turn("session-1", "task-a"));
-}
-
-#[test]
-fn model_text_during_a_hold_is_a_cycle_for_an_agent_that_names_messages() {
-    let work = BackgroundWork::default();
-    work.session_update_observed("session-1", &model_text());
-    work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
-    assert!(work.holds_turn("session-1", "task-a"));
-
-    work.session_update_observed("session-1", &model_text());
-    assert_eq!(live_ids(&work, true), (false, vec!["task-1".to_string()]));
 }

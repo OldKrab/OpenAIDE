@@ -3,9 +3,12 @@
 //! The Claude adapter lets a backgrounded command run on after the prompt
 //! returns, and the model answers the command's completion in a cycle no prompt
 //! started. The adapter reports both: async task updates name the live
-//! commands, and `_session/turn_ended` ends such a cycle. The prompt runner
-//! keeps the Task turn open while this state says work remains, so one prompt
-//! owner still decides when the Task becomes idle.
+//! commands, and `_session/state_changed` says when the Agent is working. The
+//! prompt runner keeps the Task turn open while this state says work remains,
+//! so one prompt owner still decides when the Task becomes idle.
+//!
+//! Output is no evidence of a cycle: the adapter also writes lines of its own
+//! after the prompt response, such as the acknowledgement of a stopped command.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,7 +19,7 @@ use agent_client_protocol::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::agent::acp_schema::{SessionId, SessionUpdate};
+use crate::agent::acp_schema::SessionId;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::events::{AgentBackgroundCommand, AgentBackgroundWork};
 use crate::logging;
@@ -34,9 +37,9 @@ const ASYNC_TASK_STATE_METHOD: &str = "_openaide/async_task_state";
 const ASYNC_TASK_STOP_METHOD: &str = "_session/async_task/stop";
 
 /// How long a finished background command may take to wake the model. The
-/// adapter reports no cycle start, so the first update of the cycle is the only
-/// evidence that one began.
-const DEFAULT_FOLLOWUP_GRACE: Duration = Duration::from_secs(60);
+/// Agent reports the cycle's start well under a second after the command ends;
+/// the rest covers a slow machine.
+const DEFAULT_FOLLOWUP_GRACE: Duration = Duration::from_secs(10);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What the connection does with one raw inbound notification.
@@ -158,12 +161,15 @@ impl AsyncTaskState {
     }
 }
 
-/// The adapter's announcement that a cycle no prompt started is over.
+/// The adapter's report that the Agent started or stopped working. After the
+/// prompt response, `running` is a cycle the Agent started itself.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonRpcNotification)]
-#[notification(method = "_session/turn_ended")]
+#[notification(method = "_session/state_changed")]
 #[serde(rename_all = "camelCase")]
-pub(super) struct TurnEndedNotification {
+pub(super) struct SessionStateNotification {
     session_id: SessionId,
+    /// `idle`, or a working state: `running`, `requires_action`.
+    state: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonRpcRequest)]
@@ -203,13 +209,11 @@ struct State {
     finished: Vec<FinishedCommand>,
     /// Set while a settled prompt response waits for this work to end.
     hold_started: Option<Instant>,
-    /// A command finished during the hold; its cycle has not shown itself yet.
+    /// A command finished during the hold; its cycle has not started yet.
     followup_deadline: Option<Instant>,
-    /// Updates arrived during the hold and no `_session/turn_ended` followed.
-    cycle_running: bool,
-    /// The Agent has sent model output with a `messageId`, so text without one
-    /// is a line the Agent wrote itself.
-    names_messages: bool,
+    /// The Agent's last reported state was a working one. The prompt response
+    /// clears it, so during a hold it means a cycle the Agent started itself.
+    agent_running: bool,
 }
 
 impl Default for BackgroundWork {
@@ -308,67 +312,44 @@ impl BackgroundWork {
         );
     }
 
-    /// Any Chat-visible update during the hold belongs to a cycle the model
-    /// started on its own: the prompt's own updates precede its response.
-    ///
-    /// Text the Agent writes itself is the exception, since no
-    /// `_session/turn_ended` follows it: the acknowledgement of a stopped
-    /// command, a mode or Fast mode fallback. The Claude adapter gives every
-    /// model message a `messageId` and its own lines none. An Agent that never
-    /// names a message keeps all of its text as cycle evidence.
-    pub(super) fn session_update_observed(&self, session_id: &str, update: &SessionUpdate) {
-        let (kind, named) = match update {
-            SessionUpdate::AgentMessageChunk(chunk) => {
-                ("agent_message_chunk", Some(chunk.message_id.is_some()))
-            }
-            SessionUpdate::AgentThoughtChunk(chunk) => (
-                "agent_thought_chunk",
-                chunk.message_id.is_some().then_some(true),
-            ),
-            SessionUpdate::ToolCall(_) => ("tool_call", None),
-            SessionUpdate::ToolCallUpdate(_) => ("tool_call_update", None),
-            SessionUpdate::Plan(_) => ("plan", None),
-            _ => return,
-        };
+    /// The Agent started or stopped working. During a hold `running` starts the
+    /// cycle a finished command was waiting for. `idle` ends a cycle; a command
+    /// that finished while it ran may still wake the model, so its wait starts
+    /// over from here.
+    pub(super) fn session_state_changed(&self, change: &SessionStateNotification) {
+        let running = change.state != "idle";
         let mut state = self.state();
-        match named {
-            Some(true) => state.names_messages = true,
-            Some(false) if state.names_messages => return,
-            Some(false) | None => {}
-        }
-        if state.hold_started.is_none() {
+        if std::mem::replace(&mut state.agent_running, running) == running
+            || state.hold_started.is_none()
+        {
             return;
         }
-        state.followup_deadline = None;
-        if !std::mem::replace(&mut state.cycle_running, true) {
-            logging::info(
-                "acp_autonomous_cycle_observed",
-                json!({
-                    "session_id": session_id,
-                    "first_update": kind,
-                    "live_tasks": state.live_tasks.len(),
-                }),
-            );
+        if running {
+            state.followup_deadline = None;
+        } else if state.followup_deadline.is_some() {
+            state.followup_deadline = Some(Instant::now() + self.followup_grace);
         }
-    }
-
-    pub(super) fn turn_ended(&self, ended: &TurnEndedNotification) {
-        let mut state = self.state();
-        state.followup_deadline = None;
-        let was_running = std::mem::take(&mut state.cycle_running);
         logging::info(
-            "acp_autonomous_turn_ended",
+            "acp_background_cycle",
             json!({
-                "session_id": ended.session_id.to_string(),
-                "held": state.hold_started.is_some(),
-                "cycle_observed": was_running,
+                "session_id": change.session_id.to_string(),
+                "phase": if running { "started" } else { "ended" },
+                "live_tasks": state.live_tasks.len(),
+                "followup_expected": state.followup_deadline.is_some(),
             }),
         );
     }
 
+    /// The prompt response ends the prompt's own work, whatever state the Agent
+    /// reported last. The `idle` that follows the response must not be awaited:
+    /// a turn that settles early loses nothing, one that waits for a report
+    /// that never comes hangs.
+    pub(super) fn prompt_answered(&self) {
+        self.state().agent_running = false;
+    }
+
     /// A new prompt took over completion ownership, which ends the hold: its
-    /// updates are its own output, not a cycle, and its response decides anew
-    /// whether background work holds the turn.
+    /// response decides anew whether background work holds the turn.
     pub(super) fn prompt_continued(&self, session_id: &str, task_id: &str) {
         self.finish_hold(session_id, task_id, "prompt_continued");
     }
@@ -393,7 +374,7 @@ impl BackgroundWork {
             );
         }
         let holds = !state.live_tasks.is_empty()
-            || state.cycle_running
+            || state.agent_running
             || state.followup_deadline.is_some();
         if holds && state.hold_started.is_none() {
             state.hold_started = Some(now);
@@ -415,11 +396,11 @@ impl BackgroundWork {
 
     /// What the Task shows of this work: the live commands, and whether they
     /// alone keep the answered turn open. `held` is false while the prompt or a
-    /// cycle the Agent started is producing output.
+    /// cycle the Agent started is running.
     pub(super) fn report(&self, turn_held: bool) -> AgentBackgroundWork {
         let state = self.state();
         AgentBackgroundWork {
-            held: turn_held && state.hold_started.is_some() && !state.cycle_running,
+            held: turn_held && state.hold_started.is_some() && !state.agent_running,
             commands: state.live_tasks.clone(),
         }
     }
@@ -439,10 +420,10 @@ impl BackgroundWork {
     }
 
     /// The prompt runner is leaving, or a continuation prompt took over. Live
-    /// commands stay tracked; the cycle flags describe this hold only.
+    /// commands and the Agent's state stay tracked; the follow-up wait
+    /// describes this hold only.
     pub(super) fn finish_hold(&self, session_id: &str, task_id: &str, outcome: &'static str) {
         let mut state = self.state();
-        state.cycle_running = false;
         state.followup_deadline = None;
         let Some(started) = state.hold_started.take() else {
             return;
