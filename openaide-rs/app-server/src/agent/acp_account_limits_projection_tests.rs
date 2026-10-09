@@ -3,7 +3,10 @@ use openaide_app_server_protocol::snapshot::{
 };
 use serde_json::json;
 
-use super::project_account_limits;
+use super::{
+    is_account_limits_carrier, project_account_limits, project_account_limits_reading,
+    AccountLimitsReading,
+};
 use crate::agent::events::{
     AgentAccountLimitUsage, AgentAccountLimitWindowId, AgentAccountLimitsChange,
 };
@@ -130,4 +133,53 @@ fn plan_label_rejects_free_form_text() {
             windows: Vec::new(),
         }]
     );
+}
+
+#[test]
+fn a_connection_reading_carries_the_same_windows_as_the_meta_key() {
+    let reading = project_account_limits_reading(&json!({
+        "accountLimits": {
+            "subscriptionType": "pro",
+            "windows": [{ "type": "five_hour", "utilization": 39, "resetsAt": null }],
+        },
+    }));
+    assert_eq!(
+        reading,
+        AccountLimitsReading::Usage(AgentAccountLimitsChange::Usage {
+            plan_label: Some("Pro".to_string()),
+            windows: vec![AgentAccountLimitUsage {
+                window: window(AgentAccountLimitWindowKind::FiveHour, None),
+                used_percent: 39,
+                resets_at_ms: None,
+            }],
+        })
+    );
+}
+
+#[test]
+fn a_connection_reading_tells_no_limits_apart_from_an_unusable_payload() {
+    assert_eq!(
+        project_account_limits_reading(&json!({ "accountLimits": null })),
+        AccountLimitsReading::Unavailable
+    );
+    assert_eq!(
+        project_account_limits_reading(&json!({})),
+        AccountLimitsReading::Unavailable
+    );
+    assert_eq!(
+        project_account_limits_reading(&json!({ "accountLimits": { "windows": "many" } })),
+        AccountLimitsReading::Malformed
+    );
+}
+
+#[test]
+fn only_an_update_carrying_a_full_reading_is_a_limits_carrier() {
+    assert!(!is_account_limits_carrier(None));
+    // A verdict rides on the turn's own usage update, whose context usage is real.
+    assert!(!is_account_limits_carrier(Some(&meta(
+        json!({ "_claude/rateLimit": { "status": "allowed" } })
+    ))));
+    assert!(is_account_limits_carrier(Some(&meta(
+        json!({ "_claude/accountLimits": { "windows": [] } })
+    ))));
 }

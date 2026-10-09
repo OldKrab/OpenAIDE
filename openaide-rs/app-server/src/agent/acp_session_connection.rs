@@ -32,6 +32,8 @@ pub(super) struct AcpSessionConnectionContext {
     pub(super) elicitation_cancellations:
         crate::agent::acp_host_capabilities::AcpElicitationCancellationMap,
     pub(super) native_subagents: AcpNativeSubagentRouter,
+    /// Receives the Account Limits the Agent pushes on the connection.
+    pub(super) account_limits: Option<crate::agent::status_cache::AgentAccountLimitsRecorder>,
 }
 
 pub(super) async fn connect_acp_session_client<R, AgentTransport>(
@@ -58,6 +60,7 @@ where
     let notification_load_replay = context.load_replay;
     let raw_native_subagents = context.native_subagents.clone();
     let notification_native_subagents = context.native_subagents;
+    let account_limits = context.account_limits;
 
     // ACP request callbacks run inside the shared connection's dispatch loop. Every host wait
     // must be spawned so one session cannot block updates and responses for every other session.
@@ -66,6 +69,15 @@ where
         .name("openaide")
         .on_receive_notification(
             async move |notification: UntypedMessage, cx| {
+                if notification.method()
+                    == crate::agent::acp_account_limits_projection::ACCOUNT_LIMITS_KEY
+                {
+                    crate::agent::acp_account_limits_read::record_pushed_account_limits(
+                        account_limits.as_ref(),
+                        notification.params(),
+                    );
+                    return Ok(Handled::Yes);
+                }
                 if let Err(reason) = raw_plan_update_is_valid(&notification) {
                     crate::logging::warn(
                         "acp_plan_update_ignored",

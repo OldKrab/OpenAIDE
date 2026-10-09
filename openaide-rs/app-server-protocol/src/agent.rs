@@ -78,6 +78,21 @@ pub struct AgentLogoutResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentRefreshAccountLimitsParams {
+    pub agent_id: AgentId,
+}
+
+/// The request never waits for the Agent: a reading that changes the Account Limits arrives
+/// with the Agent collection update.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRefreshAccountLimitsResult {
+    /// False when the current reading is recent enough or the Agent reports no Account Limits.
+    pub started: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentListSessionsParams {
     pub agent_id: AgentId,
     pub project_id: ProjectId,

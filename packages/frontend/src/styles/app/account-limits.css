@@ -1,50 +1,75 @@
-/* Agent account limits drawn from the Composer's own top-right corner. */
-.account-limits-corner {
+/* Agent account limits drawn on the right end of the Composer's top border. */
+.account-limits-edge {
   --account-limit-tone: color-mix(in oklch, var(--oa-text) 62%, var(--oa-muted));
-  width: 28px;
-  height: 28px;
+  height: 16px;
   position: absolute;
-  top: 0;
-  right: 0;
+  /* Half a pixel down centres the 2px meter on the Composer's 1px border. */
+  top: -7.5px;
   z-index: 2;
   border: 0;
-  border-top-right-radius: 20px;
   background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0;
   cursor: pointer;
   pointer-events: auto;
 }
 
 /*
- * Touch layouts have no hover, so the target grows to 44px outward from the corner: most of it
- * lies over the Chat gutter instead of the first draft line.
+ * Touch layouts have no hover, so the target grows to 44px tall. It is centred on the border and
+ * reaches as far over the Chat gutter as over the first draft line.
  */
-.account-limits-corner[data-compact="true"] {
-  width: 44px;
+.account-limits-edge[data-compact="true"] {
   height: 44px;
-  top: -16px;
-  right: -12px;
+  top: -21.5px;
+}
+
+.account-limits-edge:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
   border-radius: var(--oa-radius-sm);
 }
 
-.account-limits-corner:focus-visible {
-  outline: 1px solid var(--oa-focus);
-  outline-offset: 2px;
-}
-
-.account-limits-rings {
-  position: absolute;
-  top: 0;
-  right: 0;
-  overflow: visible;
-  fill: none;
-  stroke-linecap: round;
+.account-limits-segment {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   pointer-events: none;
 }
 
-.account-limits-corner[data-compact="true"] .account-limits-rings {
-  top: 16px;
-  right: 12px;
+.account-limits-segment svg {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke-linecap: round;
+}
+
+/*
+ * The name interrupts the border like a legend. Its two-tone backdrop continues the Chat above
+ * the border and the Composer below it, so no patch shows around the letters.
+ */
+.account-limits-segment-name {
+  background: linear-gradient(
+    var(--oa-bg) 50%,
+    color-mix(in oklch, var(--oa-panel) 76%, var(--oa-bg)) 50%
+  );
+  color: var(--oa-muted);
+  padding: 0 3px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 12px;
+  letter-spacing: .02em;
+}
+
+.account-limits-segment:is(.account-limits-warning, .account-limits-fast, .account-limits-reached) .account-limits-segment-name {
+  color: var(--account-limit-tone);
+}
+
+.account-limits-edge:hover .account-limits-segment-name,
+.account-limits-edge:focus-visible .account-limits-segment-name,
+.account-limits-edge[aria-expanded="true"] .account-limits-segment-name {
+  color: var(--oa-text);
 }
 
 /* Graphite for the account, so the accent edge stays the only mark that means this Task. */
@@ -52,7 +77,8 @@
   --account-limit-tone: color-mix(in oklch, var(--oa-text) 62%, var(--oa-muted));
 }
 
-.account-limits-warning {
+.account-limits-warning,
+.account-limits-fast {
   --account-limit-tone: var(--oa-warning);
 }
 
@@ -60,41 +86,47 @@
   --account-limit-tone: var(--oa-danger);
 }
 
-.account-limits-ring-track {
-  stroke: color-mix(in oklch, var(--oa-muted) 28%, transparent);
-  stroke-width: 1;
+/* The track hides the Composer border beneath it so the meter reads as part of the border. */
+.account-limits-segment-track {
+  stroke: color-mix(in oklch, var(--oa-muted) 34%, var(--oa-bg));
+  stroke-width: 2;
 }
 
-.account-limits-ring-fill {
+/* A spent window has no fill left to colour, so its empty track carries the tone. */
+.account-limits-segment.account-limits-reached .account-limits-segment-track {
+  stroke: color-mix(in oklch, var(--oa-danger) 70%, var(--oa-bg));
+}
+
+.account-limits-meter.account-limits-reached .account-limits-meter-track {
+  background: color-mix(in oklch, var(--oa-danger) 55%, transparent);
+}
+
+.account-limits-segment-fill {
   stroke: var(--account-limit-tone);
-  stroke-width: 1.5;
-  stroke-dasharray: var(--account-limit-used) 100;
-  opacity: .7;
+  stroke-width: 2;
+  stroke-dasharray: var(--account-limit-left) 100;
+  opacity: .72;
   transition: stroke-dasharray 600ms cubic-bezier(.22, 1, .36, 1), opacity 160ms ease;
 }
 
-.account-limits-ring[data-inner="true"] .account-limits-ring-fill {
-  opacity: .48;
-}
-
-.account-limits-ring:is(.account-limits-warning, .account-limits-reached) .account-limits-ring-fill,
-.account-limits-corner:hover .account-limits-ring-fill,
-.account-limits-corner:focus-visible .account-limits-ring-fill,
-.account-limits-corner[aria-expanded="true"] .account-limits-ring-fill {
+.account-limits-segment:is(.account-limits-warning, .account-limits-fast, .account-limits-reached) .account-limits-segment-fill,
+.account-limits-edge:hover .account-limits-segment-fill,
+.account-limits-edge:focus-visible .account-limits-segment-fill,
+.account-limits-edge[aria-expanded="true"] .account-limits-segment-fill {
   opacity: 1;
 }
 
-.account-limits-ring-tick {
+.account-limits-segment-tick {
   stroke: var(--oa-text);
   stroke-width: 1;
   stroke-linecap: butt;
-  opacity: .5;
+  opacity: .55;
 }
 
 .account-limits-label {
   position: absolute;
-  top: 5px;
-  right: 30px;
+  right: 24px;
+  bottom: calc(100% + 10px);
   z-index: 2;
   border: 1px solid var(--oa-border);
   border-radius: 6px;
@@ -109,23 +141,23 @@
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transform: translateX(3px);
+  transform: translateY(3px);
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.account-limits-label > :is(.account-limits-warning, .account-limits-reached) {
+.account-limits-label > :is(.account-limits-warning, .account-limits-fast, .account-limits-reached) {
   color: var(--account-limit-tone);
 }
 
-.composer-context-host:has(.account-limits-corner:hover) .account-limits-label,
-.composer-context-host:has(.account-limits-corner:focus-visible) .account-limits-label,
+.composer-context-host:has(.account-limits-edge:hover) .account-limits-label,
+.composer-context-host:has(.account-limits-edge:focus-visible) .account-limits-label,
 .account-limits-label[data-announce="true"] {
   opacity: 1;
   transform: none;
 }
 
 .oa-popup-surface.account-limits-popup {
-  width: min(288px, calc(100vw - 16px));
+  width: min(292px, calc(100vw - 16px));
   padding: 0;
 }
 
@@ -134,51 +166,46 @@
   color: var(--oa-text);
 }
 
-.account-limits-scope {
-  margin: 8px 0 2px;
-  border-top: 1px solid var(--oa-border);
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding-top: 9px;
-  font-size: 11px;
-}
-
-.account-limits-scope strong {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.account-limits-scope span {
-  margin-left: auto;
+.account-limits-plan {
+  margin-left: 6px;
   color: var(--oa-muted);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .account-limits-meter {
-  padding-top: 8px;
+  padding-top: 10px;
 }
 
 .account-limits-meter-heading {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   font-size: 12px;
 }
 
+.account-limits-meter-heading small {
+  overflow: hidden;
+  color: var(--oa-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .account-limits-meter-heading b {
+  grid-column: 3;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.account-limits-meter:is(.account-limits-warning, .account-limits-reached) .account-limits-meter-heading b {
+.account-limits-meter:is(.account-limits-warning, .account-limits-fast, .account-limits-reached) .account-limits-meter-heading b {
   color: var(--account-limit-tone);
 }
 
 .account-limits-meter-track {
   height: 3px;
-  margin: 7px 0 5px;
+  margin: 6px 0 0;
   border-radius: 999px;
   overflow: hidden;
   background: color-mix(in oklch, var(--oa-muted) 25%, transparent);
@@ -192,14 +219,9 @@
   transition: width 180ms cubic-bezier(.22, 1, .36, 1);
 }
 
-.account-limits-meter small {
-  color: var(--oa-muted);
-  font-size: 11px;
-}
-
 @media (max-width: 760px) {
   .account-limits-label {
-    right: 24px;
+    right: 18px;
   }
 
   .account-limits-popup .context-usage-panel-header button {
@@ -209,7 +231,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .account-limits-ring-fill,
+  .account-limits-segment-fill,
   .account-limits-label,
   .account-limits-meter-track span {
     transition: none;

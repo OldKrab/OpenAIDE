@@ -405,3 +405,50 @@ fn account_limits_survive_status_replacement_and_end_with_the_account() {
     assert!(cache.clear("claude"));
     assert_eq!(cache.account_limits("claude"), None);
 }
+
+#[test]
+fn an_on_demand_read_is_claimed_once_per_interval_and_a_reading_counts_as_fresh() {
+    let cache = AgentStatusCache::default();
+    // timing: data — the minimum gap between reads, compared against elapsed time and never waited on.
+    let interval = std::time::Duration::from_secs(60);
+
+    assert!(cache.claim_account_limits_read("claude", interval));
+    assert!(
+        !cache.claim_account_limits_read("claude", interval),
+        "a running or recent attempt answers the next caller"
+    );
+    assert!(cache.claim_account_limits_read("codex", interval));
+    assert!(cache.claim_account_limits_read("claude", std::time::Duration::ZERO));
+
+    let cache = AgentStatusCache::default();
+    cache.record_account_limits("claude", five_hour_usage(40));
+    assert!(
+        !cache.claim_account_limits_read("claude", interval),
+        "a reading a turn just delivered needs no second read"
+    );
+    // A new account must not inherit the previous one's freshness.
+    cache.record_logout_success("claude");
+    assert!(cache.claim_account_limits_read("claude", interval));
+}
+
+#[test]
+fn an_agent_that_refused_the_read_is_not_asked_again_until_it_is_replaced() {
+    let cache = AgentStatusCache::default();
+    cache.record_account_limits_unsupported("claude");
+    assert!(!cache.claim_account_limits_read("claude", std::time::Duration::ZERO));
+
+    cache.clear("claude");
+    assert!(cache.claim_account_limits_read("claude", std::time::Duration::ZERO));
+}
+
+#[test]
+fn a_recorder_files_pushed_limits_under_its_agent() {
+    let cache = AgentStatusCache::default();
+    cache
+        .account_limits_recorder("claude")
+        .record(five_hour_usage(12));
+    assert_eq!(
+        cache.account_limits("claude").expect("limits").windows[0].used_percent,
+        12
+    );
+}

@@ -335,14 +335,18 @@ impl LivePromptProjection {
             }
             SessionUpdate::UsageUpdate(update) => {
                 self.emit_account_limits(update.meta.as_ref())?;
-                self.sink.emit(AgentEvent::ContextUsage(AgentContextUsage {
-                    used_tokens: update.used,
-                    capacity_tokens: update.size,
-                    cost: update.cost.map(|cost| AgentUsageCost {
-                        amount: cost.amount.to_string(),
-                        currency: cost.currency,
-                    }),
-                }))?;
+                if !crate::agent::acp_account_limits_projection::is_account_limits_carrier(
+                    update.meta.as_ref(),
+                ) {
+                    self.sink.emit(AgentEvent::ContextUsage(AgentContextUsage {
+                        used_tokens: update.used,
+                        capacity_tokens: update.size,
+                        cost: update.cost.map(|cost| AgentUsageCost {
+                            amount: cost.amount.to_string(),
+                            currency: cost.currency,
+                        }),
+                    }))?;
+                }
             }
             SessionUpdate::Plan(plan) => {
                 let Some(entries) = plan

@@ -44,6 +44,13 @@ impl AgentGateway {
         self.agent.logout(agent_id)
     }
 
+    pub(crate) fn read_account_limits(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError> {
+        self.agent.read_account_limits(agent_id)
+    }
+
     pub(crate) fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
         self.agent.shutdown_agent(agent_id)
     }

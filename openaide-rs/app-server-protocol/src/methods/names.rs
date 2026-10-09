@@ -21,6 +21,7 @@ pub const AGENT_PROBE: &str = "agent/probe";
 pub const AGENT_AUTHENTICATE: &str = "agent/authenticate";
 pub const AGENT_CANCEL_AUTHENTICATE: &str = "agent/cancelAuthenticate";
 pub const AGENT_LOGOUT: &str = "agent/logout";
+pub const AGENT_REFRESH_ACCOUNT_LIMITS: &str = "agent/refreshAccountLimits";
 pub const AGENT_LIST_SESSIONS: &str = "agent/listSessions";
 pub const AGENT_CREATE_CUSTOM: &str = "agent/createCustom";
 pub const AGENT_UPDATE_CUSTOM_METADATA: &str = "agent/updateCustomMetadata";
@@ -130,6 +131,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     AGENT_AUTHENTICATE,
     AGENT_CANCEL_AUTHENTICATE,
     AGENT_LOGOUT,
+    AGENT_REFRESH_ACCOUNT_LIMITS,
     AGENT_LIST_SESSIONS,
     AGENT_CREATE_CUSTOM,
     AGENT_UPDATE_CUSTOM_METADATA,

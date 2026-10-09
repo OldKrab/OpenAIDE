@@ -1,4 +1,5 @@
-//! Reads the Claude adapter's account limit values from a `usage_update`'s `_meta`.
+//! Reads the Claude adapter's account limit values: a reading it pushes or answers on the
+//! connection, and the verdict it attaches to a `usage_update`'s `_meta`.
 //!
 //! This is the one typed exception to "Agent-private `_meta` is never interpreted as usage": the
 //! two keys below are parsed field by field, and anything unrecognized is dropped rather than
@@ -13,8 +14,39 @@ use crate::agent::events::{
     AgentAccountLimitUsage, AgentAccountLimitWindowId, AgentAccountLimitsChange,
 };
 
-/// Full reading of the account's windows, fetched by the adapter after a turn.
-const ACCOUNT_LIMITS_KEY: &str = "_claude/accountLimits";
+/// Full reading of the account's windows. It names the adapter's connection notification and,
+/// for adapters that predate it, the `usage_update` `_meta` key carrying the same value.
+// TODO: drop the `_meta` reading once no supported adapter sends it; the notification replaces
+// it because a limits-only `usage_update` also overwrote the Task's context cost.
+pub(super) const ACCOUNT_LIMITS_KEY: &str = "_claude/accountLimits";
+/// Request that asks the adapter for a reading now; it needs no session.
+pub(super) const ACCOUNT_LIMITS_READ_METHOD: &str = "_claude/accountLimits/read";
+/// Field holding the reading in the notification params and in the read response.
+const ACCOUNT_LIMITS_FIELD: &str = "accountLimits";
+
+/// What a notification or read response said about the account's windows.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum AccountLimitsReading {
+    Usage(AgentAccountLimitsChange),
+    /// Plan limits do not apply to this account, or the adapter could not read them.
+    Unavailable,
+    Malformed,
+}
+
+/// True for the `usage_update` an older adapter sends only to carry a full reading. Its context
+/// usage repeats the turn's own figures without their cost, so it must not replace them.
+pub(super) fn is_account_limits_carrier(meta: Option<&serde_json::Map<String, Value>>) -> bool {
+    meta.is_some_and(|meta| meta.contains_key(ACCOUNT_LIMITS_KEY))
+}
+
+pub(super) fn project_account_limits_reading(payload: &Value) -> AccountLimitsReading {
+    match payload.get(ACCOUNT_LIMITS_FIELD) {
+        None | Some(Value::Null) => AccountLimitsReading::Unavailable,
+        Some(value) => {
+            usage_change(value).map_or(AccountLimitsReading::Malformed, AccountLimitsReading::Usage)
+        }
+    }
+}
 /// Claude's verdict for the window a request was checked against.
 const RATE_LIMIT_KEY: &str = "_claude/rateLimit";
 

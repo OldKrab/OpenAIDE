@@ -346,6 +346,17 @@ pub trait AgentRuntime: Send + Sync {
         )))
     }
 
+    /// Asks the Agent for its account's limits now, without a session or a turn. `None` means
+    /// the Agent answered that it has none to report.
+    fn read_account_limits(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError> {
+        Err(RuntimeError::CapabilityMissing(format!(
+            "agent_account_limits:{agent_id}"
+        )))
+    }
+
     /// Stops the pooled Agent process for one Agent without ending the runtime.
     /// Any attached session ends; later work launches a fresh process. Runtimes
     /// that do not pool processes keep the default no-op.

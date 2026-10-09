@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use openaide_app_server_protocol::snapshot::{
     AgentAccountLimits, AgentCapabilities, AgentSetupReason, AgentSignInFlow, AgentSignInPhase,
@@ -56,7 +57,30 @@ pub(crate) struct AgentStatusCache {
     /// Kept beside the status entries because probes and session outcomes replace a whole
     /// status snapshot, while account limits only change when the Agent reports them.
     account_limits: Arc<Mutex<HashMap<String, AgentAccountLimits>>>,
+    account_limit_reads: Arc<Mutex<AccountLimitReads>>,
     updates: Option<mpsc::Sender<()>>,
+}
+
+/// When each Agent's limits were last read or asked for, so on-demand reads stay rare.
+#[derive(Debug, Default)]
+struct AccountLimitReads {
+    last: HashMap<String, Instant>,
+    /// Agents whose process refused the read; asking again cannot succeed in this run.
+    unsupported: HashSet<String>,
+}
+
+/// Records one Agent process's pushed limits under the Agent's catalog identity, which the
+/// process's own launch configuration does not always carry.
+#[derive(Debug, Clone)]
+pub(crate) struct AgentAccountLimitsRecorder {
+    statuses: AgentStatusCache,
+    agent_id: String,
+}
+
+impl AgentAccountLimitsRecorder {
+    pub(crate) fn record(&self, change: AgentAccountLimitsChange) {
+        self.statuses.record_account_limits(&self.agent_id, change);
+    }
 }
 
 pub(crate) type AgentStatusUpdateReceiver = mpsc::Receiver<()>;
@@ -68,6 +92,7 @@ impl AgentStatusCache {
             Self {
                 entries: Arc::default(),
                 account_limits: Arc::default(),
+                account_limit_reads: Arc::default(),
                 updates: Some(sender),
             },
             receiver,
@@ -204,6 +229,14 @@ impl AgentStatusCache {
             AgentAccountLimitsChange::Usage { .. } => "usage",
             AgentAccountLimitsChange::Signal { .. } => "signal",
         };
+        if source == "usage" {
+            // A full reading is fresh even when it changes nothing.
+            self.account_limit_reads
+                .lock()
+                .expect("agent account limit reads poisoned")
+                .last
+                .insert(agent_id.to_string(), Instant::now());
+        }
         let mut limits = self
             .account_limits
             .lock()
@@ -231,8 +264,53 @@ impl AgentStatusCache {
         self.notify();
     }
 
+    pub(crate) fn account_limits_recorder(&self, agent_id: &str) -> AgentAccountLimitsRecorder {
+        AgentAccountLimitsRecorder {
+            statuses: self.clone(),
+            agent_id: agent_id.to_string(),
+        }
+    }
+
+    /// Claims the next on-demand read. False while a reading or an attempt is younger than
+    /// `min_interval`, which also keeps overlapping callers down to one read.
+    pub(crate) fn claim_account_limits_read(&self, agent_id: &str, min_interval: Duration) -> bool {
+        let mut reads = self
+            .account_limit_reads
+            .lock()
+            .expect("agent account limit reads poisoned");
+        if reads.unsupported.contains(agent_id) {
+            return false;
+        }
+        let now = Instant::now();
+        if reads
+            .last
+            .get(agent_id)
+            .is_some_and(|last| now.duration_since(*last) < min_interval)
+        {
+            return false;
+        }
+        reads.last.insert(agent_id.to_string(), now);
+        true
+    }
+
+    pub(crate) fn record_account_limits_unsupported(&self, agent_id: &str) {
+        self.account_limit_reads
+            .lock()
+            .expect("agent account limit reads poisoned")
+            .unsupported
+            .insert(agent_id.to_string());
+    }
+
     /// The limits describe the signed-in account, so they end with it.
     fn forget_account_limits(&self, agent_id: &str) -> bool {
+        {
+            let mut reads = self
+                .account_limit_reads
+                .lock()
+                .expect("agent account limit reads poisoned");
+            reads.last.remove(agent_id);
+            reads.unsupported.remove(agent_id);
+        }
         self.account_limits
             .lock()
             .expect("agent account limits poisoned")

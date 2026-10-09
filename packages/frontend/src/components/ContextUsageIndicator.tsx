@@ -55,7 +55,15 @@ export function ComposerWithContextUsage({
   configOptions?: ConfigOptionsCatalog;
   usage?: TaskContextUsage;
 }) {
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  // One panel at a time: the context details and the account limits share the space above the
+  // Composer, so opening either closes the other.
+  const [openPanel, setOpenPanel] = useState<"context" | "limits" | null>(null);
+  const detailsOpen = openPanel === "context";
+  const setDetailsOpen = (next: boolean | ((open: boolean) => boolean)) =>
+    setOpenPanel((panel) => {
+      const open = typeof next === "function" ? next(panel === "context") : next;
+      return open ? "context" : panel === "context" ? null : panel;
+    });
   const compact = useCompactContextUsage();
   const hostRef = useRef<HTMLDivElement>(null);
   const detailsId = useId().replaceAll(":", "");
@@ -92,7 +100,7 @@ export function ComposerWithContextUsage({
     if (!usage) closeDetails();
   }, [usage]);
 
-  useEffect(() => setDetailsOpen(false), [compact]);
+  useEffect(() => setOpenPanel(null), [compact]);
 
   const mobileControl = compact && usage && capacity > 0 ? (
     <PopupPanel
@@ -124,7 +132,14 @@ export function ComposerWithContextUsage({
     <div className="composer-context-host" ref={hostRef}>
       <ContextUsageControl.Provider value={mobileControl}>{children}</ContextUsageControl.Provider>
       {agentLabel ? (
-        <AccountLimitsIndicator agentLabel={agentLabel} compact={compact} hostRef={hostRef} limits={accountLimits} />
+        <AccountLimitsIndicator
+          agentLabel={agentLabel}
+          compact={compact}
+          hostRef={hostRef}
+          limits={accountLimits}
+          onOpenChange={(open) => setOpenPanel((panel) => open ? "limits" : panel === "limits" ? null : panel)}
+          open={openPanel === "limits"}
+        />
       ) : null}
       {!compact && usage && capacity > 0 ? (
         <div className="context-usage-interaction">

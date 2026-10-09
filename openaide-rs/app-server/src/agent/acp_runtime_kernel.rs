@@ -53,6 +53,13 @@ impl AcpRuntimeKernel {
         self.active_sessions.with_codex_provisioner(provisioner);
     }
 
+    pub(super) fn with_account_limits(
+        &mut self,
+        statuses: crate::agent::status_cache::AgentStatusCache,
+    ) {
+        self.active_sessions.with_account_limits(statuses);
+    }
+
     pub(super) fn probe(
         &self,
         request: AgentProbeRequest,
@@ -83,6 +90,19 @@ impl AcpRuntimeKernel {
     pub(super) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
         self.registry.require(agent_id)?;
         self.with_agent_process_operation(agent_id, || self.active_sessions.logout(agent_id))
+    }
+
+    pub(super) fn read_account_limits(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError> {
+        self.registry.require(agent_id)?;
+        // Only reaching the process is serialized with other process operations; the wait
+        // for the Agent's answer must not hold up a session start.
+        let read = self.with_agent_process_operation(agent_id, || {
+            self.active_sessions.begin_account_limits_read(agent_id)
+        })?;
+        read.wait()
     }
 
     pub(super) fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {

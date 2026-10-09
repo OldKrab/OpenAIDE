@@ -662,6 +662,16 @@ for line in sys.stdin:
         respond(message, {})
     elif method == "logout":
         respond(message, {})
+    elif method == "_claude/accountLimits/read" and session_id == "limits-session":
+        # The push and the answer differ so a test can tell which one it observed.
+        notify("_claude/accountLimits", {"accountLimits": {
+            "subscriptionType": "pro",
+            "windows": [{"type": "five_hour", "utilization": 40, "resetsAt": None}],
+        }})
+        respond(message, {"accountLimits": {
+            "subscriptionType": "pro",
+            "windows": [{"type": "five_hour", "utilization": 41, "resetsAt": None}],
+        }})
     elif method == "session/prompt":
         if log_details:
             log("prompt:" + json.dumps(message.get("params", {}), sort_keys=True))
@@ -1489,6 +1499,52 @@ fn logout_uses_the_advertised_acp_method_and_stops_the_agent_process() {
         read_fixture_methods(&log_path),
         ["initialize", "logout", "initialize"]
     );
+}
+
+#[test]
+fn account_limits_are_read_without_a_session_and_pushed_ones_are_recorded() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((mut runtime, log_path)) = fixture_runtime(&temp, "limits-session") else {
+        return;
+    };
+    let statuses = crate::agent::status_cache::AgentStatusCache::default();
+    runtime.kernel.with_account_limits(statuses.clone());
+
+    let reading = runtime
+        .read_account_limits("codex")
+        .expect("read account limits")
+        .expect("a reading");
+
+    let crate::agent::events::AgentAccountLimitsChange::Usage { windows, .. } = reading else {
+        panic!("a read answers with a full reading");
+    };
+    assert_eq!(windows[0].used_percent, 41);
+    // The notification precedes the response on the wire, so it is recorded by now.
+    assert_eq!(
+        statuses
+            .account_limits("codex")
+            .expect("pushed limits")
+            .windows[0]
+            .used_percent,
+        40
+    );
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "_claude/accountLimits/read"]
+    );
+}
+
+#[test]
+fn an_agent_without_the_account_limits_extension_reports_the_method_missing() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) = fixture_runtime(&temp, "plain-session") else {
+        return;
+    };
+
+    assert!(matches!(
+        runtime.read_account_limits("codex"),
+        Err(RuntimeError::MethodNotFound(_))
+    ));
 }
 
 #[test]

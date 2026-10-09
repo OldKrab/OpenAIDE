@@ -8,6 +8,8 @@ use openaide_app_server_protocol::agent::{
     AgentCancelAuthenticateResult as ProtocolAgentCancelAuthenticateResult,
     AgentLogoutParams as ProtocolAgentLogoutParams, AgentLogoutResult as ProtocolAgentLogoutResult,
     AgentProbeParams as ProtocolAgentProbeParams, AgentProbeResult as ProtocolAgentProbeResult,
+    AgentRefreshAccountLimitsParams as ProtocolAgentRefreshAccountLimitsParams,
+    AgentRefreshAccountLimitsResult as ProtocolAgentRefreshAccountLimitsResult,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::snapshot::{AgentCollectionSnapshot, AgentStatus};
@@ -22,6 +24,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentAuthenticateResult, AgentAuthenticateStatus, AgentProbeResult};
 use crate::snapshots::{AgentCollectionSnapshotSource, AgentRegistrySnapshotSource};
 
+mod account_limits_refresh;
 mod catalog_mutations;
 pub(crate) use catalog_mutations::AgentCatalogMutationWorkflow;
 mod settings_details;
@@ -93,6 +96,16 @@ pub(crate) trait AgentAuthenticateWorkflow: Send + Sync {
             recoverable: true,
             target: None,
         })
+    }
+
+    /// Starts a background read of the Agent's Account Limits when the current reading is
+    /// old. It never waits for the Agent; a changed reading arrives with the Agent collection.
+    fn refresh_account_limits(
+        &self,
+        params: ProtocolAgentRefreshAccountLimitsParams,
+    ) -> Result<ProtocolAgentRefreshAccountLimitsResult, ProtocolError> {
+        let _ = params;
+        Ok(ProtocolAgentRefreshAccountLimitsResult { started: false })
     }
 
     /// The Agent asked the user to open `url` during the running Sign-in Flow. Returns whether a
@@ -395,6 +408,25 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
         );
         Ok(ProtocolAgentLogoutResult {
             agents: self.snapshot()?,
+        })
+    }
+
+    fn refresh_account_limits(
+        &self,
+        params: ProtocolAgentRefreshAccountLimitsParams,
+    ) -> Result<ProtocolAgentRefreshAccountLimitsResult, ProtocolError> {
+        let agent_id = params.agent_id.as_str();
+        self.registry
+            .require(agent_id)
+            .map_err(protocol_error_from_runtime)?;
+        Ok(ProtocolAgentRefreshAccountLimitsResult {
+            started: account_limits_refresh::start(
+                &self.gateway,
+                &self.statuses,
+                agent_id,
+                account_limits_refresh::MIN_READ_INTERVAL,
+            )
+            .is_some(),
         })
     }
 

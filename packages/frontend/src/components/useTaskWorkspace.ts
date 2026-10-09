@@ -6,6 +6,7 @@ import type { WebviewBootstrap } from "../state/surfaceTypes";
 import { openNewTaskSurface, postHostMessage } from "../services/hostBridge";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import { appControllerDerivedStateDeps, deriveAppControllerState } from "./appControllerDerivedState";
+import { useAccountLimitsRefresh } from "./useAccountLimitsRefresh";
 import { useTaskAttentionReadReceipt } from "./useTaskAttentionReadReceipt";
 
 type TaskWorkspaceOptions = {
@@ -32,6 +33,13 @@ export function useTaskWorkspace({
       ? state.snapshot.task.task_id
       : undefined,
     unread: state.snapshot?.task.unread === true,
+  });
+
+  useAccountLimitsRefresh({
+    agentId: bootstrap.surface === "task" && state.snapshot && bootstrap.taskId === state.snapshot.task.task_id
+      ? state.snapshot.task.agent_id
+      : undefined,
+    backendConnection,
   });
 
   useEffect(() => {

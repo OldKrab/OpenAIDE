@@ -12,9 +12,10 @@ use crate::agent::{
     AgentCreateCustomParams, AgentCreateCustomResult, AgentDeleteCustomParams,
     AgentDeleteCustomResult, AgentListSessionsParams, AgentListSessionsResult, AgentListedSession,
     AgentLogoutParams, AgentLogoutResult, AgentProbeParams, AgentProbeResult,
-    AgentReplaceCustomCleanup, AgentReplaceCustomConfirmation, AgentReplaceCustomHistoryPolicy,
-    AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
-    AgentSetEnabledResult, AgentSettingsAuthMethod, AgentSettingsAuthVariable, AgentSettingsDetail,
+    AgentRefreshAccountLimitsParams, AgentRefreshAccountLimitsResult, AgentReplaceCustomCleanup,
+    AgentReplaceCustomConfirmation, AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams,
+    AgentReplaceCustomResult, AgentSetEnabledParams, AgentSetEnabledResult,
+    AgentSettingsAuthMethod, AgentSettingsAuthVariable, AgentSettingsDetail,
     AgentSettingsDetailsParams, AgentSettingsDetailsResult, AgentSettingsEnvRow,
     AgentSettingsSourceKind, AgentSettingsStatus, AgentSettingsTransport,
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
@@ -282,6 +283,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentCancelAuthenticateResult>(output, config);
     push_decl::<AgentLogoutParams>(output, config);
     push_decl::<AgentLogoutResult>(output, config);
+    push_decl::<AgentRefreshAccountLimitsParams>(output, config);
+    push_decl::<AgentRefreshAccountLimitsResult>(output, config);
     push_decl::<AgentListSessionsParams>(output, config);
     push_decl::<AgentListSessionsResult>(output, config);
     push_decl::<AgentListedSession>(output, config);
