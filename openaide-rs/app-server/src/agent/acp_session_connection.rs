@@ -8,6 +8,7 @@ use agent_client_protocol::{
 };
 use serde::Deserialize;
 
+use crate::agent::acp_background_work::{route_async_task_update, AsyncTaskRouting};
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
 };
@@ -79,6 +80,11 @@ where
                     return Ok(Handled::Yes);
                 }
                 raw_native_subagents.remember_spawn_prompt(notification.params());
+                let notification = match route_async_task_update(&notification) {
+                    AsyncTaskRouting::NotAsyncTask => notification,
+                    AsyncTaskRouting::Forward(state_change) => state_change,
+                    AsyncTaskRouting::Drop => return Ok(Handled::Yes),
+                };
                 Ok(Handled::No {
                     message: (notification, cx),
                     retry: false,

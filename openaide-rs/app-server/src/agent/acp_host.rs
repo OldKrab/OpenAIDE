@@ -12,6 +12,7 @@ use crate::agent::acp_schema::{
     WriteTextFileResponse,
 };
 
+use crate::agent::acp_background_work::ASYNC_TASKS_CAPABILITY;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -33,6 +34,11 @@ fn initialize_request_with_subagents(
     let mut meta = serde_json::Map::new();
     meta.insert(
         "parameterizedModelPicker".to_string(),
+        serde_json::Value::Bool(true),
+    );
+    // Background commands that outlive a prompt keep their Task turn open.
+    meta.insert(
+        ASYNC_TASKS_CAPABILITY.to_string(),
         serde_json::Value::Bool(true),
     );
     if native_subagents {

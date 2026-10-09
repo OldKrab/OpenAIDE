@@ -62,6 +62,15 @@ fn form_elicitation_is_advertised_without_shell_host_capabilities() {
 }
 
 #[test]
+fn background_command_reporting_is_requested_so_turns_can_outlive_a_prompt_response() {
+    for bridge in [HostBridge::disabled(), HostBridge::channel().0] {
+        let value = serde_json::to_value(initialize_request(&bridge)).unwrap();
+
+        assert_eq!(value["clientCapabilities"]["_meta"]["async-tasks"], true);
+    }
+}
+
+#[test]
 fn session_compaction_is_advertised_so_agents_send_structured_updates() {
     for bridge in [HostBridge::disabled(), HostBridge::channel().0] {
         let value = serde_json::to_value(initialize_request(&bridge)).unwrap();
