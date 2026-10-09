@@ -27,6 +27,8 @@ use crate::protocol::host::HostBridge;
 
 const DEFAULT_LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const LIST_REPLY_TIMEOUT_GRACE: Duration = Duration::from_secs(1);
+/// Outlasts the process's own bound on the request, so the process reports the timeout.
+const ACCOUNT_LIMITS_REPLY_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub(super) struct AcpAgentProcessPool {
     registry: AgentRegistryHandle,
@@ -36,6 +38,30 @@ pub(super) struct AcpAgentProcessPool {
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
     list_timeout: Duration,
     codex_provisioner: Option<CodexAcpProvisioner>,
+    /// Where a process's pushed Account Limits are recorded; absent in runtimes built without
+    /// product state.
+    account_limits: Option<crate::agent::status_cache::AgentStatusCache>,
+}
+
+/// An account limits read already sent to the Agent process. Holding the operation keeps the
+/// process from retiring while its answer is awaited.
+pub(super) struct AccountLimitsRead {
+    reply_rx: std::sync::mpsc::Receiver<
+        Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError>,
+    >,
+    _operation: ProcessOperation,
+}
+
+impl AccountLimitsRead {
+    pub(super) fn wait(
+        self,
+    ) -> Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError> {
+        self.reply_rx
+            .recv_timeout(ACCOUNT_LIMITS_REPLY_TIMEOUT)
+            .map_err(|_| {
+                RuntimeError::NotReady("ACP account limits read did not answer".to_string())
+            })?
+    }
 }
 
 #[derive(Clone)]
@@ -76,7 +102,15 @@ impl AcpAgentProcessPool {
             auth_environments: Mutex::new(HashMap::new()),
             list_timeout: DEFAULT_LIST_TIMEOUT,
             codex_provisioner: None,
+            account_limits: None,
         }
+    }
+
+    pub(super) fn with_account_limits(
+        &mut self,
+        statuses: crate::agent::status_cache::AgentStatusCache,
+    ) {
+        self.account_limits = Some(statuses);
     }
 
     pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
@@ -465,6 +499,30 @@ impl AcpAgentProcessPool {
         result
     }
 
+    /// Sends the read to this Agent's process, launching one when none is alive.
+    pub(super) fn begin_account_limits_read(
+        &self,
+        agent_id: &str,
+    ) -> Result<AccountLimitsRead, RuntimeError> {
+        let (process, operation) = self.get_or_launch_process(agent_id)?;
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        process
+            .control_tx
+            .send(AcpAgentProcessControl::ReadAccountLimits {
+                agent_id: agent_id.to_string(),
+                reply_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::NotReady(
+                    "ACP agent process ended before account limits read".to_string(),
+                )
+            })?;
+        Ok(AccountLimitsRead {
+            reply_rx,
+            _operation: operation,
+        })
+    }
+
     fn stop_process(&self, agent_id: &str, process: &AcpAgentProcessClient) {
         if self.remove_process_if_current(agent_id, process) {
             let _ = process.shutdown_tx.send(true);
@@ -545,6 +603,10 @@ impl AcpAgentProcessPool {
             .expect("ACP process registry poisoned")
             .insert(agent_id.to_string(), process.clone());
 
+        let account_limits = self
+            .account_limits
+            .as_ref()
+            .map(|statuses| statuses.account_limits_recorder(agent_id));
         let worker_agent_id = agent_id.to_string();
         let worker_terminal_error = terminal_error.clone();
         let worker_runtime_lease = prepared.lease;
@@ -562,6 +624,7 @@ impl AcpAgentProcessPool {
                 terminal_registry,
                 secret_resolver,
                 lifetime: lifetime.clone(),
+                account_limits,
             }))
             .and_then(|result| result);
             // Remove only this generation; a concurrent demand may already have replaced it.

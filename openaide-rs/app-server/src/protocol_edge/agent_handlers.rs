@@ -3,7 +3,8 @@ use openaide_app_server_protocol::agent::{
     AgentCancelAuthenticateResult, AgentCreateCustomParams, AgentCreateCustomResult,
     AgentDeleteCustomParams, AgentDeleteCustomResult, AgentListSessionsParams,
     AgentListSessionsResult, AgentLogoutParams, AgentLogoutResult, AgentProbeParams,
-    AgentProbeResult, AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
+    AgentProbeResult, AgentRefreshAccountLimitsParams, AgentRefreshAccountLimitsResult,
+    AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
     AgentSetEnabledResult, AgentSettingsDetailsParams, AgentSettingsDetailsResult,
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
@@ -455,6 +456,27 @@ impl RpcGateway {
             result,
             events,
         )
+    }
+
+    pub(super) fn handle_agent_refresh_account_limits(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<AgentRefreshAccountLimitsParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error));
+            }
+        };
+        match self.agent_authenticate.refresh_account_limits(params) {
+            Ok(result) => {
+                self.result::<AgentRefreshAccountLimitsResult>(connection_id, id, meta, result)
+            }
+            Err(error) => self.error(connection_id, id, meta, error),
+        }
     }
 
     pub(super) fn handle_agent_create_custom(

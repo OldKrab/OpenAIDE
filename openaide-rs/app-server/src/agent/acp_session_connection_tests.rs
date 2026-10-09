@@ -419,6 +419,7 @@ fn connection_context_with_trace(
         session_traces: Arc::default(),
         elicitation_cancellations: Arc::default(),
         native_subagents,
+        account_limits: None,
     }
 }
 

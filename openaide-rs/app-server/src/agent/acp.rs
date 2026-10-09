@@ -51,6 +51,7 @@ impl AcpAgentRuntime {
         statuses: AgentStatusCache,
     ) -> Self {
         let mut runtime = Self::new_with_registry(registry, host_bridge);
+        runtime.kernel.with_account_limits(statuses.clone());
         runtime
             .kernel
             .with_codex_provisioner(CodexAcpProvisioner::new_with_statuses(
@@ -145,6 +146,13 @@ impl AgentRuntime for AcpAgentRuntime {
 
     fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
         self.kernel.logout(agent_id)
+    }
+
+    fn read_account_limits(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError> {
+        self.kernel.read_account_limits(agent_id)
     }
 
     fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {

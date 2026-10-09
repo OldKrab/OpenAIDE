@@ -12,8 +12,8 @@ import { PopupPanel } from "./Popup";
 
 /*
  * Account limits belong to the Agent's subscription, not to a Task: every Task of that Agent shows
- * the same windows. The Composer corner is their only resting place; the corner arcs share the
- * Composer corner's centre of curvature, so they stay inside its padding at any draft length.
+ * the same windows. They rest on the right end of the Composer's top border, the same way the
+ * context meter rests on its right border, so neither takes space from the draft.
  */
 
 const WINDOW_MS: Record<AgentAccountLimitWindow["kind"], number> = {
@@ -23,6 +23,11 @@ const WINDOW_MS: Record<AgentAccountLimitWindow["kind"], number> = {
 };
 
 const ANNOUNCE_MS = 2600;
+/** Keeps the meters on the straight part of the border, clear of the corner curve. */
+const EDGE_CORNER_GAP = 4;
+const EDGE_HEIGHT = 8;
+/** Points of usage a window may run ahead of its elapsed time before it reads as draining fast. */
+const FAST_MARGIN_PERCENT = 5;
 const CLOCK_TICK_MS = 60_000;
 
 export function AccountLimitsIndicator({
@@ -31,6 +36,8 @@ export function AccountLimitsIndicator({
   hostRef,
   limits,
   now = Date.now,
+  onOpenChange,
+  open,
 }: {
   /** Names whose account the limits belong to; the limits themselves carry no Agent identity. */
   agentLabel: string;
@@ -39,8 +46,10 @@ export function AccountLimitsIndicator({
   limits?: AgentAccountLimits | null;
   /** Injectable clock so reset labels and elapsed ticks are deterministic in tests. */
   now?: () => number;
+  /** The Composer owns which of its panels is open, so this one never stacks on another. */
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const radius = useComposerCornerRadius(hostRef, compact);
   const clock = useMinuteClock(now, limits !== undefined);
   const primary = limits ? headlineWindow(limits.windows) : undefined;
@@ -48,7 +57,7 @@ export function AccountLimitsIndicator({
 
   if (!limits || !primary) return null;
 
-  const rings = ringWindows(limits.windows, compact);
+  const segments = edgeWindows(limits.windows);
   // The compact Composer has no room for two lines beside the corner, so it names the headline only.
   const summary = (compact ? [primary] : limits.windows.filter((window) => window.kind !== "weeklyModel"))
     .map((window) => ({ window, text: `${windowLabel(window)} ${amountLabel(window)}`, reset: resetLabel(window, clock) }));
@@ -59,27 +68,28 @@ export function AccountLimitsIndicator({
         anchorRef={hostRef}
         className="account-limits-popup"
         label={`${agentLabel} limits`}
-        onOpenChange={setOpen}
+        onOpenChange={onOpenChange}
         open={open}
         placement="top-end"
         trigger={(props) => (
           <button
             {...props}
             aria-label={`${agentLabel} ${windowLabel(primary).toLowerCase()}: ${amountLabel(primary)}. Show limits`}
-            className={`account-limits-corner account-limits-${primary.status}`}
+            className={`account-limits-edge account-limits-${windowTone(primary, clock)}`}
             data-compact={compact}
+            style={{ right: radius + EDGE_CORNER_GAP }}
             type="button"
           >
-            <CornerRings clock={clock} radius={radius} windows={rings} />
+            <EdgeSegments clock={clock} length={compact ? 36 : 52} windows={segments} />
           </button>
         )}
       >
-        <AccountLimitsDetails agentLabel={agentLabel} clock={clock} limits={limits} onClose={() => setOpen(false)} />
+        <AccountLimitsDetails agentLabel={agentLabel} clock={clock} limits={limits} onClose={() => onOpenChange(false)} />
       </PopupPanel>
       {!open ? (
         <span className="account-limits-label" data-announce={announce} role="tooltip">
           {summary.map(({ window, text, reset }) => (
-            <span className={`account-limits-${window.status}`} key={window.kind}>
+            <span className={`account-limits-${windowTone(window, clock)}`} key={window.kind}>
               {text}{reset ? ` · resets ${reset}` : ""}
             </span>
           ))}
@@ -89,33 +99,37 @@ export function AccountLimitsIndicator({
   );
 }
 
-function CornerRings({ clock, radius, windows }: { clock: number; radius: number; windows: AgentAccountLimitWindow[] }) {
-  const size = radius + 2;
-  const centerX = 2;
-  const centerY = radius;
-  const arc = (r: number) => `M${centerX} ${centerY - r} A${r} ${r} 0 0 1 ${centerX + r} ${centerY}`;
+/**
+ * One straight meter per window, laid along the top border. It starts full and drains toward its
+ * name as the limit is spent. Each carries its window's name on the border, the way a fieldset
+ * legend does, because two bare lines cannot say which limit is which.
+ */
+function EdgeSegments({ clock, length, windows }: { clock: number; length: number; windows: AgentAccountLimitWindow[] }) {
+  const line = `M0 ${EDGE_HEIGHT / 2} h${length}`;
   return (
-    <svg aria-hidden="true" className="account-limits-rings" height={size} viewBox={`0 0 ${size} ${size}`} width={size}>
-      {windows.map((window, index) => {
-        const r = radius - 3.5 - index * 4;
+    <>
+      {windows.map((window) => {
         const elapsed = elapsedFraction(window, clock);
         return (
-          <g className={`account-limits-ring account-limits-${window.status}`} data-inner={index > 0} key={window.kind}>
-            <path className="account-limits-ring-track" d={arc(r)} />
-            <path
-              className="account-limits-ring-fill"
-              d={arc(r)}
-              pathLength="100"
-              style={{ "--account-limit-used": clampPercent(window.usedPercent) } as CSSProperties}
-            />
-            {elapsed !== undefined && window.status !== "reached" ? (
-              // Where the clock is in the window: a fill ahead of its tick is burning faster than time.
-              <path className="account-limits-ring-tick" d={tickPath(centerX, centerY, r, elapsed)} />
-            ) : null}
-          </g>
+          <span aria-hidden="true" className={`account-limits-segment account-limits-${windowTone(window, clock)}`} key={window.kind}>
+            <span className="account-limits-segment-name">{window.kind === "fiveHour" ? "5h" : "week"}</span>
+            <svg height={EDGE_HEIGHT} viewBox={`0 0 ${length} ${EDGE_HEIGHT}`} width={length}>
+              <path className="account-limits-segment-track" d={line} />
+              <path
+                className="account-limits-segment-fill"
+                d={line}
+                pathLength="100"
+                style={{ "--account-limit-left": leftPercent(window) } as CSSProperties}
+              />
+              {elapsed !== undefined && window.status !== "reached" ? (
+                // How much of the window's time is left: a fill that falls short of its tick is draining faster than time.
+                <path className="account-limits-segment-tick" d={`M${round((1 - elapsed) * length)} 1 v${EDGE_HEIGHT - 2}`} />
+              ) : null}
+            </svg>
+          </span>
         );
       })}
-    </svg>
+    </>
   );
 }
 
@@ -133,36 +147,32 @@ function AccountLimitsDetails({
   return (
     <section className="account-limits-panel">
       <div className="context-usage-panel-header">
-        <strong>{agentLabel} limits</strong>
+        <strong>
+          {agentLabel} limits
+          {limits.planLabel ? <span className="account-limits-plan">{limits.planLabel}</span> : null}
+        </strong>
         <button aria-label="Close limits" onClick={onClose} type="button">
           <X aria-hidden="true" size={15} />
         </button>
       </div>
-      <p className="account-limits-scope">
-        {limits.planLabel ? <strong>{limits.planLabel} plan</strong> : null}
-        <span>Shared by all tasks</span>
-      </p>
-      {limits.windows.map((window) => {
-        const reset = resetLabel(window, clock);
-        const remaining = remainingLabel(window, clock);
-        return (
-          <div className={`account-limits-meter account-limits-${window.status}`} key={`${window.kind}:${window.modelLabel ?? ""}`}>
-            <div className="account-limits-meter-heading">
-              <span>{windowLabel(window)}</span>
-              <b>{window.status === "reached" ? "Reached" : `${clampPercent(window.usedPercent)}% used`}</b>
-            </div>
-            <div aria-hidden="true" className="account-limits-meter-track">
-              <span style={{ width: `${clampPercent(window.usedPercent)}%` }} />
-            </div>
-            {reset ? <small>Resets {reset}{remaining ? ` · ${remaining}` : ""}</small> : null}
+      {limits.windows.map((window) => (
+        // One line of words per window: its name, when it resets, and how much is used.
+        <div className={`account-limits-meter account-limits-${windowTone(window, clock)}`} key={`${window.kind}:${window.modelLabel ?? ""}`}>
+          <div className="account-limits-meter-heading">
+            <span>{panelWindowLabel(window)}</span>
+            <small title={resetLabel(window, clock)}>{panelResetLabel(window, clock)}</small>
+            <b>{window.status === "reached" ? "Used up" : `${leftPercent(window)}% left`}</b>
           </div>
-        );
-      })}
+          <div aria-hidden="true" className="account-limits-meter-track">
+            <span style={{ width: `${leftPercent(window)}%` }} />
+          </div>
+        </div>
+      ))}
     </section>
   );
 }
 
-/** Matches the edge meter: the Composer's computed corner is the only source of the arc geometry. */
+/** The Composer's computed corner decides where the straight part of its top border ends. */
 function useComposerCornerRadius(hostRef: RefObject<HTMLDivElement | null>, compact: boolean) {
   const [radius, setRadius] = useState(compact ? 14 : 20);
   useLayoutEffect(() => {
@@ -216,22 +226,9 @@ export function headlineWindow(windows: AgentAccountLimitWindow[]) {
     ?? windows[0];
 }
 
-/**
- * Outer arc is the 5-hour window, inner arc the week. The compact corner is too tight for a
- * readable inner arc, so it draws the headline window alone.
- */
-function ringWindows(windows: AgentAccountLimitWindow[], compact: boolean) {
-  const shared = windows.filter((window) => window.kind !== "weeklyModel");
-  if (!compact) return shared.slice(0, 2);
-  const headline = headlineWindow(shared);
-  return headline ? [headline] : [];
-}
-
-function tickPath(centerX: number, centerY: number, r: number, elapsed: number) {
-  const angle = elapsed * (Math.PI / 2);
-  const point = (distance: number) =>
-    `${round(centerX + distance * Math.sin(angle))} ${round(centerY - distance * Math.cos(angle))}`;
-  return `M${point(r - 1.6)} L${point(r + 1.6)}`;
+/** Left to right in reading order: the 5-hour window, then the week. Per-model windows stay in the panel. */
+function edgeWindows(windows: AgentAccountLimitWindow[]) {
+  return windows.filter((window) => window.kind !== "weeklyModel").slice(0, 2);
 }
 
 function elapsedFraction(window: AgentAccountLimitWindow, clock: number) {
@@ -249,7 +246,23 @@ function windowLabel(window: AgentAccountLimitWindow) {
 }
 
 function amountLabel(window: AgentAccountLimitWindow) {
-  return window.status === "reached" ? "reached" : `${clampPercent(window.usedPercent)}%`;
+  return window.status === "reached" ? "used up" : `${leftPercent(window)}% left`;
+}
+
+function leftPercent(window: AgentAccountLimitWindow) {
+  return 100 - clampPercent(window.usedPercent);
+}
+
+/**
+ * The colour a window is drawn in. The Agent's own warning and reached states come first; below
+ * them, `fast` marks a window draining faster than its time runs out. It is a pace hint drawn from
+ * the reading, never a status, and the margin keeps the first turns of a fresh window quiet.
+ */
+function windowTone(window: AgentAccountLimitWindow, clock: number) {
+  if (window.status !== "ok") return window.status;
+  const elapsed = elapsedFraction(window, clock);
+  if (elapsed === undefined) return "ok";
+  return clampPercent(window.usedPercent) - elapsed * 100 >= FAST_MARGIN_PERCENT ? "fast" : "ok";
 }
 
 /** Clock time for a reset later today, otherwise the day and time, in the viewer's locale. */
@@ -263,16 +276,23 @@ export function resetLabel(window: AgentAccountLimitWindow, clock: number) {
   return `on ${day}, ${time}`;
 }
 
-function remainingLabel(window: AgentAccountLimitWindow, clock: number) {
+function panelWindowLabel(window: AgentAccountLimitWindow) {
+  if (window.kind === "fiveHour") return "5-hour";
+  if (window.kind === "weekly") return "Week";
+  return window.modelLabel ? `Week · ${window.modelLabel}` : "Week · model";
+}
+
+/** A reset within a day reads as a countdown; a later one as the day it lands on. */
+function panelResetLabel(window: AgentAccountLimitWindow, clock: number) {
   const resetsAt = parseInstant(window.resetsAtMs);
   if (resetsAt === undefined) return undefined;
   const minutes = Math.round((resetsAt - clock) / 60_000);
   if (minutes <= 0) return undefined;
-  if (minutes < 60) return `in ${minutes} min`;
+  if (minutes < 60) return `resets in ${minutes} min`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return minutes % 60 ? `in ${hours} h ${minutes % 60} min` : `in ${hours} h`;
-  const days = Math.round(hours / 24);
-  return `in ${days} ${days === 1 ? "day" : "days"}`;
+  if (hours < 24) return minutes % 60 ? `resets in ${hours} h ${minutes % 60} min` : `resets in ${hours} h`;
+  const day = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(resetsAt));
+  return `resets ${day}`;
 }
 
 function parseInstant(value: number | null | undefined) {

@@ -63,6 +63,13 @@ impl AcpActiveSessionManager {
         self.processes.with_codex_provisioner(provisioner);
     }
 
+    pub(super) fn with_account_limits(
+        &mut self,
+        statuses: crate::agent::status_cache::AgentStatusCache,
+    ) {
+        self.processes.with_account_limits(statuses);
+    }
+
     #[cfg(test)]
     pub(super) fn with_start_timeout(&mut self, start_timeout: Duration) {
         self.start_timeout = start_timeout;
@@ -153,6 +160,13 @@ impl AcpActiveSessionManager {
 
     pub(super) fn logout(&self, agent_id: &str) -> Result<(), RuntimeError> {
         self.processes.logout(agent_id)
+    }
+
+    pub(super) fn begin_account_limits_read(
+        &self,
+        agent_id: &str,
+    ) -> Result<crate::agent::acp_agent_process_pool::AccountLimitsRead, RuntimeError> {
+        self.processes.begin_account_limits_read(agent_id)
     }
 
     /// Ends this Agent's pooled process and every session attached to it.

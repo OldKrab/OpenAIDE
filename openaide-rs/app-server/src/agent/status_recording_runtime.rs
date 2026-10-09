@@ -61,6 +61,13 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
         self.inner.logout(agent_id)
     }
 
+    fn read_account_limits(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError> {
+        self.inner.read_account_limits(agent_id)
+    }
+
     fn shutdown_agent(&self, agent_id: &str) -> Result<(), RuntimeError> {
         self.inner.shutdown_agent(agent_id)
     }

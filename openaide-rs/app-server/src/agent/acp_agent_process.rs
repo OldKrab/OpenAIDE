@@ -124,6 +124,7 @@ pub(super) struct AcpAgentProcessInput {
     pub(super) terminal_registry: AcpHostTerminalRegistry,
     pub(super) secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
     pub(super) lifetime: AcpProcessLifetime,
+    pub(super) account_limits: Option<crate::agent::status_cache::AgentAccountLimitsRecorder>,
 }
 
 pub(super) enum AcpAgentProcessControl {
@@ -138,6 +139,12 @@ pub(super) enum AcpAgentProcessControl {
     Logout {
         agent_id: String,
         reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
+    },
+    ReadAccountLimits {
+        agent_id: String,
+        reply_tx: mpsc::Sender<
+            Result<Option<crate::agent::events::AgentAccountLimitsChange>, RuntimeError>,
+        >,
     },
     Fork {
         request: AgentSessionFork,
@@ -169,6 +176,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         terminal_registry,
         secret_resolver,
         lifetime,
+        account_limits,
     } = input;
 
     let current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>> = Arc::default();
@@ -235,6 +243,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         session_traces: session_traces.clone(),
         elicitation_cancellations,
         native_subagents: native_subagents.clone(),
+        account_limits,
     };
     let connection_terminal_registry = terminal_registry.clone();
 
@@ -408,6 +417,18 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                                     &agent_id,
                                 ).await;
                                 let _ = reply_tx.send(result);
+                            }
+                            AcpAgentProcessControl::ReadAccountLimits { agent_id, reply_tx } => {
+                                // Detached like session listing: the read spawns a Claude
+                                // process and must not hold up sign-in or probes meanwhile.
+                                let connection = connection.clone();
+                                discovery_tasks.spawn(async move {
+                                    let result = crate::agent::acp_account_limits_read::read_account_limits_on_shared_process(
+                                        &connection,
+                                        &agent_id,
+                                    ).await;
+                                    let _ = reply_tx.send(result);
+                                });
                             }
                             AcpAgentProcessControl::Fork { request, reply_tx } => {
                                 let result = fork_session_on_shared_process(

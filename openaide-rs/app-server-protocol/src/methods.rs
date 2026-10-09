@@ -10,7 +10,8 @@ use crate::agent::{
     AgentCancelAuthenticateResult, AgentCreateCustomParams, AgentCreateCustomResult,
     AgentDeleteCustomParams, AgentDeleteCustomResult, AgentListSessionsParams,
     AgentListSessionsResult, AgentLogoutParams, AgentLogoutResult, AgentProbeParams,
-    AgentProbeResult, AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
+    AgentProbeResult, AgentRefreshAccountLimitsParams, AgentRefreshAccountLimitsResult,
+    AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
     AgentSetEnabledResult, AgentSettingsDetailsParams, AgentSettingsDetailsResult,
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
@@ -246,6 +247,12 @@ protocol_method!(
     AGENT_LOGOUT,
     AgentLogoutParams,
     AgentLogoutResult
+);
+protocol_method!(
+    AgentRefreshAccountLimits,
+    AGENT_REFRESH_ACCOUNT_LIMITS,
+    AgentRefreshAccountLimitsParams,
+    AgentRefreshAccountLimitsResult
 );
 protocol_method!(
     AgentListSessions,
