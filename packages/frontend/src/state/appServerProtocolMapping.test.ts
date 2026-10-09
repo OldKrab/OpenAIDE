@@ -103,6 +103,12 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.refreshing).toBe(false);
   });
 
+  it("keeps background work distinct from running", () => {
+    expect(mapProtocolTaskSummary(protocolSummary({ status: "background" }))).toMatchObject({
+      status: "background",
+    });
+  });
+
   it("keeps stopping distinct from running", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ status: "stopping" }))).toMatchObject({
       status: "stopping",

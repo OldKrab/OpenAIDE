@@ -47,6 +47,15 @@ pub enum TaskStatus {
     Waiting,
 }
 
+/// Agent-reported Background Work holding an answered turn open. The Task stays
+/// `Active` for every workflow rule; only its client-visible status differs.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskBackgroundWork {
+    /// Background commands still running or paused. Zero while a finished
+    /// command's follow-up cycle is still awaited.
+    pub live_commands: u32,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IsolationKind {
@@ -76,6 +85,8 @@ pub struct TaskSummary {
     pub project_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_work: Option<TaskBackgroundWork>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

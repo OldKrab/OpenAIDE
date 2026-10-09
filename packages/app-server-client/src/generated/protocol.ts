@@ -1080,7 +1080,11 @@ export type TaskChanges = { task?: TaskSummary | null,
 /**
  * Present when the active-turn clock changes; inner `None` clears it.
  */
-activeTurnStartedAt?: string | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null,
+activeTurnStartedAt?: string | null | null,
+/**
+ * Present with every Task summary change; inner `None` means the Task is not `background`.
+ */
+backgroundCommandCount?: number | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null,
 /**
  * Task-owned permission handling. Carried as a delta so an open replica
  * learns about `task/setPermissionPolicy` without a fresh baseline.
@@ -1226,7 +1230,7 @@ export type TaskTitle = { value: string, source: TaskTitleSource, };
 
 export type TaskTitleSource = "prompt" | "agent" | "user";
 
-export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "stopping" | "waiting" | "interrupted" | "failed" | "completed";
+export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "background" | "stopping" | "waiting" | "interrupted" | "failed" | "completed";
 
 export type TaskLifecycle = "prepared" | "open" | "archived";
 
@@ -1240,7 +1244,11 @@ permissionPolicy: TaskPermissionPolicy,
 /**
  * App Server-authored start of the active turn; absent when no turn is running.
  */
-activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, currentPlan?: AgentPlanSnapshot | null, messageQueue: TaskMessageQueueSnapshot, subagents: SubagentOverviewSnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+activeTurnStartedAt?: string | null,
+/**
+ * Agent-reported background commands still running; present only while the Task is `background`.
+ */
+backgroundCommandCount?: number | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, currentPlan?: AgentPlanSnapshot | null, messageQueue: TaskMessageQueueSnapshot, subagents: SubagentOverviewSnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
 
 export type TaskMessageQueueSnapshot = { revision: number, pause?: TaskMessageQueuePauseSnapshot | null, items?: Array<QueuedMessageSnapshot>, };
 

@@ -13,11 +13,23 @@ export function newTaskStatusLabel({
   return undefined;
 }
 
+/** A turn the user can steer or Stop: the Agent is working or only its Background Work remains. */
+export function taskTurnOpen(status: TaskStatus | undefined) {
+  return status === "active" || status === "background";
+}
+
+/** Chat row text for a turn held open only by Background Work. */
+export function backgroundWorkLabel(commandCount: number | undefined) {
+  if (!commandCount) return "Background command finished";
+  return commandCount === 1 ? "1 background command running" : `${commandCount} background commands running`;
+}
+
 export function taskWorkingStatusLabel(
   items: ChatMessage[],
   status: TaskStatus,
   inputPending: boolean,
   historySync: HistorySyncState = { state: "idle", generation: 0 },
+  backgroundCommandCount?: number,
 ) {
   if (historySync.state === "syncing") return "Reloading session";
   if (historySync.state === "updated") return "History updated";
@@ -42,6 +54,7 @@ export function taskWorkingStatusLabel(
     }
     return "Permission needed";
   }
+  if (status === "background") return backgroundWorkLabel(backgroundCommandCount);
   if (status !== "active") return undefined;
   // A new user message starts a new turn; completed work before it must not leak into the live footer.
   const reversedUserIndex = [...items].reverse().findIndex((item) => item.message.kind === "user");

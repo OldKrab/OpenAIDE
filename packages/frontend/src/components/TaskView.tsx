@@ -21,7 +21,7 @@ import { composerAvailability, composerCanSubmit } from "./composerAvailability"
 import { TaskHeader } from "./TaskHeader";
 import type { DesktopWindowCapability } from "../services/frontendShell";
 import { scrollTopAfterPrependedContent } from "./TaskViewModel";
-import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
+import { backgroundWorkLabel, taskTurnOpen, taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
   permissionResponseForMessage,
@@ -294,8 +294,11 @@ export function TaskView({
     ...chat.items,
     ...snapshot.active_requests,
   ], [chat.items, snapshot.active_requests]);
-  const turnBusy = snapshot.task.status === "active";
-  const queueAvailable = snapshot.task.status === "active"
+  const turnBusy = taskTurnOpen(snapshot.task.status);
+  const backgroundCommandCount = snapshot.task.status === "background"
+    ? snapshot.background_command_count ?? 0
+    : 0;
+  const queueAvailable = turnBusy
     || snapshot.task.status === "waiting"
     || snapshot.task.status === "stopping";
   const workspaceAvailable = snapshot.task.workspace_available !== false;
@@ -314,7 +317,7 @@ export function TaskView({
       : "Attached context is not ready to send.",
     blockedPlaceholder: snapshot.task.status === "waiting"
       ? "Draft follow-up while input is pending."
-      : snapshot.task.status === "active" ? "Send a follow-up" : undefined,
+      : turnBusy ? "Send a follow-up" : undefined,
     connectionStatus: backendReady ? "ready" : backendConnectionState?.status ?? "connecting",
     contextReady: workspaceAvailable,
     contextPlaceholder: "Task workspace is unavailable. Restore it before sending.",
@@ -433,11 +436,14 @@ export function TaskView({
       snapshot.history_sync.state === "updated" && !showCurrentHistoryUpdated
         ? { state: "idle", generation: snapshot.history_sync.generation }
         : snapshot.history_sync,
+      snapshot.background_command_count,
     );
   const timelineStatusKind = showCurrentHistoryUpdated && snapshot.history_sync.state === "updated"
     ? "notice"
       : snapshot.task.status === "waiting"
       ? "blocked"
+    : snapshot.task.status === "background" && timelineStatusLabel === backgroundWorkLabel(snapshot.background_command_count)
+      ? "background"
     : "progress";
   const workingStartedAt = snapshot.active_turn_started_at;
   const timelineRows = useMemo(
@@ -714,6 +720,9 @@ export function TaskView({
                   ? onCancel
                   : undefined
               }
+              cancelLabel={backgroundCommandCount > 0
+                ? `Stop ${backgroundCommandCount} background ${backgroundCommandCount === 1 ? "command" : "commands"}`
+                : undefined}
               onAddToQueue={!archived && queueAvailable && onAddToQueue ? () => onAddToQueue() : undefined}
               onSchedule={!archived && backendReady ? onAddToQueue : undefined}
               onChange={intents.changePrompt}

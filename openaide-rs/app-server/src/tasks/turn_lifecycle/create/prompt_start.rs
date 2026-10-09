@@ -67,6 +67,7 @@ impl TaskTurnLifecycle {
                 agent_session_id: Some(session.session_id.clone()),
                 active_turn_id: Some(turn_id.clone()),
                 active_turn_started_at: Some(now.clone()),
+                background_work: None,
                 tombstoned: false,
                 revision: 0,
                 config_options_catalog: session.config_catalog.clone(),

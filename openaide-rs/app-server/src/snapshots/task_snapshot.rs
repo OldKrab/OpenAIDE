@@ -473,8 +473,12 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     }
     let agent_config = agent_config_snapshot(&snapshot);
     let agent_commands = agent_commands_snapshot(&snapshot);
-    let projected_status =
-        project_status_with_preparation(snapshot.task.status, &snapshot.preparation);
+    let background_work = snapshot.task.background_work;
+    let projected_status = project_status_with_preparation(
+        snapshot.task.status,
+        &snapshot.preparation,
+        background_work.is_some(),
+    );
     let mut task =
         project_legacy_task_summary(snapshot.task, snapshot.chat.total_count > 0, lifecycle);
     task.status = projected_status;
@@ -482,6 +486,9 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
         task,
         permission_policy: snapshot.permission_policy,
         active_turn_started_at: snapshot.active_turn_started_at,
+        background_command_count: (projected_status == openaide_app_server_protocol::snapshot::TaskStatus::Background)
+            .then(|| background_work.map(|work| work.live_commands))
+            .flatten(),
         lifecycle,
         revision: snapshot.revision,
         preparation: preparation_snapshot(&snapshot.preparation),

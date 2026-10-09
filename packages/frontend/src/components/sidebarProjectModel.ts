@@ -143,7 +143,8 @@ function rowInProgress(row: SidebarProjectRow) {
 }
 
 function taskInProgress(task: TaskSummary) {
-  return task.status === "active";
+  // A turn held open by Background Work is still open work and sorts with running Tasks.
+  return task.status === "active" || task.status === "background";
 }
 
 function compareBooleanDesc(left: boolean, right: boolean) {

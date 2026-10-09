@@ -287,6 +287,7 @@ impl TaskProductApi {
                     task.status = TaskStatus::Inactive;
                     task.active_turn_id = None;
                     task.active_turn_started_at = None;
+                    task.background_work = None;
                     task.message_queue = Default::default();
                     task.composer_history = Default::default();
                     Ok(TaskMutationResult::Changed)

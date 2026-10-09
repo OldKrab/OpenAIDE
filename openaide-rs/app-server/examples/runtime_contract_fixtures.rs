@@ -274,6 +274,7 @@ fn task_summary() -> TaskSummary {
         workspace_root: "/workspace/app".to_string(),
         project_root: None,
         worktree_id: None,
+        background_work: None,
     }
 }
 

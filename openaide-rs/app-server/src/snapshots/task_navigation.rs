@@ -291,7 +291,10 @@ pub(crate) fn native_session_summary(
 fn navigation_active(entry: &TaskNavigationEntry) -> bool {
     matches!(
         entry,
-        TaskNavigationEntry::Task { task } if task.status == ProtocolTaskStatus::Running
+        TaskNavigationEntry::Task { task } if matches!(
+            task.status,
+            ProtocolTaskStatus::Running | ProtocolTaskStatus::Background
+        )
     )
 }
 
@@ -328,7 +331,11 @@ pub(crate) fn project_task_summary_with_has_messages(
     has_messages: bool,
 ) -> TaskSummary {
     let title = record.title.effective().cloned().map(project_title);
-    let status = project_status_with_preparation(record.status, &record.preparation);
+    let status = project_status_with_preparation(
+        record.status,
+        &record.preparation,
+        record.background_only().is_some(),
+    );
     let lifecycle = project_task_lifecycle(&record.lifecycle);
     let workspace_available = std::path::Path::new(&record.workspace_root).is_dir();
     TaskSummary {
@@ -369,6 +376,7 @@ fn project_title(title: StoredTaskTitle) -> TaskTitle {
 pub(crate) fn project_status_with_preparation(
     status: TaskStatus,
     preparation: &crate::storage::records::TaskPreparationRecord,
+    background_only: bool,
 ) -> ProtocolTaskStatus {
     if matches!(
         preparation,
@@ -377,7 +385,7 @@ pub(crate) fn project_status_with_preparation(
     ) {
         return ProtocolTaskStatus::Preparing;
     }
-    project_status(status)
+    project_status(status, background_only)
 }
 
 pub(crate) fn project_legacy_task_summary(
@@ -398,7 +406,7 @@ pub(crate) fn project_legacy_task_summary(
         agent_id: AgentId::from(summary.agent_id),
         lifecycle,
         title: summary.title.map(project_title),
-        status: project_status(summary.status),
+        status: project_status(summary.status, summary.background_work.is_some()),
         updated_at: summary.updated_at,
         last_activity: summary.last_activity,
         unread: summary.unread,
@@ -440,9 +448,12 @@ fn project_attention(attention: StoredTaskAttentionEvent) -> TaskAttentionEvent 
     }
 }
 
-pub(crate) fn project_status(status: TaskStatus) -> ProtocolTaskStatus {
+/// `background_only` is the single place the display-only `Background` status
+/// is derived; the stored status of such a Task stays `Active`.
+pub(crate) fn project_status(status: TaskStatus, background_only: bool) -> ProtocolTaskStatus {
     match status {
         TaskStatus::Starting => ProtocolTaskStatus::Starting,
+        TaskStatus::Active if background_only => ProtocolTaskStatus::Background,
         TaskStatus::Active => ProtocolTaskStatus::Running,
         TaskStatus::Stopping => ProtocolTaskStatus::Stopping,
         TaskStatus::Inactive => ProtocolTaskStatus::Idle,

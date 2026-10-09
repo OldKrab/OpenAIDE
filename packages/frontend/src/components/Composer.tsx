@@ -60,6 +60,8 @@ type ComposerProps = {
   loadComposerHistory?: () => Promise<string[]>;
   agents?: AgentOption[];
   onCancel?: () => void;
+  /** Names what Stop ends when that is not the Agent's own work. */
+  cancelLabel?: string;
   onAddToQueue?: () => void;
   onSchedule?: (notBefore: string) => void;
   onChange: (prompt: string) => void;
@@ -100,6 +102,7 @@ export function Composer({
   loadComposerHistory,
   agents = agentOptions,
   onCancel,
+  cancelLabel = "Stop task",
   onAddToQueue,
   onSchedule,
   onChange,
@@ -658,7 +661,7 @@ export function Composer({
             </span>
           ) : null}
           {showStopAction && onCancel ? (
-            <IconButton ariaLabel="Stop task" className="composer-stop-button" icon={<CircleStop size={14} />} onClick={onCancel} />
+            <IconButton ariaLabel={cancelLabel} className="composer-stop-button" icon={<CircleStop size={14} />} onClick={onCancel} />
           ) : null}
           {onAddToQueue && hasDraftContent && !availability.submitting ? (
             <IconButton

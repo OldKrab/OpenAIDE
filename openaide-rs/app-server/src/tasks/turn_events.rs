@@ -159,6 +159,10 @@ impl TaskSessionEventSink {
     fn handle_session_update(&self, mut event: AgentEvent) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let now = now_string();
+        // A status-only change: it must not close the text run it arrives inside.
+        if let AgentEvent::BackgroundWork(work) = event {
+            return self.update_background_work(work, &now);
+        }
         if let AgentEvent::ConfigOptionsChanged(catalog) = event {
             self.finish_anonymous_text_routes();
             return self.update_task_config_options(catalog, &now);
@@ -549,6 +553,58 @@ impl TaskSessionEventSink {
                 Ok(TaskMutationResult::Changed)
             },
         )?;
+        Ok(())
+    }
+
+    /// Records whether the active turn is held open only by Background Work.
+    /// Entering that state marks the Agent's finished output unread; the
+    /// `finished` Task Attention Event still waits for the turn to settle.
+    fn update_background_work(
+        &self,
+        work: Option<crate::agent::events::AgentBackgroundWork>,
+        now: &str,
+    ) -> Result<(), RuntimeError> {
+        let next = work.map(|work| crate::protocol::model::TaskBackgroundWork {
+            live_commands: work.live_commands,
+        });
+        let mut transition = None;
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                let task = ctx.task();
+                if task.agent_session_id.as_deref() != Some(self.session_id.as_str())
+                    || task.active_turn_id.is_none()
+                    || task.background_work == next
+                {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let entered = task.background_work.is_none();
+                let task = ctx.task_mut();
+                task.background_work = next;
+                if entered {
+                    task.unread = true;
+                }
+                task.updated_at = now.to_string();
+                transition = Some((entered, next));
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        if let Some((entered, next)) = transition {
+            crate::logging::info(
+                "task_background_work_changed",
+                serde_json::json!({
+                    "task_id": self.task_id,
+                    "session_id": self.session_id,
+                    "phase": match (entered, next) {
+                        (true, _) => "entered",
+                        (false, Some(_)) => "updated",
+                        (false, None) => "left",
+                    },
+                    "live_commands": next.map(|work| work.live_commands),
+                }),
+            );
+        }
         Ok(())
     }
 

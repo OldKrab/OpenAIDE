@@ -144,6 +144,32 @@ fn a_live_command_holds_the_turn_until_its_followup_cycle_ends() {
 }
 
 #[test]
+fn a_hold_is_background_only_until_the_agent_produces_output_again() {
+    let work = BackgroundWork::default();
+    work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
+    assert_eq!(
+        work.background_only(),
+        None,
+        "the prompt itself is still running"
+    );
+
+    assert!(work.holds_turn("session-1", "task-a"));
+    assert_eq!(work.background_only(), Some(1));
+
+    // The follow-up cycle is awaited with no command left to count.
+    work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
+    assert_eq!(work.background_only(), Some(0));
+
+    work.session_update_observed(&agent_text());
+    assert_eq!(work.background_only(), None);
+
+    // The cycle ended while a second command is still live.
+    work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
+    work.turn_ended(&turn_ended());
+    assert_eq!(work.background_only(), Some(1));
+}
+
+#[test]
 fn a_command_that_ended_inside_the_prompt_does_not_hold_its_turn() {
     let work = BackgroundWork::default();
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));

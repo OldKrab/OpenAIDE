@@ -195,6 +195,13 @@ describe("SidebarTaskRow", () => {
     expect(active.root.findAllByProps({ className: "task-state-unread-badge" })).toHaveLength(0);
     expect(active.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(0);
 
+    const background = renderState("background");
+    expect(background.root.findByProps({ "aria-label": "Background" })).toBeDefined();
+    expect(background.root.findAllByProps({ className: "task-state-spinner" })).toHaveLength(0);
+    const backgroundUnread = renderState("background", true);
+    expect(backgroundUnread.root.findByProps({ "aria-label": "Background, unread" })).toBeDefined();
+    expect(backgroundUnread.root.findAllByProps({ className: "task-state-unread-badge" })).toHaveLength(1);
+
     const waiting = renderState("waiting");
     expect(waiting.root.findByProps({ "aria-label": "Waiting" })).toBeDefined();
     const waitingUnread = renderState("waiting", true);
@@ -1584,6 +1591,31 @@ describe("Sidebar", () => {
     );
 
     expect(rowTitles(tree)).toEqual(["Older active task", "Recent session", "Recent idle task"]);
+  });
+
+  it("sorts a task held by background work with in-progress rows", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions({ items: [] })}
+        showArchived={false}
+        tasks={[
+          task({
+            task_id: "task_idle_recent",
+            title: "Recent idle task",
+            last_activity: "2026-05-22T00:04:00.000Z",
+          }),
+          task({
+            task_id: "task_background_old",
+            status: "background",
+            title: "Older background task",
+            last_activity: "2026-05-22T00:01:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    expect(rowTitles(tree)).toEqual(["Older background task", "Recent idle task"]);
   });
 
   it("puts pinned flat rows before live unpinned tasks and native sessions", () => {

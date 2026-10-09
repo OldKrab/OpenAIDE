@@ -59,6 +59,7 @@ fn task_record(task_id: &str, workspace_root: String) -> TaskRecord {
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
+        background_work: None,
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,

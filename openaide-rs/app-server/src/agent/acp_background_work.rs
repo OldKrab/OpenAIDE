@@ -298,6 +298,15 @@ impl BackgroundWork {
         self.state().hold_started.is_some()
     }
 
+    /// How the Task should show the hold: the live command count while only
+    /// background work keeps the turn open, `None` once a cycle the Agent
+    /// started is producing output in it.
+    pub(super) fn background_only(&self) -> Option<u32> {
+        let state = self.state();
+        (state.hold_started.is_some() && !state.cycle_running)
+            .then(|| u32::try_from(state.live_tasks.len()).unwrap_or(u32::MAX))
+    }
+
     /// Resolves when the grace for an expected cycle ends; pending otherwise.
     pub(super) async fn followup_timeout(&self) {
         let deadline = self.state().followup_deadline;

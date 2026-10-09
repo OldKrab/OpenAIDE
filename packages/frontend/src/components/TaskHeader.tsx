@@ -1,4 +1,4 @@
-import { Circle, CircleAlert, CircleCheck, CircleX, FolderRoot, GitBranch, LoaderCircle } from "lucide-react";
+import { Circle, CircleAlert, CircleCheck, CircleDashed, CircleX, FolderRoot, GitBranch, LoaderCircle } from "lucide-react";
 import type { TaskPermissionPolicy, TaskStatus } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 
 const STATUS_PRESENTATION = {
   active: { label: "Running", Icon: LoaderCircle },
+  background: { label: "Background", Icon: CircleDashed },
   stopping: { label: "Stopping", Icon: LoaderCircle },
   waiting: { label: "Waiting", Icon: CircleAlert },
   failed: { label: "Failed", Icon: CircleX },

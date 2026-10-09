@@ -378,8 +378,12 @@ An Agent-provided setting for a Native Session whose available choices and curre
 _Avoid_: Static hard-coded model or mode controls
 
 **Running Task**:
-A Task whose primary Agent prompt is active, owned by one App Server process and its Agent Native Session, and which may still need permissions, files, terminals, or user input.
+A Task whose primary Agent prompt is active or held open by Background Work, owned by one App Server process and its Agent Native Session, and which may still need permissions, files, terminals, or user input.
 _Avoid_: Blocking all existing Tasks as if they were running
+
+**Background Work**:
+Commands an Agent leaves running after it answers a prompt. While only Background Work keeps a Task turn open, the Task shows as Background instead of in progress.
+_Avoid_: Background Task, treating Background Work as a finished Task
 
 **Task Attention Event**:
 A Task state change the user should notice: a turn finished normally, work is waiting for a response, the Agent stopped because it could not continue, or work failed unexpectedly. A user-initiated Stop is not a Task Attention Event.

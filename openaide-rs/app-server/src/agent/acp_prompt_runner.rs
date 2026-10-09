@@ -28,6 +28,7 @@ use crate::agent::acp_steering::{SteeringAction, SteeringDelivery, SteeringReque
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::attached_native_session::{AcpSessionCommand, AcpSessionConfigCommand};
+use crate::agent::events::{AgentBackgroundWork, AgentEvent};
 use crate::agent::prompt_content::PromptContentPolicy;
 use crate::agent::{
     AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionEventSink,
@@ -102,6 +103,7 @@ pub(super) async fn run_prompt(
     let mut settled_by_response = false;
     let mut deletion = SessionDeleteRequest::default();
     let mut completed_prompt = None;
+    let mut reported_background = None;
     // Legacy prompt sets still settle on their first terminal response. With
     // the extension, resolve admitted deliveries before retiring their owner.
     let wait_for_steering = steering_requests.supported();
@@ -147,6 +149,18 @@ pub(super) async fn run_prompt(
         {
             settled_by_response = true;
             break completed_prompt.take().expect("completed prompt");
+        }
+        // The turn continues. Tell the Task whether only background work holds
+        // it; a settling turn skips this so it never flashes back to running.
+        let background = held
+            .then(|| background_work.background_only())
+            .flatten()
+            .map(|live_commands| AgentBackgroundWork { live_commands });
+        if background != reported_background {
+            reported_background = background;
+            if let Err(error) = sink.emit(AgentEvent::BackgroundWork(background)) {
+                break Err(error);
+            }
         }
         tokio::select! {
             Some(()) = cancel_rx.recv(), if !cancel_sent => {

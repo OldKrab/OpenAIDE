@@ -460,6 +460,32 @@ describe("TaskView timeline presentation", () => {
     expect(onReloadNativeSession).toHaveBeenCalledTimes(1);
   });
 
+  it("presents a turn held by background commands as quiet open work that can still be stopped", async () => {
+    const { TaskView } = await import("./TaskView");
+    const held = snapshotWithAuthoritativeTail(true);
+    held.task.status = "background";
+    held.background_command_count = 2;
+    held.active_turn_started_at = String(Date.now() - 60_000);
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(held)} />);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("2 background commands running");
+    expect(tree.root.findAllByProps({ className: "working-status working-status-background" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ className: "working-status-duration" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ "aria-label": "Stop 2 background commands" }).length).toBeGreaterThan(0);
+
+    const awaitingFollowup = { ...held, background_command_count: 0 };
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(awaitingFollowup)} />);
+    });
+    expect(JSON.stringify(tree.toJSON())).toContain("Background command finished");
+    expect(tree.root.findAllByProps({ "aria-label": "Stop task" }).length).toBeGreaterThan(0);
+  });
+
   it("presents a bare waiting fallback as blocked instead of working", async () => {
     const { TaskView } = await import("./TaskView");
     const waiting = snapshotWithAuthoritativeTail(true);

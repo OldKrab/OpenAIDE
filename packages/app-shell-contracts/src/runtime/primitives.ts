@@ -1,4 +1,5 @@
-export type TaskStatus = "active" | "stopping" | "inactive" | "failed" | "completed" | "waiting";
+/** `background`: the Agent answered and its turn stays open only for Background Work. */
+export type TaskStatus = "active" | "background" | "stopping" | "inactive" | "failed" | "completed" | "waiting";
 export type IsolationKind = "local" | "git_worktree" | "docker";
 export type ActivityStatus = "running" | "completed" | "interrupted" | "error";
 export type PermissionState = "pending" | "responding" | "resolved" | "cancelled";

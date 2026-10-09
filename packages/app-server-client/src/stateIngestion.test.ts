@@ -89,6 +89,35 @@ describe("scope-local state ingestion", () => {
     expect(result.state.snapshot.task.chat.items).toEqual([item]);
   });
 
+  it("follows the background command count through Task deltas", () => {
+    const changed = (state: ReturnType<typeof taskState>, revision: number, changes: object) => {
+      const result = applySubscriptionEvent(state, taskEvent("task-1", `cursor-${revision - 4}`, `cursor-${revision - 3}`, {
+        kind: "taskChanged",
+        taskId: taskId("task-1"),
+        revision,
+        changes,
+      }));
+      if (result.kind !== "applied" || result.state.snapshot.kind !== "task") throw new Error("delta was not applied");
+      return result.state;
+    };
+
+    const held = changed(taskState("task-1", 4), 5, {
+      task: { ...taskSummary("task-1"), status: "background" },
+      backgroundCommandCount: 2,
+    });
+    expect(held.snapshot.kind === "task" && held.snapshot.task.backgroundCommandCount).toBe(2);
+
+    // A delta that does not carry the Task summary leaves the count alone.
+    const unrelated = changed(held, 6, { permissionPolicy: "autoApprove" });
+    expect(unrelated.snapshot.kind === "task" && unrelated.snapshot.task.backgroundCommandCount).toBe(2);
+
+    const running = changed(unrelated, 7, {
+      task: { ...taskSummary("task-1"), status: "running" },
+      backgroundCommandCount: null,
+    });
+    expect(running.snapshot.kind === "task" && running.snapshot.task.backgroundCommandCount).toBeNull();
+  });
+
   it("applies a Task-owned permission policy delta", () => {
     const state = taskState("task-1", 4);
     const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {

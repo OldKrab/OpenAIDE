@@ -787,6 +787,7 @@ fn task_record(
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
+        background_work: None,
         tombstoned: false,
         config_options_catalog: None,
         native_session_data_freshness: Default::default(),

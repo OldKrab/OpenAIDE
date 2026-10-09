@@ -291,6 +291,7 @@ export function taskPreviewContent(
 
 function taskState(task: TaskSummary) {
   if (task.status === "active") return "Running";
+  if (task.status === "background") return "Background";
   if (task.status === "waiting") return "Waiting";
   if (task.status === "failed") return "Failed";
   return relativeTime(task.last_activity);

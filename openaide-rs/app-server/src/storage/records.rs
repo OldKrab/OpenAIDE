@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
     AgentCommandsCatalog, AgentPlan, ChatMessage, ConfigOptionsCatalog, IsolationKind,
-    TaskContextUsage, TaskStatus, TaskSummary, TaskTurnUsage,
+    TaskBackgroundWork, TaskContextUsage, TaskStatus, TaskSummary, TaskTurnUsage,
 };
 use crate::storage::composer_history::ComposerHistory;
 
@@ -546,6 +546,10 @@ pub struct TaskRecord {
     /// Durable wall-clock origin for active-turn elapsed-time presentation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<String>,
+    /// Set while the active turn is held open only by Agent-reported Background
+    /// Work. It ends with the turn and never changes a workflow decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_work: Option<TaskBackgroundWork>,
     #[serde(default)]
     pub tombstoned: bool,
     #[serde(default)]
@@ -633,6 +637,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             #[serde(default)]
             active_turn_started_at: Option<String>,
             #[serde(default)]
+            background_work: Option<TaskBackgroundWork>,
+            #[serde(default)]
             archived: bool,
             #[serde(default)]
             tombstoned: bool,
@@ -696,6 +702,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             agent_session_id: stored.agent_session_id,
             active_turn_id: stored.active_turn_id,
             active_turn_started_at: stored.active_turn_started_at,
+            background_work: stored.background_work,
             tombstoned: stored.tombstoned,
             revision: stored.revision,
             config_options_catalog: stored.config_options_catalog,
@@ -777,7 +784,16 @@ impl TaskRecord {
             workspace_root: self.workspace_root.clone(),
             project_root: self.project_root.clone(),
             worktree_id: self.worktree_id.clone(),
+            background_work: self.background_only(),
         }
+    }
+
+    /// The Background Work that is the only thing keeping this Task's turn open.
+    /// A permission wait or a Stop in the same turn takes precedence.
+    pub(crate) fn background_only(&self) -> Option<TaskBackgroundWork> {
+        (self.status == TaskStatus::Active && self.active_turn_id.is_some())
+            .then_some(self.background_work)
+            .flatten()
     }
 }
 

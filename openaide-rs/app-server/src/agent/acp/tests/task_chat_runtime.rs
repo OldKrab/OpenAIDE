@@ -895,6 +895,23 @@ fn background_command_keeps_the_task_working_until_its_followup_cycle_ends() {
         "a live background command must keep its turn open"
     );
     assert!(held.active_turn_id.is_some());
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.background_work.is_some())
+            .unwrap_or(false)
+    });
+    let held = store.read_task(task_id.as_str()).expect("read held task");
+    assert_eq!(
+        held.background_only().map(|work| work.live_commands),
+        Some(1),
+        "the held turn shows as background work with its live command"
+    );
+    assert!(held.unread, "the answered prompt is readable while held");
+    assert!(
+        held.attention.is_none(),
+        "finished is raised only when the turn settles"
+    );
     fs::write(&gate_path, "").expect("finish the background command");
 
     wait_until(|| {
@@ -908,6 +925,14 @@ fn background_command_keeps_the_task_working_until_its_followup_cycle_ends() {
             .iter()
             .any(|(_, text)| text == "Build finished"),
         "the follow-up cycle belongs to the held turn"
+    );
+    let settled = store
+        .read_task(task_id.as_str())
+        .expect("read settled task");
+    assert!(settled.background_work.is_none());
+    assert!(
+        settled.attention.is_some(),
+        "the settled turn raises finished"
     );
     api.shutdown().expect("shutdown task runtime");
 }

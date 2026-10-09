@@ -8,9 +8,9 @@ test('mobile status counts all pages without disclosing task data', async () => 
     requests.push(params);
     return { result: params.cursor
       ? { tasks: [{ status: 'waiting', title: 'private' }, { status: 'completed' }] }
-      : { tasks: [{ status: 'running', taskId: 'private' }], nextCursor: 'next' } };
+      : { tasks: [{ status: 'running', taskId: 'private' }, { status: 'background' }], nextCursor: 'next' } };
   });
-  assert.deepEqual(await status(), { product: 'OpenAIDE', mobileProtocol: 1, active: 1, waiting: 1 });
+  assert.deepEqual(await status(), { product: 'OpenAIDE', mobileProtocol: 1, active: 2, waiting: 1 });
   await status();
   assert.equal(requests.length, 2);
   assert.equal(requests[1].cursor, 'next');

@@ -370,7 +370,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             | AgentEvent::ContextUsage(_)
             | AgentEvent::Compaction { .. }
             | AgentEvent::TurnUsage(_)
-            | AgentEvent::AccountLimits(_) => {}
+            | AgentEvent::AccountLimits(_)
+            // Background commands of a child session never hold the Task turn.
+            | AgentEvent::BackgroundWork(_) => {}
             other => {
                 let message = crate::agent::normalizer::normalize_event(other, &now);
                 self.mutations.store().append_subagent_message(

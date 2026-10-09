@@ -47,6 +47,15 @@ pub enum AgentEvent {
     /// Account-wide usage limits. They ride a Native Session's updates but describe the Agent's
     /// account, so the consumer records them on the Agent and never on the Task.
     AccountLimits(AgentAccountLimitsUpdate),
+    /// The answered prompt's turn is now held open only by background commands
+    /// (`Some`), or the Agent is producing output in it again (`None`).
+    BackgroundWork(Option<AgentBackgroundWork>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentBackgroundWork {
+    /// Zero while a finished command's follow-up cycle is still awaited.
+    pub live_commands: u32,
 }
 
 /// A normalized ACP compaction patch. Omitted fields keep their stored value.
