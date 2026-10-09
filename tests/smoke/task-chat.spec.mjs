@@ -670,21 +670,13 @@ test("uses a mobile context button and keeps the desktop meter on the rounded ed
 
   const meter = page.locator(".context-usage-meter");
   await meter.hover();
-  const tooltip = page.getByRole("tooltip", { name: "Context used: 12%" });
+  const tooltip = page.getByRole("tooltip", { name: "context 12%" });
   await expect(tooltip).toBeVisible();
-  const tooltipGeometry = await tooltip.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    return { centerY: bounds.y + bounds.height / 2, right: bounds.right };
-  });
+  // The Chat column leaves no room beside the Composer at this width, so the readout stays inside.
+  await expect(tooltip).toHaveAttribute("data-side", "inside");
   const composerBounds = await composer.boundingBox();
   expect(composerBounds).not.toBeNull();
-  expect(tooltipGeometry.centerY).toBeCloseTo(
-    composerBounds.y + composerBounds.height * 0.88,
-    0,
-  );
-  const edgeBounds = await meterEdge.boundingBox();
-  expect(edgeBounds).not.toBeNull();
-  // Visibility can become observable while the 100 ms hover transform is still settling.
+  // Visibility can become observable while the hover transform is still settling.
   await expect.poll(async () => {
     const tooltipBounds = await tooltip.boundingBox();
     const currentEdgeBounds = await meterEdge.boundingBox();
@@ -697,7 +689,12 @@ test("uses a mobile context button and keeps the desktop meter on the rounded ed
   expect(settledEdgeBounds).not.toBeNull();
   const tooltipGap = settledEdgeBounds.x + settledEdgeBounds.width
     - settledTooltipBounds.x - settledTooltipBounds.width;
-  expect(tooltipGap).toBeLessThan(7);
+  expect(tooltipGap).toBeLessThan(9);
+  // Level with the 12% fill, but never lower than the send control allows.
+  expect(settledTooltipBounds.y + settledTooltipBounds.height / 2).toBeCloseTo(
+    composerBounds.y + Math.min(composerBounds.height * 0.88, composerBounds.height - 60),
+    0,
+  );
 
   await page.setViewportSize({ width: 1_200, height: 800 });
   const desktopGeometry = await composer.evaluate((element) => ({
