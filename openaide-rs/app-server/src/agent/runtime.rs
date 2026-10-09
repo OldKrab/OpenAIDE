@@ -511,6 +511,13 @@ pub trait AgentSessionEventSink: Send + Sync {
         Ok(())
     }
 
+    fn subagent_details_changed(
+        &self,
+        _event: crate::agent::events::AgentNativeSubagentDetailsUpdate,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
     fn request_subagent_permission(
         &self,
         _native_session_id: &str,

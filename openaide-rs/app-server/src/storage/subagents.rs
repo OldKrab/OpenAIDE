@@ -271,6 +271,29 @@ impl Store {
         })
     }
 
+    /// Replaces stored details that share a label with an incoming one and
+    /// appends the rest, so a later Agent report refines the announced value.
+    pub fn merge_subagent_details(
+        &self,
+        task_id: &str,
+        native_session_id: &str,
+        details: Vec<SubagentDetailRecord>,
+    ) -> Result<SubagentRecord, RuntimeError> {
+        self.mutate_subagent_record(task_id, native_session_id, |record| {
+            for detail in details {
+                match record
+                    .details
+                    .iter_mut()
+                    .find(|stored| stored.label == detail.label)
+                {
+                    Some(stored) => stored.value = detail.value,
+                    None => record.details.push(detail),
+                }
+            }
+            Ok(())
+        })
+    }
+
     pub fn append_subagent_message(
         &self,
         task_id: &str,

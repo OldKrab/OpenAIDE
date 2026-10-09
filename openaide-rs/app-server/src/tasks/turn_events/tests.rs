@@ -59,6 +59,51 @@ fn sourced_agent_text_event(text: &str, source_message_id: &str) -> AgentEvent {
 }
 
 #[test]
+fn later_subagent_details_replace_the_announced_value_with_the_same_label() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    let detail = |label: &str, value: &str| crate::agent::events::AgentNativeSubagentDetail {
+        label: label.to_string(),
+        value: value.to_string(),
+    };
+    sink.subagent_spawned(AgentNativeSubagentSpawned {
+        parent_native_session_id: "session_1".to_string(),
+        native_session_id: "child_1".to_string(),
+        name: "Researcher".to_string(),
+        delegated_task: Some("Summary".to_string()),
+        parent_interaction: false,
+        capabilities: AgentNativeSubagentCapabilities::default(),
+        details: vec![detail("Agent type", "Explore"), detail("Model", "sonnet")],
+    })
+    .unwrap();
+
+    sink.subagent_details_changed(crate::agent::events::AgentNativeSubagentDetailsUpdate {
+        native_session_id: "child_1".to_string(),
+        details: vec![detail("Model", "claude-sonnet-5-5")],
+    })
+    .unwrap();
+
+    let record = store
+        .subagent_record_by_native("task_1", "child_1")
+        .unwrap();
+    let details: Vec<_> = record
+        .details
+        .iter()
+        .map(|detail| (detail.label.as_str(), detail.value.as_str()))
+        .collect();
+    assert_eq!(
+        details,
+        [("Agent type", "Explore"), ("Model", "claude-sonnet-5-5")],
+    );
+}
+
+#[test]
 fn codex_child_history_explains_parent_lifecycle_without_inventing_prompts() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();

@@ -57,6 +57,11 @@ impl AcpTraceSession {
         &self.task_id
     }
 
+    /// Whether both handles write to the same trace file.
+    pub(crate) fn shares_file_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.file, &other.file)
+    }
+
     pub fn record_line(&self, line: &str, direction: LineDirection) {
         let direction = match direction {
             LineDirection::Stdout => "agent_to_client.raw_stdout",

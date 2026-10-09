@@ -389,6 +389,26 @@ impl AgentSessionEventSink for TaskSessionEventSink {
         Ok(())
     }
 
+    fn subagent_details_changed(
+        &self,
+        event: crate::agent::events::AgentNativeSubagentDetailsUpdate,
+    ) -> Result<(), RuntimeError> {
+        let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
+        let record = self.mutations.store().merge_subagent_details(
+            &self.task_id,
+            &event.native_session_id,
+            event
+                .details
+                .into_iter()
+                .map(|detail| crate::storage::subagents::SubagentDetailRecord {
+                    label: detail.label,
+                    value: detail.value,
+                })
+                .collect(),
+        )?;
+        self.publish_subagent_snapshots(&record.subagent_id)
+    }
+
     fn subagent_state_changed(
         &self,
         event: AgentNativeSubagentStateUpdate,

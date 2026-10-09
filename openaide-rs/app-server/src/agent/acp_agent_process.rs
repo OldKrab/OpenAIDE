@@ -774,10 +774,15 @@ async fn open_on_shared_process(
             .lock()
             .expect("ACP active session id set poisoned")
             .remove(&session_id);
-        session_traces_for_task
-            .lock()
-            .expect("ACP session trace map lock poisoned")
-            .remove(&session_id_for_task);
+        {
+            let mut session_traces = session_traces_for_task
+                .lock()
+                .expect("ACP session trace map lock poisoned");
+            // Child sessions share the root's trace and end with it.
+            if let Some(root_trace) = session_traces.remove(&session_id_for_task) {
+                session_traces.retain(|_, trace| !trace.shares_file_with(&root_trace));
+            }
+        }
         result
     });
     let _ = started_tx.send(Ok(AcpStartedSession {
