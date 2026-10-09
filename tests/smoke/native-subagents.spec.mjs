@@ -39,7 +39,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(chat.getByText("Child review result", { exact: true })).toBeVisible();
     await expect(chat.getByText("Main review result", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+    const details = page.getByRole("button", { name: "Subagent details: Agent type reviewer, Model test-model" });
+    await details.click();
+    const detailsPanel = page.getByRole("dialog", { name: "Subagent details" });
+    await expect(detailsPanel.getByText("Agent type", { exact: true })).toBeVisible();
+    await expect(detailsPanel.getByText("test-model", { exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("child-history.png") });
+    await page.keyboard.press("Escape");
     // Rehosting the same selector in compact chrome must preserve inspection.
     await page.setViewportSize(viewport.width > 760 ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Reviewer" })).toBeVisible();
@@ -48,6 +54,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await selectHistory(page, "Detail reviewer");
     await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toHaveCount(0);
+    // A Subagent whose Agent reported no details shows no empty disclosure.
+    await expect(page.getByRole("button", { name: /^Subagent details/ })).toHaveCount(0);
     await page.getByRole("button", { name: /^Switch agent\. Currently viewing/ }).click();
     await expect(page.getByRole("menuitemradio", { name: /^Main Agent/ })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("history-selector.png") });
