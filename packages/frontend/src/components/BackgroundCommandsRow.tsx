@@ -17,15 +17,11 @@ export function BackgroundCommandsRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const listId = useId();
-  // One command needs no summary: it is the row.
-  const single = commands.length === 1 ? commands[0] : undefined;
   return (
     <div className="background-commands">
       <div className="background-commands-summary">
         <CircleDashed aria-hidden="true" className="working-status-background-icon" size={14} />
-        {single ? (
-          <BackgroundCommandEntry command={single} onStop={onStop} />
-        ) : commands.length === 0 ? (
+        {commands.length === 0 ? (
           <span className="background-commands-label" role="status" aria-live="polite">
             {backgroundWorkLabel(0)}
           </span>
@@ -42,7 +38,7 @@ export function BackgroundCommandsRow({
           </button>
         )}
       </div>
-      {!single && commands.length > 0 && expanded ? (
+      {commands.length > 0 && expanded ? (
         <ul className="background-commands-list" id={listId}>
           {commands.map((command) => (
             <li key={command.command_id}>
