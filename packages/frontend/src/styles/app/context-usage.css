@@ -148,13 +148,14 @@
 
 /*
  * The same readout the account limit meters raise: a name and a value coming into focus from the
- * line they describe, level with the fill. Its backdrop is the Composer's own surface, so it reads
+ * line they describe, level with the fill where the Composer has room. Its backdrop is the Composer's own surface, so it reads
  * as lettering on the Composer rather than a box, and still covers a draft line beneath it.
  */
 .context-usage-tooltip {
   position: absolute;
   right: 7px;
-  top: calc(100% - var(--context-usage-percent));
+  /* Level with the fill, but held clear of the rounded corner above and the send control below. */
+  top: clamp(16px, calc(100% - var(--context-usage-percent)), calc(100% - 60px));
   display: flex;
   align-items: baseline;
   gap: 4px;
