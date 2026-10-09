@@ -172,6 +172,7 @@ async function runPrompt(message) {
       update(sessionId, {
         sessionUpdate: "subagent_spawned", subagentSessionId: childId,
         name: "Reviewer", task: "Review the implementation", capabilities: {},
+        _meta: { claudeCode: { nativeSubagent: { type: "reviewer", model: "test-model" } } },
       });
       textUpdate(childId, "agent_thought_chunk", "Checking the implementation", "child-thought");
       update(childId, {

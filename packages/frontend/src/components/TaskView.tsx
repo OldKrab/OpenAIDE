@@ -50,6 +50,7 @@ import { TaskSessionReloadNotice } from "./TaskSessionReloadNotice";
 import { currentFrontendShell } from "../services/frontendShell";
 import { useTaskFileViewer } from "./useTaskFileViewer";
 import { useSubagentSessions } from "./useSubagentSessions";
+import { SubagentInspectionBar } from "./SubagentInspectionBar";
 import { SubagentNavigator } from "./SubagentNavigator";
 
 export {
@@ -683,19 +684,10 @@ export function TaskView({
           </section>
         ) : null}
         {subagents.selected ? (
-          <div className="subagent-inspection-footer" role="note">
-            <span className="subagent-inspection-context">
-              Viewing <strong>{subagents.selected.name}</strong>
-            </span>
-            <button
-              aria-keyshortcuts="Alt+ArrowLeft"
-              onClick={() => subagents.selectSubagent(undefined)}
-              title="Back to Main Agent (Alt+Left)"
-              type="button"
-            >
-              Back to Main Agent
-            </button>
-          </div>
+          <SubagentInspectionBar
+            onReturn={() => subagents.selectSubagent(undefined)}
+            selected={subagents.selected}
+          />
         ) : recovery && agentRecoveryActions ? <AgentRecoveryPanel
           actions={agentRecoveryActions}
           agent={recovery.agent}
