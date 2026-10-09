@@ -20,8 +20,8 @@ use crate::agent::acp_schema::{
     SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate, SessionListCapabilities,
     SessionNotification, SessionUpdate, TextContent, TextResourceContents, ToolCall,
     ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
-    ToolKind, UnstructuredCommandInput, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest,
+    ToolKind, UnstructuredCommandInput, UsageUpdate, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest,
 };
 use crate::agent::acp_session_capabilities::{
     validate_auth_method, validate_initialize_protocol, validate_session_list_capability,
@@ -29,7 +29,7 @@ use crate::agent::acp_session_capabilities::{
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_to_slot, deliver_session_commands_catalog,
     deliver_session_config_catalog, deliver_session_metadata_update,
-    session_catalogs_from_dispatch, PendingSessionCatalogs,
+    keep_unprojected_context_usage, session_catalogs_from_dispatch, PendingSessionCatalogs,
 };
 use crate::agent::acp_session_lifecycle::{
     agent_list_sessions_result_from_response, initialize_supports_session_close,
@@ -40,7 +40,8 @@ use crate::agent::acp_session_lifecycle::{
 use crate::agent::acp_session_paths::normalized_session_cwd;
 use crate::agent::acp_update_projection::{LivePromptProjection, ReplayProjection};
 use crate::agent::events::{
-    AgentEvent, AgentPermissionOutcome, AgentPermissionRequest, AgentToolCallStatus,
+    AgentContextUsage, AgentEvent, AgentPermissionOutcome, AgentPermissionRequest,
+    AgentToolCallStatus,
 };
 use crate::agent::prompt_content::{
     build_prompt_content_with_policy, PromptContentCapabilities, PromptContentPolicy,
@@ -711,6 +712,72 @@ fn session_command_catalog_buffers_latest_update_until_sink_attaches() {
         .unwrap();
 
     assert_eq!(sink.command_names(), vec!["web"]);
+}
+
+async fn context_usage_from_update(used: u64) -> Option<AgentContextUsage> {
+    session_catalogs_from_dispatch(
+        "claude",
+        session_update_dispatch(SessionUpdate::UsageUpdate(UsageUpdate::new(used, 300_000))),
+    )
+    .await
+    .expect("project context usage")
+    .context_usage
+}
+
+#[tokio::test]
+async fn context_usage_reported_before_a_sink_attaches_reaches_that_sink() {
+    let mut session_event_sink = None;
+    let mut pending_catalogs = PendingSessionCatalogs::default();
+
+    for used in [9_000, 12_000] {
+        keep_unprojected_context_usage(
+            context_usage_from_update(used).await,
+            false,
+            &mut pending_catalogs,
+        );
+    }
+
+    let sink = Arc::new(CapturingSessionSink::default());
+    attach_session_event_sink_to_slot(&mut session_event_sink, &mut pending_catalogs, sink.clone())
+        .unwrap();
+
+    let events = sink.events.lock().unwrap();
+    let [AgentEvent::ContextUsage(usage)] = events.as_slice() else {
+        panic!("expected only the latest context reading, got {events:?}");
+    };
+    assert_eq!(
+        *usage,
+        AgentContextUsage {
+            used_tokens: 12_000,
+            capacity_tokens: 300_000,
+            cost: None,
+        }
+    );
+}
+
+#[tokio::test]
+async fn a_projected_context_reading_replaces_the_one_kept_for_the_next_sink() {
+    let mut session_event_sink = None;
+    let mut pending_catalogs = PendingSessionCatalogs::default();
+
+    keep_unprojected_context_usage(
+        context_usage_from_update(12_000).await,
+        false,
+        &mut pending_catalogs,
+    );
+    // A prompt's own projection consumed a newer reading; replaying the kept one
+    // to a sink attached afterwards would move the Task back to a stale value.
+    keep_unprojected_context_usage(
+        context_usage_from_update(20_000).await,
+        true,
+        &mut pending_catalogs,
+    );
+
+    let sink = Arc::new(CapturingSessionSink::default());
+    attach_session_event_sink_to_slot(&mut session_event_sink, &mut pending_catalogs, sink.clone())
+        .unwrap();
+
+    assert!(sink.events.lock().unwrap().is_empty());
 }
 
 #[test]
