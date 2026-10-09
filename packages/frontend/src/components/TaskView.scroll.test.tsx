@@ -2,6 +2,7 @@ import { act, create } from "react-test-renderer";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
+import type { TaskChatScrollState } from "../state/store";
 
 const virtualizerCalls = vi.hoisted(() => ({ scrollToEnd: vi.fn() }));
 
@@ -312,6 +313,58 @@ describe("TaskView follow scroll", () => {
     expect(messageList.scrollTop).toBe(1000);
   });
 
+  it("returns to the reader's Main Agent position after inspecting a subagent history", async () => {
+    const { TaskView } = await import("./TaskView");
+    const { SubagentNavigator } = await import("./SubagentNavigator");
+    // Subagent inspection binds its return shortcut on the window.
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const taskSnapshot = snapshot("inactive");
+    // Mirror the app controller: the recorded position comes back as the saved one.
+    let savedScrollState: TaskChatScrollState | undefined;
+    const props = () => ({
+      ...taskViewProps(taskSnapshot),
+      intents: {
+        ...taskViewProps(taskSnapshot).intents,
+        recordScroll: (scrollState: TaskChatScrollState) => { savedScrollState = scrollState; },
+      },
+      savedScrollState,
+      subagentConnection: subagentConnection(taskSnapshot.task.task_id),
+    });
+    const connection = props().subagentConnection;
+    const render = () => <TaskView {...props()} subagentConnection={connection} />;
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(render(), {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+    act(() => {
+      messageListView(tree).props.onWheel({ deltaY: -8 });
+      messageList.scrollTop = 600;
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+    });
+    act(() => tree.update(render()));
+
+    act(() => tree.root.findByType(SubagentNavigator).props.onSelect(SUBAGENT_ID));
+    // The subagent history opens at its latest row, and the browser reports that move.
+    expect(messageList.scrollTop).toBe(1000);
+    act(() => messageListView(tree).props.onScroll({ currentTarget: messageList }));
+    act(() => tree.update(render()));
+
+    act(() => tree.root.findByType(SubagentNavigator).props.onSelect(undefined));
+
+    expect(messageList.scrollTop).toBe(600);
+    expect(savedScrollState).toEqual({ ownership: "reading", scrollTop: 600 });
+  });
+
   it("keeps a pending follow-up in the disabled composer without changing Chat", async () => {
     const { TaskView } = await import("./TaskView");
     const props = taskViewProps(snapshot("inactive"));
@@ -342,6 +395,47 @@ function messageListView(tree: ReactTestRenderer) {
 
 function jumpButtons(tree: ReactTestRenderer) {
   return tree.root.findAllByProps({ className: "jump-to-latest" });
+}
+
+const SUBAGENT_ID = "subagent_11111111111111111111111111111111";
+
+/** Serves one completed subagent with an empty history. */
+function subagentConnection(taskId: string) {
+  return {
+    request: vi.fn(),
+    subscribeState: vi.fn((scope: { kind: string }, handlers: { onSnapshot: (snapshot: unknown) => void }) => {
+      if (scope.kind === "subagentCatalog") {
+        handlers.onSnapshot({
+          kind: "subagentCatalog",
+          catalog: {
+            taskId,
+            revision: 1,
+            entries: [{
+              subagentId: SUBAGENT_ID,
+              name: "Reviewer",
+              delegatedTask: "Review",
+              status: "completed",
+              capabilities: { cancel: false, close: false },
+              spawnedOrder: 1,
+              historyRevision: 1,
+            }],
+          },
+        });
+      } else if (scope.kind === "subagentHistory") {
+        handlers.onSnapshot({
+          kind: "subagentHistory",
+          history: {
+            taskId,
+            subagentId: SUBAGENT_ID,
+            revision: 1,
+            availability: "available",
+            chat: { items: [], hasMessages: false },
+          },
+        });
+      }
+      return vi.fn();
+    }),
+  } as unknown as NonNullable<Parameters<typeof import("./TaskView").TaskView>[0]["subagentConnection"]>;
 }
 
 function taskViewProps(taskSnapshot: TaskSnapshot) {
