@@ -268,7 +268,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   if (domainState) return domainState;
 
   if (!isGlobalAction(action)) return state;
-  return reduceGlobalState(state, action);
+  return forgetLeftTaskLiveText(state, reduceGlobalState(state, action));
 }
 
 function isGlobalAction(action: AppAction): action is GlobalAction {
@@ -648,6 +648,19 @@ function settleTaskLiveTextPresentation(
   if (!state.taskLiveTextPresentation[taskId]) return state;
   const { [taskId]: _settled, ...taskLiveTextPresentation } = state.taskLiveTextPresentation;
   return { ...state, taskLiveTextPresentation };
+}
+
+/**
+ * A live text signal announces text arriving in the Chat that is on screen.
+ * Once that Chat is left its rows unmount, so a signal kept for it would make
+ * the already-read message type itself out again when the Task is reopened.
+ */
+function forgetLeftTaskLiveText(previous: AppState, next: AppState): AppState {
+  const leftTaskId = previous.snapshot?.task.task_id;
+  if (!leftTaskId || leftTaskId === next.snapshot?.task.task_id) return next;
+  if (!next.taskLiveTextPresentation[leftTaskId]) return next;
+  const { [leftTaskId]: _left, ...taskLiveTextPresentation } = next.taskLiveTextPresentation;
+  return { ...next, taskLiveTextPresentation };
 }
 
 function taskAcceptsLiveText(status: TaskSnapshot["task"]["status"]) {
