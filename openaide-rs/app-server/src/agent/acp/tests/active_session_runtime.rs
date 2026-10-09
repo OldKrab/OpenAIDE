@@ -606,6 +606,11 @@ for line in sys.stdin:
             respond(message, result)
             if prompt_mode == "title_after_new":
                 notify_title("Agent generated title")
+            elif prompt_mode == "usage_after_new":
+                notify("session/update", {
+                    "sessionId": session_id,
+                    "update": {"sessionUpdate": "usage_update", "used": 12000, "size": 300000},
+                })
             elif fixture_title:
                 notify_title(fixture_title)
     elif method == "session/load":
@@ -2462,6 +2467,42 @@ fn session_title_update_before_sink_attachment_is_delivered() {
             title: AgentMetadataField::Value("Agent generated title".to_string()),
             updated_at: AgentMetadataField::Unchanged,
         }]
+    );
+    runtime.close_session(&session.key()).unwrap();
+}
+
+#[test]
+fn context_usage_reported_before_sink_attachment_is_delivered() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "usage-session", "usage_after_new")
+    else {
+        return;
+    };
+    let session = runtime
+        .start_session(start_request("task-usage", cwd_string()))
+        .expect("start session");
+    let sink = Arc::new(CapturingSessionSink::default());
+
+    runtime
+        .attach_session_event_sink(&session.key(), sink.clone())
+        .expect("attach session sink");
+
+    let context_usage = || {
+        sink.events
+            .lock()
+            .expect("captured session event lock poisoned")
+            .iter()
+            .find_map(|event| match event {
+                AgentEvent::ContextUsage(usage) => Some(usage.clone()),
+                _ => None,
+            })
+    };
+    wait_until(|| context_usage().is_some());
+    let usage = context_usage().expect("context usage");
+    assert_eq!(
+        (usage.used_tokens, usage.capacity_tokens),
+        (12_000, 300_000)
     );
     runtime.close_session(&session.key()).unwrap();
 }

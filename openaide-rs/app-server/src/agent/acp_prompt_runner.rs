@@ -19,8 +19,9 @@ use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_response_boundary::take_preceding_session_updates;
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_with_catalog_snapshot, deliver_session_commands_catalog,
-    deliver_session_config_catalog, deliver_session_metadata_update, session_catalogs_from_update,
-    session_with_catalog_snapshots, DispatchSessionCatalogs, PendingSessionCatalogs,
+    deliver_session_config_catalog, deliver_session_metadata_update,
+    keep_unprojected_context_usage, session_catalogs_from_update, session_with_catalog_snapshots,
+    DispatchSessionCatalogs, PendingSessionCatalogs,
 };
 use crate::agent::acp_session_termination::close_active_session;
 use crate::agent::acp_session_termination::SessionDeleteRequest;
@@ -717,6 +718,7 @@ pub(super) async fn dispatch_session_notification(
     let catalogs = Arc::new(Mutex::new(DispatchSessionCatalogs::default()));
     let catalogs_sink = catalogs.clone();
     let (task_states, agent_states) = (background_work.clone(), background_work.clone());
+    let projected = projection.is_some();
     MatchDispatch::new(dispatch)
         .if_notification(async move |change: AsyncTaskStateNotification| {
             task_states.task_state_changed(&change);
@@ -769,6 +771,11 @@ pub(super) async fn dispatch_session_notification(
             pending_session_catalogs,
         )?;
     }
+    keep_unprojected_context_usage(
+        catalogs.context_usage.clone(),
+        projected,
+        pending_session_catalogs,
+    );
     Ok(catalogs)
 }
 

@@ -6,12 +6,15 @@ use crate::agent::acp_schema::{MaybeUndefined, SessionUpdate};
 #[cfg(test)]
 use agent_client_protocol::util::MatchDispatch;
 
+use crate::agent::acp_account_limits_projection::is_account_limits_carrier;
 #[cfg(test)]
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_update_projection::{normalize_available_commands, normalize_config_options};
+use crate::agent::events::{AgentContextUsage, AgentEvent, AgentUsageCost};
 use crate::agent::{
     AgentMetadataField, AgentSession, AgentSessionEventSink, AgentSessionMetadataUpdate,
 };
+use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentCommandsCatalog, ConfigOptionsCatalog};
 
@@ -20,6 +23,9 @@ pub(super) struct PendingSessionCatalogs {
     config: Option<ConfigOptionsCatalog>,
     commands: Option<AgentCommandsCatalog>,
     metadata: Option<AgentSessionMetadataUpdate>,
+    /// The latest context reading that arrived while nothing projected session updates.
+    /// An Agent may report it right after opening a session, before the Task subscribes.
+    context_usage: Option<AgentContextUsage>,
 }
 
 #[derive(Clone, Default)]
@@ -27,6 +33,7 @@ pub(super) struct DispatchSessionCatalogs {
     pub(super) config: Option<ConfigOptionsCatalog>,
     pub(super) commands: Option<AgentCommandsCatalog>,
     pub(super) metadata: Option<AgentSessionMetadataUpdate>,
+    pub(super) context_usage: Option<AgentContextUsage>,
 }
 
 #[cfg(test)]
@@ -72,6 +79,16 @@ pub(super) fn session_catalogs_from_update(
         }
         SessionUpdate::SessionInfoUpdate(update) => {
             catalogs.metadata = Some(metadata_update_from_acp(update.clone()));
+        }
+        SessionUpdate::UsageUpdate(update) if !is_account_limits_carrier(update.meta.as_ref()) => {
+            catalogs.context_usage = Some(AgentContextUsage {
+                used_tokens: update.used,
+                capacity_tokens: update.size,
+                cost: update.cost.clone().map(|cost| AgentUsageCost {
+                    amount: cost.amount.to_string(),
+                    currency: cost.currency,
+                }),
+            });
         }
         _ => {}
     }
@@ -138,7 +155,26 @@ pub(super) fn attach_session_event_sink_with_catalog_snapshot(
     if let Some(update) = pending_catalogs.metadata.take() {
         sink.metadata_changed(update)?;
     }
+    if let Some(usage) = pending_catalogs.context_usage.take() {
+        logging::info("acp_pending_context_usage_delivered", serde_json::json!({}));
+        sink.session_update(AgentEvent::ContextUsage(usage))?;
+    }
     Ok(())
+}
+
+/// Keeps a context reading no projection consumed, so the next sink still receives it.
+///
+/// A projected reading already reached its owner and is newer than anything kept here,
+/// so it drops the kept one instead of letting a later attachment replay a stale value.
+pub(super) fn keep_unprojected_context_usage(
+    usage: Option<AgentContextUsage>,
+    projected: bool,
+    pending_catalogs: &mut PendingSessionCatalogs,
+) {
+    let Some(usage) = usage else {
+        return;
+    };
+    pending_catalogs.context_usage = (!projected).then_some(usage);
 }
 
 /// Applies live catalogs without turning an absent config catalog into a false empty catalog.
