@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -201,10 +201,23 @@ test("linked worktrees reuse the primary worktree role-local env", (t) => {
   assert.doesNotMatch(result.stdout, /:5580\b/);
 });
 
+test("tracked role env files allow only loopback hosts", () => {
+  // A real hostname belongs in the ignored local-web.<role>.local.env override.
+  const deployDir = new URL("./", import.meta.url);
+  const roleEnvFiles = readdirSync(deployDir).filter((name) => /^local-web\.[^.]+\.env$/.test(name));
+
+  assert.ok(roleEnvFiles.length > 0);
+  for (const name of roleEnvFiles) {
+    const allowedHosts = /^OPENAIDE_WEB_ALLOWED_HOSTS=(.*)$/m.exec(readFileSync(new URL(name, deployDir), "utf8"));
+    const hosts = allowedHosts ? allowedHosts[1].split(",") : [];
+    assert.deepEqual(hosts.filter((host) => !["localhost", "127.0.0.1", "::1"].includes(host)), [], name);
+  }
+});
+
 test("target role uses a durable isolated systemd service", () => {
   const targetEnv = readFileSync(new URL("./local-web.target.env", import.meta.url), "utf8");
 
-  assert.match(targetEnv, /^OPENAIDE_WEB_ALLOWED_HOSTS=target\.old\.dedyn\.io,localhost,127\.0\.0\.1$/m);
+  assert.match(targetEnv, /^OPENAIDE_WEB_ALLOWED_HOSTS=localhost,127\.0\.0\.1$/m);
   assert.match(targetEnv, /^OPENAIDE_WEB_DAEMON=systemd$/m);
   assert.match(targetEnv, /^OPENAIDE_WEB_SYSTEMD_UNIT=openaide-web-target-5574$/m);
   assert.match(targetEnv, /^OPENAIDE_WEB_PROTOTYPE_PORT=5572$/m);

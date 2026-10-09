@@ -18,9 +18,9 @@ describe("NewWorkspacePicker", () => {
       await Promise.resolve();
     });
 
-    expect(browser.listDirectory).toHaveBeenCalledWith("/home/old");
+    expect(browser.listDirectory).toHaveBeenCalledWith("/home/user");
     expect(textContent(tree!)).toContain("src");
-    expect(textContent(tree!)).toContain("old");
+    expect(textContent(tree!)).toContain("user");
     expect(textContent(tree!)).toContain("Add this folder");
     expect(textContent(tree!)).not.toContain("Use this folder");
     expect(textContent(tree!)).not.toContain("Browse folders");
@@ -39,14 +39,14 @@ describe("NewWorkspacePicker", () => {
       tree!.root.findByProps({ children: "Add this folder" }).props.onClick();
     });
 
-    expect(onSelect).toHaveBeenCalledWith({ path: "/home/old", label: "old" });
+    expect(onSelect).toHaveBeenCalledWith({ path: "/home/user", label: "user" });
   });
 
   it("keeps the current folders visible while the next directory loads", async () => {
     let resolveDirectory: ((listing: WorkspaceListDirectoryResult) => void) | undefined;
     const browser = workspaceBrowser("new-task:1");
     browser.listDirectory = vi.fn(async (path) => {
-      if (path === "/home/old/src") {
+      if (path === "/home/user/src") {
         return new Promise<WorkspaceListDirectoryResult>((resolve) => {
           resolveDirectory = resolve;
         });
@@ -67,7 +67,7 @@ describe("NewWorkspacePicker", () => {
     expect(textContent(tree!)).not.toContain("Loading folders");
 
     await act(async () => {
-      resolveDirectory?.(directoryListing("/home/old/src"));
+      resolveDirectory?.(directoryListing("/home/user/src"));
       await Promise.resolve();
     });
     expect(textContent(tree!)).toContain("OpenAIDE");
@@ -89,7 +89,7 @@ describe("NewWorkspacePicker", () => {
 
     expect(first.listRoots).toHaveBeenCalledTimes(1);
     expect(refreshed.listRoots).not.toHaveBeenCalled();
-    expect(textContent(tree!)).toContain("old");
+    expect(textContent(tree!)).toContain("user");
   });
 
   it("ignores a directory response from a superseded navigation owner", async () => {
@@ -114,7 +114,7 @@ describe("NewWorkspacePicker", () => {
     expect(textContent(tree!)).toContain("other");
 
     await act(async () => {
-      resolveOldDirectory?.(directoryListing("/home/old"));
+      resolveOldDirectory?.(directoryListing("/home/user"));
       await oldDirectory;
       await Promise.resolve();
     });
@@ -127,10 +127,10 @@ describe("NewWorkspacePicker", () => {
 describe("preferredWorkspaceStart", () => {
   it("prefers the home folder over cwd and the filesystem root", () => {
     expect(preferredWorkspaceStart([
-      { label: "OpenAIDE", path: "/home/old/src/OpenAIDE" },
-      { label: "old", path: "/home/old" },
+      { label: "OpenAIDE", path: "/home/user/src/OpenAIDE" },
+      { label: "user", path: "/home/user" },
       { label: "/", path: "/" },
-    ])).toBe("/home/old");
+    ])).toBe("/home/user");
   });
 });
 
@@ -139,8 +139,8 @@ function workspaceBrowser(ownerKey: string): WorkspaceBrowserCallbacks {
     ownerKey,
     listDirectory: vi.fn(async (path) => directoryListing(path)),
     listRoots: vi.fn(async () => [
-      { label: "OpenAIDE", path: "/home/old/src/OpenAIDE" },
-      { label: "old", path: "/home/old" },
+      { label: "OpenAIDE", path: "/home/user/src/OpenAIDE" },
+      { label: "user", path: "/home/user" },
       { label: "/", path: "/" },
     ]),
   };
@@ -148,12 +148,12 @@ function workspaceBrowser(ownerKey: string): WorkspaceBrowserCallbacks {
 
 function directoryListing(path: string): WorkspaceListDirectoryResult {
   const entries = {
-    "/home/old": [
-      { label: "Desktop", path: "/home/old/Desktop" },
-      { label: "src", path: "/home/old/src" },
+    "/home/user": [
+      { label: "Desktop", path: "/home/user/Desktop" },
+      { label: "src", path: "/home/user/src" },
     ],
-    "/home/old/src": [
-      { label: "OpenAIDE", path: "/home/old/src/OpenAIDE" },
+    "/home/user/src": [
+      { label: "OpenAIDE", path: "/home/user/src/OpenAIDE" },
     ],
     "/home/other": [],
   }[path] ?? [];

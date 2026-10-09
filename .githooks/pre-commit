@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks a commit whose staged content names a personal host or a private term.
+exec node scripts/check-private-data.mjs
