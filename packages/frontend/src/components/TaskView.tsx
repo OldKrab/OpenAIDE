@@ -478,7 +478,7 @@ export function TaskView({
     itemKeys: timelineRowKeys,
     latestMessageKey: chatItems.at(-1)?.message_id,
     onLoadEarlier: subagents.selected ? subagents.loadEarlier : loadChatPage,
-    onScrollState: intents.recordScroll,
+    onScrollState: subagents.selected ? discardSubagentScroll : intents.recordScroll,
     pendingPrepend: chat.pending,
     savedScrollState: subagents.selected ? undefined : savedScrollState,
     taskId: subagents.selected
@@ -781,6 +781,12 @@ export function TaskView({
     </AgentFileOpenContext.Provider>
   );
 }
+
+/**
+ * The saved Chat position belongs to the Main Agent history. A Subagent history shares the same
+ * viewport, so recording its position would replace the place the reader returns to.
+ */
+function discardSubagentScroll() {}
 
 async function unavailableToolImagePreview() {
   return undefined;
