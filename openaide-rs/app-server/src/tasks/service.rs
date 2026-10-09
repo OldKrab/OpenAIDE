@@ -122,7 +122,8 @@ impl TaskService {
             notifier.clone(),
         );
         let agent_gateway = AgentGateway::new(agent.clone());
-        let turn_runner = TurnRunner::new(mutations.clone(), agent);
+        let turn_runner =
+            TurnRunner::new(mutations.clone(), agent).with_agent_statuses(agent_statuses.clone());
         let agent_service = AgentService::with_status_cache(
             agent_gateway.clone(),
             agent_registry.clone(),

@@ -348,3 +348,60 @@ fn failed_authentication_restores_the_status_that_required_or_started_it() {
     );
     assert_eq!(required.snapshot("codex").status, AgentStatus::AuthRequired);
 }
+
+fn five_hour_usage(used_percent: u8) -> crate::agent::events::AgentAccountLimitsChange {
+    use crate::agent::events::{
+        AgentAccountLimitUsage, AgentAccountLimitWindowId, AgentAccountLimitsChange,
+    };
+    AgentAccountLimitsChange::Usage {
+        plan_label: Some("Max".to_string()),
+        windows: vec![AgentAccountLimitUsage {
+            window: AgentAccountLimitWindowId {
+                kind: openaide_app_server_protocol::snapshot::AgentAccountLimitWindowKind::FiveHour,
+                model_label: None,
+            },
+            used_percent,
+            resets_at_ms: None,
+        }],
+    }
+}
+
+#[test]
+fn account_limits_notify_only_when_the_visible_value_changes() {
+    let (cache, updates) = AgentStatusCache::channel();
+    assert_eq!(cache.account_limits("claude"), None);
+
+    cache.record_account_limits("claude", five_hour_usage(40));
+    assert!(updates.try_recv().is_ok());
+    cache.record_account_limits("claude", five_hour_usage(40));
+    assert!(
+        updates.try_recv().is_err(),
+        "an unchanged reading stays quiet"
+    );
+
+    cache.record_account_limits("claude", five_hour_usage(44));
+    assert!(updates.try_recv().is_ok());
+    let limits = cache.account_limits("claude").expect("limits");
+    assert_eq!(limits.windows[0].used_percent, 44);
+    assert_eq!(cache.account_limits("codex"), None);
+}
+
+#[test]
+fn account_limits_survive_status_replacement_and_end_with_the_account() {
+    let cache = AgentStatusCache::default();
+    cache.record_account_limits("claude", five_hour_usage(40));
+
+    cache.record_probe_error(
+        "claude",
+        &RuntimeError::CapabilityMissing("agent_probe:claude".to_string()),
+    );
+    cache.record_connected("claude");
+    assert!(cache.account_limits("claude").is_some());
+
+    cache.record_logout_success("claude");
+    assert_eq!(cache.account_limits("claude"), None);
+
+    cache.record_account_limits("claude", five_hour_usage(40));
+    assert!(cache.clear("claude"));
+    assert_eq!(cache.account_limits("claude"), None);
+}

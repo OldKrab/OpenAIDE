@@ -501,6 +501,55 @@ fn repeated_identical_session_catalogs_do_not_churn_task_revision() {
 }
 
 #[test]
+fn account_limits_are_recorded_on_the_agent_without_touching_the_task() {
+    use crate::agent::events::{
+        AgentAccountLimitWindowId, AgentAccountLimitsChange, AgentAccountLimitsUpdate,
+    };
+    use openaide_app_server_protocol::snapshot::{
+        AgentAccountLimitStatus, AgentAccountLimitWindowKind,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let statuses = crate::agent::status_cache::AgentStatusCache::default();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    )
+    .with_agent_statuses(statuses.clone());
+
+    sink.session_update(AgentEvent::AccountLimits(AgentAccountLimitsUpdate {
+        agent_id: "claude".to_string(),
+        change: AgentAccountLimitsChange::Signal {
+            window: AgentAccountLimitWindowId {
+                kind: AgentAccountLimitWindowKind::FiveHour,
+                model_label: None,
+            },
+            status: AgentAccountLimitStatus::Reached,
+            used_percent: None,
+            resets_at_ms: Some(1_791_556_200_000),
+        },
+    }))
+    .unwrap();
+
+    let limits = statuses.account_limits("claude").expect("agent limits");
+    assert_eq!(limits.windows[0].status, AgentAccountLimitStatus::Reached);
+    assert_eq!(limits.windows[0].used_percent, 100);
+    assert!(notifications.try_recv().is_err(), "no Task delta");
+    assert_eq!(store.read_task("task_1").unwrap().revision, 0);
+}
+
+#[test]
 fn context_usage_updates_publish_complete_contiguous_task_deltas() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();

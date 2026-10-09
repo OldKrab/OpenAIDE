@@ -28,6 +28,7 @@ export function agentOptionsFromProtocol(snapshot: AgentCollectionSnapshot): Age
       status: agent.status,
       setupReason: agent.setupReason ?? undefined,
       capabilities: agent.capabilities,
+      accountLimits: agent.accountLimits ?? undefined,
     };
   });
 }

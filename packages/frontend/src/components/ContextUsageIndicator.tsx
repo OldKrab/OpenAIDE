@@ -14,6 +14,8 @@ import type {
   ConfigOptionsCatalog,
   TaskContextUsage,
 } from "@openaide/app-shell-contracts";
+import type { AgentAccountLimits } from "@openaide/app-server-client";
+import { AccountLimitsIndicator } from "./AccountLimitsIndicator";
 import { PopupPanel } from "./Popup";
 import { useBackNavigation } from "./useBackNavigation";
 
@@ -39,10 +41,16 @@ function useCompactContextUsage() {
 }
 
 export function ComposerWithContextUsage({
+  accountLimits,
+  agentLabel,
   children,
   configOptions,
   usage,
 }: {
+  /** Account-wide Agent limits, drawn in the corner independently of this Task's context. */
+  accountLimits?: AgentAccountLimits | null;
+  /** Names the account's Agent in the limits corner; without it the corner is not drawn. */
+  agentLabel?: string;
   children: ReactNode;
   configOptions?: ConfigOptionsCatalog;
   usage?: TaskContextUsage;
@@ -115,6 +123,9 @@ export function ComposerWithContextUsage({
   return (
     <div className="composer-context-host" ref={hostRef}>
       <ContextUsageControl.Provider value={mobileControl}>{children}</ContextUsageControl.Provider>
+      {agentLabel ? (
+        <AccountLimitsIndicator agentLabel={agentLabel} compact={compact} hostRef={hostRef} limits={accountLimits} />
+      ) : null}
       {!compact && usage && capacity > 0 ? (
         <div className="context-usage-interaction">
           <button

@@ -99,6 +99,7 @@ pub(super) fn gateway(
             task_notifier,
             server_requests.clone(),
             configured_projects.clone(),
+            agent_statuses.clone(),
         )?
         .with_task_subscription_presence(task_subscription_presence.clone()),
     );

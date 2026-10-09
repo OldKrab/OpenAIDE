@@ -278,8 +278,8 @@ export function TaskView({
     agents,
     snapshot.preparation,
   );
-  const activeAgentIcon = agentIcons?.[snapshot.task.agent_id]
-    ?? agents?.find((agent) => agent.id === snapshot.task.agent_id)?.icon;
+  const taskAgent = agents?.find((agent) => agent.id === snapshot.task.agent_id);
+  const activeAgentIcon = agentIcons?.[snapshot.task.agent_id] ?? taskAgent?.icon;
   const subagents = useSubagentSessions({
     connection: subagentConnection,
     enabled: backendReady,
@@ -689,6 +689,8 @@ export function TaskView({
           kind={recovery.kind}
         /> : (
           <ComposerWithContextUsage
+            accountLimits={taskAgent?.accountLimits}
+            agentLabel={taskAgent?.label}
             configOptions={taskConfigOptions}
             usage={snapshot.context_usage}
           >

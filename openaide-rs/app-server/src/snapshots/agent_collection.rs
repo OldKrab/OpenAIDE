@@ -60,6 +60,7 @@ fn collection_from_registry_summaries_with_statuses(
             .into_iter()
             .map(|agent| {
                 let status = statuses.snapshot(&agent.id);
+                let account_limits = statuses.account_limits(&agent.id);
                 AgentSummary {
                     agent_id: AgentId::from(agent.id),
                     label: agent.label,
@@ -68,6 +69,7 @@ fn collection_from_registry_summaries_with_statuses(
                     setup_reason: status.setup_reason,
                     capabilities: status.capabilities,
                     sign_in: status.sign_in,
+                    account_limits,
                 }
             })
             .collect(),

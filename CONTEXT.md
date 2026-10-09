@@ -263,6 +263,10 @@ _Avoid_: Letting users start work with an unavailable Agent
 The user-facing availability state of an Agent: disconnected, installing, launching, connected, setup required, auth required, authenticating, unsupported, or failed. Installing is an ephemeral App Server-owned activity for a managed Agent integration, not a Task state or user setup requirement.
 _Avoid_: Representing Agent setup problems as failed Tasks
 
+**Account Limits**:
+The usage windows of the subscription account an Agent is signed in to, such as a 5-hour and a weekly window, each with a used share, a reset time, and the Agent's own ok, warning, or reached verdict. They belong to the Agent and are shared by all of its Tasks.
+_Avoid_: Context usage, quota, rate limit as a Task property, deriving a warning from a percentage
+
 **Setup Required Agent**:
 An enabled Agent that cannot begin launch or ACP initialization until the user completes an external prerequisite.
 _Avoid_: Treating automatic Agent bootstrap as setup, failed Task

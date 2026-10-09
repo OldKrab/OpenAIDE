@@ -26,6 +26,7 @@ pub struct TurnRunner {
     active_turns: Arc<ActiveTurnRegistry>,
     server_requests: ServerRequestRuntime,
     native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
+    agent_statuses: crate::agent::status_cache::AgentStatusCache,
     cancel_grace_period: Arc<Mutex<Duration>>,
     turn_acceptance: TurnAcceptanceCoordinator,
     #[cfg(test)]
@@ -57,6 +58,7 @@ impl TurnRunner {
             active_turns: Arc::new(ActiveTurnRegistry::default()),
             server_requests,
             native_catalog: None,
+            agent_statuses: crate::agent::status_cache::AgentStatusCache::default(),
             cancel_grace_period: Arc::new(Mutex::new(DEFAULT_CANCEL_GRACE_PERIOD)),
             turn_acceptance: TurnAcceptanceCoordinator::default(),
             #[cfg(test)]
@@ -75,6 +77,15 @@ impl TurnRunner {
         native_catalog: crate::native_sessions::catalog::NativeSessionCatalog,
     ) -> Self {
         self.native_catalog = Some(native_catalog);
+        self
+    }
+
+    /// Shares the Agent status owner so session sinks can record Agent-level reports.
+    pub(crate) fn with_agent_statuses(
+        mut self,
+        agent_statuses: crate::agent::status_cache::AgentStatusCache,
+    ) -> Self {
+        self.agent_statuses = agent_statuses;
         self
     }
 
@@ -613,7 +624,8 @@ impl TurnRunner {
                 session.session_id().to_string(),
                 self.server_requests.clone(),
             )
-            .with_native_catalog(self.native_catalog.clone()),
+            .with_native_catalog(self.native_catalog.clone())
+            .with_agent_statuses(self.agent_statuses.clone()),
         );
         self.agent
             .attach_session_event_sink(session, sink.clone() as Arc<dyn AgentSessionEventSink>)?;

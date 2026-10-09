@@ -148,6 +148,55 @@ pub struct AgentSummary {
     /// Absent when no flow is running and the last flow ended in success or cancellation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sign_in: Option<AgentSignInFlow>,
+    /// Usage windows of the account this Agent is signed in to. Absent until the Agent reports
+    /// them; every Task of the Agent shares the same value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_limits: Option<AgentAccountLimits>,
+}
+
+/// Subscription usage limits an Agent reports for its signed-in account. They belong to the
+/// account, not to a Task or Native Session, and are held in memory only: a restarted App Server
+/// has none until the Agent reports again.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccountLimits {
+    /// Display name of the subscription plan when the Agent reports one, for example "Max".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_label: Option<String>,
+    /// Ordered for display: the 5-hour window, the weekly window, then per-model weekly windows.
+    pub windows: Vec<AgentAccountLimitWindow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccountLimitWindow {
+    pub kind: AgentAccountLimitWindowKind,
+    /// Only a `weeklyModel` window carries the model family it meters, for example "Opus".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_label: Option<String>,
+    /// Share of the window already used, 0 to 100.
+    pub used_percent: u8,
+    /// Unix epoch milliseconds at which the window resets. Absent when the Agent did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at_ms: Option<u64>,
+    pub status: AgentAccountLimitStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentAccountLimitWindowKind {
+    FiveHour,
+    Weekly,
+    WeeklyModel,
+}
+
+/// The Agent's own verdict for a window; App Server never derives a warning from a percentage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentAccountLimitStatus {
+    Ok,
+    Warning,
+    Reached,
 }
 
 /// App Server-owned state of an Agent Sign-in Flow. Every connected client observes the same
