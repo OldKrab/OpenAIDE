@@ -165,11 +165,19 @@ function AccountLimitsDetails({
           </div>
           <div aria-hidden="true" className="account-limits-meter-track">
             <span style={{ width: `${leftPercent(window)}%` }} />
+            <MeterTick clock={clock} window={window} />
           </div>
         </div>
       ))}
     </section>
   );
+}
+
+/** Same mark as on the Composer border: the share of the window's time still ahead. */
+function MeterTick({ clock, window }: { clock: number; window: AgentAccountLimitWindow }) {
+  const elapsed = elapsedFraction(window, clock);
+  if (elapsed === undefined) return null;
+  return <i className="account-limits-meter-tick" style={{ left: `${round((1 - elapsed) * 100)}%` }} />;
 }
 
 /** The Composer's computed corner decides where the straight part of its top border ends. */
