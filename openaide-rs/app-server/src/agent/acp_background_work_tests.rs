@@ -56,6 +56,16 @@ fn agent_text() -> SessionUpdate {
     .expect("agent message chunk")
 }
 
+/// Model output as the Claude adapter sends it: every chunk names its message.
+fn model_text() -> SessionUpdate {
+    serde_json::from_value(json!({
+        "sessionUpdate": "agent_message_chunk",
+        "messageId": "0f5d1c1e-6b1b-4d5e-9a57-3a1f0c2b7e11",
+        "content": { "type": "text", "text": "The build passed." },
+    }))
+    .expect("named agent message chunk")
+}
+
 fn turn_ended() -> TurnEndedNotification {
     serde_json::from_value(json!({ "sessionId": "session-1", "stopReason": "end_turn" }))
         .expect("turn ended notification")
@@ -325,14 +335,15 @@ fn finishing_a_hold_keeps_live_commands_for_the_next_prompt() {
 }
 
 #[test]
-fn the_acknowledgement_of_a_requested_stop_is_not_a_cycle() {
+fn a_line_the_agent_writes_itself_is_not_a_cycle() {
     let work = BackgroundWork::default();
+    // The prompt's own answer shows that this Agent names its model messages.
+    work.session_update_observed("session-1", &model_text());
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
     work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
     assert!(work.holds_turn("session-1", "task-a"));
 
-    // The user stops one command; the Agent confirms and says so in Chat.
-    work.stop_confirmed();
+    // The user stops one command and the Agent acknowledges it in Chat.
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Stopped));
     work.session_update_observed("session-1", &agent_text());
     assert_eq!(
@@ -341,21 +352,18 @@ fn the_acknowledgement_of_a_requested_stop_is_not_a_cycle() {
         "the turn is still held by the other command alone"
     );
 
-    work.stop_confirmed();
     work.task_state_changed(&task_state("task-2", AsyncTaskState::Stopped));
+    work.session_update_observed("session-1", &agent_text());
     assert!(!work.holds_turn("session-1", "task-a"));
 }
 
 #[test]
-fn agent_text_beyond_a_stop_acknowledgement_is_a_cycle() {
+fn model_text_during_a_hold_is_a_cycle_for_an_agent_that_names_messages() {
     let work = BackgroundWork::default();
+    work.session_update_observed("session-1", &model_text());
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
-    work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
     assert!(work.holds_turn("session-1", "task-a"));
 
-    work.stop_confirmed();
-    work.task_state_changed(&task_state("task-1", AsyncTaskState::Stopped));
-    work.session_update_observed("session-1", &agent_text());
-    work.session_update_observed("session-1", &agent_text());
-    assert_eq!(live_ids(&work, true), (false, vec!["task-2".to_string()]));
+    work.session_update_observed("session-1", &model_text());
+    assert_eq!(live_ids(&work, true), (false, vec!["task-1".to_string()]));
 }

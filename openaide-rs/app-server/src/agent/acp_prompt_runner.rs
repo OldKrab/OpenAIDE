@@ -304,7 +304,7 @@ pub(super) async fn run_prompt(
                         // The turn keeps running; the command's own state
                         // update removes it from the live set.
                         let _ = reply_tx.send(
-                            background_work.stop_command(
+                            BackgroundWork::stop_task(
                                 active_session.connection(),
                                 active_session.session_id(),
                                 context.trace.as_ref(),
