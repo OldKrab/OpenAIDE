@@ -100,9 +100,9 @@ export function AccountLimitsIndicator({
 }
 
 /**
- * One straight meter per window, laid along the top border. It starts full and drains toward its
- * name as the limit is spent. Each carries its window's name on the border, the way a fieldset
- * legend does, because two bare lines cannot say which limit is which.
+ * One straight meter per window, laid along the top border. It starts full and drains as the limit
+ * is spent. At rest the border carries the lines alone; pointing at them raises each window's name
+ * and what is left above its own line, because two bare lines cannot say which limit is which.
  */
 function EdgeSegments({ clock, length, windows }: { clock: number; length: number; windows: AgentAccountLimitWindow[] }) {
   const line = `M0 ${EDGE_HEIGHT / 2} h${length}`;
@@ -112,7 +112,10 @@ function EdgeSegments({ clock, length, windows }: { clock: number; length: numbe
         const elapsed = elapsedFraction(window, clock);
         return (
           <span aria-hidden="true" className={`account-limits-segment account-limits-${windowTone(window, clock)}`} key={window.kind}>
-            <span className="account-limits-segment-name">{window.kind === "fiveHour" ? "5h" : "week"}</span>
+            <span className="account-limits-segment-name">
+              {window.kind === "fiveHour" ? "5h" : "week"}
+              <b>{window.status === "reached" ? "0%" : `${leftPercent(window)}%`}</b>
+            </span>
             <svg height={EDGE_HEIGHT} viewBox={`0 0 ${length} ${EDGE_HEIGHT}`} width={length}>
               <path className="account-limits-segment-track" d={line} />
               <path

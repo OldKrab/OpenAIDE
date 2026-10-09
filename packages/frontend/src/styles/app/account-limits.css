@@ -47,28 +47,62 @@
 }
 
 /*
- * The name sits just above the border, over the start of its meter, so the border and the meter
- * stay one unbroken line.
+ * The border carries the meters alone. Pointing at them raises a readout above each one: the
+ * window's name and what is left, coming into focus from the line it describes. The open panel
+ * says the same in full, so the readout stays down while it is open.
  */
 .account-limits-segment-name {
   position: absolute;
   left: 0;
   bottom: calc(50% + 5px);
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
   color: var(--oa-muted);
   font-size: 10px;
   font-weight: 500;
   line-height: 12px;
   letter-spacing: .02em;
+  white-space: nowrap;
+  opacity: 0;
+  filter: blur(3px);
+  transform: translateY(5px);
+  transition:
+    opacity 140ms ease,
+    filter 140ms ease,
+    transform 140ms ease;
 }
 
-.account-limits-segment:is(.account-limits-warning, .account-limits-fast, .account-limits-reached) .account-limits-segment-name {
-  color: var(--account-limit-tone);
-}
-
-.account-limits-edge:hover .account-limits-segment-name,
-.account-limits-edge:focus-visible .account-limits-segment-name,
-.account-limits-edge[aria-expanded="true"] .account-limits-segment-name {
+.account-limits-segment-name b {
   color: var(--oa-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-limits-edge:not([aria-expanded="true"]):is(:hover, :focus-visible) .account-limits-segment-name {
+  opacity: 1;
+  filter: none;
+  transform: none;
+  transition:
+    opacity 220ms ease,
+    filter 260ms ease,
+    transform 320ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.account-limits-edge:is(:hover, :focus-visible) .account-limits-segment + .account-limits-segment .account-limits-segment-name {
+  transition-delay: 50ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-limits-segment-name {
+    filter: none;
+    transform: none;
+    transition: opacity 160ms ease;
+  }
+}
+
+.account-limits-segment:is(.account-limits-warning, .account-limits-fast, .account-limits-reached) .account-limits-segment-name b {
+  color: var(--account-limit-tone);
 }
 
 /* Graphite for the account, so the accent edge stays the only mark that means this Task. */
@@ -148,14 +182,47 @@
   color: var(--account-limit-tone);
 }
 
-.composer-context-host:has(.account-limits-edge:hover) .account-limits-label,
-.composer-context-host:has(.account-limits-edge:focus-visible) .account-limits-label,
+/* Hover has its own readout on the border; this line only speaks up when usage crosses a step. */
 .account-limits-label[data-announce="true"] {
   opacity: 1;
   transform: none;
 }
 
+/*
+ * Opening the panel replays the reading: every bar starts full and drains to what is left, one
+ * window after another.
+ */
+@keyframes account-limits-drain {
+  from { width: 100%; }
+}
+
+@keyframes account-limits-settle {
+  from { opacity: 0; }
+}
+
+.account-limits-meter-track span {
+  animation: account-limits-drain 900ms cubic-bezier(.16, 1, .3, 1) backwards;
+}
+
+.account-limits-meter-tick {
+  animation: account-limits-settle 300ms ease 500ms backwards;
+}
+
+.account-limits-meter:nth-child(3) .account-limits-meter-track span { animation-delay: 70ms; }
+.account-limits-meter:nth-child(3) .account-limits-meter-tick { animation-delay: 570ms; }
+.account-limits-meter:nth-child(4) .account-limits-meter-track span { animation-delay: 140ms; }
+.account-limits-meter:nth-child(4) .account-limits-meter-tick { animation-delay: 640ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .account-limits-meter-track span,
+  .account-limits-meter-tick {
+    animation: none;
+  }
+}
+
 .oa-popup-surface.account-limits-popup {
+  /* Lifts the panel clear of the meters it explains. */
+  translate: 0 -8px;
   width: min(292px, calc(100vw - 16px));
   padding: 0;
 }
