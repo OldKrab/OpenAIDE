@@ -334,7 +334,7 @@ pub(crate) fn project_task_summary_with_has_messages(
     let status = project_status_with_preparation(
         record.status,
         &record.preparation,
-        record.background_only().is_some(),
+        record.background_only(),
     );
     let lifecycle = project_task_lifecycle(&record.lifecycle);
     let workspace_available = std::path::Path::new(&record.workspace_root).is_dir();
@@ -406,7 +406,13 @@ pub(crate) fn project_legacy_task_summary(
         agent_id: AgentId::from(summary.agent_id),
         lifecycle,
         title: summary.title.map(project_title),
-        status: project_status(summary.status, summary.background_work.is_some()),
+        status: project_status(
+            summary.status,
+            summary
+                .background_work
+                .as_ref()
+                .is_some_and(|work| work.held),
+        ),
         updated_at: summary.updated_at,
         last_activity: summary.last_activity,
         unread: summary.unread,

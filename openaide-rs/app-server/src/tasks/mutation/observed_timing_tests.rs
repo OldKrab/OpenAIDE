@@ -59,6 +59,7 @@ fn tool(id: &str, status: ActivityStatus, created_at: &str) -> NormalizedMessage
         created_at: created_at.to_string(),
         collapsed: true,
         steps: vec![ActivityStep::Tool {
+            background_outcome: None,
             tool_call_id: Some(id.to_string()),
             name: "read".to_string(),
             status,

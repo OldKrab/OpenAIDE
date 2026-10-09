@@ -346,6 +346,9 @@ impl RpcGateway {
                 self.handle_task_queue_resume(connection_id, id, params, meta)
             }
             TASK_CANCEL => self.handle_task_cancel(connection_id, id, params, meta, now),
+            openaide_app_server_protocol::methods::TASK_STOP_BACKGROUND_COMMAND => {
+                self.handle_task_stop_background_command(connection_id, id, params, meta)
+            }
             TASK_CHAT_PAGE => self.handle_task_chat_page(connection_id, id, params, meta),
             TASK_COMPOSER_HISTORY => {
                 self.handle_task_composer_history(connection_id, id, params, meta)

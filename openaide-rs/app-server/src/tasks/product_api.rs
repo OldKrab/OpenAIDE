@@ -42,6 +42,7 @@ mod adopt_native_session;
 mod archive;
 mod archive_workflow;
 mod attachments;
+mod background_command;
 mod cancel;
 mod chat_page;
 mod close_plan;
@@ -589,6 +590,14 @@ impl TaskCancelWorkflow for TaskProductApi {
         params: TaskCancelParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.cancel_task(client_instance_id, params)
+    }
+
+    fn stop_background_command_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskStopBackgroundCommandParams,
+    ) -> Result<(), ProtocolError> {
+        self.stop_background_command(client_instance_id, params)
     }
 
     fn recover_stuck_sessions(

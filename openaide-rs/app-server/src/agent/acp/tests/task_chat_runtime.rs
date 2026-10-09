@@ -902,10 +902,16 @@ fn background_command_keeps_the_task_working_until_its_followup_cycle_ends() {
             .unwrap_or(false)
     });
     let held = store.read_task(task_id.as_str()).expect("read held task");
+    assert!(
+        held.background_only(),
+        "the held turn shows as background work"
+    );
     assert_eq!(
-        held.background_only().map(|work| work.live_commands),
+        held.background_work
+            .as_ref()
+            .map(|work| work.commands.len()),
         Some(1),
-        "the held turn shows as background work with its live command"
+        "its live command is listed"
     );
     assert!(held.unread, "the answered prompt is readable while held");
     assert!(
@@ -980,6 +986,67 @@ fn stop_ends_a_turn_held_by_a_background_command_and_stops_the_command() {
             .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
             .unwrap_or(false)
     });
+    assert_eq!(
+        fs::read_to_string(&stop_marker).expect("the Agent received the stop request"),
+        "build-1"
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn stopping_the_only_background_command_finishes_the_turn_normally() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let stop_marker = temp.path().join("background-command-stopped");
+    let Some((api, store, workspace_root)) = task_chat_fixture_with_runtime(
+        &temp,
+        "background_stop",
+        ServerRequestRuntime::new(),
+        vec![(
+            "OPENAIDE_TASK_CHAT_GATE".to_string(),
+            stop_marker.to_string_lossy().to_string(),
+        )],
+        None,
+    ) else {
+        return;
+    };
+    let task_id = ready_task(&api, &store, &workspace_root);
+
+    api.send(send_params(&task_id, "build in the background"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.background_only())
+            .unwrap_or(false)
+    });
+    let held = store.read_task(task_id.as_str()).expect("read held task");
+    let command = held.background_work.expect("background work").commands[0].clone();
+    assert_eq!(command.description, "npm run build");
+    assert!(command.can_stop);
+
+    api.stop_background_command_for_test(
+        openaide_app_server_protocol::task::TaskStopBackgroundCommandParams {
+            task_id: task_id.clone(),
+            command_id: command.command_id,
+        },
+    )
+    .expect("stop the background command");
+
+    // Nothing holds the turn any more: it ends as a finished turn, not a Stop.
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    let settled = store
+        .read_task(task_id.as_str())
+        .expect("read settled task");
+    assert!(settled.background_work.is_none());
+    assert!(
+        settled.attention.is_some(),
+        "a turn that ran out of background work raises finished"
+    );
     assert_eq!(
         fs::read_to_string(&stop_marker).expect("the Agent received the stop request"),
         "build-1"
@@ -1543,6 +1610,7 @@ for line in sys.stdin:
         with open(gate_file, "w") as handle:
             handle.write(message.get("params", {}).get("asyncTaskId", ""))
         respond(message, {"stopped": True})
+        update_raw({"sessionUpdate": "async_task_state_update", "asyncTaskId": message.get("params", {}).get("asyncTaskId", ""), "state": "stopped"})
     elif method == "session/close":
         if pending_primary_id is not None:
             respond({"id": pending_primary_id}, {"stopReason": "end_turn"})

@@ -30,8 +30,22 @@ fn task_state(async_task_id: &str, state: AsyncTaskState) -> AsyncTaskStateNotif
     AsyncTaskStateNotification {
         session_id: "session-1".to_string().into(),
         async_task_id: async_task_id.to_string(),
-        state,
+        state: Some(state),
+        description: Some(format!("run {async_task_id}")),
+        kind_label: None,
+        tool_call_id: None,
+        can_stop: Some(true),
     }
+}
+
+fn live_ids(work: &BackgroundWork, turn_held: bool) -> (bool, Vec<String>) {
+    let report = work.report(turn_held);
+    let ids = report
+        .commands
+        .into_iter()
+        .map(|command| command.command_id)
+        .collect();
+    (report.held, ids)
 }
 
 fn agent_text() -> SessionUpdate {
@@ -148,25 +162,90 @@ fn a_hold_is_background_only_until_the_agent_produces_output_again() {
     let work = BackgroundWork::default();
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
     assert_eq!(
-        work.background_only(),
-        None,
-        "the prompt itself is still running"
+        live_ids(&work, false),
+        (false, vec!["task-1".to_string()]),
+        "the command is listed while the prompt itself is still running"
     );
 
     assert!(work.holds_turn("session-1", "task-a"));
-    assert_eq!(work.background_only(), Some(1));
+    assert_eq!(live_ids(&work, true), (true, vec!["task-1".to_string()]));
 
-    // The follow-up cycle is awaited with no command left to count.
+    // The follow-up cycle is awaited with no command left to list.
     work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
-    assert_eq!(work.background_only(), Some(0));
+    assert_eq!(live_ids(&work, true), (true, Vec::new()));
 
     work.session_update_observed(&agent_text());
-    assert_eq!(work.background_only(), None);
+    assert_eq!(live_ids(&work, true), (false, Vec::new()));
 
     // The cycle ended while a second command is still live.
     work.task_state_changed(&task_state("task-2", AsyncTaskState::Running));
     work.turn_ended(&turn_ended());
-    assert_eq!(work.background_only(), Some(1));
+    assert_eq!(live_ids(&work, true), (true, vec!["task-2".to_string()]));
+}
+
+#[test]
+fn a_command_carries_its_details_and_reports_how_it_ended_to_its_tool_row() {
+    let spawned = session_update(json!({
+        "sessionUpdate": "async_task_spawned",
+        "asyncTaskId": "task-1",
+        "name": "Background task",
+        "description": "npm run build",
+        "taskType": "shell",
+        "canStop": true,
+    }));
+    let AsyncTaskRouting::Forward(message) = route_async_task_update(&spawned) else {
+        panic!("a spawn is forwarded");
+    };
+    let spawned: AsyncTaskStateNotification =
+        serde_json::from_value(message.params().clone()).expect("forwarded spawn");
+    let work = BackgroundWork::default();
+    work.task_state_changed(&spawned);
+    let command = work.report(false).commands.remove(0);
+    assert_eq!(command.description, "npm run build");
+    assert_eq!(command.kind_label, None, "a shell command is unlabeled");
+    assert!(command.can_stop);
+    assert_eq!(command.tool_call_id, None);
+
+    // The Tool call is correlated later, by a progress update.
+    let progress = session_update(json!({
+        "sessionUpdate": "async_task_progress",
+        "asyncTaskId": "task-1",
+        "toolCallId": "tool-7",
+    }));
+    let AsyncTaskRouting::Forward(message) = route_async_task_update(&progress) else {
+        panic!("a correlating progress update is forwarded");
+    };
+    work.task_state_changed(
+        &serde_json::from_value(message.params().clone()).expect("forwarded progress"),
+    );
+    assert_eq!(
+        work.report(false).commands[0].tool_call_id.as_deref(),
+        Some("tool-7")
+    );
+    assert!(matches!(
+        route_async_task_update(&session_update(json!({
+            "sessionUpdate": "async_task_progress",
+            "asyncTaskId": "task-1",
+            "summary": "still building",
+        }))),
+        AsyncTaskRouting::Drop
+    ));
+
+    assert!(work.take_finished().is_empty());
+    work.task_state_changed(&AsyncTaskStateNotification {
+        description: None,
+        can_stop: None,
+        ..task_state("task-1", AsyncTaskState::Failed)
+    });
+    assert!(work.report(false).commands.is_empty());
+    assert_eq!(
+        work.take_finished(),
+        vec![FinishedCommand {
+            tool_call_id: "tool-7".to_string(),
+            outcome: BackgroundCommandOutcome::Failed,
+        }]
+    );
+    assert!(work.take_finished().is_empty(), "an end is reported once");
 }
 
 #[test]

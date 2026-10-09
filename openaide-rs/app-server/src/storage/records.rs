@@ -784,16 +784,21 @@ impl TaskRecord {
             workspace_root: self.workspace_root.clone(),
             project_root: self.project_root.clone(),
             worktree_id: self.worktree_id.clone(),
-            background_work: self.background_only(),
+            background_work: self.live_background_work().cloned(),
         }
     }
 
-    /// The Background Work that is the only thing keeping this Task's turn open.
-    /// A permission wait or a Stop in the same turn takes precedence.
-    pub(crate) fn background_only(&self) -> Option<TaskBackgroundWork> {
+    /// Background Work of a turn that is running normally. A permission wait or
+    /// a Stop in the same turn takes precedence over showing it.
+    pub(crate) fn live_background_work(&self) -> Option<&TaskBackgroundWork> {
         (self.status == TaskStatus::Active && self.active_turn_id.is_some())
-            .then_some(self.background_work)
+            .then_some(self.background_work.as_ref())
             .flatten()
+    }
+
+    /// Whether Background Work is the only thing keeping this Task's turn open.
+    pub(crate) fn background_only(&self) -> bool {
+        self.live_background_work().is_some_and(|work| work.held)
     }
 }
 

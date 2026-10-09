@@ -1,4 +1,11 @@
-import type { AgentListedSession, ChatMessage, HistorySyncState, TaskStatus } from "@openaide/app-shell-contracts";
+import type {
+  AgentListedSession,
+  BackgroundCommand,
+  ChatMessage,
+  HistorySyncState,
+  TaskSnapshot,
+  TaskStatus,
+} from "@openaide/app-shell-contracts";
 import { activityStepCompletedLabel, activityStepProgressLabel, activityStepWithTitle } from "../state/activityLabels";
 
 export function newTaskStatusLabel({
@@ -18,8 +25,8 @@ export function taskTurnOpen(status: TaskStatus | undefined) {
   return status === "active" || status === "background";
 }
 
-/** Chat row text for a turn held open only by Background Work. */
-export function backgroundWorkLabel(commandCount: number | undefined) {
+/** Summary of the Background Work row; zero means a finished command's follow-up is awaited. */
+export function backgroundWorkLabel(commandCount: number) {
   if (!commandCount) return "Background command finished";
   return commandCount === 1 ? "1 background command running" : `${commandCount} background commands running`;
 }
@@ -29,7 +36,6 @@ export function taskWorkingStatusLabel(
   status: TaskStatus,
   inputPending: boolean,
   historySync: HistorySyncState = { state: "idle", generation: 0 },
-  backgroundCommandCount?: number,
 ) {
   if (historySync.state === "syncing") return "Reloading session";
   if (historySync.state === "updated") return "History updated";
@@ -54,7 +60,7 @@ export function taskWorkingStatusLabel(
     }
     return "Permission needed";
   }
-  if (status === "background") return backgroundWorkLabel(backgroundCommandCount);
+  // A held turn is described by the Background Work row, not by a status line.
   if (status !== "active") return undefined;
   // A new user message starts a new turn; completed work before it must not leak into the live footer.
   const reversedUserIndex = [...items].reverse().findIndex((item) => item.message.kind === "user");
@@ -129,4 +135,21 @@ export function timestampMillis(value: string) {
   const trimmed = value.trim();
   if (/^\d+$/.test(trimmed)) return Number(trimmed);
   return Date.parse(trimmed);
+}
+
+// One identity for "no commands", so memoized Chat rows do not churn on every render.
+const NO_BACKGROUND_COMMANDS: BackgroundCommand[] = [];
+
+/** Background Work of the active turn as the Task Page presents it. */
+export function taskBackgroundWork(snapshot: TaskSnapshot, hidden: boolean) {
+  const commands = snapshot.background_commands ?? NO_BACKGROUND_COMMANDS;
+  const held = snapshot.task.status === "background";
+  return {
+    commands,
+    // Listed while any command is alive; a held turn shows the row even when it only awaits a follow-up.
+    shown: !hidden && (commands.length > 0 || held),
+    cancelLabel: held && commands.length > 0
+      ? `Stop ${commands.length} background ${commands.length === 1 ? "command" : "commands"}`
+      : undefined,
+  };
 }

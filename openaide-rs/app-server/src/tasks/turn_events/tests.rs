@@ -637,10 +637,29 @@ fn background_work_changes_the_visible_status_and_marks_the_answer_unread() {
         "session_1".to_string(),
         ServerRequestRuntime::new(),
     );
-    let background = |live_commands| {
-        AgentEvent::BackgroundWork(Some(crate::agent::events::AgentBackgroundWork {
-            live_commands,
-        }))
+    let background = |held: bool, command_ids: &[&str]| {
+        AgentEvent::BackgroundWork(crate::agent::events::AgentBackgroundWork {
+            held,
+            commands: command_ids
+                .iter()
+                .map(|id| crate::agent::events::AgentBackgroundCommand {
+                    command_id: id.to_string(),
+                    description: format!("run {id}"),
+                    kind_label: None,
+                    paused: false,
+                    can_stop: true,
+                    tool_call_id: None,
+                })
+                .collect(),
+        })
+    };
+    let listed = |changes: &openaide_app_server_protocol::events::TaskChanges| {
+        changes.background_commands.as_ref().map(|commands| {
+            commands
+                .iter()
+                .map(|command| command.command_id.clone())
+                .collect::<Vec<_>>()
+        })
     };
     let next_change = || {
         let TaskUpdateKind::Changed(change) = notifications.recv().expect("task delta").kind else {
@@ -653,10 +672,29 @@ fn background_work_changes_the_visible_status_and_marks_the_answer_unread() {
     };
     use openaide_app_server_protocol::snapshot::TaskStatus as VisibleStatus;
 
-    sink.session_update(background(2)).unwrap();
+    // The command is listed while the prompt is still being answered.
+    sink.session_update(background(false, &["c1", "c2"]))
+        .unwrap();
+    let listed_early = next_change();
+    assert_eq!(visible_status(&listed_early), Some(VisibleStatus::Running));
+    assert_eq!(
+        listed(&listed_early),
+        Some(vec!["c1".to_string(), "c2".to_string()])
+    );
+    assert!(!store.read_task("task_1").unwrap().unread);
+    let started_at = listed_early.background_commands.unwrap()[0]
+        .started_at
+        .clone();
+
+    sink.session_update(background(true, &["c1", "c2"]))
+        .unwrap();
     let entered = next_change();
     assert_eq!(visible_status(&entered), Some(VisibleStatus::Background));
-    assert_eq!(entered.background_command_count, Some(Some(2)));
+    assert_eq!(
+        entered.background_commands.as_ref().unwrap()[0].started_at,
+        started_at,
+        "a command keeps the time of its first report"
+    );
     let held = store.read_task("task_1").unwrap();
     assert_eq!(
         held.status,
@@ -673,22 +711,93 @@ fn background_work_changes_the_visible_status_and_marks_the_answer_unread() {
     let mut read = held;
     read.unread = false;
     store.write_task(&read).unwrap();
-    sink.session_update(background(1)).unwrap();
+    sink.session_update(background(true, &["c2"])).unwrap();
     let updated = next_change();
-    assert_eq!(updated.background_command_count, Some(Some(1)));
+    assert_eq!(listed(&updated), Some(vec!["c2".to_string()]));
     assert!(!store.read_task("task_1").unwrap().unread);
 
-    sink.session_update(AgentEvent::BackgroundWork(None))
-        .unwrap();
+    sink.session_update(background(false, &[])).unwrap();
     let left = next_change();
     assert_eq!(visible_status(&left), Some(VisibleStatus::Running));
-    assert_eq!(left.background_command_count, Some(None));
+    assert_eq!(listed(&left), Some(Vec::new()));
+    assert!(store.read_task("task_1").unwrap().background_work.is_none());
 
     // A repeated report commits nothing.
     let revision = store.read_task("task_1").unwrap().revision;
-    sink.session_update(AgentEvent::BackgroundWork(None))
-        .unwrap();
+    sink.session_update(background(false, &[])).unwrap();
     assert_eq!(store.read_task("task_1").unwrap().revision, revision);
+}
+
+#[test]
+fn a_finished_background_command_marks_its_tool_row_for_good() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+    let tool = |status| {
+        AgentEvent::ToolCall(AgentToolCall {
+            tool_call_id: "tool_1".to_string(),
+            scope_id: None,
+            title: "Run build".to_string(),
+            kind: "execute".to_string(),
+            status,
+            presentation: None,
+            description: None,
+            input_summary: None,
+            output_preview: None,
+            details: None,
+        })
+    };
+    let outcome = || {
+        store
+            .task_journal()
+            .load("task_1")
+            .unwrap()
+            .messages
+            .iter()
+            .find_map(|stored| match &stored.chat.message {
+                NormalizedMessage::Activity { steps, .. } => {
+                    steps.iter().find_map(|step| match step {
+                        crate::protocol::model::ActivityStep::Tool {
+                            background_outcome, ..
+                        } => Some(*background_outcome),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .expect("tool row")
+    };
+    let finished = |tool_call_id: &str| AgentEvent::BackgroundCommandFinished {
+        tool_call_id: tool_call_id.to_string(),
+        outcome: crate::protocol::model::BackgroundCommandOutcome::Failed,
+    };
+
+    sink.session_update(tool(AgentToolCallStatus::Completed))
+        .unwrap();
+    assert_eq!(outcome(), None);
+
+    // A command whose Tool row is not in this Task changes nothing.
+    sink.session_update(finished("tool_unknown")).unwrap();
+    assert_eq!(outcome(), None);
+
+    sink.session_update(finished("tool_1")).unwrap();
+    assert_eq!(
+        outcome(),
+        Some(crate::protocol::model::BackgroundCommandOutcome::Failed)
+    );
+
+    // A later Agent update replaces the row but not App Server's own mark.
+    sink.session_update(tool(AgentToolCallStatus::Completed))
+        .unwrap();
+    assert_eq!(
+        outcome(),
+        Some(crate::protocol::model::BackgroundCommandOutcome::Failed)
+    );
 }
 
 #[test]

@@ -764,7 +764,7 @@ fn project_committed_changes(
     Ok(TaskChanges {
         task: fields.summary.then(|| task.task.clone()),
         active_turn_started_at: fields.summary.then(|| task.active_turn_started_at.clone()),
-        background_command_count: fields.summary.then_some(task.background_command_count),
+        background_commands: fields.summary.then(|| task.background_commands.clone()),
         lifecycle: fields.lifecycle.then_some(task.lifecycle),
         preparation: fields.preparation.then(|| task.preparation.clone()),
         permission_policy: fields.permission_policy.then_some(task.permission_policy),

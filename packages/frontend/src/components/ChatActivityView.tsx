@@ -28,6 +28,9 @@ import { presentThoughtMarkdown } from "./thoughtPresentation";
 import { ActivityStepTime } from "./timeMarks";
 
 /** Lets disclosure commits synchronously update an enclosing measured Chat row. */
+/** Tool calls whose background command is still running, from the Task snapshot. */
+export const BackgroundToolCallsContext = createContext<ReadonlySet<string>>(new Set());
+
 export const ChatContentSizeChangeContext = createContext<((element: HTMLElement) => void) | undefined>(undefined);
 
 export function ChatActivityView({
@@ -172,6 +175,7 @@ export function ActivityStepRow({
     : undefined;
   const metadata = (
     <ActivityStepMetadata
+      backgroundStep={step.kind === "tool" ? step : undefined}
       context={context === label ? undefined : context}
       permissionSummary={permissionSummary}
       status={status}
@@ -547,20 +551,40 @@ function SemanticStepTitle({ title }: { title: ActivityStepSemanticTitle }) {
   );
 }
 
+/**
+ * How the background command a Tool started stands. Liveness comes from the Task snapshot; only
+ * the final outcome is part of the Tool row itself.
+ */
+function backgroundCommandLabel(
+  step: Extract<ActivityStep, { kind: "tool" }>,
+  liveToolCalls: ReadonlySet<string>,
+) {
+  if (step.tool_call_id && liveToolCalls.has(step.tool_call_id)) return "Running in background";
+  if (step.background_outcome === "completed") return "Finished in background";
+  if (step.background_outcome === "failed") return "Failed in background";
+  if (step.background_outcome === "stopped") return "Stopped";
+  return undefined;
+}
+
 function ActivityStepMetadata({
+  backgroundStep,
   context,
   permissionSummary,
   status,
   time,
   timed,
 }: {
+  /** The Tool whose background command, if any, is described next to its status. */
+  backgroundStep?: Extract<ActivityStep, { kind: "tool" }>;
   context?: string;
   permissionSummary?: { decision: "approved" | "rejected" | "cancelled"; label: string };
   status?: string;
   time: ReactNode;
   timed: boolean;
 }) {
-  if (!context && !permissionSummary && !status && !timed) return null;
+  const liveToolCalls = useContext(BackgroundToolCallsContext);
+  const background = backgroundStep ? backgroundCommandLabel(backgroundStep, liveToolCalls) : undefined;
+  if (!background && !context && !permissionSummary && !status && !timed) return null;
   return (
     <span className="activity-step-meta">
       {context ? <small className="activity-step-context">{context}</small> : null}
@@ -571,6 +595,7 @@ function ActivityStepMetadata({
         </small>
       ) : null}
       {status ? <small className="activity-step-state">{status}</small> : null}
+      {background ? <small className="activity-step-state activity-step-background">{background}</small> : null}
       {time}
     </span>
   );

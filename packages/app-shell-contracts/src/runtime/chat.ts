@@ -61,7 +61,7 @@ export type AgentMessagePart =
 export type ActivityStep =
   | { kind: "text"; text: string; level?: "info" | "warning" | "error" | "agent_boundary" }
   | { kind: "thought"; message_id?: string; text: string; streaming?: boolean }
-  | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; presentation?: ToolPresentation; description?: string; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails; permission_outcomes?: ToolPermissionOutcome[]; run?: TimeSpan }
+  | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; presentation?: ToolPresentation; description?: string; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails; permission_outcomes?: ToolPermissionOutcome[]; background_outcome?: "completed" | "failed" | "stopped"; run?: TimeSpan }
   | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string; run?: TimeSpan }
   | {
       kind: "subagent";

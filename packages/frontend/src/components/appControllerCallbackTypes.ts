@@ -128,6 +128,7 @@ export type TaskCallbacks = {
   addToQueue: (notBefore?: string) => void;
   resumeQueue?: () => Promise<void>;
   cancel: () => void;
+  stopBackgroundCommand?: (commandId: string) => void;
   closePlan?: () => Promise<void>;
   fileBrowser?: TaskFileBrowserCallbacks;
   /** Starts one earlier-page request and returns its viewport/reducer generation. */

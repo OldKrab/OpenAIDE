@@ -473,11 +473,11 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     }
     let agent_config = agent_config_snapshot(&snapshot);
     let agent_commands = agent_commands_snapshot(&snapshot);
-    let background_work = snapshot.task.background_work;
+    let background_work = snapshot.task.background_work.clone().unwrap_or_default();
     let projected_status = project_status_with_preparation(
         snapshot.task.status,
         &snapshot.preparation,
-        background_work.is_some(),
+        background_work.held,
     );
     let mut task =
         project_legacy_task_summary(snapshot.task, snapshot.chat.total_count > 0, lifecycle);
@@ -486,9 +486,11 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
         task,
         permission_policy: snapshot.permission_policy,
         active_turn_started_at: snapshot.active_turn_started_at,
-        background_command_count: (projected_status == openaide_app_server_protocol::snapshot::TaskStatus::Background)
-            .then(|| background_work.map(|work| work.live_commands))
-            .flatten(),
+        background_commands: background_work
+            .commands
+            .into_iter()
+            .map(background_command_snapshot)
+            .collect(),
         lifecycle,
         revision: snapshot.revision,
         preparation: preparation_snapshot(&snapshot.preparation),
@@ -738,3 +740,18 @@ fn task_snapshot_error(error: impl std::fmt::Display) -> ProtocolError {
 
 #[cfg(test)]
 mod tests;
+
+fn background_command_snapshot(
+    command: crate::protocol::model::TaskBackgroundCommand,
+) -> openaide_app_server_protocol::snapshot::BackgroundCommandSnapshot {
+    openaide_app_server_protocol::snapshot::BackgroundCommandSnapshot {
+        command_id: command.command_id,
+        description: command.description,
+        kind_label: command.kind_label,
+        started_at: command.started_at,
+        paused: command.paused,
+        can_stop: command.can_stop,
+        stop_failed: command.stop_failed,
+        tool_call_id: command.tool_call_id,
+    }
+}

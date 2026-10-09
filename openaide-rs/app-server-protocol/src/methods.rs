@@ -1,5 +1,8 @@
 use crate::project_files::{ProjectFilesParams, ProjectFilesResult};
-use crate::task::{TaskQueueResumeParams, TaskQueueResumeResult};
+use crate::task::{
+    TaskQueueResumeParams, TaskQueueResumeResult, TaskStopBackgroundCommandParams,
+    TaskStopBackgroundCommandResult,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{
@@ -679,6 +682,12 @@ protocol_method!(
     FileViewerReleaseResult
 );
 protocol_method!(TaskCancel, TASK_CANCEL, TaskCancelParams, TaskCancelResult);
+protocol_method!(
+    TaskStopBackgroundCommand,
+    TASK_STOP_BACKGROUND_COMMAND,
+    TaskStopBackgroundCommandParams,
+    TaskStopBackgroundCommandResult
+);
 protocol_method!(
     TaskClosePlan,
     TASK_CLOSE_PLAN,

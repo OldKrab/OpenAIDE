@@ -4338,6 +4338,19 @@ impl TaskCancelWorkflow for RejectingTaskCancel {
         })
     }
 
+    fn stop_background_command_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskStopBackgroundCommandParams,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "background command stop unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
     fn recover_stuck_sessions(
         &self,
         _params: openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams,

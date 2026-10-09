@@ -1,7 +1,8 @@
-import { memo, useCallback, useState } from "react";
-import { ArrowDown, Check, CircleAlert, CircleDashed } from "lucide-react";
+import { memo, useCallback, useMemo, useState } from "react";
+import { ArrowDown, Check, CircleAlert } from "lucide-react";
 import type {
   ActivityStep,
+  BackgroundCommand,
   ChatMessage,
   ElicitationResponse,
   TaskSnapshot,
@@ -9,7 +10,8 @@ import type {
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskLiveTextPresentation } from "../state/store";
-import { ChatContentSizeChangeContext } from "./ChatActivityView";
+import { BackgroundCommandsRow } from "./BackgroundCommandsRow";
+import { BackgroundToolCallsContext, ChatContentSizeChangeContext } from "./ChatActivityView";
 import { ChatRow } from "./ChatMessageView";
 import {
   ELAPSED_VISIBLE_AFTER_SECONDS,
@@ -36,6 +38,7 @@ export type TaskChatTimelineRow =
       permissionQueueCount?: number;
       permissionTool?: Extract<ActivityStep, { kind: "tool" }>;
     }
+  | { key: "background-work"; kind: "background" }
   | { key: "timeline-status"; kind: "status" };
 
 type TaskChatTimelineProps = {
@@ -61,9 +64,11 @@ type TaskChatTimelineProps = {
   taskId: string;
   taskStatus: TaskSnapshot["task"]["status"];
   toolDetails: AppState["toolDetails"];
-  timelineStatusKind: "background" | "blocked" | "notice" | "progress";
+  timelineStatusKind: "blocked" | "notice" | "progress";
   timelineStatusLabel?: string;
   workingStartedAt?: string;
+  backgroundCommands: BackgroundCommand[];
+  onStopBackgroundCommand?: (commandId: string) => void;
 };
 
 /** Renders only the measured Chat rows selected by the virtualizer. */
@@ -93,7 +98,13 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   timelineStatusKind,
   timelineStatusLabel,
   workingStartedAt,
+  backgroundCommands,
+  onStopBackgroundCommand,
 }: TaskChatTimelineProps) {
+  const backgroundToolCalls = useMemo(
+    () => new Set(backgroundCommands.flatMap((command) => command.tool_call_id ?? [])),
+    [backgroundCommands],
+  );
   const [messageListElement, setMessageListElement] = useState<HTMLDivElement | null>(null);
   const setMessageListRef = useCallback((element: HTMLDivElement | null) => {
     chatScroll.messageListRef.current = element;
@@ -124,6 +135,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
         onWheel={chatScroll.onWheel}
         ref={setMessageListRef}
         >
+        <BackgroundToolCallsContext.Provider value={backgroundToolCalls}>
         <ChatContentSizeChangeContext.Provider value={measureChangedChatContent}>
           <div className="message-list-virtualizer" ref={chatScroll.virtualizer.containerRef}>
             {/* Rows are out of flow, so a drag-selection that leaves them above or below
@@ -206,6 +218,8 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                     taskId={taskId}
                     toolDetails={toolDetails}
                   />
+                ) : row.kind === "background" ? (
+                  <BackgroundCommandsRow commands={backgroundCommands} onStop={onStopBackgroundCommand} />
                 ) : timelineStatusLabel ? (
                   <TimelineStatus
                     kind={timelineStatusKind}
@@ -219,6 +233,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
             <div aria-hidden="true" className="message-list-selection-edge" />
           </div>
         </ChatContentSizeChangeContext.Provider>
+        </BackgroundToolCallsContext.Provider>
       </div>
       {/* Sibling keys must differ: duplicate keys orphan the old portaled header picker on task switch. */}
       <UserMessageNavigator key={`navigator:${taskId}`} navigation={chatScroll.userMessageNavigation} target={headerActionsTarget} />
@@ -245,11 +260,14 @@ export function buildTaskChatTimelineRows({
   archived,
   chat,
   items,
+  showBackgroundWork = false,
   timelineStatusLabel,
 }: {
   archived: boolean;
   chat: ReturnType<typeof renderedChat>;
   items: ChatMessage[];
+  /** The Background Work row sits above the status line so both can show in one turn. */
+  showBackgroundWork?: boolean;
   timelineStatusLabel?: string;
 }): TaskChatTimelineRow[] {
   const toolSteps = permissionToolSteps(items);
@@ -279,6 +297,7 @@ export function buildTaskChatTimelineRows({
     ...(chat.hasBefore ? [{ key: "load-earlier", kind: "loadEarlier" } as const] : []),
     ...(chat.error ? [{ key: "chat-error", kind: "error" } as const] : []),
     ...messageRows,
+    ...(showBackgroundWork ? [{ key: "background-work", kind: "background" } as const] : []),
     ...(timelineStatusLabel ? [{ key: "timeline-status", kind: "status" } as const] : []),
   ];
 }
@@ -350,7 +369,7 @@ function TimelineStatus({
   onRetry,
   startedAt,
 }: {
-  kind: "background" | "blocked" | "notice" | "progress";
+  kind: "blocked" | "notice" | "progress";
   label: string;
   onRetry?: () => void;
   startedAt?: string;
@@ -367,8 +386,6 @@ function TimelineStatus({
           <span />
           <span />
         </span>
-      ) : kind === "background" ? (
-        <CircleDashed aria-hidden="true" className="working-status-background-icon" size={14} />
       ) : kind === "notice" ? (
         <Check aria-hidden="true" className="working-status-notice-icon" size={14} />
       ) : <CircleAlert aria-hidden="true" className="working-status-blocked-icon" size={14} />}

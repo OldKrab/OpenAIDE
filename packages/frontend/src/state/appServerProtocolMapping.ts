@@ -222,7 +222,16 @@ function mapProtocolTaskSnapshotWithCache(
         end_cursor: snapshot.chat.endCursor ?? allItems.at(-1)?.cursor,
       },
       active_turn_started_at: snapshot.activeTurnStartedAt ?? undefined,
-      background_command_count: snapshot.backgroundCommandCount ?? undefined,
+      background_commands: (snapshot.backgroundCommands ?? []).map((command) => ({
+        command_id: command.commandId,
+        description: command.description,
+        kind_label: command.kindLabel ?? undefined,
+        started_at: command.startedAt,
+        paused: command.paused,
+        can_stop: command.canStop,
+        stop_failed: command.stopFailed,
+        tool_call_id: command.toolCallId ?? undefined,
+      })),
       active_requests: pendingRequestItems(snapshot.pendingRequests ?? [], task.updated_at),
       message_queue: {
         revision: snapshot.messageQueue?.revision ?? 0,

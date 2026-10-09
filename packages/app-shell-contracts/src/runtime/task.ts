@@ -37,14 +37,29 @@ export type TaskAttentionEvent = {
 /** User-owned handling for future permission requests in one Task. */
 export type TaskPermissionPolicy = "ask_every_time" | "auto_approve";
 
+/** One command an Agent left running. Its description is Agent-authored content. */
+export type BackgroundCommand = {
+  command_id: string;
+  description: string;
+  /** Label for work that is not a shell command. */
+  kind_label?: string;
+  started_at: string;
+  paused: boolean;
+  can_stop: boolean;
+  /** The last stop request for this command did not succeed. */
+  stop_failed: boolean;
+  /** The Tool row that started the command, once known. */
+  tool_call_id?: string;
+};
+
 export type TaskSnapshot = {
   lifecycle: "prepared" | "open" | "archived";
   task: TaskSummary;
   permission_policy: TaskPermissionPolicy;
   /** App Server-authored start of the active turn; absent when no turn is running. */
   active_turn_started_at?: string;
-  /** Background commands still running; present only while the Task is `background`. */
-  background_command_count?: number;
+  /** Agent-reported background commands still alive in the active turn, in start order. */
+  background_commands?: BackgroundCommand[];
   chat: MessagePage;
   /** Active App Server requests render after durable Chat and never enter history. */
   active_requests: ChatMessage[];

@@ -194,6 +194,14 @@ pub enum ActivityStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub enum BackgroundCommandOutcome {
+    Completed,
+    Failed,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub enum SubagentActivitySnapshot {
     Delegated,
     Interacted,
@@ -272,6 +280,10 @@ pub enum ActivityStepSnapshot {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<ToolDetailSnapshot>,
         permission_outcomes: Vec<ToolPermissionOutcomeSnapshot>,
+        /// How the background command this Tool started ended. A command still
+        /// running is listed in `TaskSnapshot.backgroundCommands` instead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        background_outcome: Option<BackgroundCommandOutcome>,
     },
     Command {
         command_label: String,

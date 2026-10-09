@@ -19,9 +19,11 @@ use crate::agent::{
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 
+mod commands;
 mod idle_policy;
 mod runtime;
 
+pub(super) use commands::{AcpSessionCommand, AcpSessionConfigCommand};
 pub(super) use idle_policy::SessionIdleTimeouts;
 
 /// Inputs consumed by the attachment's private event loop.
@@ -477,6 +479,24 @@ impl AttachedNativeSession {
         result
     }
 
+    /// Waits for the Agent's answer: the worker bounds the request itself.
+    pub(super) fn stop_background_command(&self, command_id: String) -> Result<(), RuntimeError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.command_tx
+            .send(AcpSessionCommand::StopBackgroundCommand {
+                command_id,
+                reply_tx,
+            })
+            .map_err(|_| self.attachment_stopped_error())?;
+        reply_rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|_| {
+                RuntimeError::OutcomeUnknown(
+                    "Stopping the background command timed out".to_string(),
+                )
+            })?
+    }
+
     pub(super) fn cancel(&self) -> Result<(), RuntimeError> {
         let cancel_result = self
             .cancel_tx
@@ -735,45 +755,6 @@ impl Drop for PromptRequestGuard {
         self.finish_steering_admission();
         self.lifecycle.finish_request(self.generation_id);
     }
-}
-
-pub(super) enum AcpSessionCommand {
-    Snapshot {
-        reply_tx: mpsc::Sender<Result<AgentSession, RuntimeError>>,
-    },
-    SetEventSink {
-        sink: Arc<dyn AgentSessionEventSink>,
-    },
-    Load {
-        request: AgentSessionLoad,
-        reply_tx: mpsc::Sender<Result<AgentLoadedSession, RuntimeError>>,
-    },
-    Prompt {
-        prompt: AgentPrompt,
-        sink: Arc<dyn AgentEventSink>,
-        done_tx: mpsc::Sender<Result<AgentPromptOutcome, RuntimeError>>,
-        request_guard: PromptRequestGuard,
-    },
-    Steer {
-        prompt: AgentPrompt,
-        request_guard: PromptRequestGuard,
-    },
-    Delete {
-        operation_id: String,
-        reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
-    },
-}
-
-pub(super) enum AcpSessionConfigCommand {
-    SetConfigOption {
-        agent_id: String,
-        session_id: String,
-        config_id: String,
-        value: ConfigOptionCurrentValue,
-        operation_id: String,
-        queued_at: Instant,
-        reply_tx: mpsc::Sender<Result<ConfigOptionsCatalog, RuntimeError>>,
-    },
 }
 
 pub(super) fn record_terminal_error(

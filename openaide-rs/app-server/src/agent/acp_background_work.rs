@@ -7,7 +7,6 @@
 //! keeps the Task turn open while this state says work remains, so one prompt
 //! owner still decides when the Task becomes idle.
 
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -19,7 +18,10 @@ use serde_json::json;
 
 use crate::agent::acp_schema::{SessionId, SessionUpdate};
 use crate::agent::acp_trace::AcpTraceSession;
+use crate::agent::events::{AgentBackgroundCommand, AgentBackgroundWork};
 use crate::logging;
+use crate::protocol::errors::RuntimeError;
+use crate::protocol::model::BackgroundCommandOutcome;
 
 #[cfg(test)]
 #[path = "acp_background_work_tests.rs"]
@@ -42,12 +44,12 @@ pub(super) enum AsyncTaskRouting {
     NotAsyncTask,
     /// A normalized state change, addressed to the session worker.
     Forward(UntypedMessage),
-    /// An async task update that changes no liveness, or cannot be read.
+    /// An async task update that changes nothing tracked, or cannot be read.
     Drop,
 }
 
 /// Async task updates are not ACP `sessionUpdate` variants, so typed decoding
-/// rejects them. Rewrite the liveness changes into a notification the session
+/// rejects them. Rewrite the tracked changes into a notification the session
 /// worker reads in arrival order with every other update of its session.
 pub(super) fn route_async_task_update(notification: &UntypedMessage) -> AsyncTaskRouting {
     if notification.method() != "session/update" {
@@ -61,32 +63,55 @@ pub(super) fn route_async_task_update(notification: &UntypedMessage) -> AsyncTas
         .get("sessionUpdate")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
+    let text = |field: &str| {
+        update
+            .get(field)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    let tool_call_id = text("toolCallId");
+    // `None` leaves liveness alone: a progress update only refines metadata.
     let state = match kind {
         "async_task_spawned" => Some(AsyncTaskState::Running),
-        "async_task_state_update" => update
-            .get("state")
-            .and_then(|state| serde_json::from_value(state.clone()).ok()),
+        "async_task_state_update" => {
+            let state = update
+                .get("state")
+                .and_then(|state| serde_json::from_value(state.clone()).ok());
+            if state.is_none() {
+                logging::warn(
+                    "acp_async_task_update_ignored",
+                    json!({ "update": kind, "reason": "malformed" }),
+                );
+                return AsyncTaskRouting::Drop;
+            }
+            state
+        }
+        "async_task_progress" if tool_call_id.is_some() || text("description").is_some() => None,
         "async_task_progress" => return AsyncTaskRouting::Drop,
         _ => return AsyncTaskRouting::NotAsyncTask,
     };
     let session_id = params.get("sessionId").and_then(serde_json::Value::as_str);
-    let async_task_id = update
-        .get("asyncTaskId")
-        .and_then(serde_json::Value::as_str);
-    let (Some(session_id), Some(async_task_id), Some(state)) = (session_id, async_task_id, state)
-    else {
+    let (Some(session_id), Some(async_task_id)) = (session_id, text("asyncTaskId")) else {
         logging::warn(
             "acp_async_task_update_ignored",
             json!({ "session_id": session_id, "update": kind, "reason": "malformed" }),
         );
         return AsyncTaskRouting::Drop;
     };
+    let spawned = kind == "async_task_spawned";
     let forwarded = UntypedMessage::new(
         ASYNC_TASK_STATE_METHOD,
         AsyncTaskStateNotification {
             session_id: session_id.to_string().into(),
-            async_task_id: async_task_id.to_string(),
+            async_task_id,
             state,
+            description: text("description").or_else(|| spawned.then(|| text("name")).flatten()),
+            // A shell command is the unlabeled default.
+            kind_label: text("taskType").filter(|kind| kind != "shell"),
+            tool_call_id,
+            can_stop: update.get("canStop").and_then(serde_json::Value::as_bool),
         },
     );
     forwarded.map_or(AsyncTaskRouting::Drop, AsyncTaskRouting::Forward)
@@ -98,7 +123,17 @@ pub(super) fn route_async_task_update(notification: &UntypedMessage) -> AsyncTas
 pub(super) struct AsyncTaskStateNotification {
     session_id: SessionId,
     pub(super) async_task_id: String,
-    pub(super) state: AsyncTaskState,
+    /// Absent on a metadata-only refinement of a known command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) state: Option<AsyncTaskState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) kind_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) can_stop: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -153,9 +188,19 @@ pub(crate) struct BackgroundWork {
     followup_grace: Duration,
 }
 
+/// A background command ended; reported once to the Task's Tool row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FinishedCommand {
+    pub(super) tool_call_id: String,
+    pub(super) outcome: BackgroundCommandOutcome,
+}
+
 #[derive(Default)]
 struct State {
-    live_tasks: BTreeSet<String>,
+    /// Running or paused commands in spawn order.
+    live_tasks: Vec<AgentBackgroundCommand>,
+    /// Ended commands whose Tool row has not been told yet.
+    finished: Vec<FinishedCommand>,
     /// Set while a settled prompt response waits for this work to end.
     hold_started: Option<Instant>,
     /// A command finished during the hold; its cycle has not shown itself yet.
@@ -186,32 +231,75 @@ impl BackgroundWork {
 
     pub(super) fn task_state_changed(&self, update: &AsyncTaskStateNotification) {
         let mut state = self.state();
-        let changed = match update.state {
-            AsyncTaskState::Running | AsyncTaskState::Paused => {
-                state.live_tasks.insert(update.async_task_id.clone())
-            }
-            AsyncTaskState::Completed | AsyncTaskState::Failed | AsyncTaskState::Stopped => {
-                state.live_tasks.remove(&update.async_task_id)
-            }
+        let position = state
+            .live_tasks
+            .iter()
+            .position(|task| task.command_id == update.async_task_id);
+        let outcome = match update.state {
+            Some(AsyncTaskState::Completed) => Some(BackgroundCommandOutcome::Completed),
+            Some(AsyncTaskState::Failed) => Some(BackgroundCommandOutcome::Failed),
+            Some(AsyncTaskState::Stopped) => Some(BackgroundCommandOutcome::Stopped),
+            Some(AsyncTaskState::Running | AsyncTaskState::Paused) | None => None,
         };
-        if !changed {
+        let Some(outcome) = outcome else {
+            let paused = update.state.map(|state| state == AsyncTaskState::Paused);
+            match position {
+                Some(position) => {
+                    let task = &mut state.live_tasks[position];
+                    if let Some(description) = &update.description {
+                        task.description.clone_from(description);
+                    }
+                    if update.tool_call_id.is_some() {
+                        task.tool_call_id.clone_from(&update.tool_call_id);
+                    }
+                    if let Some(paused) = paused {
+                        task.paused = paused;
+                    }
+                }
+                // A refinement of a command that already ended tracks nothing.
+                None if update.state.is_none() => return,
+                None => state.live_tasks.push(AgentBackgroundCommand {
+                    command_id: update.async_task_id.clone(),
+                    description: update.description.clone().unwrap_or_default(),
+                    kind_label: update.kind_label.clone(),
+                    paused: paused.unwrap_or(false),
+                    can_stop: update.can_stop.unwrap_or(false),
+                    tool_call_id: update.tool_call_id.clone(),
+                }),
+            }
+            if let Some(reported) = update.state {
+                logging::info(
+                    "acp_async_task_state_changed",
+                    json!({
+                        "session_id": update.session_id.to_string(),
+                        "state": reported.label(),
+                        "live_tasks": state.live_tasks.len(),
+                    }),
+                );
+            }
             return;
+        };
+        let Some(position) = position else {
+            return;
+        };
+        let ended = state.live_tasks.remove(position);
+        // The id can arrive with the terminal update alone.
+        if let Some(tool_call_id) = update.tool_call_id.clone().or(ended.tool_call_id) {
+            state.finished.push(FinishedCommand {
+                tool_call_id,
+                outcome,
+            });
         }
         // The SDK tells the model about a finished command, not about one the
         // user stopped, so only the former promises a cycle.
-        if state.hold_started.is_some()
-            && matches!(
-                update.state,
-                AsyncTaskState::Completed | AsyncTaskState::Failed
-            )
-        {
+        if state.hold_started.is_some() && outcome != BackgroundCommandOutcome::Stopped {
             state.followup_deadline = Some(Instant::now() + self.followup_grace);
         }
         logging::info(
             "acp_async_task_state_changed",
             json!({
                 "session_id": update.session_id.to_string(),
-                "state": update.state.label(),
+                "state": update.state.map(AsyncTaskState::label),
                 "live_tasks": state.live_tasks.len(),
             }),
         );
@@ -298,13 +386,20 @@ impl BackgroundWork {
         self.state().hold_started.is_some()
     }
 
-    /// How the Task should show the hold: the live command count while only
-    /// background work keeps the turn open, `None` once a cycle the Agent
-    /// started is producing output in it.
-    pub(super) fn background_only(&self) -> Option<u32> {
+    /// What the Task shows of this work: the live commands, and whether they
+    /// alone keep the answered turn open. `held` is false while the prompt or a
+    /// cycle the Agent started is producing output.
+    pub(super) fn report(&self, turn_held: bool) -> AgentBackgroundWork {
         let state = self.state();
-        (state.hold_started.is_some() && !state.cycle_running)
-            .then(|| u32::try_from(state.live_tasks.len()).unwrap_or(u32::MAX))
+        AgentBackgroundWork {
+            held: turn_held && state.hold_started.is_some() && !state.cycle_running,
+            commands: state.live_tasks.clone(),
+        }
+    }
+
+    /// Ended commands not yet reported to their Tool rows.
+    pub(super) fn take_finished(&self) -> Vec<FinishedCommand> {
+        std::mem::take(&mut self.state().finished)
     }
 
     /// Resolves when the grace for an expected cycle ends; pending otherwise.
@@ -345,50 +440,78 @@ impl BackgroundWork {
         session_id: &SessionId,
         trace: Option<&AcpTraceSession>,
     ) {
-        let tasks: Vec<String> = self.state().live_tasks.iter().cloned().collect();
+        let tasks: Vec<String> = self
+            .state()
+            .live_tasks
+            .iter()
+            .map(|task| task.command_id.clone())
+            .collect();
         for async_task_id in tasks {
-            let started = Instant::now();
-            logging::info(
-                "acp_async_task_stop_started",
-                json!({
-                    "operation": ASYNC_TASK_STOP_METHOD,
-                    "session_id": session_id.to_string(),
-                    "attempt": 1,
-                }),
+            // Best effort: the turn ends whether or not a command stops.
+            let _ = Self::stop_task(connection, session_id, trace, async_task_id).await;
+        }
+    }
+
+    /// Asks the Agent to stop one command without touching the turn. `Ok` means
+    /// the Agent answered; the command leaves the live set through its own
+    /// state update, which may already have arrived.
+    pub(super) async fn stop_task(
+        connection: &ConnectionTo<Agent>,
+        session_id: &SessionId,
+        trace: Option<&AcpTraceSession>,
+        async_task_id: String,
+    ) -> Result<(), RuntimeError> {
+        let started = Instant::now();
+        logging::info(
+            "acp_async_task_stop_started",
+            json!({
+                "operation": ASYNC_TASK_STOP_METHOD,
+                "session_id": session_id.to_string(),
+                "attempt": 1,
+            }),
+        );
+        let request = AsyncTaskStopRequest {
+            session_id: session_id.clone(),
+            async_task_id,
+        };
+        if let Some(trace) = trace {
+            trace.record(
+                "client_to_agent",
+                "_session/async_task/stop.request",
+                &request,
             );
-            let request = AsyncTaskStopRequest {
-                session_id: session_id.clone(),
-                async_task_id,
-            };
-            if let Some(trace) = trace {
-                trace.record(
-                    "client_to_agent",
-                    "_session/async_task/stop.request",
-                    &request,
-                );
-            }
-            let result = tokio::time::timeout(
-                STOP_TIMEOUT,
-                connection.send_request_to(Agent, request).block_task(),
-            )
-            .await;
-            let (outcome, error_code) = match &result {
-                Ok(Ok(response)) if response.stopped => ("stopped", None),
-                Ok(Ok(_)) => ("not_running", None),
-                Ok(Err(error)) => ("error", Some(i32::from(error.code))),
-                Err(_) => ("timeout", None),
-            };
-            logging::info(
-                "acp_async_task_stop",
-                json!({
-                    "operation": ASYNC_TASK_STOP_METHOD,
-                    "session_id": session_id.to_string(),
-                    "attempt": 1,
-                    "outcome": outcome,
-                    "error_code": error_code,
-                    "duration_ms": started.elapsed().as_millis(),
-                }),
-            );
+        }
+        let result = tokio::time::timeout(
+            STOP_TIMEOUT,
+            connection.send_request_to(Agent, request).block_task(),
+        )
+        .await;
+        let (outcome, error_code) = match &result {
+            Ok(Ok(response)) if response.stopped => ("stopped", None),
+            Ok(Ok(_)) => ("not_running", None),
+            Ok(Err(error)) => ("error", Some(i32::from(error.code))),
+            Err(_) => ("timeout", None),
+        };
+        logging::info(
+            "acp_async_task_stop",
+            json!({
+                "operation": ASYNC_TASK_STOP_METHOD,
+                "session_id": session_id.to_string(),
+                "attempt": 1,
+                "outcome": outcome,
+                "error_code": error_code,
+                "duration_ms": started.elapsed().as_millis(),
+            }),
+        );
+        match result {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(error)) => Err(RuntimeError::NotReady(format!(
+                "Agent refused to stop the background command (code {})",
+                i32::from(error.code)
+            ))),
+            Err(_) => Err(RuntimeError::OutcomeUnknown(
+                "Stopping the background command timed out".to_string(),
+            )),
         }
     }
 }

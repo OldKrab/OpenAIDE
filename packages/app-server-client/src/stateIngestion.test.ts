@@ -89,7 +89,7 @@ describe("scope-local state ingestion", () => {
     expect(result.state.snapshot.task.chat.items).toEqual([item]);
   });
 
-  it("follows the background command count through Task deltas", () => {
+  it("follows the background command list through Task deltas", () => {
     const changed = (state: ReturnType<typeof taskState>, revision: number, changes: object) => {
       const result = applySubscriptionEvent(state, taskEvent("task-1", `cursor-${revision - 4}`, `cursor-${revision - 3}`, {
         kind: "taskChanged",
@@ -101,21 +101,29 @@ describe("scope-local state ingestion", () => {
       return result.state;
     };
 
+    const command = {
+      commandId: "command-1",
+      description: "npm run build",
+      startedAt: "2026-07-13T00:00:00Z",
+      paused: false,
+      canStop: true,
+      stopFailed: false,
+    };
     const held = changed(taskState("task-1", 4), 5, {
       task: { ...taskSummary("task-1"), status: "background" },
-      backgroundCommandCount: 2,
+      backgroundCommands: [command],
     });
-    expect(held.snapshot.kind === "task" && held.snapshot.task.backgroundCommandCount).toBe(2);
+    expect(held.snapshot.kind === "task" && held.snapshot.task.backgroundCommands).toEqual([command]);
 
     // A delta that does not carry the Task summary leaves the count alone.
     const unrelated = changed(held, 6, { permissionPolicy: "autoApprove" });
-    expect(unrelated.snapshot.kind === "task" && unrelated.snapshot.task.backgroundCommandCount).toBe(2);
+    expect(unrelated.snapshot.kind === "task" && unrelated.snapshot.task.backgroundCommands).toEqual([command]);
 
     const running = changed(unrelated, 7, {
       task: { ...taskSummary("task-1"), status: "running" },
-      backgroundCommandCount: null,
+      backgroundCommands: [],
     });
-    expect(running.snapshot.kind === "task" && running.snapshot.task.backgroundCommandCount).toBeNull();
+    expect(running.snapshot.kind === "task" && running.snapshot.task.backgroundCommands).toEqual([]);
   });
 
   it("applies a Task-owned permission policy delta", () => {

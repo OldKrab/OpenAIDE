@@ -65,6 +65,7 @@ fn projects_thought_messages_as_system_chat_items() {
 #[test]
 fn projects_execute_presentation_without_reclassifying_the_tool() {
     let step = project_activity_step(&ActivityStep::Tool {
+        background_outcome: None,
         tool_call_id: Some("call-1".to_string()),
         name: "execute".to_string(),
         status: ActivityStatus::Completed,

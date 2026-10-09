@@ -134,6 +134,10 @@ pub enum ActivityStep {
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<Box<ActivityToolDetails>>,
         permission_outcomes: Vec<ToolPermissionOutcome>,
+        /// How the background command this Tool started ended. App Server-owned,
+        /// like `permission_outcomes`: Agent Tool updates never carry it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        background_outcome: Option<super::BackgroundCommandOutcome>,
     },
     Command {
         command_label: String,

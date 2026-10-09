@@ -168,6 +168,7 @@ export function AppPrimaryTaskSurface({
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onClosePlan={callbacks.task.closePlan}
+        onStopBackgroundCommand={callbacks.task.stopBackgroundCommand}
         onAddToQueue={callbacks.task.addToQueue}
         onLoadChatPage={callbacks.task.loadChatPage}
         onLoadComposerHistory={callbacks.task.loadComposerHistory}

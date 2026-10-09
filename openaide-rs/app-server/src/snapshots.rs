@@ -450,7 +450,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
         },
         permission_policy: Default::default(),
         active_turn_started_at: None,
-        background_command_count: None,
+        background_commands: Vec::new(),
         lifecycle: TaskLifecycle::Open,
         revision: 0,
         preparation: TaskPreparationSnapshot::Blocked {

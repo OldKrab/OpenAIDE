@@ -42,8 +42,10 @@ fn background_work_shows_only_on_a_running_turn() {
         let mut record = task_record("task-a", "Task A", "1000");
         record.status = status;
         record.active_turn_id = Some("turn-1".to_string());
-        record.background_work =
-            Some(crate::protocol::model::TaskBackgroundWork { live_commands: 1 });
+        record.background_work = Some(crate::protocol::model::TaskBackgroundWork {
+            held: true,
+            commands: Vec::new(),
+        });
         record
     };
 

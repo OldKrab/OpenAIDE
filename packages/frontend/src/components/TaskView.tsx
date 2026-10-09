@@ -21,7 +21,7 @@ import { composerAvailability, composerCanSubmit } from "./composerAvailability"
 import { TaskHeader } from "./TaskHeader";
 import type { DesktopWindowCapability } from "../services/frontendShell";
 import { scrollTopAfterPrependedContent } from "./TaskViewModel";
-import { backgroundWorkLabel, taskTurnOpen, taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
+import { taskBackgroundWork, taskTurnOpen, taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
   permissionResponseForMessage,
@@ -44,6 +44,7 @@ import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
 import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
+import { useCurrentCallback } from "./useCurrentCallback";
 import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
 import { TaskSessionReloadNotice } from "./TaskSessionReloadNotice";
 import { currentFrontendShell } from "../services/frontendShell";
@@ -138,6 +139,7 @@ export function TaskView({
   desktopWindow,
   intents,
   onCancel,
+  onStopBackgroundCommand,
   onClosePlan,
   onAddToQueue,
   fileBrowser,
@@ -194,6 +196,7 @@ export function TaskView({
   desktopWindow?: DesktopWindowCapability;
   intents: TaskViewIntents;
   onCancel: () => void;
+  onStopBackgroundCommand?: (commandId: string) => void;
   onClosePlan?: () => Promise<void>;
   onAddToQueue?: (notBefore?: string) => void;
   fileBrowser?: TaskFileBrowserCallbacks;
@@ -295,9 +298,6 @@ export function TaskView({
     ...snapshot.active_requests,
   ], [chat.items, snapshot.active_requests]);
   const turnBusy = taskTurnOpen(snapshot.task.status);
-  const backgroundCommandCount = snapshot.task.status === "background"
-    ? snapshot.background_command_count ?? 0
-    : 0;
   const queueAvailable = turnBusy
     || snapshot.task.status === "waiting"
     || snapshot.task.status === "stopping";
@@ -436,19 +436,24 @@ export function TaskView({
       snapshot.history_sync.state === "updated" && !showCurrentHistoryUpdated
         ? { state: "idle", generation: snapshot.history_sync.generation }
         : snapshot.history_sync,
-      snapshot.background_command_count,
     );
   const timelineStatusKind = showCurrentHistoryUpdated && snapshot.history_sync.state === "updated"
     ? "notice"
       : snapshot.task.status === "waiting"
       ? "blocked"
-    : snapshot.task.status === "background" && timelineStatusLabel === backgroundWorkLabel(snapshot.background_command_count)
-      ? "background"
     : "progress";
   const workingStartedAt = snapshot.active_turn_started_at;
+  const backgroundWork = taskBackgroundWork(snapshot, Boolean(subagents.selected) || archived);
+  const showBackgroundWork = backgroundWork.shown;
   const timelineRows = useMemo(
-    () => buildTaskChatTimelineRows({ archived, chat, items: chatItems, timelineStatusLabel }),
-    [archived, chat, chatItems, timelineStatusLabel],
+    () => buildTaskChatTimelineRows({
+      archived,
+      chat,
+      items: chatItems,
+      showBackgroundWork,
+      timelineStatusLabel,
+    }),
+    [archived, chat, chatItems, showBackgroundWork, timelineStatusLabel],
   );
   const timelineRowKeys = useMemo(() => timelineRows.map((row) => row.key), [timelineRows]);
   const userMessageAnchors = useMemo(() => (
@@ -627,6 +632,8 @@ export function TaskView({
           timelineStatusKind={timelineStatusKind}
           timelineStatusLabel={timelineStatusLabel}
           workingStartedAt={workingStartedAt}
+          backgroundCommands={backgroundWork.commands}
+          onStopBackgroundCommand={backendReady ? onStopBackgroundCommand : undefined}
         />
         {backendConnectionState?.status === "unavailable" ? (
           <div className="task-connection-notice" role="status" aria-live="polite">
@@ -720,9 +727,7 @@ export function TaskView({
                   ? onCancel
                   : undefined
               }
-              cancelLabel={backgroundCommandCount > 0
-                ? `Stop ${backgroundCommandCount} background ${backgroundCommandCount === 1 ? "command" : "commands"}`
-                : undefined}
+              cancelLabel={backgroundWork.cancelLabel}
               onAddToQueue={!archived && queueAvailable && onAddToQueue ? () => onAddToQueue() : undefined}
               onSchedule={!archived && backendReady ? onAddToQueue : undefined}
               onChange={intents.changePrompt}
@@ -801,13 +806,4 @@ function discardSubagentScroll() {}
 
 async function unavailableToolImagePreview() {
   return undefined;
-}
-
-/** Keeps a callback interface stable while routing calls to the latest controller closure. */
-function useCurrentCallback<Arguments extends unknown[], Result>(
-  callback: (...args: Arguments) => Result,
-) {
-  const callbackRef = useRef(callback);
-  callbackRef.current = callback;
-  return useCallback((...args: Arguments) => callbackRef.current(...args), []);
 }
