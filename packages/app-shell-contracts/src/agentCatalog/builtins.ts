@@ -1,8 +1,8 @@
 import type { AgentCatalogEntry } from "./types.js";
 import claudeAcpPolicy from "./claude-acp/package.json" with { type: "json" };
 
-// Shared with App Server: Dependabot updates this exact launch pin in one place.
-const claudeAcpSpec = `@agentclientprotocol/claude-agent-acp@${claudeAcpPolicy.dependencies["@agentclientprotocol/claude-agent-acp"]}`;
+// Shared with App Server: update-claude-acp.yml updates this exact launch pin in one place.
+const claudeAcpSpec = `@openaide/claude-agent-acp@${claudeAcpPolicy.dependencies["@openaide/claude-agent-acp"]}`;
 
 export const builtInAgents = [
   {

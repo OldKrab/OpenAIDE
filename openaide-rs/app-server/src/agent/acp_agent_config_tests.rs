@@ -31,8 +31,8 @@ fn built_in_claude_uses_an_exact_stable_package_pin() {
     assert_eq!(config.args.len(), 2);
     assert_eq!(config.args[0], "-y");
     let version = config.args[1]
-        .strip_prefix("@agentclientprotocol/claude-agent-acp@")
-        .expect("the built-in must use the official Claude ACP package");
+        .strip_prefix("@openaide/claude-agent-acp@")
+        .expect("the built-in must use the OpenAIDE-maintained Claude ACP package");
     let components: Vec<_> = version.split('.').collect();
     assert_eq!(
         components.len(),
