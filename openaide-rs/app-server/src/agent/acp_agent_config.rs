@@ -24,7 +24,7 @@ fn product_codex_acp_spec() -> String {
         .expect("embedded Codex ACP policy includes its package version");
     format!("@openaide/codex-acp@{version}")
 }
-// The shared catalog and App Server consume the same Dependabot-managed policy.
+// The shared catalog and App Server consume the same workflow-managed policy.
 const CLAUDE_ACP_POLICY: &str = include_str!(
     "../../../../packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json"
 );
@@ -65,7 +65,7 @@ impl AcpAgentConfig {
     pub fn claude_code() -> Self {
         let policy: serde_json::Value = serde_json::from_str(CLAUDE_ACP_POLICY)
             .expect("embedded Claude ACP policy is valid JSON");
-        let version = policy["dependencies"]["@agentclientprotocol/claude-agent-acp"]
+        let version = policy["dependencies"]["@openaide/claude-agent-acp"]
             .as_str()
             .expect("embedded Claude ACP policy includes its package version");
         Self {
@@ -73,7 +73,7 @@ impl AcpAgentConfig {
             command: resolved_command_or_name("npx"),
             args: vec![
                 "-y".to_string(),
-                format!("@agentclientprotocol/claude-agent-acp@{version}"),
+                format!("@openaide/claude-agent-acp@{version}"),
             ],
             env: Vec::new(),
             secret_env: Vec::new(),
