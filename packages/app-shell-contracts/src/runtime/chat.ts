@@ -19,7 +19,7 @@ export type ChatMessage = {
 export type NormalizedMessage =
   | { kind: "user"; id: string; text: string; created_at: string; sent_at?: string; attachments?: Attachment[] }
   | { kind: "agent_message"; id: string; role: AgentMessageRole; parts: AgentMessagePart[]; created_at: string; closed_turn?: TimeSpan }
-  | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[]; run?: TimeSpan }
+  | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
   | { kind: "completed_plan"; id: string; entries: AgentPlanEntry[]; created_at: string }
   | { kind: "closed_plan"; id: string; entries: AgentPlanEntry[]; created_at: string }
   | { kind: "compaction"; id: string; status: CompactionStatus; summary?: string; error?: string; created_at: string; run?: TimeSpan }

@@ -1179,12 +1179,7 @@ export type NativeSessionSummary = { reference: NativeSessionReference, projectI
 
 export type NativeSessionReference = { agentId: AgentId, sessionId: string, };
 
-export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, lifecycle: TaskLifecycle, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, pinned?: boolean, attention?: TaskAttentionEvent | null,
-/**
- * Start of the turn the Agent is working on, so Navigation can show how
- * long a Task has been running without loading its Chat.
- */
-activeTurnStartedAt?: string | null, hasMessages: boolean, worktreeId?: WorktreeId | null,
+export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, lifecycle: TaskLifecycle, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, pinned?: boolean, attention?: TaskAttentionEvent | null, hasMessages: boolean, worktreeId?: WorktreeId | null,
 /**
  * Availability is independent of Task runtime status so history remains readable.
  */

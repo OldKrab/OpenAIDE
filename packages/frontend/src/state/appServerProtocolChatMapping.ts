@@ -174,7 +174,6 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       created_at: createdAt,
       collapsed: activity.status !== "running",
       steps: activitySteps(activity, run),
-      ...(run ? { run } : {}),
     };
   }
   if (item.status === "interrupted") {

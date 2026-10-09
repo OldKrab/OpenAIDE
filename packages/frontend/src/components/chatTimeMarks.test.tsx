@@ -4,7 +4,6 @@ import type { ReactElement } from "react";
 import { act, create, type ReactTestRendererNode } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatItem, MessageId, PendingRequestSnapshot, RequestId, TaskId } from "@openaide/app-server-client";
-import type { TaskSummary } from "@openaide/app-shell-contracts";
 
 vi.mock("./AgentMarkdown", () => ({
   AgentMarkdown: ({ text }: { text: string }) => <div>{text}</div>,
@@ -12,7 +11,6 @@ vi.mock("./AgentMarkdown", () => ({
 
 import { mapProtocolChatItem, pendingRequestItems } from "../state/appServerProtocolChatMapping";
 import { ChatRow } from "./ChatMessageView";
-import { SidebarTaskRow } from "./SidebarTaskRow";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -117,19 +115,6 @@ describe("time information from App Server-observed timing", () => {
 
     expect(text(tree)).toContain("waiting 2:10");
   });
-
-  it("shows running and waiting time in Navigation, and nothing for a settled Task", () => {
-    const running = sidebarRow({ status: "active", active_turn_started_at: ago(75) });
-    const waiting = sidebarRow({
-      status: "waiting",
-      attention: { event_id: "event_1", reason: "needsPermission", occurred_at: ago(130) },
-    });
-    const settled = sidebarRow({ status: "inactive", active_turn_started_at: undefined });
-
-    expect(liveTimes(running)).toEqual(["1:15"]);
-    expect(liveTimes(waiting)).toEqual(["2:10"]);
-    expect(liveTimes(settled)).toEqual([]);
-  });
 });
 
 function item(overrides: Partial<ChatItem>): ChatItem {
@@ -139,36 +124,6 @@ function item(overrides: Partial<ChatItem>): ChatItem {
 function row(chatItem: ChatItem) {
   const message = mapProtocolChatItem(chatItem, ago(0));
   return render(<ChatRow message={message} onPermissionRespond={vi.fn()} taskId="task_1" />);
-}
-
-function sidebarRow(overrides: Partial<TaskSummary>) {
-  const task: TaskSummary = {
-    agent_id: "codex",
-    agent_name: "Codex",
-    created_at: ago(0),
-    isolation: "local",
-    last_activity: ago(0),
-    message_history_version: 1,
-    has_messages: true,
-    status: "inactive",
-    task_id: "task",
-    task_version: 1,
-    title: "Task",
-    unread: false,
-    pinned: false,
-    updated_at: ago(0),
-    workspace_root: "",
-    ...overrides,
-  };
-  return render(
-    <SidebarTaskRow
-      onArchiveTask={vi.fn()}
-      onOpenTask={vi.fn()}
-      onRestoreTask={vi.fn()}
-      showArchived={false}
-      task={task}
-    />,
-  );
 }
 
 function render(element: ReactElement) {

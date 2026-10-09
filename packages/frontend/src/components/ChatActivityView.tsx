@@ -25,7 +25,7 @@ import { ChatToolDetails } from "./ChatToolDetailsView";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { toolKindIcon } from "./chatToolIcons";
 import { presentThoughtMarkdown } from "./thoughtPresentation";
-import { ActivityGroupTime, ActivityStepTime } from "./timeMarks";
+import { ActivityStepTime } from "./timeMarks";
 
 /** Lets disclosure commits synchronously update an enclosing measured Chat row. */
 export const ChatContentSizeChangeContext = createContext<((element: HTMLElement) => void) | undefined>(undefined);
@@ -65,7 +65,6 @@ export function ChatActivityView({
           <span className="activity-status-mark" aria-hidden="true" />
           <span>{activitySummary(activity)}</span>
           <small>{activityStatusLabel(activity.status)}</small>
-          <ActivityGroupTime fallback={activity.run} steps={activity.steps} />
         </>
       }
     >
