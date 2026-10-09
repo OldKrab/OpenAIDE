@@ -11,6 +11,14 @@ describe("TaskHeader", () => {
     expect(html).not.toContain("task-header-workspace");
   });
 
+  it("names a turn held open by background work", () => {
+    const html = renderToStaticMarkup(
+      <TaskHeader agentId="claude" agentName="Claude" status="background" title="Task" workspaceRoot="" />,
+    );
+
+    expect(html).toContain('aria-label="Task status: Background"');
+  });
+
   it("keeps the task title concise while exposing agent, workspace, and running state", () => {
     const html = renderToStaticMarkup(
       <TaskHeader

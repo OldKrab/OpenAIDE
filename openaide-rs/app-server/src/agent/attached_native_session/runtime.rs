@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::agent::acp_active_prompt::{cancel_active_prompt, send_steering_prompt_request};
+use crate::agent::acp_background_work::BackgroundWork;
 use crate::agent::acp_config_options_apply::SessionConfigRequests;
 use crate::agent::acp_prompt_runner::{
     dispatch_session_notification, run_prompt, PromptRunContext,
@@ -65,6 +66,7 @@ pub(super) async fn run(
     let mut config_requests = SessionConfigRequests::new();
     let mut deletion = SessionDeleteRequest::default();
     let mut steering_requests = SteeringRequests::new(&initialize);
+    let background_work = BackgroundWork::default();
     let session_id = active_session.session_id().to_string();
     let sink_registration = SessionSinkRegistration {
         session_id,
@@ -247,6 +249,7 @@ pub(super) async fn run(
                             &mut session_event_sink,
                             &mut session_projection,
                             &mut pending_session_catalogs,
+                            &background_work,
                         )
                         .await;
                         // Also covers early error returns from the runner: no
@@ -319,6 +322,7 @@ pub(super) async fn run(
                         session_event_sink.as_ref(),
                         session_projection.clone(),
                         &mut pending_session_catalogs,
+                        &background_work,
                     ).await
                     .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
                 }
@@ -342,6 +346,7 @@ pub(super) async fn run(
                     session_event_sink.as_ref(),
                     session_projection.clone(),
                     &mut pending_session_catalogs,
+                    &background_work,
                 )
                 .await
                 .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
@@ -463,6 +468,7 @@ fn active_session_config_catalog(session: &AgentSession) -> ConfigOptionsCatalog
         })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_opened_session_message(
     agent_id: &str,
     update: SessionMessage,
@@ -471,6 +477,7 @@ async fn apply_opened_session_message(
     session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
     session_projection: Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
+    background_work: &BackgroundWork,
 ) -> Result<(), RuntimeError> {
     let SessionMessage::SessionMessage(dispatch) = update else {
         return Ok(());
@@ -481,6 +488,7 @@ async fn apply_opened_session_message(
         session_projection,
         session_event_sink.cloned(),
         pending_session_catalogs,
+        background_work,
     )
     .await?;
     apply_session_catalogs(catalogs, config_catalog, commands_catalog);

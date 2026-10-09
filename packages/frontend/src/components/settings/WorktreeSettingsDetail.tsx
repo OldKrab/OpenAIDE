@@ -145,7 +145,7 @@ export function WorktreeSettingsDetail({
           {linked.map((task) => (
             <button key={task.task_id} onClick={() => intents.openTask(task.task_id)} type="button">
               <span><strong>{task.title}</strong><small>{task.agent_name}</small></span>
-              <small>{task.status === "active" ? "Running" : relativeTime(task.last_activity)}</small>
+              <small>{task.status === "active" ? "Running" : task.status === "background" ? "Background" : relativeTime(task.last_activity)}</small>
               <ExternalLink size={13} />
             </button>
           ))}

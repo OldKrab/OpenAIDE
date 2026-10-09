@@ -147,6 +147,9 @@ pub struct TaskChanges {
     /// Present when the active-turn clock changes; inner `None` clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<Option<String>>,
+    /// Present with every Task summary change; inner `None` means the Task is not `background`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_command_count: Option<Option<u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<TaskLifecycle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

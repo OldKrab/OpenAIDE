@@ -10,6 +10,9 @@ use tokio::sync::mpsc as tokio_mpsc;
 use crate::agent::acp_active_prompt::{
     cancel_active_prompt, send_steering_prompt_request, ActivePrompt, PromptSettlementKind,
 };
+use crate::agent::acp_background_work::{
+    AsyncTaskStateNotification, BackgroundWork, TurnEndedNotification,
+};
 use crate::agent::acp_config_options_apply::SessionConfigRequests;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
@@ -25,6 +28,7 @@ use crate::agent::acp_steering::{SteeringAction, SteeringDelivery, SteeringReque
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::attached_native_session::{AcpSessionCommand, AcpSessionConfigCommand};
+use crate::agent::events::{AgentBackgroundWork, AgentEvent};
 use crate::agent::prompt_content::PromptContentPolicy;
 use crate::agent::{
     AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionEventSink,
@@ -63,6 +67,7 @@ pub(super) async fn run_prompt(
     session_event_sink: &mut Option<Arc<dyn AgentSessionEventSink>>,
     session_projection: &mut Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
+    background_work: &BackgroundWork,
 ) -> Result<AgentPromptOutcome, RuntimeError> {
     let prompt_started_at = Instant::now();
     if prompt.cancellation.is_cancelled() {
@@ -98,6 +103,7 @@ pub(super) async fn run_prompt(
     let mut settled_by_response = false;
     let mut deletion = SessionDeleteRequest::default();
     let mut completed_prompt = None;
+    let mut reported_background = None;
     // Legacy prompt sets still settle on their first terminal response. With
     // the extension, resolve admitted deliveries before retiring their owner.
     let wait_for_steering = steering_requests.supported();
@@ -119,13 +125,42 @@ pub(super) async fn run_prompt(
                 Err(error) => break Err(error),
             }
             cancel_sent = true;
+            background_work
+                .stop_live_tasks(
+                    active_session.connection(),
+                    active_session.session_id(),
+                    context.trace.as_ref(),
+                )
+                .await;
         }
+        // A cancelled hold has no prompt response left to wait for.
+        if cancel_sent && completed_prompt.is_some() && background_work.is_holding() {
+            break Ok(AgentPromptOutcome::Cancelled);
+        }
+        // Agent-reported background work keeps a finished turn open. Checked
+        // first: settling retires the prompt set and its steering admission.
+        let held = !cancel_sent
+            && matches!(completed_prompt, Some(Ok(AgentPromptOutcome::EndTurn)))
+            && background_work.holds_turn(active_session_id.as_str(), active_prompt.task_id());
         if completed_prompt.is_some()
+            && !held
             && !deletion.is_pending()
             && active_prompt.settle_after_delivery(wait_for_steering && !cancel_sent)
         {
             settled_by_response = true;
             break completed_prompt.take().expect("completed prompt");
+        }
+        // The turn continues. Tell the Task whether only background work holds
+        // it; a settling turn skips this so it never flashes back to running.
+        let background = held
+            .then(|| background_work.background_only())
+            .flatten()
+            .map(|live_commands| AgentBackgroundWork { live_commands });
+        if background != reported_background {
+            reported_background = background;
+            if let Err(error) = sink.emit(AgentEvent::BackgroundWork(background)) {
+                break Err(error);
+            }
         }
         tokio::select! {
             Some(()) = cancel_rx.recv(), if !cancel_sent => {
@@ -146,7 +181,16 @@ pub(super) async fn run_prompt(
                     }
                 }
                 cancel_sent = true;
+                background_work
+                    .stop_live_tasks(
+                        active_session.connection(),
+                        active_session.session_id(),
+                        context.trace.as_ref(),
+                    )
+                    .await;
             }
+            // Re-evaluates the hold once an expected cycle failed to appear.
+            () = background_work.followup_timeout() => {}
             close = close_rx.recv() => {
                 let Some(reply_tx) = close else {
                     break Err(RuntimeError::NotReady("ACP close channel stopped".to_string()));
@@ -185,6 +229,7 @@ pub(super) async fn run_prompt(
                     pending_session_catalogs,
                     config_catalog,
                     commands_catalog,
+                    background_work,
                 )
                 .await
                 {
@@ -297,7 +342,7 @@ pub(super) async fn run_prompt(
                     active_session, context.agent_id, active_prompt.task_id(),
                     active_session_id.as_str(), session_projection.clone(),
                     session_event_sink.clone(), pending_session_catalogs,
-                    config_catalog, commands_catalog,
+                    config_catalog, commands_catalog, background_work,
                 ).await?;
                 match action {
                     SteeringAction::Injected => {
@@ -312,6 +357,7 @@ pub(super) async fn run_prompt(
                             break Err(error);
                         }
                         completed_prompt = None;
+                        background_work.prompt_continued();
                     }
                     SteeringAction::LegacyPrompt => {
                         if let Err(error) = send_steering_prompt_request(
@@ -354,6 +400,7 @@ pub(super) async fn run_prompt(
                     pending_session_catalogs,
                     config_catalog,
                     commands_catalog,
+                    background_work,
                 ).await?;
                 if let Some(catalog) = response.finish_with_session_sink(session_event_sink.as_deref()) {
                     *config_catalog = catalog;
@@ -373,6 +420,7 @@ pub(super) async fn run_prompt(
                     pending_session_catalogs,
                     config_catalog,
                     commands_catalog,
+                    background_work,
                 )
                 .await?;
                 let result = completion.finish();
@@ -401,6 +449,7 @@ pub(super) async fn run_prompt(
                     pending_session_catalogs,
                     config_catalog,
                     commands_catalog,
+                    background_work,
                 )
                 .await;
                 let _ = reply_tx.send(result);
@@ -418,6 +467,7 @@ pub(super) async fn run_prompt(
                     session_projection.clone(),
                     session_event_sink.clone(),
                     pending_session_catalogs,
+                    background_work,
                 ).await {
                     Ok(catalogs) => {
                         apply_session_catalogs(catalogs, config_catalog, commands_catalog)
@@ -435,6 +485,11 @@ pub(super) async fn run_prompt(
     // Retire every still-pending response from lifecycle ownership. The session-level
     // update consumer remains attached and continues accepting late updates.
     active_prompt.mark_settled(PromptSettlementKind::RunnerExit);
+    background_work.finish_hold(
+        active_session_id.as_str(),
+        active_prompt.task_id(),
+        runtime_result_name(&result),
+    );
 
     if let (Some(trace), Some(requested_at)) = (context.trace.as_ref(), cancel_requested_at) {
         trace.record_value(
@@ -555,6 +610,7 @@ async fn project_preceding_session_updates(
     pending_session_catalogs: &mut PendingSessionCatalogs,
     config_catalog: &mut ConfigOptionsCatalog,
     commands_catalog: &mut Option<AgentCommandsCatalog>,
+    background_work: &BackgroundWork,
 ) -> Result<(), RuntimeError> {
     for update in take_preceding_session_updates(active_session).await? {
         let catalogs = apply_prompt_session_message(
@@ -565,6 +621,7 @@ async fn project_preceding_session_updates(
             projection.clone(),
             session_event_sink.clone(),
             pending_session_catalogs,
+            background_work,
         )
         .await?;
         apply_session_catalogs(catalogs, config_catalog, commands_catalog);
@@ -572,6 +629,7 @@ async fn project_preceding_session_updates(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_prompt_session_message(
     agent_id: &str,
     task_id: &str,
@@ -580,6 +638,7 @@ async fn apply_prompt_session_message(
     projection: Option<LivePromptProjection>,
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
+    background_work: &BackgroundWork,
 ) -> Result<DispatchSessionCatalogs, RuntimeError> {
     match update {
         SessionMessage::SessionMessage(dispatch) => {
@@ -589,6 +648,7 @@ async fn apply_prompt_session_message(
                 projection,
                 session_event_sink,
                 pending_session_catalogs,
+                background_work,
             )
             .await
         }
@@ -625,11 +685,28 @@ pub(super) async fn dispatch_session_notification(
     projection: Option<LivePromptProjection>,
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
+    background_work: &BackgroundWork,
 ) -> Result<DispatchSessionCatalogs, RuntimeError> {
     let catalogs = Arc::new(Mutex::new(DispatchSessionCatalogs::default()));
     let catalogs_sink = catalogs.clone();
+    let (task_states, turn_ends, updates) = (
+        background_work.clone(),
+        background_work.clone(),
+        background_work.clone(),
+    );
     MatchDispatch::new(dispatch)
+        .if_notification(async move |change: AsyncTaskStateNotification| {
+            task_states.task_state_changed(&change);
+            Ok(())
+        })
+        .await
+        .if_notification(async move |ended: TurnEndedNotification| {
+            turn_ends.turn_ended(&ended);
+            Ok(())
+        })
+        .await
         .if_notification(async move |notification: SessionNotification| {
+            updates.session_update_observed(&notification.update);
             *catalogs_sink
                 .lock()
                 .expect("ACP session catalog update lock poisoned") =

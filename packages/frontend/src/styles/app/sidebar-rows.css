@@ -283,6 +283,24 @@
   animation: task-state-spin 800ms linear infinite;
 }
 
+.task-state-background {
+  /* Same footprint as the spinner, but grey and slow: open work that needs no attention. */
+  --task-state-background-ink: color-mix(in oklch, var(--oa-muted) 80%, var(--oa-text));
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 6.00px 1.40px, var(--task-state-background-ink) 0.8px, transparent 1px),
+    radial-gradient(circle at 9.25px 2.75px, var(--task-state-background-ink) 0.8px, transparent 1px),
+    radial-gradient(circle at 10.60px 6.00px, var(--task-state-background-ink) 0.8px, transparent 1px),
+    radial-gradient(circle at 9.25px 9.25px, var(--task-state-background-ink) 0.8px, transparent 1px),
+    radial-gradient(circle at 6.00px 10.60px, var(--task-state-background-ink) 0.8px, transparent 1px),
+    radial-gradient(circle at 2.75px 9.25px, var(--task-state-background-ink) 0.8px, transparent 1px),
+    radial-gradient(circle at 1.40px 6.00px, var(--task-state-background-ink) 0.8px, transparent 1px),
+    radial-gradient(circle at 2.75px 2.75px, var(--task-state-background-ink) 0.8px, transparent 1px);
+  animation: task-state-spin 6s linear infinite;
+}
+
 .task-state-pause {
   width: 9px;
   height: 11px;
@@ -341,7 +359,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .task-state-spinner {
+  .task-state-spinner,
+  .task-state-background {
     animation: none;
   }
 }

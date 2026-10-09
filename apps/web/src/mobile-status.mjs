@@ -15,7 +15,7 @@ export function createMobileStatus(listTasks, now = Date.now) {
         const page = response?.result ?? response;
         if (!Array.isArray(page?.tasks)) throw new Error('Invalid task status');
         for (const task of page.tasks) {
-          if (['preparing', 'starting', 'running', 'stopping'].includes(task.status)) active++;
+          if (['preparing', 'starting', 'running', 'background', 'stopping'].includes(task.status)) active++;
           else if (task.status === 'waiting') waiting++;
           else if (!['idle', 'interrupted', 'failed', 'completed'].includes(task.status)) throw new Error('Unknown task status');
         }

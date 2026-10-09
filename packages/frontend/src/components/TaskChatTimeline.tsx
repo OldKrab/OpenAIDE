@@ -1,5 +1,5 @@
 import { memo, useCallback, useState } from "react";
-import { ArrowDown, Check, CircleAlert } from "lucide-react";
+import { ArrowDown, Check, CircleAlert, CircleDashed } from "lucide-react";
 import type {
   ActivityStep,
   ChatMessage,
@@ -61,7 +61,7 @@ type TaskChatTimelineProps = {
   taskId: string;
   taskStatus: TaskSnapshot["task"]["status"];
   toolDetails: AppState["toolDetails"];
-  timelineStatusKind: "blocked" | "notice" | "progress";
+  timelineStatusKind: "background" | "blocked" | "notice" | "progress";
   timelineStatusLabel?: string;
   workingStartedAt?: string;
 };
@@ -350,7 +350,7 @@ function TimelineStatus({
   onRetry,
   startedAt,
 }: {
-  kind: "blocked" | "notice" | "progress";
+  kind: "background" | "blocked" | "notice" | "progress";
   label: string;
   onRetry?: () => void;
   startedAt?: string;
@@ -367,6 +367,8 @@ function TimelineStatus({
           <span />
           <span />
         </span>
+      ) : kind === "background" ? (
+        <CircleDashed aria-hidden="true" className="working-status-background-icon" size={14} />
       ) : kind === "notice" ? (
         <Check aria-hidden="true" className="working-status-notice-icon" size={14} />
       ) : <CircleAlert aria-hidden="true" className="working-status-blocked-icon" size={14} />}

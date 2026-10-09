@@ -10,6 +10,7 @@ pub(crate) mod acp_agent_process;
 pub(crate) mod acp_agent_process_pool;
 pub(crate) mod acp_agent_status;
 pub(crate) mod acp_auth_method_cache;
+mod acp_background_work;
 pub(crate) mod acp_codex_subagent;
 pub(crate) mod acp_commands_projection;
 pub(crate) mod acp_compaction_projection;

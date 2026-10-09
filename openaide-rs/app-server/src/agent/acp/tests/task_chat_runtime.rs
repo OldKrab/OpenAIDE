@@ -4,10 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openaide_app_server_protocol::agent::AgentListSessionsParams;
-use openaide_app_server_protocol::ids::{AgentId, TaskId};
+use openaide_app_server_protocol::ids::{AgentId, TaskId, TurnId};
 use openaide_app_server_protocol::snapshot::{ChatItem, ChatItemStatus, ChatRole, MessagePart};
 use openaide_app_server_protocol::task::{
-    ComposerMessage, TaskAcquireParams, TaskAdoptNativeSessionParams, TaskSendParams,
+    ComposerMessage, TaskAcquireParams, TaskAdoptNativeSessionParams, TaskCancelParams,
+    TaskSendParams,
 };
 
 use crate::agent::acp::{AcpAgentConfig, AcpAgentRuntime};
@@ -860,6 +861,154 @@ fn steering_keeps_task_active_when_primary_is_cancelled() {
 }
 
 #[test]
+fn background_command_keeps_the_task_working_until_its_followup_cycle_ends() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let gate_path = temp.path().join("background-command-release");
+    let Some((api, store, workspace_root)) = task_chat_fixture_with_runtime(
+        &temp,
+        "background_followup",
+        ServerRequestRuntime::new(),
+        vec![(
+            "OPENAIDE_TASK_CHAT_GATE".to_string(),
+            gate_path.to_string_lossy().to_string(),
+        )],
+        None,
+    ) else {
+        return;
+    };
+    let task_id = ready_task(&api, &store, &workspace_root);
+
+    api.send(send_params(&task_id, "build in the background"))
+        .expect("send prompt");
+    wait_until(|| {
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Build started")
+    });
+    // The fixture answered the prompt with end_turn right after this chunk and
+    // keeps its background command running until released.
+    crate::test_sync::observe_absence();
+    let held = store.read_task(task_id.as_str()).expect("read held task");
+    assert_eq!(
+        held.status,
+        TaskStatus::Active,
+        "a live background command must keep its turn open"
+    );
+    assert!(held.active_turn_id.is_some());
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.background_work.is_some())
+            .unwrap_or(false)
+    });
+    let held = store.read_task(task_id.as_str()).expect("read held task");
+    assert_eq!(
+        held.background_only().map(|work| work.live_commands),
+        Some(1),
+        "the held turn shows as background work with its live command"
+    );
+    assert!(held.unread, "the answered prompt is readable while held");
+    assert!(
+        held.attention.is_none(),
+        "finished is raised only when the turn settles"
+    );
+    fs::write(&gate_path, "").expect("finish the background command");
+
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    assert!(
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Build finished"),
+        "the follow-up cycle belongs to the held turn"
+    );
+    let settled = store
+        .read_task(task_id.as_str())
+        .expect("read settled task");
+    assert!(settled.background_work.is_none());
+    assert!(
+        settled.attention.is_some(),
+        "the settled turn raises finished"
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn stop_ends_a_turn_held_by_a_background_command_and_stops_the_command() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let stop_marker = temp.path().join("background-command-stopped");
+    let Some((api, store, workspace_root)) = task_chat_fixture_with_runtime(
+        &temp,
+        "background_stop",
+        ServerRequestRuntime::new(),
+        vec![(
+            "OPENAIDE_TASK_CHAT_GATE".to_string(),
+            stop_marker.to_string_lossy().to_string(),
+        )],
+        None,
+    ) else {
+        return;
+    };
+    let task_id = ready_task(&api, &store, &workspace_root);
+
+    api.send(send_params(&task_id, "build in the background"))
+        .expect("send prompt");
+    wait_until(|| {
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Build started")
+    });
+    // The fixture answered the prompt with end_turn right after this chunk and
+    // never finishes its background command.
+    crate::test_sync::observe_absence();
+    let held = store.read_task(task_id.as_str()).expect("read held task");
+    assert_eq!(held.status, TaskStatus::Active);
+
+    api.cancel_for_test(TaskCancelParams {
+        task_id: task_id.clone(),
+        turn_id: held.active_turn_id.map(TurnId::from),
+    })
+    .expect("stop the held turn");
+
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    assert_eq!(
+        fs::read_to_string(&stop_marker).expect("the Agent received the stop request"),
+        "build-1"
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+/// Creates a Task and waits until it can accept its first prompt.
+fn ready_task(api: &TaskProductApi, store: &Store, workspace_root: &str) -> TaskId {
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+    task_id
+}
+
+#[test]
 fn agent_bookkeeping_on_idle_close_is_not_reported_as_an_external_change() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let activity_path = temp.path().join("native-activity");
@@ -1151,6 +1300,13 @@ def write(message):
 def respond(message, result):
     write({"jsonrpc": "2.0", "id": message.get("id"), "result": result})
 
+def update_raw(update):
+    write({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {"sessionId": session_id, "update": update},
+    })
+
 def update_chunk(kind, text, message_id):
     payload = {
         "sessionUpdate": kind,
@@ -1279,6 +1435,20 @@ for line in sys.stdin:
             await_release()
             respond(message, {"stopReason": "end_turn"})
             continue
+        if mode in ("background_followup", "background_stop"):
+            update_chunk("agent_message_chunk", "Build started", "started")
+            update_raw({"sessionUpdate": "async_task_spawned", "asyncTaskId": "build-1", "name": "npm run build", "canStop": True})
+            respond(message, {"stopReason": "end_turn"})
+            if mode == "background_followup":
+                await_release()
+                update_raw({"sessionUpdate": "async_task_state_update", "asyncTaskId": "build-1", "state": "completed"})
+                update_chunk("agent_message_chunk", "Build finished", "finished")
+                write({
+                    "jsonrpc": "2.0",
+                    "method": "_session/turn_ended",
+                    "params": {"sessionId": session_id, "stopReason": "end_turn"},
+                })
+            continue
         if mode == "content_blocks":
             update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U=", "uri": "memory://diagram.png"}, "content-image")
             update_content({"type": "resource", "resource": {"uri": "memory://notes.txt", "mimeType": "text/plain", "text": "Embedded notes"}}, "content-text-resource")
@@ -1368,6 +1538,11 @@ for line in sys.stdin:
             })
         else:
             respond(message, {"stopReason": "end_turn"})
+    elif method == "_session/async_task/stop":
+        # Tells the test that Stop reached the background command.
+        with open(gate_file, "w") as handle:
+            handle.write(message.get("params", {}).get("asyncTaskId", ""))
+        respond(message, {"stopped": True})
     elif method == "session/close":
         if pending_primary_id is not None:
             respond({"id": pending_primary_id}, {"stopReason": "end_turn"})

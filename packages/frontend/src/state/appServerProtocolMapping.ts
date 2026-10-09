@@ -222,6 +222,7 @@ function mapProtocolTaskSnapshotWithCache(
         end_cursor: snapshot.chat.endCursor ?? allItems.at(-1)?.cursor,
       },
       active_turn_started_at: snapshot.activeTurnStartedAt ?? undefined,
+      background_command_count: snapshot.backgroundCommandCount ?? undefined,
       active_requests: pendingRequestItems(snapshot.pendingRequests ?? [], task.updated_at),
       message_queue: {
         revision: snapshot.messageQueue?.revision ?? 0,
@@ -450,6 +451,8 @@ function taskSummaryStatusFromProtocol(status: ProtocolTaskStatus): TaskSummary[
     case "starting":
     case "preparing":
       return "active";
+    case "background":
+      return "background";
     case "stopping":
       return "stopping";
     case "waiting":

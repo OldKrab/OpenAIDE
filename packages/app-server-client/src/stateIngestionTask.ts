@@ -52,6 +52,9 @@ function applyTaskChanges(
     activeTurnStartedAt: changes.activeTurnStartedAt === undefined
       ? snapshot.task.activeTurnStartedAt
       : changes.activeTurnStartedAt,
+    backgroundCommandCount: changes.backgroundCommandCount === undefined
+      ? snapshot.task.backgroundCommandCount
+      : changes.backgroundCommandCount,
     lifecycle: changes.lifecycle ?? snapshot.task.lifecycle,
     preparation: changes.preparation ?? snapshot.task.preparation,
     permissionPolicy: changes.permissionPolicy ?? snapshot.task.permissionPolicy,

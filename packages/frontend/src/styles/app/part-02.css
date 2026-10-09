@@ -325,6 +325,11 @@
   color: var(--oa-warning);
 }
 
+.working-status-background-icon {
+  flex: none;
+  color: var(--oa-muted);
+}
+
 .working-status-label {
   flex: 1;
   min-width: 0;

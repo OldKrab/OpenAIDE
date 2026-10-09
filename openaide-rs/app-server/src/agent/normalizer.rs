@@ -106,7 +106,8 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
             | AgentEvent::Compaction { .. }
             | AgentEvent::ContextUsage(_)
             | AgentEvent::TurnUsage(_)
-            | AgentEvent::AccountLimits(_) => None,
+            | AgentEvent::AccountLimits(_)
+            | AgentEvent::BackgroundWork(_) => None,
         })
         .collect()
 }

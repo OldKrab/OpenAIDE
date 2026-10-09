@@ -620,6 +620,78 @@ fn context_usage_updates_publish_complete_contiguous_task_deltas() {
 }
 
 #[test]
+fn background_work_changes_the_visible_status_and_marks_the_answer_unread() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+    let background = |live_commands| {
+        AgentEvent::BackgroundWork(Some(crate::agent::events::AgentBackgroundWork {
+            live_commands,
+        }))
+    };
+    let next_change = || {
+        let TaskUpdateKind::Changed(change) = notifications.recv().expect("task delta").kind else {
+            panic!("expected a Task change");
+        };
+        change.changes
+    };
+    let visible_status = |changes: &openaide_app_server_protocol::events::TaskChanges| {
+        changes.task.as_ref().map(|task| task.status)
+    };
+    use openaide_app_server_protocol::snapshot::TaskStatus as VisibleStatus;
+
+    sink.session_update(background(2)).unwrap();
+    let entered = next_change();
+    assert_eq!(visible_status(&entered), Some(VisibleStatus::Background));
+    assert_eq!(entered.background_command_count, Some(Some(2)));
+    let held = store.read_task("task_1").unwrap();
+    assert_eq!(
+        held.status,
+        TaskStatus::Active,
+        "the stored status keeps every workflow rule of a running turn"
+    );
+    assert!(held.unread, "the answered prompt is readable");
+    assert!(
+        held.attention.is_none(),
+        "finished waits for the turn to settle"
+    );
+
+    // The user read it; a command finishing must not mark it unread again.
+    let mut read = held;
+    read.unread = false;
+    store.write_task(&read).unwrap();
+    sink.session_update(background(1)).unwrap();
+    let updated = next_change();
+    assert_eq!(updated.background_command_count, Some(Some(1)));
+    assert!(!store.read_task("task_1").unwrap().unread);
+
+    sink.session_update(AgentEvent::BackgroundWork(None))
+        .unwrap();
+    let left = next_change();
+    assert_eq!(visible_status(&left), Some(VisibleStatus::Running));
+    assert_eq!(left.background_command_count, Some(None));
+
+    // A repeated report commits nothing.
+    let revision = store.read_task("task_1").unwrap().revision;
+    sink.session_update(AgentEvent::BackgroundWork(None))
+        .unwrap();
+    assert_eq!(store.read_task("task_1").unwrap().revision, revision);
+}
+
+#[test]
 fn question_waits_for_a_late_responder() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
@@ -2595,6 +2667,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         agent_session_id: Some("session_1".to_string()),
         active_turn_id: Some("turn_1".to_string()),
         active_turn_started_at: None,
+        background_work: None,
         tombstoned: false,
         revision: 0,
         config_options_catalog: None,

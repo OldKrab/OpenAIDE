@@ -392,6 +392,16 @@ function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; tim
       </span>
     );
   }
+  if (status === "background") {
+    // The Agent's answer is readable while its commands run on, so unread stays visible here.
+    const label = unread ? "Background, unread" : "Background";
+    return (
+      <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>
+        <span className="task-state-background" />
+        {unread ? <span className="task-state-unread-badge" /> : null}
+      </span>
+    );
+  }
   if (status === "waiting") {
     const label = unread ? "Waiting, unread" : "Waiting";
     return (

@@ -1,5 +1,6 @@
 import { NewTaskView } from "./NewTaskView";
 import { TaskLoadingView, TaskView } from "./TaskView";
+import { taskTurnOpen } from "./taskSurfaceHelpers";
 import type { AppController } from "./appController";
 import { openRecoveryUrl, reloadRecoveryShell } from "../services/hostBridge";
 import type { AgentRecoveryActions } from "./AgentRecovery";
@@ -20,7 +21,7 @@ export function primaryTaskSurfaceModel(controller: AppController) {
   const adoptedEmptyTaskHasDraft = Boolean(routedSnapshot) && hasVisibleTaskDraft(snapshotTaskInput);
   // Task preparation can publish an active New Task while the route remains
   // /new-task. Only an explicit Task route may promote that snapshot to TaskView.
-  const activeNoMessageTask = routedSnapshot?.task.status === "active";
+  const activeNoMessageTask = taskTurnOpen(routedSnapshot?.task.status);
   const renderableTaskSnapshot = routedSnapshot
     && (
       routedSnapshot.task.has_messages === true
@@ -163,7 +164,7 @@ export function AppPrimaryTaskSurface({
         fileViewer={callbacks.task.fileViewer}
         headerActionsTarget={headerActionsTarget}
         intents={intents.task}
-        onCancel={renderableTaskSnapshot.task.has_messages || renderableTaskSnapshot.task.status === "active"
+        onCancel={renderableTaskSnapshot.task.has_messages || taskTurnOpen(renderableTaskSnapshot.task.status)
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onClosePlan={callbacks.task.closePlan}

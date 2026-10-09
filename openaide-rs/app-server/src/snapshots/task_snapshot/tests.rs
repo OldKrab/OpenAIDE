@@ -879,6 +879,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
+        background_work: None,
         tombstoned: false,
         revision: 7,
         config_options_catalog: None,

@@ -156,6 +156,8 @@ pub enum TaskStatus {
     Starting,
     Idle,
     Running,
+    /// The Agent answered its prompt and the turn stays open only for Background Work.
+    Background,
     Stopping,
     Waiting,
     Interrupted,
@@ -200,6 +202,9 @@ pub struct TaskSnapshot {
     /// App Server-authored start of the active turn; absent when no turn is running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<String>,
+    /// Agent-reported background commands still running; present only while the Task is `background`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_command_count: Option<u32>,
     pub lifecycle: TaskLifecycle,
     pub revision: u64,
     pub preparation: TaskPreparationSnapshot,

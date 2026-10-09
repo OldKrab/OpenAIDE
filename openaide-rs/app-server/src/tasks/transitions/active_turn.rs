@@ -131,6 +131,8 @@ impl TaskTransitions {
                     }
 
                     let now = now_string();
+                    // Background Work is a property of the turn that is ending.
+                    ctx.task_mut().background_work = None;
                     if ctx.task().status == TaskStatus::Stopping {
                         let cause = match &result {
                             Ok(_) => ActiveWorkEnd::UserStopped,

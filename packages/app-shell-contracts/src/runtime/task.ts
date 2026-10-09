@@ -43,6 +43,8 @@ export type TaskSnapshot = {
   permission_policy: TaskPermissionPolicy;
   /** App Server-authored start of the active turn; absent when no turn is running. */
   active_turn_started_at?: string;
+  /** Background commands still running; present only while the Task is `background`. */
+  background_command_count?: number;
   chat: MessagePage;
   /** Active App Server requests render after durable Chat and never enter history. */
   active_requests: ChatMessage[];

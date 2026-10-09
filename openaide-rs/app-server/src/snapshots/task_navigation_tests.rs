@@ -37,6 +37,35 @@ fn preparing_task_projects_preparing_status() {
 }
 
 #[test]
+fn background_work_shows_only_on_a_running_turn() {
+    let held = |status| {
+        let mut record = task_record("task-a", "Task A", "1000");
+        record.status = status;
+        record.active_turn_id = Some("turn-1".to_string());
+        record.background_work =
+            Some(crate::protocol::model::TaskBackgroundWork { live_commands: 1 });
+        record
+    };
+
+    let summary = project_task_summary_with_has_messages(held(TaskStatus::Active), true);
+    assert_eq!(summary.status, ProtocolTaskStatus::Background);
+
+    // A permission wait or a Stop in the held turn is what the user must see.
+    for (stored, visible) in [
+        (TaskStatus::Waiting, ProtocolTaskStatus::Waiting),
+        (TaskStatus::Stopping, ProtocolTaskStatus::Stopping),
+    ] {
+        let summary = project_task_summary_with_has_messages(held(stored), true);
+        assert_eq!(summary.status, visible);
+    }
+
+    let mut settled = held(TaskStatus::Active);
+    settled.active_turn_id = None;
+    let summary = project_task_summary_with_has_messages(settled, true);
+    assert_eq!(summary.status, ProtocolTaskStatus::Running);
+}
+
+#[test]
 fn projects_durable_task_attention_into_navigation() {
     let mut record = task_record("task-attention", "Task", "2026-01-01T00:00:00.000Z");
     record.attention = Some(StoredTaskAttentionEvent::new(
@@ -466,6 +495,7 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
+        background_work: None,
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,

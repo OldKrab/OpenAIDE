@@ -173,6 +173,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             agent_session_id: Some("session_stale_boot".to_string()),
             active_turn_id: Some("turn_stale_boot".to_string()),
             active_turn_started_at: None,
+            background_work: None,
             tombstoned: false,
             revision: 1,
             config_options_catalog: None,

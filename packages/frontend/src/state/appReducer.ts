@@ -664,7 +664,7 @@ function forgetLeftTaskLiveText(previous: AppState, next: AppState): AppState {
 }
 
 function taskAcceptsLiveText(status: TaskSnapshot["task"]["status"]) {
-  return status === "active" || status === "waiting" || status === "stopping";
+  return status === "active" || status === "background" || status === "waiting" || status === "stopping";
 }
 
 function abandonNativeSessionOpening(newTask: AppState["newTask"]): AppState["newTask"] {

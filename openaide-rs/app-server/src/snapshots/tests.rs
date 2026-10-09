@@ -367,6 +367,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
             },
             permission_policy: Default::default(),
             active_turn_started_at: None,
+            background_command_count: None,
             lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
             revision: 7,
             preparation: TaskPreparationSnapshot::Ready,
