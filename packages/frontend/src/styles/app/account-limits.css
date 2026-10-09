@@ -32,6 +32,7 @@
 }
 
 .account-limits-segment {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -46,16 +47,14 @@
 }
 
 /*
- * The name interrupts the border like a legend. Its two-tone backdrop continues the Chat above
- * the border and the Composer below it, so no patch shows around the letters.
+ * The name sits just above the border, over the start of its meter, so the border and the meter
+ * stay one unbroken line.
  */
 .account-limits-segment-name {
-  background: linear-gradient(
-    var(--oa-bg) 50%,
-    color-mix(in oklch, var(--oa-panel) 76%, var(--oa-bg)) 50%
-  );
+  position: absolute;
+  left: 0;
+  bottom: calc(50% + 5px);
   color: var(--oa-muted);
-  padding: 0 3px;
   font-size: 10px;
   font-weight: 500;
   line-height: 12px;
