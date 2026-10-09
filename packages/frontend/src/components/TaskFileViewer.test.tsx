@@ -113,7 +113,7 @@ describe("Task File Viewer", () => {
   it("replaces the pending File Tab when App Server returns a resolved display path", async () => {
     const snapshot: FileViewerSnapshot = {
       handle: "handle-resolved" as FileViewerSnapshot["handle"],
-      displayPath: "/home/old/src/OpenAIDE/file.rs",
+      displayPath: "/home/user/src/OpenAIDE/file.rs",
       basename: "file.rs",
       kind: "error",
       error: "notFound",
@@ -135,7 +135,7 @@ describe("Task File Viewer", () => {
     expect(tree!.root.findAllByProps({ role: "tab" })).toHaveLength(1);
     expect(JSON.stringify(tree!.toJSON())).not.toContain("Opening file");
     expect(JSON.stringify(tree!.toJSON())).toContain("File not found");
-    expect(JSON.stringify(tree!.toJSON())).toContain("/home/old/src/OpenAIDE/file.rs");
+    expect(JSON.stringify(tree!.toJSON())).toContain("/home/user/src/OpenAIDE/file.rs");
   });
 
   it("releases the handle when the last File Tab closes", async () => {

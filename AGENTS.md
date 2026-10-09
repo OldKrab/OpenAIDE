@@ -39,5 +39,5 @@ Tests and verification: read [the testing guide](docs/testing.md) when writing t
 
 ## Hand off
 
-- Before a commit, inspect the complete staged diff for credentials, personal or machine-specific data, and local paths. Keep local configuration ignored.
+- Before a commit, inspect the complete staged diff for credentials, personal or machine-specific data, and local paths. Keep local configuration ignored. `npm run check:private-data` must pass on the staged content.
 - Report unresolved checks and any security-sensitive findings with the change.

@@ -25,6 +25,11 @@ Do not commit credentials, personal domains, real home-directory paths, local
 runtime state, diagnostics, screenshots, or machine-specific configuration.
 Use `example.com`, loopback addresses, and generic fixture users in tests.
 
+`npm run check:private-data` enforces this on staged content. Run
+`git config core.hooksPath .githooks` once per clone so it runs before every
+commit, and list your own hostnames, user name, and home directory, one per
+line, in `.git/info/private-terms` so the check matches them too.
+
 ## Pull requests
 
 Describe the problem, the chosen behavior, and the verification performed. Keep

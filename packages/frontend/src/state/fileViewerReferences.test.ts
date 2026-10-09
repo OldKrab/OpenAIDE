@@ -5,7 +5,7 @@ describe("path-like Agent File References", () => {
   it("opens relative source paths and line suffixes that agents write in inline code", () => {
     expect(pathLikeFileLocation("deploy/local-web.sh")).toEqual({ path: "deploy/local-web.sh" });
     expect(pathLikeFileLocation("tool_details.rs:134")).toEqual({ path: "tool_details.rs", line: 134 });
-    expect(pathLikeFileLocation("/home/old/docs")).toEqual({ path: "/home/old/docs" });
+    expect(pathLikeFileLocation("/home/user/docs")).toEqual({ path: "/home/user/docs" });
   });
 
   it("does not treat commands, ports, dotted identifiers, or protocol methods as files", () => {
