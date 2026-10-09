@@ -89,6 +89,20 @@
     transform 320ms cubic-bezier(.16, 1, .3, 1);
 }
 
+/*
+ * Touch has no hover to ask with, so the readout stays up there, quiet until a window needs
+ * attention.
+ */
+.account-limits-edge[data-compact="true"]:not([aria-expanded="true"]) .account-limits-segment-name {
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+.account-limits-edge[data-compact="true"] .account-limits-ok .account-limits-segment-name b {
+  color: var(--oa-muted);
+}
+
 .account-limits-edge:is(:hover, :focus-visible) .account-limits-segment + .account-limits-segment .account-limits-segment-name {
   transition-delay: 50ms;
 }

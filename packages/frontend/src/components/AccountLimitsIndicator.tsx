@@ -80,7 +80,7 @@ export function AccountLimitsIndicator({
             style={{ right: radius + EDGE_CORNER_GAP }}
             type="button"
           >
-            <EdgeSegments clock={clock} length={compact ? 36 : 52} windows={segments} />
+            <EdgeSegments clock={clock} length={compact ? 50 : 52} windows={segments} />
           </button>
         )}
       >
