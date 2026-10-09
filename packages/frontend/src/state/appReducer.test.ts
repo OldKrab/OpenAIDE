@@ -139,6 +139,28 @@ describe("app reducer composer state", () => {
     expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
   });
 
+  it("forgets a running task's text signal once its Chat is left", () => {
+    const running = snapshot("task_1", [chatMessage("agent-live", "Complete")]);
+    const liveText = { messageId: "agent-live", channel: "agent" as const, eventCursor: "cursor-live" };
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: { ...running, task: { ...running.task, status: "active" } },
+      liveText,
+    });
+    expect(state.taskLiveTextPresentation.task_1?.agent).toBeDefined();
+
+    state = appReducer(state, { type: "selection:set", taskId: "task_2" });
+    expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
+
+    // Returning shows the received text at once; only text that arrives afterwards is live again.
+    state = appReducer(state, { type: "selection:set", taskId: "task_1" });
+    expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
+    state = appReducer(state, { type: "taskChat:liveText", taskId: "task_1", ...liveText, eventCursor: "cursor-next" });
+    expect(state.taskLiveTextPresentation.task_1?.agent?.eventCursor).toBe("cursor-next");
+  });
+
   it("applies a config result without replacing a pending permission request", () => {
     const initial = snapshot("task_1");
     initial.agent_config = configCatalog("off");
