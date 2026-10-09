@@ -159,7 +159,7 @@ export function ComposerWithContextUsage({
                 role="tooltip"
                 style={{ "--context-usage-percent": `${usagePercent}%` } as CSSProperties}
               >
-                Context used: {usagePercent}%
+                context <b>{usagePercent}%</b>
               </span>
             ) : null}
           </button>
