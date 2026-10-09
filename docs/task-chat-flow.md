@@ -361,8 +361,7 @@ Frontend presents these as quiet marks that never read as Agent text. A duration
 - A User message shows its send time as a clock beside its Copy action on hover.
 - A finished Compaction row shows its duration after its label.
 - A pending Permission or Question shows a live `waiting m:ss`. A resolved request shows no wait time.
-- A timed step in an expanded group shows its duration at the row's trailing edge on hover; a running step's time is always visible and ticks. A group header shows the span from its first step's start to its last step's end on hover without taking header width: it trails the header, or overlays the header's end when the header fills the row.
-- Task Navigation shows a live running or waiting time before the Task's status indicator, only while the Task is running or waiting for a Permission or Answer.
+- A timed step in an expanded group shows its duration at the row's trailing edge on hover; a running step's time is always visible and ticks.
 
 Live marks read `m:ss`; settled durations read `42s`, `4m 12s`, or `1h 04m`. Each live mark ticks locally and rerenders only itself.
 

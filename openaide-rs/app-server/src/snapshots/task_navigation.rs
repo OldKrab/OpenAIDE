@@ -352,7 +352,6 @@ pub(crate) fn project_task_summary_with_has_messages(
         has_messages,
         worktree_id: record.worktree_id.map(WorktreeId::from),
         workspace_available,
-        active_turn_started_at: record.active_turn_started_at,
     }
 }
 
@@ -408,7 +407,6 @@ pub(crate) fn project_legacy_task_summary(
         has_messages,
         worktree_id: summary.worktree_id.map(WorktreeId::from),
         workspace_available,
-        active_turn_started_at: None,
     }
 }
 

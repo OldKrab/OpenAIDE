@@ -4981,7 +4981,6 @@ fn committed_task_update(
                 has_messages: true,
                 worktree_id: None,
                 workspace_available: true,
-                active_turn_started_at: None,
             })),
         ),
     };
@@ -5027,7 +5026,6 @@ fn committed_task_status_update(
                     has_messages: true,
                     worktree_id: None,
                     workspace_available: true,
-                    active_turn_started_at: None,
                 }),
                 ..TaskChanges::default()
             },

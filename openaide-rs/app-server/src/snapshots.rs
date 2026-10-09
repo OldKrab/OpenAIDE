@@ -447,7 +447,6 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             has_messages: false,
             worktree_id: None,
             workspace_available: false,
-            active_turn_started_at: None,
         },
         permission_policy: Default::default(),
         active_turn_started_at: None,

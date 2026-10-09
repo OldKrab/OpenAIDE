@@ -1,11 +1,10 @@
 import { Timer } from "lucide-react";
-import { useLayoutEffect, useRef, type Ref } from "react";
 import type { ActivityStep, TimeSpan } from "@openaide/app-shell-contracts";
 import { elapsedDurationLabel, formatElapsedDuration, useElapsedSeconds } from "./elapsedDuration";
 import { timestampMillis } from "./taskSurfaceHelpers";
 
 /**
- * Time marks for Chat and Navigation.
+ * Time marks for Chat.
  *
  * Two readings never share a shape: a duration ("how long") carries the timer glyph or sits in a
  * labelled slot, and a bare `18:40` is always a clock time ("when"). Every mark renders nothing
@@ -142,18 +141,16 @@ export function RequestWait({
 function TimedMark({
   className,
   live,
-  markRef,
   span,
 }: {
   className: string;
   live: boolean;
-  markRef?: Ref<HTMLSpanElement>;
   span: TimeSpan;
 }) {
   const seconds = settledSpanSeconds(span);
   if (!live && seconds === undefined) return null;
   return (
-    <span className={`time-mark ${className}`} data-live={live ? "true" : undefined} ref={markRef}>
+    <span className={`time-mark ${className}`} data-live={live ? "true" : undefined}>
       <Timer aria-hidden="true" size={12} strokeWidth={1.75} />
       {live ? <LiveDuration startedAt={span.started_at} /> : <SettledDuration seconds={seconds ?? 0} />}
     </span>
@@ -173,63 +170,4 @@ export function ActivityStepTime({ step }: { step: ActivityStep }) {
   // A span left open by a step that is no longer running has no trustworthy end.
   const live = timed.running && !timed.run.ended_at;
   return <TimedMark className="activity-step-time" live={live} span={timed.run} />;
-}
-
-/** The wall-clock span covered by a group's timed steps: first start to last end. */
-export function activityGroupSpan(steps: ActivityStep[], fallback?: TimeSpan): { live: boolean; span: TimeSpan } | undefined {
-  let startedAt: string | undefined;
-  let endedAt: string | undefined;
-  let live = false;
-  for (const step of steps) {
-    const timed = stepRun(step);
-    if (!timed?.run) continue;
-    if (startedAt === undefined || timestampMillis(timed.run.started_at) < timestampMillis(startedAt)) {
-      startedAt = timed.run.started_at;
-    }
-    if (timed.run.ended_at) {
-      if (endedAt === undefined || timestampMillis(timed.run.ended_at) > timestampMillis(endedAt)) {
-        endedAt = timed.run.ended_at;
-      }
-    } else if (timed.running) {
-      live = true;
-    }
-  }
-  if (startedAt === undefined) return fallback ? { live: false, span: fallback } : undefined;
-  if (live) return { live: true, span: { started_at: startedAt } };
-  return endedAt ? { live: false, span: { started_at: startedAt, ended_at: endedAt } } : undefined;
-}
-
-/** Room the trailing time needs past the end of a group header before it must overlay instead. */
-const GROUP_TIME_TRAILING_ROOM_PX = 90;
-
-/**
- * A group's total, revealed on hover of its header. It takes no room in the header, so a long
- * summary keeps its full measure: the time trails the header, or overlays its end when the header
- * already fills the row.
- */
-export function ActivityGroupTime({ fallback, steps }: { fallback?: TimeSpan; steps: ActivityStep[] }) {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  const total = activityGroupSpan(steps, fallback);
-  const shown = Boolean(total);
-  // A group whose total appears or changes kind re-measures; a ticking second does not.
-  const live = total?.live;
-  useLayoutEffect(() => {
-    const mark = ref.current;
-    const header = mark?.parentElement;
-    const row = header?.parentElement;
-    if (!mark || !header || !row) return undefined;
-    const measure = () => {
-      mark.dataset.overlay = String(row.clientWidth - header.offsetWidth < GROUP_TIME_TRAILING_ROOM_PX);
-    };
-    measure();
-    // Re-measured when the reader reaches for the header, so a resized Chat needs no observer.
-    header.addEventListener("pointerenter", measure);
-    header.addEventListener("focus", measure);
-    return () => {
-      header.removeEventListener("pointerenter", measure);
-      header.removeEventListener("focus", measure);
-    };
-  }, [shown, live]);
-  if (!total) return null;
-  return <TimedMark className="activity-group-time" live={total.live} markRef={ref} span={total.span} />;
 }

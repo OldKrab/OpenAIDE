@@ -427,7 +427,7 @@
   justify-self: end;
 }
 
-/* Step and group durations stay out of the scan until the reader reaches for a row; a running
+/* Step durations stay out of the scan until the reader reaches for a row; a running
    step's clock is the exception. Touch has no hover, so it shows them all. */
 .time-mark {
   flex: none;
@@ -448,8 +448,7 @@
 }
 
 .time-mark[data-live="true"],
-.activity-step:is(:hover, :focus-within) .activity-step-time,
-.activity-disclosure-trigger:is(:hover, :focus-visible) > .activity-group-time {
+.activity-step:is(:hover, :focus-within) .activity-step-time {
   opacity: 1;
 }
 
@@ -462,26 +461,6 @@
 .activity-step-time {
   align-self: center;
   padding-inline-start: 6px;
-}
-
-/* The group total takes no room in the header: it trails the header's end. */
-.activity-group > .activity-disclosure-trigger:has(> .activity-group-time) {
-  position: relative;
-}
-
-.activity-group-time {
-  position: absolute;
-  inset-inline-start: 100%;
-  inset-block-start: 50%;
-  translate: 0 -50%;
-  padding-inline-start: 10px;
-}
-
-/* A header that already fills the row has no room past its end; overlay its last characters. */
-.activity-group-time[data-overlay="true"] {
-  inset-inline: auto 0;
-  padding-inline: 14px 6px;
-  background: linear-gradient(to right, transparent, var(--oa-bg) 12px);
 }
 
 .activity-step-approval {

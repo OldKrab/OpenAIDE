@@ -15,8 +15,6 @@ export type TaskSummary = {
   unread: boolean;
   pinned: boolean;
   attention?: TaskAttentionEvent;
-  /** App Server-authored start of the running turn, so Navigation can show how long it has run. */
-  active_turn_started_at?: string;
   created_at: string;
   updated_at: string;
   last_activity: string;

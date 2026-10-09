@@ -265,14 +265,6 @@
 .task-pin-marker,
 .task-worktree-marker { width: 14px; height: 14px; display: inline-grid; flex: 0 0 14px; place-items: center; }
 
-/* How long the Task has been running or waiting; shown only for those two states. */
-.task-state-time {
-  flex: none;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .task-trailing-indicator {
   position: relative;
   width: 14px;

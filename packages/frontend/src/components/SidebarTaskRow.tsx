@@ -22,7 +22,6 @@ import { AgentIcon } from "./AgentIcon";
 import { PopupMenu } from "./Popup";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { relativeTime } from "./taskSurfaceHelpers";
-import { LiveDuration } from "./timeMarks";
 import { TaskPreviewDetails, taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
 import type { NativeSessionMutationState } from "../state/store";
 import {
@@ -225,7 +224,6 @@ export function SidebarTaskRow({
             forkMutation={forkMutation}
             pinned={task.pinned}
             pinSaving={pinSaving}
-            stateSince={taskStateSince(task)}
             status={task.status}
             timestamp={task.last_activity}
             unread={task.unread}
@@ -326,7 +324,6 @@ function TaskTrailingMeta({
   forkMutation,
   pinned,
   pinSaving,
-  stateSince,
   status,
   timestamp,
   unread,
@@ -335,7 +332,6 @@ function TaskTrailingMeta({
   forkMutation?: NativeSessionMutationState;
   pinned: boolean;
   pinSaving: boolean;
-  stateSince?: string;
   status: TaskStatus;
   timestamp?: string;
   unread: boolean;
@@ -373,18 +369,9 @@ function TaskTrailingMeta({
         </span>
       ) : null}
       {worktreeName ? <span aria-label={`Worktree: ${worktreeName}`} className="task-worktree-marker" role="img" title={`Worktree: ${worktreeName}`}><GitBranch size={12} /></span> : null}
-      {stateSince ? <LiveDuration className="task-state-time" startedAt={stateSince} /> : null}
       <TaskStateOrAge status={status} timestamp={timestamp} unread={unread} />
     </span>
   );
-}
-
-/** When the Task's current running or waiting state began; undefined for every settled state. */
-function taskStateSince(task: TaskSummary) {
-  if (task.status === "active" || task.status === "stopping") return task.active_turn_started_at;
-  if (task.status !== "waiting") return undefined;
-  const reason = task.attention?.reason;
-  return reason === "needsPermission" || reason === "needsAnswer" ? task.attention?.occurred_at : undefined;
 }
 
 function forkMutationLabel(mutation: NativeSessionMutationState) {
