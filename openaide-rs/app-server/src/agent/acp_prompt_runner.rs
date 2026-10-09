@@ -11,7 +11,7 @@ use crate::agent::acp_active_prompt::{
     cancel_active_prompt, send_steering_prompt_request, ActivePrompt, PromptSettlementKind,
 };
 use crate::agent::acp_background_work::{
-    AsyncTaskStateNotification, BackgroundWork, TurnEndedNotification,
+    AsyncTaskStateNotification, BackgroundWork, SessionStateNotification,
 };
 use crate::agent::acp_config_options_apply::SessionConfigRequests;
 use crate::agent::acp_errors::acp_error;
@@ -460,6 +460,7 @@ pub(super) async fn run_prompt(
                         "result": if succeeded { "stop_reason" } else { "error" },
                     }),
                 );
+                background_work.prompt_answered();
                 // Release the ACP receive boundary before waiting for a steering
                 // acknowledgment, which may be the very next incoming response.
                 completed_prompt = Some(result);
@@ -715,27 +716,19 @@ pub(super) async fn dispatch_session_notification(
 ) -> Result<DispatchSessionCatalogs, RuntimeError> {
     let catalogs = Arc::new(Mutex::new(DispatchSessionCatalogs::default()));
     let catalogs_sink = catalogs.clone();
-    let (task_states, turn_ends, updates) = (
-        background_work.clone(),
-        background_work.clone(),
-        background_work.clone(),
-    );
+    let (task_states, agent_states) = (background_work.clone(), background_work.clone());
     MatchDispatch::new(dispatch)
         .if_notification(async move |change: AsyncTaskStateNotification| {
             task_states.task_state_changed(&change);
             Ok(())
         })
         .await
-        .if_notification(async move |ended: TurnEndedNotification| {
-            turn_ends.turn_ended(&ended);
+        .if_notification(async move |change: SessionStateNotification| {
+            agent_states.session_state_changed(&change);
             Ok(())
         })
         .await
         .if_notification(async move |notification: SessionNotification| {
-            updates.session_update_observed(
-                &notification.session_id.to_string(),
-                &notification.update,
-            );
             *catalogs_sink
                 .lock()
                 .expect("ACP session catalog update lock poisoned") =
