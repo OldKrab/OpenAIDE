@@ -245,6 +245,14 @@ impl LivePromptProjection {
         result
     }
 
+    /// Projects the exact prompt a parent delegated as the child's User message.
+    pub(super) fn emit_user_prompt(&self, text: String) -> Result<(), RuntimeError> {
+        self.sink.emit(AgentEvent::UserMessageChunk {
+            text,
+            source_message_id: None,
+        })
+    }
+
     pub(super) fn emit(&self, update: SessionUpdate) -> Result<(), RuntimeError> {
         match update {
             SessionUpdate::UserMessageChunk(chunk) if self.project_user_messages => {

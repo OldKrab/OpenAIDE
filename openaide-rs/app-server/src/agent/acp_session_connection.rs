@@ -55,6 +55,7 @@ where
     });
     let notification_trace = context.trace;
     let notification_load_replay = context.load_replay;
+    let raw_native_subagents = context.native_subagents.clone();
     let notification_native_subagents = context.native_subagents;
 
     // ACP request callbacks run inside the shared connection's dispatch loop. Every host wait
@@ -77,6 +78,7 @@ where
                     );
                     return Ok(Handled::Yes);
                 }
+                raw_native_subagents.remember_spawn_prompt(notification.params());
                 Ok(Handled::No {
                     message: (notification, cx),
                     retry: false,
@@ -359,12 +361,26 @@ fn handle_session_update_notification(
     load_replay: &LoadReplayCaptures,
 ) -> Option<SessionNotification> {
     log_tool_call_status_received(&notification);
-    let owning_trace = session_traces
-        .lock()
-        .expect("ACP session trace map lock poisoned")
-        .get(&notification.session_id.to_string())
-        .cloned()
-        .or_else(|| trace.clone());
+    let owning_trace = {
+        let mut session_traces = session_traces
+            .lock()
+            .expect("ACP session trace map lock poisoned");
+        let owning_trace = session_traces
+            .get(&notification.session_id.to_string())
+            .cloned();
+        // A child session never opens through this client, so it inherits the
+        // trace of the session that announced it. Otherwise its traffic falls
+        // back to whichever Task first opened the shared Agent process.
+        if let (Some(parent_trace), SessionUpdate::SubagentSpawned(spawned)) =
+            (&owning_trace, &notification.update)
+        {
+            session_traces.insert(
+                spawned.subagent_session_id.to_string(),
+                parent_trace.clone(),
+            );
+        }
+        owning_trace.or_else(|| trace.clone())
+    };
     if let Some(trace) = owning_trace {
         trace.record("agent_to_client", "session/update", &notification);
     }

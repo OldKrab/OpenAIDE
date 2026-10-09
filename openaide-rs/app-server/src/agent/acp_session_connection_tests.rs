@@ -779,6 +779,64 @@ fn notification_handler_traces_and_forwards_unmatched_updates_without_retry() {
 }
 
 #[test]
+fn child_session_updates_are_traced_with_the_session_that_spawned_them() {
+    let temp = tempfile::TempDir::new().expect("trace temp dir");
+    let trace_state = AcpTraceState::disabled(temp.path());
+    trace_state.set_enabled(true).expect("enable ACP trace");
+    // The connection-level trace belongs to whichever Task opened the process first.
+    let connection_trace = Some(AcpTraceSession::new(
+        trace_state.clone(),
+        "task_first",
+        "connection-test",
+    ));
+    let session_traces = Arc::new(Mutex::new(HashMap::from([(
+        "root_session".to_string(),
+        AcpTraceSession::new(trace_state, "task_owner", "connection-test"),
+    )])));
+    let load_replay = Arc::new(Mutex::new(HashMap::new()));
+
+    let spawned = SessionNotification::new(
+        "root_session",
+        SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
+            "child_1",
+            "Explorer",
+            "Inspect",
+            SubagentSessionCapabilities::default(),
+        )),
+    );
+    handle_session_update_notification(spawned, &connection_trace, &session_traces, &load_replay)
+        .expect("spawn should be forwarded");
+    let child_chunk = SessionNotification::new(
+        "child_1",
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            "child output",
+        )))),
+    );
+    handle_session_update_notification(
+        child_chunk,
+        &connection_trace,
+        &session_traces,
+        &load_replay,
+    )
+    .expect("child update should be forwarded");
+
+    let trace_dir = temp.path().join("diagnostics").join("acp-traces");
+    let traces: Vec<(String, String)> = std::fs::read_dir(&trace_dir)
+        .expect("trace dir")
+        .map(|entry| {
+            let path = entry.expect("trace entry").path();
+            (
+                path.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(&path).expect("trace content"),
+            )
+        })
+        .collect();
+    assert_eq!(traces.len(), 1, "only the owning Task opens a trace");
+    assert!(traces[0].0.contains("task_owner"));
+    assert!(traces[0].1.contains("\"sessionId\":\"child_1\""));
+}
+
+#[test]
 fn raw_plan_validation_rejects_the_whole_snapshot_when_one_entry_is_malformed() {
     let valid = UntypedMessage::new(
         "session/update",

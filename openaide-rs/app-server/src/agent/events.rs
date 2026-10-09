@@ -82,6 +82,14 @@ pub struct AgentNativeSubagentSpawned {
     pub details: Vec<AgentNativeSubagentDetail>,
 }
 
+/// Recognized Agent metadata learned after the announcement, such as the model
+/// a child resolved to. Each detail replaces the stored one with the same label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentDetailsUpdate {
+    pub native_session_id: String,
+    pub details: Vec<AgentNativeSubagentDetail>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentNativeSubagentCapabilities {
     pub cancel: bool,
