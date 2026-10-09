@@ -1,6 +1,7 @@
 import { Archive, ArrowLeft } from "lucide-react";
 import { useRef, useState } from "react";
 import type { TaskArchiveOlderCutoff, TaskArchiveOlderResult } from "@openaide/app-server-client";
+import { TaskStateSpinner } from "./TaskStateSpinner";
 
 export type ArchiveOlderTasksAction = (
   cutoff: TaskArchiveOlderCutoff,
@@ -125,7 +126,7 @@ export function SidebarArchiveOlderMenu({
       </button>
     ) : state.kind === "applying" ? (
       <button className="archive-older-confirm" disabled type="button" role="menuitem">
-        <span className="task-state-spinner" />Archiving…
+        <TaskStateSpinner />Archiving…
       </button>
     ) : null}
   </>;

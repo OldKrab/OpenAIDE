@@ -5,6 +5,7 @@ import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { PopupMenu } from "./Popup";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
+import { TaskStateSpinner } from "./TaskStateSpinner";
 import { nativeSessionTitle, relativeTime } from "./taskSurfaceHelpers";
 import { AgentHistoryPreviewDetails, useSidebarTaskPreview } from "./SidebarTaskPreview";
 import {
@@ -291,7 +292,7 @@ export function SidebarNativeSessionRow({
               role="status"
               title={forkMutation.error}
             >
-              {forkMutation.state === "pending" ? <span className="task-state-spinner" />
+              {forkMutation.state === "pending" ? <TaskStateSpinner />
                 : forkMutation.state === "created" && !forkMutation.error ? <Check size={12} />
                   : <AlertCircle size={12} />}
               <span>{forkMutationLabel(forkMutation)}</span>
@@ -312,18 +313,18 @@ export function SidebarNativeSessionRow({
               className="task-trailing-indicator"
               role="img"
             >
-              <span className="task-state-spinner" />
+              <TaskStateSpinner />
             </span>
           ) : archived ? (
             <span className="native-session-archive-label">Native Session</span>
           ) : adopting ? (
             <span aria-label="Opening task" className="task-trailing-indicator" role="img" title="Opening task">
-              <span className="task-state-spinner" />
+              <TaskStateSpinner />
             </span>
           ) : session.pinned ? (
             <span aria-label="Pinned" className="task-pin-marker" role="img" title="Pinned"><Pin size={12} /></span>
           ) : pinSaving ? (
-            <span aria-label="Pinning task" className="task-trailing-indicator task-pin-pending" role="img"><span className="task-state-spinner" /></span>
+            <span aria-label="Pinning task" className="task-trailing-indicator task-pin-pending" role="img"><TaskStateSpinner /></span>
           ) : age ? (
             <span className="task-meta-age" title={`Last activity: ${timestamp}`}>
               {age}
