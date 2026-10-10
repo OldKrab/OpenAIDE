@@ -4,8 +4,9 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { stageWebPackage } from "./package-web.mjs";
+import { stageWebPackage } from "../../../scripts/package-web.mjs";
 
+// Runs with the workspace tests, after the TypeScript packages it stages are built.
 test("the staged Web package starts from its own files and omits development inputs", { timeout: 60_000 }, async (t) => {
   const fixture = mkdtempSync(path.join(tmpdir(), "openaide-web-package-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
@@ -63,7 +64,7 @@ test("the staged Web package starts from its own files and omits development inp
 
 // Real server sources and client build, with a stand-in Frontend and App Server.
 function createSourceTree(root) {
-  const repoRoot = path.resolve(import.meta.dirname, "..");
+  const repoRoot = path.resolve(import.meta.dirname, "../../..");
   for (const directory of ["apps/web", "packages/frontend/dist/assets", "deploy"]) {
     mkdirSync(path.join(root, directory), { recursive: true });
   }
