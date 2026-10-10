@@ -414,6 +414,8 @@ fn connection_context_with_trace(
         trace,
         current_prompts: Arc::default(),
         load_replay,
+        active_session_ids: Arc::default(),
+        early_catalogs: Default::default(),
         terminal_registry,
         session_event_sinks,
         session_traces: Arc::default(),
@@ -766,7 +768,7 @@ fn notification_handler_traces_and_forwards_unmatched_updates_without_retry() {
     let forwarded =
         handle_session_update_notification(notification, &None, &session_traces, &load_replay)
             .expect("unmatched update should be forwarded");
-    match unhandled_session_update(forwarded, ()) {
+    match unhandled_session_update(forwarded, (), false) {
         Handled::No { retry, .. } => assert!(!retry),
         Handled::Yes => panic!("unmatched update should not be handled"),
     }
@@ -950,4 +952,90 @@ fn session_requests_ask_the_claude_adapter_for_summarized_thinking() {
             "{agent_id}"
         );
     }
+}
+
+/// Publishes the session's commands ahead of the response that names the session.
+struct CommandsBeforeSessionResponseAgent;
+
+impl agent_client_protocol::ConnectTo<Client> for CommandsBeforeSessionResponseAgent {
+    fn connect_to(
+        self,
+        client: impl agent_client_protocol::ConnectTo<Agent>,
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
+        use crate::agent::acp_schema::{AvailableCommand, AvailableCommandsUpdate};
+
+        Agent
+            .builder()
+            .name("commands-before-session-response-test-agent")
+            .on_receive_request(
+                async move |_request: NewSessionRequest, responder, connection| {
+                    connection.send_notification(SessionNotification::new(
+                        "catalog_wire_session",
+                        SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
+                            AvailableCommand::new("review", "Review the change"),
+                        ])),
+                    ))?;
+                    responder.respond(NewSessionResponse::new("catalog_wire_session"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .connect_to(client)
+    }
+}
+
+#[test]
+fn session_start_keeps_commands_the_agent_sent_before_its_response() {
+    let logs = crate::logging::capture_test_logs();
+    let context = connection_context(HostBridge::disabled(), Arc::default());
+    let early_catalogs = context.early_catalogs.clone();
+    let initialize = InitializeResponse::new(ProtocolVersion::V1);
+
+    let update = tokio::runtime::Runtime::new().unwrap().block_on(async {
+        connect_acp_session_client(
+            CommandsBeforeSessionResponseAgent,
+            context,
+            async |connection| {
+                let open = early_catalogs.begin_open();
+                let (mut active_session, _) = start_active_session(
+                    &connection,
+                    "test-agent",
+                    "/".into(),
+                    &initialize,
+                    None,
+                    Vec::new(),
+                    None,
+                )
+                .await?;
+                open.finish(&active_session.session_id().to_string());
+                let update =
+                    tokio::time::timeout(crate::test_sync::WATCHDOG, active_session.read_update())
+                        .await
+                        .expect("the update sent before the response reaches the session")?;
+                let agent_client_protocol::SessionMessage::SessionMessage(dispatch) = update else {
+                    panic!("expected the deferred session update");
+                };
+                let agent_client_protocol::Dispatch::Notification(notification) = dispatch else {
+                    panic!("expected a session notification");
+                };
+                Ok(notification.params().clone())
+            },
+        )
+        .await
+        .unwrap()
+    });
+
+    assert_eq!(update["sessionId"], "catalog_wire_session");
+    assert_eq!(
+        update["update"]["sessionUpdate"],
+        "available_commands_update"
+    );
+    assert_eq!(update["update"]["availableCommands"][0]["name"], "review");
+    let outcomes: Vec<_> = logs
+        .snapshot()
+        .into_iter()
+        .filter(|record| record["event"] == "acp_session_catalog_update_unattached")
+        .filter(|record| record["fields"]["session_id"] == "catalog_wire_session")
+        .map(|record| record["fields"]["outcome"].clone())
+        .collect();
+    assert_eq!(outcomes, ["deferred"]);
 }

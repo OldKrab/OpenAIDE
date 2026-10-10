@@ -31,6 +31,10 @@ test("correlated timings survive while prompts, paths, arbitrary errors and URLs
     error_kind: "https://private", output_bytes: 512,
   } }, "app_server", 1000);
   assert.deepEqual(record.fields, { task_id: "task-1", request_id: "req:123", method: "task.send", duration_ms: 170, output_bytes: 512 });
+  const named = (method) => safeRecord({ timestamp_ms: 2000, event: "rpc_request_completed", fields: { method } }, "app_server", 1000).fields;
+  assert.deepEqual(named("attachment/listDirectory"), { method: "attachment/listDirectory" });
+  assert.deepEqual(named("/private/path"), {});
+  assert.deepEqual(named("https://private/a"), {});
   assert.equal(safeRecord({ timestamp_ms: 999, event: "rpc_request_completed" }, "app_server", 1000), undefined);
 });
 
