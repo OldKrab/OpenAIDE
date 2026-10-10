@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenAIDE Web App
+After=network.target
+
+[Service]
+# Adjust this path when the archive is unpacked somewhere else.
+ExecStart=%h/.local/opt/openaide-web/bin/openaide-web
+# Settings, one NAME=value per line. It must carry the login PATH: Node.js and
+# the Agents run under this service and are rarely on systemd's default PATH.
+EnvironmentFile=%h/.config/openaide-web/env
+Restart=on-failure
+RestartSec=2
+# Output goes to the journal, which owns rotation and retention.
+
+[Install]
+WantedBy=default.target

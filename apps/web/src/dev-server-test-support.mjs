@@ -1,5 +1,5 @@
 /**
- * Resolves the port a spawned Web dev shell bound, read from its listening
+ * Resolves the port a spawned Web App Shell server bound, read from its listening
  * line. Spawn the shell with `OPENAIDE_WEB_PORT=0` so the OS assigns the port
  * to the shell itself and no other process can claim it first.
  */
@@ -11,7 +11,7 @@ export function listeningPort(child) {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
-      const listening = /dev shell listening on http:\/\/[^\s:]+:(\d+)\r?\n/.exec(stdout);
+      const listening = / listening on http:\/\/[^\s:]+:(\d+)\r?\n/.exec(stdout);
       if (listening) resolve(Number(listening[1]));
     });
     child.stderr.on("data", (chunk) => {

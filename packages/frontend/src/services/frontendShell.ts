@@ -139,6 +139,8 @@ export type FrontendFileAcquisition =
 
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
+  /** Version of a shell installation that has no update capability to report it. */
+  appVersion?: string;
   connectionSettings?: import("./connectionSettings").ConnectionSettings;
   /** Writes text through the App Shell that owns system clipboard access. */
   clipboard?: {

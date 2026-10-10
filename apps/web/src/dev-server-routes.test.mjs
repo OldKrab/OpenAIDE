@@ -77,6 +77,13 @@ test("injects instance label and title for distinguishable deployed instances", 
 
   assert.match(injected, /<title>OpenAIDE Target<\/title>/);
   assert.match(injected, /data-instance-label="Target"/);
+  assert.doesNotMatch(injected, /data-app-version/);
+});
+
+test("injects the installed version for the Settings surface", () => {
+  const html = '<html><body><div id="root"></div></body></html>';
+
+  assert.match(injectBootstrap(html, webRoute("/"), { version: '1.2.3"' }), /data-app-version="1\.2\.3&quot;"/);
 });
 
 test("escapes task ids before injecting route metadata", () => {

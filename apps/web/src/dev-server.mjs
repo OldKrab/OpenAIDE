@@ -1,34 +1,18 @@
-import http from "node:http";
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  APP_SERVER_HANDOFF_TIMEOUT_MS,
-  APP_SERVER_HANDOFF_MAX_LINE_BYTES,
-  parseAppServerHandoffConnection,
-} from "@openaide/app-server-client";
-import { createAppServerManager } from "./app-server-manager.mjs";
-import { createAppServerSocketProxy } from "./dev-server-app-server-socket.mjs";
-import {
-  allowedHostNamesFromEnv,
-  appServerHeaders,
-  authConfigFromEnv,
-  isAllowedBrowserOrigin,
-  isAllowedHost,
-  isAuthorized,
-  writeUnauthorized,
-} from "./dev-server-auth.mjs";
-import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
-import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
+import { injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 import { createRuntimeLogger } from "./runtime-logger.mjs";
-import { createMobileStatus } from './mobile-status.mjs';
+import { createStaticFrontend } from "./static-frontend.mjs";
+import { startWebServer, webServerEnvironment } from "./web-server.mjs";
 
+// Development entry point: serves the Frontend through Vite, or from a built
+// static root, and can route `/prototype` to a prototype Vite server.
+// TODO: the Android Termux runtime still launches this entry with a static
+// root; point it at server.mjs so packaged installs share one entry point.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const host = process.env.OPENAIDE_WEB_HOST ?? "127.0.0.1";
-const port = Number(process.env.OPENAIDE_WEB_PORT ?? "5174");
+const environment = webServerEnvironment();
 const vitePort = Number(process.env.OPENAIDE_WEB_VITE_PORT ?? "5173");
 const prototypePort = process.env.OPENAIDE_WEB_PROTOTYPE_PORT
   ? Number(process.env.OPENAIDE_WEB_PROTOTYPE_PORT)
@@ -36,38 +20,11 @@ const prototypePort = process.env.OPENAIDE_WEB_PROTOTYPE_PORT
 const staticRoot = process.env.OPENAIDE_WEB_STATIC_ROOT
   ? path.resolve(process.env.OPENAIDE_WEB_STATIC_ROOT)
   : undefined;
-const stateRoot = path.resolve(process.env.OPENAIDE_WEB_STATE_ROOT ?? path.join(repoRoot, ".openaide-web-dev", "state"));
-const runtimeRoot = path.resolve(process.env.OPENAIDE_WEB_RUNTIME_ROOT ?? path.join(repoRoot, ".openaide-web-dev", "runtime"));
-const appServerPath = path.resolve(
-  process.env.OPENAIDE_APP_SERVER_PATH
-    ?? process.env.OPENAIDE_RUNTIME_PATH
-    ?? path.join(repoRoot, "target", "debug", "openaide-app-server"),
-);
-const allowedHosts = allowedHostNamesFromEnv(process.env.OPENAIDE_WEB_ALLOWED_HOSTS);
-const authConfig = authConfigFromEnv();
-const instanceLabel = process.env.OPENAIDE_WEB_INSTANCE_LABEL?.trim();
-const webPresentation = {
-  // HTTP remains selectable for a network path that cannot carry WebSockets.
-  appServerTransport: process.env.OPENAIDE_WEB_TRANSPORT === "http" ? "http" : "webSocket",
-  instanceLabel,
-  title: process.env.OPENAIDE_WEB_TITLE?.trim() || (instanceLabel ? `OpenAIDE ${instanceLabel}` : "OpenAIDE"),
-};
 const logger = createRuntimeLogger("openaide-web-server");
-// Match the App Server JSON ceiling before buffering at the Web boundary.
-// General-file uploads use the streaming path and remain exempt.
-const MAX_RPC_BODY_BYTES = 10 * 1024 * 1024;
-class RequestBodyTooLarge extends Error {}
 
 if (prototypePort !== undefined && (!Number.isInteger(prototypePort) || prototypePort < 1 || prototypePort > 65_535)) {
   throw new Error("OPENAIDE_WEB_PROTOTYPE_PORT must be a valid TCP port.");
 }
-
-if (!existsSync(appServerPath)) {
-  throw new Error(`OpenAIDE App Server not found at ${appServerPath}. Run npm run app-server:build first.`);
-}
-
-await mkdir(stateRoot, { recursive: true });
-await mkdir(runtimeRoot, { recursive: true });
 
 const vite = staticRoot ? undefined : spawn(
   process.platform === "win32" ? "npm.cmd" : "npm",
@@ -76,358 +33,45 @@ const vite = staticRoot ? undefined : spawn(
     cwd: repoRoot,
     env: {
       ...process.env,
-      OPENAIDE_VITE_ALLOWED_HOSTS: [host, ...allowedHosts].filter(Boolean).join(","),
+      OPENAIDE_VITE_ALLOWED_HOSTS: [environment.host, ...environment.allowedHosts].filter(Boolean).join(","),
     },
     stdio: ["ignore", "inherit", "inherit"],
   },
 );
 
-const appServerManager = createAppServerManager({
+await startWebServer({
+  ...environment,
+  appServerCwd: repoRoot,
+  appServerPath: path.resolve(
+    process.env.OPENAIDE_APP_SERVER_PATH
+      ?? process.env.OPENAIDE_RUNTIME_PATH
+      ?? path.join(repoRoot, "target", "debug", "openaide-app-server"),
+  ),
+  frontend: staticRoot
+    ? createStaticFrontend({ root: staticRoot, presentation: environment.presentation, logger })
+    : createViteProxy({
+        port: vitePort,
+        transformResponse: ({ body, headers, url }) => {
+          const route = webRoute(url.pathname);
+          if (route && headers["content-type"]?.includes("text/html")) {
+            body = Buffer.from(injectBootstrap(body.toString("utf8"), route, environment.presentation), "utf8");
+          }
+          return { body, headers };
+        },
+      }),
   logger,
-  readHandoffConnection,
-  spawnAppServer,
+  name: "OpenAIDE Web dev shell",
+  onShutdown: (signal) => vite?.kill(signal),
+  port: Number(process.env.OPENAIDE_WEB_PORT ?? "5174"),
+  prototype: prototypePort === undefined
+    ? undefined
+    : createViteProxy({
+        port: prototypePort,
+        unavailableMessage: "Prototype server is not running. Start it with npm run prototype:target.",
+      }),
+  runtimeRoot: path.resolve(process.env.OPENAIDE_WEB_RUNTIME_ROOT ?? path.join(repoRoot, ".openaide-web-dev", "runtime")),
+  stateRoot: path.resolve(process.env.OPENAIDE_WEB_STATE_ROOT ?? path.join(repoRoot, ".openaide-web-dev", "state")),
 });
-const mainViteProxy = createViteProxy({
-  port: vitePort,
-  transformResponse: ({ body, headers, url }) => {
-    const route = webRoute(url.pathname);
-    if (route && headers["content-type"]?.includes("text/html")) {
-      body = Buffer.from(injectBootstrap(body.toString("utf8"), route, webPresentation), "utf8");
-    }
-    return { body, headers };
-  },
-});
-const prototypeViteProxy = prototypePort === undefined
-  ? undefined
-  : createViteProxy({
-      port: prototypePort,
-      unavailableMessage: "Prototype server is not running. Start it with npm run prototype:target.",
-    });
-
-const mobileStatus = createMobileStatus(appServerManager.listTasks);
-const appServerSocketProxy = createAppServerSocketProxy({
-  startAppServer,
-  currentEndpoint() {
-    const connection = appServerManager.currentConnection();
-    const url = appServerManager.currentUrl();
-    return connection && url ? { url, authToken: connection.authToken } : undefined;
-  },
-  logger,
-});
-const server = http.createServer(async (req, res) => {
-  try {
-    if (!isAllowedHost(req.headers.host, allowedHosts)) {
-      writeText(res, 403, "Host not allowed");
-      return;
-    }
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
-    // Probes intentionally precede browser-origin auth and expose only process state.
-    if (url.pathname === "/livez") {
-      writeText(res, 200, "live");
-      return;
-    }
-    if (url.pathname === "/readyz") {
-      const ready = appServerManager.currentConnection() !== undefined;
-      if (!ready) void startAppServer().catch(() => {});
-      writeText(res, ready ? 200 : 503, ready ? "ready" : "starting");
-      return;
-    }
-    if (!isAllowedBrowserOrigin(req.headers.origin, req.headers)) {
-      writeText(res, 403, "Origin not allowed");
-      return;
-    }
-    if (!isAuthorized(req.headers, authConfig)) {
-      writeUnauthorized(res, authConfig);
-      return;
-    }
-
-    if (url.pathname === '/__openaide-mobile/status') {
-      if (req.method !== 'GET') { writeText(res, 405, 'Method not allowed'); return; }
-      const status = await mobileStatus();
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify(status));
-      return;
-    }
-    if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
-      writeFavicon(res);
-      return;
-    }
-    if (url.pathname.startsWith("/__openaide-app-server/")) {
-      await proxyAppServer(req, res, url);
-      return;
-    }
-    if (isPrototypePath(url.pathname)) {
-      if (!prototypeViteProxy) {
-        writeText(res, 404, "Not found");
-        return;
-      }
-      await prototypeViteProxy.request(req, res, url);
-      return;
-    }
-    if (staticRoot) {
-      await serveStaticFrontend(req, res, url);
-    } else {
-      await mainViteProxy.request(req, res, url);
-    }
-  } catch (error) {
-    if (error instanceof RequestBodyTooLarge) {
-      res.setHeader("connection", "close");
-      writeText(res, 413, "Request body is too large");
-    } else {
-      writeText(res, 502, error instanceof Error ? error.message : String(error));
-    }
-  }
-});
-server.on("upgrade", (req, socket, head) => {
-  try {
-    if (
-      !isAllowedHost(req.headers.host, allowedHosts)
-      || !isAllowedBrowserOrigin(req.headers.origin, req.headers)
-      || !isAuthorized(req.headers, authConfig)
-    ) {
-      socket.destroy();
-      return;
-    }
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
-    if (url.pathname.startsWith("/__openaide-app-server/")) {
-      void appServerSocketProxy(req, socket, head, url).catch(() => socket.destroy());
-      return;
-    }
-    if (isPrototypePath(url.pathname)) {
-      if (prototypeViteProxy) prototypeViteProxy.upgrade(req, socket, head, url);
-      else socket.destroy();
-      return;
-    }
-    if (staticRoot) {
-      socket.destroy();
-    } else {
-      mainViteProxy.upgrade(req, socket, head, url);
-    }
-  } catch {
-    socket.destroy();
-  }
-});
-
-server.listen(port, host, () => {
-  // Port 0 leaves the choice to the OS, so report the port actually bound.
-  const boundPort = server.address().port;
-  console.log(`OpenAIDE Web dev shell listening on http://${host}:${boundPort}`);
-  logger.info("web_server_listening", { port: boundPort, host });
-  if (authConfig.enabled) {
-    console.log("OpenAIDE Web authentication is enabled.");
-  } else {
-    console.log("Protect public routes with authentication before exposing this server.");
-  }
-});
-
-// Asset serving and liveness do not depend on product-state recovery. The manager
-// coalesces this eager attempt with the first protocol request and permits retry.
-void startAppServer().catch(() => {});
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.once(signal, () => shutdown(signal));
-}
-
-function shutdown(signal) {
-  server.close();
-  vite?.kill(signal);
-  appServerManager.currentProcess()?.kill(signal);
-  process.exit(signal === "SIGINT" ? 130 : 143);
-}
-
-async function serveStaticFrontend(req, res, url) {
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    writeText(res, 405, "Method not allowed");
-    return;
-  }
-  const route = webRoute(url.pathname);
-  const filePath = route
-    ? path.join(staticRoot, "index.html")
-    : safeStaticPath(staticRoot, url.pathname);
-  if (!filePath) {
-    writeText(res, 404, "Not found");
-    return;
-  }
-  let fileStat;
-  try {
-    fileStat = await stat(filePath);
-  } catch {
-    writeText(res, 404, "Not found");
-    return;
-  }
-  if (!fileStat.isFile()) {
-    writeText(res, 404, "Not found");
-    return;
-  }
-  const headers = {
-    "content-type": contentType(filePath),
-    "cache-control": "no-store, max-age=0, must-revalidate",
-    pragma: "no-cache",
-    expires: "0",
-  };
-  if (route && headers["content-type"].startsWith("text/html")) {
-    const html = await import("node:fs/promises").then((fs) => fs.readFile(filePath, "utf8"));
-    const body = Buffer.from(injectBootstrap(html, route, webPresentation), "utf8");
-    headers["content-length"] = String(body.byteLength);
-    res.writeHead(200, headers);
-    if (req.method === "HEAD") res.end();
-    else res.end(body);
-    return;
-  }
-  headers["content-length"] = String(fileStat.size);
-  res.writeHead(200, headers);
-  if (req.method === "HEAD") {
-    res.end();
-    return;
-  }
-  createReadStream(filePath).pipe(res);
-}
-
-async function proxyAppServer(req, res, url) {
-  const requestId = `web-proxy-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const connectionId = typeof req.headers["x-openaide-connection-id"] === "string"
-    ? req.headers["x-openaide-connection-id"]
-    : undefined;
-  const transportRoute = appServerTransportRoute(req.method, url.pathname);
-  const isUpload = transportRoute?.kind === "upload";
-  const isReliablePoll = req.method === "GET"
-    && transportRoute === undefined
-    && typeof req.headers["x-openaide-session-id"] === "string";
-  const transportOperationKind = isReliablePoll
-    ? "receive"
-    : transportRoute?.kind ?? "rpc";
-  const startedAt = Date.now();
-  if (req.method !== "GET" && req.method !== "POST" && req.method !== "OPTIONS") {
-    writeText(res, 405, "Method not allowed");
-    return;
-  }
-  if (!isReliablePoll) {
-    logger.info("web_proxy_request_started", {
-      request_id: requestId,
-      connection_id: connectionId,
-      method: req.method,
-      route: url.pathname,
-      transport_operation_kind: transportOperationKind,
-    });
-  }
-  try {
-    await startAppServer();
-    const body = req.method === "POST" && !isUpload ? await readRequestBody(req) : Buffer.alloc(0);
-    // An ambiguous proxy failure may happen after App Server acceptance. Only the
-    // sequenced client transport may retry the identical frame; the proxy must
-    // never manufacture a second application delivery.
-    await forwardAppServerRequest(req, res, url, body, transportRoute);
-    if (!isReliablePoll || res.statusCode !== 204) {
-      logger.info("web_proxy_request_completed", {
-        request_id: requestId,
-        connection_id: connectionId,
-        method: req.method,
-        route: url.pathname,
-        transport_operation_kind: transportOperationKind,
-        http_status: res.statusCode,
-        body_bytes: body.byteLength,
-        duration_ms: Date.now() - startedAt,
-      });
-    }
-  } catch (error) {
-    logger.warn("web_proxy_request_failed", {
-      request_id: requestId,
-      connection_id: connectionId,
-      method: req.method,
-      route: url.pathname,
-      transport_operation_kind: transportOperationKind,
-      duration_ms: Date.now() - startedAt,
-      error_kind: error instanceof Error && error.name ? error.name : typeof error,
-    });
-    throw error;
-  }
-}
-
-function forwardAppServerRequest(req, res, url, body, transportRoute) {
-  const appServerConnection = appServerManager.currentConnection();
-  const appServerUrl = appServerManager.currentUrl();
-  if (!appServerConnection || !appServerUrl) {
-    return Promise.reject(new Error("App Server connection is not ready"));
-  }
-  return new Promise((resolve, reject) => {
-    const isUpload = transportRoute?.kind === "upload";
-    const contentLength = isUpload ? Number(req.headers["content-length"] ?? 0) : body.byteLength;
-    const headers = appServerHeaders(req.headers, appServerUrl.host, appServerConnection.authToken, contentLength);
-    const appServerPath = transportRoute
-      ? `${appServerUrl.pathname.replace(/\/$/, "")}/${transportRoute.appServerSuffix}`
-      : appServerUrl.pathname;
-    const proxyReq = http.request({
-      hostname: appServerUrl.hostname,
-      port: Number(appServerUrl.port),
-      path: appServerPath + url.search,
-      method: req.method,
-      headers,
-    }, (proxyRes) => {
-      if (!pendingResponse.handoff()) {
-        proxyRes.destroy();
-        return;
-      }
-      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-      pipeProxyResponse(proxyRes, res).then(resolve, reject);
-    });
-    const pendingResponse = watchPendingProxyResponse(proxyReq, res);
-    void pendingResponse.cancelled.then(resolve);
-    proxyReq.on("error", (error) => {
-      pendingResponse.handoff();
-      reject(error);
-    });
-    if (isUpload) req.pipe(proxyReq);
-    else proxyReq.end(body);
-  });
-}
-
-async function startAppServer() {
-  await appServerManager.startAppServer();
-}
-
-function spawnAppServer() {
-  const {
-    OPENAIDE_PROJECT_ROOTS: _projectRoots,
-    ...baseEnv
-  } = process.env;
-  const webProjectRoots = process.env.OPENAIDE_WEB_PROJECT_ROOTS;
-  return spawn(appServerPath, [], {
-    cwd: repoRoot,
-    env: {
-      ...baseEnv,
-      ...(webProjectRoots ? { OPENAIDE_PROJECT_ROOTS: webProjectRoots } : {}),
-      OPENAIDE_STORAGE_ROOT: stateRoot,
-      OPENAIDE_RUNTIME_ROOT: runtimeRoot,
-      OPENAIDE_APP_SERVER_PROTOCOL: "app-server-handoff",
-    },
-    stdio: ["pipe", "pipe", "inherit"],
-  });
-}
-
-function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    if (Number(req.headers["content-length"]) > MAX_RPC_BODY_BYTES) {
-      reject(new RequestBodyTooLarge());
-      return;
-    }
-    const chunks = [];
-    let bytes = 0;
-    req.on("data", (chunk) => {
-      bytes += chunk.byteLength;
-      if (bytes > MAX_RPC_BODY_BYTES) {
-        // Stop retaining chunks immediately; the 413 response closes the
-        // connection, including requests sent with chunked transfer encoding.
-        chunks.length = 0;
-        req.pause();
-        reject(new RequestBodyTooLarge());
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.once("end", () => resolve(Buffer.concat(chunks)));
-    req.once("error", reject);
-  });
-}
 
 function viteArgs() {
   const args = ["--host", "127.0.0.1", "--port", String(vitePort)];
@@ -435,105 +79,4 @@ function viteArgs() {
     args.push("--config", process.env.OPENAIDE_VITE_CONFIG);
   }
   return args;
-}
-
-function safeStaticPath(root, requestPath) {
-  const decoded = decodeURIComponent(requestPath);
-  const normalized = path.normalize(decoded).replace(/^(\.\.[/\\])+/, "");
-  const relative = normalized.replace(/^[/\\]+/, "");
-  const filePath = path.resolve(root, relative || "index.html");
-  if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) return undefined;
-  return filePath;
-}
-
-function contentType(filePath) {
-  switch (path.extname(filePath).toLowerCase()) {
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-      return "text/javascript; charset=utf-8";
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml";
-    case ".png":
-      return "image/png";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".ico":
-      return "image/x-icon";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-function writeText(res, status, text) {
-  res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
-  res.end(text);
-}
-
-function isPrototypePath(pathname) {
-  return pathname === "/prototype" || pathname.startsWith("/prototype/");
-}
-
-function writeFavicon(res) {
-  const body = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <g transform="translate(4 4) scale(2.333333)" color="#4d9cff">
-    <path d="M12 2V7M12 17V22M2 12H7M17 12H22" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="square" stroke-linejoin="bevel"/>
-    <path d="M4.2 4.2L7.8 7.8M16.2 7.8L19.8 4.2M16.2 16.2L19.8 19.8M7.8 16.2L4.2 19.8" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="square" stroke-linejoin="bevel"/>
-    <path d="M12 7L17 12L12 17L7 12L12 7Z" fill="currentColor"/>
-  </g>
-</svg>`, "utf8");
-  res.writeHead(200, {
-    "content-type": "image/svg+xml; charset=utf-8",
-    "cache-control": "no-store, max-age=0, must-revalidate",
-    "content-length": String(body.byteLength),
-  });
-  res.end(body);
-}
-
-
-function readHandoffConnection(child) {
-  return new Promise((resolve, reject) => {
-    let buffer = "";
-    const cleanup = () => {
-      clearTimeout(timeout);
-      child.stdout.off("data", onData);
-      child.off("exit", onExit);
-      child.off("error", fail);
-    };
-    const fail = (error) => {
-      cleanup();
-      reject(error);
-    };
-    const onExit = () => fail(new Error("App Server exited before handoff"));
-    const onData = (chunk) => {
-      buffer += chunk.toString("utf8");
-      if (Buffer.byteLength(buffer, "utf8") > APP_SERVER_HANDOFF_MAX_LINE_BYTES) {
-        fail(new Error("App Server handoff connection info is too large"));
-        return;
-      }
-      const newline = buffer.indexOf("\n");
-      if (newline < 0) return;
-      // Parse errors occur in a stream callback, outside the Promise executor.
-      // Reject the handoff so the manager can clean up and offer a later retry.
-      try {
-        const connection = parseAppServerHandoffConnection(buffer.slice(0, newline));
-        cleanup();
-        resolve(connection);
-      } catch (error) {
-        fail(error);
-      }
-    };
-    const timeout = setTimeout(
-      () => fail(new Error("App Server handoff timed out")),
-      APP_SERVER_HANDOFF_TIMEOUT_MS,
-    );
-    child.stdout.on("data", onData);
-    child.once("exit", onExit);
-    child.once("error", fail);
-  });
 }

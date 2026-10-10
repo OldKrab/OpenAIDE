@@ -4,6 +4,7 @@ import {
   Bug,
   Check,
   Folder,
+  Info,
   Keyboard,
   Laptop,
   Moon,
@@ -134,11 +135,15 @@ export function DataSupportSettingsTab({
   runtimeSettings?: RuntimeSettingsResult;
 }) {
   const developerSettings = runtimeSettings?.developer;
+  const appVersion = currentFrontendShell()?.appVersion;
 
   return (
     <div className="general-settings-panel">
       <GeneralSection id="settings-data-support" label="Support">
         <div className="general-preference-surface">
+          {appVersion ? (
+            <GeneralPreferenceRow action={null} detail={`Version ${appVersion}`} icon={<Info size={17} />} label="OpenAIDE" />
+          ) : null}
           <GeneralPreferenceRow action={<SupportExportButton connection={backendConnection} openRequestKey={supportExportRequestKey} />} detail="Export diagnostics, Agent sessions, and raw traces for troubleshooting." icon={<Bug size={17} />} label="Diagnostics" />
         </div>
       </GeneralSection>

@@ -6,7 +6,7 @@ on:
       artifacts:
         description: Artifact family to build
         type: choice
-        options: [all, vsix, desktop]
+        options: [all, vsix, desktop, web]
         default: all
         required: true
       version:
@@ -33,7 +33,7 @@ on:
   workflow_call:
     inputs:
       artifacts:
-        description: Artifact family to build (all, vsix, or desktop)
+        description: Artifact family to build (all, vsix, desktop, or web)
         type: string
         default: all
         required: false
@@ -80,6 +80,7 @@ jobs:
       vsix_darwin_arm64: ${{ steps.build.outputs.vsix_darwin_arm64 }}
       desktop_win32_x64: ${{ steps.build.outputs.desktop_win32_x64 }}
       desktop_darwin_arm64: ${{ steps.build.outputs.desktop_darwin_arm64 }}
+      web_linux_x64: ${{ steps.build.outputs.web_linux_x64 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -193,3 +194,12 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
       artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
       enable_windows_updates: false
+
+  web-linux-x64:
+    if: needs.prepare.outputs.web_linux_x64 == 'true'
+    needs: [prepare, server-linux-x64-musl]
+    uses: ./.github/workflows/package-web-target.yml
+    with:
+      target: linux-x64
+      version: ${{ needs.prepare.outputs.version }}
+      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}

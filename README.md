@@ -10,9 +10,9 @@ run fails or is interrupted, and OpenAIDE does not silently retry actions that
 may have changed your files.
 
 OpenAIDE is published as a Desktop App for Windows x64 and macOS Apple Silicon,
-and as a packaged VS Code extension. A local Web App is also available when
-building from source. Every App Shell uses the same Rust App Server and shared
-Frontend. A Mobile App Shell is planned but is not included today.
+as a packaged VS Code extension, and as a self-hosted Web App for Linux x64.
+Every App Shell uses the same Rust App Server and shared Frontend. A Mobile App
+Shell is planned but is not included today.
 
 ## Agents
 
@@ -72,8 +72,8 @@ storage and reuses it on later launches. This initial install requires Node.js,
 npm, and network access. The built-in Codex Agent never uses a `codex-acp`
 executable from `PATH`; register a Custom Agent to use a different build.
 
-Each VSIX bundles the matching App Server executable. Standalone App Server,
-Web App archive, and container artifacts are not currently published.
+Each VSIX bundles the matching App Server executable. Standalone App Server
+and container artifacts are not currently published.
 
 ## Install the Desktop App
 
@@ -106,6 +106,16 @@ to Trash on macOS. Uninstalling does not remove saved user data or project files
 
 See the [privacy policy](PRIVACY.md) for local storage and network behavior and
 the [code signing policy](CODE_SIGNING.md) for release trust and verification.
+
+## Install the Web App
+
+The Web App is a single-user server for Linux x64: it serves OpenAIDE to a
+browser and runs Agents on the machine it is installed on. Download
+`openaide-web-linux-x64-VERSION.tar.gz` from
+[GitHub Releases](https://github.com/OldKrab/OpenAIDE/releases) and follow the
+[installation guide](deploy/web/README.md), which covers the systemd service,
+remote access through an authenticating HTTPS proxy, data location, and
+upgrades. Node.js 24 or newer is required.
 
 ## Build from source
 
