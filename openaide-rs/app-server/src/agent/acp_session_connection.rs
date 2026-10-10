@@ -9,6 +9,7 @@ use agent_client_protocol::{
 use serde::Deserialize;
 
 use crate::agent::acp_background_work::{route_async_task_update, AsyncTaskRouting};
+use crate::agent::acp_early_session_catalogs::EarlySessionCatalogs;
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
 };
@@ -20,12 +21,19 @@ use crate::agent::acp_tool_call_projection::tool_status_name;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::host::HostBridge;
 
+pub(super) type AcpActiveSessionIds =
+    std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>;
+
 pub(super) struct AcpSessionConnectionContext {
     pub(super) agent_id: String,
     pub(super) host_bridge: HostBridge,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) current_prompts: crate::agent::acp_host_capabilities::AcpSessionPromptMap,
     pub(super) load_replay: LoadReplayCaptures,
+    /// Sessions this connection has attached. It tells an update for a session that is
+    /// still opening from one a session worker will receive.
+    pub(super) active_session_ids: AcpActiveSessionIds,
+    pub(super) early_catalogs: EarlySessionCatalogs,
     pub(super) terminal_registry: AcpHostTerminalRegistry,
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
     pub(super) session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap,
@@ -45,6 +53,9 @@ where
     AgentTransport: ConnectTo<Client>,
 {
     let notification_session_traces = context.session_traces.clone();
+    let notification_agent_id = context.agent_id.clone();
+    let notification_active_session_ids = context.active_session_ids;
+    let notification_early_catalogs = context.early_catalogs;
     let host_capabilities = AcpHostCapabilityHandlers::new(AcpHostCapabilityContext {
         agent_id: context.agent_id,
         host_bridge: context.host_bridge,
@@ -129,7 +140,14 @@ where
                         return Ok(Handled::Yes);
                     }
                 };
-                Ok(unhandled_session_update(notification, cx))
+                // Child sessions were routed above; only a root session can be opening.
+                let retry = defer_catalog_update_for_unattached_session(
+                    &notification_agent_id,
+                    &notification,
+                    &notification_active_session_ids,
+                    &notification_early_catalogs,
+                );
+                Ok(unhandled_session_update(notification, cx, retry))
             },
             agent_client_protocol::on_receive_notification!(),
         )
@@ -426,6 +444,45 @@ fn handle_session_update_notification(
     Some(notification)
 }
 
+/// An Agent may publish a session's catalogs before this client finishes attaching the
+/// session it just opened. No session handler consumes such an update yet. Returns whether
+/// the dispatch loop should defer it for that handler, and records every update that is lost.
+fn defer_catalog_update_for_unattached_session(
+    agent_id: &str,
+    notification: &SessionNotification,
+    active_session_ids: &AcpActiveSessionIds,
+    early_catalogs: &EarlySessionCatalogs,
+) -> bool {
+    let update_kind = match &notification.update {
+        SessionUpdate::AvailableCommandsUpdate(_) => "available_commands",
+        // The open response carries the session's options, so an early copy is not kept.
+        SessionUpdate::ConfigOptionUpdate(_) => "config_options",
+        _ => return false,
+    };
+    let session_id = notification.session_id.to_string();
+    if active_session_ids
+        .lock()
+        .expect("ACP active session id set poisoned")
+        .contains(&session_id)
+    {
+        return false;
+    }
+    let deferred =
+        update_kind == "available_commands" && early_catalogs.defer_commands(&session_id);
+    let fields = serde_json::json!({
+        "agent_id": agent_id,
+        "session_id": session_id,
+        "update_kind": update_kind,
+        "outcome": if deferred { "deferred" } else { "dropped" },
+    });
+    if deferred {
+        crate::logging::info("acp_session_catalog_update_unattached", fields);
+    } else {
+        crate::logging::warn("acp_session_catalog_update_unattached", fields);
+    }
+    deferred
+}
+
 fn log_tool_call_status_received(notification: &SessionNotification) {
     let status = match &notification.update {
         SessionUpdate::ToolCall(tool_call) => Some((
@@ -452,13 +509,16 @@ fn log_tool_call_status_received(notification: &SessionNotification) {
     );
 }
 
+/// Leaves the update to the session handlers. `retry` asks the dispatch loop to hold an
+/// update none of them accepts and offer it to the next handler that is registered.
 fn unhandled_session_update<Cx>(
     notification: SessionNotification,
     cx: Cx,
+    retry: bool,
 ) -> Handled<(SessionNotification, Cx)> {
     Handled::No {
         message: (notification, cx),
-        retry: false,
+        retry,
     }
 }
 

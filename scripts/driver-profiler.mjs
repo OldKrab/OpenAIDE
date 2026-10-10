@@ -35,7 +35,9 @@ export function safeRecord(value, source, cutoff) {
     timestamp_ms: timestamp, source, event: value.event,
     fields: Object.fromEntries(Object.entries(value.fields ?? {}).filter(([key, item]) =>
       fields.has(key) && (typeof item === "number" && Number.isFinite(item) || typeof item === "boolean"
-        || typeof item === "string" && /^[a-zA-Z0-9_.:-]{1,160}$/.test(item) && !item.includes("@")),
+        || typeof item === "string" && /^[a-zA-Z0-9_.:-]{1,160}$/.test(item) && !item.includes("@")
+        // Protocol method names are `namespace/name`; only that shape may carry a slash.
+        || key === "method" && typeof item === "string" && /^[a-zA-Z]{1,40}(\/[a-zA-Z]{1,60}){1,2}$/.test(item)),
     )),
   };
 }

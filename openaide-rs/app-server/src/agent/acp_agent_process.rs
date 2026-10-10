@@ -9,12 +9,12 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
+use crate::agent::acp_early_session_catalogs::EarlySessionCatalogs;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
 use crate::agent::acp_process_diagnostics::acp_connection_terminal_diagnostics;
 use crate::agent::acp_process_lifetime::AcpProcessLifetime;
-use crate::agent::acp_schema::{CloseSessionRequest, ForkSessionRequest};
-use crate::agent::acp_session_capabilities::validate_session_fork_capabilities;
+use crate::agent::acp_session_fork::fork_session_on_shared_process;
 use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connection};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::{
@@ -182,6 +182,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     let current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>> = Arc::default();
     let load_replay: Arc<Mutex<HashMap<String, LoadReplayCapture>>> = Arc::default();
     let active_session_ids: Arc<Mutex<HashSet<String>>> = Arc::default();
+    let early_catalogs = EarlySessionCatalogs::default();
     let session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap =
         Arc::default();
     let native_subagents = crate::agent::acp_native_subagents::AcpNativeSubagentRouter::new(
@@ -238,6 +239,8 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         trace: first_open.as_ref().and_then(|open| open.trace.clone()),
         current_prompts: current_prompts.clone(),
         load_replay: load_replay.clone(),
+        active_session_ids: active_session_ids.clone(),
+        early_catalogs: early_catalogs.clone(),
         terminal_registry: terminal_registry.clone(),
         session_event_sinks: session_event_sinks.clone(),
         session_traces: session_traces.clone(),
@@ -307,6 +310,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     &current_prompts,
                     &load_replay,
                     &active_session_ids,
+                    &early_catalogs,
                     &connection_terminal_registry,
                     &session_event_sinks,
                     &session_traces,
@@ -341,6 +345,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                             &current_prompts,
                             &load_replay,
                             &active_session_ids,
+                            &early_catalogs,
                             &connection_terminal_registry,
                             &session_event_sinks,
                             &session_traces,
@@ -523,56 +528,6 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     result
 }
 
-async fn fork_session_on_shared_process(
-    connection: &ConnectionTo<Agent>,
-    initialize: &InitializeResponse,
-    request: AgentSessionFork,
-) -> Result<AgentForkedSession, RuntimeError> {
-    validate_session_fork_capabilities(initialize)?;
-    let mcp_servers = match request.secret_resolver {
-        Some(resolver) => {
-            resolver.resolve_mcp_servers(&initialize.agent_capabilities.mcp_capabilities)?
-        }
-        None => Vec::new(),
-    };
-    let started_at = Instant::now();
-    logging::info(
-        "acp_session_fork_started",
-        serde_json::json!({
-            "agent_id": request.agent_id,
-            "source_session_id": request.source_session_id,
-        }),
-    );
-    let response = connection
-        .send_request(
-            ForkSessionRequest::new(request.source_session_id.clone(), request.cwd)
-                .mcp_servers(mcp_servers),
-        )
-        .block_task()
-        .await
-        .map_err(acp_error)?;
-    let session_id = response.session_id.to_string();
-    let close_warning = connection
-        .send_request(CloseSessionRequest::new(response.session_id))
-        .block_task()
-        .await
-        .is_err();
-    logging::info(
-        "acp_session_fork_completed",
-        serde_json::json!({
-            "agent_id": request.agent_id,
-            "source_session_id": request.source_session_id,
-            "forked_session_id": session_id,
-            "duration_ms": started_at.elapsed().as_millis(),
-            "close_warning": close_warning,
-        }),
-    );
-    Ok(AgentForkedSession {
-        session_id,
-        close_warning,
-    })
-}
-
 async fn list_sessions_on_shared_process(
     connection: &ConnectionTo<Agent>,
     initialize: &InitializeResponse,
@@ -680,6 +635,7 @@ async fn open_on_shared_process(
     current_prompts: &Arc<Mutex<HashMap<String, LivePromptProjection>>>,
     load_replay: &Arc<Mutex<HashMap<String, LoadReplayCapture>>>,
     active_session_ids: &Arc<Mutex<HashSet<String>>>,
+    early_catalogs: &EarlySessionCatalogs,
     terminal_registry: &AcpHostTerminalRegistry,
     session_event_sinks: &crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
     session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
@@ -702,6 +658,7 @@ async fn open_on_shared_process(
     let terminal_owner = terminal_registry.owner(terminal_owner_id);
     let request_agent_id = request.agent_id().to_string();
     let start_error_tx = started_tx.clone();
+    let early_open = early_catalogs.begin_open();
     let opened = match open_acp_session(OpenAcpSessionContext {
         connection,
         initialize: Some(initialize.clone()),
@@ -723,6 +680,7 @@ async fn open_on_shared_process(
         }
     };
     let started_session = opened.started_session.clone();
+    early_open.finish(&started_session.session_id);
     let replayed_messages = opened.replayed_messages.clone();
     let session_id = started_session.session_id.clone();
     terminal_owner.activate_session(&session_id);
