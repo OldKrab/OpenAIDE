@@ -1,4 +1,4 @@
-import { Battery, Bell, Bug, Laptop, RefreshCcw, Smartphone } from "lucide-react";
+import { Battery, Bell, Bug, Laptop, QrCode, RefreshCcw, Smartphone } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ConnectionCommand, ConnectionSettings } from "../../services/connectionSettings";
 import { GeneralPreferenceRow, GeneralSection, SettingsSwitch } from "./GeneralSettingsTab";
@@ -7,10 +7,8 @@ import "./ConnectionSettingsTab.css";
 
 export function ConnectionSettingsTab({ capability }: { capability: ConnectionSettings }) {
   const state = useSyncExternalStore(capability.subscribe, capability.snapshot, capability.snapshot);
-  const [destination, setDestination] = useState<"local" | "remote">("local");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
-  const initialized = useRef(false);
   const mounted = useRef(true);
   const busy = sending || Boolean(state?.busy);
   const execute = async (command: ConnectionCommand) => {
@@ -26,12 +24,6 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
     void execute({ action: "state" });
     return () => { mounted.current = false; };
   }, [capability]);
-  useEffect(() => {
-    if (!state || initialized.current) return;
-    initialized.current = true;
-    setDestination(state.remote ? "remote" : "local");
-  }, [state]);
-
   const button = (label: string, command: ConnectionCommand) => (
     <button type="button" className="settings-secondary-button" disabled={busy} onClick={() => { void execute(command); }}>{label}</button>
   );
@@ -43,47 +35,36 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
   const needsTools = checks && ["node", "nodeVersion", "git", "npm", "codex", "runtime", "frontend", "supervisor"].some(key => !checks[key]);
   return (
     <div className="general-settings-panel" aria-busy={busy}>
-      <GeneralSection id="settings-connection-workspace" label="Workspace" description="Choose where agents run. Your projects and conversations stay on that device.">
-        <div className="desktop-runtime-settings">
-          <div className="desktop-runtime-choices connection-runtime-choices" role="radiogroup" aria-label="Where agents run" onKeyDown={event => {
-            if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) || busy) return;
-            event.preventDefault();
-            const next = event.key === "Home" ? "local" : event.key === "End" ? "remote" : destination === "local" ? "remote" : "local";
-            setDestination(next);
-            event.currentTarget.querySelectorAll<HTMLButtonElement>("button")[next === "local" ? 0 : 1]?.focus();
-          }}>
-            {(["local", "remote"] as const).map(choice => (
-              <button key={choice} type="button" role="radio" aria-checked={destination === choice} tabIndex={destination === choice ? 0 : -1} className={destination === choice ? "selected" : ""} disabled={busy} onClick={() => setDestination(choice)}>
-                <span className="desktop-runtime-choice-icon">{choice === "local" ? <Smartphone size={17} /> : <Laptop size={17} />}</span>
-                <span className="desktop-runtime-choice-copy"><strong>{choice === "local" ? "This phone" : "Remote computer"}</strong><small>{choice === "local" ? "Run agents in Termux" : state.paired ? state.computer || "Paired computer" : "Pair with OpenAIDE on your computer"}</small></span>
-                {state.remote === (choice === "remote") ? <span className="desktop-runtime-active">Connected</span> : null}
-              </button>
-            ))}
-          </div>
-          {destination === "local" ? (
-            <>
-              <InlineNotice message={state.remote ? "Switch to the projects and conversations stored on this phone. Remote work is not stopped." : "OpenAIDE starts Termux when needed. No manual launch required."} />
-              {state.remote ? <div>{button("Connect to this phone", { action: "local" })}</div> : null}
-            </>
-          ) : (
-            <>
-              {state.paired ? (
-                <div className="general-preference-surface">
-                  <GeneralPreferenceRow label={state.computer || "Paired computer"} icon={<Laptop size={17} />}
-                    detail={state.remote ? "This phone is connected to this computer." : "This phone is still trusted by this computer."}
-                    action={state.remote ? button("Forget", { action: "forget" }) : button("Connect to computer", { action: "paired" })} />
-                </div>
-              ) : null}
-              <div>{button(state.paired ? "Pair with another computer" : "Pair with a computer", { action: "pair_setup" })}</div>
-              <InlineNotice message={state.paired
-                ? "Forgetting stops this phone from connecting. To end the computer’s trust in this phone, remove it in Settings → Devices on the computer."
-                : "No account or password. On your computer, open Settings → Devices and choose Show code, then scan it with this phone."} />
-            </>
-          )}
+      <GeneralSection id="settings-connection-workspace" label="Connected to" description="Your projects and conversations stay on the device where agents run.">
+        <div className="general-preference-surface connection-current">
+          <GeneralPreferenceRow label={state.remote ? state.computer || "Remote computer" : "This phone"}
+            icon={state.remote ? <Laptop size={17} /> : <Smartphone size={17} />}
+            detail={state.remote ? "Work runs on your computer, even when your phone is locked." : "Agents run in Termux on this phone. OpenAIDE starts Termux when needed."}
+            action={<span className="connection-status">Connected</span>} />
         </div>
       </GeneralSection>
 
-      {!state.remote && destination === "local" ? (
+      <GeneralSection id="settings-connection-switch" label="Switch"
+        description={state.paired ? "Forgetting a computer only stops this phone from connecting. Remove the phone in Settings → Devices on the computer to end its access." : "No account or password. On your computer, open Settings → Devices and choose Show code, then scan it with this phone."}>
+        <div className="general-preference-surface">
+          {state.remote ? (
+            <>
+              <GeneralPreferenceRow label="Use this phone" icon={<Smartphone size={17} />} detail="Switch to the projects and conversations stored on this phone. Remote work is not stopped."
+                action={button("Connect to this phone", { action: "local" })} />
+              <GeneralPreferenceRow label={`Forget ${state.computer || "this computer"}`} icon={<Laptop size={17} />} detail="Stop connecting to this computer from this phone."
+                action={button("Forget", { action: "forget" })} />
+            </>
+          ) : state.paired ? (
+            <GeneralPreferenceRow label={state.computer || "Paired computer"} icon={<Laptop size={17} />} detail="This phone is still trusted by this computer."
+              action={button("Connect to computer", { action: "paired" })} />
+          ) : null}
+          <GeneralPreferenceRow label={state.paired || state.remote ? "Pair another computer" : "Pair with a computer"} icon={<QrCode size={17} />}
+            detail="Scan or paste a code from OpenAIDE on a computer."
+            action={button(state.paired || state.remote ? "Pair another" : "Pair", { action: "pair_setup" })} />
+        </div>
+      </GeneralSection>
+
+      {!state.remote ? (
         <GeneralSection id="settings-connection-background" label="Background work">
           <div className="general-preference-surface">
             <GeneralPreferenceRow label="Continue while locked" icon={<Battery size={17} />} detail="Keep active work running when you leave the app or lock your phone. Extra protection stops when work finishes."
@@ -99,7 +80,7 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
           </div>
           {state.background && state.batterySaver ? <InlineNotice message="Battery Saver is on. Android may delay work even with background activity allowed." /> : null}
         </GeneralSection>
-      ) : state.remote && destination === "remote" ? <InlineNotice message="Remote work continues on your computer when you close OpenAIDE or lock your phone. Keep that computer awake and connected." /> : null}
+      ) : <InlineNotice message="Keep your computer awake and connected. Remote work continues there when you close OpenAIDE or lock your phone." />}
 
       <details className="general-settings-section">
         <summary className="general-settings-section-heading">Advanced</summary>

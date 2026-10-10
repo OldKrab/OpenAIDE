@@ -48,10 +48,9 @@ it("changes background protection inline using authoritative native state", asyn
 it("pairs through the setup screen and never asks for an address or password", async () => {
   const test = capability();
   const tree = await render(test);
-  act(() => tree.root.findAllByProps({ role: "radio" })[1].props.onClick());
   expect(tree.root.findAllByType("input").filter(input => input.props.type !== "checkbox")).toHaveLength(0);
   expect(test.execute).toHaveBeenCalledTimes(1);
-  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Pair with a computer"))!.props.onClick());
+  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Pair"))!.props.onClick());
   expect(test.execute).toHaveBeenLastCalledWith({ action: "pair_setup" });
   act(() => tree.unmount());
 });
@@ -59,11 +58,11 @@ it("returns to a paired computer without pairing again, and forgets the connecte
   const test = capability();
   test.update({ paired: true, computer: "Studio" });
   const tree = await render(test);
-  act(() => tree.root.findAllByProps({ role: "radio" })[1].props.onClick());
   expect(JSON.stringify(tree.toJSON())).toContain("Studio");
   await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Connect to computer"))!.props.onClick());
   expect(test.execute).toHaveBeenLastCalledWith({ action: "paired" });
   act(() => test.update({ remote: true }));
+  expect(tree.root.findByProps({ className: "connection-status" }).children).toContain("Connected");
   await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Forget"))!.props.onClick());
   expect(test.execute).toHaveBeenLastCalledWith({ action: "forget" });
   act(() => tree.unmount());
@@ -77,18 +76,10 @@ it("shows a recoverable error instead of loading forever", async () => {
   expect(tree.root.findAllByType("button").some(button => button.children.includes("Try again"))).toBe(true);
   act(() => tree.unmount());
 });
-it("offers keyboard choices without switching the live connection until Connect", async () => {
+it("switches back to this phone only when asked", async () => {
   const test = capability();
   test.update({ remote: true, paired: true, computer: "Studio" });
   const tree = await render(test);
-  const focus = vi.fn();
-  act(() => tree.root.findByProps({ role: "radiogroup" }).props.onKeyDown({ key: "ArrowLeft", preventDefault() {}, currentTarget: { querySelectorAll: () => [{ focus }, { focus }] } }));
-  const choices = tree.root.findAllByProps({ role: "radio" });
-  expect(choices[0].props["aria-checked"]).toBe(true);
-  expect(choices[0].props.tabIndex).toBe(0);
-  expect(choices[1].props.tabIndex).toBe(-1);
-  expect(choices[1].findByProps({ className: "desktop-runtime-active" }).children).toContain("Connected");
-  expect(focus).toHaveBeenCalledOnce();
   expect(test.execute).toHaveBeenCalledTimes(1);
   await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Connect to this phone"))!.props.onClick());
   expect(test.execute).toHaveBeenLastCalledWith({ action: "local" });
@@ -99,7 +90,7 @@ it("keeps phone-only tools out of remote settings", async () => {
   test.update({ remote: true, paired: true, computer: "Studio" });
   const tree = await render(test);
   const text = JSON.stringify(tree.toJSON());
-  expect(text).toContain("Remote work continues");
+  expect(text).toContain("Keep your computer awake");
   expect(text).not.toContain("Continue while locked");
   expect(text).not.toContain("Reconnect Termux");
   act(() => tree.unmount());

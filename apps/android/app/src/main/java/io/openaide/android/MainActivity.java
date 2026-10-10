@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -29,6 +30,7 @@ import android.widget.ImageView;
 import android.widget.Toast;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.net.HttpURLConnection;
@@ -97,40 +99,56 @@ public final class MainActivity extends Activity {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
-        int padding = (int) (24 * getResources().getDisplayMetrics().density);
+        int padding = dp(24);
         layout.setPadding(padding, padding * 2, padding, padding);
         layout.setBackgroundColor(shellBackground());
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.mipmap.ic_launcher);
         icon.setContentDescription("OpenAIDE");
-        layout.addView(icon, new LinearLayout.LayoutParams(padding * 4, padding * 4));
+        layout.addView(icon, centered(dp(72), dp(72), 0));
         TextView title = new TextView(this);
         title.setText("OpenAIDE");
-        title.setTextSize(30);
-        layout.addView(title);
+        title.setTextSize(24);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(shellText());
+        title.setGravity(Gravity.CENTER);
+        layout.addView(title, centered(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 16));
         TextView instructions = new TextView(this);
         instructions.setText("Your agent workspace");
         instructions.setGravity(Gravity.CENTER);
-        instructions.setTextSize(16);
-        layout.addView(instructions);
+        instructions.setTextSize(15);
+        instructions.setTextColor(shellMuted());
+        layout.addView(instructions, centered(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 4));
+        status = new TextView(this);
+        status.setTextSize(15);
+        status.setGravity(Gravity.CENTER);
+        status.setTextColor(shellMuted());
+        layout.addView(status, centered(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 32));
         connect = new Button(this);
         connect.setText("Open workspace");
         connect.setAllCaps(false);
+        connect.setTextSize(15);
+        connect.setTypeface(Typeface.DEFAULT_BOLD);
+        connect.setTextColor(shellOnAccent());
+        connect.setStateListAnimator(null);
+        android.graphics.drawable.GradientDrawable fill = new android.graphics.drawable.GradientDrawable();
+        fill.setColor(shellAccent());
+        fill.setCornerRadius(dp(10));
+        connect.setBackground(fill);
         connect.setOnClickListener(view -> requestConnection());
-        layout.addView(connect);
+        layout.addView(connect, centered(dp(240), dp(48), 24));
         setup = new Button(this);
         setup.setText("Connection settings");
         setup.setAllCaps(false);
+        setup.setTextSize(15);
+        setup.setTextColor(shellAccent());
+        setup.setStateListAnimator(null);
         setup.setBackgroundColor(Color.TRANSPARENT);
         setup.setOnClickListener(view -> {
             pendingSettings = false;
             openSetup(getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false) ? "settings" : "welcome");
         });
-        layout.addView(setup);
-        status = new TextView(this);
-        status.setTextSize(16);
-        status.setGravity(Gravity.CENTER);
-        layout.addView(status);
+        layout.addView(setup, centered(dp(240), dp(48), 8));
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(layout);
@@ -587,10 +605,25 @@ public final class MainActivity extends Activity {
         else super.onBackPressed();
     }
 
-    private int shellBackground() {
-        boolean dark = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+    private boolean darkTheme() {
+        return (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-        return dark ? 0xff1f232b : 0xfff8f9fb;
+    }
+
+    // Colors follow DESIGN.md and match the setup screens' tokens.
+    private int shellBackground() { return darkTheme() ? 0xff1f2229 : 0xfff6f7f9; }
+    private int shellText() { return darkTheme() ? 0xffe4e7ec : 0xff2a2e36; }
+    private int shellMuted() { return darkTheme() ? 0xffa7aebb : 0xff626a78; }
+    private int shellAccent() { return darkTheme() ? 0xff7fb0f5 : 0xff2f6fd0; }
+    private int shellOnAccent() { return darkTheme() ? 0xff1f2229 : 0xfffcfcfd; }
+
+    private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density); }
+
+    private LinearLayout.LayoutParams centered(int width, int height, int topMarginDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height);
+        params.gravity = Gravity.CENTER_HORIZONTAL;
+        params.topMargin = dp(topMarginDp);
+        return params;
     }
 
     @Override protected void onDestroy() {
