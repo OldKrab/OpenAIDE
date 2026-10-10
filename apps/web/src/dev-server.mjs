@@ -2,6 +2,7 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
+import inspector from "node:inspector";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -228,10 +229,38 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => shutdown(signal));
 }
 
+// Shutdown must reach process.exit even when a profiler holds the Node inspector:
+// exit would otherwise block on "Waiting for the debugger to disconnect" and leave
+// the service looking alive with no listener. The inspector is closed first.
 function shutdown(signal) {
+  const startedAt = Date.now();
+  const inspectorAttached = inspector.url() !== undefined;
+  logger.info("web_server_shutdown_started", {
+    signal,
+    uptime_ms: Math.round(process.uptime() * 1000),
+    inspector_attached: inspectorAttached,
+    vite_running: Boolean(vite),
+    app_server_running: Boolean(appServerManager.currentProcess()),
+  });
   server.close();
   vite?.kill(signal);
   appServerManager.currentProcess()?.kill(signal);
+  let inspectorCloseOutcome = "not_attached";
+  if (inspectorAttached) {
+    try {
+      inspector.close();
+      inspectorCloseOutcome = "closed";
+    } catch (error) {
+      inspectorCloseOutcome = "failed";
+      logger.warn("web_server_inspector_close_failed", { error_class: error?.name ?? "Error" });
+    }
+  }
+  logger.info("web_server_shutdown_completed", {
+    signal,
+    outcome: "exiting",
+    duration_ms: Date.now() - startedAt,
+    inspector: inspectorCloseOutcome,
+  });
   process.exit(signal === "SIGINT" ? 130 : 143);
 }
 

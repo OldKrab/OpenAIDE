@@ -96,6 +96,51 @@ test("Web survives a malformed handoff and can retry a repaired App Server", { t
   await waitUntilReady(`${origin}/readyz`, WATCHDOG_MS);
 });
 
+test("Web logs its shutdown and exits with the Node inspector enabled", { timeout: 60_000 }, async (t) => {
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), "openaide-web-shutdown-"));
+  const staticRoot = path.join(fixtureRoot, "static");
+  const fakeAppServerPath = path.join(fixtureRoot, "app-server.mjs");
+  mkdirSync(staticRoot);
+  writeFileSync(path.join(staticRoot, "index.html"), "<html><body>OpenAIDE shutdown</body></html>");
+  writeFileSync(fakeAppServerPath, '#!/usr/bin/env node\nconsole.log("invalid handoff");\n');
+  chmodSync(fakeAppServerPath, 0o755);
+
+  const webServer = spawn(process.execPath, ["--inspect=127.0.0.1:0", "src/dev-server.mjs"], {
+    cwd: new URL("..", import.meta.url),
+    env: {
+      ...process.env,
+      OPENAIDE_APP_SERVER_PATH: fakeAppServerPath,
+      OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
+      OPENAIDE_WEB_HOST: "127.0.0.1",
+      OPENAIDE_WEB_PORT: "0",
+      OPENAIDE_WEB_RUNTIME_ROOT: path.join(fixtureRoot, "runtime"),
+      OPENAIDE_WEB_STATE_ROOT: path.join(fixtureRoot, "state"),
+      OPENAIDE_WEB_STATIC_ROOT: staticRoot,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  webServer.stdout.setEncoding("utf8");
+  webServer.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  t.after(() => {
+    webServer.kill("SIGKILL");
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  await listeningPort(webServer);
+  await stopProcess(webServer);
+
+  assert.equal(webServer.exitCode, 143);
+  const events = stdout.split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+  const started = events.find((event) => event.event === "web_server_shutdown_started");
+  const completed = events.find((event) => event.event === "web_server_shutdown_completed");
+  assert.equal(started?.fields.signal, "SIGTERM");
+  assert.equal(started?.fields.inspector_attached, true);
+  assert.equal(completed?.fields.inspector, "closed");
+});
+
 function waitForOutput(child, expected) {
   return new Promise((resolve, reject) => {
     let stdout = "";
