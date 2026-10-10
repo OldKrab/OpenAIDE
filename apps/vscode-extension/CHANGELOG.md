@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.9.0 - 2026-10-10
+
+### Background work
+- Keep a Task's turn open while a background command the Agent started is still running, instead of showing the Task as idle.
+- Show a Task held by background work as Background, with its own Navigation glyph, header label, and Stop label.
+- List the running background commands in Chat and stop them one at a time; stopping the last one finishes the turn.
+- Settle a held turn after a follow-up message or a stopped command instead of leaving the Task running.
+
+### Account limits and context usage
+- Show Claude account limits as meters on the Composer corner, draining as each window is used and warning when a window drains faster than its time passes.
+- Refresh account limits when a Task opens and when the window regains focus, without waiting for a turn.
+- Show limit names and the percentage left on hover, and keep them visible on touch layouts; the details panel marks the remaining time on each bar.
+- Give the context meter the same hover readout, placed beside the Composer when there is room.
+- Show context usage on a new Task before its first prompt.
+
+### Task and Chat
+- Show a turn's duration beside Copy on its closing answer, send times on User messages on hover, and step durations on hover.
+- Show a live waiting time on pending Permissions and Questions, and how long a finished compaction took.
+- Stop replaying live text when a running Task is reopened.
+- Show slash commands on a new Task as soon as the Agent publishes them.
+- Fix New Task staying on "Connecting" after an Agent retry.
+- Spin running-task indicators in Navigation in phase.
+
+### Subagents
+- Show Agent-reported details such as agent type, model, and reasoning effort for the selected Subagent history.
+- Open a Claude Subagent history with the prompt it was delegated.
+- Keep the Main Agent scroll position while a Subagent is inspected.
+
+### Agents
+- Launch Claude Code through the OpenAIDE-maintained ACP adapter, updated to 1.5.0.
+
 ## 0.8.0 - 2026-10-06
 
 ### Task and Chat
