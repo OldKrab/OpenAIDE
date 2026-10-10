@@ -129,6 +129,7 @@ fn publish_local_http_probe_listener(
         gateway: gateway.clone(),
         shutdown,
     };
+    start_remote_device_edge(&gateway, address, endpoint.auth_token.clone());
     start_local_http_listener(
         listener,
         LocalHttpAppHandler::new(
@@ -175,6 +176,19 @@ fn start_local_http_listener(listener: LocalHttpProbeListener, handler: LocalHtt
             }
         });
     });
+}
+
+/// Remote Devices enter through the same listener as same-machine App Shells,
+/// after the edge has checked their key (ADR-0062).
+fn start_remote_device_edge(gateway: &SharedRpcGateway, address: SocketAddr, auth_token: String) {
+    let Some(devices) = gateway.remote_devices() else {
+        return;
+    };
+    let publisher = gateway.clone();
+    devices.on_changed(move || {
+        publisher.publish_device_collection_update(AppServerTime::now());
+    });
+    crate::remote_devices::edge::start(devices, address, auth_token);
 }
 
 fn local_http_error_fields(

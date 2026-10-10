@@ -101,3 +101,25 @@ fn public_enums_match_product_language() {
         json!("commonSettings")
     );
 }
+
+#[test]
+fn protocol_version_accepts_same_major_clients_up_to_its_minor() {
+    let server = ProtocolVersion { major: 2, minor: 1 };
+
+    assert!(server.accepts_client(ProtocolVersion { major: 2, minor: 0 }));
+    assert!(server.accepts_client(ProtocolVersion { major: 2, minor: 1 }));
+    assert!(!server.accepts_client(ProtocolVersion { major: 2, minor: 2 }));
+    assert!(!server.accepts_client(ProtocolVersion { major: 1, minor: 0 }));
+    assert!(!server.accepts_client(ProtocolVersion { major: 3, minor: 0 }));
+}
+
+#[test]
+fn protocol_version_round_trips_as_text_and_reads_a_bare_major() {
+    let version = ProtocolVersion { major: 2, minor: 1 };
+
+    assert_eq!(version.to_string(), "2.1");
+    assert_eq!("2.1".parse(), Ok(version));
+    assert_eq!("2".parse(), Ok(ProtocolVersion { major: 2, minor: 0 }));
+    assert!("two".parse::<ProtocolVersion>().is_err());
+    assert!("2.x".parse::<ProtocolVersion>().is_err());
+}

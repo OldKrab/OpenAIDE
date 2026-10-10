@@ -73,6 +73,8 @@ pub enum SubscriptionScope {
     WorktreeRepository {
         repository_id: WorktreeRepositoryId,
     },
+    /// The Remote Devices this App Server trusts. Every client may subscribe.
+    Devices,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -113,6 +115,9 @@ pub enum SubscriptionSnapshot {
     },
     WorktreeRepository {
         repository: WorktreeRepositorySnapshot,
+    },
+    Devices {
+        devices: crate::devices::DeviceCollectionSnapshot,
     },
 }
 

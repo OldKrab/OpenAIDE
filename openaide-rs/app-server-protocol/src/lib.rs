@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod attachment;
 pub mod client;
+pub mod devices;
 pub mod diagnostics;
 pub mod envelopes;
 pub mod errors;

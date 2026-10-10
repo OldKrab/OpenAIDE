@@ -464,6 +464,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onBackToApp={backFromSettings}
         onCreateCustomAgent={callbacks.settings.createCustomAgent}
         onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
+        deviceIntents={controller.backendConnection ? callbacks.settings.devices : undefined}
         onDeleteMcpServer={callbacks.settings.deleteMcpServer}
         onDismissError={callbacks.settings.dismissError}
         onGetMcpServerDetails={callbacks.settings.getMcpServerDetails}

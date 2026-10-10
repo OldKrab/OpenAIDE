@@ -7,6 +7,10 @@ pub(super) fn push_method_maps(output: &mut String) {
         " | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS",
     );
     output.insert_str(output.len() - ";\n".len(), " | typeof TASK_QUEUE_RESUME");
+    output.insert_str(
+        output.len() - ";\n".len(),
+        " | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE",
+    );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;\n");
     output.push_str("  [FILE_VIEWER_SEARCH]: ProjectFilesParams;\n");
@@ -54,6 +58,11 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_GET_RUNTIME]: RuntimeSettingsParams;\n");
     output.push_str("  [SETTINGS_UPDATE_RUNTIME]: RuntimeSettingsUpdateParams;\n");
     output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryParams;\n");
+    output.push_str("  [DEVICES_CREATE_INVITE]: DevicesCreateInviteParams;\n");
+    output.push_str("  [DEVICES_CANCEL_INVITE]: DevicesCancelInviteParams;\n");
+    output.push_str("  [DEVICES_PREVIEW_JOIN_REQUEST]: DevicesPreviewJoinRequestParams;\n");
+    output.push_str("  [DEVICES_APPROVE_JOIN_REQUEST]: DevicesApproveJoinRequestParams;\n");
+    output.push_str("  [DEVICES_REMOVE]: DevicesRemoveParams;\n");
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsParams;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryParams;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceParams;\n");
@@ -171,6 +180,11 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_GET_RUNTIME]: RuntimeSettingsResult;\n");
     output.push_str("  [SETTINGS_UPDATE_RUNTIME]: RuntimeSettingsResult;\n");
     output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryResult;\n");
+    output.push_str("  [DEVICES_CREATE_INVITE]: DevicesCreateInviteResult;\n");
+    output.push_str("  [DEVICES_CANCEL_INVITE]: DevicesCancelInviteResult;\n");
+    output.push_str("  [DEVICES_PREVIEW_JOIN_REQUEST]: DevicesPreviewJoinRequestResult;\n");
+    output.push_str("  [DEVICES_APPROVE_JOIN_REQUEST]: DevicesApproveJoinRequestResult;\n");
+    output.push_str("  [DEVICES_REMOVE]: DevicesRemoveResult;\n");
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsResult;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryResult;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceResult;\n");

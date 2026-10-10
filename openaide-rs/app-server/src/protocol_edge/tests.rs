@@ -71,6 +71,7 @@ use crate::tasks::product_api::{
 use super::*;
 
 mod client_probe;
+mod devices;
 
 #[test]
 fn rejects_product_request_before_initialize() {
@@ -4895,6 +4896,7 @@ pub(super) fn init_params(client_id: &str) -> InitializeParams {
             shell: Vec::new(),
         },
         workspace_roots: Vec::new(),
+        protocol_version: None,
     }
 }
 

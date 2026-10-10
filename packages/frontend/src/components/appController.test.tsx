@@ -4428,6 +4428,16 @@ function nonTaskSubscriptionSnapshot(
       },
     };
   }
+  if (scope?.kind === "devices") {
+    return {
+      cursor: cursor as never,
+      scope,
+      snapshot: {
+        kind: "devices" as const,
+        devices: { remoteAccess: "off" as const, serverName: "workstation" },
+      },
+    };
+  }
   throw new Error(`unexpected subscription scope: ${scope?.kind ?? "missing"}`);
 }
 

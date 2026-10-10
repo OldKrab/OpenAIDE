@@ -4,6 +4,7 @@ use super::runner::{EndpointProbeError, EndpointProber};
 use super::{EndpointProbeOutcome, EndpointProbeReport, EndpointRequirements, EndpointTarget};
 use crate::storage_runtime::{RuntimeEndpoint, TransportKind};
 use openaide_app_server_protocol::client::{ClientProbeLifecycle, ClientProbeResult};
+use openaide_app_server_protocol::snapshot::ProtocolVersion;
 
 pub mod exchange;
 
@@ -133,7 +134,10 @@ pub fn classify_observation(
             if facts.state_root_fingerprint != target.state_root_fingerprint {
                 return EndpointProbeOutcome::StateRootMismatch;
             }
-            if facts.protocol_version != requirements.required_protocol_version {
+            if !protocol_accepts(
+                &facts.protocol_version,
+                &requirements.required_protocol_version,
+            ) {
                 return EndpointProbeOutcome::IncompatibleProtocol;
             }
             if facts.app_version != requirements.required_app_version {
@@ -141,6 +145,17 @@ pub fn classify_observation(
             }
             EndpointProbeOutcome::Compatible
         }
+    }
+}
+
+/// An unparseable version on either side is incompatible rather than assumed equal.
+fn protocol_accepts(server: &str, required: &str) -> bool {
+    match (
+        server.parse::<ProtocolVersion>(),
+        required.parse::<ProtocolVersion>(),
+    ) {
+        (Ok(server), Ok(required)) => server.accepts_client(required),
+        _ => false,
     }
 }
 

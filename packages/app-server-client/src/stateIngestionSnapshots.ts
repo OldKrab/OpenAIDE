@@ -31,6 +31,10 @@ export function updateSubscriptionSnapshot(
       return payload.kind === "agentCollectionUpdated"
         ? changed({ kind: "agents", agents: payload.agents })
         : unchanged(snapshot);
+    case "devices":
+      return payload.kind === "deviceCollectionUpdated"
+        ? changed({ kind: "devices", devices: payload.devices })
+        : unchanged(snapshot);
     case "settings":
       return unchanged(snapshot);
     case "taskNavigation":
@@ -118,6 +122,7 @@ function updateFromClientSnapshot(
     case "subagentCatalog":
     case "subagentHistory":
       return unchanged(snapshot);
+    case "devices":
     case "toolDetail":
     case "worktreeRepository":
       return unchanged(snapshot);

@@ -14,6 +14,7 @@ pub(crate) mod native_sessions;
 pub mod projects;
 pub mod protocol;
 pub mod protocol_edge;
+pub mod remote_devices;
 pub mod server_requests;
 pub mod settings;
 pub mod shell_file_handles;

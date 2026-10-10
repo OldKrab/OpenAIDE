@@ -139,6 +139,11 @@ macro_rules! protocol_method {
     };
 }
 
+// Declared after the macro so the module can use it.
+mod devices;
+
+pub use devices::*;
+
 protocol_method!(
     ClientProbe,
     CLIENT_PROBE,

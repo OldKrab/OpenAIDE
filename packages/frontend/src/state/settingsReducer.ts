@@ -8,6 +8,7 @@ import type {
   SettingsTabId,
   SkillSettingsRecord,
 } from "@openaide/app-shell-contracts";
+import type { DeviceCollectionSnapshot } from "@openaide/app-server-client";
 import type { AppAction } from "./appReducer";
 import type { AppState } from "./store";
 
@@ -27,6 +28,7 @@ type SettingsAction =
   | { type: "settings:sections"; tabs: SettingsTabId[] }
   | { type: "settings:agentDetailsResult"; generatedAt: string; agents: AgentSettingsRecord[] }
   | { type: "settings:agentCollection"; agents: SettingsAgentCollectionEntry[] }
+  | { type: "settings:devices"; devices: DeviceCollectionSnapshot }
   | { type: "settings:mcpServersStart" }
   | { type: "settings:mcpServersResult"; generatedAt: string; availability: SettingsProjectionAvailability; servers: McpServerSettingsRecord[] }
   | { type: "settings:mcpServersError"; message: string }
@@ -58,7 +60,7 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
         settings: {
           ...state.settings,
           availableTabs: action.tabs,
-          activeTab: state.settings.activeTab === "connection" || action.tabs.includes(state.settings.activeTab) ? state.settings.activeTab : action.tabs[0] ?? "agents",
+          activeTab: state.settings.activeTab === "connection" || state.settings.activeTab === "devices" || action.tabs.includes(state.settings.activeTab) ? state.settings.activeTab : action.tabs[0] ?? "agents",
         },
       };
     case "settings:agentDetailsResult":
@@ -72,6 +74,9 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
           error: undefined,
         },
       };
+    case "settings:devices":
+      // App Server owns the trusted-device list; the Devices subscription replaces it whole.
+      return { ...state, settings: { ...state.settings, devices: action.devices } };
     case "settings:agentCollection":
       // The subscription is authoritative for status and Sign-in Flow; details keep the rest.
       return {

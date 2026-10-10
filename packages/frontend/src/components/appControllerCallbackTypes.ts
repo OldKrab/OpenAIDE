@@ -31,6 +31,7 @@ import type {
   WorkspaceListDirectoryResult,
 } from "@openaide/app-server-client";
 import type { McpServerSaveInput } from "../intents/mcpSettingsIntents";
+import type { RemoteDeviceIntents } from "../intents/remoteDeviceIntents";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import type { NewTaskController, NewTaskLease } from "./newTaskController";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
@@ -78,6 +79,7 @@ export type SettingsCallbacks = {
   createCustomAgent: (payload: CustomAgentCreateParams) => void;
   deleteCustomAgent: (agentId: string) => void;
   deleteMcpServer: (server: McpServerDefinition) => void;
+  devices: RemoteDeviceIntents;
   dismissError?: () => void;
   /** Recovery-surface disable; its banner renders the confirmation for interrupting running work. */
   disableRecoveredAgent: (

@@ -183,7 +183,10 @@ pub(super) fn gateway(
         task_product_api.clone(),
     )
     .with_task_storage_maintenance(task_product_api)
-    .with_new_task_defaults(new_task_defaults);
+    .with_new_task_defaults(new_task_defaults)
+    .with_remote_devices(crate::remote_devices::RemoteDevices::open(
+        state_root.path(),
+    ));
     Ok(GatewayFactoryOutput {
         gateway,
         task_updates,

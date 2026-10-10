@@ -590,6 +590,17 @@ impl SharedRpcGateway {
         self.lock().publish_background_agent_status_update(now)
     }
 
+    pub fn remote_devices(&self) -> Option<crate::remote_devices::RemoteDevices> {
+        self.lock_quiet().remote_device_service()
+    }
+
+    pub fn publish_device_collection_update(
+        &self,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        self.lock().publish_background_device_collection_update(now)
+    }
+
     pub fn publish_committed_task_update_for_connection(
         &self,
         connection_id: &ConnectionId,

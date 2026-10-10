@@ -5,6 +5,7 @@ import {
   Database,
   FolderGit2,
   MonitorCog,
+  MonitorSmartphone,
   Network,
   RefreshCcw,
   Search,
@@ -39,6 +40,8 @@ import { agentLeftLaunching } from "./agentSettingsModel";
 import { AgentSettingsTab } from "./AgentSettingsTab";
 import { DataSupportSettingsTab, DesktopSettingsTab, GeneralSettingsTab } from "./GeneralSettingsTab";
 import { ConnectionSettingsTab } from "./ConnectionSettingsTab";
+import { DevicesSettingsTab } from "./DevicesSettingsTab";
+import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
 import { currentFrontendShell, type FrontendShellAppearance } from "../../services/frontendShell";
 import { SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { McpSettingsTab } from "./McpSettingsTab";
@@ -59,6 +62,7 @@ const tabs: Array<{
 }> = [
   { group: "App", icon: SlidersHorizontal, id: "common", label: "General", description: "Appearance and everyday interaction preferences." },
   { group: "App", icon: Smartphone, id: "connection", label: "Connection", description: "Where agents run and how work continues in the background." },
+  { group: "App", icon: MonitorSmartphone, id: "devices", label: "Devices", description: "Phones and computers that can use this OpenAIDE." },
   { group: "App", icon: MonitorCog, id: "desktop", label: "Desktop", description: "Runtime selection and application updates for this device." },
   { group: "App", icon: Database, id: "data", label: "Data & support", description: "Diagnostics, developer tools, and local history." },
   { group: "Agent work", icon: Bot, id: "agents", label: "Agents", description: "Configure the Agents available for tasks." },
@@ -69,6 +73,7 @@ const tabs: Array<{
 
 const searchEntries: Array<{ tab: SettingsTabId; label: string; keywords: string; target?: string; action?: "openSupportExport" }> = [
   { tab: "connection", label: "Connection", keywords: "phone remote computer termux background battery", target: "settings-connection-workspace" },
+  { tab: "devices", label: "Add a device", keywords: "phone pair pairing qr code remote mobile", target: "settings-devices-add" },
   { tab: "common", label: "Appearance", keywords: "theme system light dark", target: "settings-general-appearance" },
   { tab: "common", label: "Send with Enter", keywords: "composer keyboard shortcut newline", target: "settings-general-behavior" },
   { tab: "common", label: "Desktop notifications", keywords: "alerts browser os", target: "settings-general-behavior" },
@@ -83,6 +88,7 @@ export function SettingsView({
   appearance = currentFrontendShell()?.appearance,
   backendConnection,
   desktopNotifications,
+  deviceIntents,
   developerSettingsUnlocked: initialDeveloperSettingsUnlocked = false,
   frameHeader,
   frameHeaderPlacement,
@@ -121,6 +127,8 @@ export function SettingsView({
   appearance?: FrontendShellAppearance;
   backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   desktopNotifications?: DesktopNotificationSettings;
+  /** Present when this client can pair and remove Remote Devices; shows the Devices page. */
+  deviceIntents?: RemoteDeviceIntents;
   /** Shell-persisted unlock state for local diagnostic controls. */
   developerSettingsUnlocked?: boolean;
   frameHeader?: ReactNode;
@@ -161,6 +169,7 @@ export function SettingsView({
   const availableTabs = state.availableTabs ?? ["agents", "common", "data"];
   const visibleTabs = tabs.filter((tab) => (
     tab.id === "worktrees"
+    || (tab.id === "devices" && Boolean(deviceIntents))
     || (tab.id === "connection" && Boolean(shell?.connectionSettings))
     || (availableTabs.includes(tab.id) && (tab.id !== "desktop" || Boolean(shell?.desktopRuntime || shell?.desktopUpdates)))
   ));
@@ -460,6 +469,7 @@ export function SettingsView({
             appearance={appearance}
             backendConnection={backendConnection}
             desktopNotifications={desktopNotifications}
+            deviceIntents={deviceIntents}
             agents={state.agentDetails ?? []}
             deletedAgentId={state.deletedAgentId}
             onAuthenticate={onAuthenticate}
@@ -513,6 +523,7 @@ function SettingsTabContent({
   appearance,
   backendConnection,
   desktopNotifications,
+  deviceIntents,
   onAuthenticate,
   onCancelAuthentication,
   onLogout,
@@ -551,6 +562,7 @@ function SettingsTabContent({
   appearance?: FrontendShellAppearance;
   backendConnection?: Pick<import("@openaide/app-server-client").BackendConnection, "request">;
   desktopNotifications?: DesktopNotificationSettings;
+  deviceIntents?: RemoteDeviceIntents;
   agents: AgentSettingsRecord[];
   onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onCancelAuthentication?: (agentId: string) => void | Promise<void>;
@@ -624,6 +636,9 @@ function SettingsTabContent({
       ) : null}
       {tab === "desktop" ? <DesktopSettingsTab /> : null}
       {tab === "connection" && currentFrontendShell()?.connectionSettings ? <ConnectionSettingsTab capability={currentFrontendShell()!.connectionSettings!} /> : null}
+      {tab === "devices" && deviceIntents ? (
+        <DevicesSettingsTab devices={settingsState.devices} intents={deviceIntents} />
+      ) : null}
       {tab === "data" ? (
         <DataSupportSettingsTab
           backendConnection={backendConnection}

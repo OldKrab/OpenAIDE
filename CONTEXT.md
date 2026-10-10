@@ -291,6 +291,14 @@ _Avoid_: Treating available Authentication Methods as active authentication, all
 The application form OpenAIDE runs in, such as the Web App, Desktop App, Mobile App, or VS Code Extension.
 _Avoid_: Host as a product term
 
+**Remote Device**:
+A phone or computer other than the one running the App Server whose App Shell connects to that App Server as a regular client. It is trusted because it was paired, has full access, and stays trusted until any client removes it.
+_Avoid_: Account, login, linked phone
+
+**Pairing Code**:
+A short plain-text code, also drawn as a QR code, that adds a Remote Device. Either a trusted client shows a single-use code the new device reads, or the new device shows a code a trusted client reads and confirms.
+_Avoid_: Password, token, invite link
+
 **Desktop Update**:
 A newer official OpenAIDE Desktop App release offered inside the installed Desktop App. The user may review its Release Notes, initiate download and staging, and restart OpenAIDE to apply it.
 _Avoid_: Silently replacing a running release, treating a downloaded update as already applied
@@ -399,6 +407,7 @@ _Avoid_: Treating every unread update or status change as an alert
 - **Frontend** is shared across App Shells, while App Shell-specific presentation is kept narrow.
 - Web App, Desktop App, Mobile App, and VS Code Extension are **App Shells** that connect to an **App Server** for the selected OpenAIDE state root.
 - **App Shells** embed or mount **Frontend** through a narrow shell API.
+- A **Remote Device** is added with a **Pairing Code** and connects as an ordinary **App Server** client; removing it ends its access until it is paired again.
 - Web App, Desktop App, and Mobile App share as much **Frontend** composition as their shell constraints allow.
 - VS Code Extension composes the same **Frontend** surfaces into VS Code-specific locations.
 - An idle **Open Task** can enter the read-only **Archive** lifecycle and later be restored to Open.

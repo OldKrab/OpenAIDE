@@ -9,6 +9,7 @@ mod attachment_handlers;
 mod background_command_handlers;
 mod client_handlers;
 mod delivery_signal;
+mod device_handlers;
 mod diagnostics_handlers;
 mod file_viewer_handlers;
 pub mod local_http;
@@ -110,6 +111,8 @@ pub struct RpcGateway {
     worktrees: Arc<crate::worktrees::WorktreeManager>,
     shutdown: Arc<dyn AppServerShutdownWorkflow>,
     update_shutdown: Option<UpdateShutdownBarrier>,
+    remote_devices: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow>,
+    remote_device_service: Option<crate::remote_devices::RemoteDevices>,
 }
 
 pub(crate) trait AppServerShutdownWorkflow: Send + Sync {
@@ -234,7 +237,28 @@ impl RpcGateway {
             worktrees,
             shutdown,
             update_shutdown: None,
+            remote_devices: Arc::new(crate::remote_devices::NoRemoteDevices),
+            remote_device_service: None,
         }
+    }
+
+    /// The snapshot builder reads the same service, so a subscription and a
+    /// pairing response can never disagree about who is trusted.
+    pub(crate) fn with_remote_devices(
+        mut self,
+        remote_devices: crate::remote_devices::RemoteDevices,
+    ) -> Self {
+        let workflow: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow> =
+            Arc::new(remote_devices.clone());
+        self.snapshots = self.snapshots.with_remote_devices(workflow.clone());
+        self.remote_devices = workflow;
+        self.remote_device_service = Some(remote_devices);
+        self
+    }
+
+    /// The service the network edge attaches to, when this gateway has one.
+    pub(crate) fn remote_device_service(&self) -> Option<crate::remote_devices::RemoteDevices> {
+        self.remote_device_service.clone()
     }
 
     pub(crate) fn with_task_storage_maintenance(
@@ -294,6 +318,23 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
+        if let Some(client_version) = params.protocol_version {
+            if !APP_SERVER_PROTOCOL_VERSION.accepts_client(client_version) {
+                crate::logging::warn(
+                    "client_initialize_incompatible_protocol",
+                    serde_json::json!({
+                        "client_protocol_version": client_version.to_string(),
+                        "server_protocol_version": APP_SERVER_PROTOCOL_VERSION.to_string(),
+                    }),
+                );
+                return self.error(
+                    connection_id,
+                    id,
+                    meta,
+                    responses::incompatible_protocol(CLIENT_INITIALIZE.to_string()),
+                );
+            }
+        }
         if let Some(barrier) = &self.update_shutdown {
             if barrier.owner == params.client_instance_id {
                 // A WebView reload keeps the native Desktop client identity. Clearing its

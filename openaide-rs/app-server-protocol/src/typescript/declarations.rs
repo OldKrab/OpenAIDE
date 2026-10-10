@@ -44,6 +44,13 @@ use crate::client::{
     UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
     UpdateShutdownCommitResult, UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
 };
+use crate::devices::{
+    DeviceCollectionSnapshot, DevicesApproveJoinRequestParams, DevicesApproveJoinRequestResult,
+    DevicesCancelInviteParams, DevicesCancelInviteResult, DevicesCreateInviteParams,
+    DevicesCreateInviteResult, DevicesPreviewJoinRequestParams, DevicesPreviewJoinRequestResult,
+    DevicesRemoveParams, DevicesRemoveResult, RemoteAccessState, RemoteDeviceConnection,
+    RemoteDevicePath, RemoteDeviceSummary,
+};
 use crate::diagnostics::{
     ActiveTaskDiagnosticsResult, DiagnosticsRedaction, RuntimeDiagnosticsParams,
     RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus, SupportArtifactAvailability,
@@ -352,6 +359,21 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<RuntimeSettingsResult>(output, config);
     push_decl::<ResetTaskHistoryParams>(output, config);
     push_decl::<ResetTaskHistoryResult>(output, config);
+    push_decl::<DeviceCollectionSnapshot>(output, config);
+    push_decl::<RemoteAccessState>(output, config);
+    push_decl::<RemoteDeviceSummary>(output, config);
+    push_decl::<RemoteDeviceConnection>(output, config);
+    push_decl::<RemoteDevicePath>(output, config);
+    push_decl::<DevicesCreateInviteParams>(output, config);
+    push_decl::<DevicesCreateInviteResult>(output, config);
+    push_decl::<DevicesCancelInviteParams>(output, config);
+    push_decl::<DevicesCancelInviteResult>(output, config);
+    push_decl::<DevicesPreviewJoinRequestParams>(output, config);
+    push_decl::<DevicesPreviewJoinRequestResult>(output, config);
+    push_decl::<DevicesApproveJoinRequestParams>(output, config);
+    push_decl::<DevicesApproveJoinRequestResult>(output, config);
+    push_decl::<DevicesRemoveParams>(output, config);
+    push_decl::<DevicesRemoveResult>(output, config);
     push_decl::<RuntimeDeveloperSettings>(output, config);
     push_decl::<RuntimeAcpTraceSettings>(output, config);
 
