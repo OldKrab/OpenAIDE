@@ -13,6 +13,7 @@ pub fn bindings() -> String {
     method_constants::push_method_constants(&mut output);
     declarations::push_protocol_declarations(&mut output, &config);
     method_maps::push_method_maps(&mut output);
+    push_protocol_version(&mut output);
 
     // ts-rs emits a space before newlines around documented fields. Normalize
     // once at the generator boundary so checked-in bindings stay diff-clean.
@@ -23,6 +24,15 @@ pub fn bindings() -> String {
         .join("\n");
     normalized.push('\n');
     normalized
+}
+
+/// A client states the version it was built against when it initializes.
+fn push_protocol_version(output: &mut String) {
+    let version = crate::client::APP_SERVER_PROTOCOL_VERSION;
+    output.push_str(&format!(
+        "\nexport const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = {{ major: {}, minor: {} }};\n",
+        version.major, version.minor
+    ));
 }
 
 #[cfg(test)]

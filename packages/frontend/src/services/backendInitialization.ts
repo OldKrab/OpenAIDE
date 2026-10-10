@@ -1,3 +1,4 @@
+import { APP_SERVER_PROTOCOL_VERSION } from "@openaide/app-server-client";
 import type {
   ClientInstanceId,
   InitializeParams,
@@ -102,6 +103,9 @@ export function initializeParamsForBootstrap(
         "showNotification",
       ],
     },
+    // A Remote Device ships its own Frontend, so the App Server must be able to
+    // refuse a client that is newer than it is (ADR-0062).
+    protocolVersion: APP_SERVER_PROTOCOL_VERSION,
   };
 }
 

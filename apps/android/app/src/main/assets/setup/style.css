@@ -7,7 +7,7 @@ header { display: flex; align-items: center; gap: 12px; height: 76px; font-weigh
 .edition { margin-left: auto; font-size: 10px; letter-spacing: .14em; color: var(--muted); }
 button { font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 button:disabled { opacity: .55; cursor: wait; }
-button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .back { border: 0; background: transparent; font-size: 26px; width: 44px; height: 44px; margin-left: -12px; border-radius: 10px; }
 h1 { font-size: 29px; line-height: 1.18; letter-spacing: -.025em; font-weight: 650; margin: 10px 0 14px; }
 h2 { font-size: 17px; line-height: 1.4; margin: 0 0 7px; }
@@ -41,7 +41,6 @@ p { margin: 0 0 20px; color: var(--muted); }
 label { display: block; font-size: 13px; font-weight: 600; margin: 22px 0 7px; }
 input:not([type=checkbox]) { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 13px; width: 100%; min-height: 48px; font: inherit; }
 input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--accent); flex-shrink: 0; }
-.show-password { display: flex; align-items: center; gap: 10px; color: var(--muted); font-weight: 400; margin: 12px 0 24px; }
 details { margin-top: 28px; color: var(--muted); font-size: 13px; }
 summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
 dl { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; }
@@ -53,3 +52,7 @@ dd { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 @media (min-width: 600px) { .shell { padding-top: 12px; } main { padding-top: 20px; } h1 { font-size: 34px; } }
 @media (max-width: 350px) { .shell { padding-inline: 16px; } .choice { padding: 16px 12px; gap: 10px; } }
+textarea { width: 100%; min-height: 96px; padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font: 15px/1.5 ui-monospace, monospace; resize: vertical; }
+.qr { margin: 8px auto 16px; padding: 12px; max-width: 320px; border-radius: 16px; background: #fff; }
+.qr svg { display: block; width: 100%; height: auto; fill: #000; }
+.code { margin: 0 0 16px; font: 14px/1.7 ui-monospace, monospace; text-align: center; word-spacing: 4px; overflow-wrap: anywhere; user-select: all; }

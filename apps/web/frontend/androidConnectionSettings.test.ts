@@ -32,16 +32,15 @@ describe("Android connection controls", () => {
     test.receive({ type: "result", id: request.id, accepted: true });
     await accepted;
   });
-  it("subscribes to authoritative settings and preserves QR results across updates", () => {
+  it("subscribes to authoritative settings and replaces the snapshot on each update", () => {
     const test = harness();
     test.attach();
     const changed = vi.fn();
     const unsubscribe = test.capability!.subscribe(changed);
     test.receive({ type: "state", state: { remote: false, background: true } });
-    test.receive({ type: "scanned", address: "https://computer.example" });
-    test.receive({ type: "state", state: { remote: false, background: false } });
-    expect(test.capability!.snapshot()).toMatchObject({ background: false, scannedAddress: "https://computer.example", scanSequence: 1 });
-    expect(changed).toHaveBeenCalledTimes(3);
+    test.receive({ type: "state", state: { remote: true, computer: "Studio", background: false } });
+    expect(test.capability!.snapshot()).toMatchObject({ remote: true, computer: "Studio", background: false });
+    expect(changed).toHaveBeenCalledTimes(2);
     unsubscribe();
   });
   it("rejects foreign handshakes and bounds unavailable settings", async () => {

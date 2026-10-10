@@ -8,9 +8,6 @@ import "./ConnectionSettingsTab.css";
 export function ConnectionSettingsTab({ capability }: { capability: ConnectionSettings }) {
   const state = useSyncExternalStore(capability.subscribe, capability.snapshot, capability.snapshot);
   const [destination, setDestination] = useState<"local" | "remote">("local");
-  const [address, setAddress] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const initialized = useRef(false);
@@ -33,12 +30,7 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
     if (!state || initialized.current) return;
     initialized.current = true;
     setDestination(state.remote ? "remote" : "local");
-    setAddress(state.address);
-    setUsername(state.username);
   }, [state]);
-  useEffect(() => {
-    if (state?.scannedAddress) setAddress(state.scannedAddress);
-  }, [state?.scanSequence]);
 
   const button = (label: string, command: ConnectionCommand) => (
     <button type="button" className="settings-secondary-button" disabled={busy} onClick={() => { void execute(command); }}>{label}</button>
@@ -63,7 +55,7 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
             {(["local", "remote"] as const).map(choice => (
               <button key={choice} type="button" role="radio" aria-checked={destination === choice} tabIndex={destination === choice ? 0 : -1} className={destination === choice ? "selected" : ""} disabled={busy} onClick={() => setDestination(choice)}>
                 <span className="desktop-runtime-choice-icon">{choice === "local" ? <Smartphone size={17} /> : <Laptop size={17} />}</span>
-                <span className="desktop-runtime-choice-copy"><strong>{choice === "local" ? "This phone" : "Remote computer"}</strong><small>{choice === "local" ? "Run agents in Termux" : "Connect to your server"}</small></span>
+                <span className="desktop-runtime-choice-copy"><strong>{choice === "local" ? "This phone" : "Remote computer"}</strong><small>{choice === "local" ? "Run agents in Termux" : state.paired ? state.computer || "Paired computer" : "Pair with OpenAIDE on your computer"}</small></span>
                 {state.remote === (choice === "remote") ? <span className="desktop-runtime-active">Connected</span> : null}
               </button>
             ))}
@@ -74,18 +66,19 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
               {state.remote ? <div>{button("Connect to this phone", { action: "local" })}</div> : null}
             </>
           ) : (
-            <div className="general-preference-surface">
-            <form className="agent-sign-in-fields" onSubmit={event => { event.preventDefault(); void execute({ action: "remote", address, username, password }); }}>
-              <label><span>Server address</span><input type="url" autoComplete="url" placeholder="https://your-computer.example" required value={address} disabled={busy} onChange={event => setAddress(event.currentTarget.value)} /></label>
-              <label><span>Username</span><input autoComplete="username" required value={username} disabled={busy} onChange={event => setUsername(event.currentTarget.value)} /></label>
-              <label><span>Password</span><input type="password" autoComplete="current-password" required value={password} disabled={busy} onChange={event => setPassword(event.currentTarget.value)} /></label>
-              <div className="agent-sign-in-value-actions">
-                {button("Read QR image", { action: "qr" })}
-                <button type="submit" className="agent-page-row-button primary" disabled={busy}>Connect to computer</button>
-              </div>
-              <InlineNotice message="Use your OpenAIDE server’s HTTPS address and sign-in details. The current connection stays unchanged until these are verified." />
-            </form>
-            </div>
+            <>
+              {state.paired ? (
+                <div className="general-preference-surface">
+                  <GeneralPreferenceRow label={state.computer || "Paired computer"} icon={<Laptop size={17} />}
+                    detail={state.remote ? "This phone is connected to this computer." : "This phone is still trusted by this computer."}
+                    action={state.remote ? button("Forget", { action: "forget" }) : button("Connect to computer", { action: "paired" })} />
+                </div>
+              ) : null}
+              <div>{button(state.paired ? "Pair with another computer" : "Pair with a computer", { action: "pair_setup" })}</div>
+              <InlineNotice message={state.paired
+                ? "Forgetting stops this phone from connecting. To end the computer’s trust in this phone, remove it in Settings → Devices on the computer."
+                : "No account or password. On your computer, open Settings → Devices and choose Show code, then scan it with this phone."} />
+            </>
           )}
         </div>
       </GeneralSection>

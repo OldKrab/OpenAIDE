@@ -1,7 +1,10 @@
 export type ConnectionSnapshot = {
+  /** The paired computer, rather than this phone, is the selected workspace. */
   remote: boolean;
-  address: string;
-  username: string;
+  /** This phone is paired with a computer, whether or not it is selected. */
+  paired: boolean;
+  /** The name the paired computer reported; empty when it gave none. */
+  computer: string;
   busy: boolean;
   notice: string;
   termux: boolean;
@@ -13,14 +16,11 @@ export type ConnectionSnapshot = {
   notifications: boolean;
   boot: boolean;
   checks: Record<string, boolean | string> | null;
-  scannedAddress?: string;
-  scanSequence?: number;
 };
 
 export type ConnectionCommand =
-  | { action: "state" | "check" | "local" | "install" | "termux" | "get_termux" | "access" | "grant" | "signin" | "battery" | "termux_settings" | "app_settings" | "repair" | "boot" | "get_boot" | "qr" | "diagnostics" }
-  | { action: "background"; enabled: boolean }
-  | { action: "remote"; address: string; username: string; password: string };
+  | { action: "state" | "check" | "local" | "install" | "termux" | "get_termux" | "access" | "grant" | "signin" | "battery" | "termux_settings" | "app_settings" | "repair" | "boot" | "get_boot" | "paired" | "pair_setup" | "forget" | "diagnostics" }
+  | { action: "background"; enabled: boolean };
 
 export type ConnectionSettings = {
   snapshot(): ConnectionSnapshot | undefined;

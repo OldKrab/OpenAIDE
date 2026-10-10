@@ -38,7 +38,7 @@ import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Android owns connection UI; all tasks, credentials and execution stay in Termux. */
+/** Android owns connection UI; tasks, credentials and execution stay in Termux or on the paired computer. */
 public final class MainActivity extends Activity {
     private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
     private static final int FILE_REQUEST = 2;
@@ -82,7 +82,7 @@ public final class MainActivity extends Activity {
         try { profile = connections.load(); }
         catch (RuntimeException error) { profile = connections.local(); credentialsUnavailable = true; }
         showConnection();
-        if (credentialsUnavailable) openSetup("remote");
+        if (credentialsUnavailable) openSetup("welcome");
         else if (getIntent().getBooleanExtra("show_settings", false)) showSettings();
         else if (preferences.getBoolean("configured", false) || checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) requestConnection();
         else openSetup("welcome");
@@ -173,7 +173,9 @@ public final class MainActivity extends Activity {
         pairingAttempted = false;
         password = getSharedPreferences("connection", MODE_PRIVATE).getString("password", password);
         showConnection();
-        requestConnection();
+        // Forgetting the paired computer leaves no workspace to open until one is chosen.
+        if (getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false)) requestConnection();
+        else openSetup("welcome");
     }
 
     private void startBackgroundWork() {
@@ -250,6 +252,7 @@ public final class MainActivity extends Activity {
         connect.setVisibility(View.GONE);
         status.setText("Opening your workspace…");
         Log.i("OpenAIDE", "connection_start attempt=" + attempt);
+        if (!profile.local) { connectPaired(attempt, started); return; }
         worker.execute(() -> {
             int response = probe();
             if (response == 200) { finishConnection(attempt, started); return; }
@@ -291,6 +294,32 @@ public final class MainActivity extends Activity {
                         });
                 });
             });
+        });
+    }
+
+    /** A paired computer needs no probe: reaching its App Server over the trusted connection is the check. */
+    private void connectPaired(int attempt, long started) {
+        status.setText("Connecting to your computer…");
+        RemotePairing.connect(this, problem -> {
+            if (attempt != generation || isDestroyed()) return;
+            if (problem != null) { fail(attempt, problem); return; }
+            connecting = false;
+            Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
+            diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
+            if (browser == null) showBrowser();
+            else if (mainFrameFailed) browser.reload();
+            else browser.evaluateJavascript("window.dispatchEvent(new Event('openaide:resume'))", null);
+        });
+    }
+
+    /** The computer refused this phone while the workspace was open; only the user can repair that. */
+    private void pairedConnectionRefused(RemoteNode.Failure failure) {
+        runOnUiThread(() -> {
+            if (isDestroyed() || profile.local || browser == null) return;
+            diagnostics.record("connection", "refused", 0, 0);
+            showConnection();
+            connect.setText("Try again");
+            status.setText(RemotePairing.message(failure));
         });
     }
 
@@ -397,7 +426,7 @@ public final class MainActivity extends Activity {
         resourcePolicy.use(profile);
         WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
         browser = new WebView(this);
-        connectionBridge = new WorkspaceConnectionBridge(this, browser, profile, () -> visible, this::changeConnection);
+        connectionBridge = new WorkspaceConnectionBridge(this, browser, profile, () -> visible, this::changeConnection, this::openSetup);
         if (visible) browser.resumeTimers();
         else browser.pauseTimers();
         browser.getSettings().setJavaScriptEnabled(true);
@@ -427,7 +456,7 @@ public final class MainActivity extends Activity {
                     Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
             }
             @Override public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
-                if (java.net.URI.create(profile.endpoint).getHost().equalsIgnoreCase(host)
+                if (profile.local && java.net.URI.create(profile.endpoint).getHost().equalsIgnoreCase(host)
                         && realm.startsWith("OpenAIDE")) handler.proceed(profile.username, profile.password);
                 else handler.cancel();
             }
@@ -486,7 +515,15 @@ public final class MainActivity extends Activity {
         });
         frame.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(frame);
-        browser.loadUrl(profile.endpoint, Collections.singletonMap("Authorization", authorization()));
+        if (profile.local) {
+            browser.loadUrl(profile.endpoint, Collections.singletonMap("Authorization", authorization()));
+            return;
+        }
+        // The gateway serves only this WebView: the cookie is its proof on every request.
+        android.webkit.CookieManager.getInstance().setCookie(profile.endpoint,
+            GatewayHttp.COOKIE + "=" + RemoteGateway.INSTANCE.getToken() + "; Path=/; HttpOnly; SameSite=Strict");
+        RemoteGateway.INSTANCE.onFailure(failure -> { pairedConnectionRefused(failure); return kotlin.Unit.INSTANCE; });
+        browser.loadUrl(profile.endpoint);
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
@@ -558,6 +595,10 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         backNavigation.dispose();
+        // TODO: clear only this activity's listener. A recreated activity registers in
+        // onCreate before the old one is destroyed, so this can drop the newer listener
+        // and a later removal or version mismatch would go unreported until restart.
+        RemoteGateway.INSTANCE.onFailure(null);
         generation++;
         worker.shutdownNow();
         if (connectionBridge != null) connectionBridge.dispose();

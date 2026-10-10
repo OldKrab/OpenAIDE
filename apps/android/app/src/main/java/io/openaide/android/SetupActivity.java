@@ -30,9 +30,7 @@ public final class SetupActivity extends Activity {
             }
             @Override public void changed() { setResult(RESULT_OK); finish(); }
             @Override public void close() { finish(); }
-            @Override public void scanned(String address) {
-                if (loaded && !isDestroyed()) page.evaluateJavascript("window.scanned(" + JSONObject.quote(address) + ")", null);
-            }
+            @Override public void setup(String screen) { }
         }, true);
         page = new WebView(this);
         page.setBackgroundColor(0xfff8f9fb);

@@ -11,7 +11,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 function capability() {
   let state: ConnectionSnapshot = {
-    remote: false, address: "", username: "", busy: false, notice: "", termux: true, permission: true,
+    remote: false, paired: false, computer: "", busy: false, notice: "", termux: true, permission: true,
     background: true, appBattery: true, termuxBattery: true, batterySaver: false, notifications: true, boot: false, checks: null,
   };
   let listener = () => {};
@@ -45,21 +45,27 @@ it("changes background protection inline using authoritative native state", asyn
   expect(tree.root.findByType("input").props.checked).toBe(false);
   act(() => tree.unmount());
 });
-it("keeps remote credentials while state refreshes and verifies on submit only", async () => {
+it("pairs through the setup screen and never asks for an address or password", async () => {
   const test = capability();
   const tree = await render(test);
   act(() => tree.root.findAllByProps({ role: "radio" })[1].props.onClick());
-  const fields = tree.root.findAllByType("input").filter(input => input.props.type !== "checkbox");
-  act(() => {
-    fields[0].props.onChange({ currentTarget: { value: "https://computer.example" } });
-    fields[1].props.onChange({ currentTarget: { value: "user" } });
-    fields[2].props.onChange({ currentTarget: { value: "secret" } });
-    test.update({ background: false });
-  });
-  expect(fields[2].props.value).toBe("secret");
+  expect(tree.root.findAllByType("input").filter(input => input.props.type !== "checkbox")).toHaveLength(0);
   expect(test.execute).toHaveBeenCalledTimes(1);
-  await act(async () => tree.root.findByType("form").props.onSubmit({ preventDefault() {} }));
-  expect(test.execute).toHaveBeenLastCalledWith({ action: "remote", address: "https://computer.example", username: "user", password: "secret" });
+  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Pair with a computer"))!.props.onClick());
+  expect(test.execute).toHaveBeenLastCalledWith({ action: "pair_setup" });
+  act(() => tree.unmount());
+});
+it("returns to a paired computer without pairing again, and forgets the connected one", async () => {
+  const test = capability();
+  test.update({ paired: true, computer: "Studio" });
+  const tree = await render(test);
+  act(() => tree.root.findAllByProps({ role: "radio" })[1].props.onClick());
+  expect(JSON.stringify(tree.toJSON())).toContain("Studio");
+  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Connect to computer"))!.props.onClick());
+  expect(test.execute).toHaveBeenLastCalledWith({ action: "paired" });
+  act(() => test.update({ remote: true }));
+  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Forget"))!.props.onClick());
+  expect(test.execute).toHaveBeenLastCalledWith({ action: "forget" });
   act(() => tree.unmount());
 });
 it("shows a recoverable error instead of loading forever", async () => {
@@ -73,7 +79,7 @@ it("shows a recoverable error instead of loading forever", async () => {
 });
 it("offers keyboard choices without switching the live connection until Connect", async () => {
   const test = capability();
-  test.update({ remote: true, address: "https://computer.example" });
+  test.update({ remote: true, paired: true, computer: "Studio" });
   const tree = await render(test);
   const focus = vi.fn();
   act(() => tree.root.findByProps({ role: "radiogroup" }).props.onKeyDown({ key: "ArrowLeft", preventDefault() {}, currentTarget: { querySelectorAll: () => [{ focus }, { focus }] } }));
@@ -90,7 +96,7 @@ it("offers keyboard choices without switching the live connection until Connect"
 });
 it("keeps phone-only tools out of remote settings", async () => {
   const test = capability();
-  test.update({ remote: true, address: "https://computer.example" });
+  test.update({ remote: true, paired: true, computer: "Studio" });
   const tree = await render(test);
   const text = JSON.stringify(tree.toJSON());
   expect(text).toContain("Remote work continues");

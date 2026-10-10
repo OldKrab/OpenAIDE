@@ -1,14 +1,10 @@
 package io.openaide.android;
 
 import android.content.Intent;
-import android.graphics.Bitmap;
 import android.net.Uri;
 import android.test.InstrumentationTestCase;
-import com.google.zxing.BarcodeFormat;
-import com.google.zxing.qrcode.QRCodeWriter;
 import org.json.JSONObject;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -56,7 +52,7 @@ public final class DeviceChecks extends InstrumentationTestCase {
                 @Override public void render(JSONObject state) { result.set(state); }
                 @Override public void changed() { fail("Remote command changed the connection"); }
                 @Override public void close() { }
-                @Override public void scanned(String address) { }
+                @Override public void setup(String screen) { }
             }, false);
             try { controller.receive(new JSONObject().put("action", "background").put("enabled", !original)); }
             catch (Exception error) { throw new AssertionError(error); }
@@ -117,7 +113,7 @@ public final class DeviceChecks extends InstrumentationTestCase {
         waitForBrowser(activity);
         CountDownLatch delivered = new CountDownLatch(1);
         AtomicReference<Uri[]> selected = new AtomicReference<>();
-        Uri image = Uri.parse("content://io.openaide.android.test.image/pixel");
+        Uri image = Uri.parse("content://" + getInstrumentation().getContext().getPackageName() + ".image/pixel");
         var callback = MainActivity.class.getDeclaredField("fileCallback");
         callback.setAccessible(true);
         getInstrumentation().runOnMainSync(() -> {
@@ -176,19 +172,6 @@ public final class DeviceChecks extends InstrumentationTestCase {
         ConnectionProfile wrong = new ConnectionProfile("http://127.0.0.1:5474/", "android", "wrong-test-password", true);
         try { ServerStatus.read(wrong); fail("Wrong credentials were accepted"); }
         catch (java.io.IOException expected) { }
-    }
-
-    public void testQrImageReturnsOnlyAnHttpsOrigin() throws Exception {
-        var context = getInstrumentation().getTargetContext();
-        File file = new File(context.getCacheDir(), "connection-qr-test.png");
-        var matrix = new QRCodeWriter().encode("https://server.example", BarcodeFormat.QR_CODE, 384, 384);
-        Bitmap bitmap = Bitmap.createBitmap(384, 384, Bitmap.Config.ARGB_8888);
-        for (int row = 0; row < 384; row++) for (int column = 0; column < 384; column++)
-            bitmap.setPixel(column, row, matrix.get(column, row) ? 0xff000000 : 0xffffffff);
-        try {
-            try (var stream = new FileOutputStream(file)) { bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream); }
-            assertEquals("https://server.example/", QrConnection.read(context, Uri.fromFile(file)));
-        } finally { bitmap.recycle(); file.delete(); }
     }
 
     private void waitForBrowser(MainActivity activity) throws Exception {

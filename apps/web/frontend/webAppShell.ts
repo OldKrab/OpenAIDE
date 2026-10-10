@@ -28,7 +28,7 @@ import { createWebSecretStore } from "./webSecretVault";
 import { createWebSecretMessageHandler } from "./webSecrets";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
-const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "connection", "desktop", "data", "worktrees"]);
+const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "connection", "devices", "desktop", "data", "worktrees"]);
 const logger = createRuntimeLogger("openaide-webview");
 function openWebExternal(url: string) {
   usableExternalWindow(window.open(url, "_blank", "noopener,noreferrer"));

@@ -3,7 +3,7 @@ const notice = document.getElementById('notice');
 let state = {};
 let screen;
 let history = [];
-let remoteDraft = { address: '', username: '', password: '' };
+let codeDraft = '';
 const icons = {
   phone: '<rect x="7" y="2" width="14" height="24" rx="3"/><path d="M12 22h4"/>',
   computer: '<rect x="2" y="4" width="24" height="16" rx="2"/><path d="M9 26h10M14 20v6"/>',
@@ -18,40 +18,45 @@ function choice(icon, title, detail, destination) {
 function row(title, detail, action, value = '›') {
   return `<button class="row" data-action="${action}"><span><strong>${title}</strong><small>${detail}</small></span><span class="value">${value}</span></button>`;
 }
+function escape(text) { return String(text).replace(/[&<>"']/g, character => `&#${character.charCodeAt(0)};`); }
+// This phone's code is disclosed only while its screen is open.
+function enter(next) {
+  if (next === 'local') send('check');
+  if (next === 'join') send('join');
+}
+function leave(previous) { if (previous === 'join') send('join_stop'); }
 function go(next) {
-  rememberRemote();
+  rememberCode();
+  leave(screen);
   history.push(screen);
   screen = next;
   render();
   page.focus();
   window.scrollTo(0, 0);
-  if (next === 'local') send('check');
+  enter(next);
 }
 window.back = () => {
   if (state.busy) return;
-  rememberRemote();
+  rememberCode();
+  leave(screen);
   if (!history.length) { send('close'); return; }
   screen = history.pop();
   render();
   page.focus();
+  enter(screen);
 };
 document.getElementById('back').addEventListener('click', window.back);
 window.receive = (next) => {
-  rememberRemote();
+  rememberCode();
   const first = !screen;
   state = next;
-  if (first) {
-    screen = next.initial || 'settings';
-    remoteDraft.address = next.address || '';
-    remoteDraft.username = next.username || '';
-  }
+  if (first) screen = next.initial || 'settings';
   render();
-  if (first && screen === 'local') send('check');
+  if (first) enter(screen);
 };
-window.scanned = (address) => { remoteDraft.address = address; screen = 'remote'; render(); };
-function rememberRemote() {
-  const form = document.getElementById('remote-form');
-  if (form) for (const key of ['address', 'username', 'password']) remoteDraft[key] = form.elements[key].value;
+function rememberCode() {
+  const field = document.getElementById('code');
+  if (field) codeDraft = field.value;
 }
 function localStep() {
   if (!state.termux) return { index: 1, title: 'Install Termux', detail: 'Termux provides a private place for your tools and projects. Install it from its official releases, then open it once and return here.', action: 'get_termux', label: 'Get Termux' };
@@ -69,13 +74,13 @@ function render() {
   if (screen === 'welcome') {
     page.innerHTML = heading('Your workspace, your choice', 'Where will your<br>agents work?', 'Choose once. Change it later in Settings.')
       + choice('phone', 'This phone', 'Work locally with Termux.', 'local')
-      + choice('computer', 'Remote computer', 'Use an OpenAIDE server. No Termux needed.', 'remote')
+      + choice('computer', 'Remote computer', 'Pair with OpenAIDE on your computer. No Termux needed.', 'remote')
       + '<p class="note">Projects and conversations stay on the device where your agents work.</p>';
   } else if (screen === 'settings') {
     page.innerHTML = heading('Settings', 'Connection', 'Manage where your agents work. Your current conversation stays open while you’re here.')
-      + `<div class="panel"><p class="tag">CURRENT WORKSPACE</p><h2>${state.remote ? 'Remote computer' : 'This phone'}</h2><p>${state.remote ? 'Work runs on your computer, independently of your phone.' : 'Tools and projects run locally in Termux. Startup and reconnection are automatic.'}</p></div>`
+      + `<div class="panel"><p class="tag">CURRENT WORKSPACE</p><h2>${state.remote ? escape(state.computer || 'Remote computer') : 'This phone'}</h2><p>${state.remote ? 'Work runs on your computer, independently of your phone.' : 'Tools and projects run locally in Termux. Startup and reconnection are automatic.'}</p></div>`
       + choice(state.remote ? 'phone' : 'computer', state.remote ? 'Use this phone' : 'Use a remote computer', 'Switch where new work runs.', state.remote ? 'local' : 'remote')
-      + (state.remote ? button('Edit remote connection', 'remote_screen', 'link') : button('Background work', 'background_screen', 'secondary'))
+      + (state.remote ? button('Pair with another computer', 'remote_screen', 'link') : button('Background work', 'background_screen', 'secondary'))
       + button('Advanced', 'advanced_screen', 'link');
   } else if (screen === 'local') {
     const step = localStep();
@@ -88,18 +93,21 @@ function render() {
       + (state.remote && step.index === 4 ? '<p class="note">Switching closes the current view. Save unsent drafts first. Existing tasks stay on their original computer.</p>' : '')
       + '<details><summary>What does OpenAIDE check?</summary><p>Connection permission, compatible tools, agent sign-in, storage and automatic startup. These checks run for you.</p></details>';
   } else if (screen === 'remote') {
-    page.innerHTML = heading('Remote computer', 'Bring your workspace', 'Connect to an OpenAIDE server. Your computer runs the work, even when your phone is locked.')
-      + '<form id="remote-form"><label for="address">Server address</label><input id="address" name="address" type="url" inputmode="url" placeholder="https://your-computer.example" autocapitalize="none" spellcheck="false" required>'
-      + '<label for="username">Username</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>'
-      + '<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>'
-      + '<label class="show-password"><input id="show-password" type="checkbox">Show password</label>'
-      + '<button class="primary" type="submit">Connect to computer</button></form>'
-      + button('Use a QR image', 'qr', 'secondary')
-      + '<p class="note">Save any unsent draft before switching. Existing tasks stay on their original device. Credentials are encrypted on this phone.</p>'
-      + '<details><summary>Where do I find these details?</summary><p>Use the HTTPS address and login for your OpenAIDE Web server. If it is on a private network, connect your phone to that network or VPN first.</p></details>';
-    for (const key of ['address', 'username', 'password']) document.getElementById(key).value = remoteDraft[key];
-    document.getElementById('show-password').addEventListener('change', event => { document.getElementById('password').type = event.target.checked ? 'text' : 'password'; });
-    document.getElementById('remote-form').addEventListener('submit', event => { event.preventDefault(); rememberRemote(); send('remote', remoteDraft); });
+    page.innerHTML = heading('Remote computer', 'Pair with your computer', 'On your computer, open OpenAIDE, then Settings → Devices → Show code. Your computer runs the work, even when your phone is locked.')
+      + (state.paired && !state.remote ? `<div class="panel"><p class="tag">ALREADY PAIRED</p><h2>${escape(state.computer || 'Your computer')}</h2><p>This phone is still trusted there.</p></div>` + button('Use this computer', 'paired') : '')
+      + button('Scan code', 'scan', state.paired && !state.remote ? 'secondary' : 'primary')
+      + '<form id="pair-form"><label for="code">Or paste the code</label><textarea id="code" name="code" rows="3" autocapitalize="characters" autocomplete="off" spellcheck="false" required></textarea>'
+      + '<button class="secondary" type="submit">Pair with code</button></form>'
+      + button('Show this phone’s code instead', 'join_screen', 'link')
+      + '<p class="note">No account or password. The code is valid for a few minutes and works once. Save any unsent draft before switching.</p>'
+      + '<details><summary>How is this secure?</summary><p>Each device has its own key. Pairing tells your computer to trust this phone’s key; the connection is encrypted end to end. Remove this phone any time in Settings → Devices on your computer.</p></details>';
+    document.getElementById('code').value = codeDraft;
+    document.getElementById('pair-form').addEventListener('submit', event => { event.preventDefault(); rememberCode(); send('pair', { code: codeDraft }); });
+  } else if (screen === 'join') {
+    const join = state.join;
+    page.innerHTML = heading('Remote computer', 'Show this code', 'On your computer, open OpenAIDE, then Settings → Devices → Enter code, and scan or type it.')
+      + (join ? `<div class="qr" role="img" aria-label="Pairing code"><svg viewBox="-2 -2 ${join.qr.size + 4} ${join.qr.size + 4}" shape-rendering="crispEdges"><path d="${escape(join.qr.path)}"/></svg></div><p class="code">${escape(join.text)}</p><p class="note">Waiting for your computer to confirm. Keep this screen open.</p>`
+        : '<p class="note">Preparing this phone’s code…</p>');
   } else if (screen === 'background') {
     page.innerHTML = heading('This phone', 'Keep work going', 'Protect active work when you leave OpenAIDE or lock your phone. Protection is released when work is idle.')
       + `<label class="row"><span><strong>Background work</strong><small>Only keeps the phone awake while needed.</small></span><input id="background" type="checkbox" ${state.background ? 'checked' : ''}></label>`
@@ -123,7 +131,7 @@ function render() {
   notice.hidden = !state.notice;
   notice.textContent = state.notice || '';
   if (state.busy) { const spinner = document.createElement('span'); spinner.className = 'spinner'; spinner.setAttribute('aria-hidden', 'true'); notice.prepend(spinner); }
-  for (const control of page.querySelectorAll('button, input')) control.disabled = Boolean(state.busy);
+  for (const control of page.querySelectorAll('button, input, textarea')) control.disabled = Boolean(state.busy);
   document.getElementById('back').disabled = Boolean(state.busy);
   for (const control of page.querySelectorAll('[data-screen]')) control.addEventListener('click', () => go(control.dataset.screen));
   for (const control of page.querySelectorAll('[data-action]')) control.addEventListener('click', () => {

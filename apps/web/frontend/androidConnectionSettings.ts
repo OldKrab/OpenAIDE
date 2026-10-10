@@ -28,10 +28,7 @@ export function androidConnectionSettings(host: Window): ConnectionSettings | un
         if (message.type === "result") {
           pending.get(message.id)?.finish(message.accepted ? undefined : unavailable());
         } else if (message.type === "state" && typeof message.state?.remote === "boolean") {
-          state = { ...message.state, scannedAddress: state?.scannedAddress, scanSequence: state?.scanSequence };
-          notify();
-        } else if (message.type === "scanned" && state && typeof message.address === "string") {
-          state = { ...state, scannedAddress: message.address, scanSequence: (state.scanSequence ?? 0) + 1 };
+          state = message.state;
           notify();
         }
       } catch { }
