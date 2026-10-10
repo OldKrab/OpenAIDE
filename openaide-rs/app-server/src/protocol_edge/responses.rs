@@ -166,6 +166,20 @@ pub fn update_shutdown_in_progress(method: String) -> ProtocolError {
     }
 }
 
+/// The message is shown to the user of a client that is newer than its App Server.
+pub fn incompatible_protocol(method: String) -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::IncompatibleProtocol,
+        message: "Update OpenAIDE on your computer".to_string(),
+        recoverable: false,
+        target: Some(ErrorTarget {
+            method: Some(method),
+            field: Some("protocolVersion".to_string()),
+            current_task: None,
+        }),
+    }
+}
+
 pub fn update_shutdown_readiness_failed() -> ProtocolError {
     ProtocolError {
         code: ProtocolErrorCode::Internal,

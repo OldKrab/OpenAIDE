@@ -43,6 +43,11 @@ pub const SETTINGS_UPDATE_NEW_TASK_DEFAULTS: &str = "settings/updateNewTaskDefau
 pub const SETTINGS_GET_RUNTIME: &str = "settings/getRuntime";
 pub const SETTINGS_UPDATE_RUNTIME: &str = "settings/updateRuntime";
 pub const SETTINGS_RESET_TASK_HISTORY: &str = "settings/resetTaskHistory";
+pub const DEVICES_CREATE_INVITE: &str = "devices/createInvite";
+pub const DEVICES_CANCEL_INVITE: &str = "devices/cancelInvite";
+pub const DEVICES_PREVIEW_JOIN_REQUEST: &str = "devices/previewJoinRequest";
+pub const DEVICES_APPROVE_JOIN_REQUEST: &str = "devices/approveJoinRequest";
+pub const DEVICES_REMOVE: &str = "devices/remove";
 pub const ATTACHMENT_LIST_ROOTS: &str = "attachment/listRoots";
 pub const ATTACHMENT_LIST_DIRECTORY: &str = "attachment/listDirectory";
 pub const ATTACHMENT_CREATE_FILE_REFERENCE: &str = "attachment/createFileReference";
@@ -153,6 +158,11 @@ pub const CLIENT_METHODS: &[&str] = &[
     SETTINGS_GET_RUNTIME,
     SETTINGS_UPDATE_RUNTIME,
     SETTINGS_RESET_TASK_HISTORY,
+    DEVICES_CREATE_INVITE,
+    DEVICES_CANCEL_INVITE,
+    DEVICES_PREVIEW_JOIN_REQUEST,
+    DEVICES_APPROVE_JOIN_REQUEST,
+    DEVICES_REMOVE,
     ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_CREATE_FILE_REFERENCE,

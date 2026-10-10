@@ -126,6 +126,10 @@ pub enum AppServerEventPayload {
         repository_id: WorktreeRepositoryId,
         repository: WorktreeRepositorySnapshot,
     },
+    /// Replaces the trusted Remote Device list and its connection state.
+    DeviceCollectionUpdated {
+        devices: crate::devices::DeviceCollectionSnapshot,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

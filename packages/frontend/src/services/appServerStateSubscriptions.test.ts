@@ -99,6 +99,26 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "worktreeRepository", repository });
   });
 
+  it("maps the Remote Device list into Settings state", () => {
+    const subscription = fakeSubscription();
+    const dispatch = vi.fn();
+    const devices = {
+      remoteAccess: "on" as const,
+      serverName: "workstation",
+      devices: [{ deviceId: "device_1", name: "Phone", addedAtMs: 1 }],
+    };
+
+    startAppServerStateSubscription({
+      backendConnection: subscription.connection,
+      context: { stateRootId: "root_1" as StateRootId },
+      dispatch,
+      scope: { kind: "devices" },
+    });
+    subscription.observer().onSnapshot({ kind: "devices", devices });
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "settings:devices", devices });
+  });
+
   it("remaps task navigation when session-owned Project metadata arrives", () => {
     const navigation = fakeSubscription();
     const projects = fakeSubscription();

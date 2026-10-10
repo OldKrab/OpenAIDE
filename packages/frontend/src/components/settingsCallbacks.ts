@@ -29,6 +29,7 @@ import {
   saveMcpServerThroughBackend,
   setMcpServerEnabledThroughBackend,
 } from "../intents/mcpSettingsIntents";
+import { createRemoteDeviceIntents } from "../intents/remoteDeviceIntents";
 
 type SettingsDependencies = Pick<
   AppCallbacksDependencies,
@@ -73,6 +74,7 @@ export function createSettingsCallbacks({
   };
   return {
     dismissError: () => dispatch({ type: "settings:error:clear" }),
+    devices: createRemoteDeviceIntents(backendConnection?.request ? { request: backendConnection.request } : undefined),
     // Sign-in Flow state is App Server-owned and arrives through the agents subscription, so
     // these callbacks only send intents; they never stage optimistic status.
     authenticateAgent: async (agentId, methodId, values) => {

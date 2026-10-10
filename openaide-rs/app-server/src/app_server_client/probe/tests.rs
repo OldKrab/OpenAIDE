@@ -57,6 +57,38 @@ fn classifier_reports_protocol_mismatch() {
 }
 
 #[test]
+fn classifier_accepts_a_server_with_a_newer_minor_and_refuses_an_older_one() {
+    let target = target(vec![endpoint(TransportKind::LocalHttp)]);
+    let mut requirements = requirements();
+    requirements.required_protocol_version = "1.2".to_string();
+
+    assert_eq!(
+        classify_observation(
+            &target,
+            &requirements,
+            EndpointProbeObservation::Alive(facts("root-a", "1.3", "0.1.0"))
+        ),
+        EndpointProbeOutcome::Compatible
+    );
+    assert_eq!(
+        classify_observation(
+            &target,
+            &requirements,
+            EndpointProbeObservation::Alive(facts("root-a", "1.1", "0.1.0"))
+        ),
+        EndpointProbeOutcome::IncompatibleProtocol
+    );
+    assert_eq!(
+        classify_observation(
+            &target,
+            &requirements,
+            EndpointProbeObservation::Alive(facts("root-a", "unknown", "0.1.0"))
+        ),
+        EndpointProbeOutcome::IncompatibleProtocol
+    );
+}
+
+#[test]
 fn classifier_reports_app_mismatch() {
     assert_eq!(
         classify_observation(

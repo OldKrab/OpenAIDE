@@ -186,6 +186,7 @@ type AppActionPayload =
   | { type: "settings:sections"; tabs: SettingsTabId[] }
   | { type: "settings:agentDetailsResult"; generatedAt: string; agents: AgentSettingsRecord[] }
   | { type: "settings:agentCollection"; agents: SettingsAgentCollectionEntry[] }
+  | { type: "settings:devices"; devices: import("@openaide/app-server-client").DeviceCollectionSnapshot }
   | { type: "settings:mcpServersStart" }
   | { type: "settings:mcpServersResult"; generatedAt: string; availability: SettingsProjectionAvailability; servers: McpServerSettingsRecord[] }
   | { type: "settings:mcpServersError"; message: string }

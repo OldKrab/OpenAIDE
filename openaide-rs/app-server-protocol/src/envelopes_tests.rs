@@ -20,6 +20,7 @@ fn client_request_envelope_carries_method_params_and_meta() {
             requested_surface: RequestedSurface::Home,
             capabilities: ClientCapabilities::default(),
             workspace_roots: Vec::new(),
+            protocol_version: None,
         },
         RequestMeta {
             client_request_id: Some("request-1".into()),

@@ -2,9 +2,13 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{ClientInstanceId, ProjectId, TaskId};
-use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot};
+use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot, ProtocolVersion};
 
-pub const APP_SERVER_PROTOCOL_VERSION: &str = "2";
+/// The App Server Protocol version, separate from the product version (ADR-0062).
+///
+/// Bump `minor` when adding methods, fields, or events. Bump `major` and reset
+/// `minor` for any change an older client cannot ignore.
+pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 1 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +104,10 @@ pub struct InitializeParams {
     /// Local workspace facts supplied by the App Shell for Project canonicalization.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_roots: Vec<ClientWorkspaceRoot>,
+    /// The protocol version the client was built against. A client that ships
+    /// separately from its App Server must send it; an omitted version is not checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<ProtocolVersion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

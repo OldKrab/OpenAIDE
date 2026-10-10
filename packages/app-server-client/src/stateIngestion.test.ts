@@ -53,6 +53,42 @@ describe("scope-local state ingestion", () => {
     });
   });
 
+  it("replaces the Remote Device list from a live collection update", () => {
+    const state = createSubscriptionIngestionState({
+      scope: { kind: "devices" },
+      cursor: "cursor-1" as EventCursor,
+      snapshot: { kind: "devices", devices: { remoteAccess: "off", serverName: "workstation" } },
+    }, {
+      stateRootId: rootId,
+      clientInstanceId: "client-1" as never,
+    });
+    const result = applySubscriptionEvent(state, {
+      subscription: { kind: "devices" },
+      previousCursor: "cursor-1" as EventCursor,
+      cursor: "cursor-2" as EventCursor,
+      scope: { kind: "stateRoot", stateRootId: rootId },
+      payload: {
+        kind: "deviceCollectionUpdated",
+        devices: {
+          remoteAccess: "on",
+          serverName: "workstation",
+          devices: [{ deviceId: "device-1", name: "Phone", addedAtMs: 1 }],
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "applied",
+      snapshotChanged: true,
+      state: {
+        snapshot: {
+          kind: "devices",
+          devices: { remoteAccess: "on", devices: [{ deviceId: "device-1" }] },
+        },
+      },
+    });
+  });
+
   it("applies one atomic Task patch at the exact next Task revision", () => {
     const state = taskState("task-1", 4);
     const item = chatItem("agent-1", "Hello");

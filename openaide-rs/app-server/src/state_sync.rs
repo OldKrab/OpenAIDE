@@ -406,6 +406,11 @@ fn payload_matches_subscription(
         SubscriptionScope::Settings { .. } => {
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
         }
+        SubscriptionScope::Devices => matches!(
+            payload,
+            AppServerEventPayload::SnapshotReplaced { .. }
+                | AppServerEventPayload::DeviceCollectionUpdated { .. }
+        ),
         SubscriptionScope::TaskNavigation {
             section,
             project_ids,

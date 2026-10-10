@@ -197,7 +197,7 @@ impl Fixture {
         &self,
         waiter: &mut W,
     ) -> Result<LaunchHandoffResult, LaunchHandoffError> {
-        self.run_requiring_protocol(APP_SERVER_PROTOCOL_VERSION, waiter)
+        self.run_requiring_protocol(&APP_SERVER_PROTOCOL_VERSION.to_string(), waiter)
     }
 
     fn run_requiring_protocol<W: LaunchWaiter>(

@@ -5,12 +5,11 @@ use std::sync::Arc;
 use openaide_app_server_protocol::ids::{AgentId, ProjectId, ServerId, StateRootId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
-    LiveSessionDataState, NewTaskDefaultsSnapshot, ProjectCollectionSnapshot, ProtocolVersion,
-    ServerCapabilities, ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction,
-    TaskPreparationSnapshot, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary,
+    LiveSessionDataState, NewTaskDefaultsSnapshot, ProjectCollectionSnapshot, ServerCapabilities,
+    ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
+    TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot,
+    TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState,
+    TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
 
@@ -69,6 +68,7 @@ pub struct SnapshotBuilder {
     settings: Arc<dyn SettingsSnapshotSource>,
     task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
     task_snapshots: Arc<dyn TaskSnapshotSource>,
+    devices: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow>,
 }
 
 /// Groups snapshot projections so adding one source does not widen every construction call.
@@ -165,7 +165,16 @@ impl SnapshotBuilder {
             settings: sources.settings,
             task_navigation: sources.task_navigation,
             task_snapshots: sources.task_snapshots,
+            devices: Arc::new(crate::remote_devices::NoRemoteDevices),
         }
+    }
+
+    pub(crate) fn with_remote_devices(
+        mut self,
+        devices: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow>,
+    ) -> Self {
+        self.devices = devices;
+        self
     }
 
     pub fn client_snapshot(
@@ -193,7 +202,7 @@ impl SnapshotBuilder {
             cursor: token.cursor().clone(),
             server: ServerSnapshot {
                 server_id: self.server_id.clone(),
-                protocol_version: ProtocolVersion::V1,
+                protocol_version: openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION,
                 capabilities: ServerCapabilities {
                     reconnect: true,
                     resync: true,
@@ -252,6 +261,9 @@ impl SnapshotProvider for SnapshotBuilder {
         Ok(match scope {
             SubscriptionScope::Projects => SubscriptionSnapshot::Projects {
                 projects: self.projects.snapshot()?,
+            },
+            SubscriptionScope::Devices => SubscriptionSnapshot::Devices {
+                devices: self.devices.snapshot(),
             },
             SubscriptionScope::Agents => SubscriptionSnapshot::Agents {
                 agents: self.agents.snapshot()?,

@@ -31,6 +31,10 @@ use crate::methods::{
     WORKTREE_RESOLVE_FOLDER,
 };
 use crate::methods::{
+    DEVICES_APPROVE_JOIN_REQUEST, DEVICES_CANCEL_INVITE, DEVICES_CREATE_INVITE,
+    DEVICES_PREVIEW_JOIN_REQUEST, DEVICES_REMOVE,
+};
+use crate::methods::{
     FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_SEARCH,
 };
 use crate::server_requests::{
@@ -218,6 +222,26 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const SETTINGS_RESET_TASK_HISTORY = {:?} as const;\n\n",
         SETTINGS_RESET_TASK_HISTORY
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_CREATE_INVITE = {:?} as const;\n",
+        DEVICES_CREATE_INVITE
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_CANCEL_INVITE = {:?} as const;\n",
+        DEVICES_CANCEL_INVITE
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_PREVIEW_JOIN_REQUEST = {:?} as const;\n",
+        DEVICES_PREVIEW_JOIN_REQUEST
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_APPROVE_JOIN_REQUEST = {:?} as const;\n",
+        DEVICES_APPROVE_JOIN_REQUEST
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_REMOVE = {:?} as const;\n",
+        DEVICES_REMOVE
     ));
     output.push_str(&format!(
         "export const ATTACHMENT_LIST_ROOTS = {:?} as const;\n",

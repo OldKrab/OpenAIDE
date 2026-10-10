@@ -69,7 +69,43 @@ pub struct ProtocolVersion {
 
 impl ProtocolVersion {
     pub const V1: Self = Self { major: 1, minor: 0 };
+
+    /// A client is compatible when it shares this server's major version and
+    /// was built against a minor version this server already implements.
+    pub fn accepts_client(self, client: Self) -> bool {
+        self.major == client.major && client.minor <= self.minor
+    }
 }
+
+impl std::fmt::Display for ProtocolVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}.{}", self.major, self.minor)
+    }
+}
+
+impl std::str::FromStr for ProtocolVersion {
+    type Err = ProtocolVersionParseError;
+
+    /// A bare major such as `2` is the form written before minors existed.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (major, minor) = value.split_once('.').unwrap_or((value, "0"));
+        Ok(Self {
+            major: major.parse().map_err(|_| ProtocolVersionParseError)?,
+            minor: minor.parse().map_err(|_| ProtocolVersionParseError)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtocolVersionParseError;
+
+impl std::fmt::Display for ProtocolVersionParseError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("protocol version must be major.minor")
+    }
+}
+
+impl std::error::Error for ProtocolVersionParseError {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

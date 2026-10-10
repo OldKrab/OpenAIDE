@@ -14,7 +14,10 @@ fn client_probe_result_uses_endpoint_validation_facts() {
     let value = serde_json::to_value(result).unwrap();
 
     assert_eq!(value["stateRootFingerprint"], json!("root-a"));
-    assert_eq!(value["protocolVersion"], json!("2"));
+    assert_eq!(
+        value["protocolVersion"],
+        json!(APP_SERVER_PROTOCOL_VERSION.to_string())
+    );
     assert_eq!(value["appVersion"], json!("0.1.0"));
     assert_eq!(value["lifecycle"], json!("running"));
 }
@@ -38,6 +41,7 @@ fn initialize_params_use_typed_method_shape() {
         workspace_roots: vec![ClientWorkspaceRoot {
             path: "/workspace/app".to_string(),
         }],
+        protocol_version: None,
     };
 
     let value = serde_json::to_value(params).unwrap();

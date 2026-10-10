@@ -363,6 +363,13 @@ export function useAppControllerBackendLifecycle({
                 scope: { kind: "agents" },
                 setAgents,
               }));
+              // Devices never gates readiness: the list only feeds Settings and the new-device notice.
+              stopSubscriptions.push(startAppServerStateSubscription({
+                backendConnection: subscriptionConnection,
+                context: subscriptionContext,
+                dispatch: dispatchForCurrentReplica,
+                scope: { kind: "devices" },
+              }));
               for (const project of result.snapshot.projects?.projects ?? []) {
                 if (!project.worktreeRepositoryId) continue;
                 stopSubscriptions.push(startAppServerStateSubscription({

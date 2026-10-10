@@ -193,6 +193,8 @@ function actionsFromSubscriptionSnapshot(
     }
     case "settings":
       return [];
+    case "devices":
+      return [{ type: "settings:devices", devices: snapshot.devices }];
     case "toolDetail":
       return [{
         type: "toolDetail:result",

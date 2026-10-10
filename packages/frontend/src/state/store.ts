@@ -19,7 +19,7 @@ import {
   type ProjectOption,
   type WorkspaceRoot,
 } from "./composerOptions";
-import type { MessageId, WorktreeRepositorySnapshot } from "@openaide/app-server-client";
+import type { DeviceCollectionSnapshot, MessageId, WorktreeRepositorySnapshot } from "@openaide/app-server-client";
 
 export type PendingComposerSend = {
   prompt: string;
@@ -146,6 +146,8 @@ export type SettingsState = {
   runtimeSettings?: RuntimeSettingsResult;
   agentDetails?: AgentSettingsRecord[];
   agentDetailsGeneratedAt?: string;
+  /** Trusted Remote Devices and remote-access state, replicated from the Devices subscription. */
+  devices?: DeviceCollectionSnapshot;
   mcpServers?: McpServerSettingsRecord[];
   mcpServersAvailability?: SettingsProjectionAvailability;
   mcpServersGeneratedAt?: string;

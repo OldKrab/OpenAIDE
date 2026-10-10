@@ -28,6 +28,8 @@ pub enum ProtocolErrorCode {
     NodeJsRequired,
     RequestAlreadyResolved,
     ServerStopping,
+    /// The client was built for a protocol version this App Server does not implement.
+    IncompatibleProtocol,
     StaleCursor,
     Internal,
 }
