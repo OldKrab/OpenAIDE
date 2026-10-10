@@ -99,6 +99,14 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(tree.root.findAll((node) => node.props.role === "radio")).toHaveLength(0);
   });
 
+  it("shows the installed version only when the shell reports one", () => {
+    const renderTab = () => render(<DataSupportSettingsTab onResetTaskHistory={async () => undefined} onSetAcpTrace={() => undefined} />);
+    vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({ appVersion: "1.2.3" } as unknown as frontendShell.FrontendShell);
+    expect(JSON.stringify(renderTab().toJSON())).toContain("Version 1.2.3");
+    vi.mocked(frontendShell.currentFrontendShell).mockReturnValue(undefined);
+    expect(JSON.stringify(renderTab().toJSON())).not.toContain("Version ");
+  });
+
   it("requires explicit confirmation before resetting Task history", async () => {
     const resetTaskHistory = vi.fn(async () => undefined);
     const tree = render(

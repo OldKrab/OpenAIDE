@@ -85,8 +85,8 @@ Before that release:
    startup and graceful JSON-RPC shutdown before upload. Desktop builds verify
    that Tauri bundled the exact App Server binary built for that platform. The
    Web App runner unpacks the archive it built outside the checkout, starts the
-   packaged server, and requires the bundled App Server to answer through it
-   before upload.
+   packaged server, and requires the bundled App Server to complete one Task
+   with the test Agent through it before upload.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. Windows Desktop
    filenames end in `-unsigned` until Authenticode signing is configured. macOS

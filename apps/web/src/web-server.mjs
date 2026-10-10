@@ -19,7 +19,7 @@ import {
   isAuthorized,
   writeUnauthorized,
 } from "./dev-server-auth.mjs";
-import { appServerTransportRoute } from "./dev-server-routes.mjs";
+import { appServerTransportRoute, WEB_MANIFEST_PATH, webManifest } from "./dev-server-routes.mjs";
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
 import { createRuntimeLogger } from "./runtime-logger.mjs";
 import { createMobileStatus } from "./mobile-status.mjs";
@@ -66,6 +66,7 @@ export async function startWebServer({
   name,
   onShutdown,
   port,
+  presentation,
   projectRoots,
   prototype,
   runtimeRoot,
@@ -133,6 +134,16 @@ export async function startWebServer({
       }
       if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
         writeFavicon(res);
+        return;
+      }
+      if (url.pathname === WEB_MANIFEST_PATH) {
+        const body = Buffer.from(JSON.stringify(webManifest(presentation)), "utf8");
+        res.writeHead(200, {
+          "content-type": "application/manifest+json; charset=utf-8",
+          "cache-control": "no-cache",
+          "content-length": String(body.byteLength),
+        });
+        res.end(body);
         return;
       }
       if (url.pathname.startsWith("/__openaide-app-server/")) {

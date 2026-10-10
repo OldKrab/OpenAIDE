@@ -97,6 +97,7 @@ export function createWebAppShell(): FrontendShell {
   );
   return {
     appearance,
+    appVersion: document.body.dataset.appVersion || undefined,
     connectionSettings: androidConnectionSettings(window),
     bootstrap,
     clipboard: { writeText: writeBrowserClipboardText },

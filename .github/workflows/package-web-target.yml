@@ -61,14 +61,17 @@ jobs:
           node scripts/package-web.mjs app-server/openaide-app-server "$RUNNER_TEMP/stage/openaide-web" "$RELEASE_VERSION"
           tar -czf "artifacts/openaide-web-${{ inputs.target }}-${RELEASE_VERSION}.tar.gz" \
             -C "$RUNNER_TEMP/stage" openaide-web
-      - name: Verify packaged content and start the packaged server
+      - name: Verify packaged content and complete a Task on the packaged server
         shell: bash
         run: |
           # Unpack the published bytes outside the checkout so nothing resolves from the repository.
           extraction_root="$RUNNER_TEMP/openaide-web-${{ inputs.target }}"
           mkdir -p "$extraction_root"
           tar -xzf "artifacts/openaide-web-${{ inputs.target }}-${{ inputs.version }}.tar.gz" -C "$extraction_root"
-          node scripts/smoke-release-web.mjs "$extraction_root/openaide-web" "${{ inputs.version }}"
+          node scripts/smoke-release-web.mjs \
+            "$extraction_root/openaide-web" \
+            "${{ inputs.version }}" \
+            tests/smoke/fixtures/test-acp-agent.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: web-${{ inputs.target }}${{ inputs.artifact_suffix }}

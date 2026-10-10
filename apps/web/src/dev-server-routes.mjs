@@ -25,13 +25,32 @@ export function injectBootstrap(html, route, presentation = {}) {
     route.nativeSessionId ? `data-native-session-id="${escapeAttribute(route.nativeSessionId)}"` : undefined,
     route.archived ? 'data-archived="true"' : undefined,
     presentation.instanceLabel ? `data-instance-label="${escapeAttribute(presentation.instanceLabel)}"` : undefined,
+    presentation.version ? `data-app-version="${escapeAttribute(presentation.version)}"` : undefined,
     `data-app-server-connection="${escapeAttribute(JSON.stringify(browserConnection(presentation.appServerTransport)))}"`,
   ].filter(Boolean).join(" ");
-  const titled = presentation.title ? injectTitle(html, presentation.title) : html;
+  const titled = injectManifestLink(presentation.title ? injectTitle(html, presentation.title) : html);
   if (/<body([^>]*)>/i.test(html)) {
     return titled.replace(/<body([^>]*)>/i, `<body$1 ${attrs}>`);
   }
   return titled.replace(/<div id="root"><\/div>/i, `<body ${attrs}><div id="root"></div></body>`);
+}
+
+export const WEB_MANIFEST_PATH = "/manifest.webmanifest";
+
+/**
+ * Lets a browser install the Web App in its own window. Colors are left to the
+ * page, which follows the system appearance; a fixed manifest color would not.
+ */
+export function webManifest(presentation = {}) {
+  const name = presentation.title || "OpenAIDE";
+  return {
+    name,
+    short_name: name,
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    icons: [{ src: "/favicon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
+  };
 }
 
 export function webRoute(pathname) {
@@ -100,6 +119,13 @@ function injectTitle(html, title) {
     return html.replace(/<\/head>/i, `<title>${escaped}</title></head>`);
   }
   return html;
+}
+
+function injectManifestLink(html) {
+  // The manifest sits behind the same authentication as the app, and a browser
+  // fetches it without credentials unless the link asks for them.
+  const link = `<link rel="manifest" href="${WEB_MANIFEST_PATH}" crossorigin="use-credentials" />`;
+  return /<\/head>/i.test(html) ? html.replace(/<\/head>/i, `${link}</head>`) : html;
 }
 
 function escapeText(value) {

@@ -8,13 +8,26 @@ import { listeningPort } from "./dev-server-test-support.mjs";
 
 test("the packaged server serves the Frontend and keeps user data outside the install", { timeout: 60_000 }, async (t) => {
   const fixture = createFixture(t);
-  const webServer = startServer(t, fixture, { OPENAIDE_WEB_HOST: "127.0.0.1" });
+  const webServer = startServer(t, fixture, { OPENAIDE_WEB_HOST: "127.0.0.1", OPENAIDE_WEB_TITLE: "OpenAIDE Fixture" });
   const origin = `http://127.0.0.1:${await listeningPort(webServer)}`;
 
   assert.equal((await fetch(`${origin}/livez`)).status, 200);
   const page = await fetch(origin);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /data-shell="web"/);
+  const html = await page.text();
+  assert.match(html, /data-shell="web"/);
+  assert.match(html, /data-app-version="\d+\.\d+\.\d+[^"]*"/);
+  assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest" crossorigin="use-credentials" \/>/);
+  const manifest = await fetch(`${origin}/manifest.webmanifest`);
+  assert.equal(manifest.headers.get("content-type"), "application/manifest+json; charset=utf-8");
+  assert.deepEqual(await manifest.json(), {
+    name: "OpenAIDE Fixture",
+    short_name: "OpenAIDE Fixture",
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    icons: [{ src: "/favicon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
+  });
   // Prototype routing belongs to the development server only.
   assert.equal((await fetch(`${origin}/prototype/example`)).status, 404);
 
@@ -53,7 +66,7 @@ function createFixture(t) {
   const staticRoot = path.join(root, "static");
   const appServerPath = path.join(root, "app-server.mjs");
   mkdirSync(staticRoot);
-  writeFileSync(path.join(staticRoot, "index.html"), "<html><body><div id=\"root\"></div></body></html>");
+  writeFileSync(path.join(staticRoot, "index.html"), "<html><head><title>x</title></head><body><div id=\"root\"></div></body></html>");
   writeFileSync(appServerPath, fakeAppServerSource());
   chmodSync(appServerPath, 0o755);
   t.after(() => rmSync(root, { recursive: true, force: true }));
