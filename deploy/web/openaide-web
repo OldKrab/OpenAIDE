@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Starts the packaged Web App from wherever the archive was unpacked.
+install_root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "OpenAIDE Web requires Node.js 24 or newer on PATH." >&2
+  exit 127
+fi
+
+exec node --enable-source-maps "$install_root/apps/web/src/server.mjs"

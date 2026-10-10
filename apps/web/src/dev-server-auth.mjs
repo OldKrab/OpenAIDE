@@ -18,6 +18,22 @@ export function authConfigFromEnv(env = process.env) {
   };
 }
 
+/**
+ * A Web App Shell hands out a terminal, so a network-reachable bind must name
+ * its protection: the built-in password, or an explicit statement that an
+ * authenticating proxy is in front. Returns the refusal, or undefined.
+ */
+export function exposureGuardError({ authConfig, authHandledUpstream, host }) {
+  if (authConfig.enabled || authHandledUpstream || isLoopbackHost(host)) return undefined;
+  return `Refusing to listen on ${host} without authentication. `
+    + "Set OPENAIDE_WEB_PASSWORD, or set OPENAIDE_WEB_UPSTREAM_AUTH=1 when a proxy in front authenticates every request.";
+}
+
+function isLoopbackHost(host) {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" || normalized === "::1" || /^127(?:\.\d{1,3}){3}$/.test(normalized);
+}
+
 export function isAuthorized(headers, config) {
   if (!config.enabled) return true;
   const header = Array.isArray(headers.authorization)
