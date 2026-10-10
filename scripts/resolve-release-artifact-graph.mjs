@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-const artifactSelections = ["all", "vsix", "desktop"];
+const artifactSelections = ["all", "vsix", "desktop", "web"];
 const vsixTargets = ["linux-x64", "win32-x64", "darwin-arm64"];
 const desktopTargets = ["win32-x64", "darwin-arm64"];
 
@@ -10,6 +10,7 @@ const dependencies = Object.freeze({
   "vsix-darwin-arm64": ["server-darwin-arm64"],
   "desktop-win32-x64": ["server-win32-x64", "server-linux-x64-musl"],
   "desktop-darwin-arm64": ["server-darwin-arm64"],
+  "web-linux-x64": ["server-linux-x64-musl"],
 });
 
 const nodeOrder = [
@@ -30,7 +31,7 @@ function selectedTargets(selection, supported, inputName) {
 /** Owns release-node selection and the exact App Server dependencies of every package. */
 export function resolveReleaseArtifactGraph({ artifacts, vsixTarget, desktopTarget }) {
   if (!artifactSelections.includes(artifacts)) {
-    throw new Error("artifacts must be all, vsix, or desktop");
+    throw new Error("artifacts must be all, vsix, desktop, or web");
   }
   const selectedVsixTargets = selectedTargets(vsixTarget, vsixTargets, "vsix_target");
   const selectedDesktopTargets = selectedTargets(
@@ -39,15 +40,19 @@ export function resolveReleaseArtifactGraph({ artifacts, vsixTarget, desktopTarg
     "desktop_target",
   );
   const enabledPackages = new Set();
-  if (artifacts !== "desktop") {
+  if (artifacts === "all" || artifacts === "vsix") {
     for (const target of selectedVsixTargets) {
       enabledPackages.add(`vsix-${target}`);
     }
   }
-  if (artifacts !== "vsix") {
+  if (artifacts === "all" || artifacts === "desktop") {
     for (const target of selectedDesktopTargets) {
       enabledPackages.add(`desktop-${target}`);
     }
+  }
+  // The Web App has one packaged platform, so it has no target selector.
+  if (artifacts === "all" || artifacts === "web") {
+    enabledPackages.add("web-linux-x64");
   }
 
   const enabledServers = new Set(

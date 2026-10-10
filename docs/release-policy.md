@@ -75,14 +75,18 @@ Before that release:
    atomically pushes the `main` update and tag.
 5. The tag starts `Release`. It rejects tags not reachable from `main`, then
    builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
-   self-contained Windows x64 and macOS Apple Silicon desktop installers, a signed
+   self-contained Windows x64 and macOS Apple Silicon desktop installers, a
+   Linux x64 Web App archive, a signed
    Android APK and its ARM64 Termux runtime while
    normal CI validates the exact version commit. Publication requires both to
    succeed; the release workflow does not repeat the CI suite. Prerelease
    packages carry the registry's native prerelease metadata. Each VSIX runner
    inspects the packaged files and exercises its bundled App Server through
    startup and graceful JSON-RPC shutdown before upload. Desktop builds verify
-   that Tauri bundled the exact App Server binary built for that platform.
+   that Tauri bundled the exact App Server binary built for that platform. The
+   Web App runner unpacks the archive it built outside the checkout, starts the
+   packaged server, and requires the bundled App Server to answer through it
+   before upload.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. Windows Desktop
    filenames end in `-unsigned` until Authenticode signing is configured. macOS

@@ -85,6 +85,7 @@ test("workflows pin every external action and declared release toolchain", () =>
     "ci.yml",
     "package-desktop-target.yml",
     "package-vsix-target.yml",
+    "package-web-target.yml",
     "reconcile-release.yml",
     "release.yml",
     "version-bump.yml",
@@ -203,14 +204,33 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.doesNotMatch(release, /openaide-web-assets|docker\/build-push-action|openaide-app-server-linux/);
 });
 
-test("manual artifact builds can select VSIX, desktop, or all without publishing", () => {
+test("release publishing produces the Web App archive from its own smoke-tested bytes", () => {
+  const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+  const artifactBuild = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
+  const webBuild = readFileSync(path.join(repoRoot, ".github/workflows/package-web-target.yml"), "utf8");
+
+  assert.match(artifactBuild, /uses: \.\/\.github\/workflows\/package-web-target\.yml/);
+  assert.match(artifactBuild, /needs: \[prepare, server-linux-x64-musl\]\s+uses: \.\/\.github\/workflows\/package-web-target\.yml/);
+  assert.match(webBuild, /app-server-linux-x64-musl/);
+  assert.match(webBuild, /node scripts\/package-web\.mjs/);
+  assert.match(webBuild, /name: web-\$\{\{ inputs\.target \}\}/);
+  // The smoke test unpacks the archive it uploads, so the published bytes are the tested bytes.
+  assert.ok(webBuild.indexOf("tar -czf") < webBuild.indexOf("tar -xzf"));
+  assert.ok(webBuild.indexOf("tar -xzf") < webBuild.indexOf("node scripts/smoke-release-web.mjs"));
+  assert.ok(webBuild.indexOf("node scripts/smoke-release-web.mjs") < webBuild.indexOf("actions/upload-artifact"));
+  assert.match(release, /pattern: web-\*/);
+  assert.match(release, /test -s "release\/openaide-web-linux-x64-\$RELEASE_VERSION\.tar\.gz"/);
+  assert.match(release, /release\/openaide-web-linux-x64-\*\.tar\.gz/);
+});
+
+test("manual artifact builds can select VSIX, desktop, Web, or all without publishing", () => {
   const workflow = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
   const vsixBuild = readFileSync(path.join(repoRoot, ".github/workflows/package-vsix-target.yml"), "utf8");
   const desktopBuild = readFileSync(path.join(repoRoot, ".github/workflows/package-desktop-target.yml"), "utf8");
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /workflow_call:/);
-  assert.match(workflow, /options: \[all, vsix, desktop\]/);
+  assert.match(workflow, /options: \[all, vsix, desktop, web\]/);
   assert.match(workflow, /vsix_target:/);
   assert.match(workflow, /options: \[all, linux-x64, win32-x64, darwin-arm64\]/);
   assert.match(workflow, /resolve-release-artifact-graph\.mjs/);
@@ -244,6 +264,7 @@ test("artifact builds select only the requested package targets and required ser
     "server-win32-x64",
     "vsix-win32-x64",
     "desktop-win32-x64",
+    "web-linux-x64",
   ]);
   assert.deepEqual(windows.dependencies["vsix-win32-x64"], ["server-win32-x64"]);
   assert.deepEqual(windows.dependencies["desktop-win32-x64"], [
@@ -265,8 +286,23 @@ test("artifact builds select only the requested package targets and required ser
     "vsix-darwin-arm64",
     "desktop-win32-x64",
     "desktop-darwin-arm64",
+    "web-linux-x64",
   ]);
   assert.deepEqual(fullRelease.dependencies["vsix-linux-x64"], ["server-linux-x64-musl"]);
+
+  const web = resolveReleaseArtifactGraph({
+    artifacts: "web",
+    vsixTarget: "all",
+    desktopTarget: "all",
+  });
+  assert.deepEqual(web.enabledNodes, ["server-linux-x64-musl", "web-linux-x64"]);
+
+  const desktopOnly = resolveReleaseArtifactGraph({
+    artifacts: "desktop",
+    vsixTarget: "all",
+    desktopTarget: "darwin-arm64",
+  });
+  assert.deepEqual(desktopOnly.enabledNodes, ["server-darwin-arm64", "desktop-darwin-arm64"]);
 
   assert.throws(
     () => resolveReleaseArtifactGraph({

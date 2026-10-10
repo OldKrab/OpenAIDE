@@ -101,6 +101,11 @@ jobs:
           pattern: desktop-*
           path: release
           merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: web-*
+          path: release
+          merge-multiple: true
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: openaide-android-user
@@ -124,6 +129,7 @@ jobs:
           test -f "release/openaide-desktop-windows-x64-$RELEASE_VERSION.exe"
           test -f "release/openaide-desktop-windows-x64-$RELEASE_VERSION.exe.sig"
           test -f "release/openaide-desktop-macos-arm64-$RELEASE_VERSION.dmg"
+          test -s "release/openaide-web-linux-x64-$RELEASE_VERSION.tar.gz"
           test "$(find release -maxdepth 1 -type f -name '*.vsix' | wc -l)" -eq 3
           test "$(find release -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | wc -l)" -eq 2
       - name: Create draft and attach verified assets
@@ -140,6 +146,7 @@ jobs:
             release/*.dmg
             release/*.apk
             release/openaide-termux-arm64.tar.gz
+            release/openaide-web-linux-x64-*.tar.gz
       - name: Publish the completed draft
         env:
           GH_TOKEN: ${{ github.token }}

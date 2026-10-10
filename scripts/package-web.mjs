@@ -60,15 +60,15 @@ export function stageWebPackage({ appServerPath, output, root = repoRoot, versio
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const [appServerPath, output] = process.argv.slice(2);
+  const [appServerPath, output, version] = process.argv.slice(2);
   if (!appServerPath || !output) {
-    console.error("Usage: node scripts/package-web.mjs <app-server-executable> <output-directory>");
+    console.error("Usage: node scripts/package-web.mjs <app-server-executable> <output-directory> [version]");
     process.exit(2);
   }
   stageWebPackage({
     appServerPath: path.resolve(appServerPath),
     output: path.resolve(output),
-    version: JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version,
+    version: version ?? JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version,
   });
   console.log(`Staged the Web App package in ${path.resolve(output)}`);
 }
