@@ -30,7 +30,8 @@ public final class TermuxCommand extends BroadcastReceiver {
         });
         new Handler(Looper.getMainLooper()).postDelayed(() -> finish(operation, false,
             "Termux did not return a result. Check command access and allow-external-apps=true."),
-            "install-termux.sh".equals(asset) ? 180_000 : "start-termux.sh".equals(asset) ? 75_000 : 30_000);
+            // Installing downloads the runtime and, for Claude, a binary of a few hundred megabytes.
+            "install-termux.sh".equals(asset) ? 1_200_000 : "start-termux.sh".equals(asset) ? 75_000 : 30_000);
         try {
             String script;
             try (var input = context.getAssets().open(asset); var output = new java.io.ByteArrayOutputStream()) {

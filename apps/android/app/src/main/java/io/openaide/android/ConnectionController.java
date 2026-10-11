@@ -129,7 +129,10 @@ final class ConnectionController extends ContextWrapper {
         begin("setup_install", "Preparing your workspace download…");
         worker.execute(() -> {
             String environment;
-            try { environment = needsRuntime ? RuntimeRelease.installEnvironment() : ""; }
+            try {
+                environment = (needsRuntime ? RuntimeRelease.installEnvironment() : "")
+                    + TermuxCommand.variable("OPENAIDE_CLAUDE_ACP_VERSION", BuildConfig.CLAUDE_ACP_VERSION);
+            }
             catch (Exception error) {
                 runOnUiThread(() -> end(false, "The Android workspace download is unavailable. Check your internet connection and try again later."));
                 return;

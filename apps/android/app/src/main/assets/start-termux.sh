@@ -29,12 +29,9 @@ fi
 # ones installed in Termux.
 if command -v codex >/dev/null 2>&1; then export CODEX_PATH="$(command -v codex)"; fi
 if command -v claude >/dev/null 2>&1; then
-    # The real file, so a JavaScript release is recognised by its name and run with Node.
-    export CLAUDE_CODE_EXECUTABLE="$(readlink -f "$(command -v claude)")"
-    # The pinned release must not replace itself with a build that cannot run here,
-    # and its bundled search binary is not an Android one.
+    export CLAUDE_CODE_EXECUTABLE="$(command -v claude)"
+    # An update would replace the binary with one that is not prepared to run here.
     export DISABLE_AUTOUPDATER=1
-    export USE_BUILTIN_RIPGREP=0
 fi
 export OPENAIDE_STORAGE_ROOT="$state"
 export OPENAIDE_RUNTIME_ROOT="$state/runtime"

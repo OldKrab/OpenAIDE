@@ -26,10 +26,10 @@ function fixture(context, symlink = false, versioned = true) {
   const hash = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
   return {
     runtimeRoot,
-    run: (checksum = hash) => spawnSync('bash', ['apps/android/app/src/main/assets/install-termux.sh'], {
+    run: (checksum = hash, extra = {}) => spawnSync('bash', ['apps/android/app/src/main/assets/install-termux.sh'], {
       cwd: path.resolve(new URL('../../..', import.meta.url).pathname),
       env: { ...process.env, HOME: home, PREFIX: path.join(root, 'tools'), FIXTURE_ARCHIVE: archive,
-        OPENAIDE_RUNTIME_URL: 'https://downloads.example/runtime.tar.gz', OPENAIDE_RUNTIME_SHA256: checksum },
+        OPENAIDE_RUNTIME_URL: 'https://downloads.example/runtime.tar.gz', OPENAIDE_RUNTIME_SHA256: checksum, ...extra },
       encoding: 'utf8',
     }),
   };
@@ -70,4 +70,41 @@ test('archive links cannot escape the staging directory', context => {
   const installation = fixture(context, true);
   assert.notEqual(installation.run().status, 0);
   assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime')), false);
+});
+
+// Replaces the fixture's agents with the tools the Claude install drives: npm, the glibc runner and a shell.
+function claudeTools(installation, starts) {
+  const tools = path.join(installation.runtimeRoot, '../../../../tools/bin');
+  fs.rmSync(path.join(tools, 'claude'));
+  fs.symlinkSync('/bin/sh', path.join(tools, 'sh'));
+  fs.writeFileSync(path.join(tools, 'grun'), `#!${process.execPath}\nprocess.exit(process.argv[2] === '--set' ? 0 : 1);\n`, { mode: 0o700 });
+  fs.writeFileSync(path.join(tools, 'npm'), `#!${process.execPath}
+const fs = require('node:fs'), path = require('node:path'), args = process.argv.slice(2);
+if (args[0] === 'view') { console.log(args[1] === '@openaide/claude-agent-acp@1.5.0' ? '0.3.293' : ''); process.exit(0); }
+if (!args.includes('@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.293')) process.exit(1);
+const target = path.join(args[args.indexOf('--prefix') + 1], 'node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64');
+fs.mkdirSync(target, { recursive: true });
+fs.writeFileSync(path.join(target, 'claude'), '#!/bin/sh\\ntest -z "\${LD_PRELOAD:-}" && test -n "$BUN_OPTIONS" && exit ${starts ? 0 : 1}\\nexit 1\\n');
+`, { mode: 0o700 });
+  // A Claude installed on the machine running the tests must not count as the phone's.
+  const systemPath = ['/usr/bin', '/bin'];
+  if (!fs.existsSync(path.join(path.dirname(process.execPath), 'claude'))) systemPath.unshift(path.dirname(process.execPath));
+  return { command: path.join(tools, 'claude'), env: { OPENAIDE_CLAUDE_ACP_VERSION: '1.5.0', PATH: systemPath.join(':'), LD_PRELOAD: '' } };
+}
+
+test('installs the Claude binary of the adapter behind a command that starts it', context => {
+  const installation = fixture(context);
+  const { command, env } = claudeTools(installation, true);
+  assert.equal(installation.run(undefined, env).status, 0);
+  assert.ok(fs.existsSync(path.join(installation.runtimeRoot, 'agents/claude/claude-0.3.293')));
+  assert.equal(spawnSync(command, ['--version'], { env: { PATH: env.PATH, LD_PRELOAD: 'libtermux-exec.so' } }).status, 0);
+});
+
+test('a Claude binary that cannot start is removed and setup continues with Codex', context => {
+  const installation = fixture(context);
+  const { command, env } = claudeTools(installation, false);
+  assert.equal(installation.run(undefined, env).status, 0);
+  assert.equal(fs.existsSync(command), false);
+  assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'agents/claude/claude-0.3.293')), false);
+  assert.match(fs.readFileSync(path.join(installation.runtimeRoot, 'install.log'), 'utf8'), /claude=unavailable step=start/);
 });

@@ -88,6 +88,7 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
             {!state.termux ? <GeneralPreferenceRow label="Install Termux" icon={<Smartphone size={17} />} action={button("Get Termux", { action: "get_termux" })} />
               : !state.permission ? <GeneralPreferenceRow label="Termux access" icon={<Smartphone size={17} />} action={button("Allow", { action: "grant" })} /> : null}
             {needsTools ? <GeneralPreferenceRow label="Required tools" detail="Your projects are kept" icon={<RefreshCcw size={17} />} action={button("Install", { action: "install" })} /> : null}
+            {checks && !needsTools && !checks.claude ? <GeneralPreferenceRow label="Claude" detail="Not installed on this phone" icon={<Smartphone size={17} />} action={button("Install", { action: "install" })} /> : null}
             {checks && checks.agent && !checks.agentVersion ? <GeneralPreferenceRow label="Agent version" detail="Requires Codex 0.153.3" icon={<Smartphone size={17} />} action={button("Open Termux", { action: "termux" })} /> : null}
             {checks && !checks.authenticated ? <GeneralPreferenceRow label="Agent sign-in" detail="Paste the copied command in Termux" icon={<Smartphone size={17} />} action={button("Sign in", { action: "signin" })} /> : null}
             {checks && !needsTools && checks.authenticated && checks.agentVersion ? <InlineNotice message="Your phone is ready for local work." /> : null}

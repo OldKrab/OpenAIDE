@@ -87,11 +87,13 @@ history live in the state directory beside it and are kept.
 Use Android 8 or newer and Termux 0.118 or newer with Node.js, npm, Git and at least
 one agent command that works in Termux: `codex` or `claude`. The managed Codex
 integration pins Codex 0.153.3; use a compatible Termux build. Neither agent
-publishes an Android build, so setup installs a pinned release of each that runs in
-Termux when it is missing: a community Codex build, and Claude Code 2.1.112, the last
-release shipped as JavaScript. Claude's adapter is pointed at the `claude` command in
-Termux instead of its bundled runtime; with that release everything works except the
-account-limits display. Authenticate the agent in Termux.
+publishes an Android build, so setup installs one that runs in Termux when it is
+missing. Codex is a pinned community build. Claude Code ships only as a glibc binary:
+setup takes the binary the app's Claude adapter was built against from the adapter's
+own npm package, prepares it with Termux's `glibc-runner`, and installs a `claude`
+command that starts it. The adapter is pointed at that command instead of its bundled
+runtime. A phone that cannot start the binary keeps working with Codex; the outcome
+is in `~/.local/share/openaide-android/install.log`. Authenticate the agent in Termux.
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
