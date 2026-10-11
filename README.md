@@ -72,8 +72,8 @@ storage and reuses it on later launches. This initial install requires Node.js,
 npm, and network access. The built-in Codex Agent never uses a `codex-acp`
 executable from `PATH`; register a Custom Agent to use a different build.
 
-Each VSIX bundles the matching App Server executable. Standalone App Server,
-Web App archive, and container artifacts are not currently published.
+Each VSIX bundles the matching App Server executable. Web App archive and
+container artifacts are not currently published.
 
 ## Install the Desktop App
 
@@ -106,6 +106,24 @@ under `~/.local/share/openaide` in that distribution. OpenAIDE stores Tasks,
 settings, and local diagnostics in per-user application data. Uninstall the
 Windows app through **Settings → Apps → Installed apps**, or move `OpenAIDE.app`
 to Trash on macOS. Uninstalling does not remove saved user data or project files.
+
+## Install the App Server on a Linux computer
+
+To work on a Linux x64 computer that has no OpenAIDE window on it, such as a
+server, download `openaide-app-server-linux-x64-VERSION.tar.gz` from
+[GitHub Releases](https://github.com/OldKrab/OpenAIDE/releases). It holds one
+self-contained program:
+
+```sh
+tar -xzf openaide-app-server-linux-x64-VERSION.tar.gz
+install -D openaide-app-server/openaide-app-server ~/.local/bin/openaide-app-server
+openaide-app-server remote --pair
+```
+
+The last command starts OpenAIDE and prints a pairing code for the phone or for
+the Desktop App on another computer. No port is opened on the Linux computer.
+The [guide in the archive](deploy/app-server/README.md) covers pairing, keeping
+it running as a service, updating, and removal.
 
 See the [privacy policy](PRIVACY.md) for local storage and network behavior and
 the [code signing policy](CODE_SIGNING.md) for release trust and verification.

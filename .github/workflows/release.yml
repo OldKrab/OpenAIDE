@@ -109,6 +109,26 @@ jobs:
         with:
           name: openaide-termux-arm64
           path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: app-server-linux-x64-musl
+          path: app-server-linux
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
+      - name: Package and smoke-test the Linux App Server archive
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          # The static executable built once for the Linux VSIX is the one published here.
+          node scripts/package-app-server-archive.mjs \
+            app-server-linux/openaide-app-server "$RELEASE_VERSION" release
+          extraction_root="$RUNNER_TEMP/openaide-app-server-archive"
+          mkdir -p "$extraction_root"
+          tar -xzf "release/openaide-app-server-linux-x64-$RELEASE_VERSION.tar.gz" -C "$extraction_root"
+          test "$(cat "$extraction_root/openaide-app-server/VERSION")" = "$RELEASE_VERSION"
+          "$extraction_root/openaide-app-server/openaide-app-server" remote help
       - name: Require the complete canonical asset set
         shell: bash
         env:
@@ -118,6 +138,7 @@ jobs:
           rmdir release/android
           test -s "release/openaide-android-$RELEASE_VERSION.apk"
           test -s release/openaide-termux-arm64.tar.gz
+          test -s "release/openaide-app-server-linux-x64-$RELEASE_VERSION.tar.gz"
           for target in linux-x64 win32-x64 darwin-arm64; do
             test -f "release/openaide-vscode-$target-$RELEASE_VERSION.vsix"
           done
@@ -140,6 +161,7 @@ jobs:
             release/*.dmg
             release/*.apk
             release/openaide-termux-arm64.tar.gz
+            release/openaide-app-server-linux-x64-*.tar.gz
       - name: Publish the completed draft
         env:
           GH_TOKEN: ${{ github.token }}

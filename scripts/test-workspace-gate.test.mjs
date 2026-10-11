@@ -180,6 +180,11 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(desktopBuild, /openaide-app-server-\$\{\{ steps\.target\.outputs\.target_triple \}\}/);
   assert.match(release, /openaide-desktop-windows-x64-\$RELEASE_VERSION\.exe/);
   assert.match(release, /openaide-desktop-macos-arm64-\$RELEASE_VERSION\.dmg/);
+  assert.match(release, /name: app-server-linux-x64-musl\n/);
+  assert.match(release, /node scripts\/package-app-server-archive\.mjs/);
+  assert.match(release, /openaide-app-server" remote help/);
+  assert.match(release, /test -s "release\/openaide-app-server-linux-x64-\$RELEASE_VERSION\.tar\.gz"/);
+  assert.match(release, /release\/openaide-app-server-linux-x64-\*\.tar\.gz/);
   assert.doesNotMatch(`${artifactBuild}\n${vsixBuild}\n${desktopBuild}`, /extension_version=|--cwd/);
   assert.match(extensionPackage.scripts.build, /esbuild/);
   assert.match(extensionPackage.scripts.build, /--external:vscode/);
@@ -200,7 +205,7 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(release, /reconcile-release-registry\.mjs open-vsx/);
   assert.match(release, /OVSX_PAT: \$\{\{ secrets\.OVSX_PAT \}\}/);
   assert.match(release, /if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
-  assert.doesNotMatch(release, /openaide-web-assets|docker\/build-push-action|openaide-app-server-linux/);
+  assert.doesNotMatch(release, /openaide-web-assets|docker\/build-push-action/);
 });
 
 test("manual artifact builds can select VSIX, desktop, or all without publishing", () => {
