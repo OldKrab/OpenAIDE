@@ -2101,6 +2101,26 @@ fn prompt_refused_for_sign_in_tells_the_user_what_to_do() {
 }
 
 #[test]
+fn session_refused_for_sign_in_before_a_prompt_tells_the_user_what_to_do() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+
+    TaskTransitions::new(mutations, server_requests)
+        .fail_created_task_start(
+            "task_1",
+            &crate::protocol::errors::RuntimeError::AuthRequired("refused".to_string()),
+        )
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(
+        &stored.chat.message,
+        NormalizedMessage::Interruption { message, .. }
+            if message == "The Agent is not signed in or set up. Finish that, then send again."
+    )));
+}
+
+#[test]
 fn agent_failure_interrupts_running_tools_and_returns_task_to_idle() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();

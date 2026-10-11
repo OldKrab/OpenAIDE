@@ -171,6 +171,9 @@ impl AgentProbeWorkflow for AgentProductApi {
             .require(params.agent_id.as_str())
             .map_err(protocol_error_from_runtime)?;
         let agent_id = params.agent_id.into_string();
+        // The user asked to check again: an earlier signed-out report must not hold
+        // the Agent in sign-in after a login made outside OpenAIDE.
+        self.statuses.forget_reported_sign_out(&agent_id);
         let probe = self.gateway.probe(AgentProbeRequest {
             agent_id: agent_id.clone(),
         });

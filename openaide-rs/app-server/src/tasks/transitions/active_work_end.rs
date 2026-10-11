@@ -109,7 +109,39 @@ fn active_work_matches(ctx: &TaskMutationContext<'_>, expected_work_id: Option<&
     }
 }
 
+/// Chat text for work the Agent refused until the user signs in or finishes its setup.
+pub(super) const AGENT_UNAVAILABLE_MESSAGE: &str =
+    "The Agent is not signed in or set up. Finish that, then send again.";
+
+/// True for refusals only the user can lift; the Agent's status carries the recovery action.
+pub(super) fn agent_needs_user_setup(error: &RuntimeError) -> bool {
+    matches!(
+        error,
+        RuntimeError::AuthRequired(_)
+            | RuntimeError::SetupRequired(_)
+            | RuntimeError::NodeJsRequired(_)
+    )
+}
+
 impl ActiveWorkEnd {
+    /// Classifies a failed prompt.
+    pub(super) fn prompt_failed(error: &RuntimeError) -> Self {
+        if agent_needs_user_setup(error) {
+            Self::AgentUnavailable(error.to_string())
+        } else {
+            Self::AgentFailed(error.to_string())
+        }
+    }
+
+    /// Classifies a session that could not be started or reopened for a prompt.
+    pub(super) fn start_failed(error: &RuntimeError) -> Self {
+        if agent_needs_user_setup(error) {
+            Self::AgentUnavailable(error.to_string())
+        } else {
+            Self::AgentStartFailed(error.to_string())
+        }
+    }
+
     pub(super) fn name(&self) -> &'static str {
         match self {
             Self::UserStopped => "user_stopped",
@@ -153,9 +185,7 @@ impl ActiveWorkEnd {
             Self::AgentFailed(_) | Self::AgentStartFailed(_) => {
                 "Agent work stopped unexpectedly. Try again.".to_string()
             }
-            Self::AgentUnavailable(_) => {
-                "The Agent is not signed in or set up. Finish that, then send again.".to_string()
-            }
+            Self::AgentUnavailable(_) => AGENT_UNAVAILABLE_MESSAGE.to_string(),
             Self::CancellationFailed(_) => "Unable to stop the Agent. Try again.".to_string(),
             Self::Restarted => "Task was interrupted because OpenAIDE restarted.".to_string(),
             Self::Shutdown => "Task was interrupted because OpenAIDE shut down.".to_string(),

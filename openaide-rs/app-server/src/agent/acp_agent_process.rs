@@ -124,7 +124,7 @@ pub(super) struct AcpAgentProcessInput {
     pub(super) terminal_registry: AcpHostTerminalRegistry,
     pub(super) secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
     pub(super) lifetime: AcpProcessLifetime,
-    pub(super) account_limits: Option<crate::agent::status_cache::AgentAccountLimitsRecorder>,
+    pub(super) agent_reports: Option<crate::agent::status_cache::AgentReportRecorder>,
 }
 
 pub(super) enum AcpAgentProcessControl {
@@ -176,7 +176,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         terminal_registry,
         secret_resolver,
         lifetime,
-        account_limits,
+        agent_reports,
     } = input;
 
     let current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>> = Arc::default();
@@ -246,7 +246,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         session_traces: session_traces.clone(),
         elicitation_cancellations,
         native_subagents: native_subagents.clone(),
-        account_limits,
+        agent_reports,
     };
     let connection_terminal_registry = terminal_registry.clone();
 

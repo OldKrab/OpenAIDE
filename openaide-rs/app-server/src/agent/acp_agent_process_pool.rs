@@ -603,10 +603,10 @@ impl AcpAgentProcessPool {
             .expect("ACP process registry poisoned")
             .insert(agent_id.to_string(), process.clone());
 
-        let account_limits = self
+        let agent_reports = self
             .account_limits
             .as_ref()
-            .map(|statuses| statuses.account_limits_recorder(agent_id));
+            .map(|statuses| statuses.report_recorder(agent_id));
         let worker_agent_id = agent_id.to_string();
         let worker_terminal_error = terminal_error.clone();
         let worker_runtime_lease = prepared.lease;
@@ -624,7 +624,7 @@ impl AcpAgentProcessPool {
                 terminal_registry,
                 secret_resolver,
                 lifetime: lifetime.clone(),
-                account_limits,
+                agent_reports,
             }))
             .and_then(|result| result);
             // Remove only this generation; a concurrent demand may already have replaced it.
