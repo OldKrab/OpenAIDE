@@ -14,25 +14,59 @@ import javax.crypto.spec.GCMParameterSpec;
 
 final class ConnectionStore {
     private final SharedPreferences preferences;
-    ConnectionStore(Context context) { preferences = context.getSharedPreferences("connection", Context.MODE_PRIVATE); }
+    /** The computer this phone is paired with: its key and the name it reported. */
+    static final class PairedServer {
+        final String id;
+        final String name;
+        PairedServer(String id, String name) { this.id = id; this.name = name; }
+    }
 
-    ConnectionProfile load() {
+    ConnectionStore(Context context) {
+        preferences = context.getSharedPreferences("connection", Context.MODE_PRIVATE);
+        // Address-and-password connections were replaced by pairing; a phone that
+        // used one starts setup again instead of failing to sign in.
         if (preferences.getBoolean("remote", false)) {
-            return new ConnectionProfile(preferences.getString("remote_url", ""),
-                preferences.getString("remote_user", ""), decrypt(preferences.getString("remote_secret", "")), false);
+            preferences.edit().remove("remote").remove("remote_url").remove("remote_user").remove("remote_secret")
+                .putBoolean("configured", false).apply();
         }
-        return local();
     }
 
-    ConnectionProfile local() { return new ConnectionProfile("http://127.0.0.1:5474/", "android", preferences.getString("password", ""), true); }
+    ConnectionProfile load() { return usesPaired() ? ConnectionProfile.paired() : local(); }
 
-    void saveRemote(ConnectionProfile profile) {
-        String secret = encrypt(profile.password);
-        preferences.edit().putString("remote_url", profile.endpoint).putString("remote_user", profile.username)
-            .putString("remote_secret", secret).putBoolean("remote", true).putBoolean("configured", true).apply();
+    /** Whether the paired computer, rather than this phone, is the selected workspace. */
+    boolean usesPaired() { return preferences.getBoolean("paired", false) && pairedServer() != null; }
+
+    ConnectionProfile local() { return new ConnectionProfile(ConnectionProfile.LOCAL_ENDPOINT, "android", preferences.getString("password", ""), true); }
+
+    PairedServer pairedServer() {
+        String id = preferences.getString("server_id", "");
+        if (!id.matches("[0-9a-f]{64}")) return null;
+        return new PairedServer(id, preferences.getString("server_name", ""));
     }
 
-    void selectLocal() { preferences.edit().putBoolean("remote", false).putBoolean("configured", true).apply(); }
+    /** Pairing selects the computer; the previous one, if any, is replaced. */
+    void savePaired(PairedServer server) {
+        preferences.edit().putString("server_id", server.id).putString("server_name", server.name)
+            .putBoolean("paired", true).putBoolean("configured", true).apply();
+    }
+
+    /** Stops using the paired computer. Its trust in this phone ends when a client there removes it. */
+    void forgetPaired() { preferences.edit().remove("server_id").remove("server_name").putBoolean("paired", false).apply(); }
+
+    /** Returns to the paired computer after working on this phone; trust is unchanged. */
+    void selectPaired() { if (pairedServer() != null) preferences.edit().putBoolean("paired", true).putBoolean("configured", true).apply(); }
+
+    void selectLocal() { preferences.edit().putBoolean("paired", false).putBoolean("configured", true).apply(); }
+
+    /** This phone's private key as a Remote Device, or null before the first pairing. */
+    byte[] deviceKey() {
+        String stored = preferences.getString("device_key", "");
+        return stored.isEmpty() ? null : Base64.decode(decrypt(stored), Base64.NO_WRAP);
+    }
+
+    void saveDeviceKey(byte[] key) {
+        preferences.edit().putString("device_key", encrypt(Base64.encodeToString(key, Base64.NO_WRAP))).apply();
+    }
 
     private SecretKey key() throws Exception {
         KeyStore store = KeyStore.getInstance("AndroidKeyStore");
@@ -53,7 +87,7 @@ final class ConnectionStore {
             cipher.init(Cipher.ENCRYPT_MODE, key());
             return Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":"
                 + Base64.encodeToString(cipher.doFinal(value.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
-        } catch (Exception error) { throw new IllegalStateException("Secure credential storage unavailable"); }
+        } catch (Exception error) { throw new IllegalStateException("Secure storage unavailable"); }
     }
 
     private String decrypt(String value) {
@@ -62,6 +96,6 @@ final class ConnectionStore {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)));
             return new String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), StandardCharsets.UTF_8);
-        } catch (Exception error) { throw new IllegalStateException("Please enter the server credentials again"); }
+        } catch (Exception error) { throw new IllegalStateException("Secure storage unavailable"); }
     }
 }

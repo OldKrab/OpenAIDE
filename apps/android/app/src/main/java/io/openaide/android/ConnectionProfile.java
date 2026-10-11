@@ -2,25 +2,30 @@ package io.openaide.android;
 
 import java.net.URI;
 
+/** The origin the workspace WebView loads: the Termux Web Shell, or the paired computer's gateway. */
 final class ConnectionProfile {
+    static final String LOCAL_ENDPOINT = "http://127.0.0.1:5474/";
+    /** Fixed so the bundled Frontend keeps one origin, and with it its stored drafts and preferences. */
+    static final int PAIRED_PORT = 5475;
+    static final String PAIRED_ENDPOINT = "http://127.0.0.1:" + PAIRED_PORT + "/";
     final String endpoint;
     final String username;
     final String password;
     final boolean local;
 
     ConnectionProfile(String address, String username, String password, boolean local) {
-        URI uri = URI.create(address.trim());
-        if (uri.getHost() == null || uri.getUserInfo() != null || uri.getQuery() != null
-                || uri.getFragment() != null || !(uri.getPath().isEmpty() || "/".equals(uri.getPath()))
-                || (local ? !"http://127.0.0.1:5474/".equals(address) : !"https".equals(uri.getScheme()))
-                || username.isEmpty() || username.contains(":") || password.isEmpty()) {
-            throw new IllegalArgumentException("Use an HTTPS server address, username and password; no path or embedded credentials.");
+        if (!(local ? LOCAL_ENDPOINT : PAIRED_ENDPOINT).equals(address)
+                || (local && (username.isEmpty() || username.contains(":") || password.isEmpty()))) {
+            throw new IllegalArgumentException("Unsupported workspace address or credentials.");
         }
-        this.endpoint = uri.resolve("/").toString();
+        this.endpoint = address;
         this.username = username;
         this.password = password;
         this.local = local;
     }
+
+    /** A paired computer is trusted by key; the WebView holds no credential for it. */
+    static ConnectionProfile paired() { return new ConnectionProfile(PAIRED_ENDPOINT, "", "", false); }
 
     boolean owns(String address) {
         try {

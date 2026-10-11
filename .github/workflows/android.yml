@@ -66,6 +66,15 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Build the Frontend shipped in the APK
+        run: |
+          npm ci
+          npm run build:typescript-deps
+          npm run build --workspace openaide-frontend
       - name: Check and build APKs
         run: gradle -p apps/android --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
       - name: Build signed user APK

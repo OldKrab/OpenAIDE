@@ -1,9 +1,21 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
 
 def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../../package.json')).version as String
 if (!(appVersion ==~ /\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?/)) throw new GradleException('Invalid Android release version')
 def versionParts = appVersion.split('-')[0].split('\\.').collect { it.toLong() }
 def appVersionCode = versionParts[0] * 1000000 + versionParts[1] * 1000 + versionParts[2]
+// A Remote Device names the protocol major it speaks when it connects, so it is
+// read from the same declaration the App Server is built from.
+def protocolSource = rootProject.file('../../openaide-rs/app-server-protocol/src/client.rs').text
+def protocolVersion = protocolSource =~ /APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion \{\s*major: (\d+),\s*minor: (\d+),?\s*\}/
+if (!protocolVersion.find()) throw new GradleException('App Server Protocol version not found')
+def protocolMajor = protocolVersion.group(1) as int
+// The paired connection renders the Frontend shipped in the APK.
+def frontendDist = rootProject.file('../../packages/frontend/dist')
+def frontendAssets = layout.buildDirectory.dir('generated/frontend-assets')
 if (versionParts[1] > 999 || versionParts[2] > 999 || appVersionCode < 1 || appVersionCode > 2100000000) throw new GradleException('Android version is out of range')
 
 android {
@@ -29,6 +41,14 @@ android {
         versionCode appVersionCode.toInteger()
         versionName appVersion
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
+        buildConfigField 'int', 'PROTOCOL_MAJOR', "${protocolMajor}"
+        // The iroh library is about 14 MB per architecture; phones are ARM64.
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    sourceSets { main { assets.srcDir frontendAssets } }
+    kotlinOptions { jvmTarget = '17' }
+    packaging {
+        resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'darwin-aarch64/**', 'win32-x86-64/**', 'linux-*/**'] }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -36,13 +56,40 @@ android {
     }
     buildFeatures { buildConfig true }
     buildTypes {
+        debug {
+            // Lets a development build sit beside the installed app instead of replacing it:
+            // gradle -PopenaideApplicationIdSuffix=.dev assembleDebug
+            if (project.hasProperty('openaideApplicationIdSuffix')) applicationIdSuffix project.property('openaideApplicationIdSuffix')
+        }
         release {
             if (System.getenv('OPENAIDE_ANDROID_KEYSTORE')) signingConfig signingConfigs.debug
         }
     }
     lint { abortOnError true }
 }
+def copyFrontend = tasks.register('copyFrontend', Sync) {
+    doFirst {
+        if (!new File(frontendDist, 'index.html').isFile()) {
+            throw new GradleException('Build the Frontend first: npm run build --workspace packages/frontend')
+        }
+    }
+    from(frontendDist) {
+        exclude '**/*.map', 'mockups/**', '__debug/**'
+    }
+    into frontendAssets.map { it.dir('frontend') }
+}
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    afterEvaluate {
+        tasks.named("merge${variant.name.capitalize()}Assets") { dependsOn copyFrontend }
+        tasks.matching { it.name == "generate${variant.name.capitalize()}LintReportModel" || it.name == "lintAnalyze${variant.name.capitalize()}" }.configureEach { dependsOn copyFrontend }
+    }
+}
 dependencies {
+    implementation 'computer.iroh:iroh-android:1.1.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+    // The scanner library calls into androidx.core but does not declare it.
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
     implementation 'com.google.zxing:core:3.5.3'
     testImplementation 'junit:junit:4.13.2'
 }

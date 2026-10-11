@@ -1,10 +1,12 @@
 # OpenAIDE Android
 
-The Android app can connect to a remote HTTPS OpenAIDE Web Shell or start the existing Web Shell in Termux through the
-`com.termux.RUN_COMMAND` service and renders the shared Frontend in a WebView.
-The Rust App Server, ACP integration, projects and Codex authentication stay in
-Termux in local mode. Remote mode keeps execution, projects and authentication on the selected server.
-Neither mode embeds a standalone execution environment.
+The Android app renders the shared Frontend in a WebView and works in one of two ways.
+Paired with a **Remote computer**, it is a client of that computer's App Server
+([ADR-0062](../../docs/adr/0062-remote-devices-are-app-server-clients.md)): the Frontend
+ships in the APK, and execution, projects and authentication stay on the computer.
+On **This phone**, it starts the existing Web Shell in Termux through the
+`com.termux.RUN_COMMAND` service; the Rust App Server, ACP integration, projects and
+Codex authentication stay in Termux. Neither mode embeds a standalone execution environment.
 
 ## Connections and background work
 
@@ -23,14 +25,23 @@ initial Termux initialization and agent sign-in still require user interaction.
 Dependency installation uses the pinned Android-compatible Codex package only when
 Codex is missing; it does not replace an existing user installation.
 
-Remote setup requires an HTTPS origin, username and password. It accepts an address
-directly or from a QR image; scanning does not authorize or connect automatically.
-Remote credentials use Android Keystore encryption. WebView resources and credentials
-remain scoped to the selected origin; invalid TLS certificates are not bypassed.
-The server must have the mobile status endpoint from this revision, enabled Web
-authentication, and its public hostname in `OPENAIDE_WEB_ALLOWED_HOSTS`. An HTTPS
-reverse proxy must forward the original Host and `X-Forwarded-Proto: https`.
-Tailscale Serve is one private-network option. Do not expose an unauthenticated port.
+A remote computer needs no address, account or password. On the computer, open
+**Settings → Devices → Show code**; on the phone, choose **Remote computer** and scan
+the QR code with the camera or paste its text. Where the phone cannot scan, it shows
+its own code instead, which the computer accepts under **Enter code**. A code works
+once and for a few minutes. Pairing makes the computer trust this phone's key; the
+phone keeps its private key encrypted with Android Keystore and remembers the computer's
+key and name. Any client of that computer can remove the phone under **Settings → Devices**.
+
+The paired connection is end-to-end encrypted between the two keys by
+[iroh](https://www.iroh.computer). It uses a direct path when the networks allow one
+and otherwise a public relay that sees only ciphertext. The WebView loads the bundled
+Frontend from a gateway on `127.0.0.1:5475` inside the app; the gateway carries App
+Server requests to the computer, one stream per request, and answers only requests
+that hold the per-process cookie given to the app's own WebView. A lost connection is
+reopened on the next request, and the Frontend's resumable session continues from
+where it stopped. The computer must be running OpenAIDE; the phone and the computer
+must speak the same App Server Protocol major version.
 
 Local startup reuses a healthy server. With `termux-services` installed, an app-owned
 `runsv` supervisor remains a Termux background task, restarts a crashed Web launcher,
@@ -105,11 +116,15 @@ the runtime directory so replacing runtime files does not delete task history.
 
 ## Build and validation
 
-Use JDK 17, Gradle 8.13 and Android SDK 35:
+Use JDK 17, Gradle 8.13 and Android SDK 35. The APK ships the shared Frontend, so
+build it first:
 
 ```sh
+npm run build:typescript-deps && npm run build --workspace openaide-frontend
 gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
 ```
+
+The APK is built for ARM64 only. The iroh library adds about 14 MB.
 
 CI separately cross-compiles the App Server with the Android NDK, builds the
 shared Frontend, runs existing Web Shell tests and packages the Termux runtime.
@@ -191,14 +206,16 @@ the selected origin, and checks the visible Activity and exact Connection settin
 route on every command. Commands are fixed actions, not arbitrary shell scripts.
 Remote workspaces cannot run local setup or change local power preferences; the
 user must first switch to this phone, which replaces the remote document and port.
-Passwords are never returned in settings snapshots. The workspace does not get
-an `addJavascriptInterface` object.
+Keys are never returned in settings snapshots. The workspace does not get
+an `addJavascriptInterface` object. Pairing itself happens in the offline setup
+Activity, because it must work before any workspace is reachable.
 
 Offline onboarding and connection recovery retain a separate, non-exported Activity
 because shared Settings requires a reachable workspace. Its JavaScript interface
 is present **only** in the offline setup WebView, which serves three exact APK-owned
 assets, rejects all other resources/navigation, disables file/provider access, and
-applies a CSP that forbids network requests, frames and inline scripts. See
+applies a CSP that forbids network requests, frames and inline scripts. The camera
+scanner is a separate native screen that returns only the code's text. See
 [Android WebView bridge security guidance](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges).
 
 ## Device validation
@@ -218,7 +235,7 @@ Keep OpenAIDE unlocked and visible. `--renderer-only` avoids all system key inpu
 and checks the renderer Back event instead; it is not a physical Back-button test.
 
 `DeviceChecks` exercises authenticated native status reads, wrong-password rejection,
-the real Termux PendingIntent callback, selected-image result delivery, QR image decoding,
+the real Termux PendingIntent callback, selected-image result delivery,
 Android wake-lock release and offline setup network isolation. Build the instrumentation APK and run:
 
 ```sh
@@ -227,11 +244,7 @@ adb shell am instrument -w -r -e class io.openaide.android.DeviceChecks \
 ```
 
 The checks require an initialized local installation; they do not submit paid agent
-prompts. `scripts/build-on-termux.sh` and `scripts/build-device-tests.sh` also support
-direct device-side debug builds with the Android SDK jars, Termux AAPT2, D8, ZXing
-and the existing signing key. All generated artifacts remain ignored.
-Set `OPENAIDE_ANDROID_BUILD_TYPE=release` for the device-side script to produce
-`app-release.apk` without WebView debugging or debuggable application access.
+prompts. All generated artifacts remain ignored.
 
 For power validation, test both active and idle states, lock/unlock, forced Doze,
 launcher crashes, opening without a terminal UI, and restored connectivity. Restore
@@ -239,7 +252,7 @@ launcher crashes, opening without a terminal UI, and restored connectivity. Rest
 A short successful test is not proof of overnight survival or a battery benchmark.
 
 Run `node --test apps/android/scripts/setup-ui.test.mjs` for guided setup interactions,
-remote form preservation and error rendering, and the frontend `ConnectionSettings`
+pairing screens and error rendering, and the frontend `ConnectionSettings`
 and `androidConnectionSettings` tests for default/Android composition. Verify the
 rendered workspace and setup at narrow/wide sizes in light/dark themes on an unlocked
 device before release. A passing DOM or instrumentation test is not visual approval.

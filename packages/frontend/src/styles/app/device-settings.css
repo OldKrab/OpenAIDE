@@ -1,64 +1,114 @@
+.device-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.device-heading h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.device-heading-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .device-action {
   min-height: 32px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--oa-raised);
   color: var(--oa-text);
-  padding: 5px 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
   font-weight: 550;
   white-space: nowrap;
+  transition: background 150ms ease-out;
 }
 
 .device-action:hover {
   background: var(--oa-selected);
 }
 
-.device-relay-notice,
-.device-empty,
-.device-access-failed {
-  margin: 10px 2px 0;
-  color: var(--oa-muted);
-  font-size: 12px;
-  line-height: 1.5;
+.device-action.primary {
+  background: var(--oa-focus);
+  color: white;
+  font-weight: 600;
+}
+
+.device-action.primary:hover {
+  background: color-mix(in oklch, var(--oa-focus) 88%, white);
 }
 
 .device-access-failed {
-  color: var(--oa-danger);
   margin: 0 2px 10px;
+  color: var(--oa-danger);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .device-list {
   list-style: none;
   margin: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--oa-border-subtle);
-  border-radius: 9px;
+  padding: 4px;
+  border-radius: 14px;
   background: color-mix(in oklch, var(--oa-panel) 62%, var(--oa-bg));
+  display: grid;
+  gap: 2px;
 }
 
-.device-row {
+.device-row,
+.device-empty {
   min-width: 0;
-  min-height: 62px;
+  min-height: 60px;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
-  padding: 11px 13px;
+  border-radius: 10px;
+  padding: 8px 10px;
 }
 
-.device-row + .device-row {
-  border-top: 1px solid var(--oa-border-subtle);
+.device-row:hover {
+  background: var(--oa-raised);
+}
+
+.device-empty {
+  grid-template-columns: 40px minmax(0, 1fr);
+  color: var(--oa-muted);
+  font-size: 13px;
+}
+
+.device-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.device-avatar.ghost {
+  background: transparent;
+  border: 1px dashed var(--oa-border);
+  color: var(--oa-muted);
 }
 
 .device-copy {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .device-copy strong {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -69,30 +119,92 @@
   overflow-wrap: anywhere;
 }
 
-.device-model {
-  margin-left: 7px;
+.device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: var(--oa-raised);
   color: var(--oa-muted);
-  font-weight: 400;
+  padding: 3px 10px 3px 8px;
+  font-size: 12px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.device-connected {
+.device-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .6;
+}
+
+.device-chip.connected {
+  background: color-mix(in oklch, var(--oa-success) 14%, transparent);
   color: var(--oa-success);
+}
+
+.device-chip.connected::before {
+  opacity: 1;
 }
 
 .device-remove {
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   color: var(--oa-muted);
   display: grid;
   place-items: center;
+  opacity: .7;
+  transition: background 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out;
+}
+
+.device-row:hover .device-remove,
+.device-remove:focus-visible {
+  opacity: 1;
 }
 
 .device-remove:hover {
   background: color-mix(in oklch, var(--oa-danger) 12%, transparent);
   color: var(--oa-danger);
+}
+
+.device-relay-notice {
+  margin: 10px 4px 0;
+  color: var(--oa-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* A question beside the list it concerns; the answer is prose that opens in place. */
+.device-relay-notice summary {
+  display: inline-block;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 6px;
+  text-decoration: underline;
+  text-decoration-color: var(--oa-border);
+  text-underline-offset: 3px;
+}
+
+.device-relay-notice summary::-webkit-details-marker {
+  display: none;
+}
+
+.device-relay-notice summary:hover,
+.device-relay-notice[open] summary {
+  color: var(--oa-text);
+}
+
+.device-relay-notice p {
+  max-width: 62ch;
+  margin: 8px 0 0;
+  font-size: 13px;
 }
 
 .settings-reset-dialog.device-dialog header > svg {
@@ -233,6 +345,21 @@
 }
 
 @media (max-width: 760px) {
+  .device-row {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+
+  .device-row .device-chip {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    justify-self: start;
+  }
+
+  .device-row .device-remove {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
   .device-dialog footer button,
   .device-action,
   .device-added-notice footer button {

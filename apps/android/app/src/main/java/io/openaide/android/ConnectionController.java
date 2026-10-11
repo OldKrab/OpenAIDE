@@ -19,9 +19,11 @@ final class ConnectionController extends ContextWrapper {
         void render(JSONObject state);
         void changed();
         void close();
-        void scanned(String address);
+        /** Opens the full-screen setup, which owns pairing because it must work with no workspace. */
+        void setup(String screen);
     }
     private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
+    static final int SCAN_REQUEST = 4;
     private final Activity activity;
     private final View view;
     private final boolean localTools;
@@ -35,6 +37,7 @@ final class ConnectionController extends ContextWrapper {
     private long operationStarted;
     private int operationSequence;
     private String operationName;
+    private JSONObject joinCode;
 
     ConnectionController(Activity activity, View view, boolean localTools) {
         super(activity);
@@ -46,7 +49,7 @@ final class ConnectionController extends ContextWrapper {
     void receive(JSONObject message) {
         if (disposed) return;
         String command = message.optString("action");
-        if (!localTools && !java.util.Arrays.asList("state", "close", "remote", "local", "qr", "app_settings", "diagnostics").contains(command)) {
+        if (!localTools && !java.util.Arrays.asList("state", "close", "local", "paired", "pair_setup", "forget", "app_settings", "diagnostics").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
@@ -65,7 +68,13 @@ final class ConnectionController extends ContextWrapper {
             case "state": emit(); break;
             case "check": check(); break;
             case "local": new ConnectionStore(this).selectLocal(); changed(); break;
-            case "remote": saveRemote(message); break;
+            case "paired": new ConnectionStore(this).selectPaired(); changed(); break;
+            case "pair_setup": view.setup("remote"); break;
+            case "scan": scan(); break;
+            case "pair": pair(message.optString("code")); break;
+            case "join": join(); break;
+            case "join_stop": RemotePairing.stopJoin(); joinCode = null; emit(); break;
+            case "forget": RemotePairing.forget(this); changed(); break;
             case "install": install(); break;
             case "termux": launchTermux(); break;
             case "get_termux": open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/termux/termux-app/releases"))); break;
@@ -89,7 +98,6 @@ final class ConnectionController extends ContextWrapper {
             case "repair": repair(); break;
             case "boot": boot(); break;
             case "get_boot": open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/termux/termux-boot#installation"))); break;
-            case "qr": startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), 4); break;
             case "diagnostics":
                 open(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
                     diagnostics.snapshot()), "Share diagnostics"));
@@ -133,22 +141,37 @@ final class ConnectionController extends ContextWrapper {
         });
     }
 
-    private void saveRemote(JSONObject message) throws Exception {
-        ConnectionProfile candidate;
-        try { candidate = new ConnectionProfile(message.optString("address"), message.optString("username"), message.optString("password"), false); }
-        catch (RuntimeException error) { notice = "Enter an HTTPS server address, username and password. Use the address only, without a page path."; emit(); return; }
-        begin("setup_remote_connect", "Connecting securely…");
-        worker.execute(() -> {
-            boolean connected;
-            try { ServerStatus.read(candidate); connected = true; }
-            catch (Exception error) { connected = false; }
-            boolean success = connected;
-            runOnUiThread(() -> {
-                if (isDestroyed()) return;
-                if (!success) { end(false, "Could not connect. Check the address and sign-in details, and make sure your computer or VPN is online."); return; }
-                try { new ConnectionStore(this).saveRemote(candidate); end(true, ""); changed(); }
-                catch (RuntimeException error) { end(false, "Secure storage is unavailable. Restart OpenAIDE and try again."); }
-            });
+    private void scan() {
+        // The scanner asks for the camera itself and returns here with the code's text.
+        com.google.zxing.integration.android.IntentIntegrator scanner = new com.google.zxing.integration.android.IntentIntegrator(activity);
+        scanner.setDesiredBarcodeFormats(com.google.zxing.integration.android.IntentIntegrator.QR_CODE);
+        scanner.setPrompt("Scan the code shown on your computer");
+        scanner.setBeepEnabled(false);
+        scanner.setOrientationLocked(false);
+        scanner.setRequestCode(SCAN_REQUEST);
+        scanner.initiateScan();
+    }
+
+    private void pair(String code) {
+        begin("setup_pairing_invite", "Pairing with your computer…");
+        RemotePairing.redeem(this, code, (server, problem) -> {
+            if (isDestroyed()) return;
+            end(server != null, server != null ? "" : problem);
+            if (server != null) changed();
+        });
+    }
+
+    private void join() {
+        begin("setup_pairing_join", "Preparing this phone’s code…");
+        RemotePairing.join(this, (code, problem) -> {
+            if (isDestroyed()) { RemotePairing.stopJoin(); return; }
+            joinCode = code;
+            end(code != null, code != null ? "" : problem);
+        }, (server, problem) -> {
+            if (isDestroyed()) return;
+            joinCode = null;
+            diagnostics.record("setup_pairing_join", "paired", operationSequence, SystemClock.elapsedRealtime() - operationStarted);
+            changed();
         });
     }
 
@@ -201,10 +224,13 @@ final class ConnectionController extends ContextWrapper {
         if (isDestroyed()) return;
         try {
             var preferences = getSharedPreferences("connection", MODE_PRIVATE);
+            ConnectionStore store = new ConnectionStore(this);
+            ConnectionStore.PairedServer computer = store.pairedServer();
             PowerManager power = getSystemService(PowerManager.class);
             JSONObject state = new JSONObject().put("initial", activity.getIntent().getStringExtra("screen"))
-                .put("remote", preferences.getBoolean("remote", false)).put("address", preferences.getString("remote_url", ""))
-                .put("username", preferences.getString("remote_user", "")).put("busy", busy).put("notice", notice)
+                .put("remote", store.usesPaired()).put("paired", computer != null)
+                .put("computer", computer == null ? "" : computer.name)
+                .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("notice", notice)
                 .put("termux", installed("com.termux")).put("permission", checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
                 .put("checks", checks == null ? JSONObject.NULL : checks)
                 .put("background", preferences.getBoolean("background", true))
@@ -240,19 +266,10 @@ final class ConnectionController extends ContextWrapper {
     }
 
     void onActivityResult(int request, int result, Intent data) {
-        if (request != 4 || result != Activity.RESULT_OK || data == null || data.getData() == null) return;
-        begin("setup_qr", "Reading connection image…");
-        worker.execute(() -> {
-            String address;
-            try { address = QrConnection.read(this, data.getData()); } catch (Exception error) { address = null; }
-            String scanned = address;
-            runOnUiThread(() -> {
-                end(scanned != null, scanned == null ? "Choose a QR image containing an HTTPS server address." : "");
-                if (scanned != null && !isDestroyed()) view.scanned(scanned);
-            });
-        });
+        if (request != SCAN_REQUEST) return;
+        String code = com.google.zxing.integration.android.IntentIntegrator.parseActivityResult(result, data).getContents();
+        if (code != null) pair(code);
     }
-
 
     void resume() {
         if (recheckOnReturn && !busy) { recheckOnReturn = false; check(); }
@@ -261,6 +278,7 @@ final class ConnectionController extends ContextWrapper {
     void dispose() {
         if (busy) diagnostics.record(operationName, "view_closed", operationSequence, SystemClock.elapsedRealtime() - operationStarted);
         disposed = true;
+        RemotePairing.stopJoin();
         worker.shutdownNow();
     }
     private boolean isDestroyed() { return disposed || activity.isDestroyed(); }

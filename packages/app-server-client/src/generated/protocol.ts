@@ -1880,3 +1880,5 @@ export type ServerRequestResponseResultByMethod = {
 export type TypedServerRequest<M extends ServerRequestMethod> = ServerRequestEnvelope<ServerRequestParamsByMethod[M]> & {
   method: M;
 };
+
+export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 2, minor: 1 };

@@ -20,7 +20,7 @@ final class WorkspaceConnectionBridge {
     private WebMessagePort port;
     private final AndroidDiagnostics diagnostics = new AndroidDiagnostics();
 
-    WorkspaceConnectionBridge(Activity activity, WebView browser, ConnectionProfile profile, BooleanSupplier visible, Runnable changed) {
+    WorkspaceConnectionBridge(Activity activity, WebView browser, ConnectionProfile profile, BooleanSupplier visible, Runnable changed, java.util.function.Consumer<String> setup) {
         this.browser = browser;
         this.profile = profile;
         this.visible = visible;
@@ -29,7 +29,7 @@ final class WorkspaceConnectionBridge {
             @Override public void render(JSONObject state) { if (settingsRoute()) send("state", "state", state); }
             @Override public void changed() { changed.run(); }
             @Override public void close() { }
-            @Override public void scanned(String address) { if (settingsRoute()) send("scanned", "address", address); }
+            @Override public void setup(String screen) { setup.accept(screen); }
         }, profile.local);
     }
 

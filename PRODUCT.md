@@ -28,7 +28,7 @@ Small manual edits and Git actions remain separate product decisions, justified 
 
 ## Brand Personality
 
-Calm, capable, precise, and contemporary. OpenAIDE should feel thoughtfully made for daily professional use. It should be visually refined without becoming decorative, technical without becoming austere, and powerful without exposing unnecessary complexity.
+Calm, capable, precise, and modern. OpenAIDE should look and feel like a current, well-crafted product on every shell, and thoughtfully made for daily professional use. A dated or generic appearance is a product defect, not a matter of taste. It should be visually refined without becoming decorative, technical without becoming austere, and powerful without exposing unnecessary complexity.
 
 ## Design Judgment
 
@@ -43,6 +43,8 @@ Design guidance describes failure modes, not forbidden components or aesthetics.
 ## Design Principles
 
 - Best UI/UX is the primary product constraint. Architecture, protocol, runtime, and shell decisions must preserve immediate feedback, clear progress, recoverable errors, and responsiveness under local Agent or App Server latency.
+- Design must be modern. Every screen is held to the standard of the best current products on its platform; `DESIGN.md` defines what that means. Being functional and consistent is not sufficient.
+- Show, do not explain. Keep explanatory text on a page to the minimum needed to act, and put background information behind an explicit affordance or at the moment it becomes relevant.
 - Prioritize the VS Code experience for now. Use its editor, navigation, and development capabilities where they support the agent workflow; give desktop and web users deliberate alternatives for the workflows those shells support.
 - Build one recognizable OpenAIDE product. Share product behavior and design language while adapting layout, tokens, keyboard interaction, and platform capabilities to each host.
 - Make agent work inspectable. Chat messages, folded tool activity, terminal output, permission state, and runtime errors must be visible and attributable when relevant.
@@ -64,6 +66,8 @@ A screen is not ready merely because it is aligned, consistent, or functional. B
 - Does the design make appropriate use of its current shell and window size?
 - Are familiar patterns being used intentionally rather than inherited from a library or reference product?
 - Does the result feel considered and complete for the workflow it supports?
+- Does it look modern beside current best-in-class products on the same platform?
+- Is the page free of explanatory text that could be removed, shortened, or disclosed on demand?
 
 No visual pattern passes or fails this gate by name. Approval depends on context, purpose, execution, and evidence from the rendered experience.
 

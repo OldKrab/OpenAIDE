@@ -1,129 +1,195 @@
 const page = document.getElementById('page');
 const notice = document.getElementById('notice');
+const sheet = document.getElementById('sheet');
 let state = {};
 let screen;
 let history = [];
-let remoteDraft = { address: '', username: '', password: '' };
+let codeDraft = '';
+let pasteOpen = false;
+// Switching warnings only matter once a workspace is in use, not during first setup.
+let firstRun = false;
 const icons = {
-  phone: '<rect x="7" y="2" width="14" height="24" rx="3"/><path d="M12 22h4"/>',
-  computer: '<rect x="2" y="4" width="24" height="16" rx="2"/><path d="M9 26h10M14 20v6"/>',
+  phone: '<rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3"/>',
+  computer: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  qr: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2M20 14v.01M14 20h2M18 18v2h2"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7 14h10"/>',
+  battery: '<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M22 11v2M7 10v4"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 21h4"/>',
+  wrench: '<path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2-.5-.5-2z"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>',
+  power: '<path d="M12 3v8M7 6.5a7 7 0 1 0 10 0"/>',
+  share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
+  chevron: '<path d="M9 5l7 7-7 7"/>',
 };
-function glyph(name) { return `<span class="glyph" aria-hidden="true"><svg viewBox="0 0 28 28">${icons[name]}</svg></span>`; }
+function icon(name, extra = '') { return `<svg class="i ${extra}" viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`; }
 function send(action, fields = {}) { window.OpenAIDESetup.send(JSON.stringify({ action, ...fields })); }
+function escape(text) { return String(text).replace(/[&<>"']/g, character => `&#${character.charCodeAt(0)};`); }
 function button(label, action, style = 'primary') { return `<button class="${style}" data-action="${action}">${label}</button>`; }
-function heading(kicker, title, description) { return `<p class="eyebrow">${kicker}</p><h1>${title}</h1><p class="intro">${description}</p>`; }
-function choice(icon, title, detail, destination) {
-  return `<button class="choice" data-screen="${destination}">${glyph(icon)}<span><strong>${title}</strong><small>${detail}</small></span><span class="arrow" aria-hidden="true">›</span></button>`;
+function heading(title, description = '') { return `<h1>${title}</h1>${description ? `<p class="intro">${description}</p>` : ''}`; }
+// Where to click on the computer, shown as a path instead of a sentence.
+function path(...steps) {
+  return `<p class="path" aria-label="On your computer: ${steps.join(', then ')}">${steps.map(step => `<span>${step}</span>`).join(icon('chevron', 'sep'))}</p>`;
 }
-function row(title, detail, action, value = '›') {
-  return `<button class="row" data-action="${action}"><span><strong>${title}</strong><small>${detail}</small></span><span class="value">${value}</span></button>`;
+function item(kind, glyph, title, detail, target, value) {
+  const attribute = kind === 'choice' ? `data-screen="${target}"` : `data-action="${target}"`;
+  const trailing = (value ? `<span class="value">${value}</span>` : '') + icon('chevron', 'chev');
+  return `<button class="${kind}" ${attribute}>${icon(glyph)}<span class="copy"><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ''}</span>${trailing}</button>`;
 }
+function choice(glyph, title, detail, destination) { return item('choice', glyph, title, detail, destination); }
+function row(glyph, title, action, value = '', detail = '') { return item('row', glyph, title, detail, action, value); }
+
+// Background information is prose behind a question placed where it comes up, not text on the page.
+const info = {
+  welcome: ['What’s the difference?', 'Where agents work', 'On a remote computer, work keeps running when your phone is locked or OpenAIDE is closed. On this phone, agents run locally in Termux.', 'Projects and conversations stay on the device where the agents work. You can switch later in Settings.'],
+  remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Devices on your computer.'],
+  join: ['How pairing works', 'How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.'],
+  local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, compatible tools, agent sign-in, storage and automatic startup, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
+  background: ['How does this affect battery?', 'Background work', 'Protection keeps the phone awake only while agents are working and is released when work is idle. Running agents still use battery and data, so plug in for long tasks.', 'Do not force-stop OpenAIDE or Termux during work. Some phones also need background activity allowed in their own battery settings.'],
+};
+function hint() { return info[screen] ? `<button class="hint" id="about" type="button">${info[screen][0]}</button>` : ''; }
+function openSheet() {
+  const [, title, ...paragraphs] = info[screen];
+  sheet.querySelector('h2').textContent = title;
+  sheet.querySelector('.sheet-body').innerHTML = paragraphs.map(text => `<p>${text}</p>`).join('');
+  sheet.hidden = false;
+  sheet.querySelector('.sheet-close').focus();
+}
+function closeSheet() {
+  if (sheet.hidden) return false;
+  sheet.hidden = true;
+  document.getElementById('about')?.focus();
+  return true;
+}
+sheet.addEventListener('click', event => { if (event.target === sheet || event.target.closest('.sheet-close')) closeSheet(); });
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSheet(); });
+
+// This phone's code is disclosed only while its screen is open.
+function enter(next) {
+  if (next === 'local') send('check');
+  if (next === 'join') send('join');
+}
+function leave(previous) { if (previous === 'join') send('join_stop'); }
 function go(next) {
-  rememberRemote();
+  rememberCode();
+  leave(screen);
   history.push(screen);
   screen = next;
   render();
   page.focus();
   window.scrollTo(0, 0);
-  if (next === 'local') send('check');
+  enter(next);
 }
 window.back = () => {
+  if (closeSheet()) return;
   if (state.busy) return;
-  rememberRemote();
+  rememberCode();
+  leave(screen);
   if (!history.length) { send('close'); return; }
   screen = history.pop();
   render();
   page.focus();
+  enter(screen);
 };
 document.getElementById('back').addEventListener('click', window.back);
 window.receive = (next) => {
-  rememberRemote();
+  rememberCode();
   const first = !screen;
   state = next;
-  if (first) {
-    screen = next.initial || 'settings';
-    remoteDraft.address = next.address || '';
-    remoteDraft.username = next.username || '';
-  }
+  if (first) { screen = next.initial || 'settings'; firstRun = screen === 'welcome'; }
   render();
-  if (first && screen === 'local') send('check');
+  if (first) enter(screen);
 };
-window.scanned = (address) => { remoteDraft.address = address; screen = 'remote'; render(); };
-function rememberRemote() {
-  const form = document.getElementById('remote-form');
-  if (form) for (const key of ['address', 'username', 'password']) remoteDraft[key] = form.elements[key].value;
+function rememberCode() {
+  const field = document.getElementById('code');
+  if (field) codeDraft = field.value;
 }
 function localStep() {
-  if (!state.termux) return { index: 1, title: 'Install Termux', detail: 'Termux provides a private place for your tools and projects. Install it from its official releases, then open it once and return here.', action: 'get_termux', label: 'Get Termux' };
-  if (!state.permission) return { index: 1, title: 'Connect to Termux', detail: 'Allow OpenAIDE to start your tools and use files in Termux. Android will ask for permission. You only do this once.', action: 'grant', label: 'Allow connection' };
-  if (!state.checks) return { index: 1, title: 'Allow the connection in Termux', detail: 'Termux also needs a one-time setting. Copy the setup command, paste it in Termux and press Enter. Then come back; we’ll check automatically.', action: 'access', label: 'Copy setup & open Termux' };
+  if (!state.termux) return { index: 1, title: 'Install Termux', detail: 'Termux gives your tools and projects a private place on this phone. Install it, open it once, then return here.', action: 'get_termux', label: 'Get Termux' };
+  if (!state.permission) return { index: 1, title: 'Connect to Termux', detail: 'Android will ask once to let OpenAIDE start your tools in Termux.', action: 'grant', label: 'Allow connection' };
+  if (!state.checks) return { index: 1, title: 'Allow the connection in Termux', detail: 'Paste the copied setup command in Termux and press Enter, then come back.', action: 'access', label: 'Copy setup & open Termux' };
   const checks = state.checks;
-  if (!checks.arm64) return { index: 2, title: 'Use a remote computer', detail: 'Local work requires an ARM64 Android phone. You can still use a remote OpenAIDE workspace on this device.', action: 'remote_screen', label: 'Connect to a computer' };
-  if (!checks.storage || !checks.space) return { index: 2, title: 'Your phone needs more room', detail: 'Free at least 512 MB in Termux’s storage, then check again. Your existing projects will not be removed.', action: 'check', label: 'Check again' };
-  if (checks.codex && !checks.codexVersion) return { index: 2, title: 'Your agent needs an update', detail: 'The installed Codex is not compatible with this workspace. Use the Android-compatible Codex 0.153.3 in Termux, then check again. We won’t replace your existing agent automatically.', action: 'termux', label: 'Open Termux' };
-  if (['node', 'nodeVersion', 'npm', 'git', 'codex', 'codexVersion', 'runtime', 'frontend', 'supervisor'].some(key => !checks[key])) return { index: 2, title: 'Prepare your workspace', detail: 'We’ll install the tools OpenAIDE needs in Termux. Your projects and history stay in place. This download can use mobile data.', action: 'install', label: 'Install & continue' };
-  if (!checks.authenticated) return { index: 3, title: 'Sign in to your agent', detail: 'Copy the sign-in command, paste it in Termux and follow the sign-in steps. Return here when you’re done; we’ll check automatically.', action: 'signin', label: 'Copy sign-in & open Termux' };
-  return { index: 4, title: 'Your phone is ready', detail: 'OpenAIDE starts your workspace automatically. You won’t need to open Termux each time.', action: 'local', label: state.remote ? 'Use this phone' : 'Open workspace' };
+  if (!checks.arm64) return { index: 2, title: 'Use a remote computer', detail: 'Local work needs an ARM64 phone. A remote computer works on this device.', action: 'remote_screen', label: 'Connect to a computer' };
+  if (!checks.storage || !checks.space) return { index: 2, title: 'Your phone needs more room', detail: 'Free at least 512 MB in Termux’s storage. Your projects are not removed.', action: 'check', label: 'Check again' };
+  if (checks.codex && !checks.codexVersion) return { index: 2, title: 'Your agent needs an update', detail: 'Install the Android-compatible Codex 0.153.3 in Termux, then check again.', action: 'termux', label: 'Open Termux' };
+  if (['node', 'nodeVersion', 'npm', 'git', 'codex', 'codexVersion', 'runtime', 'frontend', 'supervisor'].some(key => !checks[key])) return { index: 2, title: 'Prepare your workspace', detail: 'OpenAIDE installs the tools it needs in Termux. Your projects and history stay in place.', action: 'install', label: 'Install & continue' };
+  if (!checks.authenticated) return { index: 3, title: 'Sign in to your agent', detail: 'Paste the copied sign-in command in Termux, finish signing in, then come back.', action: 'signin', label: 'Copy sign-in & open Termux' };
+  return { index: 4, title: 'Your phone is ready', detail: '', action: 'local', label: state.remote ? 'Use this phone' : 'Open workspace' };
 }
 function render() {
   if (screen === 'welcome') {
-    page.innerHTML = heading('Your workspace, your choice', 'Where will your<br>agents work?', 'Choose once. Change it later in Settings.')
-      + choice('phone', 'This phone', 'Work locally with Termux.', 'local')
-      + choice('computer', 'Remote computer', 'Use an OpenAIDE server. No Termux needed.', 'remote')
-      + '<p class="note">Projects and conversations stay on the device where your agents work.</p>';
+    page.innerHTML = heading('Where will your<br>agents work?')
+      + '<div class="group">'
+      + choice('computer', 'Remote computer', 'Pair with a code', 'remote')
+      + choice('phone', 'This phone', 'Runs in Termux', 'local')
+      + '</div>' + hint();
   } else if (screen === 'settings') {
-    page.innerHTML = heading('Settings', 'Connection', 'Manage where your agents work. Your current conversation stays open while you’re here.')
-      + `<div class="panel"><p class="tag">CURRENT WORKSPACE</p><h2>${state.remote ? 'Remote computer' : 'This phone'}</h2><p>${state.remote ? 'Work runs on your computer, independently of your phone.' : 'Tools and projects run locally in Termux. Startup and reconnection are automatic.'}</p></div>`
-      + choice(state.remote ? 'phone' : 'computer', state.remote ? 'Use this phone' : 'Use a remote computer', 'Switch where new work runs.', state.remote ? 'local' : 'remote')
-      + (state.remote ? button('Edit remote connection', 'remote_screen', 'link') : button('Background work', 'background_screen', 'secondary'))
-      + button('Advanced', 'advanced_screen', 'link');
+    const remote = state.remote;
+    page.innerHTML = `<h1>${remote ? escape(state.computer || 'Remote computer') : 'This phone'}</h1><p class="status">Connected</p>`
+      + '<div class="group">'
+      + (remote ? row('phone', 'Switch to this phone', 'local_screen')
+        : state.paired ? row('computer', `Switch to ${escape(state.computer || 'your computer')}`, 'paired') : '')
+      + row('qr', remote || state.paired ? 'Pair another computer' : 'Pair with a computer', 'remote_screen')
+      + (remote ? '' : row('battery', 'Background work', 'background_screen', state.background ? 'On' : 'Off'))
+      + row('wrench', 'Advanced', 'advanced_screen')
+      + '</div>';
   } else if (screen === 'local') {
     const step = localStep();
-    page.innerHTML = heading(`This phone · Step ${step.index} of 4`, state.busy ? 'Getting things ready' : step.title, state.busy ? 'We’re checking and preparing what’s needed. Your existing work stays safe.' : step.detail)
-      + `<div class="step" aria-hidden="true">${[1, 2, 3, 4].map(index => `<span class="${index <= step.index ? 'done' : ''}"></span>`).join('')}</div>`
+    page.innerHTML = `<div class="step" role="img" aria-label="Step ${step.index} of 4">${[1, 2, 3, 4].map(index => `<span class="${index <= step.index ? 'done' : ''}"></span>`).join('')}</div>`
+      + heading(state.busy ? 'Getting things ready' : step.title, state.busy ? '' : step.detail)
       + (!state.busy ? button(step.label, step.action) : '')
-      + (!state.busy && (step.index === 1 || step.action === 'termux') ? button('I’ve done this · Check again', 'check', 'secondary') : '')
+      + (!state.busy && (step.index === 1 || step.action === 'termux') ? button('Check again', 'check', 'secondary') : '')
       + (!state.busy && !state.permission && state.termux ? button('Open Android app permissions', 'app_settings', 'link') : '')
-      + (step.index === 4 ? '<p class="note">Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.</p>' + button('Keep working with the screen locked', 'background_screen', 'secondary') : '')
-      + (state.remote && step.index === 4 ? '<p class="note">Switching closes the current view. Save unsent drafts first. Existing tasks stay on their original computer.</p>' : '')
-      + '<details><summary>What does OpenAIDE check?</summary><p>Connection permission, compatible tools, agent sign-in, storage and automatic startup. These checks run for you.</p></details>';
+      + (step.index === 4 ? button('Keep working with the screen locked', 'background_screen', 'secondary') : '')
+      + (state.remote && step.index === 4 ? '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>' : '')
+      + hint();
   } else if (screen === 'remote') {
-    page.innerHTML = heading('Remote computer', 'Bring your workspace', 'Connect to an OpenAIDE server. Your computer runs the work, even when your phone is locked.')
-      + '<form id="remote-form"><label for="address">Server address</label><input id="address" name="address" type="url" inputmode="url" placeholder="https://your-computer.example" autocapitalize="none" spellcheck="false" required>'
-      + '<label for="username">Username</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>'
-      + '<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>'
-      + '<label class="show-password"><input id="show-password" type="checkbox">Show password</label>'
-      + '<button class="primary" type="submit">Connect to computer</button></form>'
-      + button('Use a QR image', 'qr', 'secondary')
-      + '<p class="note">Save any unsent draft before switching. Existing tasks stay on their original device. Credentials are encrypted on this phone.</p>'
-      + '<details><summary>Where do I find these details?</summary><p>Use the HTTPS address and login for your OpenAIDE Web server. If it is on a private network, connect your phone to that network or VPN first.</p></details>';
-    for (const key of ['address', 'username', 'password']) document.getElementById(key).value = remoteDraft[key];
-    document.getElementById('show-password').addEventListener('change', event => { document.getElementById('password').type = event.target.checked ? 'text' : 'password'; });
-    document.getElementById('remote-form').addEventListener('submit', event => { event.preventDefault(); rememberRemote(); send('remote', remoteDraft); });
+    const known = state.paired && !state.remote;
+    page.innerHTML = heading('Pair with your computer', 'On your computer, open') + path('Settings', 'Devices', 'Show code') + hint()
+      + (known ? `<div class="panel"><span class="copy"><h2>${escape(state.computer || 'Your computer')}</h2><small>Already paired</small></span>${button('Use', 'paired', 'mini')}</div>` : '')
+      + '<div class="actions">'
+      + (firstRun ? '' : '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>')
+      + `<form id="pair-form" ${pasteOpen ? '' : 'hidden'}><textarea id="code" name="code" rows="3" aria-label="Pairing code" placeholder="OAI1…" autocapitalize="characters" autocomplete="off" spellcheck="false" required></textarea><button class="secondary" type="submit">Pair</button></form>`
+      + button('Scan code', 'scan')
+      + `<div class="alternatives"><button class="link" id="paste-toggle" aria-expanded="${pasteOpen}" aria-controls="pair-form">Enter code</button><button class="link" data-action="join_screen">Show my code</button></div>`
+      + '</div>';
+    document.getElementById('code').value = codeDraft;
+    document.getElementById('pair-form').addEventListener('submit', event => { event.preventDefault(); rememberCode(); send('pair', { code: codeDraft }); });
+    document.getElementById('paste-toggle').addEventListener('click', () => {
+      rememberCode();
+      pasteOpen = !pasteOpen;
+      render();
+      if (pasteOpen) document.getElementById('code').focus();
+    });
+  } else if (screen === 'join') {
+    const join = state.join;
+    page.innerHTML = heading('Show this code', 'On your computer, open') + path('Settings', 'Devices', 'Enter code')
+      + (join ? `<div class="qr" role="img" aria-label="Pairing code"><svg viewBox="-2 -2 ${join.qr.size + 4} ${join.qr.size + 4}" shape-rendering="crispEdges"><path d="${escape(join.qr.path)}"/></svg></div><p class="code">${escape(join.text)}</p><p class="waiting"><span class="pulse" aria-hidden="true"></span>Waiting for your computer</p>${hint()}`
+        : '<p class="waiting"><span class="pulse" aria-hidden="true"></span>Preparing this phone’s code…</p>');
   } else if (screen === 'background') {
-    page.innerHTML = heading('This phone', 'Keep work going', 'Protect active work when you leave OpenAIDE or lock your phone. Protection is released when work is idle.')
-      + `<label class="row"><span><strong>Background work</strong><small>Only keeps the phone awake while needed.</small></span><input id="background" type="checkbox" ${state.background ? 'checked' : ''}></label>`
-      + row('Battery access', 'Allow unrestricted use for OpenAIDE and Termux.', 'battery', state.appBattery && state.termuxBattery ? 'Allowed' : 'Review')
-      + row('Notifications', 'Know when local work finishes or needs you.', 'app_settings', state.notifications ? 'Allowed' : 'Review')
-      + (state.batterySaver ? '<p class="note">Battery Saver is on. Android may delay or interrupt local work.</p>' : '')
-      + '<div class="panel"><h2>No always-on busywork</h2><p>OpenAIDE stops its background checks when idle. Running agents still use battery and data, so plug in for long tasks.</p></div>'
-      + '<p class="note">Do not force-stop OpenAIDE or Termux during work. Some phones also require allowing background activity in their own battery settings.</p>';
+    page.innerHTML = heading('Keep work going')
+      + `<div class="group"><label class="row">${icon('power')}<span class="copy"><strong>Background work</strong></span><input id="background" type="checkbox" ${state.background ? 'checked' : ''}></label>`
+      + row('battery', 'Battery access', 'battery', state.appBattery && state.termuxBattery ? 'Allowed' : 'Review')
+      + row('bell', 'Notifications', 'app_settings', state.notifications ? 'Allowed' : 'Review')
+      + '</div>'
+      + (state.batterySaver ? '<p class="caution">Battery Saver is on. Android may pause local work.</p>' : '')
+      + hint();
     document.getElementById('background').addEventListener('change', event => send('background', { enabled: event.target.checked }));
   } else {
-    page.innerHTML = heading('Connection', 'Advanced', 'Recovery tools for when something isn’t working. You don’t need these for everyday use.')
-      + row('Check this phone', 'Find and fix missing local setup.', 'local_screen')
-      + row('Reconnect to Termux', 'Restore the saved local connection. No history is deleted.', 'repair')
-      + row('Start after reboot', 'Optional. Requires the Termux:Boot companion.', 'boot')
-      + (!state.boot ? button('Get Termux:Boot', 'get_boot', 'link') : '')
-      + row('Termux app settings', 'Review Android permissions and battery restrictions.', 'termux_settings')
-      + row('Share diagnostics', 'Connection events only. No conversations or credentials.', 'diagnostics')
-      + '<p class="note">OpenAIDE for Android · 0.4.0</p>';
+    page.innerHTML = heading('Advanced')
+      + '<div class="group">'
+      + row('phone', 'Check this phone', 'local_screen')
+      + row('refresh', 'Reconnect to Termux', 'repair')
+      + row('power', 'Start after reboot', state.boot ? 'boot' : 'get_boot', state.boot ? '' : 'Get Termux:Boot')
+      + row('wrench', 'Termux app settings', 'termux_settings')
+      + row('share', 'Share diagnostics', 'diagnostics', '', 'No conversations or credentials')
+      + '</div>';
   }
+  document.getElementById('about')?.addEventListener('click', openSheet);
   page.setAttribute('aria-busy', String(Boolean(state.busy)));
   notice.hidden = !state.notice;
   notice.textContent = state.notice || '';
   if (state.busy) { const spinner = document.createElement('span'); spinner.className = 'spinner'; spinner.setAttribute('aria-hidden', 'true'); notice.prepend(spinner); }
-  for (const control of page.querySelectorAll('button, input')) control.disabled = Boolean(state.busy);
+  for (const control of page.querySelectorAll('button, input, textarea')) control.disabled = Boolean(state.busy);
   document.getElementById('back').disabled = Boolean(state.busy);
   for (const control of page.querySelectorAll('[data-screen]')) control.addEventListener('click', () => go(control.dataset.screen));
   for (const control of page.querySelectorAll('[data-action]')) control.addEventListener('click', () => {
