@@ -645,6 +645,13 @@ export function TaskView({
             ) : null}
           </div>
         ) : null}
+        {backendConnectionState?.status === "ready" && backendConnectionState.unresponsive ? (
+          // The session is still open and retrying; this only explains why nothing is arriving.
+          <div className="task-connection-notice" role="status" aria-live="polite">
+            <span>Reconnecting…</span>
+            <small>OpenAIDE is not answering. Work continues there and appears here once it is reachable.</small>
+          </div>
+        ) : null}
         {canReloadNativeSession ? (
           <TaskSessionReloadNotice
             error={reloadError}
