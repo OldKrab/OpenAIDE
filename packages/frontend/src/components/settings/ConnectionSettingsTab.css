@@ -15,3 +15,30 @@
   border-radius: 50%;
   background: currentColor;
 }
+
+.connection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Confirms in place, under the list it changes, because forgetting cannot be undone from here. */
+.connection-confirm {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-raised);
+  font-size: 13px;
+}
+
+.connection-confirm p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.connection-confirm .connection-actions {
+  justify-self: end;
+}

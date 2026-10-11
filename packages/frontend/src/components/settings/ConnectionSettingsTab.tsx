@@ -1,6 +1,6 @@
 import { Battery, Bell, Bug, Laptop, QrCode, RefreshCcw, Smartphone } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { ConnectionCommand, ConnectionSettings } from "../../services/connectionSettings";
+import type { ConnectionCommand, ConnectionComputer, ConnectionSettings } from "../../services/connectionSettings";
 import { GeneralPreferenceRow, GeneralSection, SettingsSwitch } from "./GeneralSettingsTab";
 import { InlineNotice, SettingsSkeleton } from "./settingsPresentation";
 import "./ConnectionSettingsTab.css";
@@ -9,6 +9,7 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
   const state = useSyncExternalStore(capability.subscribe, capability.snapshot, capability.snapshot);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [forgetting, setForgetting] = useState<ConnectionComputer>();
   const mounted = useRef(true);
   const busy = sending || Boolean(state?.busy);
   const execute = async (command: ConnectionCommand) => {
@@ -32,32 +33,43 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
   ) : <SettingsSkeleton />;
 
   const checks = state.checks;
+  const computers = state.computers ?? [];
   const needsTools = checks && ["node", "nodeVersion", "git", "npm", "agent", "runtime"].some(key => !checks[key]);
   return (
     <div className="general-settings-panel" aria-busy={busy}>
-      <GeneralSection id="settings-connection-workspace" label="Connected to">
+      {/* One list of places, with the one in use marked; adding a computer is a separate act. */}
+      <GeneralSection id="settings-connection-workspace" label="Where agents work">
         <div className="general-preference-surface">
-          <GeneralPreferenceRow label={state.remote ? state.computer || "Remote computer" : "This phone"}
-            icon={state.remote ? <Laptop size={17} /> : <Smartphone size={17} />}
-            detail={state.remote ? "Remote computer" : "Runs in Termux"}
-            action={<span className="connection-status">Connected</span>} />
+          <GeneralPreferenceRow label="This phone" icon={<Smartphone size={17} />} detail="Runs in Termux"
+            action={state.remote ? button("Use", { action: "local" }) : <span className="connection-status">In use</span>} />
+          {computers.map(computer => (
+            <GeneralPreferenceRow key={computer.id} label={computer.name || "Remote computer"} icon={<Laptop size={17} />} detail="Remote computer"
+              action={<span className="connection-actions">
+                {computer.current ? <span className="connection-status">In use</span> : button("Use", { action: "use_computer", id: computer.id })}
+                <button type="button" className="settings-secondary-button connection-forget" disabled={busy}
+                  aria-label={`Forget ${computer.name || "this computer"}`}
+                  onClick={() => setForgetting(computer)}>Forget</button>
+              </span>} />
+          ))}
         </div>
+        {forgetting ? (
+          <div className="connection-confirm" role="alertdialog" aria-label={`Forget ${forgetting.name || "this computer"}?`}>
+            <p>
+              Forget {forgetting.name || "this computer"}? This phone stops connecting to it.
+              {forgetting.current ? " Work moves to this phone." : ""} Pair again to return.
+            </p>
+            <span className="connection-actions">
+              <button type="button" className="settings-secondary-button" onClick={() => setForgetting(undefined)}>Keep</button>
+              <button type="button" className="settings-secondary-button" disabled={busy}
+                onClick={() => { const id = forgetting.id; setForgetting(undefined); void execute({ action: "forget_computer", id }); }}>Forget</button>
+            </span>
+          </div>
+        ) : null}
       </GeneralSection>
 
-      <GeneralSection id="settings-connection-switch" label="Switch">
+      <GeneralSection id="settings-connection-add" label="Add">
         <div className="general-preference-surface">
-          {state.remote ? (
-            <>
-              <GeneralPreferenceRow label="This phone" icon={<Smartphone size={17} />}
-                action={button("Connect to this phone", { action: "local" })} />
-              <GeneralPreferenceRow label={state.computer || "This computer"} icon={<Laptop size={17} />} detail="Stop connecting from this phone"
-                action={button("Forget", { action: "forget" })} />
-            </>
-          ) : state.paired ? (
-            <GeneralPreferenceRow label={state.computer || "Paired computer"} icon={<Laptop size={17} />} detail="Paired"
-              action={button("Connect to computer", { action: "paired" })} />
-          ) : null}
-          <GeneralPreferenceRow label={state.paired || state.remote ? "Another computer" : "A computer"} icon={<QrCode size={17} />}
+          <GeneralPreferenceRow label={computers.length ? "Another computer" : "A computer"} icon={<QrCode size={17} />} detail="Pair with a code"
             action={button("Pair", { action: "pair_setup" })} />
         </div>
       </GeneralSection>

@@ -36,6 +36,11 @@ function item(kind, glyph, title, detail, target, value) {
 }
 function choice(glyph, title, detail, destination) { return item('choice', glyph, title, detail, destination); }
 function row(glyph, title, action, value = '', detail = '') { return item('row', glyph, title, detail, action, value); }
+// The place in use: named like the others, but not something to tap.
+function place(glyph, title, detail) { return `<div class="row current">${icon(glyph)}<span class="copy"><strong>${title}</strong><small>${detail}</small></span><span class="value">In use</span></div>`; }
+function computerRow(computer) {
+  return `<button class="row" data-action="use_computer" data-id="${escape(computer.id)}">${icon('computer')}<span class="copy"><strong>${escape(computer.name || 'Remote computer')}</strong><small>Remote computer</small></span>${icon('chevron', 'chev')}</button>`;
+}
 
 // Background information is prose behind a question placed where it comes up, not text on the page.
 // Shared by every screen that explains a remote connection; names the public service it may use (ADR 0062).
@@ -126,14 +131,19 @@ function render() {
       + '</div>' + hint();
   } else if (screen === 'settings') {
     const remote = state.remote;
+    const computers = state.computers || [];
+    // One list of places with the one in use marked; adding a computer is a separate act below it.
     page.innerHTML = `<h1>${remote ? escape(state.computer || 'Remote computer') : 'This phone'}</h1>${state.connected ? '<p class="status">Connected</p>' : '<p class="status off">Not connected</p>'}`
-      + '<div class="group">'
-      + (remote ? row('phone', 'Switch to this phone', 'local_screen')
-        : state.paired ? row('computer', `Switch to ${escape(state.computer || 'your computer')}`, 'paired') : '')
-      + row('qr', remote || state.paired ? 'Pair another computer' : 'Pair with a computer', 'remote_screen')
+      + '<h2 class="label">Where agents work</h2><div class="group">'
+      + (remote ? row('phone', 'This phone', 'local_screen', '', 'Runs in Termux') : place('phone', 'This phone', 'Runs in Termux'))
+      + computers.map(computer => computer.current ? place('computer', escape(computer.name || 'Remote computer'), 'Remote computer')
+        : computerRow(computer)).join('')
+      + '</div><div class="group">'
+      + row('qr', computers.length ? 'Add another computer' : 'Add a computer', 'remote_screen', '', 'Pair with a code')
+      + '</div><div class="group">'
       + (remote ? '' : row('battery', 'Background work', 'background_screen', state.background ? 'On' : 'Off'))
       + row('wrench', 'Advanced', 'advanced_screen')
-      + '</div>' + (remote || state.paired ? hint() : '');
+      + '</div>' + (computers.length ? hint() : '');
   } else if (screen === 'local') {
     const step = localStep();
     page.innerHTML = `<div class="step" role="img" aria-label="Step ${step.index} of 4">${[1, 2, 3, 4].map(index => `<span class="${index <= step.index ? 'done' : ''}"></span>`).join('')}</div>`
@@ -145,9 +155,10 @@ function render() {
       + (state.remote && step.index === 4 ? '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>' : '')
       + hint();
   } else if (screen === 'remote') {
-    const known = state.paired && !state.remote;
+    // Computers already paired can be used again without a new code.
+    const known = (state.computers || []).filter(computer => !computer.current);
     page.innerHTML = heading('Pair with your computer', 'On your computer, open') + path('Settings', 'Devices', 'Show code') + hint()
-      + (known ? `<div class="panel"><span class="copy"><h2>${escape(state.computer || 'Your computer')}</h2><small>Already paired</small></span>${button('Use', 'paired', 'mini')}</div>` : '')
+      + known.map(computer => `<div class="panel"><span class="copy"><h2>${escape(computer.name || 'Your computer')}</h2><small>Already paired</small></span><button class="mini" data-action="use_computer" data-id="${escape(computer.id)}">Use</button></div>`).join('')
       + '<div class="actions">'
       + (firstRun ? '' : '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>')
       + `<form id="pair-form" ${pasteOpen ? '' : 'hidden'}><textarea id="code" name="code" rows="3" aria-label="Pairing code" placeholder="OAI1…" autocapitalize="characters" autocomplete="off" spellcheck="false" required></textarea><button class="secondary" type="submit">Pair</button></form>`
@@ -195,6 +206,6 @@ function render() {
   for (const control of page.querySelectorAll('[data-action]')) control.addEventListener('click', () => {
     const action = control.dataset.action;
     if (action.endsWith('_screen')) go(action.slice(0, -7));
-    else send(action);
+    else send(action, control.dataset.id ? { id: control.dataset.id } : {});
   });
 }
