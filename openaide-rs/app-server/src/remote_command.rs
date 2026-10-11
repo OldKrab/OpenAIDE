@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -213,6 +213,7 @@ fn keep_running(state_root: &StateRoot, runtime_root: &Path, pair: bool) -> Resu
             interrupts.fetch_add(1, Ordering::SeqCst);
         });
     }
+    let terminated = termination_flag();
     let connection = launch::attach_or_start(state_root, runtime_root).map_err(Failure::Launch)?;
     let mut client = connect(&connection)?;
     logging::info(
@@ -243,6 +244,19 @@ fn keep_running(state_root: &StateRoot, runtime_root: &Path, pair: bool) -> Resu
     let mut warned = false;
     loop {
         std::thread::sleep(TICK);
+        // A service manager or a closed terminal cannot answer a warning,
+        // so its stop is final at once.
+        if terminated.load(Ordering::SeqCst) {
+            logging::info(
+                "remote_command_stop_requested",
+                json!({ "by": "termination" }),
+            );
+            let _ = client.detach();
+            // The terminal may already be gone; a failed write must not
+            // turn a clean stop into a crash.
+            let _ = writeln!(std::io::stdout(), "Stopped.");
+            return Ok(());
+        }
         let pressed = interrupts.load(Ordering::SeqCst);
         if pressed >= 2 || (pressed == 1 && warned) {
             break;
@@ -292,9 +306,24 @@ fn keep_running(state_root: &StateRoot, runtime_root: &Path, pair: bool) -> Resu
             }
         }
     }
+    logging::info(
+        "remote_command_stop_requested",
+        json!({ "by": "interrupt" }),
+    );
     let _ = client.detach();
     println!("Stopped.");
     Ok(())
+}
+
+/// Set when the command is told to end without a keyboard: a service stop or
+/// its terminal closing. Other systems end the process outright.
+fn termination_flag() -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    for signal in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP] {
+        let _ = signal_hook::flag::register(signal, flag.clone());
+    }
+    flag
 }
 
 fn report_changes(before: &DeviceCollectionSnapshot, after: &DeviceCollectionSnapshot) {

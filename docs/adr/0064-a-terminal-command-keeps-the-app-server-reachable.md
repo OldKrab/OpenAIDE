@@ -19,7 +19,7 @@ Pairing, listing, and removing devices are separate invocations run from another
 - `remote` joins the running App Server, or starts one the way an App Shell does: a separate process, outside the terminal's interrupt, that publishes its endpoint record. It then initializes as a client of kind `terminal` and renews its liveness by heartbeat. The device list changes delivered with each heartbeat become its one-line reports.
 - `remote pair` asks for an invite and prints the Pairing Code as text for pasting and, on a terminal, as a QR code. It prints only once Remote Access is on, so a shown code can be used.
 - `remote devices` lists devices oldest pairing first; `remote remove <number>` removes by that number after a confirmation, or at once with `--yes`.
-- Stopping detaches the client. With Tasks running, the first interrupt says so and the second stops.
+- Stopping detaches the client. With Tasks running, the first interrupt says so and the second stops. A termination signal or a closed terminal stops at once, because a service manager cannot answer a warning.
 - A device's self-reported name is stripped of control characters before it is printed.
 
 The command acts on the state root it is given, the default one unless the environment names another. App Shells each use their own state root today, so reaching an App Shell's App Server from a terminal means naming that root.
