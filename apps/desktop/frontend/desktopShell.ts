@@ -244,6 +244,7 @@ export function createDesktopShell(
       select: (environment) => invoke("set_desktop_runtime_environment", { environment }),
     } : undefined,
     remoteComputers: {
+      current: host.remoteComputer,
       list: () => invoke<RemoteComputer[]>("desktop_remote_snapshot"),
       pair: (code) => invoke("desktop_remote_pair", { code }),
       use: (id) => invoke("desktop_remote_use", { id: id ?? null }),

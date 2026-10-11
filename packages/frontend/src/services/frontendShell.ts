@@ -45,6 +45,8 @@ export type RemoteComputer = { id: string; name: string; current: boolean };
  * shell refused with a sentence for the user.
  */
 export type RemoteComputersCapability = {
+  /** Name of the paired computer in use; fixed for the shell's run, absent on this computer. */
+  current?: string;
   list(): Promise<RemoteComputer[]>;
   /** Spends the invite code another computer shows, then uses that computer. */
   pair(code: string): Promise<void>;

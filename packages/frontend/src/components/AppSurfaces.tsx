@@ -16,6 +16,7 @@ import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
+import { computerLink, useComputerInUse } from "./SidebarComputer";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -34,6 +35,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const { appServerError, navigation, settings } = view;
   const frontendShell = currentFrontendShell();
   const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
+  const computerInUse = useComputerInUse(frontendShell);
+  const computerLinkState = computerLink(controller.backendConnectionState);
   const updateAvailable = desktopUpdate?.kind === "available"
     || desktopUpdate?.kind === "downloading"
     || desktopUpdate?.kind === "readyToUpdate";
@@ -435,6 +438,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           projects={navigationProjects}
           searchQuery={navigation.searchQuery}
           settingsStatus={updateAvailable ? "Update available" : undefined}
+          computerLink={computerLinkState}
+          computerName={computerInUse?.name}
+          onComputer={() => callbacks.navigation.openSettings(undefined, undefined, undefined, computerInUse?.settingsTab)}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
@@ -573,6 +579,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         projects={navigation.projects}
         searchQuery={navigation.searchQuery}
         settingsStatus={updateAvailable ? "Update available" : undefined}
+        computerLink={computerLinkState}
+        computerName={computerInUse?.name}
+        onComputer={closeAfter(() => callbacks.navigation.openSettings(undefined, undefined, undefined, computerInUse?.settingsTab))}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
         tasks={visibleTasks}
