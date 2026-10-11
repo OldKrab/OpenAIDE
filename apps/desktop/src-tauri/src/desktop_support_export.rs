@@ -1,9 +1,11 @@
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use tauri_plugin_dialog::DialogExt;
 use url::Url;
 
-use crate::desktop_runtime::DesktopBootstrapPreferences;
+use crate::DesktopState;
+use crate::desktop_runtime::{DesktopBootstrapPreferences, write_bootstrap_preferences};
 
 pub(crate) fn validate_export_label(label: &str) -> Result<(), String> {
     if label.is_empty()
@@ -64,6 +66,110 @@ pub(crate) fn remember_export_directory(
     destination: &Path,
 ) {
     preferences.support_export_directory = destination.parent().map(Path::to_path_buf);
+}
+
+/// Saves an App Server-owned export where the user chooses, through the
+/// endpoint this Desktop is connected to.
+#[tauri::command]
+pub(crate) async fn desktop_save_support_export(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    file_handle_id: String,
+    label: String,
+) -> Result<bool, String> {
+    validate_export_label(&label)?;
+    let export_directory = state
+        .preferences
+        .lock()
+        .map_err(|_| "Desktop preferences are unavailable.".to_string())?
+        .support_export_directory
+        .clone();
+    let connection = state
+        .connection
+        .lock()
+        .map_err(|_| "Desktop runtime state is unavailable.".to_string())?
+        .clone()
+        .ok_or_else(|| "Desktop runtime is not connected.".to_string())?;
+    let url = support_export_download_url(
+        &connection.endpoint_url,
+        &state.client_instance_id,
+        &file_handle_id,
+    )?;
+    let operation_id = format!("desktop-support-export-{}", uuid::Uuid::new_v4());
+    let started_at = Instant::now();
+    eprintln!("desktop_support_export_save_started operation_id={operation_id} attempt_count=1");
+
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Export OpenAIDE Support Diagnostics")
+        .set_file_name(&label)
+        .set_parent(&window)
+        .add_filter("ZIP archive", &["zip"]);
+    if let Some(directory) = export_directory {
+        dialog = dialog.set_directory(directory);
+    }
+    let (destination_sender, destination_receiver) = tokio::sync::oneshot::channel();
+    dialog.save_file(move |destination| {
+        let _ = destination_sender.send(destination);
+    });
+    let destination = destination_receiver
+        .await
+        .map_err(|_| "The support export Save dialog closed unexpectedly.".to_string())?;
+    let Some(destination) = destination else {
+        eprintln!(
+            "desktop_support_export_save_completed operation_id={operation_id} outcome=cancelled duration_ms={} attempt_count=1",
+            started_at.elapsed().as_millis()
+        );
+        return Ok(false);
+    };
+    let destination = match destination.into_path() {
+        Ok(destination) => destination,
+        Err(_) => {
+            eprintln!(
+                "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=invalid_destination duration_ms={} attempt_count=1",
+                started_at.elapsed().as_millis()
+            );
+            return Err("The selected support export path is invalid.".to_string());
+        }
+    };
+    let bytes = match download_support_export(url, &connection.auth_token).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!(
+                "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=download duration_ms={} attempt_count=1",
+                started_at.elapsed().as_millis()
+            );
+            return Err(error);
+        }
+    };
+    if std::fs::write(&destination, bytes).is_err() {
+        eprintln!(
+            "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=file_write duration_ms={} attempt_count=1",
+            started_at.elapsed().as_millis()
+        );
+        return Err("Unable to save the support export to the selected file.".to_string());
+    }
+
+    match state.preferences.lock() {
+        Ok(mut preferences) => {
+            remember_export_directory(&mut preferences, &destination);
+            if write_bootstrap_preferences(&state.preferences_path, &preferences).is_err() {
+                eprintln!(
+                    "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_write"
+                );
+            }
+        }
+        Err(_) => eprintln!(
+            "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_lock"
+        ),
+    }
+    eprintln!(
+        "desktop_support_export_save_completed operation_id={operation_id} outcome=success duration_ms={} attempt_count=1",
+        started_at.elapsed().as_millis()
+    );
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -16,6 +16,8 @@ futures-util = "0.3"
 fs2 = "0.4"
 # Export builds its own client; the updater's rustls-no-provider feature alone
 # panics here unless another component happened to install a global provider.
+# The client half of Remote Devices, shared with the App Server's workspace (ADR-0063).
+openaide-remote-client = { path = "../../../openaide-rs/remote-client" }
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }

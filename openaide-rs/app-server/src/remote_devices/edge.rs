@@ -107,12 +107,14 @@ async fn run(
 ) {
     let mut endpoint: Option<Endpoint> = None;
     let connections = Connections::default();
+    // Removals still owed their close; the endpoint must not stop under them.
+    let mut closing: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     loop {
         tokio::select! {
             command = commands.recv() => match command {
                 None => break,
                 Some(EdgeCommand::Reconcile) => {
-                    reconcile(&devices, &network, &mut endpoint).await;
+                    reconcile(&devices, &network, &mut endpoint, &mut closing).await;
                 }
                 Some(EdgeCommand::AnnounceTrust(device)) => {
                     if let Some(endpoint) = &endpoint {
@@ -132,12 +134,13 @@ async fn run(
                     // The removal reply may travel over the very connection being closed,
                     // for example when a phone removes itself. Closing at once would drop
                     // that reply and leave the device's Frontend waiting forever.
-                    tokio::spawn(async move {
+                    closing.retain(|task| !task.is_finished());
+                    closing.push(tokio::spawn(async move {
                         tokio::time::sleep(REMOVAL_CLOSE_GRACE).await;
                         for connection in removed {
                             connection.close(CLOSE_REMOVED.into(), b"removed");
                         }
-                    });
+                    }));
                 }
             },
             incoming = accept(&endpoint) => match incoming {
@@ -176,6 +179,7 @@ async fn reconcile(
     devices: &RemoteDevices,
     network: &EdgeNetwork,
     endpoint: &mut Option<Endpoint>,
+    closing: &mut Vec<tokio::task::JoinHandle<()>>,
 ) {
     let wanted = devices.endpoint_secret_key();
     let current = endpoint.as_ref().map(Endpoint::id);
@@ -183,6 +187,12 @@ async fn reconcile(
         return;
     }
     if let Some(endpoint) = endpoint.take() {
+        // Removing the last device stops the endpoint. Stopping first would end
+        // that device's connection without the reason, and it would report an
+        // unreachable computer instead of its own removal.
+        for task in closing.drain(..) {
+            let _ = task.await;
+        }
         endpoint.close().await;
         logging::info("remote_devices_endpoint_stopped", serde_json::json!({}));
     }

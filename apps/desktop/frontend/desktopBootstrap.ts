@@ -18,6 +18,8 @@ export type DesktopBootstrap = {
   platform: "linux" | "macos" | "windows";
   runtimeEnvironment: DesktopRuntimeEnvironment;
   runtimeOptions: DesktopRuntimeOptions;
+  /** Names the paired computer whose App Server is in use instead of this one's. */
+  remoteComputer?: string;
 };
 
 export type DesktopBootstrapProgress = {
@@ -28,6 +30,7 @@ export type DesktopBootstrapProgress = {
 export type DesktopBootstrapContext = {
   environment: DesktopRuntimeEnvironment;
   canRecover: boolean;
+  remoteComputer?: string;
 };
 
 type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;

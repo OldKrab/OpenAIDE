@@ -2665,6 +2665,7 @@ dependencies = [
  "notify",
  "nucleo-matcher",
  "openaide-app-server-protocol",
+ "openaide-remote-client",
  "portable-pty",
  "regex",
  "serde",
@@ -2688,6 +2689,19 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
+]
+
+[[package]]
+name = "openaide-remote-client"
+version = "0.0.0"
+dependencies = [
+ "data-encoding",
+ "iroh",
+ "openaide-app-server-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

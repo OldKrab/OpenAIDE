@@ -70,6 +70,25 @@ describe("Desktop update shell adapter", () => {
     );
   });
 
+  it("updates without asking a paired computer's App Server to shut down", async () => {
+    const session = fakeSession();
+    const invoke = vi.fn(async () => snapshot(2, "applying"));
+    const updates = createDesktopUpdates({
+      invoke,
+      listen: vi.fn(async () => () => undefined),
+      openReleaseNotes: vi.fn(),
+      ownsAppServer: false,
+      reload: vi.fn(),
+      session,
+    });
+
+    await expect(updates.restartAndUpdate()).resolves.toBe("started");
+
+    expect(session.request.mock.calls.map(([method]) => method)).toEqual(["client/detach"]);
+    expect(session.close).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenLastCalledWith("desktop_install_update");
+  });
+
   it("continues installer handoff when the final detach response is lost during shutdown", async () => {
     vi.useFakeTimers();
     try {

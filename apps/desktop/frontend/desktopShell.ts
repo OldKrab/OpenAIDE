@@ -6,7 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CLIENT_DETACH, type AppServerSession } from "@openaide/app-server-client";
 import type { HostToWebviewMessage, SettingsIntent, SettingsTabId } from "@openaide/app-shell-contracts";
-import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
+import type { FrontendShell, RemoteComputer } from "../../../packages/frontend/src/services/frontendShell";
 import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import type { PostHostMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
@@ -36,7 +36,10 @@ export function createDesktopShell(
   // subscription lives as long as the WebView. Native focus is the reliable
   // machine-resume signal on macOS, and re-broadcasting it as `openaide:resume`
   // also wakes the shared transport and restarts suspended animations.
-  createDesktopServerRecovery({ invoke });
+  // With a paired computer in use there is no process here to restore; the
+  // session's own retries reopen the connection.
+  const remote = Boolean(host.remoteComputer);
+  if (!remote) createDesktopServerRecovery({ invoke });
   void nativeWindow.onFocusChanged(({ payload: focused }) => {
     if (focused) window.dispatchEvent(new Event("openaide:resume"));
   });
@@ -93,6 +96,7 @@ export function createDesktopShell(
         throw error;
       }
     },
+    ownsAppServer: !remote,
     reload: () => window.location.reload(),
     session,
   });
@@ -231,13 +235,20 @@ export function createDesktopShell(
       startDragging: () => nativeWindow.startDragging(),
       toggleMaximize,
     },
-    desktopRuntime: host.platform === "windows" ? {
+    // The environment belongs to this computer, so it is offered only while this computer is in use.
+    desktopRuntime: host.platform === "windows" && !remote ? {
       snapshot: () => ({
         active: host.runtimeEnvironment,
         wslDistros: host.runtimeOptions.wslDistros,
       }),
       select: (environment) => invoke("set_desktop_runtime_environment", { environment }),
     } : undefined,
+    remoteComputers: {
+      list: () => invoke<RemoteComputer[]>("desktop_remote_snapshot"),
+      pair: (code) => invoke("desktop_remote_pair", { code }),
+      use: (id) => invoke("desktop_remote_use", { id: id ?? null }),
+      forget: (id) => invoke("desktop_remote_forget", { id }),
+    },
     desktopUpdates,
     desktopCommands: {
       subscribe(listener) {
@@ -292,7 +303,8 @@ export function createDesktopShell(
         return () => routeListeners.delete(listener);
       },
     },
-    projects: { pickFolder: pickProjectFolder },
+    // The native picker lists this computer's folders, which a paired computer cannot open.
+    projects: remote ? undefined : { pickFolder: pickProjectFolder },
     recovery: {
       openExternal: (url) => { void openUrl(url); },
       reload: () => window.location.reload(),

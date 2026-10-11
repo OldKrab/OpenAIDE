@@ -192,7 +192,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   useBackNavigation(Boolean(projectToRemove), () => setProjectToRemove(undefined));
   // Folder acquisition belongs to the App Shell: Web browses through the App
   // Server, Desktop opens the OS picker, and VS Code delegates to its host.
-  const workspaceBrowser = isWebShell ? callbacks.newTask.workspaceBrowser : undefined;
+  // A Desktop without its picker works on another computer, whose folders only
+  // that computer's App Server can list.
+  const browsesThroughAppServer = isWebShell
+    || (bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop" && !frontendShell?.projects);
+  const workspaceBrowser = browsesThroughAppServer ? callbacks.newTask.workspaceBrowser : undefined;
   const workspaceCapability = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "vscodeExtension"
     ? frontendShell?.workspace
     : undefined;

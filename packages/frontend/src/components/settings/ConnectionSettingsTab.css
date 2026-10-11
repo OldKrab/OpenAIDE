@@ -42,3 +42,8 @@
 .connection-confirm .connection-actions {
   justify-self: end;
 }
+
+.connection-confirm .connection-note {
+  color: var(--oa-muted);
+  font-size: 12px;
+}
