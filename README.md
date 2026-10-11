@@ -93,9 +93,12 @@ versions from **Settings → General → Application updates**. This updater
 signature does not suppress SmartScreen; users may still need to allow the new
 version when Windows starts it.
 
-macOS may require approval in **System Settings → Privacy & Security** after the
-first launch. In-app updates remain disabled on macOS until safe replacement of
-an unnotarized application is qualified; install a newer DMG manually.
+macOS blocks the first launch because the application is not Apple-notarized.
+When it says it could not verify OpenAIDE, click **Done**, open **System
+Settings → Privacy & Security**, and click **Open Anyway** next to OpenAIDE.
+This is needed once per installed version; the installer window shows the same
+steps. In-app updates remain disabled on macOS until safe replacement of an
+unnotarized application is qualified; install a newer DMG manually.
 
 The Desktop installer adds the application and its bundled OpenAIDE App Server.
 On Windows, selecting a WSL project also installs the bundled Linux App Server

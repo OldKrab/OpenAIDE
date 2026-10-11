@@ -1,24 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="660" height="400" viewBox="0 0 660 400">
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="470" viewBox="0 0 660 470">
   <defs>
-    <linearGradient id="surface" x1="0" y1="0" x2="660" y2="400" gradientUnits="userSpaceOnUse">
+    <linearGradient id="surface" x1="0" y1="0" x2="660" y2="470" gradientUnits="userSpaceOnUse">
       <stop stop-color="#F8FAFD"/>
       <stop offset="1" stop-color="#EDF2F8"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(330 224) rotate(90) scale(150 260)" gradientUnits="userSpaceOnUse">
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(330 176) rotate(90) scale(150 260)" gradientUnits="userSpaceOnUse">
       <stop stop-color="#5199F7" stop-opacity=".10"/>
       <stop offset="1" stop-color="#5199F7" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
-  <rect width="660" height="400" fill="url(#surface)"/>
-  <rect width="660" height="400" fill="url(#glow)"/>
+  <rect width="660" height="470" fill="url(#surface)"/>
+  <rect width="660" height="470" fill="url(#glow)"/>
 
-  <g font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif" text-anchor="middle">
-    <text x="330" y="58" fill="#1D2939" font-size="24" font-weight="700" letter-spacing="-.35">Install OpenAIDE</text>
-    <text x="330" y="84" fill="#526175" font-size="14" font-weight="500">Drag OpenAIDE into Applications</text>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif" text-anchor="middle">
+    <text x="330" y="52" fill="#1D2939" font-size="24" font-weight="700" letter-spacing="-.35">Install OpenAIDE</text>
+    <text x="330" y="78" fill="#526175" font-size="14" font-weight="500">Drag OpenAIDE into Applications</text>
+
+    <!-- The app is not Apple-notarized, so macOS blocks its first launch; the window says how to allow it.
+         The bottom 70px stay empty: Finder's path and status bars cover them when the user shows those. -->
+    <text x="330" y="318" fill="#1D2939" font-size="13" font-weight="600">First launch</text>
+    <text x="330" y="340" fill="#526175" font-size="13" font-weight="400">macOS will say it could not verify OpenAIDE. Click Done, then open</text>
+    <text x="330" y="359" fill="#526175" font-size="13" font-weight="400">System Settings → Privacy &amp; Security and click Open Anyway.</text>
   </g>
 
-  <path d="M270 224H390" stroke="#5199F7" stroke-width="5" stroke-linecap="round"/>
-  <path d="M374 208L392 224L374 240" fill="none" stroke="#5199F7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M110 292H550" stroke="#D9E0EA" stroke-width="1"/>
+  <path d="M270 176H390" stroke="#5199F7" stroke-width="5" stroke-linecap="round"/>
+  <path d="M374 160L392 176L374 192" fill="none" stroke="#5199F7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
 
 </svg>
