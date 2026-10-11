@@ -18,7 +18,8 @@ public final class TermuxCommand extends BroadcastReceiver {
     private static final AtomicInteger sequence = new AtomicInteger(new java.security.SecureRandom().nextInt(Integer.MAX_VALUE));
     private static final ConcurrentHashMap<Integer, BiConsumer<Boolean, String>> callbacks = new ConcurrentHashMap<>();
 
-    static void run(Context context, String asset, String environment, boolean persistent, BiConsumer<Boolean, String> callback) {
+    /** Runs a bundled script in Termux and reports its exit and output once, on the main thread. */
+    static void run(Context context, String asset, String environment, BiConsumer<Boolean, String> callback) {
         int operation = sequence.incrementAndGet();
         long started = SystemClock.elapsedRealtime();
         Log.i("OpenAIDE", "termux_command_start operation=" + operation);
@@ -29,7 +30,7 @@ public final class TermuxCommand extends BroadcastReceiver {
         });
         new Handler(Looper.getMainLooper()).postDelayed(() -> finish(operation, false,
             "Termux did not return a result. Check command access and allow-external-apps=true."),
-            "install-termux.sh".equals(asset) ? 180_000 : 30_000);
+            "install-termux.sh".equals(asset) ? 180_000 : "start-termux.sh".equals(asset) ? 75_000 : 30_000);
         try {
             String script;
             try (var input = context.getAssets().open(asset); var output = new java.io.ByteArrayOutputStream()) {
@@ -45,15 +46,10 @@ public final class TermuxCommand extends BroadcastReceiver {
             Intent command = new Intent("com.termux.RUN_COMMAND").setClassName("com.termux", "com.termux.app.RunCommandService");
             command.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash");
             command.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-s"});
-            String input = environment + "\n" + script;
-            if (persistent) input = environment + "\numask 077\nmkdir -p \"$HOME/.local/share/openaide-android/state\"\n"
-                + "cat > \"$HOME/.local/share/openaide-android/state/start.sh\" <<'OPENAIDE_START_SCRIPT'\n"
-                + script + "\nOPENAIDE_START_SCRIPT\nexec bash \"$HOME/.local/share/openaide-android/state/start.sh\"\n";
-            command.putExtra("com.termux.RUN_COMMAND_STDIN", input);
+            command.putExtra("com.termux.RUN_COMMAND_STDIN", environment + "\n" + script);
             command.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
             command.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pending);
             context.startService(command);
-            if (persistent) finish(operation, true, "started");
         } catch (Exception error) { finish(operation, false, "Cannot start Termux. Check installation and command permission."); }
     }
 

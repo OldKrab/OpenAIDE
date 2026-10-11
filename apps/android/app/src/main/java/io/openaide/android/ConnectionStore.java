@@ -29,14 +29,14 @@ final class ConnectionStore {
             preferences.edit().remove("remote").remove("remote_url").remove("remote_user").remove("remote_secret")
                 .putBoolean("configured", false).apply();
         }
+        // The Web Shell in Termux and its password are gone; the App Server's own token replaces it.
+        if (preferences.contains("password")) preferences.edit().remove("password").apply();
     }
 
-    ConnectionProfile load() { return usesPaired() ? ConnectionProfile.paired() : local(); }
+    ConnectionProfile load() { return usesPaired() ? ConnectionProfile.paired() : ConnectionProfile.local(); }
 
     /** Whether the paired computer, rather than this phone, is the selected workspace. */
     boolean usesPaired() { return preferences.getBoolean("paired", false) && pairedServer() != null; }
-
-    ConnectionProfile local() { return new ConnectionProfile(ConnectionProfile.LOCAL_ENDPOINT, "android", preferences.getString("password", ""), true); }
 
     PairedServer pairedServer() {
         String id = preferences.getString("server_id", "");

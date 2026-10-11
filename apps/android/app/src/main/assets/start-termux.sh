@@ -1,72 +1,48 @@
+# Starts the App Server the way an App Shell on a computer does: attach to the
+# one already serving this state, or launch it, and print its connection line.
+# The server stops by itself once its last client has left.
 set -eu
-: "${OPENAIDE_WEB_PASSWORD:?OpenAIDE must provide a connection password}"
 umask 077
 export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export PATH="$PREFIX/bin:$PATH"
 export TMPDIR="$PREFIX/tmp"
-runtime="$HOME/.local/share/openaide-android/runtime"
-state="$HOME/.local/share/openaide-android/state"
+root="$HOME/.local/share/openaide-android"
+runtime="$root/runtime"
+state="$root/state"
 mkdir -p "$state"
-exec >> "$state/launcher.log" 2>&1
-echo 'openaide_android_start outcome=started'
-test -f "$runtime/apps/web/src/dev-server.mjs" || {
-    echo 'openaide_android_start outcome=runtime_missing'
-    exit 1
-}
-test -x "$runtime/bin/openaide-app-server" || {
-    echo 'openaide_android_start outcome=backend_missing'
-    exit 1
-}
-export CODEX_PATH="$(command -v codex)"
-test -n "$CODEX_PATH" || {
-    echo 'openaide_android_start outcome=codex_missing'
-    exit 1
-}
-export OPENAIDE_WEB_HOST=127.0.0.1
-export OPENAIDE_WEB_PORT=5474
-export OPENAIDE_WEB_ALLOWED_HOSTS=127.0.0.1
-export OPENAIDE_WEB_USERNAME=android
-export OPENAIDE_WEB_AUTH_REALM=OpenAIDE
-export OPENAIDE_WEB_STATE_ROOT="$state"
-export OPENAIDE_WEB_RUNTIME_ROOT="$state/runtime"
-export OPENAIDE_WEB_STATIC_ROOT="$runtime/packages/frontend/dist"
-export OPENAIDE_APP_SERVER_PATH="$runtime/bin/openaide-app-server"
-export OPENAIDE_WEB_PROJECT_ROOTS="$HOME"
-cd "$runtime"
-export OPENAIDE_ANDROID_RUNTIME="$runtime"
-if command -v runsv >/dev/null 2>&1; then
-    service="$state/service"
-    mkdir -p "$service"
-    cat > "$service/run" <<'RUN'
-#!/data/data/com.termux/files/usr/bin/sh
-cd "$OPENAIDE_ANDROID_RUNTIME"
-date +%s > "$OPENAIDE_WEB_STATE_ROOT/service/started"
-exec node apps/web/src/dev-server.mjs
-RUN
-    cat > "$service/finish" <<'FINISH'
-#!/data/data/com.termux/files/usr/bin/sh
-service="$OPENAIDE_WEB_STATE_ROOT/service"
-count=$(cat "$service/failures" 2>/dev/null || echo 0)
-started=$(cat "$service/started" 2>/dev/null || echo 0)
-if [ $(( $(date +%s) - started )) -gt 60 ]; then count=0; fi
-count=$((count + 1))
-printf '%s' "$count" > "$service/failures"
-if [ "$count" -ge 5 ]; then
-    touch "$service/down"
-    sv -w 1 down "$service" >/dev/null 2>&1 || true
+log="$state/launcher.log"
+note() { echo "openaide_android_start outcome=$1" >> "$log"; }
+note started
+test -x "$runtime/bin/openaide-app-server" || { note backend_missing; exit 1; }
+test "$(cat "$runtime/VERSION" 2>/dev/null)" = "${OPENAIDE_VERSION:-}" || { note runtime_outdated; exit 1; }
+if [ -d "$state/service" ]; then
+    # Earlier versions kept a supervised Web Shell here. It would hold the old
+    # App Server open, so it ends before this one starts.
+    pkill -TERM -f "runsv $state/service" >/dev/null 2>&1 || true
+    pkill -TERM -f "$runtime/bin/openaide-app-server" >/dev/null 2>&1 || true
+    rm -rf "$state/service" "$state/connection-password" "$state/start.sh" "$state/supervisor.lock"
+    rm -f "$HOME/.termux/boot/openaide"
+    sleep 1
+    note legacy_stopped
 fi
-sleep 10
-FINISH
-    chmod 700 "$service/run" "$service/finish"
-    exec 9> "$state/supervisor.lock"
-    if ! flock -n 9; then
-        rm -f "$service/down" "$service/failures"
-        sv up "$service"
-        exit 0
-    fi
-    rm -f "$service/down" "$service/failures"
-    printf '%s' "$OPENAIDE_WEB_PASSWORD" > "$state/connection-password"
-    exec runsv "$service"
-fi
-echo 'openaide_android_start outcome=supervisor_missing'
-exec node apps/web/src/dev-server.mjs
+# Agents installed in Termux are used as they are; the adapters cannot ship Android builds.
+if command -v codex >/dev/null 2>&1; then export CODEX_PATH="$(command -v codex)"; fi
+if command -v claude >/dev/null 2>&1; then export CLAUDE_CODE_EXECUTABLE="$(command -v claude)"; fi
+export OPENAIDE_STORAGE_ROOT="$state"
+export OPENAIDE_RUNTIME_ROOT="$state/runtime"
+export OPENAIDE_PROJECT_ROOTS="$HOME"
+export OPENAIDE_APP_SERVER_PROTOCOL=app-server-handoff
+handoff=$(mktemp "$state/handoff.XXXXXX")
+trap 'rm -f "$handoff"' EXIT
+cd "$HOME"
+nohup "$runtime/bin/openaide-app-server" < /dev/null > "$handoff" 2>> "$log" &
+child=$!
+waited=0
+while ! grep -q '}' "$handoff" 2>/dev/null; do
+    if ! kill -0 "$child" 2>/dev/null && ! grep -q '}' "$handoff" 2>/dev/null; then note handoff_exited; exit 1; fi
+    if [ "$waited" -ge 300 ]; then note handoff_timeout; kill "$child" 2>/dev/null || true; exit 1; fi
+    waited=$((waited + 1))
+    sleep 0.2
+done
+note ready
+head -n 1 "$handoff"

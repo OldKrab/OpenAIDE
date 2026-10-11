@@ -6,20 +6,19 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-function fixture(context, symlink = false) {
+function fixture(context, symlink = false, versioned = true) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openaide-install-'));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const source = path.join(root, 'source/runtime');
   const tools = path.join(root, 'tools/bin');
   fs.mkdirSync(path.join(source, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(source, 'apps/web/src'), { recursive: true });
   fs.mkdirSync(tools, { recursive: true });
   fs.writeFileSync(path.join(source, 'bin/openaide-app-server'), 'fixture', { mode: 0o700 });
-  fs.writeFileSync(path.join(source, 'apps/web/src/dev-server.mjs'), 'fixture');
+  if (versioned) fs.writeFileSync(path.join(source, 'VERSION'), '1.2.3\n');
   if (symlink) fs.symlinkSync('../../outside', path.join(source, 'escape'));
   const archive = path.join(root, 'runtime.tar.gz');
   assert.equal(spawnSync('tar', ['-czf', archive, '-C', path.join(root, 'source'), 'runtime']).status, 0);
-  for (const command of ['pkg', 'codex']) fs.writeFileSync(path.join(tools, command), `#!${process.execPath}\nprocess.exit(0);\n`, { mode: 0o700 });
+  for (const command of ['pkg', 'codex', 'pkill', 'pgrep']) fs.writeFileSync(path.join(tools, command), `#!${process.execPath}\nprocess.exit(0);\n`, { mode: 0o700 });
   fs.writeFileSync(path.join(tools, 'curl'), `#!${process.execPath}\nrequire('node:fs').copyFileSync(process.env.FIXTURE_ARCHIVE, process.argv[process.argv.indexOf('--output') + 1]);\n`, { mode: 0o700 });
   const home = path.join(root, 'home');
   fs.mkdirSync(home);
@@ -48,16 +47,23 @@ test('checksum mismatch does not install a runtime', context => {
   assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime')), false);
 });
 
-test('existing runtime and task state remain untouched while updates are staged', context => {
+test('an update replaces the runtime and keeps task state', context => {
   const installation = fixture(context);
   fs.mkdirSync(path.join(installation.runtimeRoot, 'runtime'), { recursive: true });
   fs.mkdirSync(path.join(installation.runtimeRoot, 'state'));
-  fs.writeFileSync(path.join(installation.runtimeRoot, 'runtime/keep'), 'old');
+  fs.writeFileSync(path.join(installation.runtimeRoot, 'runtime/old'), 'old');
   fs.writeFileSync(path.join(installation.runtimeRoot, 'state/keep'), 'history');
   assert.equal(installation.run().status, 0);
-  assert.equal(fs.readFileSync(path.join(installation.runtimeRoot, 'runtime/keep'), 'utf8'), 'old');
+  assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime/old')), false);
+  assert.equal(fs.readFileSync(path.join(installation.runtimeRoot, 'runtime/VERSION'), 'utf8'), '1.2.3\n');
   assert.equal(fs.readFileSync(path.join(installation.runtimeRoot, 'state/keep'), 'utf8'), 'history');
-  assert.ok(fs.existsSync(path.join(installation.runtimeRoot, 'runtime.pending/bin/openaide-app-server')));
+  assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime.previous')), false);
+});
+
+test('a runtime without a version is not installed', context => {
+  const installation = fixture(context, false, false);
+  assert.notEqual(installation.run().status, 0);
+  assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime')), false);
 });
 
 test('archive links cannot escape the staging directory', context => {

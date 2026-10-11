@@ -2,8 +2,9 @@ set -eu
 umask 077
 export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export PATH="$PREFIX/bin:$PATH"
-pkg install -y nodejs-lts git curl termux-services >/dev/null 2>&1
-if ! command -v codex >/dev/null; then
+pkg install -y nodejs-lts git curl >/dev/null 2>&1
+# An agent the user already installed, Codex or Claude, is left as it is.
+if ! command -v codex >/dev/null && ! command -v claude >/dev/null; then
     npm install -g @mmmbuto/codex-cli-termux@0.153.3 >/dev/null 2>&1
 fi
 if [ -n "${OPENAIDE_RUNTIME_URL:-}" ]; then
@@ -22,13 +23,24 @@ if [ -n "${OPENAIDE_RUNTIME_URL:-}" ]; then
     if tar -tvzf "$stage/runtime.tar.gz" | grep -vE '^[-d]' >/dev/null; then exit 1; fi
     tar -xzf "$stage/runtime.tar.gz" -C "$stage" --no-same-owner
     test -x "$stage/runtime/bin/openaide-app-server"
-    test -f "$stage/runtime/apps/web/src/dev-server.mjs"
+    test -s "$stage/runtime/VERSION"
     if [ -d "$root/runtime" ]; then
-        test ! -e "$root/runtime.pending"
-        mv "$stage/runtime" "$root/runtime.pending"
-        printf 'Update verified and staged. Apply after all local tasks are idle.\n'
-        exit 0
+        # The runtime and the app are one version. Nothing may still run from the
+        # old files, so a server left from before the update ends here; its tasks
+        # and history stay in the state directory.
+        pkill -TERM -f "runsv $root/state/service" >/dev/null 2>&1 || true
+        pkill -TERM -f "$root/runtime/bin/openaide-app-server" >/dev/null 2>&1 || true
+        waited=0
+        while pgrep -f "$root/runtime/bin/openaide-app-server" >/dev/null 2>&1 && [ "$waited" -lt 50 ]; do
+            waited=$((waited + 1))
+            sleep 0.2
+        done
+        rm -rf "$root/runtime.previous" "$root/runtime.pending"
+        mv "$root/runtime" "$root/runtime.previous"
+        mv "$stage/runtime" "$root/runtime"
+        rm -rf "$root/runtime.previous"
+    else
+        mv "$stage/runtime" "$root/runtime"
     fi
-    mv "$stage/runtime" "$root/runtime"
 fi
 printf 'Installation complete. Run setup checks again.\n'

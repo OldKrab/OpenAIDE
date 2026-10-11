@@ -13,7 +13,6 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.SystemClock;
 import android.util.Log;
-import android.webkit.HttpAuthHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -33,9 +32,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.security.SecureRandom;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,7 +42,6 @@ public final class MainActivity extends Activity {
     private static final int FILE_REQUEST = 2;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private volatile int generation;
-    private String password;
     private ConnectionProfile profile;
     private ConnectionStore connections;
     private boolean visible;
@@ -62,7 +57,6 @@ public final class MainActivity extends Activity {
     private boolean mainFrameFailed;
     private boolean settingsOpen;
     private boolean credentialsUnavailable;
-    private boolean pairingAttempted;
     private WorkspaceConnectionBridge connectionBridge;
     private boolean pendingSettings;
     private BackNavigation backNavigation;
@@ -71,18 +65,9 @@ public final class MainActivity extends Activity {
         super.onCreate(savedState);
         backNavigation = new BackNavigation(this, () -> browser, this::backThroughHistory);
         SharedPreferences preferences = getSharedPreferences("connection", MODE_PRIVATE);
-        password = preferences.getString("password", null);
-        if (password == null) {
-            byte[] random = new byte[32];
-            new SecureRandom().nextBytes(random);
-            StringBuilder encoded = new StringBuilder();
-            for (byte value : random) encoded.append(String.format("%02x", value & 255));
-            password = encoded.toString();
-            preferences.edit().putString("password", password).apply();
-        }
         connections = new ConnectionStore(this);
         try { profile = connections.load(); }
-        catch (RuntimeException error) { profile = connections.local(); credentialsUnavailable = true; }
+        catch (RuntimeException error) { profile = ConnectionProfile.local(); credentialsUnavailable = true; }
         showConnection();
         if (credentialsUnavailable) openSetup("welcome");
         else if (getIntent().getBooleanExtra("show_settings", false)) showSettings();
@@ -181,15 +166,12 @@ public final class MainActivity extends Activity {
     }
 
     private void changeConnection() {
-        android.webkit.WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword();
         if (profile.local && browser != null) {
             try { startService(new Intent(this, BackgroundService.class).putExtra("visible", false)); }
             catch (RuntimeException ignored) { }
         }
         profile = connections.load();
         credentialsUnavailable = false;
-        pairingAttempted = false;
-        password = getSharedPreferences("connection", MODE_PRIVATE).getString("password", password);
         showConnection();
         // Forgetting the paired computer leaves no workspace to open until one is chosen.
         if (getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false)) requestConnection();
@@ -271,48 +253,36 @@ public final class MainActivity extends Activity {
         status.setText("Opening your workspace…");
         Log.i("OpenAIDE", "connection_start attempt=" + attempt);
         if (!profile.local) { connectPaired(attempt, started); return; }
-        worker.execute(() -> {
-            int response = probe();
-            if (response == 200) { finishConnection(attempt, started); return; }
-            if (response == 503) { waitForServer(attempt, started); return; }
-            if (response == 401 || response == 403) {
-                if (profile.local && !pairingAttempted) {
-                    pairingAttempted = true;
-                    repairConnection(attempt, started);
-                    return;
-                }
-                fail(attempt, "We couldn’t sign in to your workspace. Check your connection in Settings.");
-                return;
-            }
-            if (!profile.local) {
-                fail(attempt, "Your computer is unreachable. Make sure it is online and your phone is connected to its network or VPN.");
-                return;
-            }
-            runOnUiThread(() -> {
-                if (attempt != generation) return;
-                status.setText("Checking local tools…");
-                TermuxCommand.run(this, "check-termux.sh", "", false, (checked, report) -> {
-                    if (attempt != generation || isDestroyed()) return;
-                    if (!checked) { fail(attempt, "Termux needs permission to connect."); openSetup("local"); return; }
-                    try {
-                        org.json.JSONObject checks = new org.json.JSONObject(report.trim());
-                        for (String key : new String[]{"node", "nodeVersion", "codex", "codexVersion", "runtime", "frontend", "storage"}) {
-                            if (!checks.optBoolean(key)) {
-                                fail(attempt, "Let’s finish setting up this phone.");
-                                openSetup("local");
-                                return;
-                            }
-                        }
-                    } catch (org.json.JSONException error) { fail(attempt, "Termux needs permission to connect. Open Connection settings to finish setup."); return; }
-                    status.setText("Starting local workspace…");
-                    TermuxCommand.run(this, "start-termux.sh", TermuxCommand.variable("OPENAIDE_WEB_PASSWORD", password), true,
-                        (success, output) -> {
-                            if (success) waitForServer(attempt, started);
-                            else fail(attempt, output);
-                        });
-                });
+        status.setText("Starting your local workspace…");
+        LocalServer.connect(this, problem -> {
+            if (attempt != generation || isDestroyed()) return;
+            if (problem == null) { opened(attempt, started); return; }
+            // A start that fails is usually a phone that is not set up yet, or a runtime
+            // older than the app; the check tells those apart from a transient failure.
+            TermuxCommand.run(this, "check-termux.sh", ConnectionController.checkEnvironment(), (checked, report) -> {
+                if (attempt != generation || isDestroyed()) return;
+                boolean ready = checked;
+                if (checked) try {
+                    org.json.JSONObject checks = new org.json.JSONObject(report.trim());
+                    for (String key : new String[]{"node", "nodeVersion", "agent", "agentVersion", "runtime", "storage"}) ready &= checks.optBoolean(key);
+                } catch (org.json.JSONException error) { ready = false; }
+                if (ready) { fail(attempt, problem); return; }
+                fail(attempt, "Let’s finish setting up this phone.");
+                openSetup("local");
             });
         });
+    }
+
+    /** The workspace's App Server answered; show the workspace or wake the one already shown. */
+    private void opened(int attempt, long started) {
+        connecting = false;
+        getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("configured", true).apply();
+        Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
+        diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
+        startBackgroundWork();
+        if (browser == null) showBrowser();
+        else if (mainFrameFailed) browser.reload();
+        else browser.evaluateJavascript("window.dispatchEvent(new Event('openaide:resume'))", null);
     }
 
     /** A paired computer needs no probe: reaching its App Server over the trusted connection is the check. */
@@ -321,12 +291,7 @@ public final class MainActivity extends Activity {
         RemotePairing.connect(this, problem -> {
             if (attempt != generation || isDestroyed()) return;
             if (problem != null) { fail(attempt, problem); return; }
-            connecting = false;
-            Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
-            diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
-            if (browser == null) showBrowser();
-            else if (mainFrameFailed) browser.reload();
-            else browser.evaluateJavascript("window.dispatchEvent(new Event('openaide:resume'))", null);
+            opened(attempt, started);
         });
     }
 
@@ -338,89 +303,6 @@ public final class MainActivity extends Activity {
             showConnection();
             connect.setText("Try again");
             status.setText(RemotePairing.message(failure));
-        });
-    }
-
-    private void waitForServer(int attempt, long started) {
-        worker.execute(() -> {
-            while (attempt == generation && SystemClock.elapsedRealtime() - started < 45_000) {
-                if (probe() == 200) { finishConnection(attempt, started); return; }
-                try { Thread.sleep(500); }
-                catch (InterruptedException error) { Thread.currentThread().interrupt(); return; }
-            }
-            if (attempt == generation) fail(attempt,
-                "Your workspace is taking too long to start. Try again, or check this phone in Connection settings.");
-        });
-    }
-
-    private void repairConnection(int attempt, long started) {
-        runOnUiThread(() -> {
-            if (attempt != generation) return;
-            TermuxCommand.run(this, "pair-termux.sh", "", false, (success, output) -> {
-                if (attempt != generation || isDestroyed()) return;
-                if (!success || !output.trim().matches("[a-f0-9]{64}")) {
-                    fail(attempt, "We couldn’t restore your local connection. Open Connection settings to check this phone.");
-                    return;
-                }
-                ConnectionProfile candidate = new ConnectionProfile(profile.endpoint, profile.username, output.trim(), true);
-                worker.execute(() -> {
-                    try { ServerStatus.read(candidate); }
-                    catch (IOException error) { fail(attempt, "Your local connection needs attention. Open Connection settings to check this phone."); return; }
-                    runOnUiThread(() -> {
-                        if (attempt != generation || isDestroyed()) return;
-                        password = candidate.password;
-                        profile = candidate;
-                        getSharedPreferences("connection", MODE_PRIVATE).edit().putString("password", password).apply();
-                        worker.execute(() -> finishConnection(attempt, started));
-                    });
-                });
-            });
-        });
-    }
-
-    private int probe() {
-        int authorized = requestStatus(profile.endpoint, true);
-        if (authorized != 200) return authorized;
-        if (requestStatus(profile.endpoint, false) != 401) return 401;
-        return requestStatus(profile.endpoint + "readyz", true);
-    }
-
-    private int requestStatus(String address, boolean authenticated) {
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) new URL(address).openConnection();
-            connection.setConnectTimeout(1500);
-            connection.setReadTimeout(1500);
-            connection.setInstanceFollowRedirects(false);
-            if (authenticated) connection.setRequestProperty("Authorization", authorization());
-            return connection.getResponseCode();
-        } catch (IOException error) { return -1; }
-        finally { if (connection != null) connection.disconnect(); }
-    }
-
-    private String authorization() {
-        return ServerStatus.authorization(profile);
-    }
-
-    private void finishConnection(int attempt, long started) {
-        if (attempt != generation) return;
-        try { ServerStatus.read(profile); }
-        catch (ServerStatus.Incompatible error) { fail(attempt, "Runtime compatibility check failed. Update the runtime or run setup checks."); return; }
-        catch (IOException error) {
-            if (SystemClock.elapsedRealtime() - started < 45_000) waitForServer(attempt, started);
-            else fail(attempt, "The server is not responding. Check connection settings and retry.");
-            return;
-        }
-        runOnUiThread(() -> {
-            if (attempt != generation) return;
-            connecting = false;
-            getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("configured", true).apply();
-            Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
-            diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
-            startBackgroundWork();
-            if (browser == null) showBrowser();
-            else if (mainFrameFailed) browser.reload();
-            else browser.evaluateJavascript("window.dispatchEvent(new Event('openaide:resume'))", null);
         });
     }
 
@@ -472,11 +354,6 @@ public final class MainActivity extends Activity {
                 diagnostics.record("web_resource", "blocked", 0, 0);
                 return new WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden",
                     Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
-            }
-            @Override public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
-                if (profile.local && java.net.URI.create(profile.endpoint).getHost().equalsIgnoreCase(host)
-                        && realm.startsWith("OpenAIDE")) handler.proceed(profile.username, profile.password);
-                else handler.cancel();
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
@@ -533,14 +410,10 @@ public final class MainActivity extends Activity {
         });
         frame.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(frame);
-        if (profile.local) {
-            browser.loadUrl(profile.endpoint, Collections.singletonMap("Authorization", authorization()));
-            return;
-        }
         // The gateway serves only this WebView: the cookie is its proof on every request.
         android.webkit.CookieManager.getInstance().setCookie(profile.endpoint,
-            GatewayHttp.COOKIE + "=" + RemoteGateway.INSTANCE.getToken() + "; Path=/; HttpOnly; SameSite=Strict");
-        RemoteGateway.INSTANCE.onFailure(failure -> { pairedConnectionRefused(failure); return kotlin.Unit.INSTANCE; });
+            GatewayHttp.COOKIE + "=" + WorkspaceGateway.INSTANCE.getToken() + "; Path=/; HttpOnly; SameSite=Strict");
+        if (!profile.local) WorkspaceGateway.INSTANCE.onFailure(failure -> { pairedConnectionRefused(failure); return kotlin.Unit.INSTANCE; });
         browser.loadUrl(profile.endpoint);
     }
 
@@ -629,7 +502,7 @@ public final class MainActivity extends Activity {
         // TODO: clear only this activity's listener. A recreated activity registers in
         // onCreate before the old one is destroyed, so this can drop the newer listener
         // and a later removal or version mismatch would go unreported until restart.
-        RemoteGateway.INSTANCE.onFailure(null);
+        WorkspaceGateway.INSTANCE.onFailure(null);
         generation++;
         worker.shutdownNow();
         if (connectionBridge != null) connectionBridge.dispose();

@@ -14,12 +14,11 @@ export type ConnectionSnapshot = {
   termuxBattery: boolean;
   batterySaver: boolean;
   notifications: boolean;
-  boot: boolean;
   checks: Record<string, boolean | string> | null;
 };
 
 export type ConnectionCommand =
-  | { action: "state" | "check" | "local" | "install" | "termux" | "get_termux" | "access" | "grant" | "signin" | "battery" | "termux_settings" | "app_settings" | "repair" | "boot" | "get_boot" | "paired" | "pair_setup" | "forget" | "diagnostics" }
+  | { action: "state" | "check" | "local" | "install" | "termux" | "get_termux" | "access" | "grant" | "signin" | "battery" | "termux_settings" | "app_settings" | "paired" | "pair_setup" | "forget" | "diagnostics" }
   | { action: "background"; enabled: boolean };
 
 export type ConnectionSettings = {

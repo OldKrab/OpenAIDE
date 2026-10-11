@@ -84,7 +84,13 @@ final class ConnectionController extends ContextWrapper {
                 launchTermux();
                 break;
             case "grant": requestPermissions(new String[]{PERMISSION}, 1); break;
-            case "signin": copy("codex login"); recheckOnReturn = true; launchTermux(); break;
+            case "signin":
+                // The check names the command of the agent that is installed: Codex or Claude.
+                String signin = checks == null ? "" : checks.optString("signin");
+                copy("claude".equals(signin) ? "claude" : "codex login");
+                recheckOnReturn = true;
+                launchTermux();
+                break;
             case "battery": open(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); break;
             case "termux_settings": open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.termux"))); break;
             case "app_settings": open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))); break;
@@ -95,9 +101,6 @@ final class ConnectionController extends ContextWrapper {
                 else startForegroundService(new Intent(this, BackgroundService.class).putExtra("visible", true));
                 emit();
                 break;
-            case "repair": repair(); break;
-            case "boot": boot(); break;
-            case "get_boot": open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/termux/termux-boot#installation"))); break;
             case "diagnostics":
                 open(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
                     diagnostics.snapshot()), "Share diagnostics"));
@@ -109,7 +112,7 @@ final class ConnectionController extends ContextWrapper {
     private void check() {
         if (!installed("com.termux") || checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED) { emit(); return; }
         begin("setup_preflight", "Checking your phone…");
-        TermuxCommand.run(this, "check-termux.sh", "", false, (success, output) -> {
+        TermuxCommand.run(this, "check-termux.sh", checkEnvironment(), (success, output) -> {
             if (isDestroyed()) return;
             checks = null;
             if (success) try { checks = new JSONObject(output.trim()); } catch (Exception ignored) { success = false; }
@@ -117,9 +120,12 @@ final class ConnectionController extends ContextWrapper {
         });
     }
 
+    /** The runtime in Termux must be the app's own version; the check compares against it. */
+    static String checkEnvironment() { return TermuxCommand.variable("OPENAIDE_VERSION", BuildConfig.VERSION_NAME); }
+
     private void install() {
         if (checks == null) { check(); return; }
-        boolean needsRuntime = !checks.optBoolean("runtime") || !checks.optBoolean("frontend");
+        boolean needsRuntime = !checks.optBoolean("runtime");
         begin("setup_install", "Preparing your workspace download…");
         worker.execute(() -> {
             String environment;
@@ -132,7 +138,7 @@ final class ConnectionController extends ContextWrapper {
                 if (isDestroyed()) return;
                 notice = "Installing your workspace. This can take a few minutes…";
                 emit();
-                TermuxCommand.run(this, "install-termux.sh", environment, false, (success, output) -> {
+                TermuxCommand.run(this, "install-termux.sh", environment, (success, output) -> {
                     if (isDestroyed()) return;
                     end(success, success ? "" : "Installation could not finish. Check your internet connection and available storage, then retry.");
                     if (success) check();
@@ -175,33 +181,6 @@ final class ConnectionController extends ContextWrapper {
         });
     }
 
-    private void repair() {
-        begin("setup_pairing", "Reconnecting to Termux…");
-        TermuxCommand.run(this, "pair-termux.sh", "", false, (success, output) -> {
-            if (isDestroyed()) return;
-            boolean repaired = success && output.trim().matches("[a-f0-9]{64}");
-            if (repaired) {
-                getSharedPreferences("connection", MODE_PRIVATE).edit().putString("password", output.trim()).apply();
-                new ConnectionStore(this).selectLocal();
-            }
-            end(repaired, repaired ? "" : "No saved connection was found. Set up this phone again; your projects and history will not be deleted.");
-            if (repaired) changed();
-        });
-    }
-
-    private void boot() {
-        if (!installed("com.termux.boot")) { notice = "Install Termux:Boot from the same source as Termux, then return here."; emit(); return; }
-        begin("setup_boot", "Setting up startup after reboot…");
-        TermuxCommand.run(this, "configure-boot.sh", "", false, (success, output) -> {
-            if (isDestroyed()) return;
-            end(success, success ? "Startup is configured. Open Termux:Boot once to enable it." : "Open your local workspace first, then try again.");
-            if (success) {
-                Intent launch = getPackageManager().getLaunchIntentForPackage("com.termux.boot");
-                if (launch != null) open(launch);
-            }
-        });
-    }
-
     private void begin(String operation, String text) {
         busy = true;
         notice = text;
@@ -236,7 +215,7 @@ final class ConnectionController extends ContextWrapper {
                 .put("background", preferences.getBoolean("background", true))
                 .put("appBattery", power.isIgnoringBatteryOptimizations(getPackageName()))
                 .put("termuxBattery", power.isIgnoringBatteryOptimizations("com.termux"))
-                .put("batterySaver", power.isPowerSaveMode()).put("boot", installed("com.termux.boot"))
+                .put("batterySaver", power.isPowerSaveMode())
                 .put("notifications", getSystemService(android.app.NotificationManager.class).areNotificationsEnabled());
             view.render(state);
         } catch (Exception ignored) { }
