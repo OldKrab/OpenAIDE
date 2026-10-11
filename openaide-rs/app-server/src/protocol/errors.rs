@@ -34,6 +34,10 @@ pub enum RuntimeError {
     Storage(String),
     #[error("internal error: {0}")]
     Internal(String),
+    /// The Agent ended the work and said why in its own words. The text is the Agent's
+    /// message to the user, shown like any other Agent output; it is not a diagnostic.
+    #[error("agent reported a failure: {0}")]
+    AgentReported(String),
 }
 
 impl RuntimeError {
@@ -48,7 +52,9 @@ impl RuntimeError {
             | RuntimeError::NodeJsRequired(_) => -32002,
             RuntimeError::CapabilityMissing(_) | RuntimeError::Unsupported(_) => -32004,
             RuntimeError::MethodNotFound(_) => -32601,
-            RuntimeError::Storage(_) | RuntimeError::Internal(_) => -32603,
+            RuntimeError::Storage(_)
+            | RuntimeError::Internal(_)
+            | RuntimeError::AgentReported(_) => -32603,
         }
     }
 
@@ -68,6 +74,7 @@ impl RuntimeError {
             RuntimeError::MethodNotFound(_) => "method_not_found",
             RuntimeError::Storage(_) => "storage_error",
             RuntimeError::Internal(_) => "internal_error",
+            RuntimeError::AgentReported(_) => "agent_reported_failure",
         }
     }
 

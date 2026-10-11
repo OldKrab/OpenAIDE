@@ -11,7 +11,7 @@ use crate::agent::acp_account_limits_projection::{
 };
 use crate::agent::acp_errors::acp_request_error;
 use crate::agent::events::AgentAccountLimitsChange;
-use crate::agent::status_cache::AgentAccountLimitsRecorder;
+use crate::agent::status_cache::AgentReportRecorder;
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 
@@ -20,10 +20,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Applies a pushed reading. Nothing is recorded for an account without plan limits, so a
 /// reading already shown stays until the Agent reports another.
-pub(super) fn record_pushed_account_limits(
-    recorder: Option<&AgentAccountLimitsRecorder>,
-    params: &Value,
-) {
+pub(super) fn record_pushed_account_limits(recorder: Option<&AgentReportRecorder>, params: &Value) {
     match project_account_limits_reading(params) {
         AccountLimitsReading::Usage(change) => {
             if let Some(recorder) = recorder {

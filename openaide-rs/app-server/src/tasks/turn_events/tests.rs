@@ -2071,6 +2071,79 @@ fn cancellation_failure_returns_task_to_idle_and_closes_transient_requests() {
 }
 
 #[test]
+fn prompt_refused_for_sign_in_tells_the_user_what_to_do() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+
+    TaskTransitions::new(mutations, server_requests)
+        .finish_turn(
+            "task_1",
+            "turn_1",
+            Err(crate::protocol::errors::RuntimeError::AuthRequired(
+                "provider-internal-secret".to_string(),
+            )),
+        )
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(
+        &stored.chat.message,
+        NormalizedMessage::Interruption {
+            reason: crate::protocol::model::InterruptionReason::Failed,
+            message,
+            recoverable: true,
+            ..
+        } if message == "The Agent is not signed in or set up. Finish that, then send again."
+    )));
+    assert!(messages.iter().all(|stored| {
+        !format!("{:?}", stored.chat.message).contains("provider-internal-secret")
+    }));
+}
+
+#[test]
+fn session_refused_for_sign_in_before_a_prompt_tells_the_user_what_to_do() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+
+    TaskTransitions::new(mutations, server_requests)
+        .fail_created_task_start(
+            "task_1",
+            &crate::protocol::errors::RuntimeError::AuthRequired("refused".to_string()),
+        )
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(
+        &stored.chat.message,
+        NormalizedMessage::Interruption { message, .. }
+            if message == "The Agent is not signed in or set up. Finish that, then send again."
+    )));
+}
+
+#[test]
+fn agent_explained_failure_shows_the_agents_explanation() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+
+    TaskTransitions::new(mutations, server_requests)
+        .finish_turn(
+            "task_1",
+            "turn_1",
+            Err(crate::protocol::errors::RuntimeError::AgentReported(
+                "Usage limit reached. Try again at 5pm.".to_string(),
+            )),
+        )
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(
+        &stored.chat.message,
+        NormalizedMessage::Interruption { message, .. }
+            if message == "The Agent stopped: Usage limit reached. Try again at 5pm."
+    )));
+}
+
+#[test]
 fn agent_failure_interrupts_running_tools_and_returns_task_to_idle() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();

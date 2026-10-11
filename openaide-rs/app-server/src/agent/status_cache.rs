@@ -58,6 +58,10 @@ pub(crate) struct AgentStatusCache {
     /// status snapshot, while account limits only change when the Agent reports them.
     account_limits: Arc<Mutex<HashMap<String, AgentAccountLimits>>>,
     account_limit_reads: Arc<Mutex<AccountLimitReads>>,
+    /// Agents whose process reported that it holds no credentials. Kept apart from the
+    /// status entries because a successful probe or session says nothing about sign-in:
+    /// many Agents open sessions signed out and refuse only the prompt.
+    reported_signed_out: Arc<Mutex<HashSet<String>>>,
     updates: Option<mpsc::Sender<()>>,
 }
 
@@ -69,17 +73,22 @@ struct AccountLimitReads {
     unsupported: HashSet<String>,
 }
 
-/// Records one Agent process's pushed limits under the Agent's catalog identity, which the
-/// process's own launch configuration does not always carry.
+/// Records what one Agent process reports about itself (limits, sign-in) under the Agent's
+/// catalog identity, which the process's own launch configuration does not always carry.
 #[derive(Debug, Clone)]
-pub(crate) struct AgentAccountLimitsRecorder {
+pub(crate) struct AgentReportRecorder {
     statuses: AgentStatusCache,
     agent_id: String,
 }
 
-impl AgentAccountLimitsRecorder {
+impl AgentReportRecorder {
     pub(crate) fn record(&self, change: AgentAccountLimitsChange) {
         self.statuses.record_account_limits(&self.agent_id, change);
+    }
+
+    pub(crate) fn record_signed_in(&self, signed_in: bool) {
+        self.statuses
+            .record_reported_sign_in(&self.agent_id, signed_in);
     }
 }
 
@@ -93,6 +102,7 @@ impl AgentStatusCache {
                 entries: Arc::default(),
                 account_limits: Arc::default(),
                 account_limit_reads: Arc::default(),
+                reported_signed_out: Arc::default(),
                 updates: Some(sender),
             },
             receiver,
@@ -107,10 +117,69 @@ impl AgentStatusCache {
         if snapshot.status == AgentStatus::Connected {
             return;
         }
+        // A session that opened does not overrule the Agent's own report that it is signed out.
+        if snapshot.status == AgentStatus::AuthRequired && self.reported_signed_out(agent_id) {
+            return;
+        }
         snapshot.status = AgentStatus::Connected;
         snapshot.setup_reason = None;
         drop(entries);
         self.notify();
+    }
+
+    /// Applies the Agent's own report of whether it holds credentials. Signed out asks for
+    /// sign-in before any prompt is refused; signed in ends a sign-in request that a login
+    /// made outside OpenAIDE has already satisfied.
+    pub(crate) fn record_reported_sign_in(&self, agent_id: &str, signed_in: bool) {
+        let changed = {
+            let mut reported = self
+                .reported_signed_out
+                .lock()
+                .expect("agent sign-in reports poisoned");
+            if signed_in {
+                reported.remove(agent_id)
+            } else {
+                reported.insert(agent_id.to_string())
+            }
+        };
+        logging::info(
+            "agent_sign_in_reported",
+            json!({ "agent_id": agent_id, "signed_in": signed_in, "changed": changed }),
+        );
+        if !signed_in {
+            self.record_error(
+                agent_id,
+                &RuntimeError::AuthRequired("Agent reported no credentials".to_string()),
+                None,
+            );
+            return;
+        }
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        if snapshot.status != AgentStatus::AuthRequired {
+            return;
+        }
+        snapshot.status = AgentStatus::Connected;
+        snapshot.setup_reason = None;
+        drop(entries);
+        self.notify();
+    }
+
+    /// Drops the Agent's signed-out report before an explicit re-check or after a sign-in
+    /// OpenAIDE ran itself. A still signed-out Agent is found again by its next report or
+    /// refused prompt.
+    pub(crate) fn forget_reported_sign_out(&self, agent_id: &str) {
+        self.reported_signed_out
+            .lock()
+            .expect("agent sign-in reports poisoned")
+            .remove(agent_id);
+    }
+
+    fn reported_signed_out(&self, agent_id: &str) -> bool {
+        self.reported_signed_out
+            .lock()
+            .expect("agent sign-in reports poisoned")
+            .contains(agent_id)
     }
 
     /// Publishes the shared prerequisite without treating it as Agent process launch.
@@ -161,10 +230,17 @@ impl AgentStatusCache {
     }
 
     pub(crate) fn record_probe_success(&self, result: &AgentProbeResult) {
+        // Initialize answers for a signed-out process too, and its sign-in report can
+        // arrive before this result does.
+        let status = if self.reported_signed_out(&result.agent_id) {
+            AgentStatus::AuthRequired
+        } else {
+            AgentStatus::Connected
+        };
         self.record(
             result.agent_id.clone(),
             AgentStatusSnapshot {
-                status: AgentStatus::Connected,
+                status,
                 setup_reason: None,
                 capabilities: capabilities_from_probe(result),
                 auth_methods: result.auth_methods.clone(),
@@ -264,8 +340,8 @@ impl AgentStatusCache {
         self.notify();
     }
 
-    pub(crate) fn account_limits_recorder(&self, agent_id: &str) -> AgentAccountLimitsRecorder {
-        AgentAccountLimitsRecorder {
+    pub(crate) fn report_recorder(&self, agent_id: &str) -> AgentReportRecorder {
+        AgentReportRecorder {
             statuses: self.clone(),
             agent_id: agent_id.to_string(),
         }
@@ -380,6 +456,7 @@ impl AgentStatusCache {
     }
 
     pub(crate) fn record_authentication_success(&self, agent_id: &str) {
+        self.forget_reported_sign_out(agent_id);
         self.update_authentication_result(agent_id, AgentStatus::Connected);
     }
 
@@ -467,6 +544,7 @@ impl AgentStatusCache {
     }
 
     pub(crate) fn clear(&self, agent_id: &str) -> bool {
+        self.forget_reported_sign_out(agent_id);
         let forgot_limits = self.forget_account_limits(agent_id);
         self.entries
             .lock()
@@ -537,6 +615,7 @@ fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
         }
         RuntimeError::NotReady(_)
         | RuntimeError::Internal(_)
+        | RuntimeError::AgentReported(_)
         | RuntimeError::InvalidParams(_)
         | RuntimeError::TaskNotFound(_)
         | RuntimeError::NativeSessionMissing(_)

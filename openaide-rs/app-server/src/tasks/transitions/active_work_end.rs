@@ -15,6 +15,10 @@ use super::TaskTransitions;
 pub(crate) enum ActiveWorkEnd {
     UserStopped,
     AgentFailed(String),
+    /// The Agent refused the prompt until the user signs in or finishes its setup.
+    AgentUnavailable(String),
+    /// The Agent ended the turn and explained why; Chat shows its explanation.
+    AgentReported(String),
     AgentStartFailed(String),
     CancellationFailed(String),
     Restarted,
@@ -107,11 +111,45 @@ fn active_work_matches(ctx: &TaskMutationContext<'_>, expected_work_id: Option<&
     }
 }
 
+/// Chat text for work the Agent refused until the user signs in or finishes its setup.
+pub(super) const AGENT_UNAVAILABLE_MESSAGE: &str =
+    "The Agent is not signed in or set up. Finish that, then send again.";
+
+/// True for refusals only the user can lift; the Agent's status carries the recovery action.
+pub(super) fn agent_needs_user_setup(error: &RuntimeError) -> bool {
+    matches!(
+        error,
+        RuntimeError::AuthRequired(_)
+            | RuntimeError::SetupRequired(_)
+            | RuntimeError::NodeJsRequired(_)
+    )
+}
+
 impl ActiveWorkEnd {
+    /// Classifies a failed prompt.
+    pub(super) fn prompt_failed(error: &RuntimeError) -> Self {
+        match error {
+            error if agent_needs_user_setup(error) => Self::AgentUnavailable(error.to_string()),
+            RuntimeError::AgentReported(message) => Self::AgentReported(message.clone()),
+            error => Self::AgentFailed(error.to_string()),
+        }
+    }
+
+    /// Classifies a session that could not be started or reopened for a prompt.
+    pub(super) fn start_failed(error: &RuntimeError) -> Self {
+        if agent_needs_user_setup(error) {
+            Self::AgentUnavailable(error.to_string())
+        } else {
+            Self::AgentStartFailed(error.to_string())
+        }
+    }
+
     pub(super) fn name(&self) -> &'static str {
         match self {
             Self::UserStopped => "user_stopped",
             Self::AgentFailed(_) => "agent_failed",
+            Self::AgentUnavailable(_) => "agent_unavailable",
+            Self::AgentReported(_) => "agent_reported_failure",
             Self::AgentStartFailed(_) => "agent_start_failed",
             Self::CancellationFailed(_) => "cancellation_failed",
             Self::Restarted => "restarted",
@@ -123,6 +161,8 @@ impl ActiveWorkEnd {
     pub(super) fn diagnostic_message(&self) -> Option<&str> {
         match self {
             Self::AgentFailed(message)
+            | Self::AgentUnavailable(message)
+            | Self::AgentReported(message)
             | Self::AgentStartFailed(message)
             | Self::CancellationFailed(message) => Some(message),
             Self::UserStopped | Self::Restarted | Self::Shutdown | Self::SupportRecovery => None,
@@ -135,9 +175,11 @@ impl ActiveWorkEnd {
                 InterruptionReason::Canceled
             }
             Self::Restarted => InterruptionReason::BackendUnavailable,
-            Self::AgentFailed(_) | Self::AgentStartFailed(_) | Self::CancellationFailed(_) => {
-                InterruptionReason::Failed
-            }
+            Self::AgentFailed(_)
+            | Self::AgentUnavailable(_)
+            | Self::AgentReported(_)
+            | Self::AgentStartFailed(_)
+            | Self::CancellationFailed(_) => InterruptionReason::Failed,
         }
     }
 
@@ -148,6 +190,9 @@ impl ActiveWorkEnd {
             Self::AgentFailed(_) | Self::AgentStartFailed(_) => {
                 "Agent work stopped unexpectedly. Try again.".to_string()
             }
+            Self::AgentUnavailable(_) => AGENT_UNAVAILABLE_MESSAGE.to_string(),
+            // The Agent's own words to the user, unlike the diagnostics above.
+            Self::AgentReported(message) => format!("The Agent stopped: {message}"),
             Self::CancellationFailed(_) => "Unable to stop the Agent. Try again.".to_string(),
             Self::Restarted => "Task was interrupted because OpenAIDE restarted.".to_string(),
             Self::Shutdown => "Task was interrupted because OpenAIDE shut down.".to_string(),
@@ -162,6 +207,8 @@ impl ActiveWorkEnd {
         match self {
             Self::UserStopped => None,
             Self::AgentFailed(_)
+            | Self::AgentUnavailable(_)
+            | Self::AgentReported(_)
             | Self::AgentStartFailed(_)
             | Self::CancellationFailed(_)
             | Self::Restarted

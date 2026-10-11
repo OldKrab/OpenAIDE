@@ -393,7 +393,7 @@ fn send_prompt_request(
                         Ok(prompt_outcome(response.stop_reason))
                     }
                 }
-                Err(error) => Err(acp_error(error)),
+                Err(error) => Err(crate::agent::acp_errors::acp_prompt_error(&error)),
             };
             if completion_tx
                 .send(PromptCompletion {

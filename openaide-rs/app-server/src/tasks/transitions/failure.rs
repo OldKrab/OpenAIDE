@@ -12,11 +12,7 @@ impl TaskTransitions {
         task_id: &str,
         error: &RuntimeError,
     ) -> Result<(), RuntimeError> {
-        self.end_active_work(
-            task_id,
-            None,
-            super::ActiveWorkEnd::AgentStartFailed(error.to_string()),
-        )?;
+        self.end_active_work(task_id, None, super::ActiveWorkEnd::start_failed(error))?;
         Ok(())
     }
 
@@ -24,7 +20,7 @@ impl TaskTransitions {
         &self,
         task_id: &str,
         session_id: &str,
-        _error: &RuntimeError,
+        error: &RuntimeError,
     ) -> Result<(), RuntimeError> {
         let result = self
             .mutations
@@ -36,7 +32,11 @@ impl TaskTransitions {
                 append_interruption(
                     ctx,
                     InterruptionReason::Failed,
-                    "The Agent session could not be opened. Try again.",
+                    if super::active_work_end::agent_needs_user_setup(error) {
+                        super::active_work_end::AGENT_UNAVAILABLE_MESSAGE
+                    } else {
+                        "The Agent session could not be opened. Try again."
+                    },
                     now.clone(),
                     true,
                 )?;

@@ -41,7 +41,7 @@ pub(super) struct AcpSessionConnectionContext {
         crate::agent::acp_host_capabilities::AcpElicitationCancellationMap,
     pub(super) native_subagents: AcpNativeSubagentRouter,
     /// Receives the Account Limits the Agent pushes on the connection.
-    pub(super) account_limits: Option<crate::agent::status_cache::AgentAccountLimitsRecorder>,
+    pub(super) agent_reports: Option<crate::agent::status_cache::AgentReportRecorder>,
 }
 
 pub(super) async fn connect_acp_session_client<R, AgentTransport>(
@@ -71,7 +71,7 @@ where
     let notification_load_replay = context.load_replay;
     let raw_native_subagents = context.native_subagents.clone();
     let notification_native_subagents = context.native_subagents;
-    let account_limits = context.account_limits;
+    let agent_reports = context.agent_reports;
 
     // ACP request callbacks run inside the shared connection's dispatch loop. Every host wait
     // must be spawned so one session cannot block updates and responses for every other session.
@@ -84,7 +84,15 @@ where
                     == crate::agent::acp_account_limits_projection::ACCOUNT_LIMITS_KEY
                 {
                     crate::agent::acp_account_limits_read::record_pushed_account_limits(
-                        account_limits.as_ref(),
+                        agent_reports.as_ref(),
+                        notification.params(),
+                    );
+                    return Ok(Handled::Yes);
+                }
+                if notification.method() == crate::agent::acp_auth_status::AUTH_STATUS_UPDATE_METHOD
+                {
+                    crate::agent::acp_auth_status::record_pushed_auth_status(
+                        agent_reports.as_ref(),
                         notification.params(),
                     );
                     return Ok(Handled::Yes);

@@ -444,11 +444,74 @@ fn an_agent_that_refused_the_read_is_not_asked_again_until_it_is_replaced() {
 #[test]
 fn a_recorder_files_pushed_limits_under_its_agent() {
     let cache = AgentStatusCache::default();
-    cache
-        .account_limits_recorder("claude")
-        .record(five_hour_usage(12));
+    cache.report_recorder("claude").record(five_hour_usage(12));
     assert_eq!(
         cache.account_limits("claude").expect("limits").windows[0].used_percent,
         12
     );
+}
+
+fn ready_probe(agent_id: &str) -> AgentProbeResult {
+    AgentProbeResult {
+        agent_id: agent_id.to_string(),
+        status: AgentProbeStatus::Ready,
+        protocol_version: "fixture".to_string(),
+        implementation_name: None,
+        implementation_version: None,
+        capabilities: Vec::new(),
+        typed_capabilities: AgentProbeCapabilities::default(),
+        auth_methods: Vec::new(),
+        logout_supported: false,
+    }
+}
+
+#[test]
+fn reported_sign_out_asks_for_sign_in_and_outlasts_opened_sessions_and_probes() {
+    let cache = AgentStatusCache::default();
+    cache.record_probe_success(&ready_probe("codex"));
+
+    cache.record_reported_sign_in("codex", false);
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::AuthRequired);
+
+    // Agents open sessions and answer initialize while signed out.
+    cache.record_connected("codex");
+    cache.record_probe_success(&ready_probe("codex"));
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::AuthRequired);
+}
+
+#[test]
+fn sign_out_reported_before_the_probe_result_is_not_lost() {
+    let cache = AgentStatusCache::default();
+    cache.record_reported_sign_in("codex", false);
+    cache.record_probe_success(&ready_probe("codex"));
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::AuthRequired);
+}
+
+#[test]
+fn reported_sign_in_ends_the_sign_in_request_and_nothing_else() {
+    let cache = AgentStatusCache::default();
+    cache.record_reported_sign_in("codex", false);
+    cache.record_reported_sign_in("codex", true);
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Connected);
+
+    cache.record_probe_error(
+        "codex",
+        &RuntimeError::Internal("launch failed".to_string()),
+    );
+    cache.record_reported_sign_in("codex", true);
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Failed);
+}
+
+#[test]
+fn explicit_recheck_and_own_sign_in_drop_the_signed_out_report() {
+    let cache = AgentStatusCache::default();
+    cache.record_reported_sign_in("codex", false);
+    cache.forget_reported_sign_out("codex");
+    cache.record_probe_success(&ready_probe("codex"));
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Connected);
+
+    cache.record_reported_sign_in("codex", false);
+    cache.record_authentication_success("codex");
+    cache.record_connected("codex");
+    assert_eq!(cache.snapshot("codex").status, AgentStatus::Connected);
 }

@@ -343,3 +343,89 @@ impl AgentRuntime for UnavailableHistoryRuntime {
         MockAgent.prompt(prompt, sink)
     }
 }
+
+/// An Agent that opens sessions while signed out and refuses only the prompt.
+struct PromptRefusingRuntime(RuntimeError);
+
+impl AgentRuntime for PromptRefusingRuntime {
+    fn probe(&self, request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
+        AuthRequiredListRuntime.probe(request)
+    }
+
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        MockAgent.start_session(request)
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Err(self.0.clone())
+    }
+}
+
+struct IgnoredEvents;
+
+impl AgentEventSink for IgnoredEvents {
+    fn emit(&self, _event: crate::agent::events::AgentEvent) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn request_permission(
+        &self,
+        _request: crate::agent::events::AgentPermissionRequest,
+    ) -> Result<crate::agent::events::AgentPermissionOutcome, RuntimeError> {
+        Ok(crate::agent::events::AgentPermissionOutcome::Cancelled)
+    }
+}
+
+fn status_after_refused_prompt(error: RuntimeError) -> AgentStatus {
+    let statuses = AgentStatusCache::default();
+    let runtime =
+        AgentStatusRecordingRuntime::wrap(Arc::new(PromptRefusingRuntime(error)), statuses.clone());
+    runtime
+        .start_session(AgentSessionStart {
+            agent_id: "codex".to_string(),
+            task_id: "task-1".to_string(),
+            cwd: "/fixture-workspace".to_string(),
+            model_id: None,
+            context: Vec::new(),
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .unwrap();
+    assert_eq!(statuses.snapshot("codex").status, AgentStatus::Connected);
+    runtime
+        .prompt(
+            AgentPrompt {
+                agent_id: "codex".to_string(),
+                task_id: "task-1".to_string(),
+                session_id: "session-1".to_string(),
+                text: "hello".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(IgnoredEvents),
+        )
+        .unwrap_err();
+    statuses.snapshot("codex").status
+}
+
+#[test]
+fn prompt_refused_for_sign_in_marks_the_agent_as_needing_it() {
+    assert_eq!(
+        status_after_refused_prompt(RuntimeError::AuthRequired(
+            "Authentication required".to_string()
+        )),
+        AgentStatus::AuthRequired
+    );
+}
+
+#[test]
+fn ordinary_prompt_failure_leaves_the_agent_connected() {
+    assert_eq!(
+        status_after_refused_prompt(RuntimeError::Internal("turn failed".to_string())),
+        AgentStatus::Connected
+    );
+}

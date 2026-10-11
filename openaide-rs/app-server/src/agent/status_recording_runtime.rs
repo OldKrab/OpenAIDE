@@ -157,7 +157,20 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
-        self.inner.prompt(prompt, sink)
+        let agent_id = prompt.agent_id.clone();
+        let result = self.inner.prompt(prompt, sink);
+        // Some Agents open a session signed out and refuse only the prompt. That
+        // refusal is the same availability fact as one from session start; other
+        // prompt failures belong to the turn, not to the Agent.
+        if let Err(
+            error @ (RuntimeError::AuthRequired(_)
+            | RuntimeError::SetupRequired(_)
+            | RuntimeError::NodeJsRequired(_)),
+        ) = &result
+        {
+            self.statuses.record_session_error(&agent_id, error, None);
+        }
+        result
     }
 
     fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
