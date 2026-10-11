@@ -73,7 +73,7 @@ type SidebarProps = {
   searchQuery: string;
   settingsStatus?: string;
   settingsActive?: boolean;
-  /** The other computer in use; absent while this device does the work. */
+  /** The other computer in use; absent while this device does the work or the window strip names it. */
   computerName?: string;
   computerLink?: ComputerLink;
   onComputer?: () => void;
@@ -224,6 +224,9 @@ export const Sidebar = memo(function Sidebar({
         </div>
       ) : null}
       <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
+        {computerName && onComputer && !showArchived ? (
+          <SidebarComputer link={computerLink ?? "connecting"} name={computerName} onOpen={onComputer} />
+        ) : null}
         {!showArchived ? <button disabled={noProjects} type="button" onClick={() => onNewTask()}>
           <Plus size={15} />
           New task
@@ -478,9 +481,6 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
       </div></div></SidebarTaskPreviewProvider>
       <div className="sidebar-footer">
-        {computerName && onComputer ? (
-          <SidebarComputer link={computerLink ?? "connecting"} name={computerName} onOpen={onComputer} />
-        ) : null}
         {!showArchived && onAddProject ? (
           <button className="add-project-button" onClick={onAddProject} type="button">
             <FolderPlus size={15} />

@@ -52,6 +52,10 @@ export function computerLink(state: BackendConnectionState): ComputerLink {
   }
 }
 
+/**
+ * Heads the navigation with the computer its projects and tasks live on. The
+ * dot alone says the link is healthy; words appear only when it is not.
+ */
 export function SidebarComputer({ link, name, onOpen }: {
   link: ComputerLink;
   name: string;
@@ -64,15 +68,13 @@ export function SidebarComputer({ link, name, onOpen }: {
       className="sidebar-computer"
       data-link={link}
       onClick={onOpen}
-      title={`Working on ${name}`}
+      title={`Working on ${name} · ${label}`}
       type="button"
     >
       <MonitorSmartphone size={15} />
       <span className="sidebar-computer-name">{name}</span>
-      <span className="sidebar-computer-link">
-        <span aria-hidden="true" className="sidebar-computer-dot" />
-        {label}
-      </span>
+      <span aria-hidden="true" className="sidebar-computer-dot" />
+      {link === "connected" ? null : <span className="sidebar-computer-link">{label}</span>}
     </button>
   );
 }

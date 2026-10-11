@@ -16,7 +16,7 @@ import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
-import { computerLink, useComputerInUse } from "./SidebarComputer";
+import { SidebarComputer, computerLink, useComputerInUse } from "./SidebarComputer";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -249,11 +249,18 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     else if (command === "open-project") addProject?.();
   }), [addProject, callbacks.navigation, frontendShell]);
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
+  const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, computerInUse?.settingsTab);
+  // A Desktop window names the computer in its own strip, beside the window
+  // buttons; other shells give it the first row of the navigation.
+  const desktopComputer = desktopWindow && computerInUse
+    ? <SidebarComputer link={computerLinkState} name={computerInUse.name} onOpen={openComputerSettings} />
+    : undefined;
+  const sidebarComputerName = desktopWindow ? undefined : computerInUse?.name;
   const desktopTitleBar = desktopWindow
-    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
+    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} sidebarLead={desktopComputer} window={desktopWindow} />
     : undefined;
   const desktopSettingsTitleBar = desktopWindow ? (
-    <DesktopTitleBar window={desktopWindow} />
+    <DesktopTitleBar sidebarLead={desktopComputer} window={desktopWindow} />
   ) : undefined;
   // Desktop chrome overlays product content so native controls never consume a
   // separate blank row. Active Tasks provide the draggable product header.
@@ -439,8 +446,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           searchQuery={navigation.searchQuery}
           settingsStatus={updateAvailable ? "Update available" : undefined}
           computerLink={computerLinkState}
-          computerName={computerInUse?.name}
-          onComputer={() => callbacks.navigation.openSettings(undefined, undefined, undefined, computerInUse?.settingsTab)}
+          computerName={sidebarComputerName}
+          onComputer={openComputerSettings}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
@@ -580,8 +587,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         searchQuery={navigation.searchQuery}
         settingsStatus={updateAvailable ? "Update available" : undefined}
         computerLink={computerLinkState}
-        computerName={computerInUse?.name}
-        onComputer={closeAfter(() => callbacks.navigation.openSettings(undefined, undefined, undefined, computerInUse?.settingsTab))}
+        computerName={sidebarComputerName}
+        onComputer={closeAfter(openComputerSettings)}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
         tasks={visibleTasks}

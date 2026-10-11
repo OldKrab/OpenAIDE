@@ -70,6 +70,14 @@ it("shows the computer and its link, and opens the place that changes it", () =>
   const button = tree.root.findByType("button");
   expect(button.props["data-link"]).toBe("reconnecting");
   expect(button.props["aria-label"]).toBe("Working on Studio. Reconnecting…. Change computer");
+  expect(tree.root.findByProps({ className: "sidebar-computer-link" }).children).toEqual(["Reconnecting…"]);
   act(() => button.props.onClick());
   expect(onOpen).toHaveBeenCalledOnce();
+});
+
+it("lets the dot alone speak for a healthy link", () => {
+  let tree!: ReturnType<typeof create>;
+  act(() => { tree = create(<SidebarComputer link="connected" name="Studio" onOpen={vi.fn()} />); });
+  expect(tree.root.findAllByProps({ className: "sidebar-computer-link" })).toHaveLength(0);
+  expect(tree.root.findAllByProps({ className: "sidebar-computer-dot" })).toHaveLength(1);
 });
