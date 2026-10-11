@@ -47,11 +47,20 @@ public final class TermuxCommand extends BroadcastReceiver {
             Intent command = new Intent("com.termux.RUN_COMMAND").setClassName("com.termux", "com.termux.app.RunCommandService");
             command.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash");
             command.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-s"});
-            command.putExtra("com.termux.RUN_COMMAND_STDIN", environment + "\n" + script);
+            command.putExtra("com.termux.RUN_COMMAND_STDIN", variable("OPENAIDE_DATA_NAME", dataName(context.getPackageName())) + environment + "\n" + script);
             command.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
             command.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pending);
             context.startService(command);
         } catch (Exception error) { finish(operation, false, "Cannot start Termux. Check installation and command permission."); }
+    }
+
+    /**
+     * The folder in Termux that holds this build's runtime and state. A development build installed
+     * beside the app has its own, so trying one never stops or replaces the other's server.
+     */
+    static String dataName(String packageName) {
+        String suffix = packageName.startsWith("io.openaide.android.") ? packageName.substring("io.openaide.android".length()) : "";
+        return "openaide-android" + suffix.replaceAll("[^a-z0-9]+", "-").replaceAll("-$", "");
     }
 
     static String variable(String name, String value) { return "export " + name + "='" + value.replace("'", "'\\''") + "'\n"; }

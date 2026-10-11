@@ -1,7 +1,7 @@
 set -eu
 export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export PATH="$PREFIX/bin:$PATH"
-runtime="$HOME/.local/share/openaide-android/runtime"
+runtime="$HOME/.local/share/${OPENAIDE_DATA_NAME:-openaide-android}/runtime"
 has() { "$@" >/dev/null 2>&1; }
 flag() { if "$@" >/dev/null 2>&1; then printf 'true'; else printf 'false'; fi; }
 codex_ready() { codex --version | grep -q "0\.153\.3"; }

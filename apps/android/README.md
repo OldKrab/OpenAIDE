@@ -90,10 +90,16 @@ integration pins Codex 0.153.3; use a compatible Termux build. Neither agent
 publishes an Android build, so setup installs one that runs in Termux when it is
 missing. Codex is a pinned community build. Claude Code ships only as a glibc binary:
 setup takes the binary the app's Claude adapter was built against from the adapter's
-own npm package, prepares it with Termux's `glibc-runner`, and installs a `claude`
-command that starts it. The adapter is pointed at that command instead of its bundled
-runtime. A phone that cannot start the binary keeps working with Codex; the outcome
-is in `~/.local/share/openaide-android/install.log`. Authenticate the agent in Termux.
+own npm package, keeps it in `$PREFIX/opt/openaide-claude`, and installs a `claude`
+command that starts it with Termux's glibc packages. Two things make it behave like
+any other program there. The binary names Termux's glibc loader, written into unused
+padding because tools that move the file's contents break it; started as an argument
+of the loader instead, its built-in `grep` and `find` fail. And one `LD_PRELOAD` path
+gives Claude the glibc build of `termux-exec` and the Android programs it starts the
+ordinary one, so `#!/usr/bin/env` scripts run from its shell. The adapter is pointed
+at that command instead of its bundled runtime. A phone that cannot start the binary
+keeps working with Codex; the step that failed is in
+`~/.local/share/openaide-android/install.log`. Authenticate the agent in Termux.
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
@@ -117,10 +123,16 @@ Termux's private directory. The App Server binds a loopback port of its own choo
 and accepts only its per-process token, which reaches the app in the start command's
 result. No agent credential is copied into the APK. App backup is disabled.
 
+A command started from another app does not get the `termux-exec` library that a
+Termux terminal preloads, so the start script sets it: without it the server cannot
+start an adapter through `npx`, and agents cannot run `#!/usr/bin/env` scripts.
+
 Android may kill Termux processes; return to OpenAIDE to start the server again.
 To stop it explicitly, close OpenAIDE or stop its process in Termux.
 
-Logs: `~/.local/share/openaide-android/state/launcher.log`. State is kept beside
+Logs: `~/.local/share/openaide-android/state/launcher.log`. A development build
+installed beside the app with an application id suffix keeps its runtime and state in
+its own folder, `openaide-android-<suffix>`, so the two never share a server. State is kept beside
 the runtime directory so replacing runtime files does not delete task history.
 
 ## Build and validation

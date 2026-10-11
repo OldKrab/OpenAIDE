@@ -6,7 +6,7 @@ umask 077
 export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export PATH="$PREFIX/bin:$PATH"
 export TMPDIR="$PREFIX/tmp"
-root="$HOME/.local/share/openaide-android"
+root="$HOME/.local/share/${OPENAIDE_DATA_NAME:-openaide-android}"
 runtime="$root/runtime"
 state="$root/state"
 mkdir -p "$state"
@@ -25,14 +25,20 @@ if [ -d "$state/service" ]; then
     sleep 1
     note legacy_stopped
 fi
+# A command started from another app does not get the library a Termux terminal
+# preloads to run "#!/usr/bin/env" scripts. Without it the server cannot start an
+# adapter through npx, and agents cannot run such scripts either.
+if [ -z "${LD_PRELOAD:-}" ]; then
+    for library in libtermux-exec-ld-preload.so libtermux-exec.so; do
+        if [ -f "$PREFIX/lib/$library" ]; then export LD_PRELOAD="$PREFIX/lib/$library"; break; fi
+    done
+fi
 # The adapters cannot ship Android builds of the agents, so they are pointed at the
 # ones installed in Termux.
 if command -v codex >/dev/null 2>&1; then export CODEX_PATH="$(command -v codex)"; fi
-if command -v claude >/dev/null 2>&1; then
-    export CLAUDE_CODE_EXECUTABLE="$(command -v claude)"
-    # An update would replace the binary with one that is not prepared to run here.
-    export DISABLE_AUTOUPDATER=1
-fi
+# Claude can be installed from Settings while this server runs, so the place setup
+# puts it is named even before it exists.
+export CLAUDE_CODE_EXECUTABLE="$(command -v claude 2>/dev/null || echo "$PREFIX/bin/claude")"
 export OPENAIDE_STORAGE_ROOT="$state"
 export OPENAIDE_RUNTIME_ROOT="$state/runtime"
 export OPENAIDE_PROJECT_ROOTS="$HOME"
