@@ -37,6 +37,16 @@ impl From<LocalHttpConnectionInfo> for LocalHttpHandoffConnection {
     }
 }
 
+impl LocalHttpHandoffConnection {
+    pub fn endpoint_url(&self) -> &str {
+        &self.endpoint_url
+    }
+
+    pub fn auth_token(&self) -> &str {
+        &self.auth_token
+    }
+}
+
 pub fn attach_or_launch(state_root: &StateRoot, runtime_root: &Path) -> HandoffStart {
     let runner = AttachOrLaunchRunner::new(
         EndpointRecordStore::new(runtime_root),

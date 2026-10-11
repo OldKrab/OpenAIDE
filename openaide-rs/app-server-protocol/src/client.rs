@@ -156,6 +156,9 @@ pub enum ShellKind {
     Desktop,
     Mobile,
     VscodeExtension,
+    /// The App Server's own `remote` command: a same-machine client with no
+    /// window that keeps the App Server running for Remote Devices.
+    Terminal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

@@ -45,6 +45,6 @@ A measured mobile connection commonly stays on a relay, because carrier networks
 
 The Mobile App working on the phone itself is not a Remote Device: its App Server runs in Termux on the same machine, so the shell starts it, holds its token, and keeps it alive like any same-machine App Shell, and ships the same bundled Frontend.
 
-The App Server still exits when its last same-machine client leaves, so a Remote Device can reach it only while an App Shell on the computer keeps it running. When an App Server may outlive its local clients is a separate decision.
+The App Server still exits when its last same-machine client leaves, so a Remote Device can reach it only while an App Shell on the computer keeps it running. A terminal command can be that client on a computer with no window ([ADR-0064](0064-a-terminal-command-keeps-the-app-server-reachable.md)).
 
 Because a Remote Device ships its own Frontend, the protocol's compatibility rules become a release obligation: a breaking change now strands every device that has not updated. Notifications while the Mobile App is closed need either a long-lived connection held by a foreground service or a push service, and are not decided here.
