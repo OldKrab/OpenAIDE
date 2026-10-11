@@ -178,54 +178,33 @@
   margin: 10px 4px 0;
   color: var(--oa-muted);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
+/* A question beside the list it concerns; the answer is prose that opens in place. */
 .device-relay-notice summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline-block;
   cursor: pointer;
   list-style: none;
   border-radius: 6px;
+  text-decoration: underline;
+  text-decoration-color: var(--oa-border);
+  text-underline-offset: 3px;
 }
 
 .device-relay-notice summary::-webkit-details-marker {
   display: none;
 }
 
-.device-relay-notice summary:hover {
+.device-relay-notice summary:hover,
+.device-relay-notice[open] summary {
   color: var(--oa-text);
 }
 
-.device-relay-notice ul {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.device-relay-notice li {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.device-relay-notice li svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-}
-
-.device-relay-notice strong {
-  display: block;
-  color: var(--oa-text);
-  font-weight: 500;
-}
-
-.device-relay-notice small {
-  display: block;
-  font-size: 12px;
+.device-relay-notice p {
+  max-width: 62ch;
+  margin: 8px 0 0;
+  font-size: 13px;
 }
 
 .settings-reset-dialog.device-dialog header > svg {

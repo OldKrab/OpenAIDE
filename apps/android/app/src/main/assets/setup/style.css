@@ -95,11 +95,11 @@ input[type=checkbox]:checked::after { transform: translateX(20px); }
 .sheet section { max-width: 480px; width: 100%; margin: 0 auto; padding: 10px 24px calc(20px + env(safe-area-inset-bottom, 0px)); border-radius: 24px 24px 0 0; background: var(--bg); animation: rise 260ms cubic-bezier(.2, .8, .2, 1); }
 .sheet .grip { display: block; width: 36px; height: 4px; margin: 0 auto 20px; border-radius: 4px; background: var(--pressed); }
 .sheet h2 { font-size: 20px; font-weight: 600; }
-.facts { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 18px; }
-.facts li { display: flex; align-items: flex-start; gap: 16px; }
-.facts svg.i { color: var(--muted); margin-top: 1px; }
-.facts strong { display: block; font-size: 16px; font-weight: 500; }
-.facts small { display: block; color: var(--muted); font-size: 14px; }
+.sheet p { margin-top: 10px; font-size: 16px; line-height: 1.55; }
+.hint { align-self: flex-start; min-height: 44px; margin: 6px -2px 0; padding: 8px 2px; border: 0; background: transparent; color: var(--muted); font-size: 15px; text-decoration: underline; text-decoration-color: var(--line); text-decoration-thickness: 1px; text-underline-offset: 4px; transition: color 150ms ease-out; }
+.hint:active { color: var(--text); }
+.group + .hint { margin-top: 14px; margin-left: 16px; }
+.waiting + .hint, main > .primary ~ .hint, main > .secondary ~ .hint { align-self: center; }
 .sheet .secondary { margin-top: 24px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { transform: translateY(100%); } }
