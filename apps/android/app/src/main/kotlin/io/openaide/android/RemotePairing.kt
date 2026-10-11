@@ -73,7 +73,7 @@ internal object RemotePairing {
     @JvmStatic fun connect(context: Context, callback: Connected) {
         val application = context.applicationContext
         RemoteNode.scope.launch {
-            val problem = if (!RemoteGateway.start(application)) {
+            val problem = if (!WorkspaceGateway.start(application, false)) {
                 "OpenAIDE could not start its connection on this phone. Restart the app and try again."
             } else try {
                 RemoteNode.connection(application)

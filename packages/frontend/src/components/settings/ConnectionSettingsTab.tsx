@@ -32,7 +32,7 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
   ) : <SettingsSkeleton />;
 
   const checks = state.checks;
-  const needsTools = checks && ["node", "nodeVersion", "git", "npm", "codex", "runtime", "frontend", "supervisor"].some(key => !checks[key]);
+  const needsTools = checks && ["node", "nodeVersion", "git", "npm", "agent", "runtime"].some(key => !checks[key]);
   return (
     <div className="general-settings-panel" aria-busy={busy}>
       <GeneralSection id="settings-connection-workspace" label="Connected to">
@@ -88,11 +88,10 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
             {!state.termux ? <GeneralPreferenceRow label="Install Termux" icon={<Smartphone size={17} />} action={button("Get Termux", { action: "get_termux" })} />
               : !state.permission ? <GeneralPreferenceRow label="Termux access" icon={<Smartphone size={17} />} action={button("Allow", { action: "grant" })} /> : null}
             {needsTools ? <GeneralPreferenceRow label="Required tools" detail="Your projects are kept" icon={<RefreshCcw size={17} />} action={button("Install", { action: "install" })} /> : null}
-            {checks && checks.codex && !checks.codexVersion ? <GeneralPreferenceRow label="Agent version" detail="Requires Codex 0.153.3" icon={<Smartphone size={17} />} action={button("Open Termux", { action: "termux" })} /> : null}
+            {checks && !needsTools && !checks.claude ? <GeneralPreferenceRow label="Claude" detail="Not installed on this phone" icon={<Smartphone size={17} />} action={button("Install", { action: "install" })} /> : null}
+            {checks && checks.agent && !checks.agentVersion ? <GeneralPreferenceRow label="Agent version" detail="Requires Codex 0.153.3" icon={<Smartphone size={17} />} action={button("Open Termux", { action: "termux" })} /> : null}
             {checks && !checks.authenticated ? <GeneralPreferenceRow label="Agent sign-in" detail="Paste the copied command in Termux" icon={<Smartphone size={17} />} action={button("Sign in", { action: "signin" })} /> : null}
-            {checks && !needsTools && checks.authenticated && checks.codexVersion ? <InlineNotice message="Your phone is ready for local work." /> : null}
-            <GeneralPreferenceRow label="Reconnect Termux" detail="Nothing is deleted" icon={<RefreshCcw size={17} />} action={button("Reconnect", { action: "repair" })} />
-            <GeneralPreferenceRow label="Start after reboot" detail="Needs Termux:Boot" icon={<Smartphone size={17} />} action={button(state.boot ? "Set up" : "Get Termux:Boot", { action: state.boot ? "boot" : "get_boot" })} />
+            {checks && !needsTools && checks.authenticated && checks.agentVersion ? <InlineNotice message="Your phone is ready for local work." /> : null}
           </> : null}
           <GeneralPreferenceRow label="Connection diagnostics" detail="No conversations or credentials" icon={<Bug size={17} />} action={button("Share", { action: "diagnostics" })} />
         </div>

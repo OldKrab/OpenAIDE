@@ -4,9 +4,10 @@ The Android app renders the shared Frontend in a WebView and works in one of two
 Paired with a **Remote computer**, it is a client of that computer's App Server
 ([ADR-0062](../../docs/adr/0062-remote-devices-are-app-server-clients.md)): the Frontend
 ships in the APK, and execution, projects and authentication stay on the computer.
-On **This phone**, it starts the existing Web Shell in Termux through the
-`com.termux.RUN_COMMAND` service; the Rust App Server, ACP integration, projects and
-Codex authentication stay in Termux. Neither mode embeds a standalone execution environment.
+On **This phone**, it is a client of an App Server running in Termux, started and
+reached the way an App Shell on a computer starts and reaches its own; the App Server,
+ACP integration, projects and agent authentication stay in Termux. In both modes the
+Frontend ships in the APK. Neither mode embeds a standalone execution environment.
 
 ## Connections and background work
 
@@ -19,11 +20,12 @@ switching. Local work retains its background protection when switching to remote
 Offline, full-screen setup guides Termux installation, one-time command access,
 automatic compatibility checks, workspace installation and agent sign-in. It uses
 OpenAIDE styling, large touch targets, inline progress/errors and system light/dark appearance,
-not a list of Android debug dialogs. **Advanced** contains pairing recovery,
-optional reboot startup and diagnostics. Android permission grants,
-initial Termux initialization and agent sign-in still require user interaction.
-Dependency installation uses the pinned Android-compatible Codex package only when
-Codex is missing; it does not replace an existing user installation.
+not a list of Android debug dialogs. **Advanced** contains the setup check and
+diagnostics. Android permission grants, initial Termux initialization and agent
+sign-in still require user interaction. Local work needs one agent installed in
+Termux: Codex or Claude. Dependency installation adds a pinned Termux-compatible
+release of each agent that is missing; it does not replace an existing user
+installation.
 
 A remote computer needs no address, account or password. On the computer, open
 **Settings → Devices → Show code**; on the phone, choose **Remote computer** and scan
@@ -36,22 +38,28 @@ key and name. Any client of that computer can remove the phone under **Settings 
 The paired connection is end-to-end encrypted between the two keys by
 [iroh](https://www.iroh.computer). It uses a direct path when the networks allow one
 and otherwise a public relay that sees only ciphertext. The WebView loads the bundled
-Frontend from a gateway on `127.0.0.1:5475` inside the app; the gateway carries App
-Server requests to the computer, one stream per request, and answers only requests
-that hold the per-process cookie given to the app's own WebView. A lost connection is
+Frontend from a gateway inside the app, on `127.0.0.1:5475` for a paired computer and
+`127.0.0.1:5476` for this phone, so each workspace keeps its own stored drafts and
+preferences. The gateway carries App Server requests to the App Server, one stream
+per request to the computer, and answers only requests that hold the per-process
+cookie given to the app's own WebView. A lost connection is
 reopened on the next request, and the Frontend's resumable session continues from
 where it stopped. The computer must be running OpenAIDE; the phone and the computer
 must speak the same App Server Protocol major version.
 
-Local startup reuses a healthy server. With `termux-services` installed, an app-owned
-`runsv` supervisor remains a Termux background task, restarts a crashed Web launcher,
-and stops after five rapid failures. Reopening OpenAIDE offers another attempt.
-It does not supervise unrelated Termux sessions or replay agent commands.
-Optional Termux:Boot configuration starts the runtime after reboot without an idle
-wake lock; install the compatible plugin and open it once first.
+Opening the local workspace runs the App Server in Termux in its handoff mode: it
+attaches to the server already serving the state or launches one, and prints its
+loopback address and per-process token. The app keeps that token in memory, never
+gives it to the WebView, and adds it to each request the gateway carries. The app is
+itself a client of the server and sends a heartbeat while its process lives. The
+App Server stops as it does on a computer: after its last client has left. Closing
+the view with background work enabled keeps the app's process, and so the server,
+alive while agents work; once the app is gone, the server ends. There is no
+supervisor and no start after reboot: opening OpenAIDE starts the server again.
+A server that stopped while the workspace was open is started again by the next request.
 
-The Android service reads authenticated, metadata-only task counts independently of
-WebView. Active local work holds a bounded, renewed wake lock; idle work releases it.
+The Android service reads metadata-only task counts from the App Server as that
+same client, independently of WebView. Active local work holds a bounded, renewed wake lock; idle work releases it.
 When the view is hidden and local work becomes idle, monitoring stops. A short
 settling period protects a send immediately followed by screen lock. Temporary
 status failures have a two-minute recovery grace, followed by a visible recovery
@@ -69,15 +77,29 @@ and verifies the archive before extraction. Users do not enter checksums or pack
 The canonical release includes the signed APK and matching `openaide-termux-arm64.tar.gz`
 asset together, enabling fresh-phone one-tap installation. Until that version is published,
 the app reports an unavailable download without installing unverified content.
-An existing runtime is never overwritten: updates are verified and placed in
-`~/.local/share/openaide-android/runtime.pending`. Applying staged updates remains
-manual; do not replace a live runtime or delete state to repair a connection.
+The runtime is the App Server binary and a `VERSION` file, and must be the app's own
+version. After an app update, setup offers the matching runtime; installing it stops
+a server left running from the old one and replaces the runtime directory. Tasks and
+history live in the state directory beside it and are kept.
 
 ## Install
 
-Use Android 8 or newer and Termux 0.118 or newer with Node.js, npm, Git and a
-working Android-compatible `codex` command. The current managed ACP integration
-pins Codex 0.153.3; use a compatible Termux build. Authenticate Codex in Termux.
+Use Android 8 or newer and Termux 0.118 or newer with Node.js, npm, Git and at least
+one agent command that works in Termux: `codex` or `claude`. The managed Codex
+integration pins Codex 0.153.3; use a compatible Termux build. Neither agent
+publishes an Android build, so setup installs one that runs in Termux when it is
+missing. Codex is a pinned community build. Claude Code ships only as a glibc binary:
+setup takes the binary the app's Claude adapter was built against from the adapter's
+own npm package, keeps it in `$PREFIX/opt/openaide-claude`, and installs a `claude`
+command that starts it with Termux's glibc packages. Two things make it behave like
+any other program there. The binary names Termux's glibc loader, written into unused
+padding because tools that move the file's contents break it; started as an argument
+of the loader instead, its built-in `grep` and `find` fail. And one `LD_PRELOAD` path
+gives Claude the glibc build of `termux-exec` and the Android programs it starts the
+ordinary one, so `#!/usr/bin/env` scripts run from its shell. The adapter is pointed
+at that command instead of its bundled runtime. A phone that cannot start the binary
+keeps working with Codex; the step that failed is in
+`~/.local/share/openaide-android/install.log`. Authenticate the agent in Termux.
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
@@ -96,22 +118,21 @@ The runtime artifact currently targets ARM64 phones only.
    Later launches connect automatically. Use **Advanced → Check this phone**
    if Android no longer prompts.
 
-The APK sends its bundled startup script through Intent stdin; it does not need
-access to Termux's private directory. A random per-install password stays in the
-APK's private preferences and is passed to the Termux process at startup. The
-Web Shell binds only to `127.0.0.1:5474`, using existing HTTP Basic authentication.
-No agent credential is copied into the APK. App backup is disabled.
+The APK sends its bundled scripts through Intent stdin; it does not need access to
+Termux's private directory. The App Server binds a loopback port of its own choosing
+and accepts only its per-process token, which reaches the app in the start command's
+result. No agent credential is copied into the APK. App backup is disabled.
 
-Reconnect reuses the running server when its credentials match. An authentication
-failure automatically attempts to recover the saved local pairing and verifies it
-before storing it. In **Settings → Connection**, use **Advanced → Reconnect Termux → Reconnect**
-for manual recovery. Offline setup calls this **Advanced → Reconnect to Termux**.
-Older runtimes without a saved pairing need manual recovery. Android may kill Termux processes;
-return to OpenAIDE to reconnect after a failure. Closing the
-Android view leaves the Termux Web Shell running, following existing Web Shell
-lifetime semantics. To stop it explicitly, stop its process in Termux.
+A command started from another app does not get the `termux-exec` library that a
+Termux terminal preloads, so the start script sets it: without it the server cannot
+start an adapter through `npx`, and agents cannot run `#!/usr/bin/env` scripts.
 
-Logs: `~/.local/share/openaide-android/state/launcher.log`. State is kept beside
+Android may kill Termux processes; return to OpenAIDE to start the server again.
+To stop it explicitly, close OpenAIDE or stop its process in Termux.
+
+Logs: `~/.local/share/openaide-android/state/launcher.log`. A development build
+installed beside the app with an application id suffix keeps its runtime and state in
+its own folder, `openaide-android-<suffix>`, so the two never share a server. State is kept beside
 the runtime directory so replacing runtime files does not delete task history.
 
 ## Build and validation
@@ -127,7 +148,8 @@ gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
 The APK is built for ARM64 only. The iroh library adds about 14 MB.
 
 CI separately cross-compiles the App Server with the Android NDK, builds the
-shared Frontend, runs existing Web Shell tests and packages the Termux runtime.
+shared Frontend, runs existing Web Shell tests and packages the Termux runtime,
+which is the App Server alone.
 It runs on every pull request, pushes to `main` and `android/**`, and manual dispatch,
 so shared Frontend and transport changes cannot bypass Android builds. Each run
 uploads the debug APK, a compiled device-test APK, unit/lint reports and the ARM64
@@ -151,7 +173,7 @@ backed up. These secrets sign user builds. Debug and device-test APKs use a temp
 debug key; subsequent debug APKs may require uninstalling the previous app. Without
 the secrets, CI does not publish a user APK. Switching from the initial
 temporary key requires a one-time reinstall; Termux task history is unaffected,
-but the app's connection password resets.
+and the phone must be paired with its computer again.
 
 On a device, verify permission denial and grant, first startup, authenticated
 task creation, streaming, tool approvals, attachments, Back navigation, rotation,
@@ -234,8 +256,8 @@ Settings hierarchy, repeated renderer touch swipes and the wide navigation layou
 Keep OpenAIDE unlocked and visible. `--renderer-only` avoids all system key input
 and checks the renderer Back event instead; it is not a physical Back-button test.
 
-`DeviceChecks` exercises authenticated native status reads, wrong-password rejection,
-the real Termux PendingIntent callback, selected-image result delivery,
+`DeviceChecks` exercises native status reads from the local App Server, the gateway's
+refusal of requests without the shell's cookie, the real Termux PendingIntent callback, selected-image result delivery,
 Android wake-lock release and offline setup network isolation. Build the instrumentation APK and run:
 
 ```sh

@@ -16,7 +16,6 @@ const icons = {
   battery: '<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M22 11v2M7 10v4"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 21h4"/>',
   wrench: '<path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2-.5-.5-2z"/>',
-  refresh: '<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>',
   power: '<path d="M12 3v8M7 6.5a7 7 0 1 0 10 0"/>',
   share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
   chevron: '<path d="M9 5l7 7-7 7"/>',
@@ -43,7 +42,7 @@ const info = {
   welcome: ['What’s the difference?', 'Where agents work', 'On a remote computer, work keeps running when your phone is locked or OpenAIDE is closed. On this phone, agents run locally in Termux.', 'Projects and conversations stay on the device where the agents work. You can switch later in Settings.'],
   remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Devices on your computer.'],
   join: ['How pairing works', 'How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.'],
-  local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, compatible tools, agent sign-in, storage and automatic startup, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
+  local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, the tools it needs, a signed-in agent (Codex or Claude) and storage, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
   background: ['How does this affect battery?', 'Background work', 'Protection keeps the phone awake only while agents are working and is released when work is idle. Running agents still use battery and data, so plug in for long tasks.', 'Do not force-stop OpenAIDE or Termux during work. Some phones also need background activity allowed in their own battery settings.'],
 };
 function hint() { return info[screen] ? `<button class="hint" id="about" type="button">${info[screen][0]}</button>` : ''; }
@@ -110,8 +109,8 @@ function localStep() {
   const checks = state.checks;
   if (!checks.arm64) return { index: 2, title: 'Use a remote computer', detail: 'Local work needs an ARM64 phone. A remote computer works on this device.', action: 'remote_screen', label: 'Connect to a computer' };
   if (!checks.storage || !checks.space) return { index: 2, title: 'Your phone needs more room', detail: 'Free at least 512 MB in Termux’s storage. Your projects are not removed.', action: 'check', label: 'Check again' };
-  if (checks.codex && !checks.codexVersion) return { index: 2, title: 'Your agent needs an update', detail: 'Install the Android-compatible Codex 0.153.3 in Termux, then check again.', action: 'termux', label: 'Open Termux' };
-  if (['node', 'nodeVersion', 'npm', 'git', 'codex', 'codexVersion', 'runtime', 'frontend', 'supervisor'].some(key => !checks[key])) return { index: 2, title: 'Prepare your workspace', detail: 'OpenAIDE installs the tools it needs in Termux. Your projects and history stay in place.', action: 'install', label: 'Install & continue' };
+  if (checks.agent && !checks.agentVersion) return { index: 2, title: 'Your agent needs an update', detail: 'Install the Android-compatible Codex 0.153.3 in Termux, then check again.', action: 'termux', label: 'Open Termux' };
+  if (['node', 'nodeVersion', 'npm', 'git', 'agent', 'agentVersion', 'runtime'].some(key => !checks[key])) return { index: 2, title: 'Prepare your workspace', detail: 'OpenAIDE installs the tools it needs in Termux. Your projects and history stay in place.', action: 'install', label: 'Install & continue' };
   if (!checks.authenticated) return { index: 3, title: 'Sign in to your agent', detail: 'Paste the copied sign-in command in Termux, finish signing in, then come back.', action: 'signin', label: 'Copy sign-in & open Termux' };
   return { index: 4, title: 'Your phone is ready', detail: '', action: 'local', label: state.remote ? 'Use this phone' : 'Open workspace' };
 }
@@ -178,8 +177,6 @@ function render() {
     page.innerHTML = heading('Advanced')
       + '<div class="group">'
       + row('phone', 'Check this phone', 'local_screen')
-      + row('refresh', 'Reconnect to Termux', 'repair')
-      + row('power', 'Start after reboot', state.boot ? 'boot' : 'get_boot', state.boot ? '' : 'Get Termux:Boot')
       + row('wrench', 'Termux app settings', 'termux_settings')
       + row('share', 'Share diagnostics', 'diagnostics', '', 'No conversations or credentials')
       + '</div>';

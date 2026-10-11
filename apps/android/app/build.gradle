@@ -12,6 +12,9 @@ def appVersionCode = versionParts[0] * 1000000 + versionParts[1] * 1000 + versio
 def protocolSource = rootProject.file('../../openaide-rs/app-server-protocol/src/client.rs').text
 def protocolVersion = protocolSource =~ /APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion \{\s*major: (\d+),\s*minor: (\d+),?\s*\}/
 if (!protocolVersion.find()) throw new GradleException('App Server Protocol version not found')
+// The Claude adapter this build's App Server launches; setup installs the Claude binary it was built against.
+def claudeAcpVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../../packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json')).dependencies['@openaide/claude-agent-acp'] as String
+if (!(claudeAcpVersion ==~ /\d+\.\d+\.\d+/)) throw new GradleException('Invalid Claude adapter version')
 def protocolMajor = protocolVersion.group(1) as int
 // The paired connection renders the Frontend shipped in the APK.
 def frontendDist = rootProject.file('../../packages/frontend/dist')
@@ -42,6 +45,7 @@ android {
         versionName appVersion
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
         buildConfigField 'int', 'PROTOCOL_MAJOR', "${protocolMajor}"
+        buildConfigField 'String', 'CLAUDE_ACP_VERSION', "\"${claudeAcpVersion}\""
         // The iroh library is about 14 MB per architecture; phones are ARM64.
         ndk { abiFilters 'arm64-v8a' }
     }

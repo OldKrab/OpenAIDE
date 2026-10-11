@@ -68,11 +68,11 @@ public final class RemoteDeviceChecks extends InstrumentationTestCase {
     }
 
     private static Response request(String method, String path, boolean trusted, String body) throws Exception {
-        HttpURLConnection connection = (HttpURLConnection) new URL(ConnectionProfile.PAIRED_ENDPOINT + path.substring(1)).openConnection();
+        HttpURLConnection connection = (HttpURLConnection) new URL(ConnectionProfile.paired().endpoint + path.substring(1)).openConnection();
         connection.setConnectTimeout(5000);
         connection.setReadTimeout(30000);
         connection.setRequestMethod(method);
-        if (trusted) connection.setRequestProperty("Cookie", GatewayHttp.COOKIE + "=" + RemoteGateway.INSTANCE.getToken());
+        if (trusted) connection.setRequestProperty("Cookie", GatewayHttp.COOKIE + "=" + WorkspaceGateway.INSTANCE.getToken());
         try {
             if (body != null) {
                 connection.setDoOutput(true);

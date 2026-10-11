@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom';
 const root = new URL('../app/src/main/assets/setup/', import.meta.url);
 const html = readFileSync(new URL('index.html', root), 'utf8');
 const script = readFileSync(new URL('app.js', root), 'utf8');
-const ready = Object.fromEntries(['arm64', 'storage', 'space', 'node', 'nodeVersion', 'npm', 'git', 'codex', 'codexVersion', 'runtime', 'frontend', 'supervisor', 'authenticated'].map(key => [key, true]));
+const ready = Object.fromEntries(['arm64', 'storage', 'space', 'node', 'nodeVersion', 'npm', 'git', 'agent', 'agentVersion', 'runtime', 'authenticated'].map(key => [key, true]));
 
 function setup(state = {}) {
   const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://app.openaide.invalid/index.html' });
@@ -103,7 +103,7 @@ test('unsupported phones offer a remote workspace instead of repeated installati
 });
 
 test('an incompatible existing agent gets an explicit recovery, not an install loop', () => {
-  const view = setup({ initial: 'local', checks: { ...ready, codexVersion: false } });
+  const view = setup({ initial: 'local', checks: { ...ready, agentVersion: false } });
   try {
     assert.match(view.document.querySelector('h1').textContent, /agent needs an update/);
     assert.equal(view.document.querySelectorAll('[data-action="install"]').length, 0);
