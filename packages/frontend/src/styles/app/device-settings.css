@@ -198,9 +198,34 @@
   color: var(--oa-text);
 }
 
-.device-relay-notice p {
-  margin: 6px 0 0;
-  max-width: 68ch;
+.device-relay-notice ul {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.device-relay-notice li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.device-relay-notice li svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.device-relay-notice strong {
+  display: block;
+  color: var(--oa-text);
+  font-weight: 500;
+}
+
+.device-relay-notice small {
+  display: block;
+  font-size: 12px;
 }
 
 .settings-reset-dialog.device-dialog header > svg {

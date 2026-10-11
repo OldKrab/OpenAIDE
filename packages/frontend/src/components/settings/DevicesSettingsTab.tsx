@@ -4,7 +4,7 @@ import type {
   DevicesPreviewJoinRequestResult,
   RemoteDeviceSummary,
 } from "@openaide/app-server-client";
-import { Copy, Info, Keyboard, Laptop, QrCode, Smartphone, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Copy, Globe, Info, Keyboard, Laptop, Lock, QrCode, Smartphone, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { encode } from "uqr";
 
@@ -79,11 +79,17 @@ export function DevicesSettingsTab({
         {devices.remoteAccess === "off" ? (
           <details className="device-relay-notice">
             <summary><Info size={13} /> Adding a device turns on remote access</summary>
-            <p>
-              Connections are encrypted end to end. When the two devices cannot reach each other directly,
-              traffic passes through public relays run by the iroh project, which see the network addresses
-              and public keys of both ends but none of the content.
-            </p>
+            <ul>
+              <li><Lock size={14} /><span><strong>Encrypted end to end</strong></span></li>
+              <li><ArrowLeftRight size={14} /><span><strong>Direct when the devices can reach each other</strong></span></li>
+              <li>
+                <Globe size={14} />
+                <span>
+                  <strong>Otherwise through public relays run by the iroh project</strong>
+                  <small>They see network addresses and public keys, never content.</small>
+                </span>
+              </li>
+            </ul>
           </details>
         ) : null}
       </section>

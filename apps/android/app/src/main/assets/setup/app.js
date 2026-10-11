@@ -20,6 +20,13 @@ const icons = {
   refresh: '<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>',
   power: '<path d="M12 3v8M7 6.5a7 7 0 1 0 10 0"/>',
   share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2 2M14 9l1.5 1.5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  trash: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/>',
+  alert: '<path d="M12 4l9 16H3zM12 10v4M12 17v.01"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   chevron: '<path d="M9 5l7 7-7 7"/>',
 };
 function icon(name, extra = '') { return `<svg class="i ${extra}" viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`; }
@@ -39,19 +46,20 @@ function item(kind, glyph, title, detail, target, value) {
 function choice(glyph, title, detail, destination) { return item('choice', glyph, title, detail, destination); }
 function row(glyph, title, action, value = '', detail = '') { return item('row', glyph, title, detail, action, value); }
 
-// Background information lives behind the header's info button, not on the page.
+// Background information lives behind the header's info button, as a short list of
+// facts that can be scanned rather than paragraphs that must be read.
 const info = {
-  welcome: ['Where agents work', 'Projects and conversations stay on the device where your agents work. You can switch later in Settings.'],
-  settings: ['Connection', 'Work on a remote computer keeps running when your phone is locked or OpenAIDE is closed. Work on this phone runs in Termux.', 'Switching does not stop or delete work on the other device.'],
-  remote: ['How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. Remove this phone any time in Settings → Devices on your computer.'],
-  join: ['How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.'],
-  local: ['Working on this phone', 'OpenAIDE checks the Termux connection, compatible tools, agent sign-in, storage and automatic startup, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
-  background: ['Background work', 'Protection keeps the phone awake only while agents are working and is released when work is idle. Running agents still use battery and data, so plug in for long tasks.', 'Do not force-stop OpenAIDE or Termux during work. Some phones also need background activity allowed in their own battery settings.'],
+  welcome: ['Where agents work', ['folder', 'Work stays on that device', 'Projects and conversations are not copied.'], ['refresh', 'Change it any time', 'Settings → Connection.']],
+  settings: ['Connection', ['computer', 'Remote work keeps running', 'Even when your phone is locked.'], ['phone', 'Local work runs in Termux'], ['refresh', 'Switching stops nothing', 'Work stays on the other device.']],
+  remote: ['How pairing works', ['lock', 'Encrypted end to end'], ['key', 'No account or password', 'Your computer trusts this phone’s key.'], ['clock', 'One-time code', 'Expires after a few minutes.'], ['trash', 'Remove this phone any time', 'Settings → Devices on your computer.']],
+  join: ['How pairing works', ['lock', 'Encrypted end to end'], ['check', 'Your computer asks first', 'It confirms before trusting this phone.'], ['clock', 'Valid while this screen is open']],
+  local: ['Working on this phone', ['check', 'Checked for you', 'Termux access, tools, sign-in, storage, startup.'], ['phone', 'Keep Termux installed', 'Closing its window is fine.'], ['alert', 'Don’t force-stop Termux', 'It interrupts local work.']],
+  background: ['Background work', ['power', 'Awake only while agents work'], ['battery', 'Plug in for long tasks', 'Agents use battery and data.'], ['alert', 'Don’t force-stop OpenAIDE or Termux'], ['wrench', 'Some phones need more', 'Allow background activity in battery settings.']],
 };
 function openSheet() {
-  const [title, ...paragraphs] = info[screen];
+  const [title, ...facts] = info[screen];
   sheet.querySelector('h2').textContent = title;
-  sheet.querySelector('.sheet-body').innerHTML = paragraphs.map(text => `<p>${text}</p>`).join('');
+  sheet.querySelector('.sheet-body').innerHTML = `<ul class="facts">${facts.map(([glyph, head, sub]) => `<li>${icon(glyph)}<span><strong>${head}</strong>${sub ? `<small>${sub}</small>` : ''}</span></li>`).join('')}</ul>`;
   sheet.hidden = false;
   sheet.querySelector('.sheet-close').focus();
 }
@@ -142,13 +150,13 @@ function render() {
       + (!state.busy && (step.index === 1 || step.action === 'termux') ? button('Check again', 'check', 'secondary') : '')
       + (!state.busy && !state.permission && state.termux ? button('Open Android app permissions', 'app_settings', 'link') : '')
       + (step.index === 4 ? button('Keep working with the screen locked', 'background_screen', 'secondary') : '')
-      + (state.remote && step.index === 4 ? '<p class="caution">Switching closes the current view. Save unsent drafts first.</p>' : '');
+      + (state.remote && step.index === 4 ? '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>' : '');
   } else if (screen === 'remote') {
     const known = state.paired && !state.remote;
     page.innerHTML = heading('Pair with your computer', 'On your computer, open') + path('Settings', 'Devices', 'Show code')
       + (known ? `<div class="panel"><span class="copy"><h2>${escape(state.computer || 'Your computer')}</h2><small>Already paired</small></span>${button('Use', 'paired', 'mini')}</div>` : '')
       + '<div class="actions">'
-      + (firstRun ? '' : '<p class="caution">Switching closes the current view. Save unsent drafts first.</p>')
+      + (firstRun ? '' : '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>')
       + `<form id="pair-form" ${pasteOpen ? '' : 'hidden'}><textarea id="code" name="code" rows="3" aria-label="Pairing code" placeholder="OAI1…" autocapitalize="characters" autocomplete="off" spellcheck="false" required></textarea><button class="secondary" type="submit">Pair</button></form>`
       + button('Scan code', 'scan')
       + `<div class="alternatives"><button class="link" id="paste-toggle" aria-expanded="${pasteOpen}" aria-controls="pair-form">Enter code</button><button class="link" data-action="join_screen">Show my code</button></div>`
