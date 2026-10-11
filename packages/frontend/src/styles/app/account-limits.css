@@ -170,38 +170,6 @@
   opacity: .55;
 }
 
-.account-limits-label {
-  position: absolute;
-  right: 24px;
-  bottom: calc(100% + 10px);
-  z-index: 2;
-  border: 1px solid var(--oa-border);
-  border-radius: 6px;
-  background: var(--oa-panel);
-  box-shadow: 0 4px 14px color-mix(in oklch, var(--oa-text) 12%, transparent);
-  color: var(--oa-text);
-  display: grid;
-  gap: 2px;
-  padding: 5px 7px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(3px);
-  transition: opacity 160ms ease, transform 160ms ease;
-}
-
-.account-limits-label > :is(.account-limits-warning, .account-limits-fast, .account-limits-reached) {
-  color: var(--account-limit-tone);
-}
-
-/* Hover has its own readout on the border; this line only speaks up when usage crosses a step. */
-.account-limits-label[data-announce="true"] {
-  opacity: 1;
-  transform: none;
-}
-
 /*
  * Opening the panel replays the reading: every bar starts full and drains to what is left, one
  * window after another.
@@ -309,10 +277,6 @@
 }
 
 @media (max-width: 760px) {
-  .account-limits-label {
-    right: 18px;
-  }
-
   .account-limits-popup .context-usage-panel-header button {
     width: 44px;
     height: 44px;
@@ -321,7 +285,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .account-limits-segment-fill,
-  .account-limits-label,
   .account-limits-meter-track span {
     transition: none;
   }
