@@ -197,7 +197,8 @@ pub(crate) async fn desktop_remote_pair(
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
     eprintln!("desktop_remote_computer_selected reason=paired");
-    app.restart();
+    crate::restart_desktop(&app);
+    Ok(())
 }
 
 /// Chooses a paired computer, or this computer when `id` is absent.
@@ -230,7 +231,8 @@ pub(crate) fn desktop_remote_use(
     preferences.remote_computer = id;
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
-    app.restart();
+    crate::restart_desktop(&app);
+    Ok(())
 }
 
 /// Forgets a pairing on this side. The other computer keeps listing this one
@@ -250,7 +252,7 @@ pub(crate) fn desktop_remote_forget(
     drop(preferences);
     eprintln!("desktop_remote_computer_forgotten was_current={was_current}");
     if was_current {
-        app.restart();
+        crate::restart_desktop(&app);
     }
     Ok(())
 }
@@ -299,7 +301,7 @@ fn report_failure(app: &tauri::AppHandle, failure: remote::Failure) {
         ))
         .show(move |use_local| {
             if use_local && use_this_computer(&handle.state::<DesktopState>()).is_ok() {
-                handle.restart();
+                crate::restart_desktop(&handle);
             }
         });
 }

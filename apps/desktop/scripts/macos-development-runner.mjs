@@ -8,6 +8,8 @@ const DEVELOPMENT_CONFIG = "src-tauri/tauri.development.conf.json";
 const DEVELOPMENT_MACOS_CONFIG = "src-tauri/tauri.development.macos.conf.json";
 const DEVELOPMENT_PRODUCT_NAME = "OpenAIDE Development";
 const BINARY_NAME = "openaide-desktop";
+/** The app exits with this code to be started again, for example after choosing another computer. */
+export const RESTART_EXIT_CODE = 75;
 
 /** Converts the command Tauri sends to its runner into an equivalent build. */
 export function cargoBuildArguments(runnerArguments) {
@@ -78,6 +80,18 @@ export async function runMacOsDevelopmentBundle({
   if (bundle.error) throw bundle.error;
   if (bundle.status !== 0) return bundle.status ?? 1;
 
+  // The runner outlives an app restart so Tauri keeps its frontend server and
+  // the next instance keeps this terminal's output.
+  let attempt = 1;
+  for (;;) {
+    const code = await runApplication({ environment, runnerArguments, srcTauriRoot });
+    if (code !== RESTART_EXIT_CODE) return code;
+    attempt += 1;
+    console.error(`desktop_development_runner_restart attempt=${attempt}`);
+  }
+}
+
+async function runApplication({ environment, runnerArguments, srcTauriRoot }) {
   const application = spawn(
     developmentBundleExecutable(srcTauriRoot, environment),
     applicationArguments(runnerArguments),

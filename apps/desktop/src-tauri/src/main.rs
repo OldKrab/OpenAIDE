@@ -286,6 +286,24 @@ fn configure_macos_webview_resize(app: &mut tauri::App) -> tauri::Result<()> {
     macos_webview_resize::configure(&window)
 }
 
+/// Exit code that asks the macOS development runner to start the app again.
+#[cfg(all(target_os = "macos", debug_assertions))]
+const DEVELOPMENT_RESTART_EXIT_CODE: i32 = 75;
+
+/// Restarts Desktop so a changed bootstrap preference takes effect. The macOS
+/// development runner owns the app process, its output, and the frontend
+/// server, so there it is asked to relaunch; a self-relaunch would outlive it.
+pub(crate) fn restart_desktop(app: &tauri::AppHandle) {
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    if std::env::var_os("OPENAIDE_DEVELOPMENT_RUNNER_PID").is_some() {
+        eprintln!("desktop_restart_requested owner=development_runner");
+        app.exit(DEVELOPMENT_RESTART_EXIT_CODE);
+        return;
+    }
+    eprintln!("desktop_restart_requested owner=desktop");
+    app.restart();
+}
+
 /// Stops an F5 app that outlives Tauri's development runner during a rebuild.
 /// Release bundles never receive the parent marker and never start this watch.
 #[cfg(all(target_os = "macos", debug_assertions))]
@@ -631,7 +649,8 @@ fn set_desktop_runtime_environment(
     preferences.environment = environment;
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
-    app.restart();
+    restart_desktop(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -641,7 +660,8 @@ fn recover_desktop_runtime_environment(
 ) -> Result<(), String> {
     // Leaving an unreachable paired computer comes before undoing an environment change.
     if desktop_remote::use_this_computer(&state)? {
-        app.restart();
+        restart_desktop(&app);
+        return Ok(());
     }
     let mut preferences = state
         .preferences
@@ -654,7 +674,8 @@ fn recover_desktop_runtime_environment(
     preferences.environment = previous;
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
-    app.restart();
+    restart_desktop(&app);
+    Ok(())
 }
 
 #[tauri::command]
