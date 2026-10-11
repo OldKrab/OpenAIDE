@@ -121,7 +121,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   );
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [moreBelow, setMoreBelow] = useState(false);
-  const [moreAbove, setMoreAbove] = useState(false);
   const [currentUserMessageKey, setCurrentUserMessageKey] = useState<string | undefined>(undefined);
   const [userMessageAnnouncement, setUserMessageAnnouncement] = useState<string | undefined>(undefined);
   const [userMessageScrollTargetIndex, setUserMessageScrollTargetIndex] = useState<number | undefined>(undefined);
@@ -411,7 +410,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   const updateJumpToLatestVisibility = useCallback(() => {
     const distanceFromBottom = virtualizer.getDistanceFromEnd();
     setMoreBelow(distanceFromBottom > 2);
-    setMoreAbove((messageListRef.current?.scrollTop ?? 0) > 2);
     setShowJumpToLatest((visible) => (
       visible
         ? distanceFromBottom > HIDE_JUMP_TO_LATEST_DISTANCE_PX
@@ -799,7 +797,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     jumpToLatest,
     loadEarlier,
     messageListRef,
-    moreAbove,
     moreBelow,
     onKeyDown,
     onPointerCancel: finishPointerGesture,
@@ -817,7 +814,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     finishPointerGesture,
     jumpToLatest,
     loadEarlier,
-    moreAbove,
     moreBelow,
     onKeyDown,
     onPointerDown,
