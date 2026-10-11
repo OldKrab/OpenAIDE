@@ -76,7 +76,8 @@ Before that release:
 5. The tag starts `Release`. It rejects tags not reachable from `main`, then
    builds Linux x64, Windows x64, and macOS Apple Silicon VSIX packages plus
    self-contained Windows x64 and macOS Apple Silicon desktop installers, a signed
-   Android APK and its ARM64 Termux runtime while
+   Android APK and its ARM64 Termux runtime, and a Linux x64 App Server archive
+   holding the same static executable as the Linux VSIX, while
    normal CI validates the exact version commit. Publication requires both to
    succeed; the release workflow does not repeat the CI suite. Prerelease
    packages carry the registry's native prerelease metadata. Each VSIX runner
