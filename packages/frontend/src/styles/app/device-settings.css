@@ -263,6 +263,14 @@
   font-size: 12px;
 }
 
+.settings-reset-dialog .device-connection-note {
+  margin: 10px 0 0;
+  color: var(--oa-muted);
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .device-code-input {
   width: 100%;
   box-sizing: border-box;

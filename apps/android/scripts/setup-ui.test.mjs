@@ -120,3 +120,16 @@ test('settings report the connection as it is, not as configured', () => {
     } finally { view.close(); }
   }
 });
+
+test('remote screens say what the connection uses, and the local one does not', () => {
+  for (const state of [{ initial: 'remote' }, { initial: 'settings', remote: true, computer: 'Desk' }]) {
+    const view = setup(state);
+    try {
+      view.document.getElementById('about').click();
+      assert.match(view.document.querySelector('.sheet-body').textContent, /end to end/);
+      assert.match(view.document.querySelector('.sheet-body').textContent, /public relays run by the iroh project/);
+    } finally { view.close(); }
+  }
+  const local = setup({ initial: 'settings' });
+  try { assert.equal(local.document.getElementById('about'), null); } finally { local.close(); }
+});
