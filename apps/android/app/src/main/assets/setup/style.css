@@ -107,3 +107,11 @@ input[type=checkbox]:checked::after { transform: translateX(20px); }
 [hidden] { display: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 @media (max-width: 350px) { .shell { padding-inline: 16px; } h1 { font-size: 23px; } }
+/* Names a group whose rows are alternatives; the place in use is stated, not tappable. */
+h2.label { margin: 28px 0 0 18px; color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: .02em; }
+h2.label + .group { margin-top: 10px; }
+.group + .group { margin-top: 16px; }
+.panel + .panel { margin-top: 12px; }
+.row.current:active { background: transparent; }
+.row.current .value { color: var(--success, #1f7a3d); }
+.row.current .value::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: currentColor; vertical-align: middle; }

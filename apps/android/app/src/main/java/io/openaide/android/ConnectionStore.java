@@ -38,24 +38,50 @@ final class ConnectionStore {
     /** Whether the paired computer, rather than this phone, is the selected workspace. */
     boolean usesPaired() { return preferences.getBoolean("paired", false) && pairedServer() != null; }
 
+    /** The computer selected for remote work, or null. */
     PairedServer pairedServer() {
         String id = preferences.getString("server_id", "");
-        if (!id.matches("[0-9a-f]{64}")) return null;
+        if (!PairedServers.validId(id)) return null;
         return new PairedServer(id, preferences.getString("server_name", ""));
     }
 
-    /** Pairing selects the computer; the previous one, if any, is replaced. */
+    /** Every computer this phone is paired with, in pairing order. */
+    java.util.List<PairedServer> pairedServers() {
+        java.util.List<PairedServer> servers = PairedServers.parse(preferences.getString("servers", ""));
+        // Before several computers were kept, only the selected one was stored.
+        PairedServer selected = pairedServer();
+        if (selected != null && PairedServers.find(servers, selected.id) == null) servers = PairedServers.with(servers, selected);
+        return servers;
+    }
+
+    /** Pairing adds the computer, or renames it, and selects it. */
     void savePaired(PairedServer server) {
-        preferences.edit().putString("server_id", server.id).putString("server_name", server.name)
+        preferences.edit().putString("servers", PairedServers.format(PairedServers.with(pairedServers(), server)))
+            .putString("server_id", server.id).putString("server_name", server.name)
             .putBoolean("paired", true).putBoolean("configured", true).apply();
     }
 
-    /** Stops using the paired computer. Its trust in this phone ends when a client there removes it. */
-    void forgetPaired() { preferences.edit().remove("server_id").remove("server_name").putBoolean("paired", false).apply(); }
+    /**
+     * Stops knowing a computer. Its trust in this phone ends when a client there removes it.
+     * Forgetting the selected one leaves this phone as the place to work.
+     */
+    void forgetPaired(String id) {
+        SharedPreferences.Editor edit = preferences.edit().putString("servers", PairedServers.format(PairedServers.without(pairedServers(), id)));
+        PairedServer selected = pairedServer();
+        if (selected != null && selected.id.equals(id)) edit.remove("server_id").remove("server_name").putBoolean("paired", false);
+        edit.apply();
+    }
 
-    /** Returns to the paired computer after working on this phone; trust is unchanged. */
-    void selectPaired() { if (pairedServer() != null) preferences.edit().putBoolean("paired", true).putBoolean("configured", true).apply(); }
+    /** Selects one of the paired computers; returns false for one this phone does not know. */
+    boolean selectPaired(String id) {
+        PairedServer server = PairedServers.find(pairedServers(), id);
+        if (server == null) return false;
+        preferences.edit().putString("server_id", server.id).putString("server_name", server.name)
+            .putBoolean("paired", true).putBoolean("configured", true).apply();
+        return true;
+    }
 
+    /** Keeps the selected computer remembered while work moves to this phone. */
     void selectLocal() { preferences.edit().putBoolean("paired", false).putBoolean("configured", true).apply(); }
 
     /** This phone's private key as a Remote Device, or null before the first pairing. */

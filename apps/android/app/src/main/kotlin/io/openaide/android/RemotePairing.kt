@@ -83,11 +83,6 @@ internal object RemotePairing {
         }
     }
 
-    @JvmStatic fun forget(context: Context) {
-        ConnectionStore(context.applicationContext).forgetPaired()
-        RemoteNode.disconnect()
-    }
-
     @JvmStatic fun message(failure: RemoteNode.Failure): String = when (failure) {
         RemoteNode.Failure.UNREACHABLE -> "Your computer is unreachable. Make sure OpenAIDE is open on it and both devices are online."
         RemoteNode.Failure.NOT_TRUSTED -> "This phone was removed from your computer. Pair it again in Connection settings."

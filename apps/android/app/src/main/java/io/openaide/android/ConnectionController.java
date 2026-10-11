@@ -49,7 +49,7 @@ final class ConnectionController extends ContextWrapper {
     void receive(JSONObject message) {
         if (disposed) return;
         String command = message.optString("action");
-        if (!localTools && !java.util.Arrays.asList("state", "close", "local", "paired", "pair_setup", "forget", "app_settings", "diagnostics").contains(command)) {
+        if (!localTools && !java.util.Arrays.asList("state", "close", "local", "use_computer", "forget_computer", "pair_setup", "app_settings", "diagnostics").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
@@ -68,13 +68,29 @@ final class ConnectionController extends ContextWrapper {
             case "state": emit(); break;
             case "check": check(); break;
             case "local": new ConnectionStore(this).selectLocal(); changed(); break;
-            case "paired": new ConnectionStore(this).selectPaired(); changed(); break;
+            case "use_computer":
+                if (!new ConnectionStore(this).selectPaired(message.optString("id"))) { emit(); break; }
+                // A connection to the computer used until now must not outlive the choice.
+                RemoteNode.INSTANCE.disconnect();
+                diagnostics.record("connection_computer_selected", "selected", 0, 0);
+                changed();
+                break;
             case "pair_setup": view.setup("remote"); break;
             case "scan": scan(); break;
             case "pair": pair(message.optString("code")); break;
             case "join": join(); break;
             case "join_stop": RemotePairing.stopJoin(); joinCode = null; emit(); break;
-            case "forget": RemotePairing.forget(this); changed(); break;
+            case "forget_computer": {
+                ConnectionStore store = new ConnectionStore(this);
+                String id = message.optString("id");
+                ConnectionStore.PairedServer selected = store.pairedServer();
+                boolean current = store.usesPaired() && selected != null && selected.id.equals(id);
+                store.forgetPaired(id);
+                diagnostics.record("connection_computer_forgotten", current ? "current" : "other", 0, 0);
+                // Only leaving the computer in use changes the workspace; the list alone redraws.
+                if (current) { RemoteNode.INSTANCE.disconnect(); changed(); } else emit();
+                break;
+            }
             case "install": install(); break;
             case "termux": launchTermux(); break;
             case "get_termux": open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/termux/termux-app/releases"))); break;
@@ -211,8 +227,9 @@ final class ConnectionController extends ContextWrapper {
             PowerManager power = getSystemService(PowerManager.class);
             JSONObject state = new JSONObject().put("initial", activity.getIntent().getStringExtra("screen"))
                 .put("connected", activity.getIntent().getBooleanExtra("connected", false))
-                .put("remote", store.usesPaired()).put("paired", computer != null)
+                .put("remote", store.usesPaired()).put("paired", !store.pairedServers().isEmpty())
                 .put("computer", computer == null ? "" : computer.name)
+                .put("computers", computers(store))
                 .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("notice", notice)
                 .put("termux", installed("com.termux")).put("permission", checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
                 .put("checks", checks == null ? JSONObject.NULL : checks)
@@ -223,6 +240,17 @@ final class ConnectionController extends ContextWrapper {
                 .put("notifications", getSystemService(android.app.NotificationManager.class).areNotificationsEnabled());
             view.render(state);
         } catch (Exception ignored) { }
+    }
+
+    /** Every paired computer, with the one remote work goes to marked. */
+    private static org.json.JSONArray computers(ConnectionStore store) throws org.json.JSONException {
+        ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
+        org.json.JSONArray computers = new org.json.JSONArray();
+        for (ConnectionStore.PairedServer server : store.pairedServers()) {
+            computers.put(new JSONObject().put("id", server.id).put("name", server.name)
+                .put("current", selected != null && selected.id.equals(server.id)));
+        }
+        return computers;
     }
 
     private boolean installed(String name) {

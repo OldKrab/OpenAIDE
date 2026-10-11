@@ -84,12 +84,25 @@ test('this phone’s code is requested only while its screen is open', () => {
 });
 
 test('a paired computer is named without interpreting its name as HTML', () => {
-  const view = setup({ initial: 'remote', paired: true, remote: false, computer: '<img src=x onerror=alert(1)>' });
+  const id = 'a'.repeat(64);
+  const view = setup({ initial: 'remote', paired: true, remote: false, computers: [{ id, name: '<img src=x onerror=alert(1)>', current: false }] });
   try {
     assert.equal(view.document.querySelectorAll('img').length, 0);
     assert.match(view.document.querySelector('.panel h2').textContent, /<img/);
-    view.document.querySelector('[data-action="paired"]').click();
-    assert.deepEqual(view.actions.at(-1), { action: 'paired' });
+    view.document.querySelector('[data-action="use_computer"]').click();
+    assert.deepEqual(view.actions.at(-1), { action: 'use_computer', id });
+  } finally { view.close(); }
+});
+
+test('settings list every place, mark the one in use and switch to the one tapped', () => {
+  const computers = [{ id: 'a'.repeat(64), name: 'Studio', current: true }, { id: 'b'.repeat(64), name: 'Laptop', current: false }];
+  const view = setup({ initial: 'settings', remote: true, paired: true, computer: 'Studio', computers, connected: true });
+  try {
+    assert.equal(view.document.querySelector('.row.current strong').textContent, 'Studio');
+    assert.equal(view.document.querySelectorAll('.row.current').length, 1);
+    view.document.querySelector('[data-action="use_computer"]').click();
+    assert.deepEqual(view.actions.at(-1), { action: 'use_computer', id: 'b'.repeat(64) });
+    assert.match(view.document.querySelector('[data-action="remote_screen"]').textContent, /Add another computer/);
   } finally { view.close(); }
 });
 
@@ -122,7 +135,7 @@ test('settings report the connection as it is, not as configured', () => {
 });
 
 test('remote screens say what the connection uses, and the local one does not', () => {
-  for (const state of [{ initial: 'remote' }, { initial: 'settings', remote: true, computer: 'Desk' }]) {
+  for (const state of [{ initial: 'remote' }, { initial: 'settings', remote: true, computer: 'Desk', computers: [{ id: 'a'.repeat(64), name: 'Desk', current: true }] }]) {
     const view = setup(state);
     try {
       view.document.getElementById('about').click();

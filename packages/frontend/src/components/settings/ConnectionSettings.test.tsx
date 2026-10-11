@@ -11,7 +11,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 function capability() {
   let state: ConnectionSnapshot = {
-    remote: false, paired: false, computer: "", busy: false, notice: "", termux: true, permission: true,
+    remote: false, paired: false, computer: "", computers: [], busy: false, notice: "", termux: true, permission: true,
     background: true, appBattery: true, termuxBattery: true, batterySaver: false, notifications: true, checks: null,
   };
   let listener = () => {};
@@ -54,17 +54,36 @@ it("pairs through the setup screen and never asks for an address or password", a
   expect(test.execute).toHaveBeenLastCalledWith({ action: "pair_setup" });
   act(() => tree.unmount());
 });
-it("returns to a paired computer without pairing again, and forgets the connected one", async () => {
+const studio = { id: "a".repeat(64), name: "Studio", current: false };
+const laptop = { id: "b".repeat(64), name: "Laptop", current: false };
+const press = (tree: ReturnType<typeof create>, label: string, index = 0) =>
+  act(async () => tree.root.findAllByType("button").filter(button => button.children.includes(label))[index]!.props.onClick());
+it("lists every paired computer and switches to the one chosen", async () => {
   const test = capability();
-  test.update({ paired: true, computer: "Studio" });
+  test.update({ paired: true, computers: [studio, laptop] });
   const tree = await render(test);
-  expect(JSON.stringify(tree.toJSON())).toContain("Studio");
-  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Connect to computer"))!.props.onClick());
-  expect(test.execute).toHaveBeenLastCalledWith({ action: "paired" });
-  act(() => test.update({ remote: true }));
-  expect(tree.root.findByProps({ className: "connection-status" }).children).toContain("Connected");
-  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Forget"))!.props.onClick());
-  expect(test.execute).toHaveBeenLastCalledWith({ action: "forget" });
+  const text = JSON.stringify(tree.toJSON());
+  expect(text).toContain("Studio");
+  expect(text).toContain("Laptop");
+  // This phone is in use, so only the two computers offer Use.
+  await press(tree, "Use", 1);
+  expect(test.execute).toHaveBeenLastCalledWith({ action: "use_computer", id: laptop.id });
+  act(() => test.update({ remote: true, computer: "Laptop", computers: [studio, { ...laptop, current: true }] }));
+  expect(tree.root.findAllByProps({ className: "connection-status" })).toHaveLength(1);
+  act(() => tree.unmount());
+});
+it("forgets a computer only after the user confirms", async () => {
+  const test = capability();
+  test.update({ remote: true, paired: true, computer: "Studio", computers: [{ ...studio, current: true }, laptop] });
+  const tree = await render(test);
+  await press(tree, "Forget", 0);
+  expect(test.execute).toHaveBeenCalledTimes(1);
+  expect(tree.root.findByProps({ role: "alertdialog" }).findByType("p").children.join("")).toContain("Work moves to this phone");
+  await press(tree, "Keep");
+  expect(tree.root.findAllByProps({ role: "alertdialog" })).toHaveLength(0);
+  await press(tree, "Forget", 1);
+  await press(tree, "Forget", 2);
+  expect(test.execute).toHaveBeenLastCalledWith({ action: "forget_computer", id: laptop.id });
   act(() => tree.unmount());
 });
 it("shows a recoverable error instead of loading forever", async () => {
@@ -78,16 +97,16 @@ it("shows a recoverable error instead of loading forever", async () => {
 });
 it("switches back to this phone only when asked", async () => {
   const test = capability();
-  test.update({ remote: true, paired: true, computer: "Studio" });
+  test.update({ remote: true, paired: true, computer: "Studio", computers: [{ id: "a".repeat(64), name: "Studio", current: true }] });
   const tree = await render(test);
   expect(test.execute).toHaveBeenCalledTimes(1);
-  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Connect to this phone"))!.props.onClick());
+  await act(async () => tree.root.findAllByType("button").find(button => button.children.includes("Use"))!.props.onClick());
   expect(test.execute).toHaveBeenLastCalledWith({ action: "local" });
   act(() => tree.unmount());
 });
 it("keeps phone-only tools out of remote settings", async () => {
   const test = capability();
-  test.update({ remote: true, paired: true, computer: "Studio" });
+  test.update({ remote: true, paired: true, computer: "Studio", computers: [{ id: "a".repeat(64), name: "Studio", current: true }] });
   const tree = await render(test);
   const text = JSON.stringify(tree.toJSON());
   expect(text).toContain("Remote computer");
