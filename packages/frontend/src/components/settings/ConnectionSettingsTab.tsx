@@ -35,68 +35,66 @@ export function ConnectionSettingsTab({ capability }: { capability: ConnectionSe
   const needsTools = checks && ["node", "nodeVersion", "git", "npm", "codex", "runtime", "frontend", "supervisor"].some(key => !checks[key]);
   return (
     <div className="general-settings-panel" aria-busy={busy}>
-      <GeneralSection id="settings-connection-workspace" label="Connected to" description="Your projects and conversations stay on the device where agents run.">
-        <div className="general-preference-surface connection-current">
+      <GeneralSection id="settings-connection-workspace" label="Connected to">
+        <div className="general-preference-surface">
           <GeneralPreferenceRow label={state.remote ? state.computer || "Remote computer" : "This phone"}
             icon={state.remote ? <Laptop size={17} /> : <Smartphone size={17} />}
-            detail={state.remote ? "Work runs on your computer, even when your phone is locked." : "Agents run in Termux on this phone. OpenAIDE starts Termux when needed."}
+            detail={state.remote ? "Remote computer" : "Runs in Termux"}
             action={<span className="connection-status">Connected</span>} />
         </div>
       </GeneralSection>
 
-      <GeneralSection id="settings-connection-switch" label="Switch"
-        description={state.paired ? "Forgetting a computer only stops this phone from connecting. Remove the phone in Settings → Devices on the computer to end its access." : "No account or password. On your computer, open Settings → Devices and choose Show code, then scan it with this phone."}>
+      <GeneralSection id="settings-connection-switch" label="Switch">
         <div className="general-preference-surface">
           {state.remote ? (
             <>
-              <GeneralPreferenceRow label="Use this phone" icon={<Smartphone size={17} />} detail="Switch to the projects and conversations stored on this phone. Remote work is not stopped."
+              <GeneralPreferenceRow label="This phone" icon={<Smartphone size={17} />}
                 action={button("Connect to this phone", { action: "local" })} />
-              <GeneralPreferenceRow label={`Forget ${state.computer || "this computer"}`} icon={<Laptop size={17} />} detail="Stop connecting to this computer from this phone."
+              <GeneralPreferenceRow label={state.computer || "This computer"} icon={<Laptop size={17} />} detail="Stop connecting from this phone"
                 action={button("Forget", { action: "forget" })} />
             </>
           ) : state.paired ? (
-            <GeneralPreferenceRow label={state.computer || "Paired computer"} icon={<Laptop size={17} />} detail="This phone is still trusted by this computer."
+            <GeneralPreferenceRow label={state.computer || "Paired computer"} icon={<Laptop size={17} />} detail="Paired"
               action={button("Connect to computer", { action: "paired" })} />
           ) : null}
-          <GeneralPreferenceRow label={state.paired || state.remote ? "Pair another computer" : "Pair with a computer"} icon={<QrCode size={17} />}
-            detail="Scan or paste a code from OpenAIDE on a computer."
-            action={button(state.paired || state.remote ? "Pair another" : "Pair", { action: "pair_setup" })} />
+          <GeneralPreferenceRow label={state.paired || state.remote ? "Another computer" : "A computer"} icon={<QrCode size={17} />}
+            action={button("Pair", { action: "pair_setup" })} />
         </div>
       </GeneralSection>
 
       {!state.remote ? (
         <GeneralSection id="settings-connection-background" label="Background work">
           <div className="general-preference-surface">
-            <GeneralPreferenceRow label="Continue while locked" icon={<Battery size={17} />} detail="Keep active work running when you leave the app or lock your phone. Extra protection stops when work finishes."
+            <GeneralPreferenceRow label="Continue while locked" icon={<Battery size={17} />}
               action={<SettingsSwitch checked={state.background} disabled={busy} label="Continue while locked" onChange={enabled => { void execute({ action: "background", enabled }); }} />} />
             {state.background && (!state.appBattery || !state.termuxBattery) ? (
-              <GeneralPreferenceRow label="Allow background activity" icon={<Battery size={17} />} detail="Set OpenAIDE and Termux to unrestricted battery use so Android does not pause active work."
+              <GeneralPreferenceRow label="Allow background activity" icon={<Battery size={17} />} detail="Unrestricted battery use for OpenAIDE and Termux"
                 action={button("Open settings", { action: "battery" })} />
             ) : null}
             {state.background && !state.notifications ? (
-              <GeneralPreferenceRow label="Work notification" icon={<Bell size={17} />} detail="Allow notifications to see and stop background work."
+              <GeneralPreferenceRow label="Work notification" icon={<Bell size={17} />} detail="See and stop background work"
                 action={button("Allow", { action: "app_settings" })} />
             ) : null}
           </div>
-          {state.background && state.batterySaver ? <InlineNotice message="Battery Saver is on. Android may delay work even with background activity allowed." /> : null}
+          {state.background && state.batterySaver ? <InlineNotice message="Battery Saver is on. Android may pause work." /> : null}
         </GeneralSection>
-      ) : <InlineNotice message="Keep your computer awake and connected. Remote work continues there when you close OpenAIDE or lock your phone." />}
+      ) : null}
 
       <details className="general-settings-section">
         <summary className="general-settings-section-heading">Advanced</summary>
         <div className="general-preference-surface">
           {!state.remote ? <>
-            <GeneralPreferenceRow label="Check phone setup" detail="Check Termux access, required tools, and agent sign-in." icon={<Smartphone size={17} />} action={button("Check", { action: "check" })} />
-            {!state.termux ? <GeneralPreferenceRow label="Install Termux" detail="Termux runs your local workspace." icon={<Smartphone size={17} />} action={button("Get Termux", { action: "get_termux" })} />
-              : !state.permission ? <GeneralPreferenceRow label="Termux access" detail="Allow OpenAIDE to start local work for you." icon={<Smartphone size={17} />} action={button("Allow", { action: "grant" })} /> : null}
-            {needsTools ? <GeneralPreferenceRow label="Required tools" detail="Install missing workspace tools without deleting your projects." icon={<RefreshCcw size={17} />} action={button("Install", { action: "install" })} /> : null}
-            {checks && checks.codex && !checks.codexVersion ? <GeneralPreferenceRow label="Agent version" detail="This installation requires Codex 0.153.3. Update it in Termux, then check again." icon={<Smartphone size={17} />} action={button("Open Termux", { action: "termux" })} /> : null}
-            {checks && !checks.authenticated ? <GeneralPreferenceRow label="Agent sign-in" detail="The sign-in command will be copied. Paste it in Termux to continue." icon={<Smartphone size={17} />} action={button("Sign in", { action: "signin" })} /> : null}
+            <GeneralPreferenceRow label="Check phone setup" icon={<Smartphone size={17} />} action={button("Check", { action: "check" })} />
+            {!state.termux ? <GeneralPreferenceRow label="Install Termux" icon={<Smartphone size={17} />} action={button("Get Termux", { action: "get_termux" })} />
+              : !state.permission ? <GeneralPreferenceRow label="Termux access" icon={<Smartphone size={17} />} action={button("Allow", { action: "grant" })} /> : null}
+            {needsTools ? <GeneralPreferenceRow label="Required tools" detail="Your projects are kept" icon={<RefreshCcw size={17} />} action={button("Install", { action: "install" })} /> : null}
+            {checks && checks.codex && !checks.codexVersion ? <GeneralPreferenceRow label="Agent version" detail="Requires Codex 0.153.3" icon={<Smartphone size={17} />} action={button("Open Termux", { action: "termux" })} /> : null}
+            {checks && !checks.authenticated ? <GeneralPreferenceRow label="Agent sign-in" detail="Paste the copied command in Termux" icon={<Smartphone size={17} />} action={button("Sign in", { action: "signin" })} /> : null}
             {checks && !needsTools && checks.authenticated && checks.codexVersion ? <InlineNotice message="Your phone is ready for local work." /> : null}
-            <GeneralPreferenceRow label="Reconnect Termux" detail="Repair the saved connection without deleting projects or conversations." icon={<RefreshCcw size={17} />} action={button("Reconnect", { action: "repair" })} />
-            <GeneralPreferenceRow label="Start after reboot" detail="Optional. Termux:Boot can start your workspace after a phone restart." icon={<Smartphone size={17} />} action={button(state.boot ? "Set up" : "Get Termux:Boot", { action: state.boot ? "boot" : "get_boot" })} />
+            <GeneralPreferenceRow label="Reconnect Termux" detail="Nothing is deleted" icon={<RefreshCcw size={17} />} action={button("Reconnect", { action: "repair" })} />
+            <GeneralPreferenceRow label="Start after reboot" detail="Needs Termux:Boot" icon={<Smartphone size={17} />} action={button(state.boot ? "Set up" : "Get Termux:Boot", { action: state.boot ? "boot" : "get_boot" })} />
           </> : null}
-          <GeneralPreferenceRow label="Connection diagnostics" detail="Share connection and background-service events. Sign-in details are not included." icon={<Bug size={17} />} action={button("Share", { action: "diagnostics" })} />
+          <GeneralPreferenceRow label="Connection diagnostics" detail="No conversations or credentials" icon={<Bug size={17} />} action={button("Share", { action: "diagnostics" })} />
         </div>
       </details>
       {state.notice ? <div role="status"><InlineNotice message={state.notice} /></div> : null}

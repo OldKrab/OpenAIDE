@@ -4,14 +4,13 @@ import type {
   DevicesPreviewJoinRequestResult,
   RemoteDeviceSummary,
 } from "@openaide/app-server-client";
-import { Copy, Keyboard, Laptop, QrCode, Smartphone, Trash2 } from "lucide-react";
+import { Copy, Info, Keyboard, Laptop, QrCode, Smartphone, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { encode } from "uqr";
 
 import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
 import { copyText } from "../clipboard";
 import { PopupDialog } from "../Popup";
-import { GeneralPreferenceRow, GeneralSection } from "./GeneralSettingsTab";
 import { InlineNotice } from "./settingsPresentation";
 
 type Dialog =
@@ -39,55 +38,55 @@ export function DevicesSettingsTab({
   const remoteDevices = devices.devices ?? [];
   return (
     <div className="general-settings-panel device-settings">
-      <GeneralSection
-        description="Use OpenAIDE on a phone or another computer. A paired device has full access to this OpenAIDE."
-        id="settings-devices-add"
-        label="Add a device"
-      >
-        <div className="general-preference-surface">
-          <GeneralPreferenceRow
-            action={<button className="device-action" onClick={() => setDialog({ kind: "invite" })} type="button">Show code</button>}
-            detail="Scan or type it in OpenAIDE on the new device."
-            icon={<QrCode size={16} />}
-            label="Show a pairing code"
-          />
-          <GeneralPreferenceRow
-            action={<button className="device-action" onClick={() => setDialog({ kind: "join" })} type="button">Enter code</button>}
-            detail="Use this when the new device shows a code instead."
-            icon={<Keyboard size={16} />}
-            label="Enter a code from the device"
-          />
-        </div>
-        {devices.remoteAccess === "off" ? (
-          <p className="device-relay-notice">
-            Adding a device turns on remote access. Connections are encrypted end to end. When the two
-            devices cannot reach each other directly, traffic passes through public relays run by the
-            iroh project, which see the network addresses and public keys of both ends but none of the content.
-          </p>
-        ) : null}
-      </GeneralSection>
-
-      <GeneralSection id="settings-devices-list" label="Devices">
+      <section className="general-settings-section" aria-labelledby="settings-devices-heading" id="settings-devices-list" tabIndex={-1}>
+        <header className="device-heading">
+          <h2 id="settings-devices-heading">Paired devices</h2>
+          <div className="device-heading-actions">
+            <button className="device-action" onClick={() => setDialog({ kind: "join" })} type="button">
+              <Keyboard size={14} />
+              Enter code
+            </button>
+            <button className="device-action primary" onClick={() => setDialog({ kind: "invite" })} type="button">
+              <QrCode size={14} />
+              Show code
+            </button>
+          </div>
+        </header>
         {devices.remoteAccess === "failed" ? (
           <p className="device-access-failed" role="alert">
             Remote access could not start, so paired devices cannot connect. Check the network and restart OpenAIDE.
           </p>
         ) : null}
-        {devices.remoteAccess === "starting" ? <InlineNotice message="Starting remote access…" /> : null}
         <ul className="device-list" aria-label="Devices">
           <li className="device-row">
-            <span className="general-preference-icon"><Laptop size={16} /></span>
+            <span className="device-avatar"><Laptop size={18} /></span>
             <span className="device-copy">
               <strong>{devices.serverName}</strong>
-              <small>This computer · runs the App Server</small>
+              <small>This computer</small>
             </span>
+            {devices.remoteAccess === "starting" ? <span className="device-chip">Starting remote access…</span> : null}
           </li>
           {remoteDevices.map((device) => (
             <DeviceRow device={device} key={device.deviceId} onRemove={() => setDialog({ kind: "remove", device })} />
           ))}
+          {remoteDevices.length === 0 ? (
+            <li className="device-empty">
+              <span className="device-avatar ghost"><Smartphone size={18} /></span>
+              <span>No other devices are paired.</span>
+            </li>
+          ) : null}
         </ul>
-        {remoteDevices.length === 0 ? <p className="device-empty">No other devices are paired.</p> : null}
-      </GeneralSection>
+        {devices.remoteAccess === "off" ? (
+          <details className="device-relay-notice">
+            <summary><Info size={13} /> Adding a device turns on remote access</summary>
+            <p>
+              Connections are encrypted end to end. When the two devices cannot reach each other directly,
+              traffic passes through public relays run by the iroh project, which see the network addresses
+              and public keys of both ends but none of the content.
+            </p>
+          </details>
+        ) : null}
+      </section>
 
       {dialog?.kind === "invite" ? <InviteDialog devices={remoteDevices} intents={intents} onClose={close} /> : null}
       {dialog?.kind === "join" ? <JoinDialog intents={intents} onClose={close} /> : null}
@@ -98,31 +97,27 @@ export function DevicesSettingsTab({
 
 function DeviceRow({ device, onRemove }: { device: RemoteDeviceSummary; onRemove: () => void }) {
   const connection = device.connection ?? undefined;
+  const added = `Added ${formatMoment(device.addedAtMs)}${device.addedBy ? ` from ${device.addedBy}` : ""}`;
   return (
     <li className="device-row">
-      <span className="general-preference-icon"><Smartphone size={16} /></span>
+      <span className="device-avatar"><Smartphone size={18} /></span>
       <span className="device-copy">
-        <strong>
-          {device.name}
-          {device.model && device.model !== device.name ? <span className="device-model">{device.model}</span> : null}
-        </strong>
-        <small>
-          {connection ? (
-            <span className="device-connected">
-              Connected · {connection.path === "direct" ? "direct" : "through a relay"}
-              {connection.address ? ` · ${connection.address}` : ""}
-            </span>
-          ) : (
-            <span>{device.lastSeenAtMs ? `Last seen ${formatMoment(device.lastSeenAtMs)}` : "Not connected yet"}</span>
-          )}
-        </small>
-        <small>
-          Added {formatMoment(device.addedAtMs)}
-          {device.addedBy ? ` from ${device.addedBy}` : ""}
+        <strong>{device.name}</strong>
+        <small title={added}>
+          {device.model && device.model !== device.name ? `${device.model} · ` : ""}
+          {connection ? added : device.lastSeenAtMs ? `Last seen ${formatMoment(device.lastSeenAtMs)}` : "Not connected yet"}
         </small>
       </span>
+      {connection ? (
+        <span className="device-chip connected">
+          Connected · {connection.path === "direct" ? "direct" : "through a relay"}
+          {connection.address ? ` · ${connection.address}` : ""}
+        </span>
+      ) : (
+        <span className="device-chip">Offline</span>
+      )}
       <button aria-label={`Remove ${device.name}`} className="device-remove" onClick={onRemove} title="Remove device" type="button">
-        <Trash2 size={14} />
+        <Trash2 size={15} />
       </button>
     </li>
   );

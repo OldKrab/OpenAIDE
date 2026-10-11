@@ -109,7 +109,7 @@ public final class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText("OpenAIDE");
         title.setTextSize(24);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         title.setTextColor(shellText());
         title.setGravity(Gravity.CENTER);
         layout.addView(title, centered(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 16));
@@ -128,27 +128,27 @@ public final class MainActivity extends Activity {
         connect.setText("Open workspace");
         connect.setAllCaps(false);
         connect.setTextSize(15);
-        connect.setTypeface(Typeface.DEFAULT_BOLD);
-        connect.setTextColor(shellOnAccent());
+        connect.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        connect.setTextColor(shellBackground());
         connect.setStateListAnimator(null);
         android.graphics.drawable.GradientDrawable fill = new android.graphics.drawable.GradientDrawable();
-        fill.setColor(shellAccent());
-        fill.setCornerRadius(dp(10));
+        fill.setColor(shellText());
+        fill.setCornerRadius(dp(26));
         connect.setBackground(fill);
         connect.setOnClickListener(view -> requestConnection());
-        layout.addView(connect, centered(dp(240), dp(48), 24));
+        layout.addView(connect, centered(dp(260), dp(52), 28));
         setup = new Button(this);
         setup.setText("Connection settings");
         setup.setAllCaps(false);
         setup.setTextSize(15);
-        setup.setTextColor(shellAccent());
+        setup.setTextColor(shellText());
         setup.setStateListAnimator(null);
         setup.setBackgroundColor(Color.TRANSPARENT);
         setup.setOnClickListener(view -> {
             pendingSettings = false;
             openSetup(getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false) ? "settings" : "welcome");
         });
-        layout.addView(setup, centered(dp(240), dp(48), 8));
+        layout.addView(setup, centered(dp(260), dp(48), 4));
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(layout);
@@ -610,12 +610,10 @@ public final class MainActivity extends Activity {
             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
 
-    // Colors follow DESIGN.md and match the setup screens' tokens.
-    private int shellBackground() { return darkTheme() ? 0xff1f2229 : 0xfff6f7f9; }
-    private int shellText() { return darkTheme() ? 0xffe4e7ec : 0xff2a2e36; }
-    private int shellMuted() { return darkTheme() ? 0xffa7aebb : 0xff626a78; }
-    private int shellAccent() { return darkTheme() ? 0xff7fb0f5 : 0xff2f6fd0; }
-    private int shellOnAccent() { return darkTheme() ? 0xff1f2229 : 0xfffcfcfd; }
+    // Neutral colors matching the setup screens: the primary button is text-on-background inverted.
+    private int shellBackground() { return darkTheme() ? 0xff1b1d22 : 0xfff6f7f9; }
+    private int shellText() { return darkTheme() ? 0xffeceef1 : 0xff23262d; }
+    private int shellMuted() { return darkTheme() ? 0xff9da3ae : 0xff666d7a; }
 
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density); }
 

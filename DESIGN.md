@@ -127,8 +127,9 @@ Modern is a requirement with concrete properties, not a mood and not a trend to 
 - **Current platform conventions.** Each shell follows the present-day conventions of its platform for navigation, controls, sheets, gestures, safe areas, and motion. Stock or legacy-looking controls are replaced or themed.
 - **Composed, not stacked.** A screen has one clear focal point and a deliberate composition. A page built as a vertical stack of equal bordered boxes, each holding an icon, a heading, and a sentence, reads as a form generator and is not acceptable as a finished design.
 - **Visual communication first.** Hierarchy, iconography, illustration of the real object (a code, a device, a connection), status color with a paired label, and layout carry the meaning before prose does.
-- **Depth and material with a purpose.** Tonal layers, soft elevation, and generous radii on focused surfaces give the interface a tactile, current feel. Flat grey rectangles separated by hairlines are the dated default to move away from.
-- **Confident scale.** Primary content and the primary action are large enough to own the screen. Touch shells use comfortable targets and thumb-reachable primary actions.
+- **Calm and neutral.** The reference is the current generation of assistant apps: soft neutral surfaces, medium-weight type, plenty of space, and very few elements per screen. Surfaces separate by tone; colour is reserved for status and focus.
+- **No cartoon.** Coloured icon tiles, large tinted shapes, heavy bold headings, glowing or animated ornaments, thick outlines, and oversized filled blocks make the product look like a toy. Icons are thin, monochrome, and unboxed. The primary action is a single quiet, high-contrast button; secondary actions are text.
+- **Right-sized.** Primary content and the primary action are easy to find and reach without shouting. Touch shells use comfortable targets and keep primary actions within thumb reach.
 - **Responsive feedback.** Every press, load, success, and failure has an immediate designed response. Motion explains the change and stays short.
 - **Finished details.** Empty, loading, error, and success states, focus rings, selection, and both themes are designed to the same level as the default state.
 

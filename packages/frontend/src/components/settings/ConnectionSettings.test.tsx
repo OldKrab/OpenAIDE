@@ -90,7 +90,7 @@ it("keeps phone-only tools out of remote settings", async () => {
   test.update({ remote: true, paired: true, computer: "Studio" });
   const tree = await render(test);
   const text = JSON.stringify(tree.toJSON());
-  expect(text).toContain("Keep your computer awake");
+  expect(text).toContain("Remote computer");
   expect(text).not.toContain("Continue while locked");
   expect(text).not.toContain("Reconnect Termux");
   act(() => tree.unmount());

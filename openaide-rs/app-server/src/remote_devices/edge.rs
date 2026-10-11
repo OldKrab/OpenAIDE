@@ -27,6 +27,8 @@ use crate::logging;
 const PAIRING_ALPN: &[u8] = b"openaide/pair/1";
 const CLOSE_UNTRUSTED: u32 = 1;
 const CLOSE_REMOVED: u32 = 2;
+/// Time a removed device's connection stays open so the removal reply can be delivered.
+const REMOVAL_CLOSE_GRACE: Duration = Duration::from_millis(750);
 const CLOSE_UNKNOWN_PROTOCOL: u32 = 3;
 const PAIRING_STEP_TIMEOUT: Duration = Duration::from_secs(15);
 const PAIRING_MESSAGE_LIMIT: usize = 4096;
@@ -127,9 +129,15 @@ async fn run(
                         .expect("remote connections lock poisoned")
                         .remove(&device)
                         .unwrap_or_default();
-                    for connection in removed {
-                        connection.close(CLOSE_REMOVED.into(), b"removed");
-                    }
+                    // The removal reply may travel over the very connection being closed,
+                    // for example when a phone removes itself. Closing at once would drop
+                    // that reply and leave the device's Frontend waiting forever.
+                    tokio::spawn(async move {
+                        tokio::time::sleep(REMOVAL_CLOSE_GRACE).await;
+                        for connection in removed {
+                            connection.close(CLOSE_REMOVED.into(), b"removed");
+                        }
+                    });
                 }
             },
             incoming = accept(&endpoint) => match incoming {
