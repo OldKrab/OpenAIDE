@@ -4,7 +4,6 @@ import {
   type RefObject,
   useEffect,
   useLayoutEffect,
-  useRef,
   useState,
 } from "react";
 import type { AgentAccountLimits, AgentAccountLimitWindow } from "@openaide/app-server-client";
@@ -22,7 +21,6 @@ const WINDOW_MS: Record<AgentAccountLimitWindow["kind"], number> = {
   weeklyModel: 7 * 24 * 60 * 60 * 1000,
 };
 
-const ANNOUNCE_MS = 2600;
 /** Keeps the meters on the straight part of the border, clear of the corner curve. */
 const EDGE_CORNER_GAP = 4;
 const EDGE_HEIGHT = 8;
@@ -53,49 +51,34 @@ export function AccountLimitsIndicator({
   const radius = useComposerCornerRadius(hostRef, compact);
   const clock = useMinuteClock(now, limits !== undefined);
   const primary = limits ? headlineWindow(limits.windows) : undefined;
-  const announce = useStepAnnouncement(primary);
 
   if (!limits || !primary) return null;
 
   const segments = edgeWindows(limits.windows);
-  // The compact Composer has no room for two lines beside the corner, so it names the headline only.
-  const summary = (compact ? [primary] : limits.windows.filter((window) => window.kind !== "weeklyModel"))
-    .map((window) => ({ window, text: `${windowLabel(window)} ${amountLabel(window)}`, reset: resetLabel(window, clock) }));
 
   return (
-    <>
-      <PopupPanel
-        anchorRef={hostRef}
-        className="account-limits-popup"
-        label={`${agentLabel} limits`}
-        onOpenChange={onOpenChange}
-        open={open}
-        placement="top-end"
-        trigger={(props) => (
-          <button
-            {...props}
-            aria-label={`${agentLabel} ${windowLabel(primary).toLowerCase()}: ${amountLabel(primary)}. Show limits`}
-            className={`account-limits-edge account-limits-${windowTone(primary, clock)}`}
-            data-compact={compact}
-            style={{ right: radius + EDGE_CORNER_GAP }}
-            type="button"
-          >
-            <EdgeSegments clock={clock} length={compact ? 50 : 52} windows={segments} />
-          </button>
-        )}
-      >
-        <AccountLimitsDetails agentLabel={agentLabel} clock={clock} limits={limits} onClose={() => onOpenChange(false)} />
-      </PopupPanel>
-      {!open ? (
-        <span className="account-limits-label" data-announce={announce} role="tooltip">
-          {summary.map(({ window, text, reset }) => (
-            <span className={`account-limits-${windowTone(window, clock)}`} key={window.kind}>
-              {text}{reset ? ` · resets ${reset}` : ""}
-            </span>
-          ))}
-        </span>
-      ) : null}
-    </>
+    <PopupPanel
+      anchorRef={hostRef}
+      className="account-limits-popup"
+      label={`${agentLabel} limits`}
+      onOpenChange={onOpenChange}
+      open={open}
+      placement="top-end"
+      trigger={(props) => (
+        <button
+          {...props}
+          aria-label={`${agentLabel} ${windowLabel(primary).toLowerCase()}: ${amountLabel(primary)}. Show limits`}
+          className={`account-limits-edge account-limits-${windowTone(primary, clock)}`}
+          data-compact={compact}
+          style={{ right: radius + EDGE_CORNER_GAP }}
+          type="button"
+        >
+          <EdgeSegments clock={clock} length={compact ? 50 : 52} windows={segments} />
+        </button>
+      )}
+    >
+      <AccountLimitsDetails agentLabel={agentLabel} clock={clock} limits={limits} onClose={() => onOpenChange(false)} />
+    </PopupPanel>
   );
 }
 
@@ -205,28 +188,6 @@ function useMinuteClock(now: () => number, active: boolean) {
     return () => window.clearInterval(timer);
   }, [active, now]);
   return clock;
-}
-
-/**
- * The fill moves on every update, but the label only speaks up when usage crosses a 10% step, so
- * most turns leave the corner still.
- */
-function useStepAnnouncement(primary: AgentAccountLimitWindow | undefined) {
-  const [announce, setAnnounce] = useState(false);
-  const step = primary ? Math.floor(clampPercent(primary.usedPercent) / 10) : undefined;
-  const key = primary?.kind;
-  const seen = useRef<{ key?: string; step?: number }>({ key, step });
-  useEffect(() => {
-    const previous = seen.current;
-    seen.current = { key, step };
-    if (step === undefined || previous.step === undefined || previous.key !== key || step <= previous.step) {
-      return undefined;
-    }
-    setAnnounce(true);
-    const timer = window.setTimeout(() => setAnnounce(false), ANNOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [key, step]);
-  return announce;
 }
 
 /** The window the user must hear about first: reached, then warning, else the 5-hour window. */

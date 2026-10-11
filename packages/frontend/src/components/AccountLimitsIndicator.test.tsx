@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// timing-file: mocked — the announcement window runs on Vitest fake timers.
+// timing-file: mocked — reset labels read a clock pinned by Vitest fake timers.
 
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -53,22 +53,18 @@ async function render(accountLimits?: AgentAccountLimits) {
 }
 
 const edge = () => container.querySelector<HTMLButtonElement>(".account-limits-edge");
-const label = () => container.querySelector<HTMLElement>(".account-limits-label");
 
 describe("Composer account limits", () => {
   it("draws nothing until the Agent has reported limits", async () => {
     await render();
     expect(edge()).toBeNull();
-    expect(label()).toBeNull();
   });
 
   it("names the 5-hour window and keeps the per-model window off the border", async () => {
     await render(limits(38));
     expect(edge()?.getAttribute("aria-label")).toBe("Claude 5-hour limit: 62% left. Show limits");
     expect(container.querySelectorAll(".account-limits-segment")).toHaveLength(2);
-    expect(label()?.textContent).toContain("5-hour limit 62% left · resets at");
-    expect(label()?.textContent).toContain("Weekly limit 78% left · resets on");
-    expect(label()?.textContent).not.toContain("Opus");
+    expect(container.textContent).not.toContain("Opus");
   });
 
   it("leads with the window that is reached", async () => {
@@ -104,21 +100,7 @@ describe("Composer account limits", () => {
     expect(edge()?.classList.contains("account-limits-fast")).toBe(true);
   });
 
-  it("announces a crossed 10% step and stays quiet inside one", async () => {
-    await render(limits(38));
-    expect(label()?.dataset.announce).toBe("false");
-
-    await render(limits(39));
-    expect(label()?.dataset.announce).toBe("false");
-
-    await render(limits(42));
-    expect(label()?.dataset.announce).toBe("true");
-
-    await act(async () => vi.advanceTimersByTime(3_000));
-    expect(label()?.dataset.announce).toBe("false");
-  });
-
-  it("keeps both windows on the compact border and names only the headline one", async () => {
+  it("keeps both windows on the compact border", async () => {
     media.matches = true;
     const value = limits(24);
     value.windows[1] = { ...value.windows[1]!, status: "warning", usedPercent: 91 };
@@ -127,8 +109,7 @@ describe("Composer account limits", () => {
     const segments = container.querySelectorAll(".account-limits-segment");
     expect(segments).toHaveLength(2);
     expect(segments[1]?.classList.contains("account-limits-warning")).toBe(true);
-    expect(label()?.children).toHaveLength(1);
-    expect(label()?.textContent).toContain("Weekly limit 9% left");
+    expect(edge()?.getAttribute("aria-label")).toBe("Claude weekly limit: 9% left. Show limits");
   });
 
   it("closes the context details when the limits open, and the reverse", async () => {
