@@ -123,7 +123,11 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
     chatScroll.virtualizer.resizeItem(index, row.offsetHeight);
   }, [chatScroll.virtualizer]);
   return (
-    <div className="message-list-shell" data-more-below={String(chatScroll.moreBelow)}>
+    <div
+      className="message-list-shell"
+      data-more-above={String(chatScroll.moreAbove)}
+      data-more-below={String(chatScroll.moreBelow)}
+    >
       <div
         className="message-list"
         onKeyDown={chatScroll.onKeyDown}

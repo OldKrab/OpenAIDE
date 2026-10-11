@@ -1,0 +1,222 @@
+/*
+ * macOS Desktop work well. The sidebar and the Task header form one chrome
+ * plane, and the work surface is pressed into it: the chrome casts a soft
+ * shadow onto the surface's edges, so the surface reads as lower than the
+ * chrome instead of floating above it.
+ *
+ * The well is one plate owned by the main surface, not by the view inside it.
+ * Views are swapped whole when a Task opens or closes, so anything they own can
+ * only snap; the plate outlives the swap and can travel. A Task drops it below
+ * the Task header and rounds its corner. New Task has no header, so the plate
+ * rises to the window top and keeps the sidebar's edge alone.
+ */
+body[data-shell="desktop"][data-platform="macos"] .app-sidebar-frame {
+  /* Height of the Task header: how far a Task drops the plate. */
+  --oa-work-well-band: 44px;
+  /* 1 while the sidebar wraps the left edge, 0 when the well meets the window
+     edge: a side shadow there would have nothing above it to cast it. */
+  --oa-work-well-left: 1;
+  --oa-work-well-near: color-mix(in oklch, black 10%, transparent);
+  --oa-work-well-far: color-mix(in oklch, black 5%, transparent);
+  /* Long, strongly decelerating travel: the plate is the largest thing on
+     screen, so it should land softly rather than tick over like a control. */
+  --oa-work-well-travel: 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Dark surfaces absorb shadow, so the same depth needs far more ink. */
+body[data-shell="desktop"][data-platform="macos"][data-theme="dark"] .app-sidebar-frame {
+  --oa-work-well-near: color-mix(in oklch, black 42%, transparent);
+  --oa-work-well-far: color-mix(in oklch, black 24%, transparent);
+}
+
+body[data-shell="desktop"][data-platform="macos"] .app-sidebar-frame.sidebar-collapsed {
+  --oa-work-well-left: 0;
+}
+
+/* The chrome color sits behind the plate and shows wherever the plate has
+   moved away. The plate's shade replaces the Web shell's sidebar-edge vignette. */
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface {
+  position: relative;
+  background: var(--oa-panel);
+  box-shadow: none;
+}
+
+/* Views paint nothing of their own here, so the plate shows through them.
+   Positioning the view keeps it above the plate in paint order. */
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface > .task-surface {
+  position: relative;
+  background: transparent;
+}
+
+body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .task-work-stack-header {
+  background: transparent;
+}
+
+/*
+ * ::before is the plate, ::after its shade. The shade is a separate layer above
+ * the view so docked children with their own background (Composer) cannot
+ * paint over it and the left edge runs unbroken to the window bottom.
+ *
+ * The plate travels by `top`, not by transform. A translated plate would hang
+ * below the window, and the app shell would then have something to scroll to:
+ * the first focus or scroll-into-view inside Chat would drag the whole window
+ * content up by the band. Both layers are childless, so the layout cost of
+ * animating `top` is the two boxes themselves.
+ */
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface::before,
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  transition:
+    top var(--oa-work-well-travel),
+    border-top-left-radius var(--oa-work-well-travel),
+    box-shadow var(--oa-work-well-travel);
+}
+
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface::before {
+  background: var(--oa-bg);
+}
+
+/*
+ * Each shade layer is one inset shadow whose negative spread equals its offset:
+ * the shaded edges land exactly on the plate's edges and the others fall
+ * outside it. One shape per layer follows the rounded corner at even strength,
+ * where separate top and left shadows would double up there. Both layers are
+ * soft on purpose: a tight one collapses into a grey line. The near layer
+ * darkens the edge the chrome overhangs, the far one fades the depth out.
+ * Without a header there is no chrome above, so only the sidebar shades.
+ */
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface::after {
+  z-index: 1;
+  box-shadow:
+    inset calc(var(--oa-work-well-left) * 3px) 0 6px -3px var(--oa-work-well-near),
+    inset calc(var(--oa-work-well-left) * 10px) 0 20px -10px var(--oa-work-well-far);
+}
+
+/*
+ * The plate is down for a Task and for a Task that is still loading. Loading
+ * holds the band on purpose: switching Tasks passes through it, and a plate
+ * that rose for those few frames would bounce on every switch. The App Server
+ * error surface is not a Task and stays headerless.
+ */
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface:has(> .task-work-stack, > .task-loading:not(.app-server-error))::before,
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface:has(> .task-work-stack, > .task-loading:not(.app-server-error))::after {
+  top: var(--oa-work-well-band);
+  border-top-left-radius: calc(var(--oa-work-well-left) * var(--oa-radius-lg));
+}
+
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface:has(> .task-work-stack, > .task-loading:not(.app-server-error))::after {
+  box-shadow:
+    inset calc(var(--oa-work-well-left) * 3px) 3px 6px -3px var(--oa-work-well-near),
+    inset calc(var(--oa-work-well-left) * 10px) 10px 20px -10px var(--oa-work-well-far);
+}
+
+/* The sidebar keeps the Task header's clearance on headerless surfaces too, so
+   its content does not jump when a Task opens or closes. */
+body[data-shell="desktop"][data-platform="macos"] .web-workbench-shell.app-sidebar-frame-with-overlay-header .sidebar {
+  padding-top: 45px;
+}
+
+/* With the sidebar hidden, its expand control sits beside the traffic lights on
+   every surface: at its default offset it would straddle the well's top edge
+   under a Task, and it must not move when a Task opens. It shares the lights'
+   centerline, which the native window places higher than the band's own
+   center. It sits above the title bar's drag region so it stays clickable. */
+body[data-shell="desktop"][data-platform="macos"] .web-workbench-shell.sidebar-collapsed .app-sidebar-expand {
+  z-index: 21;
+  top: 1px;
+  left: 78px;
+}
+
+/*
+ * The arriving view settles in while the plate travels: the Task header drops
+ * into the band once it has opened, Chat fades in on the plate, and New Task
+ * eases up to full size. Only entries can be animated here: the leaving view is
+ * already unmounted, and the plate's travel carries that half.
+ *
+ * These are entry transitions, not keyframe animations. The Frontend restarts
+ * every keyframe animation when the window regains focus (see
+ * resume-motion.css), which would replay an entrance on a view that never
+ * left. Chat only fades and New Task only scales inward, so neither can add
+ * scrollable overflow to its scroll container while it settles.
+ */
+body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .task-work-stack-header > * {
+  transition:
+    opacity 260ms cubic-bezier(0.22, 1, 0.36, 1) 80ms,
+    translate 260ms cubic-bezier(0.22, 1, 0.36, 1) 80ms;
+}
+
+@starting-style {
+  body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .task-work-stack-header > * {
+    opacity: 0;
+    translate: 0 -8px;
+  }
+}
+
+body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .task-conversation {
+  transition: opacity 220ms ease-out;
+}
+
+@starting-style {
+  body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .task-conversation {
+    opacity: 0;
+  }
+}
+
+body[data-shell="desktop"][data-platform="macos"] .web-main-surface .new-task-center {
+  transition:
+    opacity var(--oa-work-well-travel),
+    scale var(--oa-work-well-travel);
+}
+
+@starting-style {
+  body[data-shell="desktop"][data-platform="macos"] .web-main-surface .new-task-center {
+    opacity: 0;
+    scale: 0.985;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-shell="desktop"][data-platform="macos"] .web-main-surface::before,
+  body[data-shell="desktop"][data-platform="macos"] .web-main-surface::after,
+  body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .task-work-stack-header > *,
+  body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .task-conversation,
+  body[data-shell="desktop"][data-platform="macos"] .web-main-surface .new-task-center {
+    transition: none;
+  }
+}
+
+/*
+ * Chat dissolves under the Task header the way it already does behind the
+ * Composer (see .message-list-shell::after): scrolled text fades into the plate
+ * instead of being cut by a hard edge, which also leaves the well's top shade
+ * reading against a clean surface. Shorter than the Composer's fade: a line of
+ * text is the most that should dim, since this edge is read from, not typed
+ * into. Shown only while there is Chat above, so the first message is never
+ * dimmed at rest. Stops short of the scrollbar.
+ */
+body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .message-list-shell::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 10px;
+  left: 0;
+  height: 22px;
+  background: linear-gradient(to top, transparent 0, var(--oa-bg) 100%);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms ease-out;
+}
+
+body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .message-list-shell[data-more-above="true"]::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-shell="desktop"][data-platform="macos"] .task-work-stack[data-desktop-window="macos"] .message-list-shell::before {
+    transition-duration: 0.01ms;
+  }
+}
