@@ -98,10 +98,14 @@ components:
 
 OpenAIDE should feel like a polished application designed specifically for sustained agent work on macOS and Windows. It combines the clarity and keyboard fluency of excellent developer tools with the spatial confidence, finish, and platform integration expected from a modern desktop product.
 
+The design must be modern. A person opening any OpenAIDE screen for the first time should take it for a product designed this year by a team that cares about craft, on a par with the best current developer tools and native apps on that platform. A screen that is correct, aligned, and consistent but looks dated, generic, or assembled from default controls does not meet the standard. Section 2 says what modern means here.
+
 The desktop application defines the visual standard. Web and VS Code shells share the product language and behavior, then adapt platform-specific window chrome, menus, focus rules, tokens, and file access. VS Code is a supported environment, not the aesthetic template.
 
 **Key Characteristics:**
 
+- A modern look and feel on every shell, judged against current best-in-class products rather than against the previous version of the screen.
+- Interfaces that explain themselves through structure, icons, and state, with very little explanatory text on the page.
 - Clear visual hierarchy with purposeful whitespace.
 - Project and task navigation optimized for repeated daily use.
 - Controls whose shape and emphasis reflect their role.
@@ -115,6 +119,30 @@ The desktop application defines the visual standard. Web and VS Code shells shar
 OpenAIDE is restrained, but restraint does not mean grey, tiny, flat, or anonymous. The interface should have recognizable proportions, confident typography, carefully tuned surfaces, and precise interaction states.
 
 Use whitespace to separate concepts, not to imitate a marketing page. Use density where users compare or scan many items, such as Task Navigation. Use more breathing room where users compose, read, decide, or recover from an error.
+
+### What modern means here
+
+Modern is a requirement with concrete properties, not a mood and not a trend to copy.
+
+- **Current platform conventions.** Each shell follows the present-day conventions of its platform for navigation, controls, sheets, gestures, safe areas, and motion. Stock or legacy-looking controls are replaced or themed.
+- **Composed, not stacked.** A screen has one clear focal point and a deliberate composition. A page built as a vertical stack of equal bordered boxes, each holding an icon, a heading, and a sentence, reads as a form generator and is not acceptable as a finished design.
+- **Visual communication first.** Hierarchy, iconography, illustration of the real object (a code, a device, a connection), status color with a paired label, and layout carry the meaning before prose does.
+- **Depth and material with a purpose.** Tonal layers, soft elevation, and generous radii on focused surfaces give the interface a tactile, current feel. Flat grey rectangles separated by hairlines are the dated default to move away from.
+- **Confident scale.** Primary content and the primary action are large enough to own the screen. Touch shells use comfortable targets and thumb-reachable primary actions.
+- **Responsive feedback.** Every press, load, success, and failure has an immediate designed response. Motion explains the change and stays short.
+- **Finished details.** Empty, loading, error, and success states, focus rings, selection, and both themes are designed to the same level as the default state.
+
+Modern does not mean decorative. It excludes novelty that slows the task, effects without a job, and imitation of another product's surface style.
+
+### Sparse copy
+
+Explanatory text on a page is a cost. Long descriptions under every heading, notes after every control, and paragraphs of reassurance make a screen look unfinished and hide what matters.
+
+- A screen states what it is and offers its action. One short supporting line is the normal maximum; many screens need none.
+- Background information, security explanations, consequences, and troubleshooting belong behind an explicit affordance: an info button, a "Learn more" sheet or popover, a help page, or the moment the information becomes relevant.
+- Prefer a designed element to a sentence: numbered visual steps, a labeled diagram, a status chip, an icon with a short label.
+- Text that prevents a mistake or a loss stays visible, placed at the control it concerns and written in a few words.
+- Never repeat the same information in a heading, a description, and a note.
 
 ### Quality rules
 
@@ -146,6 +174,10 @@ Desktop implementation uses OpenAIDE semantic tokens as its shared vocabulary. A
 **The Accent Rarity Rule.** Accent is a state signal, not decoration. Large accent-filled regions require a specific product reason.
 
 **The Theme Parity Rule.** Light and dark themes must preserve hierarchy and state clarity. Neither theme is a recolored afterthought.
+
+**The Modern Standard Rule.** If a screen would not look at home beside the best current products on its platform, it is not done, regardless of how correct or consistent it is.
+
+**The Sparse Copy Rule.** If a paragraph can be removed, moved behind an info affordance, or replaced by a designed element, do that before shipping.
 
 **The Border Purpose Rule.** Borders communicate a real boundary, input affordance, focus, or selection. They are not the default method for making every item visible.
 
@@ -257,6 +289,13 @@ Shared radius, fill, and border can create useful coherence. Vary them when role
 - Respect native window controls, keyboard access, snap layouts, scaling, notifications, and system file dialogs.
 - Verify common display scaling levels and adapt intentionally across device-pixel ratios.
 
+### Android
+
+- The phone shell is a first-class design surface, not a narrow desktop layout. Follow current Android conventions: edge-to-edge layout with system bar insets, predictive back, bottom sheets for secondary flows, 48dp minimum touch targets, and primary actions within thumb reach.
+- Native screens, the launch screen, and screens rendered in a WebView share one visual language and the same tokens, so the person cannot tell where one technology ends.
+- Use larger type, radii, and spacing than the desktop scale where touch and viewing distance call for it.
+- Camera, permission, and system dialogs are introduced by the app's own designed step, never shown cold.
+
 ### Web
 
 - Provide deliberate browser-safe substitutes for operating-system file and folder access.
@@ -278,6 +317,8 @@ Respect reduced-motion preferences across every shell.
 Before presenting a UI direction:
 
 - Review the complete composition, not an isolated component crop.
+- Compare the screen with current best-in-class products on the same platform and ask whether it looks as modern and as finished.
+- Count the sentences on the screen. Remove, shorten, or move behind an info affordance everything that is not needed to act.
 - Capture realistic desktop and narrow-window screenshots in both light and dark themes when color or elevation changed.
 - Exercise default, hover, focus, open, selected, loading, empty, error, disabled, and long-value states that affect the decision.
 - Check overflow and display scaling.
