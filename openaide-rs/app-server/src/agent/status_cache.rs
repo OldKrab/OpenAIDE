@@ -615,6 +615,7 @@ fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
         }
         RuntimeError::NotReady(_)
         | RuntimeError::Internal(_)
+        | RuntimeError::AgentReported(_)
         | RuntimeError::InvalidParams(_)
         | RuntimeError::TaskNotFound(_)
         | RuntimeError::NativeSessionMissing(_)

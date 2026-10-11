@@ -389,9 +389,10 @@ fn protocol_error(error: RuntimeError) -> ProtocolError {
         RuntimeError::NotReady(_)
         | RuntimeError::SetupRequired(_)
         | RuntimeError::NodeJsRequired(_) => ProtocolErrorCode::Conflict,
-        RuntimeError::MethodNotFound(_) | RuntimeError::Storage(_) | RuntimeError::Internal(_) => {
-            ProtocolErrorCode::Internal
-        }
+        RuntimeError::MethodNotFound(_)
+        | RuntimeError::Storage(_)
+        | RuntimeError::Internal(_)
+        | RuntimeError::AgentReported(_) => ProtocolErrorCode::Internal,
     };
     ProtocolError {
         code,
