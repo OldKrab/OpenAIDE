@@ -24,6 +24,7 @@ import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
 import { PopupDialog } from "../Popup";
 import { DesktopRuntimeSettings } from "./DesktopRuntimeSettings";
 import { DesktopUpdateSettings } from "./DesktopUpdateSettings";
+import { RemoteComputersSettings } from "./RemoteComputersSettings";
 import { SupportExportButton } from "../SupportExportDialog";
 
 export function GeneralSettingsTab({
@@ -97,9 +98,19 @@ type GeneralSettingsTabProps = {
 export function DesktopSettingsTab() {
   const desktopRuntime = currentFrontendShell()?.desktopRuntime;
   const desktopUpdates = currentFrontendShell()?.desktopUpdates;
+  const remoteComputers = currentFrontendShell()?.remoteComputers;
 
   return (
     <div className="general-settings-panel">
+      {remoteComputers ? (
+        <GeneralSection
+          description="Use this computer, or the projects and Agents of another computer running OpenAIDE. Switching restarts OpenAIDE."
+          id="settings-desktop-computers"
+          label="Where agents work"
+        >
+          <RemoteComputersSettings capability={remoteComputers} />
+        </GeneralSection>
+      ) : null}
       {desktopRuntime ? (
         <GeneralSection
           description="Choose whether Windows or WSL owns projects, tools, and Agents. Switching restarts OpenAIDE."

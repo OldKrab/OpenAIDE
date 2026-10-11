@@ -77,6 +77,7 @@ const searchEntries: Array<{ tab: SettingsTabId; label: string; keywords: string
   { tab: "common", label: "Appearance", keywords: "theme system light dark", target: "settings-general-appearance" },
   { tab: "common", label: "Send with Enter", keywords: "composer keyboard shortcut newline", target: "settings-general-behavior" },
   { tab: "common", label: "Desktop notifications", keywords: "alerts browser os", target: "settings-general-behavior" },
+  { tab: "desktop", label: "Where agents work", keywords: "remote computer pair pairing code another device connect switch", target: "settings-desktop-computers" },
   { tab: "desktop", label: "Environment", keywords: "windows wsl ubuntu runtime operating system", target: "settings-desktop-environment" },
   { tab: "desktop", label: "Application updates", keywords: "update release version restart download", target: "settings-desktop-updates" },
   { tab: "data", label: "Diagnostics", keywords: "support export troubleshooting bundle", target: "settings-data-support", action: "openSupportExport" },
@@ -171,7 +172,7 @@ export function SettingsView({
     tab.id === "worktrees"
     || (tab.id === "devices" && Boolean(deviceIntents))
     || (tab.id === "connection" && Boolean(shell?.connectionSettings))
-    || (availableTabs.includes(tab.id) && (tab.id !== "desktop" || Boolean(shell?.desktopRuntime || shell?.desktopUpdates)))
+    || (availableTabs.includes(tab.id) && (tab.id !== "desktop" || Boolean(shell?.desktopRuntime || shell?.desktopUpdates || shell?.remoteComputers)))
   ));
   const activeTab = visibleTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : visibleTabs[0]?.id ?? "agents";
   const busy = state.loading || state.mcpServersLoading || state.skillsLoading;

@@ -551,16 +551,20 @@ pub(crate) async fn desktop_install_update(
         runtime.snapshot.kind = DesktopUpdateKind::Applying;
         runtime.snapshot.error = None;
     })?;
-    let endpoint_url = desktop_state.app_server_endpoint_url().map_err(|error| {
-        let _ = state.fail(&app, DesktopUpdateError::ShutdownFailed);
-        error
-    })?;
-    if crate::desktop_update_shutdown::wait_for_app_server_shutdown(endpoint_url)
-        .await
-        .is_err()
-    {
-        state.fail(&app, DesktopUpdateError::ShutdownFailed)?;
-        return Err("The App Server did not shut down cleanly.".to_string());
+    // A paired computer's App Server is not this Desktop's to stop: the update
+    // replaces only the shell, and the gateway ends with this process.
+    if desktop_state.owns_app_server() {
+        let endpoint_url = desktop_state.app_server_endpoint_url().map_err(|error| {
+            let _ = state.fail(&app, DesktopUpdateError::ShutdownFailed);
+            error
+        })?;
+        if crate::desktop_update_shutdown::wait_for_app_server_shutdown(endpoint_url)
+            .await
+            .is_err()
+        {
+            state.fail(&app, DesktopUpdateError::ShutdownFailed)?;
+            return Err("The App Server did not shut down cleanly.".to_string());
+        }
     }
     if write_receipt(
         &state.receipt_path,

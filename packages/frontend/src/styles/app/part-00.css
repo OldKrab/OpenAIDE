@@ -311,6 +311,76 @@ body[data-shell="web"] .sidebar {
   color: var(--oa-text);
 }
 
+.sidebar-computer {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 6px;
+  font-weight: 560;
+  text-align: left;
+}
+
+.sidebar-computer:hover {
+  background: var(--oa-raised);
+}
+
+.sidebar-computer > svg {
+  flex: 0 0 auto;
+}
+
+.sidebar-computer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-computer-link {
+  flex: 0 0 auto;
+  color: var(--oa-muted);
+  font-size: 11px;
+  font-weight: 580;
+}
+
+.sidebar-computer-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--oa-warning);
+}
+
+.sidebar-computer[data-link="connected"] .sidebar-computer-dot {
+  background: var(--oa-success);
+}
+
+.sidebar-computer[data-link="notConnected"] .sidebar-computer-dot {
+  background: var(--oa-danger);
+}
+
+/* In the Desktop window strip the name sits beside the native window buttons. */
+.desktop-title-bar-sidebar .sidebar-computer {
+  width: auto;
+  max-width: 100%;
+  min-height: 22px;
+  gap: 7px;
+  padding: 2px 6px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.desktop-title-bar-sidebar .sidebar-computer > svg,
+.app-sidebar-frame.sidebar-collapsed .desktop-title-bar-sidebar .sidebar-computer {
+  display: none;
+}
+
 .project-folder-backdrop {
   position: fixed;
   z-index: 1000;

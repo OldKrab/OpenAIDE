@@ -18,6 +18,7 @@ import { useScrollOverflow } from "./useScrollOverflow";
 import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
 import { AgentDisableDialog } from "./AgentDisableDialog";
 import { useAgentDisableConfirmation } from "./useAgentDisableConfirmation";
+import { SidebarComputer, type ComputerLink } from "./SidebarComputer";
 import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
 
@@ -72,6 +73,10 @@ type SidebarProps = {
   searchQuery: string;
   settingsStatus?: string;
   settingsActive?: boolean;
+  /** The other computer in use; absent while this device does the work or the window strip names it. */
+  computerName?: string;
+  computerLink?: ComputerLink;
+  onComputer?: () => void;
   showArchived: boolean;
   taskListError?: string;
   tasks: TaskSummary[];
@@ -125,6 +130,9 @@ export const Sidebar = memo(function Sidebar({
   onToggleArchived,
   searchQuery,
   settingsStatus,
+  computerName,
+  computerLink,
+  onComputer,
   settingsActive = false,
   showArchived,
   taskListError,
@@ -216,6 +224,9 @@ export const Sidebar = memo(function Sidebar({
         </div>
       ) : null}
       <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
+        {computerName && onComputer && !showArchived ? (
+          <SidebarComputer link={computerLink ?? "connecting"} name={computerName} onOpen={onComputer} />
+        ) : null}
         {!showArchived ? <button disabled={noProjects} type="button" onClick={() => onNewTask()}>
           <Plus size={15} />
           New task
@@ -514,6 +525,8 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
     prev.settingsStatus === next.settingsStatus &&
+    prev.computerName === next.computerName &&
+    prev.computerLink === next.computerLink &&
     prev.settingsActive === next.settingsActive &&
     prev.showArchived === next.showArchived &&
     prev.taskListError === next.taskListError &&

@@ -16,18 +16,18 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::DialogExt;
 
+mod desktop_remote;
 mod desktop_runtime;
 mod desktop_secrets;
+#[cfg(test)]
+#[path = "desktop_server_recovery_tests.rs"]
+mod desktop_server_recovery_tests;
 mod desktop_support_export;
 mod desktop_update;
 mod desktop_update_receipt;
 mod desktop_update_security;
 mod desktop_update_shutdown;
-#[cfg(test)]
-#[path = "desktop_server_recovery_tests.rs"]
-mod desktop_server_recovery_tests;
 #[cfg(test)]
 mod desktop_update_tests;
 #[cfg(target_os = "macos")]
@@ -39,11 +39,8 @@ mod wsl_runtime;
 
 use desktop_runtime::{
     DesktopBootstrapPreferences, DesktopRuntimeEnvironment, DesktopRuntimePaths,
-    PreparedProjectFolder, prepare_project_path,
-};
-use desktop_support_export::{
-    download_support_export, remember_export_directory, support_export_download_url,
-    validate_export_label,
+    PreparedProjectFolder, prepare_project_path, read_bootstrap_preferences,
+    write_bootstrap_preferences,
 };
 use desktop_update::DesktopUpdateState;
 use startup_process::StartupChild;
@@ -71,6 +68,9 @@ struct DesktopBootstrap {
     platform: &'static str,
     runtime_environment: DesktopRuntimeEnvironment,
     runtime_options: DesktopRuntimeOptions,
+    /// Names the paired computer whose App Server this Desktop uses instead of its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_computer: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -84,6 +84,8 @@ struct DesktopRuntimeOptions {
 struct DesktopBootstrapContext {
     environment: DesktopRuntimeEnvironment,
     can_recover: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_computer: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -128,6 +130,15 @@ impl DesktopState {
             .map(|connection| connection.endpoint_url.clone())
             .ok_or_else(|| "Desktop runtime is not connected.".to_string())
     }
+
+    /// False while a paired computer's App Server is in use: this Desktop then
+    /// started no process it could restore or must wait for.
+    fn owns_app_server(&self) -> bool {
+        self.preferences
+            .lock()
+            .map(|preferences| preferences.remote().is_none())
+            .unwrap_or(true)
+    }
 }
 
 fn main() {
@@ -154,6 +165,7 @@ fn main() {
                 preferences_path,
                 resource_dir.join("wsl").join("openaide-app-server"),
             ));
+            app.manage(desktop_remote::DesktopRemoteState::new(&app_local_data));
             app.manage(DesktopUpdateState::for_build(
                 app_local_data.join("desktop-update-receipt.json"),
             ));
@@ -213,11 +225,15 @@ fn main() {
             set_desktop_runtime_environment,
             desktop_prepare_project_folder,
             desktop_dismiss_path_warning,
-            desktop_save_support_export,
+            desktop_support_export::desktop_save_support_export,
             desktop_secrets::desktop_secret_read,
             desktop_secrets::desktop_secret_write,
             desktop_secrets::desktop_secret_delete,
             recover_desktop_runtime_environment,
+            desktop_remote::desktop_remote_snapshot,
+            desktop_remote::desktop_remote_pair,
+            desktop_remote::desktop_remote_use,
+            desktop_remote::desktop_remote_forget,
             desktop_update::desktop_update_snapshot,
             desktop_update::desktop_check_for_update,
             desktop_update::desktop_auto_check_for_update,
@@ -243,108 +259,6 @@ fn desktop_take_pending_quit(state: tauri::State<'_, DesktopQuitState>) -> bool 
 }
 
 #[tauri::command]
-async fn desktop_save_support_export(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, DesktopState>,
-    file_handle_id: String,
-    label: String,
-) -> Result<bool, String> {
-    validate_export_label(&label)?;
-    let export_directory = state
-        .preferences
-        .lock()
-        .map_err(|_| "Desktop preferences are unavailable.".to_string())?
-        .support_export_directory
-        .clone();
-    let connection = state
-        .connection
-        .lock()
-        .map_err(|_| "Desktop runtime state is unavailable.".to_string())?
-        .clone()
-        .ok_or_else(|| "Desktop runtime is not connected.".to_string())?;
-    let url = support_export_download_url(
-        &connection.endpoint_url,
-        &state.client_instance_id,
-        &file_handle_id,
-    )?;
-    let operation_id = format!("desktop-support-export-{}", uuid::Uuid::new_v4());
-    let started_at = Instant::now();
-    eprintln!("desktop_support_export_save_started operation_id={operation_id} attempt_count=1");
-
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Export OpenAIDE Support Diagnostics")
-        .set_file_name(&label)
-        .set_parent(&window)
-        .add_filter("ZIP archive", &["zip"]);
-    if let Some(directory) = export_directory {
-        dialog = dialog.set_directory(directory);
-    }
-    let (destination_sender, destination_receiver) = tokio::sync::oneshot::channel();
-    dialog.save_file(move |destination| {
-        let _ = destination_sender.send(destination);
-    });
-    let destination = destination_receiver
-        .await
-        .map_err(|_| "The support export Save dialog closed unexpectedly.".to_string())?;
-    let Some(destination) = destination else {
-        eprintln!(
-            "desktop_support_export_save_completed operation_id={operation_id} outcome=cancelled duration_ms={} attempt_count=1",
-            started_at.elapsed().as_millis()
-        );
-        return Ok(false);
-    };
-    let destination = match destination.into_path() {
-        Ok(destination) => destination,
-        Err(_) => {
-            eprintln!(
-                "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=invalid_destination duration_ms={} attempt_count=1",
-                started_at.elapsed().as_millis()
-            );
-            return Err("The selected support export path is invalid.".to_string());
-        }
-    };
-    let bytes = match download_support_export(url, &connection.auth_token).await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            eprintln!(
-                "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=download duration_ms={} attempt_count=1",
-                started_at.elapsed().as_millis()
-            );
-            return Err(error);
-        }
-    };
-    if std::fs::write(&destination, bytes).is_err() {
-        eprintln!(
-            "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=file_write duration_ms={} attempt_count=1",
-            started_at.elapsed().as_millis()
-        );
-        return Err("Unable to save the support export to the selected file.".to_string());
-    }
-
-    match state.preferences.lock() {
-        Ok(mut preferences) => {
-            remember_export_directory(&mut preferences, &destination);
-            if write_bootstrap_preferences(&state.preferences_path, &preferences).is_err() {
-                eprintln!(
-                    "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_write"
-                );
-            }
-        }
-        Err(_) => eprintln!(
-            "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_lock"
-        ),
-    }
-    eprintln!(
-        "desktop_support_export_save_completed operation_id={operation_id} outcome=success duration_ms={} attempt_count=1",
-        started_at.elapsed().as_millis()
-    );
-    Ok(true)
-}
-
-#[tauri::command]
 fn desktop_bootstrap_context(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<DesktopBootstrapContext, String> {
@@ -355,6 +269,7 @@ fn desktop_bootstrap_context(
     Ok(DesktopBootstrapContext {
         environment: preferences.environment.clone(),
         can_recover: preferences.previous_environment.is_some(),
+        remote_computer: preferences.remote().map(|computer| computer.name.clone()),
     })
 }
 
@@ -369,6 +284,24 @@ fn configure_macos_webview_resize(app: &mut tauri::App) -> tauri::Result<()> {
         .get_webview_window("main")
         .expect("main desktop window must exist during setup");
     macos_webview_resize::configure(&window)
+}
+
+/// Exit code that asks the macOS development runner to start the app again.
+#[cfg(all(target_os = "macos", debug_assertions))]
+const DEVELOPMENT_RESTART_EXIT_CODE: i32 = 75;
+
+/// Restarts Desktop so a changed bootstrap preference takes effect. The macOS
+/// development runner owns the app process, its output, and the frontend
+/// server, so there it is asked to relaunch; a self-relaunch would outlive it.
+pub(crate) fn restart_desktop(app: &tauri::AppHandle) {
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    if std::env::var_os("OPENAIDE_DEVELOPMENT_RUNNER_PID").is_some() {
+        eprintln!("desktop_restart_requested owner=development_runner");
+        app.exit(DEVELOPMENT_RESTART_EXIT_CODE);
+        return;
+    }
+    eprintln!("desktop_restart_requested owner=desktop");
+    app.restart();
 }
 
 /// Stops an F5 app that outlives Tauri's development runner during a rebuild.
@@ -475,12 +408,17 @@ async fn desktop_bootstrap(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
 ) -> Result<DesktopBootstrap, String> {
-    let environment = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?
-        .environment
-        .clone();
+    let (environment, remote) = {
+        let preferences = state
+            .preferences
+            .lock()
+            .map_err(|_| "desktop bootstrap preferences unavailable")?;
+        (
+            preferences.environment.clone(),
+            preferences.remote().cloned(),
+        )
+    };
+    let remote_computer = remote.as_ref().map(|computer| computer.name.clone());
     let runtime_options = DesktopRuntimeOptions {
         wsl_distros: discover_wsl_distros(),
     };
@@ -496,18 +434,27 @@ async fn desktop_bootstrap(
             platform: std::env::consts::OS,
             runtime_environment: environment,
             runtime_options,
+            remote_computer,
         });
     }
 
     let operation_id = format!("desktop-bootstrap-{}", uuid::Uuid::new_v4());
-    let connection = launch_app_server_for_desktop(
-        state.runtime_paths.clone(),
-        state.wsl_resource_binary.clone(),
-        environment.clone(),
-        Some(app.clone()),
-        operation_id,
-    )
-    .await?;
+    let connection = match &remote {
+        Some(computer) => {
+            emit_bootstrap_progress(&app, "remote", format!("Connecting to {}", computer.name));
+            desktop_remote::connect(&app, computer).await?
+        }
+        None => {
+            launch_app_server_for_desktop(
+                state.runtime_paths.clone(),
+                state.wsl_resource_binary.clone(),
+                environment.clone(),
+                Some(app.clone()),
+                operation_id,
+            )
+            .await?
+        }
+    };
     *state
         .connection
         .lock()
@@ -526,6 +473,7 @@ async fn desktop_bootstrap(
         platform: std::env::consts::OS,
         runtime_environment: environment,
         runtime_options,
+        remote_computer,
     })
 }
 
@@ -616,6 +564,11 @@ async fn desktop_ensure_app_server(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
 ) -> Result<Option<LocalHttpConnection>, String> {
+    // The gateway to a paired computer lives as long as this process, and the
+    // session's own retries reopen its connection.
+    if !state.owns_app_server() {
+        return Ok(None);
+    }
     let operation_id = format!("desktop-ensure-app-server-{}", uuid::Uuid::new_v4());
     let started_at = Instant::now();
     let cached = state
@@ -637,7 +590,11 @@ async fn desktop_ensure_app_server(
     eprintln!(
         "desktop_app_server_ensure_started operation_id={operation_id} had_connection={} reason_code={}",
         cached.is_some(),
-        if cached.is_some() { "endpoint_unreachable" } else { "no_connection" }
+        if cached.is_some() {
+            "endpoint_unreachable"
+        } else {
+            "no_connection"
+        }
     );
     let connection = launch_app_server_for_desktop(
         state.runtime_paths.clone(),
@@ -666,27 +623,6 @@ fn emit_bootstrap_progress(app: &tauri::AppHandle, stage: &'static str, message:
     );
 }
 
-fn read_bootstrap_preferences(path: &Path) -> DesktopBootstrapPreferences {
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
-}
-
-fn write_bootstrap_preferences(
-    path: &Path,
-    preferences: &DesktopBootstrapPreferences,
-) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())?;
-    }
-    let bytes = serde_json::to_vec_pretty(preferences)
-        .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())?;
-    std::fs::write(path, bytes)
-        .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())
-}
-
 #[tauri::command]
 fn set_desktop_runtime_environment(
     app: tauri::AppHandle,
@@ -713,7 +649,8 @@ fn set_desktop_runtime_environment(
     preferences.environment = environment;
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
-    app.restart();
+    restart_desktop(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -721,6 +658,11 @@ fn recover_desktop_runtime_environment(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
 ) -> Result<(), String> {
+    // Leaving an unreachable paired computer comes before undoing an environment change.
+    if desktop_remote::use_this_computer(&state)? {
+        restart_desktop(&app);
+        return Ok(());
+    }
     let mut preferences = state
         .preferences
         .lock()
@@ -732,7 +674,8 @@ fn recover_desktop_runtime_environment(
     preferences.environment = previous;
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
-    app.restart();
+    restart_desktop(&app);
+    Ok(())
 }
 
 #[tauri::command]

@@ -16,6 +16,7 @@ import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
+import { SidebarComputer, computerLink, useComputerInUse } from "./SidebarComputer";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -34,6 +35,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const { appServerError, navigation, settings } = view;
   const frontendShell = currentFrontendShell();
   const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
+  const computerInUse = useComputerInUse(frontendShell);
+  const computerLinkState = computerLink(controller.backendConnectionState);
   const updateAvailable = desktopUpdate?.kind === "available"
     || desktopUpdate?.kind === "downloading"
     || desktopUpdate?.kind === "readyToUpdate";
@@ -192,7 +195,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   useBackNavigation(Boolean(projectToRemove), () => setProjectToRemove(undefined));
   // Folder acquisition belongs to the App Shell: Web browses through the App
   // Server, Desktop opens the OS picker, and VS Code delegates to its host.
-  const workspaceBrowser = isWebShell ? callbacks.newTask.workspaceBrowser : undefined;
+  // A Desktop without its picker works on another computer, whose folders only
+  // that computer's App Server can list.
+  const browsesThroughAppServer = isWebShell
+    || (bootstrap.surface !== "invalid" && bootstrap.shell.kind === "desktop" && !frontendShell?.projects);
+  const workspaceBrowser = browsesThroughAppServer ? callbacks.newTask.workspaceBrowser : undefined;
   const workspaceCapability = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "vscodeExtension"
     ? frontendShell?.workspace
     : undefined;
@@ -242,11 +249,18 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     else if (command === "open-project") addProject?.();
   }), [addProject, callbacks.navigation, frontendShell]);
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
+  const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, computerInUse?.settingsTab);
+  // A Desktop window names the computer in its own strip, beside the window
+  // buttons; other shells give it the first row of the navigation.
+  const desktopComputer = desktopWindow && computerInUse
+    ? <SidebarComputer link={computerLinkState} name={computerInUse.name} onOpen={openComputerSettings} />
+    : undefined;
+  const sidebarComputerName = desktopWindow ? undefined : computerInUse?.name;
   const desktopTitleBar = desktopWindow
-    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
+    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} sidebarLead={desktopComputer} window={desktopWindow} />
     : undefined;
   const desktopSettingsTitleBar = desktopWindow ? (
-    <DesktopTitleBar window={desktopWindow} />
+    <DesktopTitleBar sidebarLead={desktopComputer} window={desktopWindow} />
   ) : undefined;
   // Desktop chrome overlays product content so native controls never consume a
   // separate blank row. Active Tasks provide the draggable product header.
@@ -431,6 +445,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           projects={navigationProjects}
           searchQuery={navigation.searchQuery}
           settingsStatus={updateAvailable ? "Update available" : undefined}
+          computerLink={computerLinkState}
+          computerName={sidebarComputerName}
+          onComputer={openComputerSettings}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
@@ -569,6 +586,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         projects={navigation.projects}
         searchQuery={navigation.searchQuery}
         settingsStatus={updateAvailable ? "Update available" : undefined}
+        computerLink={computerLinkState}
+        computerName={sidebarComputerName}
+        onComputer={closeAfter(openComputerSettings)}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
         tasks={visibleTasks}

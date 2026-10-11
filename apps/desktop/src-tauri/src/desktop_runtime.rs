@@ -96,6 +96,33 @@ pub(crate) struct DesktopBootstrapPreferences {
     /// Native shell convenience only; never exposed through product state or diagnostics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) support_export_directory: Option<PathBuf>,
+    /// Computers this Desktop is paired with (ADR-0063): public keys and names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) remote_computers: Vec<crate::desktop_remote::RemoteComputer>,
+    /// The paired computer in use instead of this one, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) remote_computer: Option<String>,
+}
+
+pub(crate) fn read_bootstrap_preferences(path: &Path) -> DesktopBootstrapPreferences {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn write_bootstrap_preferences(
+    path: &Path,
+    preferences: &DesktopBootstrapPreferences,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())?;
+    }
+    let bytes = serde_json::to_vec_pretty(preferences)
+        .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())?;
+    std::fs::write(path, bytes)
+        .map_err(|_| "OpenAIDE could not save its Desktop environment.".to_string())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

@@ -45,12 +45,15 @@ export function createDesktopUpdates({
   invoke,
   listen,
   openReleaseNotes,
+  ownsAppServer = true,
   reload,
   session,
 }: {
   invoke: Invoke;
   listen: Listen;
   openReleaseNotes(version: string): Promise<void>;
+  /** False while a paired computer's App Server is in use; an update then replaces only this shell. */
+  ownsAppServer?: boolean;
   reload(): void;
   session: AppServerSession;
 }): DesktopUpdateCapability {
@@ -90,6 +93,21 @@ export function createDesktopUpdates({
       const attemptId = `desktop-update-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       let prepared = false;
       let detached = false;
+      if (!ownsAppServer) {
+        // The App Server belongs to another computer and keeps running there.
+        // Asking it to prepare for shutdown would stop that computer's work.
+        console.info(`desktop_update_detach_started operation_id=${attemptId} app_server=remote`);
+        const detachOutcome = await waitForFinalDetach(session.request(CLIENT_DETACH, {}));
+        console.info(`desktop_update_detach_completed operation_id=${attemptId} outcome=${detachOutcome} app_server=remote`);
+        try {
+          await session.close();
+          await run("desktop_install_update");
+          return "started";
+        } catch (error) {
+          reload();
+          throw error;
+        }
+      }
       try {
         const readiness = await session.request(CLIENT_UPDATE_SHUTDOWN_PREPARE, {
           attemptId,

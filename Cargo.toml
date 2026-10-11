@@ -1,5 +1,5 @@
 [workspace]
-members = ["openaide-rs/app-server", "openaide-rs/app-server-protocol"]
+members = ["openaide-rs/app-server", "openaide-rs/app-server-protocol", "openaide-rs/remote-client"]
 resolver = "2"
 
 [workspace.package]

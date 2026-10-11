@@ -23,7 +23,10 @@ async function start() {
     onContext: (context) => {
       const cancel = document.querySelector<HTMLButtonElement>(".desktop-startup-cancel");
       if (cancel) {
-        cancel.hidden = context.environment.kind !== "wsl" || !context.canRecover;
+        // A paired computer may be off or out of reach; the way back to this
+        // computer must not depend on it answering.
+        if (context.remoteComputer) cancel.textContent = "Use this computer";
+        cancel.hidden = !context.remoteComputer && (context.environment.kind !== "wsl" || !context.canRecover);
         cancel.onclick = () => { void invoke("recover_desktop_runtime_environment"); };
       }
     },

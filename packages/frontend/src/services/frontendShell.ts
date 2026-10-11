@@ -36,6 +36,25 @@ export type DesktopRuntimeCapability = {
   select(environment: DesktopRuntimeEnvironment): Promise<void>;
 };
 
+/** A computer whose App Server trusts this shell (ADR-0063). */
+export type RemoteComputer = { id: string; name: string; current: boolean };
+
+/**
+ * Shell-owned choice of whose App Server is in use. A change that takes effect
+ * restarts the shell, so those promises settle only when nothing changed or the
+ * shell refused with a sentence for the user.
+ */
+export type RemoteComputersCapability = {
+  /** Name of the paired computer in use; fixed for the shell's run, absent on this computer. */
+  current?: string;
+  list(): Promise<RemoteComputer[]>;
+  /** Spends the invite code another computer shows, then uses that computer. */
+  pair(code: string): Promise<void>;
+  /** Uses a paired computer, or this one when no id is given. */
+  use(id?: string): Promise<void>;
+  forget(id: string): Promise<void>;
+};
+
 export type DesktopUpdateKind =
   | "unavailable"
   | "idle"
@@ -152,6 +171,8 @@ export type FrontendShell = {
   desktopWindow?: DesktopWindowCapability;
   /** Desktop-owned backend OS selection, resolved before App Server startup. */
   desktopRuntime?: DesktopRuntimeCapability;
+  /** Desktop-owned pairing with other computers and the choice among them. */
+  remoteComputers?: RemoteComputersCapability;
   /** Desktop-owned signed update lifecycle; omitted by other App Shells. */
   desktopUpdates?: DesktopUpdateCapability;
   /** Native menu and keyboard commands routed into the shared Desktop surface. */

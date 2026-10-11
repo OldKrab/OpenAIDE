@@ -250,3 +250,121 @@ fn an_approved_join_request_is_announced_to_the_device() {
     });
     assert!(response.contains(LOCAL_TOKEN));
 }
+
+fn quiet() -> openaide_remote_client::Logger {
+    std::sync::Arc::new(|_, _| {})
+}
+
+/// One HTTP exchange with the Rust client's loopback gateway.
+async fn through_gateway(address: std::net::SocketAddr, head: String) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    socket.write_all(head.as_bytes()).await.unwrap();
+    let mut response = String::new();
+    socket.read_to_string(&mut response).await.unwrap();
+    response
+}
+
+#[test]
+fn the_rust_client_pairs_by_the_shown_code_and_carries_frontend_requests() {
+    use openaide_remote_client::{Failure, Gateway, RemoteClient};
+
+    let fixture = fixture();
+    let shown = fixture
+        .devices
+        .create_invite("desk".to_string(), AppServerTime::now().0)
+        .unwrap();
+    fixture.wait_for_access(RemoteAccessState::On);
+    let invite = openaide_remote_client::InviteCode::decode(&shown.code).unwrap();
+    let endpoint = fixture.device_endpoint(5, Vec::new());
+    let failures = std::sync::Arc::new(Mutex::new(Vec::<Failure>::new()));
+
+    let (paired, gateway, served, refused) = fixture.run({
+        let failures = failures.clone();
+        let endpoint = endpoint.clone();
+        async move {
+            let paired = openaide_remote_client::redeem(
+                &endpoint,
+                &invite,
+                "Laptop",
+                Some("Desktop"),
+                &quiet(),
+            )
+            .await
+            .unwrap();
+            let client = std::sync::Arc::new(RemoteClient::new(endpoint, paired.id, quiet()));
+            let gateway = Gateway::start(client, quiet(), move |failure| {
+                failures.lock().unwrap().push(failure)
+            })
+            .await
+            .unwrap();
+            let served = through_gateway(
+                gateway.address,
+                format!(
+                    "POST /probe HTTP/1.1\r\nAuthorization: Bearer {}\r\nX-OpenAIDE-Connection-Id: conn-9\r\n\r\n",
+                    gateway.token
+                ),
+            )
+            .await;
+            let refused = through_gateway(
+                gateway.address,
+                "POST /probe HTTP/1.1\r\nAuthorization: Bearer guessed\r\n\r\n".to_string(),
+            )
+            .await;
+            (paired, gateway, served, refused)
+        }
+    });
+
+    assert_eq!(paired.name, fixture.devices.server_name());
+    assert!(served.starts_with("HTTP/1.1 200 OK"));
+    assert!(served.contains(&format!("Authorization: Bearer {LOCAL_TOKEN}\r\n")));
+    // The gateway's own token never leaves this computer.
+    assert!(!served.contains(&gateway.token));
+    assert!(refused.starts_with("HTTP/1.1 401"));
+    assert_eq!(
+        fixture
+            .devices
+            .device_name_for_connection("conn-9")
+            .as_deref(),
+        Some("Laptop")
+    );
+
+    // Once the computer removes this device, a retry cannot help and the shell is told.
+    let device_id = fixture.devices.snapshot().devices[0].device_id.clone();
+    fixture.devices.remove(&device_id).unwrap();
+    wait_until("the removed device to be told", || {
+        let head = format!(
+            "POST /probe HTTP/1.1\r\nAuthorization: Bearer {}\r\n\r\n",
+            gateway.token
+        );
+        let response = fixture.run(through_gateway(gateway.address, head));
+        response.starts_with("HTTP/1.1 502")
+            && failures.lock().unwrap().contains(&Failure::NotTrusted)
+    });
+}
+
+#[test]
+fn the_rust_client_names_an_app_server_of_another_protocol_major() {
+    use openaide_remote_client::{Failure, RemoteClient};
+
+    let fixture = fixture();
+    let shown = fixture
+        .devices
+        .create_invite("desk".to_string(), AppServerTime::now().0)
+        .unwrap();
+    fixture.wait_for_access(RemoteAccessState::On);
+    let invite = openaide_remote_client::InviteCode::decode(&shown.code).unwrap();
+    let endpoint = fixture.device_endpoint(6, Vec::new());
+
+    let result = fixture.run(async {
+        let client = RemoteClient::with_alpn(
+            endpoint,
+            invite.server,
+            b"openaide/app-server/9999".to_vec(),
+            quiet(),
+        );
+        client.connection().await.map(|_| ())
+    });
+
+    assert_eq!(result, Err(Failure::Incompatible));
+}
