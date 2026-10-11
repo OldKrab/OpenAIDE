@@ -79,11 +79,11 @@ impl Running {
     }
 
     fn interrupt(&self) {
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(self.child.id() as i32),
-            nix::sys::signal::Signal::SIGINT,
-        )
-        .unwrap();
+        self.signal(nix::sys::signal::Signal::SIGINT);
+    }
+
+    fn signal(&self, signal: nix::sys::signal::Signal) {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(self.child.id() as i32), signal).unwrap();
     }
 
     fn stopped(mut self) -> bool {
@@ -116,6 +116,17 @@ fn the_command_keeps_the_app_server_up_for_other_commands_until_it_is_stopped() 
     assert!(!ok && text.contains("Unknown command"), "{text}");
 
     running.interrupt();
+    assert!(running.stopped());
+}
+
+#[test]
+fn a_service_stop_ends_the_command_cleanly() {
+    let root = tempfile::tempdir().unwrap();
+    let running = Running::start(root.path(), &[]);
+    running.line_with("Press Ctrl+C to stop.");
+
+    running.signal(nix::sys::signal::Signal::SIGTERM);
+
     assert!(running.stopped());
 }
 
