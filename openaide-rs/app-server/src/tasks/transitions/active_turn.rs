@@ -213,7 +213,14 @@ impl TaskTransitions {
                             pause_queue_after_unsuccessful_turn(ctx.task_mut());
                         }
                         Err(error) => {
-                            let cause = ActiveWorkEnd::AgentFailed(error.to_string());
+                            let cause = match error {
+                                RuntimeError::AuthRequired(_)
+                                | RuntimeError::SetupRequired(_)
+                                | RuntimeError::NodeJsRequired(_) => {
+                                    ActiveWorkEnd::AgentUnavailable(error.to_string())
+                                }
+                                _ => ActiveWorkEnd::AgentFailed(error.to_string()),
+                            };
                             active_work_end_name = Some(cause.name());
                             active_work_end_error = cause.diagnostic_message().map(str::to_string);
                             apply_active_work_end(ctx, &cause, now)?;

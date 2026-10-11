@@ -242,8 +242,8 @@ body[data-shell="desktop"] .task-work-stack[data-desktop-window="macos"] > .task
   transform: rotate(-90deg);
 }
 
+/* The Agent stays in the header at every width: it is the only place an open Task names it. */
 @container task-work-stack (max-width: 1359px) {
-  .task-work-stack-header .task-header-agent,
   .task-work-stack-header .task-header-workspace {
     display: none;
   }

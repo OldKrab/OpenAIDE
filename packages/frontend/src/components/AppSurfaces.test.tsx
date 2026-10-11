@@ -727,7 +727,7 @@ describe("AppSurfaces callback wiring", () => {
     expect(latestMockProps<{ hiddenFromAccessibility?: boolean }>(surfaceMocks.sidebar)?.hiddenFromAccessibility).toBe(false);
   });
 
-  it("shows task status in the narrow workbench header", () => {
+  it("shows task status and Agent in the narrow workbench header", () => {
     const controller = webControllerFor("task");
     controller.bootstrap = {
       surface: "task",
@@ -743,7 +743,7 @@ describe("AppSurfaces callback wiring", () => {
     const tree = render(controller);
     const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
 
-    expect(header.findByType("small").children.join("")).toBe("Idle · OpenAIDE");
+    expect(header.findByType("small").children.join("")).toBe("Idle · Codex · OpenAIDE");
     expect(header.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
   });
 

@@ -509,6 +509,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? routedActiveTask?.status;
     const mobileSubtitle = [
       mobileTaskStatus ? taskStatusLabel(mobileTaskStatus) : undefined,
+      // The compact header has no room for the Agent identity row, so an open Task names it here.
+      renderableTaskSnapshot?.task.agent_name ?? routedActiveTask?.agent_name,
       mobileProject,
     ].filter(Boolean).join(" · ");
     const closeAfter = <T extends unknown[]>(callback: (...args: T) => void) => (...args: T) => {
