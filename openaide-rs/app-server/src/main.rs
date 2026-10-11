@@ -14,11 +14,12 @@ use openaide_app_server::Runtime;
 
 mod app_server_handoff;
 mod protocol_edge_process;
+mod remote_command;
 
-const APP_SERVER_PROTOCOL_MODE_ENV: &str = "OPENAIDE_APP_SERVER_PROTOCOL";
+pub(crate) const APP_SERVER_PROTOCOL_MODE_ENV: &str = "OPENAIDE_APP_SERVER_PROTOCOL";
 const LEGACY_PROTOCOL_MODE_ENV: &str = "OPENAIDE_RUNTIME_PROTOCOL";
 const APP_SERVER_PROTOCOL_MODE: &str = "app-server-protocol";
-const APP_SERVER_HANDOFF_MODE: &str = "app-server-handoff";
+pub(crate) const APP_SERVER_HANDOFF_MODE: &str = "app-server-handoff";
 const SHELL_CONTROL_STDIO_MODE: &str = "shell-control-stdio";
 const RUNTIME_ROOT_ENV: &str = "OPENAIDE_RUNTIME_ROOT";
 const BUILD_COMMIT: &str = env!("OPENAIDE_BUILD_COMMIT");
@@ -35,6 +36,13 @@ fn main() {
             "build_commit": BUILD_COMMIT,
         }),
     );
+
+    // Typed by a person in a terminal, so it is read before the modes an App
+    // Shell selects through the environment.
+    let arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments.first().map(String::as_str) == Some("remote") {
+        std::process::exit(run_remote_command(&arguments[1..], &storage_root));
+    }
 
     match protocol_mode().as_deref() {
         Ok(APP_SERVER_PROTOCOL_MODE) => {
@@ -129,6 +137,23 @@ fn run_shell_control_stdio(storage_root: PathBuf) {
         }
     }
     openaide_app_server::logging::info("app_server_stopped", serde_json::json!({}));
+}
+
+fn run_remote_command(arguments: &[String], storage_root: &std::path::Path) -> i32 {
+    let runtime_root = env::var_os(RUNTIME_ROOT_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(default_runtime_root);
+    match StateRoot::resolve(storage_root) {
+        Ok(state_root) => remote_command::run(arguments, &state_root, &runtime_root),
+        Err(error) => {
+            openaide_app_server::logging::error(
+                "protocol_edge_state_root_failed",
+                serde_json::json!({ "error": error.to_string() }),
+            );
+            eprintln!("OpenAIDE could not open its data folder: {error}");
+            1
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

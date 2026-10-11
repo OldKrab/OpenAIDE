@@ -619,6 +619,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
+dependencies = [
+ "dispatch2",
+ "nix 0.31.3",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ctutils"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2656,6 +2667,8 @@ dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-schema",
  "base64 0.23.1",
+ "chrono",
+ "ctrlc",
  "data-encoding",
  "fs2",
  "ignore",
@@ -2667,6 +2680,7 @@ dependencies = [
  "openaide-app-server-protocol",
  "openaide-remote-client",
  "portable-pty",
+ "qrcode",
  "regex",
  "serde",
  "serde_json",
@@ -2993,6 +3007,12 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"
