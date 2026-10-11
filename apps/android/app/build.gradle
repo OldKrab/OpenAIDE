@@ -85,7 +85,9 @@ def copyFrontend = tasks.register('copyFrontend', Sync) {
 androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     afterEvaluate {
         tasks.named("merge${variant.name.capitalize()}Assets") { dependsOn copyFrontend }
-        tasks.matching { it.name == "generate${variant.name.capitalize()}LintReportModel" || it.name == "lintAnalyze${variant.name.capitalize()}" }.configureEach { dependsOn copyFrontend }
+        // Release builds run the "vital" lint tasks, which read the same assets.
+        def lintTasks = ['generate%sLintReportModel', 'lintAnalyze%s', 'generate%sLintVitalReportModel', 'lintVitalAnalyze%s'].collect { String.format(it, variant.name.capitalize()) }
+        tasks.matching { it.name in lintTasks }.configureEach { dependsOn copyFrontend }
     }
 }
 dependencies {
