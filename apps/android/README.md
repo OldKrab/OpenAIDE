@@ -23,8 +23,8 @@ OpenAIDE styling, large touch targets, inline progress/errors and system light/d
 not a list of Android debug dialogs. **Advanced** contains the setup check and
 diagnostics. Android permission grants, initial Termux initialization and agent
 sign-in still require user interaction. Local work needs one agent installed in
-Termux: Codex or Claude. Dependency installation adds the pinned Android-compatible
-Codex package only when neither is installed; it does not replace an existing user
+Termux: Codex or Claude. Dependency installation adds a pinned Termux-compatible
+release of each agent that is missing; it does not replace an existing user
 installation.
 
 A remote computer needs no address, account or password. On the computer, open
@@ -86,9 +86,12 @@ history live in the state directory beside it and are kept.
 
 Use Android 8 or newer and Termux 0.118 or newer with Node.js, npm, Git and at least
 one agent command that works in Termux: `codex` or `claude`. The managed Codex
-integration pins Codex 0.153.3; use a compatible Termux build. Claude is used as
-installed: its adapter is pointed at the `claude` command in Termux, because the
-adapter's bundled runtime has no Android build. Authenticate the agent in Termux.
+integration pins Codex 0.153.3; use a compatible Termux build. Neither agent
+publishes an Android build, so setup installs a pinned release of each that runs in
+Termux when it is missing: a community Codex build, and Claude Code 2.1.112, the last
+release shipped as JavaScript. Claude's adapter is pointed at the `claude` command in
+Termux instead of its bundled runtime; with that release everything works except the
+account-limits display. Authenticate the agent in Termux.
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.

@@ -18,7 +18,7 @@ function fixture(context, symlink = false, versioned = true) {
   if (symlink) fs.symlinkSync('../../outside', path.join(source, 'escape'));
   const archive = path.join(root, 'runtime.tar.gz');
   assert.equal(spawnSync('tar', ['-czf', archive, '-C', path.join(root, 'source'), 'runtime']).status, 0);
-  for (const command of ['pkg', 'codex', 'pkill', 'pgrep']) fs.writeFileSync(path.join(tools, command), `#!${process.execPath}\nprocess.exit(0);\n`, { mode: 0o700 });
+  for (const command of ['pkg', 'codex', 'claude', 'pkill', 'pgrep']) fs.writeFileSync(path.join(tools, command), `#!${process.execPath}\nprocess.exit(0);\n`, { mode: 0o700 });
   fs.writeFileSync(path.join(tools, 'curl'), `#!${process.execPath}\nrequire('node:fs').copyFileSync(process.env.FIXTURE_ARCHIVE, process.argv[process.argv.indexOf('--output') + 1]);\n`, { mode: 0o700 });
   const home = path.join(root, 'home');
   fs.mkdirSync(home);

@@ -2,11 +2,17 @@ set -eu
 umask 077
 export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export PATH="$PREFIX/bin:$PATH"
-pkg install -y nodejs-lts git curl >/dev/null 2>&1
-# An agent the user already installed, Codex or Claude, is left as it is.
-if ! command -v codex >/dev/null && ! command -v claude >/dev/null; then
-    npm install -g @mmmbuto/codex-cli-termux@0.153.3 >/dev/null 2>&1
+pkg install -y nodejs-lts git curl ripgrep >/dev/null 2>&1
+# Neither agent publishes an Android build, so each gets a pinned release that runs
+# in Termux: a community Codex build, and the last Claude Code shipped as JavaScript.
+# An agent the user already installed is left as it is.
+if ! command -v codex >/dev/null; then
+    npm install -g @mmmbuto/codex-cli-termux@0.153.3 >/dev/null 2>&1 || true
 fi
+if ! command -v claude >/dev/null; then
+    npm install -g @anthropic-ai/claude-code@2.1.112 >/dev/null 2>&1 || true
+fi
+command -v codex >/dev/null || command -v claude >/dev/null
 if [ -n "${OPENAIDE_RUNTIME_URL:-}" ]; then
     case "$OPENAIDE_RUNTIME_URL" in https://*) ;; *) exit 1 ;; esac
     test "${#OPENAIDE_RUNTIME_SHA256}" = 64
