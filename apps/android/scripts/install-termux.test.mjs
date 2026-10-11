@@ -60,6 +60,21 @@ test('an update replaces the runtime and keeps task state', context => {
   assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime.previous')), false);
 });
 
+test('a test build installs the archive it carries and stamps which one', context => {
+  const installation = fixture(context);
+  const carried = { OPENAIDE_RUNTIME_URL: 'http://127.0.0.1:40123/0123abcd/runtime.tar.gz', OPENAIDE_RUNTIME_VERSION: '1.2.3+0123456789ab' };
+  assert.equal(installation.run(undefined, carried).status, 0);
+  assert.equal(fs.readFileSync(path.join(installation.runtimeRoot, 'runtime/VERSION'), 'utf8'), '1.2.3+0123456789ab\n');
+});
+
+test('only loopback may be reached without HTTPS', context => {
+  for (const url of ['http://downloads.example/runtime.tar.gz', 'http://127.0.0.1:1@downloads.example/0a/runtime.tar.gz', 'http://127.0.0.1:40123/0a/other']) {
+    const installation = fixture(context);
+    assert.notEqual(installation.run(undefined, { OPENAIDE_RUNTIME_URL: url }).status, 0);
+    assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime')), false);
+  }
+});
+
 test('a runtime without a version is not installed', context => {
   const installation = fixture(context, false, false);
   assert.notEqual(installation.run().status, 0);

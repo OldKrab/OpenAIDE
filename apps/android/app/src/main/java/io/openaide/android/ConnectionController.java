@@ -121,7 +121,7 @@ final class ConnectionController extends ContextWrapper {
     }
 
     /** The runtime in Termux must be the app's own version; the check compares against it. */
-    static String checkEnvironment() { return TermuxCommand.variable("OPENAIDE_VERSION", BuildConfig.VERSION_NAME); }
+    static String checkEnvironment() { return TermuxCommand.variable("OPENAIDE_VERSION", BundledRuntime.expectedVersion()); }
 
     private void install() {
         if (checks == null) { check(); return; }
@@ -130,7 +130,7 @@ final class ConnectionController extends ContextWrapper {
         worker.execute(() -> {
             String environment;
             try {
-                environment = (needsRuntime ? RuntimeRelease.installEnvironment() : "")
+                environment = (needsRuntime ? (BundledRuntime.available() ? BundledRuntime.installEnvironment(this) : RuntimeRelease.installEnvironment()) : "")
                     + TermuxCommand.variable("OPENAIDE_CLAUDE_ACP_VERSION", BuildConfig.CLAUDE_ACP_VERSION);
             }
             catch (Exception error) {

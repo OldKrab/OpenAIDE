@@ -19,6 +19,13 @@ def protocolMajor = protocolVersion.group(1) as int
 // The paired connection renders the Frontend shipped in the APK.
 def frontendDist = rootProject.file('../../packages/frontend/dist')
 def frontendAssets = layout.buildDirectory.dir('generated/frontend-assets')
+// A test build may carry the App Server archive so it can be tried before its version is published:
+// gradle -PopenaideBundledRuntime=/path/to/openaide-termux-arm64.tar.gz assembleDebug
+// Release builds leave it out and download the published archive.
+def bundledRuntime = project.hasProperty('openaideBundledRuntime') ? file(project.property('openaideBundledRuntime')) : null
+if (bundledRuntime != null && !bundledRuntime.isFile()) throw new GradleException('Bundled runtime archive not found')
+def bundledRuntimeDigest = bundledRuntime == null ? '' : java.security.MessageDigest.getInstance('SHA-256').digest(bundledRuntime.bytes).encodeHex().toString()
+def runtimeAssets = layout.buildDirectory.dir('generated/runtime-assets')
 if (versionParts[1] > 999 || versionParts[2] > 999 || appVersionCode < 1 || appVersionCode > 2100000000) throw new GradleException('Android version is out of range')
 
 android {
@@ -46,10 +53,11 @@ android {
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
         buildConfigField 'int', 'PROTOCOL_MAJOR', "${protocolMajor}"
         buildConfigField 'String', 'CLAUDE_ACP_VERSION', "\"${claudeAcpVersion}\""
+        buildConfigField 'String', 'BUNDLED_RUNTIME_SHA256', "\"${bundledRuntimeDigest}\""
         // The iroh library is about 14 MB per architecture; phones are ARM64.
         ndk { abiFilters 'arm64-v8a' }
     }
-    sourceSets { main { assets.srcDir frontendAssets } }
+    sourceSets { main { assets.srcDirs frontendAssets, runtimeAssets } }
     kotlinOptions { jvmTarget = '17' }
     packaging {
         resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'darwin-aarch64/**', 'win32-x86-64/**', 'linux-*/**'] }
@@ -82,12 +90,24 @@ def copyFrontend = tasks.register('copyFrontend', Sync) {
     }
     into frontendAssets.map { it.dir('frontend') }
 }
+// Always runs, so a build without the archive also drops one left by an earlier build.
+def copyBundledRuntime = tasks.register('copyBundledRuntime') {
+    def target = runtimeAssets.map { it.dir('runtime') }
+    inputs.property('digest', bundledRuntimeDigest)
+    outputs.dir(target)
+    // Packaging unpacks an asset named .gz, which would change the digest the installer checks.
+    doLast {
+        delete target
+        mkdir target
+        if (bundledRuntime != null) copy { from bundledRuntime; into target; rename { 'openaide-termux-arm64.bin' } }
+    }
+}
 androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     afterEvaluate {
-        tasks.named("merge${variant.name.capitalize()}Assets") { dependsOn copyFrontend }
+        tasks.named("merge${variant.name.capitalize()}Assets") { dependsOn copyFrontend, copyBundledRuntime }
         // Release builds run the "vital" lint tasks, which read the same assets.
         def lintTasks = ['generate%sLintReportModel', 'lintAnalyze%s', 'generate%sLintVitalReportModel', 'lintVitalAnalyze%s'].collect { String.format(it, variant.name.capitalize()) }
-        tasks.matching { it.name in lintTasks }.configureEach { dependsOn copyFrontend }
+        tasks.matching { it.name in lintTasks }.configureEach { dependsOn copyFrontend, copyBundledRuntime }
     }
 }
 dependencies {

@@ -77,6 +77,14 @@ and verifies the archive before extraction. Users do not enter checksums or pack
 The canonical release includes the signed APK and matching `openaide-termux-arm64.tar.gz`
 asset together, enabling fresh-phone one-tap installation. Until that version is published,
 the app reports an unavailable download without installing unverified content.
+
+A test build can carry the archive instead, so local work can be tried before its
+version is published: `gradle -PopenaideBundledRuntime=/path/to/openaide-termux-arm64.tar.gz`.
+CI does this for every build that is not a release. Termux cannot read the app's
+files, so setup hands the archive over on loopback at a random, short-lived address,
+and the installer accepts it only with the digest fixed when the APK was built. Such
+a build expects exactly its own archive, so installing a newer test APK replaces the
+runtime even when the version number is unchanged.
 The runtime is the App Server binary and a `VERSION` file, and must be the app's own
 version. After an app update, setup offers the matching runtime; installing it stops
 a server left running from the old one and replaces the runtime directory. Tasks and
