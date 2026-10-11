@@ -140,7 +140,7 @@ internal object LocalServer {
             if (server != null) result.complete(server) else result.completeExceptionally(Unavailable())
         }
         main.post {
-            TermuxCommand.run(context, "start-termux.sh", TermuxCommand.variable("OPENAIDE_VERSION", BuildConfig.VERSION_NAME)) { success, output ->
+            TermuxCommand.run(context, "start-termux.sh", TermuxCommand.variable("OPENAIDE_VERSION", BundledRuntime.expectedVersion())) { success, output ->
                 if (!success) { finish("termux_failed", null); return@run }
                 worker.execute {
                     val server = parse(output)

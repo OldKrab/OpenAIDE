@@ -51,10 +51,21 @@ jobs:
           name: android-browser-checks
           path: test-results/
   apk:
+    # Test builds carry the App Server built from the same commit, so local work
+    # can be tried before the version is published. Releases download the published one.
+    needs: runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: ${{ !inputs.release }}
+        with:
+          name: openaide-termux-arm64
+          path: ${{ runner.temp }}/runtime
+      - name: Carry the runtime in test builds
+        if: ${{ !inputs.release }}
+        run: echo "BUNDLED_RUNTIME=-PopenaideBundledRuntime=$RUNNER_TEMP/runtime/openaide-termux-arm64.tar.gz" >> "$GITHUB_ENV"
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
@@ -76,7 +87,7 @@ jobs:
           npm run build:typescript-deps
           npm run build --workspace openaide-frontend
       - name: Check and build APKs
-        run: gradle -p apps/android --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+        run: gradle -p apps/android --no-daemon $BUNDLED_RUNTIME testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
       - name: Build signed user APK
         if: github.event_name != 'pull_request'
         env:
@@ -89,7 +100,7 @@ jobs:
             export OPENAIDE_ANDROID_KEYSTORE="$RUNNER_TEMP/openaide-debug.p12"
             printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$OPENAIDE_ANDROID_KEYSTORE"
             trap 'rm -f "$OPENAIDE_ANDROID_KEYSTORE"' EXIT
-            gradle -p apps/android --no-daemon assembleRelease
+            gradle -p apps/android --no-daemon $BUNDLED_RUNTIME assembleRelease
           else
             if [ "$REQUIRE_SIGNING" = true ]; then
               echo '::error::Canonical releases require Android signing secrets.'

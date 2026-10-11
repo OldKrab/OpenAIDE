@@ -115,11 +115,18 @@ if ! command -v claude >/dev/null; then
 fi
 command -v codex >/dev/null || command -v claude >/dev/null
 if [ -n "${OPENAIDE_RUNTIME_URL:-}" ]; then
-    case "$OPENAIDE_RUNTIME_URL" in https://*) ;; *) exit 1 ;; esac
+    # A test build hands over the archive it carries on loopback; everything else is HTTPS.
+    # Either way the archive is trusted only by its digest.
+    protocol=https
+    if printf '%s' "$OPENAIDE_RUNTIME_URL" | grep -qE '^http://127\.0\.0\.1:[0-9]+/[0-9a-f]+/runtime\.tar\.gz$'; then
+        protocol=http
+    else
+        case "$OPENAIDE_RUNTIME_URL" in https://*) ;; *) exit 1 ;; esac
+    fi
     test "${#OPENAIDE_RUNTIME_SHA256}" = 64
     stage=$(mktemp -d "$root/install.XXXXXX")
     trap 'rm -rf "$stage"' EXIT
-    curl --fail --location --proto '=https' --proto-redir '=https' --max-time 120 --max-filesize 536870912 \
+    curl --fail --location --proto "=$protocol" --proto-redir '=https' --max-time 120 --max-filesize 536870912 \
         --output "$stage/runtime.tar.gz" "$OPENAIDE_RUNTIME_URL" >/dev/null 2>&1
     printf '%s  %s\n' "$OPENAIDE_RUNTIME_SHA256" "$stage/runtime.tar.gz" | sha256sum -c - >/dev/null
     tar -tzf "$stage/runtime.tar.gz" > "$stage/entries"
@@ -129,6 +136,8 @@ if [ -n "${OPENAIDE_RUNTIME_URL:-}" ]; then
     tar -xzf "$stage/runtime.tar.gz" -C "$stage" --no-same-owner
     test -x "$stage/runtime/bin/openaide-app-server"
     test -s "$stage/runtime/VERSION"
+    # Test builds of one version differ, so the app names the exact archive it expects.
+    if [ -n "${OPENAIDE_RUNTIME_VERSION:-}" ]; then printf '%s\n' "$OPENAIDE_RUNTIME_VERSION" > "$stage/runtime/VERSION"; fi
     if [ -d "$root/runtime" ]; then
         # The runtime and the app are one version. Nothing may still run from the
         # old files, so a server left from before the update ends here; its tasks
