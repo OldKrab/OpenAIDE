@@ -306,7 +306,8 @@ async fn serve_device(
     let initial_path = describe(&connection);
     logging::info(
         "remote_device_connected",
-        serde_json::json!({ "device": device_label, "path": path_name(&initial_path) }),
+        // Named `route` because the log redacts every field called `path`.
+        serde_json::json!({ "device": device_label, "route": path_name(&initial_path) }),
     );
     devices.device_connected(&device, initial_path);
     let path_watch = tokio::spawn(watch_path(connection.clone(), devices.clone()));
@@ -368,9 +369,19 @@ async fn watch_path(connection: Connection, devices: RemoteDevices) {
     let device = connection.remote_id();
     let mut interval = tokio::time::interval(PATH_POLL_INTERVAL);
     interval.tick().await;
+    let mut route = path_name(&describe(&connection));
     loop {
         interval.tick().await;
-        devices.device_path_changed(&device, describe(&connection));
+        let current = describe(&connection);
+        // A route change can explain a stall on the device's side.
+        if path_name(&current) != route {
+            route = path_name(&current);
+            logging::info(
+                "remote_device_route_changed",
+                serde_json::json!({ "device": device.fmt_short().to_string(), "route": route }),
+            );
+        }
+        devices.device_path_changed(&device, current);
     }
 }
 
