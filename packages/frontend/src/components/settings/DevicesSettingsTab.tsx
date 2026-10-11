@@ -76,19 +76,19 @@ export function DevicesSettingsTab({
             </li>
           ) : null}
         </ul>
-        {devices.remoteAccess === "off" ? (
-          <details className="device-relay-notice">
-            <summary>What happens when I add a device?</summary>
-            <p>
-              Adding a device turns on remote access for this computer. The connection is encrypted end to end and
-              goes directly between the devices when they can reach each other.
-            </p>
-            <p>
-              Otherwise it goes through public relays run by the iroh project. They see network addresses and public
-              keys, never content.
-            </p>
-          </details>
-        ) : null}
+        <details className="device-relay-notice" open={devices.remoteAccess === "off" ? true : undefined}>
+          <summary>How the connection works</summary>
+          {devices.remoteAccess === "off" ? <p>Adding a device turns on remote access for this computer.</p> : null}
+          <p>
+            Devices connect with iroh over QUIC. Each one is addressed by its own key, and the connection is encrypted
+            end to end with those keys. No account, open port, or router setup is needed.
+          </p>
+          <p>
+            The connection goes directly between the devices when their networks allow it (NAT hole punching).
+            Otherwise it goes through public relays run by the iroh project, which also help the devices find each
+            other. Relays see network addresses and public keys, never content.
+          </p>
+        </details>
       </section>
 
       {dialog?.kind === "invite" ? <InviteDialog devices={remoteDevices} intents={intents} onClose={close} /> : null}
@@ -123,6 +123,16 @@ function DeviceRow({ device, onRemove }: { device: RemoteDeviceSummary; onRemove
         <Trash2 size={15} />
       </button>
     </li>
+  );
+}
+
+/** Names the public service at the moment pairing starts to use it (ADR 0062). */
+function ConnectionNote() {
+  return (
+    <p className="device-connection-note">
+      Encrypted end to end. Direct when the networks allow it, otherwise through iroh’s public relays, which cannot
+      read it.
+    </p>
   );
 }
 
@@ -179,6 +189,7 @@ function InviteDialog({
           <p className="device-code-meta">
             Works once · expires in {formatCountdown(invite.expiresAtMs - now)}
           </p>
+          <ConnectionNote />
         </>
       ) : expired ? (
         <p>This code expired. Create a new one to continue.</p>
@@ -248,6 +259,7 @@ function JoinDialog({ intents, onClose }: { intents: RemoteDeviceIntents; onClos
               ? "This device is already paired. Adding it again tells it where to connect."
               : "It will have full access to this OpenAIDE: Tasks, files, and Agents. The name is reported by the device and is not verified."}
           </p>
+          <ConnectionNote />
         </>
       ) : (
         <textarea

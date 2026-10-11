@@ -38,10 +38,13 @@ function choice(glyph, title, detail, destination) { return item('choice', glyph
 function row(glyph, title, action, value = '', detail = '') { return item('row', glyph, title, detail, action, value); }
 
 // Background information is prose behind a question placed where it comes up, not text on the page.
+// Shared by every screen that explains a remote connection; names the public service it may use (ADR 0062).
+const network = 'The connection uses iroh over QUIC. It goes directly between the devices when their networks allow it (NAT hole punching). Otherwise it goes through public relays run by the iroh project, which see network addresses and public keys, never content.';
 const info = {
   welcome: ['What’s the difference?', 'Where agents work', 'On a remote computer, work keeps running when your phone is locked or OpenAIDE is closed. On this phone, agents run locally in Termux.', 'Projects and conversations stay on the device where the agents work. You can switch later in Settings.'],
-  remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Devices on your computer.'],
-  join: ['How pairing works', 'How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.'],
+  remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Devices on your computer.', network],
+  join: ['How pairing works', 'How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.', network],
+  settings: ['How the connection works', 'How the connection works', 'Your phone and computer each have their own key, and the connection is encrypted end to end with those keys. There is no account or password.', network],
   local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, the tools it needs, a signed-in agent (Codex or Claude) and storage, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
   background: ['How does this affect battery?', 'Background work', 'Protection keeps the phone awake only while agents are working and is released when work is idle. Running agents still use battery and data, so plug in for long tasks.', 'Do not force-stop OpenAIDE or Termux during work. Some phones also need background activity allowed in their own battery settings.'],
 };
@@ -130,7 +133,7 @@ function render() {
       + row('qr', remote || state.paired ? 'Pair another computer' : 'Pair with a computer', 'remote_screen')
       + (remote ? '' : row('battery', 'Background work', 'background_screen', state.background ? 'On' : 'Off'))
       + row('wrench', 'Advanced', 'advanced_screen')
-      + '</div>';
+      + '</div>' + (remote || state.paired ? hint() : '');
   } else if (screen === 'local') {
     const step = localStep();
     page.innerHTML = `<div class="step" role="img" aria-label="Step ${step.index} of 4">${[1, 2, 3, 4].map(index => `<span class="${index <= step.index ? 'done' : ''}"></span>`).join('')}</div>`

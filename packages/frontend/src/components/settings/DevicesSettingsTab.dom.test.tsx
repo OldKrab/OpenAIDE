@@ -26,6 +26,7 @@ it("lists this computer without a remove action and names the relays before firs
   expect(document.body.textContent).toContain("This computer");
   expect(document.body.textContent).toContain("No other devices are paired.");
   expect(document.body.textContent).toContain("public relays run by the iroh project");
+  expect(document.querySelector<HTMLDetailsElement>(".device-relay-notice")?.open).toBe(true);
   expect(document.querySelector('button[aria-label^="Remove"]')).toBeNull();
 });
 
@@ -38,7 +39,9 @@ it("shows how a connected device is reached", async () => {
 
   expect(document.body.textContent).toContain("Connected · through a relay · 203.0.113.7");
   expect(document.body.textContent).toContain("from workstation");
-  expect(document.body.textContent).not.toContain("public relays run by the iroh project");
+  // Once remote access is on the explanation stays available, collapsed.
+  expect(document.body.textContent).toContain("public relays run by the iroh project");
+  expect(document.querySelector<HTMLDetailsElement>(".device-relay-notice")?.open).toBe(false);
 });
 
 it("shows a single-use pairing code, withdraws it on close, and reports the device that used it", async () => {
