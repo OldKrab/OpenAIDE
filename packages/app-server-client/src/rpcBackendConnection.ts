@@ -59,7 +59,17 @@ export type ReliableBackendConnectionOptions = {
 
 export type InternalReliableBackendConnectionOptions = ReliableBackendConnectionOptions & {
   onRequestError?: (error: unknown, method: ProtocolMethod) => void;
+  /** Called when heartbeats stop being answered and when the next one is. */
+  onResponsivenessChange?: (responsive: boolean) => void;
 };
+
+/**
+ * Heartbeat intervals one heartbeat may stay unanswered before the App Server
+ * counts as silent. The link retries inside itself, so a lost heartbeat stays
+ * pending instead of failing. Counting ticks rather than time keeps a page
+ * whose timers were paused in the background from reporting silence on wake.
+ */
+const SILENT_AFTER_HEARTBEAT_TICKS = 2;
 
 /** Adapts the generated App Server contract onto the transport-independent peer. */
 export function createReliableBackendConnection(
@@ -92,6 +102,9 @@ export function createInternalReliableBackendConnection(
   let heartbeatFailureCount = 0;
   let heartbeatFailureActive = false;
   let heartbeatPending = false;
+  let heartbeatOverdueTicks = 0;
+  let silent = false;
+  let silentSince = 0;
   let requestSequence = 0;
 
   // RpcPeer owns the single protocol handler. Backend consumers are independent
@@ -206,10 +219,29 @@ export function createInternalReliableBackendConnection(
   function startHeartbeat() {
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = setInterval(() => {
-      if (!initialized || heartbeatPending) return;
+      if (!initialized) return;
+      if (heartbeatPending) {
+        heartbeatOverdueTicks += 1;
+        if (heartbeatOverdueTicks === SILENT_AFTER_HEARTBEAT_TICKS && !silent) {
+          silent = true;
+          silentSince = Date.now();
+          logger.warn("backend_heartbeat_overdue", { ...connectionContext, overdue_ticks: heartbeatOverdueTicks });
+          options.onResponsivenessChange?.(false);
+        }
+        return;
+      }
       heartbeatPending = true;
+      heartbeatOverdueTicks = 0;
       void sendRequest(CLIENT_HEARTBEAT, {})
         .then(() => {
+          if (silent) {
+            silent = false;
+            logger.info("backend_heartbeat_answered_after_silence", {
+              ...connectionContext,
+              duration_ms: Date.now() - silentSince,
+            });
+            options.onResponsivenessChange?.(true);
+          }
           if (!heartbeatFailureActive) return;
           const recoveredAfterFailureCount = heartbeatFailureCount;
           heartbeatFailureActive = false;

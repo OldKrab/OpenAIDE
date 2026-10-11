@@ -95,6 +95,8 @@ function createReliableHttpBackendConnection(
   >();
   const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
   const recoveryFailureListeners = new Set<(event: BackendRecoveryFailure) => void>();
+  const responsivenessListeners = new Set<(responsive: boolean) => void>();
+  let responsive = true;
   const requestRegistrations = new Set<{
     bind(connection: BackendConnection): void;
     dispose(): void;
@@ -237,6 +239,10 @@ function createReliableHttpBackendConnection(
       recoveryFailureListeners.add(handler);
       return () => recoveryFailureListeners.delete(handler);
     },
+    handleResponsiveness(handler) {
+      responsivenessListeners.add(handler);
+      return () => responsivenessListeners.delete(handler);
+    },
     close() {
       if (closed) return;
       closed = true;
@@ -252,6 +258,7 @@ function createReliableHttpBackendConnection(
       generationInvalidationListeners.clear();
       recoveryBaselineListeners.clear();
       recoveryFailureListeners.clear();
+      responsivenessListeners.clear();
     },
   };
 
@@ -278,6 +285,9 @@ function createReliableHttpBackendConnection(
         : { heartbeatIntervalMs: options.heartbeatIntervalMs }),
       onRequestError(error, method) {
         if (method !== CLIENT_INITIALIZE) handleGenerationRequestError(generation, error);
+      },
+      onResponsivenessChange(next) {
+        if (generation === active) publishResponsiveness(next);
       },
     });
     generation = { channel, connection, endpointRevision: generationEndpointRevision };
@@ -318,7 +328,15 @@ function createReliableHttpBackendConnection(
     });
   }
 
+  function publishResponsiveness(next: boolean) {
+    if (responsive === next) return;
+    responsive = next;
+    for (const listener of responsivenessListeners) listener(next);
+  }
+
   function bindGeneration(generation: HttpConnectionGeneration) {
+    // A replacement transport starts with a clean record; recovery has its own status.
+    publishResponsiveness(true);
     generation.unsubscribeEvent = generation.connection.handleNotification("app/event", (event) => {
       for (const listener of eventListeners) listener(event);
     });

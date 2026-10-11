@@ -6,6 +6,7 @@ import {
   createReliableWebProxyBackendConnection,
 } from "./reliableBackendConnection";
 import type { ReliableHttpFetch } from "./reliableHttpChannel";
+import { createInternalReliableBackendConnection } from "./rpcBackendConnection";
 import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
@@ -115,6 +116,54 @@ describe("ReliableBackendConnection", () => {
       expect(sent.filter((message) => (
         "method" in message && message.method === CLIENT_HEARTBEAT
       ))).toHaveLength(1);
+      connection.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports silence after two unanswered heartbeat intervals and its end with the answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const sent: RpcMessage[] = [];
+      const listeners = new Set<(message: RpcMessage) => void>();
+      const channel: RpcMessageChannel = {
+        send: (message) => sent.push(message),
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      };
+      const reports: boolean[] = [];
+      const connection = createInternalReliableBackendConnection({
+        channel,
+        heartbeatIntervalMs: 5,
+        onResponsivenessChange: (responsive) => reports.push(responsive),
+      });
+      const answer = (message: RpcMessage | undefined, result: unknown) => {
+        if (!message || !("id" in message)) throw new Error("Expected a request");
+        for (const receive of listeners) receive({ jsonrpc: "2.0", id: message.id, result: { result } });
+      };
+      const initializing = connection.initialize({
+        clientInstanceId: "client-1" as ClientInstanceId,
+        shell: { kind: "web" },
+        requestedSurface: { kind: "home" },
+        capabilities: { protocol: [], shell: [] },
+      });
+      answer(sent[0], initializeResult());
+      await initializing;
+
+      // One interval sends the heartbeat, one more leaves it merely late.
+      await vi.advanceTimersByTimeAsync(10);
+      expect(reports).toEqual([]);
+      await vi.advanceTimersByTimeAsync(5);
+      expect(reports).toEqual([false]);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(reports).toEqual([false]);
+
+      answer(sent.find((message) => "method" in message && message.method === CLIENT_HEARTBEAT), {});
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reports).toEqual([false, true]);
       connection.close();
     } finally {
       vi.useRealTimers();

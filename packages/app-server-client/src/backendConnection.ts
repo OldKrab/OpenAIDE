@@ -78,6 +78,12 @@ export interface BackendConnection {
   handleRecoveryBaseline(
     handler: (event: BackendRecoveryBaseline) => void,
   ): BackendUnsubscribe;
+  /**
+   * Reports that the App Server stopped answering, or answers again, while the
+   * session itself stays open and keeps retrying. Presentation only: requests
+   * are still accepted and delivered once the link is back.
+   */
+  handleResponsiveness?(handler: (responsive: boolean) => void): BackendUnsubscribe;
   /** Reports a terminal replacement failure so logical-session barriers can settle. */
   handleRecoveryFailed(
     handler: (event: BackendRecoveryFailure) => void,

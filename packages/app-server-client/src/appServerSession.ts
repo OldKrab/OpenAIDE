@@ -177,6 +177,9 @@ export function createAppServerSession(
       notifyListener(handler, logger, "session_status", status);
       return () => statusListeners.delete(handler);
     },
+    handleResponsiveness(handler) {
+      return connection.handleResponsiveness?.(handler) ?? (() => false);
+    },
     close() {
       if (closed) return;
       closed = true;

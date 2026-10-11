@@ -66,6 +66,7 @@ export type AppControllerBackendConnection = Pick<
   | "handleNotification"
   | "handleRecoveryBaseline"
   | "handleSessionStatus"
+  | "handleResponsiveness"
   | "subscribeState"
   | "handleRequest"
   | "close"
@@ -73,7 +74,8 @@ export type AppControllerBackendConnection = Pick<
 
 export type BackendConnectionState =
   | { status: "connecting" }
-  | { status: "ready" }
+  /** `unresponsive` marks a session that is still open but whose App Server stopped answering. */
+  | { status: "ready"; unresponsive?: boolean }
   | { status: "reconnecting"; message: string }
   | { status: "unavailable"; message: string };
 
@@ -127,6 +129,7 @@ export function useAppControllerBackendLifecycle({
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>({
     status: "connecting",
   });
+  const [backendUnresponsive, setBackendUnresponsive] = useState(false);
   const [backendStateGeneration, setBackendStateGeneration] = useState(0);
   const {
     dispatchForCurrentReplica,
@@ -278,6 +281,14 @@ export function useAppControllerBackendLifecycle({
           setBackendConnectionState({ status: "ready" });
         }
       }
+    });
+    const stopResponsiveness = backendConnection?.handleResponsiveness?.((responsive) => {
+      if (!active) return;
+      sendWebviewTelemetry(postHostMessage, "app_server_responsiveness_changed", {
+        surface: initialBootstrap.surface,
+        responsive,
+      });
+      setBackendUnresponsive(!responsive);
     });
     const stopSubscriptions: Array<() => void> = [];
     setBackendStateGeneration((generation) => generation + 1);
@@ -501,6 +512,7 @@ export function useAppControllerBackendLifecycle({
       for (const stop of stopSubscriptions) stop();
       stopRecoveryBaselines?.();
       stopSessionStatus?.();
+      stopResponsiveness?.();
       serverRequestBridge?.dispose();
       stopSession();
       backendConnection?.close();
@@ -577,7 +589,9 @@ export function useAppControllerBackendLifecycle({
     acceptSnapshotRequest,
     backendInitialized,
     backendInitializationReady,
-    backendConnectionState,
+    backendConnectionState: backendConnectionState.status === "ready" && backendUnresponsive
+      ? { status: "ready" as const, unresponsive: true }
+      : backendConnectionState,
     backendReady: backendReady && taskRouteLifecycle.ready,
     taskMutationReady: backendSessionReady && taskRouteLifecycle.ready,
     bootstrap,
