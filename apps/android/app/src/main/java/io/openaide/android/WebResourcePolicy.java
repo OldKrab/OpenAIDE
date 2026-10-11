@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 final class WebResourcePolicy {
     private final Set<String> documents = ConcurrentHashMap.newKeySet();
-    private volatile ConnectionProfile profile = new ConnectionProfile("http://127.0.0.1:5474/", "android", "unused", true);
+    private volatile ConnectionProfile profile = ConnectionProfile.local();
 
     void use(ConnectionProfile profile) { clear(); this.profile = profile; }
 

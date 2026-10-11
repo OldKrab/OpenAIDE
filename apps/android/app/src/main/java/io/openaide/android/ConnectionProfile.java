@@ -2,30 +2,24 @@ package io.openaide.android;
 
 import java.net.URI;
 
-/** The origin the workspace WebView loads: the Termux Web Shell, or the paired computer's gateway. */
+/** The origin the workspace WebView loads: the app's own gateway, one port per workspace. */
 final class ConnectionProfile {
-    static final String LOCAL_ENDPOINT = "http://127.0.0.1:5474/";
-    /** Fixed so the bundled Frontend keeps one origin, and with it its stored drafts and preferences. */
+    /** Fixed so the bundled Frontend keeps one origin per workspace, and with it its stored drafts and preferences. */
+    static final int LOCAL_PORT = 5476;
     static final int PAIRED_PORT = 5475;
-    static final String PAIRED_ENDPOINT = "http://127.0.0.1:" + PAIRED_PORT + "/";
     final String endpoint;
-    final String username;
-    final String password;
     final boolean local;
 
-    ConnectionProfile(String address, String username, String password, boolean local) {
-        if (!(local ? LOCAL_ENDPOINT : PAIRED_ENDPOINT).equals(address)
-                || (local && (username.isEmpty() || username.contains(":") || password.isEmpty()))) {
-            throw new IllegalArgumentException("Unsupported workspace address or credentials.");
-        }
-        this.endpoint = address;
-        this.username = username;
-        this.password = password;
+    private ConnectionProfile(int port, boolean local) {
+        this.endpoint = "http://127.0.0.1:" + port + "/";
         this.local = local;
     }
 
+    /** The App Server in Termux. The gateway holds its token; the WebView holds no credential for it. */
+    static ConnectionProfile local() { return new ConnectionProfile(LOCAL_PORT, true); }
+
     /** A paired computer is trusted by key; the WebView holds no credential for it. */
-    static ConnectionProfile paired() { return new ConnectionProfile(PAIRED_ENDPOINT, "", "", false); }
+    static ConnectionProfile paired() { return new ConnectionProfile(PAIRED_PORT, false); }
 
     boolean owns(String address) {
         try {

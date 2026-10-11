@@ -62,7 +62,7 @@ public final class BackgroundService extends Service {
         polling = true;
         worker.execute(() -> {
             ServerStatus status = null;
-            try { status = ServerStatus.read(new ConnectionStore(this).local()); }
+            try { status = LocalServer.status(this); }
             catch (Exception ignored) { }
             ServerStatus result = status;
             handler.post(() -> {

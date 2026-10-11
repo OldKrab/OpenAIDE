@@ -36,6 +36,7 @@ p { margin: 0; color: var(--muted); }
 .path .sep { width: 16px; height: 16px; color: var(--muted); }
 .status { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 15px; }
 .status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.status.off::before { background: var(--muted); }
 
 /* Lists: one soft neutral surface, hairlines between rows, plain icons */
 .group { margin-top: 32px; border-radius: 18px; background: var(--surface); overflow: hidden; }

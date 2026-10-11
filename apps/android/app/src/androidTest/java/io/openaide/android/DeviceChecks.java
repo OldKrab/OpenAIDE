@@ -134,7 +134,7 @@ public final class DeviceChecks extends InstrumentationTestCase {
         CountDownLatch completed = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean();
         AtomicReference<String> output = new AtomicReference<>("");
-        getInstrumentation().runOnMainSync(() -> TermuxCommand.run(context, "check-termux.sh", "", false, (ok, text) -> {
+        getInstrumentation().runOnMainSync(() -> TermuxCommand.run(context, "check-termux.sh", ConnectionController.checkEnvironment(), (ok, text) -> {
             success.set(ok);
             output.set(text);
             completed.countDown();
@@ -142,12 +142,10 @@ public final class DeviceChecks extends InstrumentationTestCase {
         assertTrue("Termux callback timed out", completed.await(45, TimeUnit.SECONDS));
         assertTrue("Termux preflight failed", success.get());
         JSONObject checks = new JSONObject(output.get().trim());
-        for (String key : new String[]{"runtime", "frontend", "codex", "authenticated", "supervisor", "storage"})
+        for (String key : new String[]{"runtime", "agent", "agentVersion", "authenticated", "storage"})
             assertTrue("Preflight check: " + key, checks.getBoolean(key));
-        ConnectionProfile profile = new ConnectionStore(context).local();
-        getInstrumentation().runOnMainSync(() -> TermuxCommand.run(context, "start-termux.sh",
-            TermuxCommand.variable("OPENAIDE_WEB_PASSWORD", profile.password), true, (ok, text) -> assertTrue(ok)));
-        assertTrue(ServerStatus.read(profile).active >= 0);
+        // Attaches to the running App Server or launches it, exactly as opening the workspace does.
+        assertTrue(LocalServer.status(context).active >= 0);
         getInstrumentation().runOnMainSync(activity::finish);
     }
 
@@ -164,14 +162,21 @@ public final class DeviceChecks extends InstrumentationTestCase {
         }
     }
 
-    public void testNativeStatusReadsAuthenticatedBackend() throws Exception {
+    public void testNativeStatusReadsTheLocalAppServer() throws Exception {
         var context = getInstrumentation().getTargetContext();
-        ServerStatus status = ServerStatus.read(new ConnectionStore(context).local());
+        ServerStatus status = LocalServer.status(context);
         assertTrue(status.active >= 0);
         assertTrue(status.waiting >= 0);
-        ConnectionProfile wrong = new ConnectionProfile("http://127.0.0.1:5474/", "android", "wrong-test-password", true);
-        try { ServerStatus.read(wrong); fail("Wrong credentials were accepted"); }
-        catch (java.io.IOException expected) { }
+    }
+
+    public void testGatewayRefusesRequestsWithoutTheShellsCookie() throws Exception {
+        var context = getInstrumentation().getTargetContext();
+        LocalServer.status(context);
+        assertTrue(WorkspaceGateway.INSTANCE.start(context, true));
+        java.net.HttpURLConnection connection = (java.net.HttpURLConnection)
+            new java.net.URL(ConnectionProfile.local().endpoint + "__openaide-app-server/probe").openConnection();
+        try { assertEquals(403, connection.getResponseCode()); }
+        finally { connection.disconnect(); }
     }
 
     private void waitForBrowser(MainActivity activity) throws Exception {

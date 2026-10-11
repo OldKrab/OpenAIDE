@@ -17,11 +17,11 @@ public class WebResourcePolicyTest {
 
     @Test public void keepsPrivateFilesAndExternalOriginsBlocked() {
         WebResourcePolicy policy = new WebResourcePolicy();
-        assertTrue(policy.allows("http://127.0.0.1:5474/assets/app.js"));
-        assertTrue(policy.allows("blob:http://127.0.0.1:5474/preview"));
+        assertTrue(policy.allows("http://127.0.0.1:5476/assets/app.js"));
+        assertTrue(policy.allows("blob:http://127.0.0.1:5476/preview"));
         assertFalse(policy.allows("http://127.0.0.1:5475/"));
         assertFalse(policy.allows("https://example.com/"));
         assertFalse(policy.allows("file:///data/private"));
-        assertFalse(policy.allows("http://127.0.0.1:5474@evil.example/"));
+        assertFalse(policy.allows("http://127.0.0.1:5476@evil.example/"));
     }
 }

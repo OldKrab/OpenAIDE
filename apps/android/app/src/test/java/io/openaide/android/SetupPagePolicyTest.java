@@ -5,7 +5,7 @@ import static org.junit.Assert.*;
 
 public class SetupPagePolicyTest {
     @Test public void connectionCommandsRequireTheOwnedSettingsSubmenu() {
-        ConnectionProfile profile = new ConnectionProfile("http://127.0.0.1:5474/", "android", "test", true);
+        ConnectionProfile profile = ConnectionProfile.local();
         assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings?tab=connection"));
         assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings/?tab=connection&source=menu"));
         for (String address : new String[]{"https://evil.example/settings?tab=connection", profile.endpoint + "settings",
@@ -23,7 +23,7 @@ public class SetupPagePolicyTest {
     }
 
     @Test public void onlyUserActivatedOwnedMainFrameCanOpenSettings() {
-        ConnectionProfile profile = new ConnectionProfile("http://127.0.0.1:5474/", "android", "test", true);
+        ConnectionProfile profile = ConnectionProfile.local();
         String source = profile.endpoint + "settings";
         String destination = "openaide://connection-settings";
         assertTrue(SetupPagePolicy.opensSettings(profile, source, destination, true, true));

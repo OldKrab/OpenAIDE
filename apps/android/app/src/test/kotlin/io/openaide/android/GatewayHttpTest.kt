@@ -46,6 +46,17 @@ class GatewayHttpTest {
         for (secret in listOf("token", "stolen", "5475", "keep-alive")) assertFalse(forwarded.contains(secret))
     }
 
+    @Test fun givesTheLocalAppServerOnlyTheShellsToken() {
+        val request = head("POST /__openaide-app-server/upload?taskId=1 HTTP/1.1", *trusted, "Authorization: Bearer stolen", "Content-Length: 2")
+        val target = GatewayHttp.localTarget(GatewayHttp.appServerTarget(request)!!, "/rpc")
+        assertEquals("/rpc/upload?taskId=1", target)
+        val forwarded = String(GatewayHttp.forwarded(request, target, "local-token"), Charsets.ISO_8859_1)
+        // The listener reads the first header of a name, so the shell's credential leads.
+        assertTrue(forwarded.startsWith("POST /rpc/upload?taskId=1 HTTP/1.1\r\nAuthorization: Bearer local-token\r\nHost: 127.0.0.1\r\n"))
+        assertFalse(forwarded.contains("stolen"))
+        assertFalse(forwarded.contains("openaide_gateway"))
+    }
+
     @Test fun keepsAWebSocketHandshakeIntact() {
         val request = head("GET /__openaide-app-server/probe?connectionId=c1 HTTP/1.1", *trusted, "Connection: Upgrade",
             "Upgrade: websocket", "Sec-WebSocket-Key: key", "Sec-WebSocket-Version: 13")

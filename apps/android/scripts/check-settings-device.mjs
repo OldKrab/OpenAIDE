@@ -49,7 +49,7 @@ async function waitFor(read, description) {
   throw new Error(description);
 }
 
-const target = await waitFor(async () => (await targets()).find(target => target.url.startsWith('http://127.0.0.1:5474/')), 'Open the local workspace first');
+const target = await waitFor(async () => (await targets()).find(target => target.url.startsWith('http://127.0.0.1:5476/')), 'Open the local workspace first');
 const workspace = await connect(target);
 let originalBackground;
 try {

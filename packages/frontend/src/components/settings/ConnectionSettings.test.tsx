@@ -12,7 +12,7 @@ afterEach(() => vi.restoreAllMocks());
 function capability() {
   let state: ConnectionSnapshot = {
     remote: false, paired: false, computer: "", busy: false, notice: "", termux: true, permission: true,
-    background: true, appBattery: true, termuxBattery: true, batterySaver: false, notifications: true, boot: false, checks: null,
+    background: true, appBattery: true, termuxBattery: true, batterySaver: false, notifications: true, checks: null,
   };
   let listener = () => {};
   const execute = vi.fn().mockResolvedValue(undefined);

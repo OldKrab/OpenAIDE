@@ -1,7 +1,7 @@
 package io.openaide.android
 
 /**
- * The HTTP rules of the paired connection's gateway, kept free of sockets.
+ * The HTTP rules of the workspace gateway, kept free of sockets.
  *
  * The WebView reaches the gateway on loopback, where every app on the phone can
  * connect too. A request is served only when it carries the per-process cookie
@@ -55,12 +55,19 @@ internal object GatewayHttp {
         return "/probe$suffix$query"
     }
 
+    /** The same target on the local App Server, whose endpoint names its own base path. */
+    fun localTarget(target: String, basePath: String): String = basePath + target.removePrefix("/probe")
+
     /**
-     * The request as the App Server receives it. The device is trusted by its key,
-     * so nothing the WebView holds for the gateway travels past it.
+     * The request as the App Server receives it. Nothing the WebView holds for the
+     * gateway travels past it: a paired computer trusts the device by its key, and
+     * the local App Server gets the token only the shell knows, as the first header
+     * because the listener reads the first of a name.
      */
-    fun forwarded(head: Head, target: String): ByteArray {
-        val text = StringBuilder("${head.method} $target HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+    fun forwarded(head: Head, target: String, localToken: String? = null): ByteArray {
+        val text = StringBuilder("${head.method} $target HTTP/1.1\r\n")
+        if (localToken != null) text.append("Authorization: Bearer ").append(localToken).append("\r\n")
+        text.append("Host: 127.0.0.1\r\n")
         for ((name, value) in head.headers) {
             when (name.lowercase()) {
                 "host", "cookie", "authorization", "origin", "referer" -> continue

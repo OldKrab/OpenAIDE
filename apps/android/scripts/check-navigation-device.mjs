@@ -51,7 +51,7 @@ async function waitFor(read, description) {
 }
 
 
-const target = await waitFor(async () => (await targets()).find(target => target.url.startsWith('http://127.0.0.1:5474/')), 'Workspace unavailable');
+const target = await waitFor(async () => (await targets()).find(target => target.url.startsWith('http://127.0.0.1:5476/')), 'Workspace unavailable');
 const workspace = await connect(target);
 const originalRoute = await evaluate(workspace, 'location.pathname + location.search');
 const rendererOnly = process.argv.includes('--renderer-only');
