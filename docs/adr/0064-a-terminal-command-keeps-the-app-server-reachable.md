@@ -36,4 +36,4 @@ The command acts on the state root it is given, the default one unless the envir
 - A same-machine client kind exists that renders nothing and holds no secrets. Anything that picks a client to show a prompt must keep choosing by capability, not by presence.
 - A terminal client counts as another client for a Desktop update's shutdown check, which is correct: stopping the App Server would cut off the devices it serves.
 - Whether App Shells and the terminal should share one state root, and with it how different versions meet on one App Server, is not decided here.
-- The Mobile App reads a Pairing Code from pasted text; scanning the terminal's QR code needs a camera reader there.
+- The QR code is drawn with the terminal's own glyphs, dark modules left empty, so it reads correctly on a dark background. A light terminal shows it inverted, which not every reader accepts; the text code is the fallback.
