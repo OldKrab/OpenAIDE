@@ -25,6 +25,7 @@
 @import "./app/background-commands.css";
 @import "./app/compaction.css";
 @import "./app/task-work-stack.css";
+@import "./app/desktop-work-well.css";
 @import "./app/subagent-navigator.css";
 @import "./app/task-message-queue.css";
 @import "./app/settings-shell.css";

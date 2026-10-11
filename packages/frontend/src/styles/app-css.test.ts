@@ -90,7 +90,9 @@ describe("task list row styles", () => {
     expect(appCss).not.toMatch(/\.task-row:hover \.task-row-action,\s*\.task-row:has\(:focus-visible\) \.task-row-action\s*{[^}]*color:/);
     expect(appCss).not.toMatch(/\.task-row:focus-within \.task-row-action/);
     expect(appCss).not.toMatch(/\.task-row\.selected \.task-row-action\s*{/);
-    expect(appCss).toMatch(/\.task-row:has\(\.task-row-action:not\(:disabled\)\):hover \.task-trailing-meta,\s*\.task-row:has\(\.task-row-action:not\(:disabled\)\):has\(:focus-visible\) \.task-trailing-meta\s*{[^}]*visibility:\s*hidden;/);
+    expect(appCss).toMatch(/\.task-row:has\(\.task-row-action:not\(:disabled\)\):hover \.task-trailing-meta,\s*\.task-row:has\(\.task-row-action:not\(:disabled\)\):has\(:focus-visible\) \.task-trailing-meta\s*{[^}]*opacity:\s*0;/);
+    // Hiding the slot stalls a running spinner's animation in the macOS WebView.
+    expect(appCss).not.toMatch(/\.task-trailing-meta\s*{[^}]*visibility:\s*hidden;/);
     expect(appCss).not.toMatch(/\.task-row\.selected \.task-trailing-meta\s*{/);
     expect(appCss).toMatch(/\.task-row:hover \.task-row-action-slot,\s*\.task-row:has\(:focus-visible\) \.task-row-action-slot\s*{[^}]*pointer-events:\s*auto;/);
     expect(appCss).toMatch(/\.task-row-action\s*{[^}]*cursor:\s*pointer;/);
@@ -633,7 +635,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 44px;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row-action-slot\s*{[^}]*position:\s*relative;[^}]*width:\s*44px;[^}]*min-width:\s*44px;[^}]*pointer-events:\s*auto;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row-action\s*{[^}]*min-width:\s*44px;[^}]*width:\s*44px;[^}]*opacity:\s*1;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):hover \.task-trailing-meta,[^{]+body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):has\(:focus-visible\) \.task-trailing-meta\s*{[^}]*visibility:\s*visible;/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):hover \.task-trailing-meta,[^{]+body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):has\(:focus-visible\) \.task-trailing-meta\s*{[^}]*opacity:\s*1;/);
   });
 
   it("uses count-aware image layouts with overlaid composer removal controls", () => {

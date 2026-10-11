@@ -296,7 +296,7 @@ body[data-input-modality="pointer"] button:focus-visible {
 
   body[data-shell="web"] .task-row:has(.task-row-action:not(:disabled)):hover .task-trailing-meta,
   body[data-shell="web"] .task-row:has(.task-row-action:not(:disabled)):has(:focus-visible) .task-trailing-meta {
-    visibility: visible;
+    opacity: 1;
   }
 
   body[data-shell="web"] .task-row-menu {

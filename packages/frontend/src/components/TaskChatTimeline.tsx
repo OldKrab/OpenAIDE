@@ -110,6 +110,14 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
     chatScroll.messageListRef.current = element;
     setMessageListElement(element);
   }, [chatScroll.messageListRef]);
+  // Drives the edge fade under the Task header. Read on scroll only: the offset
+  // is the one thing that changes it, and Chat restores its position by scrolling.
+  const [moreAbove, setMoreAbove] = useState(false);
+  const chatScrollOnScroll = chatScroll.onScroll;
+  const onScroll = useCallback<typeof chatScrollOnScroll>((...args) => {
+    setMoreAbove((chatScroll.messageListRef.current?.scrollTop ?? 0) > 2);
+    return chatScrollOnScroll(...args);
+  }, [chatScroll.messageListRef, chatScrollOnScroll]);
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   const awaitsUserAnswer = items.some(isPendingUserAnswer);
   const virtualItems = chatScroll.virtualItems;
@@ -123,14 +131,18 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
     chatScroll.virtualizer.resizeItem(index, row.offsetHeight);
   }, [chatScroll.virtualizer]);
   return (
-    <div className="message-list-shell" data-more-below={String(chatScroll.moreBelow)}>
+    <div
+      className="message-list-shell"
+      data-more-above={String(moreAbove)}
+      data-more-below={String(chatScroll.moreBelow)}
+    >
       <div
         className="message-list"
         onKeyDown={chatScroll.onKeyDown}
         onPointerCancel={chatScroll.onPointerCancel}
         onPointerDown={chatScroll.onPointerDown}
         onPointerUp={chatScroll.onPointerUp}
-        onScroll={chatScroll.onScroll}
+        onScroll={onScroll}
         onScrollEnd={chatScroll.onScrollEnd}
         onWheel={chatScroll.onWheel}
         ref={setMessageListRef}

@@ -113,13 +113,15 @@
   opacity: 1;
 }
 
+/* Faded, not `visibility: hidden`: the macOS WebView stops driving a spinner's
+   compositor animation once its slot has been hidden and shown again. */
 .task-row:has(.task-row-action:not(:disabled)):hover .task-trailing-meta,
 .task-row:has(.task-row-action:not(:disabled)):has(:focus-visible) .task-trailing-meta {
-  visibility: hidden;
+  opacity: 0;
 }
 
 .task-row[data-menu-open="true"] .task-trailing-meta {
-  visibility: hidden;
+  opacity: 0;
 }
 
 .task-row:hover .task-row-action-slot,
