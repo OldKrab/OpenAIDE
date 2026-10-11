@@ -54,6 +54,8 @@ public final class MainActivity extends Activity {
     private final AndroidDiagnostics diagnostics = new AndroidDiagnostics();
     private final WebResourcePolicy resourcePolicy = new WebResourcePolicy();
     private boolean connecting;
+    /** The last connection attempt reached the workspace's App Server; the setup screen reports it. */
+    private boolean connected;
     private boolean mainFrameFailed;
     private boolean settingsOpen;
     private boolean credentialsUnavailable;
@@ -162,7 +164,7 @@ public final class MainActivity extends Activity {
         if (settingsOpen) return;
         settingsOpen = true;
         startActivityForResult(new Intent(this, SetupActivity.class).putExtra("screen", screen)
-            .putExtra("diagnostics", diagnostics.snapshot()), 5);
+            .putExtra("connected", connected).putExtra("diagnostics", diagnostics.snapshot()), 5);
     }
 
     private void changeConnection() {
@@ -246,6 +248,7 @@ public final class MainActivity extends Activity {
     private void connect() {
         if (connecting) return;
         connecting = true;
+        connected = false;
         final int attempt = ++generation;
         final long started = SystemClock.elapsedRealtime();
         connect.setEnabled(false);
@@ -276,6 +279,7 @@ public final class MainActivity extends Activity {
     /** The workspace's App Server answered; show the workspace or wake the one already shown. */
     private void opened(int attempt, long started) {
         connecting = false;
+        connected = true;
         getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("configured", true).apply();
         Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
         diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
@@ -299,6 +303,7 @@ public final class MainActivity extends Activity {
     private void pairedConnectionRefused(RemoteNode.Failure failure) {
         runOnUiThread(() -> {
             if (isDestroyed() || profile.local || browser == null) return;
+            connected = false;
             diagnostics.record("connection", "refused", 0, 0);
             showConnection();
             connect.setText("Try again");

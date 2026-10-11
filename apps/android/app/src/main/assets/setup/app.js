@@ -123,7 +123,7 @@ function render() {
       + '</div>' + hint();
   } else if (screen === 'settings') {
     const remote = state.remote;
-    page.innerHTML = `<h1>${remote ? escape(state.computer || 'Remote computer') : 'This phone'}</h1><p class="status">Connected</p>`
+    page.innerHTML = `<h1>${remote ? escape(state.computer || 'Remote computer') : 'This phone'}</h1>${state.connected ? '<p class="status">Connected</p>' : '<p class="status off">Not connected</p>'}`
       + '<div class="group">'
       + (remote ? row('phone', 'Switch to this phone', 'local_screen')
         : state.paired ? row('computer', `Switch to ${escape(state.computer || 'your computer')}`, 'paired') : '')

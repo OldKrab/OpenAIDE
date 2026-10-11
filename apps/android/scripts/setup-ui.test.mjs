@@ -111,3 +111,12 @@ test('an incompatible existing agent gets an explicit recovery, not an install l
     assert.equal(view.actions.at(-1).action, 'termux');
   } finally { view.close(); }
 });
+
+test('settings report the connection as it is, not as configured', () => {
+  for (const [connected, text] of [[true, 'Connected'], [false, 'Not connected']]) {
+    const view = setup({ initial: 'settings', remote: true, paired: true, computer: 'studio', connected });
+    try {
+      assert.equal(view.document.querySelector('.status').textContent, text);
+    } finally { view.close(); }
+  }
+});

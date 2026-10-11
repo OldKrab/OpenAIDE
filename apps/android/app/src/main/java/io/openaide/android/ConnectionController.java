@@ -210,6 +210,7 @@ final class ConnectionController extends ContextWrapper {
             ConnectionStore.PairedServer computer = store.pairedServer();
             PowerManager power = getSystemService(PowerManager.class);
             JSONObject state = new JSONObject().put("initial", activity.getIntent().getStringExtra("screen"))
+                .put("connected", activity.getIntent().getBooleanExtra("connected", false))
                 .put("remote", store.usesPaired()).put("paired", computer != null)
                 .put("computer", computer == null ? "" : computer.name)
                 .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("notice", notice)
