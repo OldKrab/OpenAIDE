@@ -58,6 +58,10 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  /* Chat reads top to bottom only. Wide content scrolls inside its own block,
+     so anything else that sticks out must not give the whole Chat a sideways
+     scrollbar above the Composer. */
+  overflow-x: hidden;
   /* Measured against the shell container so the scroller and its rows resolve the same gutter. */
   --message-list-gutter-start: max(0px, calc((100cqi - 760px) / 2));
   --message-list-gutter-end: var(--message-list-gutter-start);
