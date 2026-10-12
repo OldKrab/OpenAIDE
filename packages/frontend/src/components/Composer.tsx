@@ -79,6 +79,8 @@ type ComposerProps = {
   onSubmit: (prompt: string) => void;
   prompt: string;
   quoteRequest?: { id: number | string; text: string };
+  /** The request owner must drop a consumed request; a remounted Composer would insert it again. */
+  onQuoteRequestHandled?: () => void;
   selection: ComposerSelection;
   submitShortcut: ComposerSubmitShortcut;
   submissionSettlementKey?: number | string;
@@ -116,6 +118,7 @@ export function Composer({
   onRetryConfigOptions,
   onResolveConfigPreferences,
   onRetryError,
+  onQuoteRequestHandled,
   onSelectIsolation,
   onSubmit,
   prompt,
@@ -381,6 +384,7 @@ export function Composer({
   useEffect(() => {
     if (!quoteRequest || quoteRequest.id === handledQuoteRequestRef.current) return;
     handledQuoteRequestRef.current = quoteRequest.id;
+    onQuoteRequestHandled?.();
     if (disabled) return;
     const nextText = appendQuoteToDraft(draftRef.current, quoteRequest.text);
     // A Quote is the same kind of local edit as typing, including leaving
@@ -392,7 +396,7 @@ export function Composer({
     setSlashPicker(undefined);
     setFileMentionToken(undefined);
     queueEditorSelection(nextText.length);
-  }, [composerHistory, disabled, onChange, quoteRequest]);
+  }, [composerHistory, disabled, onChange, onQuoteRequestHandled, quoteRequest]);
 
   const fileDropActive = useComposerFileDrop(composerRef, {
     disabled,
