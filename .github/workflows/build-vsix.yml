@@ -30,6 +30,11 @@ on:
         type: boolean
         default: false
         required: true
+      android:
+        description: Also build the Android APK and Termux runtime
+        type: boolean
+        default: true
+        required: true
   workflow_call:
     inputs:
       artifacts:
@@ -53,6 +58,12 @@ on:
         required: false
       enable_windows_updates:
         description: Build the Windows release with the production updater identity
+        type: boolean
+        default: false
+        required: false
+      android:
+        # Releases build Android through their own signed, release-mode call.
+        description: Also build the Android APK and Termux runtime
         type: boolean
         default: false
         required: false
@@ -193,3 +204,8 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
       artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
       enable_windows_updates: false
+
+  android:
+    if: inputs.android
+    # Android signing secrets are not forwarded: manual builds produce debug APKs.
+    uses: ./.github/workflows/android.yml

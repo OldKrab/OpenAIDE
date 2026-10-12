@@ -46,7 +46,8 @@ jobs:
       - run: npx playwright install ffmpeg
       - run: npx playwright test task-chat.spec.mjs --grep 'keeps selected images after picker menu dismissal'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
+        # Diagnostics only: a green run leaves just the installable artifacts.
+        if: failure()
         with:
           name: android-browser-checks
           path: test-results/
@@ -89,6 +90,7 @@ jobs:
       - name: Check and build APKs
         run: gradle -p apps/android --no-daemon $BUNDLED_RUNTIME testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
       - name: Build signed user APK
+        id: signed
         if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE }}
@@ -101,6 +103,7 @@ jobs:
             printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$OPENAIDE_ANDROID_KEYSTORE"
             trap 'rm -f "$OPENAIDE_ANDROID_KEYSTORE"' EXIT
             gradle -p apps/android --no-daemon $BUNDLED_RUNTIME assembleRelease
+            echo 'built=true' >> "$GITHUB_OUTPUT"
           else
             if [ "$REQUIRE_SIGNING" = true ]; then
               echo '::error::Canonical releases require Android signing secrets.'
@@ -108,18 +111,17 @@ jobs:
             fi
             echo '::notice::Android signing secrets are not configured; only debug APKs are available.'
           fi
+      # The debug APK is signed per runner and cannot update an installed app, so it is
+      # only the fallback when no stable-key user APK exists.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.signed.outputs.built != 'true'
         with:
           name: openaide-android-debug
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: openaide-android-device-tests
-          path: apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-          if-no-files-found: error
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
+        # Diagnostics only: a green run leaves just the installable artifacts.
+        if: failure()
         with:
           name: openaide-android-reports
           path: apps/android/app/build/reports/
