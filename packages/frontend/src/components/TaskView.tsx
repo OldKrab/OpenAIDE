@@ -347,6 +347,8 @@ export function TaskView({
       text,
     });
   }, [quoteAvailable, snapshot.task.task_id, subagents.selectSubagent]);
+  // Composer unmounts under Subagent inspection, so a retained request would be inserted again.
+  const clearQuoteRequest = useCallback(() => setQuoteRequest(undefined), []);
   const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
   const queue = useMemo(() => {
     const current = snapshot.message_queue ?? { revision: 0, items: [] };
@@ -737,6 +739,7 @@ export function TaskView({
               onRemoveAttachment={onRemoveAttachment}
               onRetryConfigOptions={onRetryConfigOptions}
               onSelectConfigOption={onSelectConfigOption}
+              onQuoteRequestHandled={clearQuoteRequest}
               onSubmit={submit}
               prompt={taskInput.prompt}
               quoteRequest={quoteRequest?.taskId === snapshot.task.task_id ? quoteRequest : undefined}
