@@ -13,6 +13,7 @@ import computer.iroh.presetN0
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -24,9 +25,11 @@ import org.json.JSONObject
  * This phone as a Remote Device: its key pair, its iroh endpoint, and the one
  * connection to the paired computer's App Server (ADR-0062).
  *
- * The endpoint lives as long as the process. The library closes every connection
- * when an endpoint is collected, and a second endpoint with the same key would
- * compete with the first for its relay.
+ * One endpoint is in use at a time: the library closes every connection when an
+ * endpoint is collected, and two endpoints with the same key compete for its
+ * relay. It is replaced, not kept for the life of the process, because Android
+ * stops a hidden app's network and the library cannot observe that on Android.
+ * See [ReconnectPolicy].
  */
 internal object RemoteNode {
     /** Why the paired computer cannot be used right now. */
@@ -37,7 +40,6 @@ internal object RemoteNode {
     private val APP_ALPN = "openaide/app-server/${BuildConfig.PROTOCOL_MAJOR}".toByteArray()
     private val PAIRING_ALPN = "openaide/pair/1".toByteArray()
     private const val PAIRING_MESSAGE_LIMIT = 4096u
-    private const val CONNECT_TIMEOUT_MS = 15_000L
     private const val PAIRING_TIMEOUT_MS = 20_000L
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -45,16 +47,64 @@ internal object RemoteNode {
     private val binding = Mutex()
     private val connecting = Mutex()
     private var endpoint: Endpoint? = null
+    /** Why the endpoint must be replaced before its next use, or null. Set from any thread, acted on under [binding]. */
+    @Volatile private var stale: String? = null
+    @Volatile private var hiddenAt = 0L
+    private var binds = 0
+    /** Set by the first bind, for the bind that follows a return while a join is awaited. */
+    @Volatile private var application: Context? = null
     @Volatile private var connection: Connection? = null
     @Volatile private var joinListener: ((ConnectionStore.PairedServer) -> Unit)? = null
     private var attempts = 0
 
+    /** The app left the screen; Android may stop its network from here on. */
+    fun hidden() { hiddenAt = SystemClock.elapsedRealtime() }
+
+    /**
+     * The app is on screen again. After more than a short pause the endpoint is
+     * replaced before the next dial, and a dial already waiting on it is ended.
+     */
+    fun shown() {
+        val since = hiddenAt
+        hiddenAt = 0
+        if (since == 0L || !ReconnectPolicy.staleAfterHidden(SystemClock.elapsedRealtime() - since)) return
+        stale = "resumed"
+        scope.launch {
+            // A computer answering this phone's own code connects to the endpoint, so
+            // one must be listening again at once; otherwise the next dial binds it.
+            val waiting = application.takeIf { joinListener != null }
+            if (waiting != null) runCatching { endpoint(waiting) } else binding.withLock { retire() }
+        }
+    }
+
+    /**
+     * Gives up the endpoint marked stale and its connection. Closing can take
+     * seconds on a dead network, so it does not delay the endpoint that follows.
+     */
+    private fun retire() {
+        val reason = stale ?: return
+        val old = endpoint
+        endpoint = null
+        connection = null
+        // Cleared last: until then no caller may take the connection being given up.
+        stale = null
+        if (old == null) return
+        diagnostics.record("remote_endpoint_retire", reason, binds, 0)
+        scope.launch {
+            val started = SystemClock.elapsedRealtime()
+            val outcome = if (runCatching { old.shutdown() }.isSuccess) "closed" else "failed"
+            diagnostics.record("remote_endpoint_close", outcome, 0, SystemClock.elapsedRealtime() - started)
+        }
+    }
+
     /** Binds the endpoint with this phone's stored key, creating the key on first use. */
     suspend fun endpoint(context: Context): Endpoint = binding.withLock {
+        retire()
         endpoint?.let { return it }
         val started = SystemClock.elapsedRealtime()
-        diagnostics.record("remote_endpoint_bind", "started", 0, 0)
-        val application = context.applicationContext
+        val bind = ++binds
+        diagnostics.record("remote_endpoint_bind", "started", bind, 0)
+        val application = context.applicationContext.also { this.application = it }
         try {
             val store = ConnectionStore(application)
             val key = try {
@@ -66,10 +116,10 @@ internal object RemoteNode {
             val bound = Endpoint.bind(EndpointOptions(preset = presetN0(), secretKey = key, alpns = listOf(PAIRING_ALPN)))
             endpoint = bound
             scope.launch { acceptAnnouncements(application, bound) }
-            diagnostics.record("remote_endpoint_bind", "ready", 0, SystemClock.elapsedRealtime() - started)
+            diagnostics.record("remote_endpoint_bind", "ready", bind, SystemClock.elapsedRealtime() - started)
             bound
         } catch (error: Throwable) {
-            diagnostics.record("remote_endpoint_bind", if (error is Unavailable) "storage_unavailable" else "failed", 0,
+            diagnostics.record("remote_endpoint_bind", if (error is Unavailable) "storage_unavailable" else "failed", bind,
                 SystemClock.elapsedRealtime() - started)
             throw error as? Unavailable ?: Unavailable(Failure.UNREACHABLE)
         }
@@ -125,39 +175,89 @@ internal object RemoteNode {
 
     /** The live connection to the paired App Server, opened or reopened on demand. */
     suspend fun connection(context: Context): Connection {
-        connection?.let { if (it.closeReason() == null) return it }
+        live()?.let { return it }
         return connecting.withLock {
-            connection?.let { if (it.closeReason() == null) return it }
-            val server = ConnectionStore(context.applicationContext).pairedServer() ?: throw Unavailable(Failure.NOT_TRUSTED)
-            val attempt = ++attempts
-            val started = SystemClock.elapsedRealtime()
-            diagnostics.record("remote_connect", "started", attempt, 0)
-            var outcome = "unreachable"
+            live()?.let { return it }
+            val store = ConnectionStore(context.applicationContext)
+            val server = store.pairedServer() ?: throw Unavailable(Failure.NOT_TRUSTED)
+            reach(context, store, server)
+        }
+    }
+
+    /**
+     * One slow or stalled dial is not yet an unreachable computer: each further
+     * attempt starts on a new endpoint, and the caller keeps showing "Connecting…".
+     */
+    private suspend fun reach(context: Context, store: ConnectionStore, server: ConnectionStore.PairedServer): Connection {
+        val started = SystemClock.elapsedRealtime()
+        var index = 0
+        while (true) {
+            val timeoutMs = ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started)
             try {
-                val node = endpoint(context)
-                val opened = withTimeout(CONNECT_TIMEOUT_MS) {
-                    node.connect(EndpointAddr(EndpointId.fromString(server.id), null, emptyList()), APP_ALPN)
-                }
-                // The App Server completes the handshake before it checks the key,
-                // so a removed phone learns it from the close that follows.
-                val refusal = withTimeoutOrNull(REFUSAL_WAIT_MS) { opened.closed() }
-                if (refusal != null) throw Unavailable(failure(refusal))
-                connection = opened
-                outcome = if (opened.paths().any { it.isSelected && it.isRelay }) "relay" else "direct"
-                opened
+                return dial(context, store, server, index, timeoutMs)
             } catch (error: Unavailable) {
-                outcome = error.failure.name.lowercase()
-                throw error
-            } catch (error: Throwable) {
-                // An App Server of another protocol major does not offer this ALPN.
-                val incompatible = (error.message ?: "").contains("alpn", ignoreCase = true)
-                if (incompatible) outcome = "incompatible"
-                throw Unavailable(if (incompatible) Failure.INCOMPATIBLE else Failure.UNREACHABLE)
-            } finally {
-                diagnostics.record("remote_connect", outcome, attempt, SystemClock.elapsedRealtime() - started)
+                index++
+                // A hidden app usually has no network to retry on; its return starts over anyway.
+                val more = hiddenAt == 0L && ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started) > 0
+                if (error.failure != Failure.UNREACHABLE || !more) throw error
+                stale = "dial_failed"
             }
         }
     }
+
+    /** One attempt to reach the computer, on the current endpoint. */
+    private suspend fun dial(context: Context, store: ConnectionStore, server: ConnectionStore.PairedServer, index: Int, timeoutMs: Long): Connection {
+        val attempt = ++attempts
+        val started = SystemClock.elapsedRealtime()
+        diagnostics.record("remote_connect", "started", attempt, 0)
+        var outcome = "unreachable"
+        try {
+            val node = endpoint(context)
+            val relay = ReconnectPolicy.relayFor(index, runCatching { store.relay(server.id) }.getOrNull())
+            // Says whether this attempt had to look the computer's address up first.
+            diagnostics.record("remote_connect_address", if (relay != null) "remembered_relay" else "lookup", attempt, 0)
+            val id = EndpointId.fromString(server.id)
+            val opened = try {
+                withTimeout(timeoutMs) { node.connect(EndpointAddr(id, relay, emptyList()), APP_ALPN) }
+            } catch (error: TimeoutCancellationException) {
+                outcome = "timeout"
+                throw Unavailable(Failure.UNREACHABLE)
+            }
+            // The App Server completes the handshake before it checks the key,
+            // so a removed phone learns it from the close that follows.
+            val refusal = withTimeoutOrNull(REFUSAL_WAIT_MS) { opened.closed() }
+            if (refusal != null) throw Unavailable(failure(refusal))
+            connection = opened
+            outcome = if (opened.paths().any { it.isSelected && it.isRelay }) "relay" else "direct"
+            rememberRelay(node, store, id, server.id, relay, attempt)
+            return opened
+        } catch (error: Unavailable) {
+            if (outcome != "timeout") outcome = error.failure.name.lowercase()
+            throw error
+        } catch (error: Throwable) {
+            // An App Server of another protocol major does not offer this ALPN.
+            val incompatible = (error.message ?: "").contains("alpn", ignoreCase = true)
+            if (incompatible) outcome = "incompatible"
+            throw Unavailable(if (incompatible) Failure.INCOMPATIBLE else Failure.UNREACHABLE)
+        } finally {
+            diagnostics.record("remote_connect", outcome, attempt, SystemClock.elapsedRealtime() - started)
+        }
+    }
+
+    /** Keeps the relay the computer answered through, so the next connect can skip the address lookup. */
+    private suspend fun rememberRelay(node: Endpoint, store: ConnectionStore, id: EndpointId, serverId: String, used: String?, attempt: Int) {
+        val current = runCatching { node.remoteAddr(id)?.relayUrl() }.getOrNull()
+        val outcome = when {
+            !ReconnectPolicy.validRelay(current) -> "unavailable"
+            current == used -> "unchanged"
+            runCatching { store.saveRelay(serverId, current) }.isSuccess -> "saved"
+            else -> "storage_unavailable"
+        }
+        diagnostics.record("remote_connect_address", outcome, attempt, 0)
+    }
+
+    /** The open connection, unless its endpoint is about to be replaced. */
+    private fun live(): Connection? = connection?.takeIf { stale == null && it.closeReason() == null }
 
     /** Forgets a connection a stream could not be opened on; returns why it ended. */
     fun drop(failed: Connection): Failure {

@@ -208,6 +208,8 @@ public final class MainActivity extends Activity {
         visible = true;
         // A slow reconnect is measured from here, and the pause before it explains a stale network.
         diagnostics.record("app_foreground", "resumed", 0, pausedAt == 0 ? 0 : android.os.SystemClock.elapsedRealtime() - pausedAt);
+        // Before any request of this return: they must not wait on an endpoint whose network Android stopped.
+        RemoteNode.INSTANCE.shown();
         if (browser != null) {
             browser.resumeTimers();
             browser.onResume();
@@ -221,6 +223,7 @@ public final class MainActivity extends Activity {
         visible = false;
         pausedAt = android.os.SystemClock.elapsedRealtime();
         diagnostics.record("app_foreground", "paused", 0, 0);
+        RemoteNode.INSTANCE.hidden();
         if (browser != null && profile.local) startBackgroundWork();
         if (browser != null) { browser.onPause(); browser.pauseTimers(); }
         super.onPause();
