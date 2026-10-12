@@ -185,6 +185,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.web-main-surface\s*{[^}]*grid-column:\s*2;[^}]*grid-row:\s*1;/);
     expect(appCss).toMatch(/\.chat-column\s*{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
+    expect(appCss).toMatch(/\.message-list\s*{[^}]*overflow:\s*auto;[^}]*overflow-x:\s*hidden;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*--message-list-gutter-start:\s*max\(0px,\s*calc\(\(100cqi - 760px\) \/ 2\)\);[^}]*padding-inline:\s*var\(--message-list-gutter-start\) var\(--message-list-gutter-end\);/);
     // Out-of-flow rows own the gutter so a drag-selection leaving the reading column stays on its row.
     expect(appCss).toMatch(/\.message-list:has\(> \.message-list-virtualizer\)\s*{[^}]*padding-inline:\s*0;/);
