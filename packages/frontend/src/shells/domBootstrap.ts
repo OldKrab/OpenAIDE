@@ -1,8 +1,9 @@
-import type {
-  HostToWebviewMessage,
-  SettingsTabId,
-  SettingsIntent,
-  WebviewAppServerConnection,
+import {
+  settingsTabFromValue,
+  type HostToWebviewMessage,
+  type SettingsTabId,
+  type SettingsIntent,
+  type WebviewAppServerConnection,
 } from "@openaide/app-shell-contracts";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 
@@ -26,7 +27,6 @@ export function datasetBootstrap(): WebviewBootstrap {
     settingsIntent: settingsIntent(),
     settingsAgentId: document.body.dataset.settingsAgentId || undefined,
     returnToNewTask: document.body.dataset.returnToNewTask === "true",
-    developerSettingsUnlocked: document.body.dataset.developerSettingsUnlocked === "true",
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };
@@ -46,16 +46,7 @@ function settingsIntent(): SettingsIntent | undefined {
 }
 
 function settingsTab(): SettingsTabId | undefined {
-  const value = document.body.dataset.settingsTab;
-  return value === "agents"
-    || value === "mcp"
-    || value === "skills"
-    || value === "common"
-    || value === "desktop"
-    || value === "data"
-    || value === "worktrees"
-    ? value
-    : undefined;
+  return settingsTabFromValue(document.body.dataset.settingsTab);
 }
 
 function projectIds(): string[] | undefined {

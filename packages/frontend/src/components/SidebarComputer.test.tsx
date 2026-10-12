@@ -42,15 +42,15 @@ it("names no computer while this device does the work", () => {
 
 it("names the Desktop's paired computer and its Settings tab", () => {
   const shell = { remoteComputers: { current: "Studio", list: vi.fn(), pair: vi.fn(), use: vi.fn(), forget: vi.fn() } };
-  expect(inUse(shell).seen()).toEqual({ name: "Studio", settingsTab: "desktop" });
+  expect(inUse(shell).seen()).toEqual({ name: "Studio", settingsTab: "remote" });
 });
 
 it("follows the phone's choice of computer as it changes", () => {
   const source = phone({ remote: true, computer: "Studio" });
   const probe = inUse({ connectionSettings: source.capability });
-  expect(probe.seen()).toEqual({ name: "Studio", settingsTab: "connection" });
+  expect(probe.seen()).toEqual({ name: "Studio", settingsTab: "remote" });
   act(() => source.set({ remote: true, computer: "" }));
-  expect(probe.seen()).toEqual({ name: "Another computer", settingsTab: "connection" });
+  expect(probe.seen()).toEqual({ name: "Another computer", settingsTab: "remote" });
   act(() => source.set({ remote: false, computer: "" }));
   expect(probe.seen()).toBeUndefined();
 });

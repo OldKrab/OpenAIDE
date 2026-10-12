@@ -397,16 +397,6 @@
   color: color-mix(in oklch, var(--oa-muted) 70%, var(--oa-text));
 }
 
-.agent-list-avatar .agent-brand-icon {
-  width: 15px;
-  height: 15px;
-}
-
-.agent-detail-avatar .agent-brand-icon {
-  width: 36px;
-  height: 36px;
-}
-
 .composer-popover .agent-brand-icon {
   width: 13px;
   height: 13px;

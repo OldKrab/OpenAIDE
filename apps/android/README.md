@@ -12,7 +12,7 @@ Frontend ships in the APK. Neither mode embeds a standalone execution environmen
 ## Connections and background work
 
 Choose **This phone** or **Remote computer** once. Connection settings are
-available under **Settings → Connection**, with a launcher shortcut
+available under **Settings → Remote**, with a launcher shortcut
 and notification action as recovery paths. There is no persistent native footer. The last connection is
 remembered; changing it never migrates or resubmits tasks. Save unsent drafts before
 switching. Local work retains its background protection when switching to remote.
@@ -28,12 +28,12 @@ release of each agent that is missing; it does not replace an existing user
 installation.
 
 A remote computer needs no address, account or password. On the computer, open
-**Settings → Devices → Show code**; on the phone, choose **Remote computer** and scan
+**Settings → Remote → Show code**; on the phone, choose **Remote computer** and scan
 the QR code with the camera or paste its text. Where the phone cannot scan, it shows
 its own code instead, which the computer accepts under **Enter code**. A code works
 once and for a few minutes. Pairing makes the computer trust this phone's key; the
 phone keeps its private key encrypted with Android Keystore and remembers the computer's
-key and name. Any client of that computer can remove the phone under **Settings → Devices**.
+key and name. Any client of that computer can remove the phone under **Settings → Remote**.
 
 The paired connection is end-to-end encrypted between the two keys by
 [iroh](https://www.iroh.computer). It uses a direct path when the networks allow one
@@ -206,7 +206,7 @@ does not cancel tasks or stop the Termux server. The service uses the `specialUs
 type for user-enabled local agent execution, which requires review before store
 distribution.
 
-Use **Settings → Connection** (or long-press the launcher icon
+Use **Settings → Remote** (or long-press the launcher icon
 and choose **App settings**) for setup, battery controls and
 **Advanced → Connection diagnostics → Share**. Offline setup calls this **Share diagnostics**.
 Logs include picker readability/delivery and WebView error

@@ -548,7 +548,7 @@ A user-initiated Stop creates no Task Attention Event. When several transient re
 
 The Web App may present a Task Attention Event as an OS notification only while at least one Web App page remains open. Closed-app delivery, background App Server lifetime, Web Push, and installed-PWA delivery are outside this specification. All visible Tasks in the connected state root qualify regardless of Project or which client started the turn.
 
-Notification enablement is local to one browser profile and origin. Common Settings exposes one Desktop notifications control for all reasons and requests browser permission only from that explicit user action. The control distinguishes off, enabled, browser- or OS-blocked, and unsupported states; it never presents a synchronized App Server preference as proof of local permission. Notification sound follows browser and OS defaults.
+Notification enablement is local to one browser profile and origin. General Settings exposes one Desktop notifications control for all reasons and requests browser permission only from that explicit user action. The control distinguishes off, enabled, browser- or OS-blocked, and unsupported states; it never presents a synchronized App Server preference as proof of local permission. Notification sound follows browser and OS defaults.
 
 Tabs for the same browser profile coordinate attention and delivery. The Web App is unattended only when none of its tabs has focus. Notification eligibility is decided at the event occurrence time: an event that occurs while any tab is focused remains an in-product indicator and does not become eligible merely because the user leaves later. A reconnect may deliver a missed event only when notifications were already enabled at occurrence, the profile was unattended, the event remains current, and the profile has no delivery receipt for its stable identity. Initial startup never turns an existing unread backlog into OS notifications.
 
@@ -611,7 +611,7 @@ Changing Task or New Task Project resets the active browsing cursor and installs
 
 ## Reset Task History
 
-Common Settings exposes **Reset task history** as a destructive recovery action,
+Troubleshooting Settings exposes **Reset task history** as a destructive recovery action,
 not as repair and not as a generic data reset. Its confirmation states that the
 operation is irreversible and deletes all OpenAIDE Tasks, Chat, Tool artifacts,
 Composer History, and local Native Session bindings. It also states that

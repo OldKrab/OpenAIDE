@@ -12,7 +12,7 @@ export function androidConnectionSettings(host: Window): ConnectionSettings | un
   let sequence = 0;
   const listeners = new Set<() => void>();
   const pending = new Map<number, { send(): void; finish(error?: Error): void }>();
-  const unavailable = () => new Error("Phone settings are unavailable. Reopen Connection and try again.");
+  const unavailable = () => new Error("Phone settings are unavailable. Reopen Settings and try again.");
   const notify = () => listeners.forEach(listener => listener());
   host.addEventListener("message", event => {
     if (event.data !== "openaide:connection-controls:1" || event.ports.length !== 1) return;

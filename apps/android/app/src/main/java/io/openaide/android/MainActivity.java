@@ -157,7 +157,7 @@ public final class MainActivity extends Activity {
     private void navigateToConnectionSettings() {
         if (browser == null) return;
         pendingSettings = false;
-        browser.evaluateJavascript("history.pushState(null, '', '/settings?tab=connection'); window.dispatchEvent(new PopStateEvent('popstate'))", null);
+        browser.evaluateJavascript("history.pushState(null, '', '/settings?tab=remote'); window.dispatchEvent(new PopStateEvent('popstate'))", null);
     }
 
     private void openSetup(String screen) {

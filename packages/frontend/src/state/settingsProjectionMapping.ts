@@ -59,8 +59,8 @@ function mapSettingsSection(section: SettingsSection) {
       return ["skills"] as const;
     case "commonSettings":
       // The App Server owns one common-settings projection; the Frontend presents
-      // its controls as smaller task-oriented pages without duplicating state.
-      return ["common", "desktop", "data"] as const;
+      // its controls under the sections a user looks for them in, without duplicating state.
+      return ["general", "troubleshooting"] as const;
   }
 }
 

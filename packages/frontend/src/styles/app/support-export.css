@@ -1,4 +1,3 @@
-.general-support-export,
 .task-support-export-trigger {
   align-items: center;
   border: 0;
@@ -10,7 +9,6 @@
   padding: 5px 10px;
 }
 
-.general-support-export:hover,
 .task-support-export-trigger:hover {
   background: var(--oa-selected);
 }

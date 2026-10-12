@@ -11,7 +11,7 @@ import {
   subscribeWindowMessages,
 } from "../../../packages/frontend/src/shells/domBootstrap";
 import { VSCODE_SHELL } from "../src/webview/types";
-import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
+import { settingsTabFromValue, type HostToWebviewMessage } from "@openaide/app-shell-contracts";
 import type { PreSendAttachment } from "@openaide/app-server-client";
 import { clientInstanceIdForBootstrap } from "../../../packages/frontend/src/services/backendInitialization";
 
@@ -227,7 +227,7 @@ function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): 
       ...current,
       surface: "settings",
       settingsAgentId: typeof candidate.payload?.agent_id === "string" ? candidate.payload.agent_id : undefined,
-      settingsTab: isSettingsTab(candidate.payload?.settings_tab) ? candidate.payload.settings_tab : undefined,
+      settingsTab: settingsTabFromValue(candidate.payload?.settings_tab),
       settingsIntent: isSettingsIntent(candidate.payload?.settings_intent) ? candidate.payload.settings_intent : undefined,
       returnToNewTask: candidate.payload?.return_to_new_task === true,
       projectId: typeof candidate.payload?.project_id === "string" ? candidate.payload.project_id : undefined,
@@ -289,12 +289,3 @@ function readDatasetBootstrap(): WebviewBootstrap {
   return typeof document === "undefined" ? { surface: "invalid" } : datasetBootstrap();
 }
 
-function isSettingsTab(value: unknown): value is import("@openaide/app-shell-contracts").SettingsTabId {
-  return value === "agents"
-    || value === "mcp"
-    || value === "skills"
-    || value === "common"
-    || value === "desktop"
-    || value === "data"
-    || value === "worktrees";
-}

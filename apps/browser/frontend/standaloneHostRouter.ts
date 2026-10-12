@@ -30,12 +30,6 @@ function routeStandaloneHostMessage(message: WebviewToHostMessage, output: Stand
     case "workspace.roots":
       output.post({ type: "workspace.roots.result", payload: { roots: data.workspaceRoots() } });
       return;
-    case "developer.settings.unlock":
-      output.post({
-        type: "runtime.settings.result",
-        payload: { developer: { acp_trace: { enabled: true, directory: data.traceDirectory() } } },
-      });
-      return;
     case "surface.openTask":
       output.navigate("/task");
       return;

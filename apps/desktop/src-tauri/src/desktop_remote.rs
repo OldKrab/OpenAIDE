@@ -159,7 +159,7 @@ pub(crate) async fn desktop_remote_pair(
     let invite = remote::InviteCode::decode(&code).map_err(|error| {
         match error {
             remote::PairingCodeError::WrongKind => {
-                "That code adds a device to a computer. On the other computer, open Settings → Devices and choose Show code."
+                "That code adds a device to a computer. On the other computer, open Settings → Remote and choose Show code."
             }
             remote::PairingCodeError::Malformed => "The code is incomplete. Copy it again.",
             remote::PairingCodeError::NotAPairingCode => "That is not an OpenAIDE pairing code.",

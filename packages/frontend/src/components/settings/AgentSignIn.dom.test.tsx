@@ -71,7 +71,7 @@ it("offers sign out only for a connected Agent that advertises logout", async ()
     />,
   ));
 
-  expect(container.textContent).toContain("Authentication");
+  expect(container.textContent).toContain("Signed in");
   await act(async () => button("Sign out").click());
   expect(onLogout).toHaveBeenCalledWith("codex");
 });

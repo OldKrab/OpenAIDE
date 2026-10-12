@@ -242,7 +242,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         : undefined;
   useEffect(() => frontendShell?.desktopCommands?.subscribe((command) => {
     if (command === "check-for-updates") {
-      callbacks.navigation.openSettings(undefined, undefined, undefined, "common");
+      callbacks.navigation.openSettings(undefined, undefined, undefined, "general");
       void frontendShell.desktopUpdates?.check();
     } else if (command === "new-task") callbacks.navigation.openNewTask();
     else if (command === "settings") callbacks.navigation.openSettings();
@@ -440,7 +440,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
           onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
           onSearchChange={callbacks.navigation.changeSearch}
-          onSettings={() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "common" : undefined)}
+          onSettings={() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "general" : undefined)}
           onToggleArchived={callbacks.navigation.toggleArchived}
           projects={navigationProjects}
           searchQuery={navigation.searchQuery}
@@ -471,7 +471,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return (
       <SettingsView
         backendConnection={controller.backendConnection}
-        developerSettingsUnlocked={bootstrap.developerSettingsUnlocked}
         desktopNotifications={taskNotifications?.settings}
         frameHeader={desktopSettingsTitleBar}
         frameHeaderPlacement={desktopSettingsTitleBarPlacement}
@@ -498,7 +497,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onSaveMcpServer={callbacks.settings.saveMcpServer}
         onSetComposerSubmitShortcut={callbacks.settings.setComposerSubmitShortcut}
         onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
-        onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
         preferences={preferences}
         preferredAgentId={bootstrap.settingsAgentId}
         supportExportRequestKey={bootstrap.settingsIntent?.kind === "openSupportExport"
@@ -581,7 +579,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
         onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
         onSearchChange={callbacks.navigation.changeSearch}
-        onSettings={closeAfter(() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "common" : undefined))}
+        onSettings={closeAfter(() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "general" : undefined))}
         onToggleArchived={callbacks.navigation.toggleArchived}
         projects={navigation.projects}
         searchQuery={navigation.searchQuery}

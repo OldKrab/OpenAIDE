@@ -1,0 +1,388 @@
+/* Settings controls: buttons, switches, pickers, marks, and the explanations behind the info button. */
+
+.settings-action {
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--oa-raised);
+  color: var(--oa-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.settings-action:hover:not(:disabled) {
+  background: var(--oa-selected);
+}
+
+.settings-action:disabled {
+  opacity: 0.5;
+}
+
+.settings-action.primary {
+  background: var(--oa-text);
+  color: var(--oa-bg);
+}
+
+.settings-action.primary:hover:not(:disabled) {
+  background: var(--oa-text);
+  opacity: 0.88;
+}
+
+.settings-action.quiet {
+  background: transparent;
+  color: var(--oa-muted);
+  padding: 0 8px;
+}
+
+.settings-action.quiet:hover:not(:disabled) {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.settings-action.danger {
+  color: var(--oa-danger);
+}
+
+.settings-switch {
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  background: var(--oa-border-strong);
+  padding: 2px;
+  transition: background 150ms ease-out;
+}
+
+.settings-switch i {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 2px color-mix(in oklch, black 25%, transparent);
+  display: block;
+  transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-switch[aria-checked="true"] {
+  background: var(--oa-focus);
+}
+
+.settings-switch[aria-checked="true"] i {
+  transform: translateX(16px);
+}
+
+.settings-switch:disabled {
+  opacity: 0.5;
+}
+
+.settings-keys {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.settings-keys kbd {
+  border: 1px solid var(--oa-border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  color: var(--oa-muted);
+  padding: 5px 7px;
+  font: 500 12px/1 var(--oa-ui-font);
+}
+
+.settings-segmented {
+  border-radius: 9px;
+  background: var(--oa-raised);
+  display: inline-flex;
+  padding: 3px;
+}
+
+.settings-segmented button {
+  height: 30px;
+  border-radius: 7px;
+  color: var(--oa-muted);
+  padding: 0 16px;
+}
+
+.settings-segmented button[aria-checked="true"] {
+  background: var(--oa-bg);
+  box-shadow: 0 1px 2px color-mix(in oklch, black 16%, transparent);
+  color: var(--oa-text);
+  font-weight: 500;
+}
+
+.settings-group-actions .settings-segmented button {
+  height: 26px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.settings-select {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--oa-border);
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+}
+
+.settings-select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-select > svg {
+  flex-shrink: 0;
+  color: var(--oa-muted);
+}
+
+.settings-select:disabled {
+  opacity: 0.5;
+}
+
+.oa-popup-menu.settings-select-menu [role^="menuitem"] {
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.settings-avatar {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--oa-raised);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+}
+
+.settings-avatar.large {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  font-size: 22px;
+}
+
+/* Brand marks are sized for chat by default; an avatar gives them room. */
+.settings-avatar .agent-brand-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.settings-avatar.large .agent-brand-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.settings-product-mark {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--oa-text);
+}
+
+.settings-product-mark::after {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border: 2.5px solid var(--oa-bg);
+  border-radius: 50%;
+}
+
+/* Theme: the choice is shown as the thing it changes. */
+
+.settings-themes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 4px 0 16px;
+}
+
+.settings-themes button {
+  color: var(--oa-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.settings-themes button > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.settings-themes button[aria-checked="true"] {
+  color: var(--oa-text);
+  font-weight: 500;
+}
+
+.settings-themes button[aria-checked="true"] svg {
+  color: var(--oa-focus);
+}
+
+/* The previews depict the light and dark themes themselves, so their colours are fixed. */
+.settings-theme-window {
+  --window-bg: #f7f8fa;
+  --window-side: #eceef2;
+  --window-line: #cfd3da;
+  height: 92px;
+  overflow: hidden;
+  border-radius: 10px;
+  outline: 1px solid var(--oa-border);
+  background: var(--window-bg);
+  display: grid;
+  grid-template-columns: 30% 1fr;
+  transition: outline-color 150ms ease-out;
+}
+
+.settings-theme-window.dark {
+  --window-bg: #1c1d21;
+  --window-side: #25262b;
+  --window-line: #3f4149;
+}
+
+.settings-theme-window.system {
+  --window-side: color-mix(in oklch, #8a8d96 22%, transparent);
+  --window-line: #8a8d96;
+  background: linear-gradient(105deg, #f7f8fa 50%, #1c1d21 50%);
+}
+
+.settings-theme-window i {
+  background: var(--window-side);
+}
+
+.settings-theme-window b {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 12px;
+}
+
+.settings-theme-window u {
+  width: 70%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--window-line);
+}
+
+.settings-theme-window u:nth-child(2) {
+  width: 45%;
+}
+
+.settings-theme-window u:last-child {
+  width: 100%;
+  height: 16px;
+  border-radius: 6px;
+  opacity: 0.6;
+}
+
+.settings-themes button:hover .settings-theme-window {
+  outline-color: var(--oa-border-strong);
+}
+
+.settings-themes button[aria-checked="true"] .settings-theme-window {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+/* Info: nothing visible until asked. */
+
+.settings-info {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  color: var(--oa-muted);
+  display: inline-grid;
+  place-items: center;
+  opacity: 0.6;
+}
+
+.settings-info:hover,
+.settings-info[aria-expanded="true"] {
+  background: var(--oa-raised);
+  opacity: 1;
+}
+
+.settings-info.hit {
+  background: color-mix(in oklch, var(--oa-warning) 32%, transparent);
+  color: var(--oa-text);
+  opacity: 1;
+}
+
+.oa-popup-surface.settings-info-card {
+  width: min(320px, calc(100vw - 16px));
+  border-radius: 12px;
+  background: var(--oa-bg);
+  color: var(--oa-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.oa-popup-surface.settings-info-card:focus-visible {
+  outline: 0;
+}
+
+.settings-info-card strong {
+  color: var(--oa-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-info-card p {
+  margin: 0;
+}
+
+/* Updates */
+
+.settings-progress {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  margin-bottom: 12px;
+  accent-color: var(--oa-focus);
+}
+
+.settings-release-notes {
+  margin-bottom: 14px;
+  color: var(--oa-muted);
+  font-size: 13px;
+}
+
+.settings-release-notes summary {
+  width: fit-content;
+  border-radius: 4px;
+  color: var(--oa-text);
+}
+
+.settings-release-notes > :not(summary) {
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}

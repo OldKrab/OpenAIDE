@@ -95,11 +95,11 @@ try {
   await evaluate(workspace, `document.querySelector('[aria-label="Open task navigation"]').click()`);
   await waitFor(() => drawerIs(true), 'Drawer unavailable');
   await evaluate(workspace, `document.querySelector('.sidebar .settings-button').click()`);
-  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('#settings-tab-connection'))`), 'Settings unavailable');
-  await evaluate(workspace, `document.querySelector('#settings-tab-connection').click()`);
-  await waitFor(() => evaluate(workspace, `!document.querySelector('.settings-content.mobile-index-open')`), 'Submenu did not open');
+  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('.settings-view.settings-index-open #settings-section-general'))`), 'Settings unavailable');
+  await evaluate(workspace, `document.querySelector('#settings-section-general').click()`);
+  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('.settings-view:not(.settings-index-open)'))`), 'Section did not open');
   await back();
-  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('.settings-content.mobile-index-open'))`), 'Back skipped the Settings index');
+  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('.settings-view.settings-index-open'))`), 'Back skipped the Settings index');
   await back();
   await waitFor(() => drawerIs(false), 'Back did not return to the workspace');
   assert.equal(await evaluate(workspace, 'location.pathname'), '/new-task');

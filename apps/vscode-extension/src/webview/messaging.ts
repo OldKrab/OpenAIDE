@@ -3,7 +3,7 @@ import { sanitizeDiagnosticText } from "../logging/logger";
 import type { MessageContext } from "./messagingContext";
 import { isObject, webviewActionFields, webviewTelemetryFields } from "./messagingFields";
 import { routeHostCapabilityCommand, routeSurfaceCommand } from "./messagingShell";
-import { routeDiagnosticsCommand, routeSettingsCommand } from "./messagingSettings";
+import { routeDiagnosticsCommand } from "./messagingSettings";
 
 export async function handleWebviewMessage(message: unknown, context: MessageContext) {
   if (!isObject(message) || typeof message.type !== "string") return;
@@ -38,7 +38,6 @@ export async function handleWebviewMessage(message: unknown, context: MessageCon
 async function routeWebviewMessage(message: WebviewToHostMessage, context: MessageContext) {
   if (await routeRuntimeCommand(message, context)) return;
   if (await routeDiagnosticsCommand(message, context)) return;
-  if (await routeSettingsCommand(message, context)) return;
   if (await routeSurfaceCommand(message, context)) return;
   if (await routeHostCapabilityCommand(message, context)) return;
 }

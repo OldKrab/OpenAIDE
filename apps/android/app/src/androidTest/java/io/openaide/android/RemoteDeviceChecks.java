@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Pairs this phone with a real App Server and talks to it through the gateway.
  *
- * Needs a computer: show a code under Settings → Devices and pass its text with
+ * Needs a computer: show a code under Settings → Remote and pass its text with
  * {@code -e invite <code>}. Without one the check is skipped, so the suite still
  * runs on a phone that has no computer to reach.
  */

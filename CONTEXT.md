@@ -184,8 +184,8 @@ A File Viewer entry for one selected file, retaining that file's visible locatio
 _Avoid_: Global editor tab, independent Task surface
 
 **Settings**:
-The global user-facing area for reusable configuration across Tasks and Worktree Management. It includes Agents, MCP Servers, Skills, application preferences, and Worktrees, but does not own Project records or Task lifecycle management.
-_Avoid_: Hiding reusable setup inside task-specific controls, treating all Project or Task management as Settings, prescribing tabs as the layout
+The global user-facing area for reusable configuration across Tasks and Worktree Management. Its sections are General, Agents, MCP servers, Skills, Worktrees, Remote, and Troubleshooting, each named for what the user came to do. It does not own Project records or Task lifecycle management.
+_Avoid_: Hiding reusable setup inside task-specific controls, treating all Project or Task management as Settings, naming a section after the code that implements it (Common, Data, Connection, Developer)
 
 **Project-scoped configuration**:
 Reusable configuration owned by a Project Context and presented alongside global configuration in Settings. It applies across that Project's root and worktrees rather than belonging to one Task Workspace.
@@ -436,7 +436,7 @@ _Avoid_: Treating every unread update or status change as an alert
 - VS Code Extension groups **Task Navigation** by Project Context, even for a single-Project workspace.
 - A **Task** opens one **Chat** backed by its **Native Session**.
 - **Task Navigation** opens **Task Pages**.
-- **Settings** contains Agents, MCP Servers, Skills, application preferences, and **Worktree Management**.
+- **Settings** contains General preferences, Agents, MCP Servers, Skills, **Worktree Management**, Remote use, and Troubleshooting.
 - **Settings** presents global and **Project-scoped configuration** for all Projects on the relevant resource page.
 - **Worktree Management** groups worktrees by Project for navigation. Projects that share a **Worktree Repository** may present the same inventory in more than one group, but mutations and operation state still belong to that one authoritative repository.
 - **Support Export** is available from Settings and Task context in every App Shell; shell commands may open the same shared flow.

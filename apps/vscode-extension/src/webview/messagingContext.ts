@@ -4,14 +4,12 @@ import type { SupportExportState } from "../diagnostics/exportLocation";
 import type { ExtensionLogger } from "../logging/logger";
 import type { RuntimeProcess } from "../runtime/process";
 import type { RuntimeClient } from "../runtime/rpcClient";
-import type { DeveloperSettingsStore } from "../settings/snapshot";
 
 export type MessageContext = {
   runtime: RuntimeClient;
   runtimeProcess: RuntimeProcess;
   post: (payload: HostToWebviewMessage) => Thenable<boolean>;
   logger: ExtensionLogger;
-  developerSettingsStore?: DeveloperSettingsStore;
   supportExportState?: SupportExportState;
   agentSecretStore?: vscode.SecretStorage;
   surface?: WebviewSurfaceKind;

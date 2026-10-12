@@ -32,7 +32,6 @@ function routeTaskRuntimeError(payload: RuntimeErrorPayload, context: HostMessag
 }
 
 const settingsErrorActions = new Set<string>([
-  "developer.settings.unlock",
   "secret.transaction.apply",
   "secret.transaction.commit",
   "secret.transaction.rollback",

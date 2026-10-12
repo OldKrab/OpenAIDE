@@ -12,7 +12,7 @@ export function App() {
       <AppSurfaces controller={controller} />
       <RemoteDeviceAddedNotice
         devices={controller.view.settings.devices}
-        onReview={() => controller.callbacks.navigation.openSettings(undefined, undefined, undefined, "devices")}
+        onReview={() => controller.callbacks.navigation.openSettings(undefined, undefined, undefined, "remote")}
       />
     </>
   );

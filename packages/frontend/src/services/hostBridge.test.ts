@@ -155,7 +155,7 @@ describe("host bridge", () => {
     ]);
     installFrontendShell(createVsCodeShell());
 
-    openSettingsSurface(undefined, undefined, "project_1", "data", {
+    openSettingsSurface(undefined, undefined, "project_1", "troubleshooting", {
       kind: "openSupportExport",
       requestId: "diagnostics-1",
     });
@@ -164,7 +164,7 @@ describe("host bridge", () => {
       type: "surface.openSettings",
       payload: {
         project_id: "project_1",
-        settings_tab: "data",
+        settings_tab: "troubleshooting",
         settings_intent: { kind: "openSupportExport", requestId: "diagnostics-1" },
       },
     });
@@ -775,7 +775,7 @@ describe("host bridge", () => {
     });
 
     const { openSettingsSurface } = await installedHostBridge();
-    openSettingsSurface(undefined, undefined, undefined, "data", {
+    openSettingsSurface(undefined, undefined, undefined, "troubleshooting", {
       kind: "openSupportExport",
       requestId: "diagnostics-1",
     });
@@ -783,7 +783,7 @@ describe("host bridge", () => {
     expect(pushState).toHaveBeenCalledWith(
       { openaideSettingsReturn: true },
       "",
-      "/settings?tab=data&intent=openSupportExport&intentRequestId=diagnostics-1",
+      "/settings?tab=troubleshooting&intent=openSupportExport&intentRequestId=diagnostics-1",
     );
   });
 

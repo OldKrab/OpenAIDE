@@ -248,7 +248,7 @@ export function createInitialState(): AppState {
     chatPages: {},
     toolDetails: {},
     settings: {
-      activeTab: "agents",
+      activeTab: "general",
       loading: false,
     },
     newTask: {
