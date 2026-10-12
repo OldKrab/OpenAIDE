@@ -1039,3 +1039,45 @@ fn session_start_keeps_commands_the_agent_sent_before_its_response() {
         .collect();
     assert_eq!(outcomes, ["deferred"]);
 }
+
+#[test]
+fn agent_state_report_is_traced_with_its_session() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let state = AcpTraceState::disabled(temp.path());
+    state.set_enabled(true).expect("enable trace");
+    let connection_trace = Some(AcpTraceSession::new(state.clone(), "task_first", "start"));
+    let session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap =
+        Arc::new(Mutex::new(HashMap::from([(
+            "session_1".to_owned(),
+            AcpTraceSession::new(state, "task_owner", "resume"),
+        )])));
+    let report = UntypedMessage::new(
+        SESSION_STATE_METHOD,
+        serde_json::json!({ "sessionId": "session_1", "state": "running" }),
+    )
+    .unwrap();
+    let other = UntypedMessage::new(
+        "session/update",
+        serde_json::json!({ "sessionId": "session_1" }),
+    )
+    .unwrap();
+
+    trace_session_state_change(&report, &connection_trace, &session_traces);
+    trace_session_state_change(&other, &connection_trace, &session_traces);
+
+    let trace_dir = temp.path().join("diagnostics").join("acp-traces");
+    let traces: Vec<(String, String)> = std::fs::read_dir(&trace_dir)
+        .expect("trace dir")
+        .map(|entry| {
+            let path = entry.expect("trace entry").path();
+            (
+                path.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(&path).expect("trace content"),
+            )
+        })
+        .collect();
+    assert_eq!(traces.len(), 1, "only the owning Task opens a trace");
+    assert!(traces[0].0.contains("task_owner"));
+    assert_eq!(traces[0].1.matches("\"_session/state_changed\"").count(), 1);
+    assert!(traces[0].1.contains("\"state\":\"running\""));
+}

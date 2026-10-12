@@ -677,6 +677,7 @@ async fn apply_prompt_session_message(
                 session_event_sink,
                 pending_session_catalogs,
                 background_work,
+                true,
             )
             .await
         }
@@ -714,6 +715,9 @@ pub(super) async fn dispatch_session_notification(
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
     background_work: &BackgroundWork,
+    // Whether a turn reads this update. An Agent state reported outside a turn
+    // cannot change Task status.
+    turn_open: bool,
 ) -> Result<DispatchSessionCatalogs, RuntimeError> {
     let catalogs = Arc::new(Mutex::new(DispatchSessionCatalogs::default()));
     let catalogs_sink = catalogs.clone();
@@ -726,7 +730,11 @@ pub(super) async fn dispatch_session_notification(
         })
         .await
         .if_notification(async move |change: SessionStateNotification| {
-            agent_states.session_state_changed(&change);
+            if turn_open {
+                agent_states.session_state_changed(&change);
+            } else {
+                agent_states.unowned_session_state_changed(&change);
+            }
             Ok(())
         })
         .await

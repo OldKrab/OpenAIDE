@@ -33,6 +33,8 @@ mod tests;
 /// Client capability `_meta` key that asks the adapter for async task updates.
 pub(super) const ASYNC_TASKS_CAPABILITY: &str = "async-tasks";
 
+/// The adapter's report that the Agent started or stopped working.
+pub(super) const SESSION_STATE_METHOD: &str = "_session/state_changed";
 const ASYNC_TASK_STATE_METHOD: &str = "_openaide/async_task_state";
 const ASYNC_TASK_STOP_METHOD: &str = "_session/async_task/stop";
 
@@ -214,6 +216,8 @@ struct State {
     /// The Agent's last reported state was a working one. The prompt response
     /// clears it, so during a hold it means a cycle the Agent started itself.
     agent_running: bool,
+    /// When the Agent started a cycle that no turn owns. Diagnostics only.
+    unowned_cycle_started: Option<Instant>,
 }
 
 impl Default for BackgroundWork {
@@ -340,12 +344,45 @@ impl BackgroundWork {
         );
     }
 
+    /// The Agent started or stopped working while no turn reads the session, so
+    /// the Task stays idle through the cycle. The cycle changes no status; it is
+    /// logged because its output still reaches Chat and nothing else explains
+    /// activity on an idle Task.
+    pub(super) fn unowned_session_state_changed(&self, change: &SessionStateNotification) {
+        let running = change.state != "idle";
+        let mut state = self.state();
+        if std::mem::replace(&mut state.agent_running, running) == running {
+            return;
+        }
+        let duration_ms = if running {
+            state.unowned_cycle_started = Some(Instant::now());
+            None
+        } else {
+            state
+                .unowned_cycle_started
+                .take()
+                .map(|started| started.elapsed().as_millis())
+        };
+        logging::info(
+            "acp_unowned_cycle",
+            json!({
+                "session_id": change.session_id.to_string(),
+                "phase": if running { "started" } else { "ended" },
+                "live_tasks": state.live_tasks.len(),
+                "duration_ms": duration_ms,
+            }),
+        );
+    }
+
     /// The prompt response ends the prompt's own work, whatever state the Agent
     /// reported last. The `idle` that follows the response must not be awaited:
     /// a turn that settles early loses nothing, one that waits for a report
     /// that never comes hangs.
     pub(super) fn prompt_answered(&self) {
-        self.state().agent_running = false;
+        let mut state = self.state();
+        state.agent_running = false;
+        // A prompt that began during an unowned cycle took the cycle over.
+        state.unowned_cycle_started = None;
     }
 
     /// A new prompt took over completion ownership, which ends the hold: its
