@@ -196,6 +196,24 @@ it("offers phone setup checks only while the phone does its own work", async () 
   expect(field("Search settings")).toBeTruthy();
 });
 
+it("names each log by whose it is on a phone that works on another computer", async () => {
+  const troubleshootingLabels = () => [...document.querySelectorAll('section[aria-label="Troubleshooting"] li strong')].map((label) => label.textContent);
+  const shellFor = (snapshot: object) => vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({
+    connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute: vi.fn(async () => undefined) },
+  } as unknown as frontendShell.FrontendShell);
+
+  shellFor({ remote: true, termux: false, permission: false, computer: "Workstation", computers: [] });
+  await mountSettings({ state: { activeTab: "troubleshooting", loading: false } });
+  // The phone's own log comes first: it is the one that works without the computer.
+  expect(troubleshootingLabels().slice(0, 2)).toEqual(["Logs from this phone", "Logs from Workstation"]);
+
+  unmount();
+  vi.restoreAllMocks();
+  shellFor({ remote: false, termux: true, permission: true, computer: "", computers: [] });
+  await mountSettings({ state: { activeTab: "troubleshooting", loading: false } });
+  expect(troubleshootingLabels().slice(0, 2)).toEqual(["Logs from this phone", "Export logs"]);
+});
+
 it("asks the phone for its state only once the route names a section with phone controls", async () => {
   const pushed = window.location.href;
   const asked: string[] = [];

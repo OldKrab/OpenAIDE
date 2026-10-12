@@ -10,6 +10,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <queries><package android:name="com.termux" /><package android:name="com.termux.boot" /></queries>
     <application
+        android:name=".OpenAideApplication"
         android:label="OpenAIDE"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"

@@ -30,20 +30,26 @@ export function useTroubleshootingSection({
   const [resetting, setResetting] = useState(false);
   const [copied, setCopied] = useState(false);
   const developer = runtimeSettings?.developer;
+  // On a phone that works on another computer there are two logs, and the row
+  // names say whose each is: this export comes from the computer, not the phone.
+  const computer = phone?.state?.remote ? phone.state.computer || "the computer" : undefined;
   const support: SettingsRow[] = [{
     id: "export-logs",
-    label: "Export logs",
+    label: computer ? `Logs from ${computer}` : "Export logs",
     info: settingsInfo.exportLogs,
-    description: "Redacted diagnostics to attach to a bug report",
-    keywords: "support diagnostics help problem bundle troubleshooting bug report",
+    description: computer
+      ? "Redacted diagnostics of the computer. Needs a connection to it"
+      : "Redacted diagnostics to attach to a bug report",
+    keywords: "support diagnostics help problem bundle troubleshooting bug report export logs",
     control: <SupportExportButton connection={backendConnection} openRequestKey={supportExportRequestKey} />,
   }];
   if (phone) {
-    support.push({
+    // First, because it is the one that works when the computer cannot be reached.
+    support.unshift({
       id: "phone-report",
-      label: "Phone connection report",
-      description: "No conversations or credentials",
-      keywords: "diagnostics share connection",
+      label: "Logs from this phone",
+      description: "Connection attempts and timings of the app. No conversations or credentials",
+      keywords: "diagnostics share connection report export logs phone",
       control: <SettingsButton disabled={phone.busy} onClick={() => void phone.execute({ action: "diagnostics" })}>Share</SettingsButton>,
     });
   }
