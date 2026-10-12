@@ -14,7 +14,6 @@ import {
   SettingsHealth,
   SettingsIdentity,
   SettingsInlineError,
-  SettingsRowView,
   SettingsSwitch,
 } from "./settingsKit";
 import type { SettingsTone } from "./settingsModel";
@@ -120,10 +119,13 @@ export function AgentPage({
             </div>
           </div>
         ) : selected ? (
-          <ul className="settings-card">
-            <SettingsRowView row={{ id: "launch", label: "Launch", control: <span className="settings-value">{selected.launch_label}</span> }} />
-            <SettingsRowView row={{ id: "transport", label: "Transport", control: <code className="settings-mono">{selected.transport}</code> }} />
-          </ul>
+          <div className="settings-card settings-form">
+            <div className="settings-field">
+              <span>Runs</span>
+              <code className="settings-mono settings-command">{selected.launch_label}</code>
+              <small>Set by OpenAIDE. Add a custom agent to run a different build.</small>
+            </div>
+          </div>
         ) : null}
       </section>
 

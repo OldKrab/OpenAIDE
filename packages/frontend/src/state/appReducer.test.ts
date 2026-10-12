@@ -2951,7 +2951,7 @@ function settingsAgents(agentIds: string[] = ["codex"]): AgentSettingsRecord[] {
     icon: id === "codex" ? "openai" : "bot",
     transport: "stdio",
     status: "unprobed",
-    launch_label: id === "codex" ? "Built-in stdio launch policy" : "custom-agent",
+    launch_label: id === "codex" ? "npx -y @openaide/codex-acp@1.0.0" : "custom-agent",
     description: id === "codex" ? "Built-in Agent." : "Custom Agent.",
     capabilities: ["ACP stdio"],
     auth_methods: [],

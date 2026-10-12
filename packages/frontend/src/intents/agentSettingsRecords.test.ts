@@ -13,7 +13,7 @@ describe("agentSettingsRecordFromProtocol", () => {
       transport: "stdio",
       status: "setupRequired",
       setupReason: "nodeJsRequired",
-      launchLabel: "Built-in stdio launch policy",
+      launchLabel: "npx -y @openaide/codex-acp@1.0.0",
       description: "Built-in ACP Agent.",
     });
 

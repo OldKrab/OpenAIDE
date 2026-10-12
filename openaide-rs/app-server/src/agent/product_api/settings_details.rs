@@ -11,7 +11,9 @@ use openaide_app_server_protocol::ids::AgentId;
 use openaide_app_server_protocol::snapshot::{AgentSetupReason, AgentStatus};
 
 use crate::agent::registry::AgentCatalogRecord;
-use crate::agent::registry_builtin::{BuiltInAgentMetadata, BUILT_IN_AGENT_METADATA};
+use crate::agent::registry_builtin::{
+    known_built_in_launch, BuiltInAgentMetadata, BUILT_IN_AGENT_METADATA,
+};
 
 use super::{protocol_error_from_runtime, AgentProductApi};
 
@@ -79,7 +81,7 @@ fn built_in_detail(
         transport: AgentSettingsTransport::Stdio,
         status: status_for(metadata.id, enabled, api),
         setup_reason: setup_reason_for(metadata.id, enabled, api),
-        launch_label: "Built-in stdio launch policy".to_string(),
+        launch_label: built_in_launch_label(metadata.id, api),
         command_line: None,
         env: Vec::new(),
         description: metadata.description.to_string(),
@@ -98,6 +100,28 @@ fn built_in_detail(
             .map_err(protocol_error_from_runtime)?,
         sign_in: api.statuses.snapshot(metadata.id).sign_in,
     })
+}
+
+/// What the App Server starts for a Built-in Agent, so Settings shows the real
+/// command instead of naming a policy. The registry is read first because a
+/// runtime may replace a built-in launch; a built-in that is turned off is not
+/// in the registry and falls back to its product declaration.
+fn built_in_launch_label(agent_id: &str, api: &AgentProductApi) -> String {
+    let Some(config) = api
+        .registry
+        .require_acp_config(agent_id)
+        .ok()
+        .or_else(|| known_built_in_launch(agent_id))
+    else {
+        return String::new();
+    };
+    if config.uses_product_pinned_codex_package() {
+        // The pinned package is installed once per user and started with Node
+        // from that installation; its path is not a command a user could reuse.
+        let package = config.args.last().map(String::as_str).unwrap_or_default();
+        return format!("{package}, installed by OpenAIDE");
+    }
+    command_line(&config.command, &config.args)
 }
 
 fn custom_detail(
@@ -227,10 +251,9 @@ fn command_line(command: &str, args: &[String]) -> String {
 }
 
 fn shell_token(value: &str) -> String {
-    if value
-        .chars()
-        .all(|item| item.is_ascii_alphanumeric() || matches!(item, '_' | '-' | '.' | '/' | ':'))
-    {
+    if value.chars().all(|item| {
+        item.is_ascii_alphanumeric() || matches!(item, '_' | '-' | '.' | '/' | ':' | '@')
+    }) {
         return value.to_string();
     }
     format!("'{}'", value.replace('\'', "'\\''"))

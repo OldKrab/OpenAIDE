@@ -89,6 +89,40 @@ fn built_in_agent_settings_use_agent_specific_descriptions() {
 }
 
 #[test]
+fn built_in_agent_settings_show_what_is_really_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let api = AgentProductApi::new(
+        AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
+        AgentCatalogStore::new(store),
+        Arc::new(ProbeReadyAgentRuntime),
+        AgentStatusCache::default(),
+    );
+
+    let result = api
+        .agent_settings_details(AgentSettingsDetailsParams {})
+        .unwrap();
+    let launch = |agent_id: &str| {
+        result
+            .agents
+            .iter()
+            .find(|agent| agent.agent_id.as_str() == agent_id)
+            .map(|agent| agent.launch_label.as_str())
+            .unwrap()
+    };
+
+    let codex = launch(CODEX_AGENT_ID);
+    assert!(codex.starts_with("@openaide/codex-acp@"), "{codex}");
+    assert!(codex.ends_with(", installed by OpenAIDE"), "{codex}");
+    let claude = launch(CLAUDE_CODE_AGENT_ID);
+    assert!(
+        claude.contains(" -y @openaide/claude-agent-acp@"),
+        "{claude}"
+    );
+    assert!(launch(OPENCODE_AGENT_ID).ends_with(" acp"));
+}
+
+#[test]
 fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();

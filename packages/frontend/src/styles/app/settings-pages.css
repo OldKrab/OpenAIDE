@@ -151,7 +151,19 @@
 }
 
 .settings-field > small {
+  color: var(--oa-muted);
   font-weight: 400;
+}
+
+/* A command the user reads but cannot edit: shown whole, never truncated. */
+.settings-command {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .settings-field input,

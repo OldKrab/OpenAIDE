@@ -311,3 +311,15 @@ function customSettingsAgent(agentId: AgentId) {
     authMethods: [],
   };
 }
+
+it("shows the command a built-in Agent really runs", async () => {
+  await mountSettings({
+    state: agentsState([builtInAgent({ launch_label: "/usr/bin/npx -y @openaide/claude-agent-acp@1.2.3" })]),
+  });
+
+  await click("Open Codex");
+
+  const page = document.querySelector('section[aria-label="Agent details"]')!;
+  expect(page.querySelector("code")?.textContent).toBe("/usr/bin/npx -y @openaide/claude-agent-acp@1.2.3");
+  expect(page.textContent).not.toContain("stdio");
+});
