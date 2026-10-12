@@ -52,6 +52,8 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private long pickerStarted;
     private final AndroidDiagnostics diagnostics = new AndroidDiagnostics();
+    /** When the screen was last left, so a resume can say how long the app was away. */
+    private long pausedAt;
     private final WebResourcePolicy resourcePolicy = new WebResourcePolicy();
     private boolean connecting;
     /** The last connection attempt reached the workspace's App Server; the setup screen reports it. */
@@ -204,6 +206,8 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         visible = true;
+        // A slow reconnect is measured from here, and the pause before it explains a stale network.
+        diagnostics.record("app_foreground", "resumed", 0, pausedAt == 0 ? 0 : android.os.SystemClock.elapsedRealtime() - pausedAt);
         if (browser != null) {
             browser.resumeTimers();
             browser.onResume();
@@ -215,6 +219,8 @@ public final class MainActivity extends Activity {
 
     @Override protected void onPause() {
         visible = false;
+        pausedAt = android.os.SystemClock.elapsedRealtime();
+        diagnostics.record("app_foreground", "paused", 0, 0);
         if (browser != null && profile.local) startBackgroundWork();
         if (browser != null) { browser.onPause(); browser.pauseTimers(); }
         super.onPause();
