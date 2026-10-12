@@ -93,11 +93,12 @@ public final class SetupActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();
+        RemoteNode.INSTANCE.shown();
         page.resumeTimers();
         page.onResume();
         controller.resume();
     }
-    @Override protected void onPause() { page.onPause(); super.onPause(); }
+    @Override protected void onPause() { RemoteNode.INSTANCE.hidden(); page.onPause(); super.onPause(); }
     @Override public void onBackPressed() { page.evaluateJavascript("window.back()", null); }
     @Override protected void onDestroy() {
         loaded = false;

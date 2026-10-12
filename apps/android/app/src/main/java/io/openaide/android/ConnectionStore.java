@@ -13,6 +13,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 final class ConnectionStore {
+    private static final String RELAY_PREFIX = "server_relay_";
     private final SharedPreferences preferences;
     /** The computer this phone is paired with: its key and the name it reported. */
     static final class PairedServer {
@@ -69,8 +70,13 @@ final class ConnectionStore {
         SharedPreferences.Editor edit = preferences.edit().putString("servers", PairedServers.format(PairedServers.without(pairedServers(), id)));
         PairedServer selected = pairedServer();
         if (selected != null && selected.id.equals(id)) edit.remove("server_id").remove("server_name").putBoolean("paired", false);
-        edit.apply();
+        edit.remove(RELAY_PREFIX + id).apply();
     }
+
+    /** The relay a computer was last reached through, or null. It only shortens the next connect. */
+    String relay(String id) { return preferences.getString(RELAY_PREFIX + id, null); }
+
+    void saveRelay(String id, String relay) { preferences.edit().putString(RELAY_PREFIX + id, relay).apply(); }
 
     /** Selects one of the paired computers; returns false for one this phone does not know. */
     boolean selectPaired(String id) {

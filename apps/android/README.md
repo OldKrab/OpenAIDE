@@ -44,7 +44,12 @@ preferences. The gateway carries App Server requests to the App Server, one stre
 per request to the computer, and answers only requests that hold the per-process
 cookie given to the app's own WebView. A lost connection is
 reopened on the next request, and the Frontend's resumable session continues from
-where it stopped. The computer must be running OpenAIDE; the phone and the computer
+where it stopped. Android stops a hidden app's network within seconds, and the
+connection library cannot observe that on Android, so the app does not wait for
+the old endpoint to recover: after more than a few seconds off screen it binds a
+new one on return, dials the relay the computer was last reached through, and
+makes up to three attempts within 24 seconds before reporting the computer as
+unreachable. While hidden it makes one attempt per request and no more. The computer must be running OpenAIDE; the phone and the computer
 must speak the same App Server Protocol major version.
 
 Opening the local workspace runs the App Server in Termux in its handoff mode: it
