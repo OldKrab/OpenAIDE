@@ -66,6 +66,9 @@ export type ReliableWebProxyBackendConnectionOptions = Omit<
   "authToken" | "subscribeToReplacement"
 >;
 
+/** A link replaced sooner than this is not worth telling the user about. */
+const LINK_LOST_NOTICE_MS = 1_000;
+
 export function createReliableLocalHttpBackendConnection(
   options: ReliableLocalHttpBackendConnectionOptions,
 ): AppServerSession {
@@ -97,6 +100,10 @@ function createReliableHttpBackendConnection(
   const recoveryFailureListeners = new Set<(event: BackendRecoveryFailure) => void>();
   const responsivenessListeners = new Set<(responsive: boolean) => void>();
   let responsive = true;
+  /** The two reasons nothing arrives: no heartbeat answer, or no link under the session. */
+  let heartbeatSilent = false;
+  let linkLost = false;
+  let linkLostTimer: ReturnType<typeof setTimeout> | undefined;
   const requestRegistrations = new Set<{
     bind(connection: BackendConnection): void;
     dispose(): void;
@@ -259,6 +266,7 @@ function createReliableHttpBackendConnection(
       recoveryBaselineListeners.clear();
       recoveryFailureListeners.clear();
       responsivenessListeners.clear();
+      if (linkLostTimer !== undefined) clearTimeout(linkLostTimer);
     },
   };
 
@@ -269,13 +277,17 @@ function createReliableHttpBackendConnection(
       endpoint_revision: generationEndpointRevision,
       transport: options.transport ?? "http",
     });
+    let generation: HttpConnectionGeneration | undefined;
     const channel = createReliableSessionChannel({
       openLink: createLinkOpener(),
       connectionId: options.connectionId,
       logger,
       ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
+      ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
+      onLinkChange(connected) {
+        if (generation === active) linkChanged(connected);
+      },
     });
-    let generation: HttpConnectionGeneration;
     const connection = createInternalReliableBackendConnection({
       channel,
       connectionId: options.connectionId,
@@ -284,18 +296,21 @@ function createReliableHttpBackendConnection(
         ? {}
         : { heartbeatIntervalMs: options.heartbeatIntervalMs }),
       onRequestError(error, method) {
-        if (method !== CLIENT_INITIALIZE) handleGenerationRequestError(generation, error);
+        if (generation && method !== CLIENT_INITIALIZE) handleGenerationRequestError(generation, error);
       },
       onResponsivenessChange(next) {
-        if (generation === active) publishResponsiveness(next);
+        if (generation !== active) return;
+        heartbeatSilent = !next;
+        publishResponsiveness();
       },
     });
-    generation = { channel, connection, endpointRevision: generationEndpointRevision };
-    generations.add(generation);
-    generation.unsubscribeError = channel.subscribeErrors?.((error) => {
-      handleGenerationError(generation, error);
+    const created: HttpConnectionGeneration = { channel, connection, endpointRevision: generationEndpointRevision };
+    generation = created;
+    generations.add(created);
+    created.unsubscribeError = channel.subscribeErrors?.((error) => {
+      handleGenerationError(created, error);
     });
-    return generation;
+    return created;
   }
 
   /** The only place that knows which carrier a generation's session uses. */
@@ -328,7 +343,29 @@ function createReliableHttpBackendConnection(
     });
   }
 
-  function publishResponsiveness(next: boolean) {
+  /**
+   * A lost link is replaced without the layers above noticing, but until then
+   * nothing arrives and the page shows what it last had. Past a moment's delay
+   * that is said, the same way an unanswered heartbeat is; a replacement that
+   * takes less than that stays invisible.
+   */
+  function linkChanged(connected: boolean) {
+    if (linkLostTimer !== undefined) clearTimeout(linkLostTimer);
+    linkLostTimer = undefined;
+    if (connected) {
+      linkLost = false;
+      publishResponsiveness();
+      return;
+    }
+    linkLostTimer = setTimeout(() => {
+      linkLostTimer = undefined;
+      linkLost = true;
+      publishResponsiveness();
+    }, LINK_LOST_NOTICE_MS);
+  }
+
+  function publishResponsiveness() {
+    const next = !heartbeatSilent && !linkLost;
     if (responsive === next) return;
     responsive = next;
     for (const listener of responsivenessListeners) listener(next);
@@ -336,7 +373,11 @@ function createReliableHttpBackendConnection(
 
   function bindGeneration(generation: HttpConnectionGeneration) {
     // A replacement transport starts with a clean record; recovery has its own status.
-    publishResponsiveness(true);
+    if (linkLostTimer !== undefined) clearTimeout(linkLostTimer);
+    linkLostTimer = undefined;
+    linkLost = false;
+    heartbeatSilent = false;
+    publishResponsiveness();
     generation.unsubscribeEvent = generation.connection.handleNotification("app/event", (event) => {
       for (const listener of eventListeners) listener(event);
     });
