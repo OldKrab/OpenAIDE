@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 
+mod desktop_app_server_hold;
 mod desktop_remote;
 mod desktop_runtime;
 mod desktop_secrets;
@@ -170,6 +171,7 @@ fn main() {
                 app_local_data.join("desktop-update-receipt.json"),
             ));
             app.manage(DesktopQuitState::default());
+            desktop_app_server_hold::install(app);
             #[cfg(target_os = "macos")]
             install_macos_menu(app)?;
             #[cfg(target_os = "macos")]
@@ -218,7 +220,7 @@ fn main() {
             desktop_bootstrap_context,
             desktop_ensure_app_server,
             desktop_take_pending_quit,
-            complete_desktop_quit,
+            desktop_app_server_hold::complete_desktop_quit,
             record_desktop_telemetry,
             prepare_desktop_native_zoom,
             perform_desktop_native_zoom,
@@ -271,11 +273,6 @@ fn desktop_bootstrap_context(
         can_recover: preferences.previous_environment.is_some(),
         remote_computer: preferences.remote().map(|computer| computer.name.clone()),
     })
-}
-
-#[tauri::command]
-fn complete_desktop_quit(app: tauri::AppHandle) {
-    app.exit(0);
 }
 
 #[cfg(target_os = "macos")]

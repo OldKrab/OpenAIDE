@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use futures_util::future::{AbortHandle, Abortable};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
 
@@ -558,6 +558,13 @@ pub(crate) async fn desktop_install_update(
             let _ = state.fail(&app, DesktopUpdateError::ShutdownFailed);
             error
         })?;
+        // The window's client detached before this command; ending the native
+        // hold is what lets the App Server stop.
+        let hold = app
+            .state::<crate::desktop_app_server_hold::AppServerHold>()
+            .inner()
+            .clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || hold.end("update")).await;
         if crate::desktop_update_shutdown::wait_for_app_server_shutdown(endpoint_url)
             .await
             .is_err()
