@@ -495,6 +495,7 @@ async fn apply_opened_session_message(
         session_event_sink.cloned(),
         pending_session_catalogs,
         background_work,
+        false,
     )
     .await?;
     apply_session_catalogs(catalogs, config_catalog, commands_catalog);

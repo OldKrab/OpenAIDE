@@ -353,3 +353,46 @@ fn finishing_a_hold_keeps_live_commands_for_the_next_prompt() {
     assert!(!work.is_holding());
     assert!(work.holds_turn("session-1", "task-b"));
 }
+
+#[test]
+fn a_cycle_no_turn_owns_is_logged_and_holds_nothing() {
+    let logs = crate::logging::capture_test_logs();
+    let work = BackgroundWork::default();
+    let unowned = serde_json::from_value::<SessionStateNotification>(
+        json!({ "sessionId": "session-unowned", "state": "running" }),
+    )
+    .expect("session state notification");
+    let idle = serde_json::from_value::<SessionStateNotification>(
+        json!({ "sessionId": "session-unowned", "state": "idle" }),
+    )
+    .expect("session state notification");
+
+    work.unowned_session_state_changed(&unowned);
+    // A repeated report is not a second cycle.
+    work.unowned_session_state_changed(&unowned);
+    work.unowned_session_state_changed(&idle);
+
+    assert!(!work.is_holding());
+    assert!(!work.holds_turn("session-unowned", "task-a"));
+    let phases: Vec<(String, bool)> = logs
+        .snapshot()
+        .into_iter()
+        .filter(|line| {
+            line["event"] == "acp_unowned_cycle"
+                && line["fields"]["session_id"] == "session-unowned"
+        })
+        .map(|line| {
+            (
+                line["fields"]["phase"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                line["fields"]["duration_ms"].is_number(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        phases,
+        [("started".to_owned(), false), ("ended".to_owned(), true)]
+    );
+}

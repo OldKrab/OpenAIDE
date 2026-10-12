@@ -8,7 +8,9 @@ use agent_client_protocol::{
 };
 use serde::Deserialize;
 
-use crate::agent::acp_background_work::{route_async_task_update, AsyncTaskRouting};
+use crate::agent::acp_background_work::{
+    route_async_task_update, AsyncTaskRouting, SESSION_STATE_METHOD,
+};
 use crate::agent::acp_early_session_catalogs::EarlySessionCatalogs;
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
@@ -68,6 +70,8 @@ where
         native_subagents: context.native_subagents.clone(),
     });
     let notification_trace = context.trace;
+    let state_trace = notification_trace.clone();
+    let state_session_traces = notification_session_traces.clone();
     let notification_load_replay = context.load_replay;
     let raw_native_subagents = context.native_subagents.clone();
     let notification_native_subagents = context.native_subagents;
@@ -111,6 +115,7 @@ where
                     return Ok(Handled::Yes);
                 }
                 raw_native_subagents.remember_spawn_prompt(notification.params());
+                trace_session_state_change(&notification, &state_trace, &state_session_traces);
                 let notification = match route_async_task_update(&notification) {
                     AsyncTaskRouting::NotAsyncTask => notification,
                     AsyncTaskRouting::Forward(state_change) => state_change,
@@ -396,6 +401,37 @@ enum RawPlanStatus {
     Pending,
     InProgress,
     Completed,
+}
+
+/// A state report is not a `session/update`, so the typed handler below never
+/// traces it. Without it a trace cannot show a cycle the Agent started itself.
+fn trace_session_state_change(
+    notification: &UntypedMessage,
+    trace: &Option<AcpTraceSession>,
+    session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
+) {
+    if notification.method() != SESSION_STATE_METHOD {
+        return;
+    }
+    let owning_trace = notification
+        .params()
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|session_id| {
+            session_traces
+                .lock()
+                .expect("ACP session trace map lock poisoned")
+                .get(session_id)
+                .cloned()
+        })
+        .or_else(|| trace.clone());
+    if let Some(trace) = owning_trace {
+        trace.record_value(
+            "agent_to_client",
+            SESSION_STATE_METHOD,
+            notification.params().clone(),
+        );
+    }
 }
 
 fn handle_session_update_notification(
