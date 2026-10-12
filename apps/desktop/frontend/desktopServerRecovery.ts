@@ -4,8 +4,9 @@ const ENSURE_DEBOUNCE_MS = 1_000;
 
 /**
  * Brings the Desktop-owned App Server back when the machine resumes or the process
- * exited while the window stayed open. The App Server is allowed to shut down while
- * idle, so returning to the app must be able to start it again without a reload.
+ * exited while the window stayed open. Desktop's native client keeps the App Server
+ * running behind a hidden window, but not through machine sleep or a crash, so
+ * returning to the app must be able to start it again without a reload.
  * A replacement endpoint is published by the host and picked up by the client.
  */
 export function createDesktopServerRecovery({
