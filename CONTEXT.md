@@ -390,7 +390,7 @@ A Task whose primary Agent prompt is active or held open by Background Work, own
 _Avoid_: Blocking all existing Tasks as if they were running
 
 **Background Work**:
-Commands an Agent leaves running after it answers a prompt. While only Background Work keeps a Task turn open, the Task shows as Background instead of in progress.
+Commands, and Monitors that watch a command's output, that an Agent or one of its Subagents leaves running after the Agent answers a prompt. While only Background Work keeps a Task turn open, the Task shows as Background instead of in progress.
 _Avoid_: Background Task, treating Background Work as a finished Task
 
 **Task Attention Event**:
