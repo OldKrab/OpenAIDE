@@ -1,18 +1,9 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
-import {
-  ArrowLeft,
-  ChevronRight,
-  CircleAlert,
-  Copy,
-  ExternalLink,
-  KeyRound,
-  LoaderCircle,
-  Save,
-  Terminal,
-} from "lucide-react";
+import { ArrowLeft, ChevronRight, Copy, ExternalLink, KeyRound, LoaderCircle, Terminal } from "lucide-react";
 import type { AgentSettingsRecord, AgentSignInFlowRecord } from "@openaide/app-shell-contracts";
 import { authMethodUsesValues, type AgentAuthMethod } from "./agentSettingsModel";
 import { authTerminalForAgent, subscribeAuthTerminals } from "../../services/authTerminals";
+import { SettingsButton, SettingsField, SettingsRowView } from "./settingsKit";
 const AgentAuthTerminal = lazy(() => import("./AgentAuthTerminal").then((module) => ({ default: module.AgentAuthTerminal })));
 
 type AuthenticateAgent = (agentId: string, methodId: string, values?: Record<string, string>) => void;
@@ -65,9 +56,10 @@ export function AgentSignIn({
     }
   } : undefined;
   return (
-    <section aria-label={isRequired ? "Sign in" : "Authentication"} className="agent-page-section agent-sign-in">
+    <section aria-label={isRequired ? "Sign in" : "Authentication"} className="settings-group">
+      <header><h2>Account</h2></header>
       {terminal && flow && flow.phase !== "failed" ? (
-        <Suspense fallback={<p role="status">Opening sign-in terminal…</p>}>
+        <Suspense fallback={<p className="settings-empty" role="status">Opening sign-in terminal…</p>}>
           <AgentAuthTerminal session={terminal} onCancel={cancel} />
         </Suspense>
       ) : flow ? (
@@ -92,32 +84,33 @@ export function AgentSignIn({
           }}
         />
       ) : (
-        <div className={`agent-page-surface agent-sign-in-summary${isRequired ? " attention" : ""}`}>
-          <span className="agent-sign-in-step-icon"><KeyRound aria-hidden="true" size={18} /></span>
-          <span className="agent-sign-in-summary-copy">
-            <strong>{isRequired
-              ? "Sign in required"
-              : "Authentication"}</strong>
-          </span>
-          <span className="agent-sign-in-summary-actions">
-            <button className={`agent-page-row-button${isRequired ? " primary" : ""}`} type="button" onClick={() => setPanel("methods")}>
-              <span>{isRequired ? "Choose method" : "Manage"}</span>
-              <ChevronRight aria-hidden="true" size={13} />
-            </button>
-            {logout ? (
-              <button
-                aria-busy={logoutPending || undefined}
-                className="agent-page-row-button danger"
-                disabled={logoutPending || agent.logout_blocked_by_running_task}
-                title={agent.logout_blocked_by_running_task ? "Stop running Tasks before signing out." : undefined}
-                type="button"
-                onClick={() => void logout()}
-              >
-                {logoutPending ? "Signing out…" : "Sign out"}
-              </button>
-            ) : null}
-          </span>
-        </div>
+        <ul className="settings-card">
+          <SettingsRowView
+            row={{
+              id: "sign-in",
+              label: isRequired ? "Sign in required" : agent.status === "connected" ? "Signed in" : "Sign-in",
+              leading: <KeyRound aria-hidden="true" size={18} strokeWidth={1.6} />,
+              control: (
+                <>
+                  {logout ? (
+                    <SettingsButton
+                      busy={logoutPending}
+                      disabled={agent.logout_blocked_by_running_task}
+                      onClick={() => void logout()}
+                      title={agent.logout_blocked_by_running_task ? "Stop running Tasks before signing out." : undefined}
+                      variant="quiet"
+                    >
+                      {logoutPending ? "Signing out…" : "Sign out"}
+                    </SettingsButton>
+                  ) : null}
+                  <SettingsButton onClick={() => setPanel("methods")} variant={isRequired ? "primary" : "default"}>
+                    {isRequired ? "Choose method" : "Manage"}
+                  </SettingsButton>
+                </>
+              ),
+            }}
+          />
+        </ul>
       )}
     </section>
   );
@@ -133,28 +126,27 @@ function AgentSignInMethods({
   onSelect: (method: AgentAuthMethod) => void;
 }) {
   return (
-    <div className="agent-page-surface agent-sign-in-chooser">
-      <div className="agent-sign-in-panel-heading">
-        <span>
-          <strong>Choose a method</strong>
-        </span>
-        <button className="agent-sign-in-secondary" type="button" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" size={13} />
-          <span>Back</span>
-        </button>
-      </div>
-      <div className="agent-sign-in-methods">
+    <div className="settings-card settings-step">
+      <header>
+        <strong>Choose a method</strong>
+        <SettingsButton icon={<ArrowLeft aria-hidden="true" size={13} />} onClick={onBack} variant="quiet">Back</SettingsButton>
+      </header>
+      <ul>
         {methods.map((method) => (
-          <button className="agent-sign-in-method" key={method.id} type="button" onClick={() => onSelect(method)}>
-            <span className="agent-sign-in-method-icon">{authMethodIcon(method)}</span>
-            <span className="agent-sign-in-method-copy">
-              <strong>{method.label}</strong>
-              {method.description ? <small>{method.description}</small> : null}
-            </span>
-            <ChevronRight aria-hidden="true" size={15} />
-          </button>
+          <li className="settings-row" key={method.id}>
+            <div className="settings-row-line">
+              <button className="settings-row-main" onClick={() => onSelect(method)} type="button">
+                <span className="settings-row-leading">{authMethodIcon(method)}</span>
+                <span className="settings-row-copy">
+                  <strong>{method.label}</strong>
+                  {method.description ? <small>{method.description}</small> : null}
+                </span>
+              </button>
+              <span className="settings-row-end"><ChevronRight aria-hidden="true" className="settings-row-chevron" size={16} /></span>
+            </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
@@ -176,34 +168,30 @@ function AgentSignInStep({
   onCancel?: () => void;
 }) {
   const label = methodLabel(agent, flow.method_id);
-  const cancelButton = onCancel ? (
-    <button className="agent-sign-in-secondary" type="button" onClick={onCancel}>Cancel sign-in</button>
-  ) : null;
+  const cancelButton = onCancel ? <SettingsButton onClick={onCancel} variant="quiet">Cancel sign-in</SettingsButton> : null;
   switch (flow.phase) {
     case "starting":
       return (
-        <div aria-busy="true" className="agent-page-surface agent-sign-in-step" role="status">
-          <span className="agent-sign-in-step-icon"><LoaderCircle aria-hidden="true" className="spin" size={18} /></span>
-          <div className="agent-sign-in-step-copy">
-            <strong>Starting {label}…</strong>
+        <div aria-busy="true" className="settings-card settings-step" role="status">
+          <div className="settings-step-copy">
+            <strong><LoaderCircle aria-hidden="true" className="spin" size={15} />Starting {label}…</strong>
             <p>Waiting for {agent.label} to begin sign-in.</p>
           </div>
-          <div className="agent-sign-in-step-actions">{cancelButton}</div>
+          <div className="settings-step-actions">{cancelButton}</div>
         </div>
       );
     case "awaiting_user":
       return (
-        <div className="agent-page-surface agent-sign-in-step" role="status">
-          <span className="agent-sign-in-step-icon"><ExternalLink aria-hidden="true" size={18} /></span>
-          <div className="agent-sign-in-step-copy">
+        <div className="settings-card settings-step" role="status">
+          <div className="settings-step-copy">
             <strong>Continue in your browser</strong>
-            {flow.hint ? <p className="agent-sign-in-hint">{flow.hint}</p> : <p>Open the sign-in page and finish there. This page updates when {agent.label} confirms.</p>}
-            {flow.url ? <p className="agent-sign-in-url">{flow.url}</p> : null}
+            {flow.hint ? <p className="settings-step-hint">{flow.hint}</p> : <p>Open the sign-in page and finish there. This page updates when {agent.label} confirms.</p>}
+            {flow.url ? <p className="settings-step-url">{flow.url}</p> : null}
           </div>
-          <div className="agent-sign-in-step-actions">
+          <div className="settings-step-actions">
             {flow.url ? (
-              <a className="agent-page-row-button primary" href={flow.url} rel="noopener noreferrer" target="_blank">
-                <ExternalLink size={13} />
+              <a className="settings-action primary" href={flow.url} rel="noopener noreferrer" target="_blank">
+                <ExternalLink aria-hidden="true" size={13} />
                 <span>Open sign-in page</span>
               </a>
             ) : null}
@@ -214,36 +202,29 @@ function AgentSignInStep({
       );
     case "awaiting_terminal":
       return (
-        <div className="agent-page-surface agent-sign-in-step" role="status">
-          <span className="agent-sign-in-step-icon"><Terminal aria-hidden="true" size={18} /></span>
-          <div className="agent-sign-in-step-copy">
+        <div className="settings-card settings-step" role="status">
+          <div className="settings-step-copy">
             <strong>Finish in the terminal</strong>
             <p>A terminal opened for {label}. Come back here once it reports you are signed in.</p>
           </div>
-          <div className="agent-sign-in-step-actions">
-            <button className="agent-page-row-button primary" type="button" onClick={() => onAuthenticate(agent.id, flow.method_id)}>
-              <Terminal size={13} />
-              <span>I've finished signing in</span>
-            </button>
+          <div className="settings-step-actions">
+            <SettingsButton icon={<Terminal aria-hidden="true" size={13} />} onClick={() => onAuthenticate(agent.id, flow.method_id)} variant="primary">
+              I've finished signing in
+            </SettingsButton>
             {cancelButton}
           </div>
         </div>
       );
     case "failed":
       return (
-        <div className="agent-page-surface attention agent-sign-in-step" role="alert">
-          <span className="agent-sign-in-step-icon failed"><CircleAlert aria-hidden="true" size={18} /></span>
-          <div className="agent-sign-in-step-copy">
+        <div className="settings-card settings-step warn" role="alert">
+          <div className="settings-step-copy">
             <strong>Sign-in didn't complete</strong>
             <p>{flow.failure ?? `${agent.label} could not sign in with ${label}.`}</p>
           </div>
-          <div className="agent-sign-in-step-actions">
-            <button className="agent-page-row-button primary" type="button" onClick={() => onAuthenticate(agent.id, flow.method_id)}>
-              <span>Try again</span>
-            </button>
-            {onCancel ? (
-              <button className="agent-sign-in-secondary" type="button" onClick={onCancel}>Choose another method</button>
-            ) : null}
+          <div className="settings-step-actions">
+            <SettingsButton onClick={() => onAuthenticate(agent.id, flow.method_id)} variant="primary">Try again</SettingsButton>
+            {onCancel ? <SettingsButton onClick={onCancel} variant="quiet">Choose another method</SettingsButton> : null}
           </div>
         </div>
       );
@@ -259,16 +240,14 @@ function CopyLinkButton({ url }: { url: string }) {
   }, [copied]);
   if (typeof navigator === "undefined" || !navigator.clipboard) return null;
   return (
-    <button
-      className="agent-page-row-button"
-      type="button"
+    <SettingsButton
+      icon={<Copy aria-hidden="true" size={13} />}
       onClick={() => {
         void navigator.clipboard.writeText(url).then(() => setCopied(true), () => undefined);
       }}
     >
-      <Copy size={13} />
-      <span>{copied ? "Copied" : "Copy link"}</span>
-    </button>
+      {copied ? "Copied" : "Copy link"}
+    </SettingsButton>
   );
 }
 
@@ -292,26 +271,22 @@ function AgentSignInValueStep({
   };
   return (
     <form
-      className="agent-page-surface agent-sign-in-value-step"
+      className="settings-card settings-step"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
       }}
     >
-      <div className="agent-sign-in-panel-heading">
-        <span>
+      <header>
+        <span className="settings-step-copy">
           <strong>Enter your {method.label}</strong>
-          <small>{method.description ?? "The value is stored using this App Shell's protected credential storage."}</small>
+          <p>{method.description ?? "The value is stored using this App Shell's protected credential storage."}</p>
         </span>
-        <button className="agent-sign-in-secondary" type="button" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" size={13} />
-          <span>Back</span>
-        </button>
-      </div>
-      <div className="agent-sign-in-fields">
+        <SettingsButton icon={<ArrowLeft aria-hidden="true" size={13} />} onClick={onBack} variant="quiet">Back</SettingsButton>
+      </header>
+      <div className="settings-form">
         {variables.map((variable) => (
-          <label key={variable.name}>
-            <span>{variable.label ?? variable.name}{variable.optional ? " (optional)" : ""}</span>
+          <SettingsField key={variable.name} label={`${variable.label ?? variable.name}${variable.optional ? " (optional)" : ""}`}>
             <input
               aria-label={variable.label ?? variable.name}
               autoComplete="off"
@@ -327,26 +302,19 @@ function AgentSignInValueStep({
                 submit();
               }}
             />
-          </label>
+          </SettingsField>
         ))}
       </div>
-      <div className="agent-sign-in-value-actions">
-        {method.link ? <a href={method.link} rel="noopener noreferrer" target="_blank">Get a key</a> : <span />}
-        <button
-          className="agent-page-row-button primary"
-          disabled={missingRequired}
-          type="submit"
-        >
-          <Save aria-hidden="true" size={13} />
-          <span>Save</span>
-        </button>
+      <div className="settings-step-actions">
+        <SettingsButton disabled={missingRequired} type="submit" variant="primary">Save</SettingsButton>
+        {method.link ? <a href={method.link} rel="noopener noreferrer" target="_blank">Get a key</a> : null}
       </div>
     </form>
   );
 }
 
 function authMethodIcon(method: AgentAuthMethod) {
-  if (method.kind === "env_var") return <KeyRound aria-hidden="true" size={17} />;
-  if (method.kind === "terminal") return <Terminal aria-hidden="true" size={17} />;
-  return <ExternalLink aria-hidden="true" size={17} />;
+  if (method.kind === "env_var") return <KeyRound aria-hidden="true" size={18} strokeWidth={1.6} />;
+  if (method.kind === "terminal") return <Terminal aria-hidden="true" size={18} strokeWidth={1.6} />;
+  return <ExternalLink aria-hidden="true" size={18} strokeWidth={1.6} />;
 }

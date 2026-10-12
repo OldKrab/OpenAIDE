@@ -2,18 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import {
   ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
-  SETTINGS_GET_RUNTIME,
 } from "@openaide/app-server-client";
 import { handleWebviewMessage } from "./messaging";
 
 const workspaceMocks = vi.hoisted(() => ({
   firstWorkspaceRoot: vi.fn(),
   workspaceRoots: vi.fn(),
-}));
-const settingsMocks = vi.hoisted(() => ({
-  unlockDeveloperSettings: vi.fn(async (store: { update: (key: string, value: boolean) => PromiseLike<void> | void }) => {
-    await store.update("openaide.developerSettingsUnlocked", true);
-  }),
 }));
 const diagnosticsMocks = vi.hoisted(() => ({
   collectDiagnostics: vi.fn(),
@@ -28,9 +22,6 @@ vi.mock("../workspace/roots", () => ({
   workspaceRoots: workspaceMocks.workspaceRoots,
 }));
 
-vi.mock("../settings/snapshot", () => ({
-  unlockDeveloperSettings: settingsMocks.unlockDeveloperSettings,
-}));
 
 vi.mock("../diagnostics/snapshot", () => ({
   collectDiagnostics: diagnosticsMocks.collectDiagnostics,
@@ -272,7 +263,7 @@ describe("webview messaging composer routes", () => {
           params: { key: "agent.secret", label: "Agent secret" },
         },
       },
-      context({}, posted, undefined, undefined, undefined, { agentSecretStore }),
+      context({}, posted, undefined, undefined, { agentSecretStore }),
     );
 
     expect(agentSecretStore.get).toHaveBeenCalledWith("agent.secret");
@@ -325,7 +316,7 @@ describe("webview messaging composer routes", () => {
           },
         },
       },
-      context({}, posted, undefined, logger, undefined, { agentSecretStore }),
+      context({}, posted, undefined, logger, { agentSecretStore }),
     );
 
     expect(agentSecretStore.get).toHaveBeenCalledWith("openaide.agent.custom.old.env.EXISTING");
@@ -542,8 +533,8 @@ describe("webview messaging composer routes", () => {
     const posted: unknown[] = [];
     const runtimeProcess = { dispose: vi.fn(), describe: vi.fn(() => ({ running: true })) };
 
-    await handleWebviewMessage({ type: "diagnostics.snapshot" }, context(runtime, posted, undefined, undefined, undefined, { runtimeProcess }));
-    await handleWebviewMessage({ type: "diagnostics.export" }, context(runtime, posted, undefined, undefined, undefined, { runtimeProcess }));
+    await handleWebviewMessage({ type: "diagnostics.snapshot" }, context(runtime, posted, undefined, undefined, { runtimeProcess }));
+    await handleWebviewMessage({ type: "diagnostics.export" }, context(runtime, posted, undefined, undefined, { runtimeProcess }));
 
     expect(diagnosticsMocks.collectDiagnostics).toHaveBeenCalledWith(runtime, runtimeProcess);
     expect(diagnosticsMocks.exportSupportDiagnostics).toHaveBeenCalledWith(runtime, runtimeProcess, undefined);
@@ -680,33 +671,6 @@ describe("webview messaging composer routes", () => {
     }]);
   });
 
-  it("persists developer settings unlock and returns refreshed runtime settings", async () => {
-    const runtime = {
-      appServerRequest: vi.fn().mockResolvedValue({
-        developer: { acpTrace: { enabled: false, directory: "/runtime/diagnostics/acp-traces" } },
-      }),
-    };
-    const posted: unknown[] = [];
-    const developerSettingsStore = {
-      get: vi.fn(() => false),
-      update: vi.fn(async () => undefined),
-    };
-
-    await handleWebviewMessage(
-      { type: "developer.settings.unlock" },
-      context(runtime, posted, undefined, undefined, developerSettingsStore),
-    );
-
-    expect(developerSettingsStore.update).toHaveBeenCalledWith("openaide.developerSettingsUnlocked", true);
-    expect(runtime.appServerRequest).toHaveBeenCalledWith(SETTINGS_GET_RUNTIME, {});
-    expect(posted[0]).toEqual({
-      type: "runtime.settings.result",
-      payload: {
-        developer: { acp_trace: { enabled: false, directory: "/runtime/diagnostics/acp-traces" } },
-      },
-    });
-  });
-
   it("routes surface commands to editor managers", async () => {
     const posted: unknown[] = [];
     const calls: string[] = [];
@@ -722,7 +686,7 @@ describe("webview messaging composer routes", () => {
 
     await handleWebviewMessage(
       { type: "surface.retainNewTaskProject", payload: { project_id: "project_1" } },
-      context({}, posted, surfaces, undefined, undefined, { surface: "task" }),
+      context({}, posted, surfaces, undefined, { surface: "task" }),
     );
     await handleWebviewMessage({ type: "surface.openNewTask" }, context({}, posted, surfaces));
     await handleWebviewMessage(
@@ -733,7 +697,7 @@ describe("webview messaging composer routes", () => {
       type: "surface.openSettings",
       payload: {
         project_id: "project_1",
-        settings_tab: "data",
+        settings_tab: "troubleshooting",
         settings_intent: { kind: "openSupportExport", requestId: "diagnostics-1" },
       },
     }, context({}, posted, surfaces));
@@ -743,7 +707,7 @@ describe("webview messaging composer routes", () => {
     }, context({}, posted, surfaces));
     await handleWebviewMessage(
       { type: "surface.openTask", payload: { task_id: "task_1", title: "Fix ACP", agent_id: "codex" } },
-      context({}, posted, surfaces, undefined, undefined, { adoptTask }),
+      context({}, posted, surfaces, undefined, { adoptTask }),
     );
     await handleWebviewMessage(
       { type: "surface.updateTaskTitle", payload: { task_id: "task_1", title: "Renamed Task" } },
@@ -759,7 +723,7 @@ describe("webview messaging composer routes", () => {
         undefined,
         undefined,
         "project_1",
-        "data",
+        "troubleshooting",
         { kind: "openSupportExport", requestId: "diagnostics-1" },
       );
     expect(surfaces.openNativeSession).toHaveBeenCalledWith("codex", "session_1", "project_1");
@@ -864,7 +828,7 @@ describe("webview messaging composer routes", () => {
         label: "openaide-support.zip",
         clientInstanceId: "webview-client-which-did-not-create-the-handle",
       },
-    }, context(runtime, posted, undefined, undefined, undefined, { supportExportState }));
+    }, context(runtime, posted, undefined, undefined, { supportExportState }));
 
     expect(runtime.resolveOwnAppServerFileReveal).toHaveBeenCalledWith("file-reveal-1");
     expect(runtime.appServerRequest).not.toHaveBeenCalled();
@@ -918,7 +882,6 @@ function context(
   posted: unknown[],
   surfaces?: unknown,
   logger: { warn: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn> } = { warn: vi.fn(), info: vi.fn() },
-  developerSettingsStore: unknown = { get: vi.fn(() => false), update: vi.fn(async () => undefined) },
   extras: Record<string, unknown> = {},
 ) {
   return {
@@ -929,7 +892,6 @@ function context(
       return true;
     },
     logger,
-    developerSettingsStore,
     surfaces,
     ...extras,
   } as never;

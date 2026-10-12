@@ -481,12 +481,9 @@ describe("task list row styles", () => {
   it("keeps the Settings navigation fixed while page content scrolls", () => {
     expect(appCss).toMatch(/\.app-shell\s*{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden;/);
     expect(appCss).toMatch(/\.app-sidebar-frame\s*{[^}]*grid-template-columns:\s*var\(--app-sidebar-width,\s*304px\) minmax\(0,\s*1fr\);/);
-    expect(appCss).toMatch(/\.settings-view\s*{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-view\s*{[^}]*--app-sidebar-width:\s*304px;/);
-    expect(appCss).toMatch(/\.settings-sidebar\s*{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/);
-    expect(appCss).toMatch(/\.settings-tabs\s*{[^}]*align-self:\s*start;/);
-    expect(appCss).toMatch(/\.settings-content\s*{[^}]*min-height:\s*0;[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;[^}]*padding:\s*44px clamp\(24px,\s*4vw,\s*58px\) 42px;/);
-    expect(appCss).toMatch(/\.settings-tab-panel\s*{[^}]*min-width:\s*0;[^}]*min-height:\s*0;/);
+    expect(appCss).toMatch(/\.settings-view\s*{[^}]*height:\s*100dvh;[^}]*overflow:\s*hidden;/);
+    expect(appCss).toMatch(/\.settings-nav\s*{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
+    expect(appCss).toMatch(/\.settings-page\s*{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
   });
 
   it("keeps the shared sidebar controls quiet until they are needed", () => {
@@ -496,27 +493,10 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.app-sidebar-expand\s*{[^}]*top:\s*10px;[^}]*left:\s*10px;/);
   });
 
-  it("replaces repeated Settings headings with a clear detail back control", () => {
+  it("shows the Settings index or one page on constrained widths, never both", () => {
     expect(appCss).toMatch(
-      /\.settings-content:has\(\.agent-focused-view\) > \.settings-page-heading,\s*\.settings-content:has\(\.skill-document\) > \.settings-page-heading,\s*\.settings-content:has\(\.settings-worktree-detail\) > \.settings-page-heading\s*{[^}]*display:\s*none;/,
+      /@media \(max-width:\s*760px\)\s*{[\s\S]*\.settings-view:not\(\.settings-index-open\) \.settings-nav,\s*\.settings-view\.settings-index-open \.settings-page\s*{\s*display:\s*none;/,
     );
-    expect(appCss).toMatch(/\.settings-detail-back\s*{[^}]*min-height:\s*32px;[^}]*color:\s*var\(--oa-text\);/);
-    expect(appCss).not.toMatch(/\.settings-detail-back\s*{[^}]*!important/);
-  });
-
-  it("uses a dedicated Settings index on constrained widths", () => {
-    expect(appCss).toMatch(/\.settings-content\.mobile-index-open\s*{\s*display:\s*none;/);
-    expect(appCss).toMatch(/\.settings-mobile-index\.open\s*{[^}]*display:\s*grid;/);
-    expect(appCss).toMatch(/\.settings-view\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*height:\s*100dvh;/);
-    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*\.settings-content\s*{[^}]*grid-column:\s*1;/);
-    expect(appCss).toMatch(/\.settings-content,[^{]+\.settings-mobile-index\s*{[^}]*scrollbar-width:\s*none;/);
-    expect(appCss).toMatch(/\.settings-content::-webkit-scrollbar,[^{]+\.settings-mobile-index::-webkit-scrollbar\s*{[^}]*display:\s*none;/);
-  });
-
-  it("keeps mobile Add Agent controls at touch target size", () => {
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.agent-field input,[^{]+\.agent-env-row input\s*{[^}]*min-height:\s*44px;[^}]*font-size:\s*16px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.agent-icon-picker button\s*{[^}]*width:\s*44px;[^}]*height:\s*44px;[^}]*min-height:\s*44px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.agent-enabled-toggle\s*{[^}]*min-height:\s*44px;/);
   });
 
   it("gives sidebar search a visible keyboard focus state", () => {
@@ -567,10 +547,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/body\[data-shell="web"\] \.project-task-group-header\s*{[^}]*min-height:\s*44px;[^}]*height:\s*auto;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.project-task-group-toggle\s*{[^}]*min-height:\s*44px;[^}]*height:\s*44px;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-popover button\s*{[^}]*min-height:\s*44px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-header button\s*{[^}]*min-height:\s*44px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-header \.settings-title-button\s*{[^}]*min-height:\s*44px;[^}]*display:\s*inline-flex;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-tabs button\s*{[^}]*min-height:\s*44px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-panel-title button\s*{[^}]*min-height:\s*44px;/);
     expect(appCss).toMatch(/\.composer-pill,[^{]+\.composer-submit-pending\s*{[^}]*min-height:\s*30px;/);
     expect(appCss).toMatch(/\.composer-controls \.composer-icon-button,[^{]+\.composer-submit-pending,[^{]+\.composer-footer > \.composer-icon-button\s*{[^}]*min-width:\s*36px;[^}]*width:\s*36px;/);
     expect(appCss).toMatch(/\.composer-actions \.composer-icon-button,[^{]+\.composer-submit-pending,[^{]+\.composer-footer > \.composer-icon-button\s*{[^}]*min-height:\s*36px;[^}]*height:\s*36px;/);

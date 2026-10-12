@@ -22,6 +22,8 @@ After saving or editing a Custom Agent, OpenAIDE automatically probes the Agent 
 
 Saved Custom Agents that are enabled but not Connected Agents remain visible in the new Task Agent picker but are disabled for Task start. The picker should expose enough status to send users back to Settings for recovery instead of making the Agent disappear. Agents intentionally disabled in Settings are hidden from the new Task Agent picker until re-enabled.
 
+_The layout described from here to the end of this record is superseded by [ADR-0065](0065-settings-sections-are-named-by-the-users-goal.md): an Agent now opens as its own page. The storage, identity, and launch decisions above stand._
+
 The Agents tab uses a compact Agent list plus detail pane instead of card-per-Agent layout. The list is for scanning Agent identity and status; the detail pane owns launch settings, authentication, environment, status recovery, and destructive actions for the selected Agent.
 
 The first Agent detail pane scope is status/setup, launch command, environment, and danger actions. ACP capability metadata can remain secondary or omitted from the first redesign rather than competing with setup and edit controls.

@@ -48,8 +48,6 @@ export type WebviewBootstrap = {
   /** Agent detail and return intent supplied by a recovery entry point. */
   settingsAgentId?: string;
   returnToNewTask?: boolean;
-  /** App Shell-persisted unlock for local diagnostic controls. */
-  developerSettingsUnlocked?: boolean;
   preferences?: AppPreferencesRecord;
   appServerConnection?: WebviewAppServerConnection;
 };

@@ -35,7 +35,7 @@ describe("VS Code commands", () => {
       undefined,
       undefined,
       undefined,
-      "data",
+      "troubleshooting",
       { kind: "openSupportExport", requestId: expect.any(String) },
     );
   });

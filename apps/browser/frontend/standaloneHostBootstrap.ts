@@ -1,4 +1,4 @@
-import type { WebviewBootstrap } from "@openaide/app-shell-contracts";
+import { settingsTabFromValue, type WebviewBootstrap } from "@openaide/app-shell-contracts";
 
 export type StandaloneBootstrapInput = {
   hasDatasetSurface: boolean;
@@ -25,10 +25,7 @@ function standaloneSettings(searchValue: string) {
   const tab = search.get("tab");
   const requestId = search.get("intentRequestId");
   return {
-    settingsTab: tab === "agents" || tab === "mcp" || tab === "skills" || tab === "common"
-      || tab === "desktop" || tab === "data" || tab === "worktrees"
-      ? tab
-      : undefined,
+    settingsTab: settingsTabFromValue(tab),
     settingsIntent: search.get("intent") === "openSupportExport" && requestId
       ? { kind: "openSupportExport" as const, requestId }
       : undefined,

@@ -105,7 +105,6 @@ export type SettingsCallbacks = {
     payload: CustomAgentMetadataUpdateParams,
     acceptedActiveWorkInterruption?: boolean,
   ) => Promise<AgentDisableOutcome>;
-  unlockDeveloperSettings: () => void;
 };
 
 export type NewTaskCallbacks = {

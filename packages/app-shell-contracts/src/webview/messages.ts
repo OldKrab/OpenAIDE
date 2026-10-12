@@ -1,4 +1,3 @@
-import type { RuntimeSettingsResult } from "../runtime/system.js";
 import type {
   SecretTransactionMessage,
   SecretTransactionResultMessage,
@@ -48,7 +47,6 @@ export type WebviewToHostMessage =
   | { type: "diagnostics.export" }
   | { type: "workspace.roots" }
   | { type: "workspace.openFolder" }
-  | { type: "developer.settings.unlock" }
   | { type: "surface.openNewTask"; payload?: { project_id?: string } }
   | { type: "surface.retainNewTaskProject"; payload: { project_id: string } }
   | { type: "surface.openNativeSession"; payload: { agent_id: string; native_session_id: string; project_id?: string } }
@@ -80,7 +78,6 @@ export type HostToWebviewMessage =
   | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId; settings_intent?: SettingsIntent } }
   | { type: "diagnostics.snapshot.result"; payload: DiagnosticsSnapshot }
   | { type: "workspace.roots.result"; payload: { roots: WorkspaceRootSummary[] } }
-  | { type: "runtime.settings.result"; payload: RuntimeSettingsResult }
   | { type: "runtime.error"; payload: RuntimeErrorPayload }
   | { type: "newTask" }
   | { type: "showSettings" };

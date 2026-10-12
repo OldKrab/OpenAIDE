@@ -2612,18 +2612,18 @@ describe("app reducer composer state", () => {
     expect(state.questionResponses["question-1"]).toBeUndefined();
   });
 
-  it("preserves the shell-owned Connection submenu when server sections refresh", () => {
+  it("keeps the shell-offered Remote section when server sections refresh", () => {
     let state = createInitialState();
-    state = appReducer(state, { type: "settings:tab", tab: "connection" });
-    state = appReducer(state, { type: "settings:sections", tabs: ["agents", "common"] });
-    expect(state.settings.activeTab).toBe("connection");
+    state = appReducer(state, { type: "settings:tab", tab: "remote" });
+    state = appReducer(state, { type: "settings:sections", tabs: ["agents", "general"] });
+    expect(state.settings.activeTab).toBe("remote");
   });
 
   it("stores settings loading, errors, and selected tab", () => {
     let state = createInitialState();
 
-    state = appReducer(state, { type: "settings:sections", tabs: ["agents", "mcp", "skills", "common"] });
-    expect(state.settings.availableTabs).toEqual(["agents", "mcp", "skills", "common"]);
+    state = appReducer(state, { type: "settings:sections", tabs: ["agents", "mcp", "skills", "general"] });
+    expect(state.settings.availableTabs).toEqual(["agents", "mcp", "skills", "general"]);
 
     state = appReducer(state, { type: "settings:start" });
     expect(state.settings.loading).toBe(true);
@@ -2951,7 +2951,7 @@ function settingsAgents(agentIds: string[] = ["codex"]): AgentSettingsRecord[] {
     icon: id === "codex" ? "openai" : "bot",
     transport: "stdio",
     status: "unprobed",
-    launch_label: id === "codex" ? "Built-in stdio launch policy" : "custom-agent",
+    launch_label: id === "codex" ? "npx -y @openaide/codex-acp@1.0.0" : "custom-agent",
     description: id === "codex" ? "Built-in Agent." : "Custom Agent.",
     capabilities: ["ACP stdio"],
     auth_methods: [],

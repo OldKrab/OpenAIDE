@@ -360,7 +360,7 @@ describe("VS Code webview surfaces", () => {
 
   it("delivers diagnostics wizard intents to new and existing Settings panels", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
-    manager.openSettings(undefined, undefined, undefined, "data", {
+    manager.openSettings(undefined, undefined, undefined, "troubleshooting", {
       kind: "openSupportExport",
       requestId: "diagnostics-1",
     });
@@ -370,14 +370,14 @@ describe("VS Code webview surfaces", () => {
       'data-settings-intent="{&quot;kind&quot;:&quot;openSupportExport&quot;,&quot;requestId&quot;:&quot;diagnostics-1&quot;}"',
     );
 
-    manager.openSettings(undefined, undefined, undefined, "data", {
+    manager.openSettings(undefined, undefined, undefined, "troubleshooting", {
       kind: "openSupportExport",
       requestId: "diagnostics-2",
     });
     expect(panel.webview.postMessage).toHaveBeenCalledWith({
       type: "surface.settingsChanged",
       payload: {
-        settings_tab: "data",
+        settings_tab: "troubleshooting",
         settings_intent: { kind: "openSupportExport", requestId: "diagnostics-2" },
       },
     });

@@ -1,0 +1,479 @@
+/* Settings shell, navigation, section pages, rows, and status.
+   Controls live in settings-controls.css, the phone layout in settings-phone.css,
+   and item pages, forms, and dialogs in settings-pages.css. */
+
+.settings-view {
+  --settings-accent: var(--oa-focus);
+  min-width: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: grid;
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  font: 400 14px/1.45 var(--oa-ui-font);
+}
+
+.settings-view small {
+  color: var(--oa-muted);
+  font-size: 13px;
+}
+
+.settings-view mark {
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--oa-warning) 32%, transparent);
+  color: inherit;
+}
+
+.settings-view button:focus-visible,
+.settings-view input:focus-visible,
+.settings-view textarea:focus-visible,
+.settings-view a:focus-visible,
+.settings-view summary:focus-visible,
+.settings-confirm button:focus-visible,
+.settings-confirm input:focus-visible,
+.settings-confirm textarea:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.settings-mono {
+  color: var(--oa-muted);
+  font: 400 12.5px/1.5 var(--oa-mono-font);
+}
+
+.settings-value {
+  color: var(--oa-muted);
+}
+
+/* Navigation */
+
+.settings-nav {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--oa-panel);
+  padding: 16px 12px;
+}
+
+.app-sidebar-frame-with-overlay-header .settings-nav {
+  padding-top: 40px;
+}
+
+.settings-nav > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.settings-nav > header strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-icon-button {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.settings-icon-button:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.settings-search {
+  height: 36px;
+  border-radius: 10px;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.settings-search:focus-within {
+  box-shadow: 0 0 0 2px var(--oa-focus);
+}
+
+.settings-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--oa-text);
+}
+
+.settings-view .settings-search input:focus-visible {
+  outline: 0;
+}
+
+.settings-search button {
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.settings-nav nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav nav > button {
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.settings-nav nav > button > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-nav nav > button > small {
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-nav nav > button > svg {
+  flex-shrink: 0;
+  color: var(--oa-muted);
+}
+
+.settings-nav nav > button:hover {
+  background: var(--oa-raised);
+}
+
+.settings-nav nav > button[aria-current] {
+  background: var(--oa-selected);
+  font-weight: 500;
+}
+
+.settings-nav nav > button[aria-current] > svg {
+  color: var(--oa-text);
+}
+
+.settings-nav nav > button > .settings-nav-chevron {
+  display: none;
+}
+
+.settings-nothing {
+  margin: 0;
+  color: var(--oa-muted);
+  padding: 6px 10px;
+}
+
+.settings-nothing button {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Page */
+
+.settings-page {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 88px 48px 96px;
+}
+
+.settings-page > * {
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.settings-page-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.settings-page-header h1,
+.settings-identity h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.settings-header-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-to-index {
+  display: none;
+}
+
+.settings-page-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.settings-page-error .settings-inline-error {
+  flex: 1;
+  padding: 5px 0;
+}
+
+.settings-group {
+  margin-bottom: 36px;
+}
+
+.settings-group > header {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.settings-group h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings-group-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-card {
+  margin: 0;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: 12px;
+  background: var(--oa-panel);
+  padding: 0;
+  list-style: none;
+}
+
+.settings-empty {
+  margin: 0;
+  color: var(--oa-muted);
+}
+
+.settings-notice,
+.settings-inline-error {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-notice {
+  color: var(--oa-muted);
+}
+
+.settings-inline-error {
+  color: var(--oa-danger);
+}
+
+.settings-blank {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 24px 0;
+}
+
+.settings-blank strong {
+  font-weight: 500;
+}
+
+.settings-blank span {
+  color: var(--oa-muted);
+}
+
+/* Rows */
+
+.settings-row {
+  padding: 0 16px;
+}
+
+.settings-row + .settings-row > .settings-row-line {
+  border-top: 1px solid var(--oa-border-subtle);
+}
+
+.settings-row-line {
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.settings-row-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.settings-row-leading {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.settings-row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-row-copy strong {
+  font-weight: 500;
+}
+
+.settings-row-copy strong,
+.settings-row-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-row-label {
+  min-width: 0;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.settings-row-end {
+  min-width: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-row-end > .settings-mono {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-row-chevron {
+  margin-left: -4px;
+  color: var(--oa-muted);
+}
+
+.settings-row:has(button.settings-row-main:hover) {
+  background: color-mix(in oklch, var(--oa-raised) 60%, transparent);
+}
+
+.settings-row:first-child {
+  border-radius: 11px 11px 0 0;
+}
+
+.settings-row:last-child {
+  border-radius: 0 0 11px 11px;
+}
+
+.settings-row:only-child {
+  border-radius: 11px;
+}
+
+.settings-row.selected .settings-row-leading {
+  color: var(--oa-text);
+}
+
+.settings-row.stacked > .settings-row-line {
+  min-height: 44px;
+  padding-bottom: 0;
+}
+
+.settings-row > .settings-inline-error {
+  margin: -4px 0 12px;
+}
+
+.settings-row-note {
+  margin: 0 0 12px;
+  color: var(--oa-muted);
+  font-size: 13px;
+}
+
+/* Status: colour always travels with words. */
+
+.settings-status {
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.settings-status i {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--oa-border-strong);
+}
+
+.settings-status.ok i {
+  background: var(--oa-success);
+}
+
+.settings-status.warn {
+  color: var(--oa-text);
+}
+
+.settings-status.warn i {
+  background: var(--oa-warning);
+}
+
+.settings-status.busy i {
+  background: var(--oa-muted);
+  animation: settings-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes settings-pulse {
+  50% { opacity: 0.35; }
+}
+
+.settings-in-use {
+  height: 30px;
+  color: var(--settings-accent, var(--oa-focus));
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+  font-weight: 500;
+}

@@ -534,7 +534,6 @@ describe("AppSurfaces callback wiring", () => {
         onSetAgentEnabled: controller.callbacks.settings.setAgentEnabled,
         onSetComposerSubmitShortcut: controller.callbacks.settings.setComposerSubmitShortcut,
         onUpdateCustomAgentMetadata: controller.callbacks.settings.updateCustomAgentMetadata,
-        onUnlockDeveloperSettings: controller.callbacks.settings.unlockDeveloperSettings,
         worktreeIntents: controller.intents.newTask,
         worktreeRepositories: controller.state.worktreeRepositories,
       }),
@@ -1624,7 +1623,6 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         setMcpServerEnabled: vi.fn(),
         setComposerSubmitShortcut: vi.fn(),
         updateCustomAgentMetadata: vi.fn(),
-        unlockDeveloperSettings: vi.fn(),
       },
       task: {
         addToQueue: vi.fn(),

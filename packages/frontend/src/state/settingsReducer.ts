@@ -60,7 +60,8 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
         settings: {
           ...state.settings,
           availableTabs: action.tabs,
-          activeTab: state.settings.activeTab === "connection" || state.settings.activeTab === "devices" || action.tabs.includes(state.settings.activeTab) ? state.settings.activeTab : action.tabs[0] ?? "agents",
+          // Remote and Worktrees are offered by shell capabilities, not by an App Server section.
+          activeTab: state.settings.activeTab === "remote" || state.settings.activeTab === "worktrees" || action.tabs.includes(state.settings.activeTab) ? state.settings.activeTab : action.tabs[0] ?? "general",
         },
       };
     case "settings:agentDetailsResult":

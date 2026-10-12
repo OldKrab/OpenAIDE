@@ -55,25 +55,22 @@ let originalBackground;
 try {
   assert.equal(await evaluate(workspace, 'typeof window.OpenAIDESetup'), 'undefined');
   await evaluate(workspace, `window.__openaideSettingsTest = {location: location.pathname + location.search};
-    history.pushState(null, '', '/settings?tab=common'); window.dispatchEvent(new PopStateEvent('popstate'))`);
-  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('#settings-tab-connection'))`), 'Connection submenu is missing');
-  await evaluate(workspace, `[...document.querySelectorAll('.settings-mobile-index.open button')].find(button => button.textContent.trim() === 'Connection')?.click();
-    document.querySelector('#settings-tab-connection')?.click()`);
-  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('input[aria-label="Continue while locked"]'))`), 'Native state did not reach the shared Settings submenu');
-  assert.equal(await evaluate(workspace, 'location.pathname + location.search'), '/settings?tab=connection');
+    history.pushState(null, '', '/settings?tab=general'); window.dispatchEvent(new PopStateEvent('popstate'))`);
+  await waitFor(() => evaluate(workspace, `Boolean(document.querySelector('button[role="switch"][aria-label="Continue while locked"]'))`), 'Native state did not reach the shared General section');
+  assert.equal(await evaluate(workspace, 'location.pathname + location.search'), '/settings?tab=general');
   assert.equal((await targets()).some(target => target.url === 'https://app.openaide.invalid/index.html'), false);
-  originalBackground = await evaluate(workspace, `document.querySelector('input[aria-label="Continue while locked"]').checked`);
-  await evaluate(workspace, `document.querySelector('input[aria-label="Continue while locked"]').click()`);
-  await waitFor(() => evaluate(workspace, `document.querySelector('input[aria-label="Continue while locked"]').checked === ${!originalBackground}`), 'Background preference was not acknowledged by Android');
-  await evaluate(workspace, `document.querySelector('input[aria-label="Continue while locked"]').click()`);
-  await waitFor(() => evaluate(workspace, `document.querySelector('input[aria-label="Continue while locked"]').checked === ${originalBackground}`), 'Background preference was not restored');
+  originalBackground = await evaluate(workspace, `document.querySelector('button[role="switch"][aria-label="Continue while locked"]').getAttribute('aria-checked') === 'true'`);
+  await evaluate(workspace, `document.querySelector('button[role="switch"][aria-label="Continue while locked"]').click()`);
+  await waitFor(() => evaluate(workspace, `document.querySelector('button[role="switch"][aria-label="Continue while locked"]').getAttribute('aria-checked') === '${!originalBackground}'`), 'Background preference was not acknowledged by Android');
+  await evaluate(workspace, `document.querySelector('button[role="switch"][aria-label="Continue while locked"]').click()`);
+  await waitFor(() => evaluate(workspace, `document.querySelector('button[role="switch"][aria-label="Continue while locked"]').getAttribute('aria-checked') === '${originalBackground}'`), 'Background preference was not restored');
   assert.equal(await evaluate(workspace, 'Boolean(window.__openaideSettingsTest)'), true);
   assert.equal(await evaluate(workspace, 'typeof window.OpenAIDESetup'), 'undefined');
-  console.log('PASS: Connection is a shared Settings submenu; native preference changes stay in the same workspace document.');
+  console.log('PASS: Phone preferences live in the shared General section; native preference changes stay in the same workspace document.');
 } finally {
   await evaluate(workspace, `if (window.__openaideSettingsTest) {
-    const toggle = document.querySelector('input[aria-label="Continue while locked"]');
-    if (toggle && toggle.checked !== ${originalBackground ?? true}) toggle.click();
+    const toggle = document.querySelector('button[role="switch"][aria-label="Continue while locked"]');
+    if (toggle && (toggle.getAttribute('aria-checked') === 'true') !== ${originalBackground ?? true}) toggle.click();
     history.replaceState(null, '', window.__openaideSettingsTest.location);
     delete window.__openaideSettingsTest;
     window.dispatchEvent(new PopStateEvent('popstate'));

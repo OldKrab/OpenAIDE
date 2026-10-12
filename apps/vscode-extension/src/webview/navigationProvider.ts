@@ -8,7 +8,6 @@ import { renderWebviewHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import { VSCODE_SHELL, type TaskFocusSource, type WebviewHost } from "./types";
 import { currentWorkspaceRoot, workspaceRoots, type WorkspaceRoot } from "../workspace/roots";
-import { developerSettingsVisible } from "../settings/snapshot";
 
 export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = "openaide.tasks";
@@ -81,7 +80,6 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         post: (payload) => view.webview.postMessage(payload),
         logger: this.logger,
         surface: "navigation",
-        developerSettingsStore: this.context.globalState,
         supportExportState: this.context.globalState,
         agentSecretStore: this.context.secrets,
         surfaces: this.surfaces,
@@ -119,7 +117,6 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       focusedTaskId: this.focusedTaskId ?? null,
       projectId: currentWorkspaceRoot()?.projectId,
       projectIds: workspaceRoots().map((root) => root.projectId),
-      developerSettingsUnlocked: developerSettingsVisible(this.context.globalState),
     };
   }
 }

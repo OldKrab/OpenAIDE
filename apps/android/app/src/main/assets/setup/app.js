@@ -47,7 +47,7 @@ function computerRow(computer) {
 const network = 'The connection uses iroh over QUIC. It goes directly between the devices when their networks allow it (NAT hole punching). Otherwise it goes through public relays run by the iroh project, which see network addresses and public keys, never content.';
 const info = {
   welcome: ['What’s the difference?', 'Where agents work', 'On a remote computer, work keeps running when your phone is locked or OpenAIDE is closed. On this phone, agents run locally in Termux.', 'Projects and conversations stay on the device where the agents work. You can switch later in Settings.'],
-  remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Devices on your computer.', network],
+  remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Remote on your computer.', network],
   join: ['How pairing works', 'How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.', network],
   settings: ['How the connection works', 'How the connection works', 'Your phone and computer each have their own key, and the connection is encrypted end to end with those keys. There is no account or password.', network],
   local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, the tools it needs, a signed-in agent (Codex or Claude) and storage, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
@@ -157,7 +157,7 @@ function render() {
   } else if (screen === 'remote') {
     // Computers already paired can be used again without a new code.
     const known = (state.computers || []).filter(computer => !computer.current);
-    page.innerHTML = heading('Pair with your computer', 'On your computer, open') + path('Settings', 'Devices', 'Show code') + hint()
+    page.innerHTML = heading('Pair with your computer', 'On your computer, open') + path('Settings', 'Remote', 'Show code') + hint()
       + known.map(computer => `<div class="panel"><span class="copy"><h2>${escape(computer.name || 'Your computer')}</h2><small>Already paired</small></span><button class="mini" data-action="use_computer" data-id="${escape(computer.id)}">Use</button></div>`).join('')
       + '<div class="actions">'
       + (firstRun ? '' : '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>')
@@ -175,7 +175,7 @@ function render() {
     });
   } else if (screen === 'join') {
     const join = state.join;
-    page.innerHTML = heading('Show this code', 'On your computer, open') + path('Settings', 'Devices', 'Enter code')
+    page.innerHTML = heading('Show this code', 'On your computer, open') + path('Settings', 'Remote', 'Enter code')
       + (join ? `<div class="qr" role="img" aria-label="Pairing code"><svg viewBox="-2 -2 ${join.qr.size + 4} ${join.qr.size + 4}" shape-rendering="crispEdges"><path d="${escape(join.qr.path)}"/></svg></div><p class="code">${escape(join.text)}</p><p class="waiting"><span class="pulse" aria-hidden="true"></span>Waiting for your computer</p>${hint()}`
         : '<p class="waiting"><span class="pulse" aria-hidden="true"></span>Preparing this phone’s code…</p>');
   } else if (screen === 'background') {

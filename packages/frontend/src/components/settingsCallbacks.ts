@@ -210,10 +210,6 @@ export function createSettingsCallbacks({
         })
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
-    unlockDeveloperSettings: () => {
-      dispatch({ type: "settings:start" });
-      postHostMessage({ type: "developer.settings.unlock" });
-    },
     updateCustomAgentMetadata: async (payload, acceptedActiveWorkInterruption) => {
       dispatch({ type: "settings:start" });
       try {

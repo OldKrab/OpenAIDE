@@ -92,7 +92,7 @@ it("preselects the current Task's sensitive sources and offers the bug form only
   const root = createRoot(container);
   await act(async () => root.render(<SupportExportButton connection={backendConnection} taskId="task-1" />));
 
-  await act(async () => document.querySelector<HTMLButtonElement>(".general-support-export")!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Export logs"]')!.click());
   await act(async () => undefined);
   expect(document.body.textContent).toContain("Recent failure");
   expect(document.body.textContent).not.toContain("Native transcript unavailable");
@@ -153,7 +153,7 @@ it("admits only one export while the native save operation is pending", async ()
   const root = createRoot(container);
   await act(async () => root.render(<SupportExportButton connection={{ request } as never} />));
 
-  await act(async () => document.querySelector<HTMLButtonElement>(".general-support-export")!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Export logs"]')!.click());
   await act(async () => undefined);
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")]
     .find((button) => button.textContent === "Continue")!.click());
@@ -210,7 +210,7 @@ it("selects sessions in a separate step and preserves them when navigating back"
   const root = createRoot(container);
   await act(async () => root.render(<SupportExportButton connection={{ request } as never} />));
 
-  await act(async () => document.querySelector<HTMLButtonElement>(".general-support-export")!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Export logs"]')!.click());
   await act(async () => undefined);
 
   expect(document.body.textContent).toContain("Recent failure");
@@ -277,7 +277,7 @@ it("preselects sessions and failed traces updated in the last 15 minutes", async
   const root = createRoot(container);
   await act(async () => root.render(<SupportExportButton connection={{ request } as never} />));
 
-  await act(async () => document.querySelector<HTMLButtonElement>(".general-support-export")!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Export logs"]')!.click());
   await act(async () => undefined);
 
   const checkbox = (name: string) => [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]

@@ -24,7 +24,7 @@ public class ConnectionProfileTest {
     @Test public void eachWorkspaceKeepsItsOwnOrigin() {
         ConnectionProfile profile = ConnectionProfile.local();
         assertTrue(profile.local);
-        assertTrue(profile.owns("http://127.0.0.1:5476/settings?tab=connection"));
+        assertTrue(profile.owns("http://127.0.0.1:5476/settings?tab=remote"));
         // The paired computer's stored drafts and session must not be readable from the local workspace.
         assertFalse(profile.owns("http://127.0.0.1:5475/"));
         // The Web Shell that Termux used to serve is no longer an origin of the app.

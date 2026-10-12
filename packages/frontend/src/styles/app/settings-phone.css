@@ -1,0 +1,122 @@
+/* Phone: the index, then one page. */
+
+@media (max-width: 760px) {
+  .settings-nav {
+    padding: 20px 16px;
+    padding-top: calc(20px + env(safe-area-inset-top, 0px));
+  }
+
+  .settings-nav > header strong {
+    font-size: 22px;
+  }
+
+  .settings-nav nav > button {
+    height: 52px;
+    font-size: 16px;
+  }
+
+  .settings-nav nav > button > .settings-nav-chevron {
+    display: block;
+  }
+
+  .settings-nav nav > button[aria-current] {
+    background: transparent;
+    font-weight: 400;
+  }
+
+  .settings-search {
+    height: 44px;
+  }
+
+  .settings-icon-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .settings-view:not(.settings-index-open) .settings-nav,
+  .settings-view.settings-index-open .settings-page {
+    display: none;
+  }
+
+  .settings-page {
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .settings-page-header {
+    margin-bottom: 24px;
+  }
+
+  .settings-page-header h1 {
+    font-size: 24px;
+  }
+
+  .settings-to-index {
+    display: grid;
+    margin-left: -10px;
+  }
+
+  .settings-group > header {
+    flex-wrap: wrap;
+  }
+
+  .settings-row-line {
+    min-height: 64px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .settings-row-main {
+    flex-basis: 55%;
+  }
+
+  .settings-row-end {
+    margin-left: auto;
+  }
+
+  .settings-row-end > .settings-mono {
+    max-width: 190px;
+  }
+
+  .settings-row-copy small {
+    white-space: normal;
+  }
+
+  .settings-keys {
+    display: none;
+  }
+
+  .settings-action,
+  .settings-select {
+    height: 36px;
+  }
+
+  .settings-theme-window {
+    height: 72px;
+  }
+
+  /* The popup positions itself beside its trigger; on a phone it becomes a sheet instead. */
+  .oa-popup-surface.settings-info-card {
+    position: fixed !important;
+    inset: auto 0 0 0 !important;
+    width: auto;
+    max-width: none;
+    transform: none !important;
+    border-width: 1px 0 0;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 0 0 100vmax color-mix(in oklch, black 40%, transparent);
+    padding: 24px 22px calc(36px + env(safe-area-inset-bottom, 0px));
+    font-size: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-switch,
+  .settings-switch i,
+  .settings-theme-window {
+    transition: none;
+  }
+
+  .settings-status.busy i {
+    animation: none;
+  }
+}

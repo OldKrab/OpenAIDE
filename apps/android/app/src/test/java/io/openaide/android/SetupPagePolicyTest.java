@@ -6,11 +6,12 @@ import static org.junit.Assert.*;
 public class SetupPagePolicyTest {
     @Test public void connectionCommandsRequireTheOwnedSettingsSubmenu() {
         ConnectionProfile profile = ConnectionProfile.local();
-        assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings?tab=connection"));
-        assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings/?tab=connection&source=menu"));
-        for (String address : new String[]{"https://evil.example/settings?tab=connection", profile.endpoint + "settings",
-            profile.endpoint + "tasks?tab=connection", profile.endpoint + "settings?tab=common", profile.endpoint + "settings?tab=connection&tab=connection",
-            profile.endpoint + "settings?tab=connection&tab=common", profile.endpoint + "settings?tab=%", profile.endpoint + "settings?tab=connection-other"})
+        assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings?tab=remote"));
+        assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings?tab=general"));
+        assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings/?tab=troubleshooting&source=menu"));
+        for (String address : new String[]{"https://evil.example/settings?tab=remote", profile.endpoint + "settings",
+            profile.endpoint + "tasks?tab=remote", profile.endpoint + "settings?tab=agents", profile.endpoint + "settings?tab=remote&tab=remote",
+            profile.endpoint + "settings?tab=remote&tab=agents", profile.endpoint + "settings?tab=%", profile.endpoint + "settings?tab=remote-other"})
             assertFalse(SetupPagePolicy.isConnectionRoute(profile, address));
     }
 

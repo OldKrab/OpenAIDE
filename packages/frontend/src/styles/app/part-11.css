@@ -353,49 +353,6 @@ body[data-input-modality="pointer"] button:focus-visible {
     min-height: 44px;
   }
 
-  body[data-shell="web"] .settings-header button {
-    min-height: 44px;
-  }
-
-  body[data-shell="web"] .settings-header .settings-title-button {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-  }
-
-  body[data-shell="web"] .settings-tabs button {
-    min-height: 44px;
-  }
-
-  body[data-shell="web"] .settings-panel-title button {
-    min-height: 44px;
-  }
-
-  body[data-shell="web"] .agent-field input,
-  body[data-shell="web"] .agent-env-row input {
-    min-height: 44px;
-    font-size: 16px;
-    padding-block: 8px;
-  }
-
-  body[data-shell="web"] .agent-icon-picker {
-    gap: 8px;
-  }
-
-  body[data-shell="web"] .agent-icon-picker button {
-    width: 44px;
-    height: 44px;
-    min-height: 44px;
-  }
-
-  body[data-shell="web"] .agent-enabled-toggle {
-    width: auto;
-    min-height: 44px;
-    height: auto;
-    justify-self: start;
-    padding-right: 8px;
-  }
-
 }
 
 @media (hover: none) {

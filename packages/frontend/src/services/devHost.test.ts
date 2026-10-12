@@ -41,7 +41,8 @@ describe("standalone dev host", () => {
       search: "?tab=data&intent=openSupportExport&intentRequestId=diagnostics-1",
     })).toMatchObject({
       surface: "settings",
-      settingsTab: "data",
+      // Links written before the sections were renamed still land on the section that took over.
+      settingsTab: "troubleshooting",
       settingsIntent: { kind: "openSupportExport", requestId: "diagnostics-1" },
     });
   });
@@ -59,10 +60,8 @@ describe("standalone dev host", () => {
   it("routes shell-local responses", () => {
     const output = outputSpy();
     handleStandaloneHostMessage({ type: "workspace.roots" }, output);
-    handleStandaloneHostMessage({ type: "developer.settings.unlock" }, output);
 
     expect(posted(output, "workspace.roots.result").payload.roots.length).toBeGreaterThan(0);
-    expect(posted(output, "runtime.settings.result").payload).toMatchObject({ developer: { acp_trace: { enabled: true } } });
   });
 
   it("ignores legacy product requests", () => {
@@ -132,11 +131,11 @@ describe("standalone dev host", () => {
       },
     });
 
-    createStandaloneHost()?.postMessage({ type: "developer.settings.unlock" });
+    createStandaloneHost()?.postMessage({ type: "workspace.roots" });
 
     expect(dispatched).toEqual([]);
     vi.runAllTimers();
-    expect(dispatched).toEqual([expect.objectContaining({ type: "runtime.settings.result" })]);
+    expect(dispatched).toEqual([expect.objectContaining({ type: "workspace.roots.result" })]);
   });
 });
 

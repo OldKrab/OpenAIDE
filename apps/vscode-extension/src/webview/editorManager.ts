@@ -15,7 +15,6 @@ import {
 } from "./types";
 import { currentWorkspaceRoot, workspaceRoots, type WorkspaceRoot } from "../workspace/roots";
 import { agentTabIcon, newTaskTabIcon, settingsTabIcon } from "./tabIcons";
-import { developerSettingsVisible } from "../settings/snapshot";
 
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
@@ -275,7 +274,6 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
         post: (payload) => panel.webview.postMessage(payload),
         logger: this.logger,
         surface: bootstrap.surface,
-        developerSettingsStore: this.context.globalState,
         supportExportState: this.context.globalState,
         agentSecretStore: this.context.secrets,
         adoptTask: (taskId, taskTitle, agentId) => this.adoptTaskPanel(panel, taskId, taskTitle, agentId),
@@ -370,7 +368,6 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       // Editor surfaces need the same Project scope as Task Navigation so a
       // multi-root VS Code window can change New Task context in place.
       projectIds: workspaceRoots().map(({ projectId }) => projectId),
-      developerSettingsUnlocked: developerSettingsVisible(this.context.globalState),
     };
   }
 }

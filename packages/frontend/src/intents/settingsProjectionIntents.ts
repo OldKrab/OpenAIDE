@@ -1,6 +1,7 @@
 import {
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
+  SETTINGS_GET_RUNTIME,
   SETTINGS_GET_SKILL_DETAILS,
   SETTINGS_GET_SKILLS,
   type BackendConnection,
@@ -13,6 +14,7 @@ import {
   mapSkillDetailsProjection,
   mapSkillsProjection,
 } from "../state/settingsProjectionMapping";
+import { mapProtocolRuntimeSettings } from "../state/runtimeSettingsMapping";
 import {
   agentSettingsRecordFromProtocol,
 } from "./agentSettingsRecords";
@@ -37,6 +39,7 @@ export async function refreshSettingsProjectionsThroughBackend(
     refreshAgentDetails(context, backendConnection),
     refreshMcpServers(context, backendConnection),
     refreshSkills(context, backendConnection),
+    refreshRuntimeSettings(context, backendConnection),
   ]);
   return true;
 }
@@ -86,6 +89,22 @@ async function refreshSkills(
     context.dispatch({ type: "settings:skillsResult", ...mapSkillsProjection(result) });
   } catch (error) {
     context.dispatch({ type: "settings:skillsError", message: safeErrorMessage(error) });
+  }
+}
+
+/**
+ * Troubleshooting shows the trace switch from this read. A failure leaves that
+ * group out instead of failing the Agents, MCP, and Skills lists read beside it.
+ */
+async function refreshRuntimeSettings(
+  context: SettingsProjectionIntentContext,
+  backendConnection: SettingsProjectionConnection,
+) {
+  try {
+    const result = await backendConnection.request(SETTINGS_GET_RUNTIME, {});
+    context.dispatch({ type: "settings:runtimeSettings", settings: mapProtocolRuntimeSettings(result) });
+  } catch {
+    // The App Server reports the failed request in its own log; there is no setting to show.
   }
 }
 

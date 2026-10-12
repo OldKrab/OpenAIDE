@@ -14,6 +14,9 @@ final class SetupPagePolicy {
         return mainFrame && gesture && profile.owns(source) && "openaide://connection-settings".equals(destination);
     }
 
+    /** Settings sections that show phone controls: background work, paired computers, phone setup. */
+    private static final java.util.Set<String> PHONE_SECTIONS = java.util.Set.of("general", "remote", "troubleshooting");
+
     static boolean isConnectionRoute(ConnectionProfile profile, String address) {
         if (!profile.owns(address)) return false;
         try {
@@ -24,7 +27,7 @@ final class SetupPagePolicy {
             for (String parameter : uri.getRawQuery().split("&")) {
                 String[] parts = parameter.split("=", 2);
                 if (!"tab".equals(java.net.URLDecoder.decode(parts[0], "UTF-8"))) continue;
-                if (parts.length != 2 || !"connection".equals(java.net.URLDecoder.decode(parts[1], "UTF-8"))) return false;
+                if (parts.length != 2 || !PHONE_SECTIONS.contains(java.net.URLDecoder.decode(parts[1], "UTF-8"))) return false;
                 matches++;
             }
             return matches == 1;

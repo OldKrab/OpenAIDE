@@ -26,7 +26,7 @@ internal object RemotePairing {
     @JvmStatic fun redeem(context: Context, code: String, callback: Paired) {
         val invite = try { PairingCode.parseInvite(code) } catch (error: PairingCode.Invalid) {
             callback.done(null, when (error.problem) {
-                PairingCode.Problem.WRONG_KIND -> "That code adds a device to a computer. On your computer, open Settings → Devices and choose Show code."
+                PairingCode.Problem.WRONG_KIND -> "That code adds a device to a computer. On your computer, open Settings → Remote and choose Show code."
                 PairingCode.Problem.MALFORMED -> "The code is incomplete. Scan or paste it again."
                 PairingCode.Problem.NOT_A_PAIRING_CODE -> "That is not an OpenAIDE pairing code."
             })

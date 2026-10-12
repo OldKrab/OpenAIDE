@@ -30,7 +30,7 @@ export function registerCommands(
 
   context.subscriptions.push(
     vscode.commands.registerCommand("openaide.exportDiagnostics", async () => {
-      taskEditors.openSettings(undefined, undefined, undefined, "data", {
+      taskEditors.openSettings(undefined, undefined, undefined, "troubleshooting", {
         kind: "openSupportExport",
         requestId: randomUUID(),
       });

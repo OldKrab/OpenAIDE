@@ -1,6 +1,7 @@
-import type {
-  HostToWebviewMessage,
-  SettingsTabId,
+import {
+  settingsTabFromValue,
+  type HostToWebviewMessage,
+  type SettingsTabId,
 } from "@openaide/app-shell-contracts";
 import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
 import { androidConnectionSettings } from "./androidConnectionSettings";
@@ -28,7 +29,6 @@ import { createWebSecretStore } from "./webSecretVault";
 import { createWebSecretMessageHandler } from "./webSecrets";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
-const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "connection", "devices", "desktop", "data", "worktrees"]);
 const logger = createRuntimeLogger("openaide-webview");
 function openWebExternal(url: string) {
   usableExternalWindow(window.open(url, "_blank", "noopener,noreferrer"));
@@ -420,8 +420,7 @@ function replaceSettingsSearch(
 }
 
 function settingsTabFromSearch() {
-  const tab = new URLSearchParams(window.location.search).get("tab");
-  return typeof tab === "string" && settingsTabs.has(tab as SettingsTabId) ? tab as SettingsTabId : undefined;
+  return settingsTabFromValue(new URLSearchParams(window.location.search).get("tab"));
 }
 
 function newTaskPath(projectId?: string) {

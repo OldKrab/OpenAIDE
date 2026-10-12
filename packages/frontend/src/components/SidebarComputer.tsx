@@ -33,10 +33,10 @@ export function useComputerInUse(shell: FrontendShell | undefined): ComputerInUs
     phone?.snapshot ?? noSnapshot,
   );
   if (snapshot?.remote) {
-    return { name: snapshot.computer || "Another computer", settingsTab: "connection" };
+    return { name: snapshot.computer || "Another computer", settingsTab: "remote" };
   }
   const desktop = shell?.remoteComputers?.current;
-  return desktop ? { name: desktop, settingsTab: "desktop" } : undefined;
+  return desktop ? { name: desktop, settingsTab: "remote" } : undefined;
 }
 
 export function computerLink(state: BackendConnectionState): ComputerLink {

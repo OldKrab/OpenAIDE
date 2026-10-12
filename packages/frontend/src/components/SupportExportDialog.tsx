@@ -121,12 +121,13 @@ export function SupportExportButton({
   return (
     <>
       <button
-        className={compact ? "task-support-export-trigger" : "general-support-export"}
+        aria-label={compact ? undefined : "Export logs"}
+        className={compact ? "task-support-export-trigger" : "settings-action"}
         disabled={!connection || !shell?.supportExports}
         onClick={openDialog}
         type="button"
       >
-        <Bug size={14} />{compact ? "Diagnostics" : "Export diagnostics…"}
+        {compact ? <><Bug size={14} />Diagnostics</> : <><Download aria-hidden="true" size={14} />Export…</>}
       </button>
       <PopupDialog className={`settings-reset-dialog support-export-dialog${step === "saved" ? " support-export-dialog-saved" : ""}`} label="Export diagnostics" onOpenChange={setOpen} open={open}>
         <header><Bug size={18} /><div><strong>Export diagnostics</strong></div></header>

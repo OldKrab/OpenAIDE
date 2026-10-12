@@ -4,16 +4,9 @@ import { routeHostMessage } from "./hostMessageRouter";
 import type { HostMessageRouterContext } from "./hostMessageRouterTypes";
 
 describe("host message router", () => {
-  it("routes shell-local settings messages", () => {
+  it("routes shell-local workspace messages", () => {
     const context = routerContext();
 
-    routeHostMessage(
-      {
-        type: "runtime.settings.result",
-        payload: { developer: { acp_trace: { enabled: true, directory: "/runtime/traces" } } },
-      },
-      context,
-    );
     routeHostMessage(
       {
         type: "workspace.roots.result",
@@ -22,10 +15,6 @@ describe("host message router", () => {
       context,
     );
 
-    expect(context.dispatch).toHaveBeenCalledWith({
-      type: "settings:runtimeSettings",
-      settings: { developer: { acp_trace: { enabled: true, directory: "/runtime/traces" } } },
-    });
     expect(context.dispatch).toHaveBeenCalledWith({
       type: "workspace:roots",
       roots: [{ path: "/workspace/app", label: "app" }],

@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import type { AuthTerminalSession } from "../../services/authTerminals";
 import { frontendShell } from "../../services/frontendShell";
+import { SettingsButton } from "./settingsKit";
 
 /** A real terminal, not a provider-specific parser: escape sequences, prompts and input stay
  * Agent-owned. Links require an explicit click and never invoke host commands or clipboard APIs. */
@@ -39,14 +40,18 @@ export function AgentAuthTerminal({ session, onCancel }: {
     terminal.focus();
     return () => { observer.disconnect(); input.dispose(); detach(); terminal.dispose(); };
   }, [session]);
-  return <div className="agent-page-surface agent-auth-terminal">
-    <div className="agent-sign-in-panel-heading">
-      <strong>Sign in using the agent’s terminal</strong>
-      <button className="agent-sign-in-secondary" type="button" onClick={() => { session.close(); onCancel?.(); }}>Cancel sign-in</button>
+  return (
+    <div className="settings-card settings-step">
+      <header>
+        <span className="settings-step-copy">
+          <strong>Sign in using the agent’s terminal</strong>
+          <p>Follow the instructions below. Sign-in completes when the agent exits successfully.</p>
+        </span>
+        <SettingsButton onClick={() => { session.close(); onCancel?.(); }} variant="quiet">Cancel sign-in</SettingsButton>
+      </header>
+      <div ref={element} className="settings-terminal-screen" aria-label="Agent sign-in terminal" />
     </div>
-    <p>Follow the instructions below. Sign-in completes when the agent exits successfully.</p>
-    <div ref={element} className="agent-auth-terminal-screen" aria-label="Agent sign-in terminal" />
-  </div>;
+  );
 }
 
 function openTerminalLink(uri: string) {
