@@ -196,6 +196,38 @@ it("offers phone setup checks only while the phone does its own work", async () 
   expect(field("Search settings")).toBeTruthy();
 });
 
+it("asks the phone for its state only once the route names a section with phone controls", async () => {
+  const pushed = window.location.href;
+  const asked: string[] = [];
+  // The phone shell answers only while the route names a section it knows.
+  const execute = vi.fn(async () => {
+    const section = new URLSearchParams(window.location.search).get("tab") ?? "";
+    asked.push(section);
+    if (!["general", "remote", "troubleshooting"].includes(section)) throw new Error("refused");
+  });
+  const snapshot = { remote: true, termux: false, permission: false, computer: "Workstation", computers: [] };
+  vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({
+    connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute },
+  } as unknown as frontendShell.FrontendShell);
+  const onSelectTab = (tab: string) => window.history.replaceState(null, "", `/settings?tab=${tab}`);
+
+  window.history.replaceState(null, "", "/settings");
+  await mountSettings({ deviceIntents: fakeDeviceIntents(), onSelectTab, state: { activeTab: "remote", availableTabs: ["agents", "general", "remote", "troubleshooting"], loading: false } });
+  await settle();
+
+  expect(asked).toEqual(["remote"]);
+  expect(pageText()).not.toContain("Phone settings did not respond");
+
+  unmount();
+  asked.length = 0;
+  window.history.replaceState(null, "", "/settings");
+  await mountSettings({ onSelectTab, state: { activeTab: "agents", loading: false } });
+  await settle();
+
+  expect(asked).toEqual([]);
+  window.history.replaceState(null, "", pushed);
+});
+
 function fakeDeviceIntents() {
   return {
     approveJoinRequest: vi.fn(async () => undefined),

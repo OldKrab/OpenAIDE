@@ -25,7 +25,7 @@ import { agentLeftLaunching } from "./agentSettingsModel";
 import { useAgentsSection } from "./AgentsSection";
 import { useGeneralSection } from "./GeneralSection";
 import { useMcpSection } from "./McpSection";
-import { usePhoneConnection } from "./phoneConnection";
+import { phoneSections, usePhoneConnection } from "./phoneConnection";
 import { useRemoteSection } from "./RemoteSection";
 import { InfoHint, SettingsGroupView, SettingsInlineError, mark } from "./settingsKit";
 import { filterSections, infoMatches, normalizeNeedle, type SettingsSection } from "./settingsModel";
@@ -220,6 +220,12 @@ export function SettingsView({
     // The route names the section in view, so a shell that restores or gates on it sees the truth.
     if (state.activeTab !== activeId || !routeNamesSection()) onSelectTab(activeId);
   }, [activeId]);
+  const phoneCapability = currentFrontendShell()?.connectionSettings;
+  useEffect(() => {
+    // Declared after the route effect: the phone shell refuses a request made
+    // before the route names the section, and sends nothing on its own later.
+    if (phoneSections.includes(activeId)) void phone?.execute({ action: "state" });
+  }, [activeId, phoneCapability]);
   const enteredSection = useRef(activeId);
   useEffect(() => {
     if (enteredSection.current === activeId) return;

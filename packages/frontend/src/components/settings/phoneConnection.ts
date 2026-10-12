@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { SettingsTabId } from "@openaide/app-shell-contracts";
 import type { ConnectionCommand, ConnectionSettings, ConnectionSnapshot } from "../../services/connectionSettings";
 
 export type PhoneConnection = {
@@ -10,12 +11,19 @@ export type PhoneConnection = {
   execute: (command: ConnectionCommand) => Promise<void>;
 };
 
+/**
+ * The sections that show phone controls. The phone shell answers only while
+ * the route names one of them, so this mirrors `SetupPagePolicy.PHONE_SECTIONS`.
+ */
+export const phoneSections: readonly SettingsTabId[] = ["general", "remote", "troubleshooting"];
+
 const noSubscription = () => () => undefined;
 const noSnapshot = () => undefined;
 
 /**
- * The phone shell owns its connection state; Settings reads it once here and
- * every section that shows phone controls renders from the same snapshot.
+ * The phone shell owns its connection state; every section that shows phone
+ * controls renders from the same snapshot. Settings asks for it per section,
+ * once the route names that section.
  */
 export function usePhoneConnection(capability: ConnectionSettings | undefined): PhoneConnection | undefined {
   const state = useSyncExternalStore(
@@ -40,9 +48,8 @@ export function usePhoneConnection(capability: ConnectionSettings | undefined): 
   };
   useEffect(() => {
     mounted.current = true;
-    void execute({ action: "state" });
     return () => { mounted.current = false; };
-  }, [capability]);
+  }, []);
   if (!capability) return undefined;
   return { state, busy: sending || Boolean(state?.busy), error, execute };
 }
