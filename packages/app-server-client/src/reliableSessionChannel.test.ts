@@ -98,6 +98,98 @@ describe("ReliableSessionChannel", () => {
     channel.close();
   });
 
+  it("tries again at once when the runtime wakes during a retry wait", async () => {
+    vi.useFakeTimers();
+    try {
+      let wake: (() => void) | undefined;
+      let reachable = true;
+      let refused = 0;
+      const { links, openLink } = fakeOpener();
+      const channel = createReliableSessionChannel({
+        connectionId: "client-1",
+        retryDelayMs: 60_000,
+        maxRetryDelayMs: 60_000,
+        eagerMaxRetryDelayMs: 60_000,
+        openLink: async (request) => {
+          if (reachable) return openLink(request);
+          refused += 1;
+          throw new TransportLinkError("interrupted", "network is away");
+        },
+        subscribeToWake(listener) {
+          wake = listener;
+          return () => {
+            wake = undefined;
+          };
+        },
+      });
+      await channel.ready();
+
+      reachable = false;
+      links[0]?.events.closed({ kind: "interrupted", error: new TransportLinkError("interrupted", "lost") });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(refused).toBe(1);
+
+      reachable = true;
+      wake?.();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(links).toHaveLength(2);
+      channel.close();
+      expect(wake).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps attempts close together for a while after the runtime wakes", async () => {
+    vi.useFakeTimers();
+    try {
+      let wake: (() => void) | undefined;
+      const delays: number[] = [];
+      const logger = {
+        info: () => undefined,
+        error: () => undefined,
+        warn: (event: string, fields?: Record<string, unknown>) => {
+          if (event === "reliable_session_resume_retry_scheduled") delays.push(fields?.retry_delay_ms as number);
+        },
+      };
+      let reachable = true;
+      const { links, openLink } = fakeOpener();
+      const channel = createReliableSessionChannel({
+        connectionId: "client-1",
+        retryDelayMs: 250,
+        maxRetryDelayMs: 5_000,
+        eagerMaxRetryDelayMs: 1_000,
+        eagerRetryWindowMs: 20_000,
+        logger,
+        openLink: async (request) => {
+          if (reachable) return openLink(request);
+          throw new TransportLinkError("interrupted", "network is away");
+        },
+        subscribeToWake(listener) {
+          wake = listener;
+          return () => undefined;
+        },
+      });
+      await channel.ready();
+      reachable = false;
+      links[0]?.events.closed({ kind: "interrupted", error: new TransportLinkError("interrupted", "lost") });
+      await vi.advanceTimersByTimeAsync(0);
+
+      wake?.();
+      await vi.advanceTimersByTimeAsync(19_000);
+      // The delay starts over at the wake and never grows past the eager limit.
+      expect(delays.slice(1, 5)).toEqual([250, 500, 1_000, 1_000]);
+      expect(Math.max(...delays.slice(1))).toBe(1_000);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(delays.at(-1)).toBe(5_000);
+      channel.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails instead of resuming when the server ended the session", async () => {
     const { links, openLink } = fakeOpener();
     const channel = createReliableSessionChannel({ openLink, connectionId: "client-1", retryDelayMs: 0 });

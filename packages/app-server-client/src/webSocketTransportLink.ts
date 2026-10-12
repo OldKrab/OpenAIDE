@@ -29,8 +29,10 @@ export type WebSocketTransportLinkOptions = {
   openTimeoutMs?: number;
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
-  /** Deadline for the probe sent when a suspended runtime wakes. */
+  /** Deadline for the probe sent when the page wakes without having been suspended. */
   wakePongTimeoutMs?: number;
+  /** Timers standing still for this long mean the runtime was suspended. */
+  suspendedAfterMs?: number;
   /** Coalesces acknowledgements of server frames into one message. */
   ackDelayMs?: number;
   subscribeToWake?: (wake: () => void) => () => void;
@@ -45,6 +47,8 @@ type ServerMessage =
   | { type: "pong" };
 
 const TRANSPORT_VERSION = 1;
+/** How often the link notes that its runtime is running, to recognise a suspension afterwards. */
+const ALIVE_INTERVAL_MS = 1_000;
 const CLOSE_NORMAL = 1000;
 
 /** Definite App Server decisions; any other close code is a lost socket. */
@@ -74,6 +78,7 @@ export function createWebSocketLinkOpener(
   const pingIntervalMs = options.pingIntervalMs ?? 10_000;
   const pongTimeoutMs = options.pongTimeoutMs ?? 5_000;
   const wakePongTimeoutMs = options.wakePongTimeoutMs ?? 2_000;
+  const suspendedAfterMs = options.suspendedAfterMs ?? 3_000;
   const ackDelayMs = options.ackDelayMs ?? 100;
 
   return ({ events, resume, signal }) => new Promise<OpenedTransportLink>((resolve, reject) => {
@@ -87,6 +92,10 @@ export function createWebSocketLinkOpener(
     let ackTimer: ReturnType<typeof setTimeout> | undefined;
     let pingTimer: ReturnType<typeof setInterval> | undefined;
     let pongTimer: ReturnType<typeof setTimeout> | undefined;
+    let aliveTimer: ReturnType<typeof setInterval> | undefined;
+    /** When this runtime last ran a timer, and when a stall of its timers last ended. */
+    let aliveAt = 0;
+    let stallEndedAt = 0;
     let unsubscribeWake: (() => void) | undefined;
     const openTimer = setTimeout(() => lose("open_timeout"), openTimeoutMs);
     const abortOpen = () => end("client_closed", CLOSE_NORMAL);
@@ -166,9 +175,25 @@ export function createWebSocketLinkOpener(
         duration_ms: Date.now() - startedAt,
       });
       pingTimer = setInterval(() => probe(pongTimeoutMs), pingIntervalMs);
+      aliveAt = Date.now();
+      aliveTimer = setInterval(() => {
+        // A timer that was due during a suspension can run before the wake signal arrives.
+        const now = Date.now();
+        if (now - aliveAt >= suspendedAfterMs) stallEndedAt = now;
+        aliveAt = now;
+      }, ALIVE_INTERVAL_MS);
       unsubscribeWake = options.subscribeToWake?.(() => {
-        // A socket can outlive a suspended runtime only in appearance; a
-        // short probe replaces it before the next request waits on it.
+        const now = Date.now();
+        if (now - aliveAt >= suspendedAfterMs || now - stallEndedAt < suspendedAfterMs) {
+          // A network drops the socket of a suspended runtime without telling
+          // it, so waiting for a pong is waiting for nothing. The session
+          // resumes on a new socket at once, and that socket supersedes this
+          // one if it was alive after all.
+          logger.info("reliable_websocket_wake_replaced", connectionContext);
+          lose("woke_after_suspension");
+          return;
+        }
+        // A page that merely regained focus keeps its socket if it answers.
         logger.info("reliable_websocket_wake_probe", connectionContext);
         clearPongDeadline();
         probe(wakePongTimeoutMs);
@@ -260,6 +285,7 @@ export function createWebSocketLinkOpener(
       clearTimeout(openTimer);
       if (ackTimer) clearTimeout(ackTimer);
       if (pingTimer) clearInterval(pingTimer);
+      if (aliveTimer) clearInterval(aliveTimer);
       clearPongDeadline();
       unsubscribeWake?.();
       signal.removeEventListener("abort", abortOpen);

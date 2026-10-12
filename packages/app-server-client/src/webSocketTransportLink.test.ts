@@ -271,6 +271,59 @@ describe("WebSocket transport link", () => {
     expect(wake).toBeUndefined();
   });
 
+  it("replaces the socket at once when the runtime wakes from a suspension", async () => {
+    vi.useFakeTimers();
+    let wake: (() => void) | undefined;
+    const { channel, sockets } = harness({
+      subscribeToWake(listener) {
+        wake = listener;
+        return () => {
+          wake = undefined;
+        };
+      },
+    });
+    const first = sockets[0] as FakeSocket;
+    first.accept();
+    await channel.ready();
+
+    // A suspended runtime: the clock moved and no timer ran.
+    vi.setSystemTime(Date.now() + 60_000);
+    wake?.();
+
+    // No pong is awaited on a socket the network has most likely dropped.
+    expect(first.sentOfType("ping")).toHaveLength(0);
+    expect(first.closedWith).toEqual({ code: 1000, reason: "woke_after_suspension" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets).toHaveLength(2);
+    channel.close();
+  });
+
+  it("recognises the suspension when a timer due during it runs before the wake signal", async () => {
+    vi.useFakeTimers();
+    let wake: (() => void) | undefined;
+    const { channel, sockets } = harness({
+      pingIntervalMs: 3_600_000,
+      subscribeToWake(listener) {
+        wake = listener;
+        return () => {
+          wake = undefined;
+        };
+      },
+    });
+    const first = sockets[0] as FakeSocket;
+    first.accept();
+    await channel.ready();
+
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    wake?.();
+
+    expect(first.closedWith).toEqual({ code: 1000, reason: "woke_after_suspension" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets).toHaveLength(2);
+    channel.close();
+  });
+
   it("logs the link lifecycle without the token or the address", async () => {
     const sink = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const { channel, socketAt } = harness({
@@ -331,6 +384,53 @@ describe("ReliableBackendConnection over WebSocket", () => {
     };
     return answer;
   }
+
+  it("says the App Server is not answering while a lost link stays lost, and not for a quick replacement", async () => {
+    const sockets: FakeSocket[] = [];
+    const session = createReliableLocalHttpBackendConnection({
+      endpointUrl: "http://127.0.0.1:4321",
+      authToken: "token-1",
+      connectionId: "client-1",
+      transport: "webSocket",
+      retryDelayMs: 0,
+      heartbeatIntervalMs: 3_600_000,
+      createWebSocket(url) {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    const responsive: boolean[] = [];
+    session.handleResponsiveness?.((next) => responsive.push(next));
+    const first = sockets[0] as FakeSocket;
+    const answerFirst = serve(first, "session-1");
+    const initializing = session.initialize(initializeParams);
+    await vi.waitFor(() => {
+      answerFirst();
+      expect(first.sentOfType("frame")).toHaveLength(1);
+    });
+    await initializing;
+    vi.useFakeTimers();
+
+    // Replaced within the moment a user would not notice.
+    first.end();
+    await vi.advanceTimersByTimeAsync(0);
+    const second = sockets[1] as FakeSocket;
+    second.accept({ sessionId: "session-1", receivedThrough: 1 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(responsive).toEqual([]);
+
+    // Lost for longer: said after a moment, and taken back when the link returns.
+    second.end();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(responsive).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(responsive).toEqual([false]);
+    (sockets[2] as FakeSocket).accept({ sessionId: "session-1", receivedThrough: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(responsive).toEqual([false, true]);
+    session.close?.();
+  });
 
   it("initializes, and replaces an expired session with a fresh initialized one", async () => {
     const sockets: FakeSocket[] = [];

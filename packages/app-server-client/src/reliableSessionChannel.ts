@@ -22,6 +22,13 @@ export type ReliableSessionChannelOptions = {
   /** First delay before reopening a lost link; doubles up to `maxRetryDelayMs`. */
   retryDelayMs?: number;
   maxRetryDelayMs?: number;
+  /** Longest delay between attempts for `eagerRetryWindowMs` after the runtime wakes. */
+  eagerMaxRetryDelayMs?: number;
+  eagerRetryWindowMs?: number;
+  /** The same wake signal the link receives: the page is visible, focused, or online again. */
+  subscribeToWake?: (wake: () => void) => () => void;
+  /** Reports a link lost without a server decision (`false`) and its replacement (`true`). */
+  onLinkChange?: (connected: boolean) => void;
   logger?: DiagnosticsLogger;
 };
 
@@ -39,6 +46,8 @@ export function createReliableSessionChannel(
   const connectionContext = { connection_id: options.connectionId };
   const retryDelayMs = options.retryDelayMs ?? 250;
   const maxRetryDelayMs = Math.max(options.maxRetryDelayMs ?? 5_000, retryDelayMs);
+  const eagerMaxRetryDelayMs = Math.max(options.eagerMaxRetryDelayMs ?? 500, retryDelayMs);
+  const eagerRetryWindowMs = options.eagerRetryWindowMs ?? 20_000;
   const listeners = new Set<(message: RpcMessage) => void>();
   const errorListeners = new Set<(error: unknown) => void>();
   const unacknowledged: SequencedFrame[] = [];
@@ -52,6 +61,17 @@ export function createReliableSessionChannel(
   let resuming = false;
   let closed = false;
   let terminalError: unknown;
+  /** Failed attempts since the delay last started over. */
+  let failedAttempts = 0;
+  let wokeAt: number | undefined;
+  let endRetryWait: (() => void) | undefined;
+  // Someone is looking at the page again, and its network is usually seconds
+  // from returning: try now, and keep trying often while that is likely.
+  const unsubscribeWake = options.subscribeToWake?.(() => {
+    wokeAt = Date.now();
+    failedAttempts = 0;
+    endRetryWait?.();
+  });
 
   const opened = open(undefined, 1).catch((error) => {
     // No session exists yet, so there is nothing to resume: the connection
@@ -89,6 +109,8 @@ export function createReliableSessionChannel(
       });
       dropLink();
       abort.abort();
+      unsubscribeWake?.();
+      endRetryWait?.();
       listeners.clear();
       errorListeners.clear();
     },
@@ -190,6 +212,7 @@ export function createReliableSessionChannel(
       received_through: receivedThrough,
       ...diagnosticErrorFields(error),
     });
+    options.onLinkChange?.(false);
     void resume();
   }
 
@@ -198,6 +221,7 @@ export function createReliableSessionChannel(
     resuming = true;
     const startedAt = Date.now();
     let attempt = 0;
+    failedAttempts = 0;
     try {
       // `link` is checked rather than the open result: a link can be lost
       // again while its unacknowledged tail is still being resent.
@@ -211,17 +235,31 @@ export function createReliableSessionChannel(
             fail(error);
             return;
           }
-          const delayMs = Math.min(retryDelayMs * 2 ** Math.min(attempt - 1, 10), maxRetryDelayMs);
+          failedAttempts += 1;
+          const eager = wokeAt !== undefined && Date.now() - wokeAt < eagerRetryWindowMs;
+          const delayMs = Math.min(
+            retryDelayMs * 2 ** Math.min(failedAttempts - 1, 10),
+            eager ? eagerMaxRetryDelayMs : maxRetryDelayMs,
+          );
           logger.warn("reliable_session_resume_retry_scheduled", {
             ...connectionContext,
             attempt,
             retry_delay_ms: delayMs,
             duration_ms: Date.now() - startedAt,
           });
-          await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(done, delayMs);
+            endRetryWait = done;
+            function done() {
+              clearTimeout(timer);
+              endRetryWait = undefined;
+              resolve();
+            }
+          });
         }
       }
       if (link) {
+        options.onLinkChange?.(true);
         logger.info("reliable_session_resumed", {
           ...connectionContext,
           attempt,
@@ -250,6 +288,8 @@ export function createReliableSessionChannel(
     });
     dropLink();
     abort.abort();
+    unsubscribeWake?.();
+    endRetryWait?.();
     for (const listener of errorListeners) listener(error);
   }
 }
