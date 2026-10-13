@@ -107,7 +107,7 @@ jobs:
           path: release/android
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: openaide-termux-arm64
+          name: app-server-android-arm64 # artifact from android.yml; the file inside is the release asset
           path: release
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:

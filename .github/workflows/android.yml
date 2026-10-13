@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # CI artifact carrying the Android App Server runtime. The tarball inside keeps the
+  # published release asset name that installed apps look up, so it must not follow this.
+  RUNTIME_ARTIFACT: app-server-android-arm64
+
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -62,7 +67,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         if: ${{ !inputs.release }}
         with:
-          name: openaide-termux-arm64
+          name: ${{ env.RUNTIME_ARTIFACT }}
           path: ${{ runner.temp }}/runtime
       - name: Carry the runtime in test builds
         if: ${{ !inputs.release }}
@@ -182,6 +187,6 @@ jobs:
           tar -czf apps/android/build/openaide-termux-arm64.tar.gz -C apps/android/build runtime
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: openaide-termux-arm64
+          name: ${{ env.RUNTIME_ARTIFACT }}
           path: apps/android/build/openaide-termux-arm64.tar.gz
           if-no-files-found: error
