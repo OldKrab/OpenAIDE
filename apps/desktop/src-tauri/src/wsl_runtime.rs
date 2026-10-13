@@ -243,6 +243,12 @@ pub(crate) fn wsl_launch_script() -> &'static str {
     r#"set -eu
 data_root="$HOME/.local/share/openaide"
 mkdir -p "$data_root/state" "$data_root/runtime"
+# A launch removes its own PID file on exit, but a stopped WSL VM never reaches
+# that line. Drop the files whose process is gone so they do not accumulate.
+for stale_pid_file in "$data_root"/runtime/desktop-launch-*.pid; do
+  [ -f "$stale_pid_file" ] || continue
+  kill -0 "$(cat "$stale_pid_file")" 2>/dev/null || rm -f "$stale_pid_file"
+done
 pid_file="$data_root/runtime/desktop-launch-$2.pid"
 user_shell="${3:-}"
 if [ -z "$user_shell" ]; then
@@ -259,7 +265,17 @@ fi
 # user's login shell initializes. Startup output is redirected separately so
 # the App Server's first stdout line remains the framed handoff response. It is
 # intentionally discarded because shell startup output may contain user data.
-"$user_shell" -ilc '
+#
+# Nobody can answer a prompt from this hidden launch, so the shell gets its own
+# session with no controlling terminal: a startup file that asks for input (an
+# SSH key passphrase, for example) fails at once instead of holding the handoff
+# until it times out. setsid execs in place here, so "$!" stays the server PID.
+if command -v setsid >/dev/null 2>&1; then
+  detach=setsid
+else
+  detach=
+fi
+$detach "$user_shell" -ilc '
   exec 1>&3 2>&4
   exec env \
     OPENAIDE_APP_SERVER_PROTOCOL=app-server-handoff \

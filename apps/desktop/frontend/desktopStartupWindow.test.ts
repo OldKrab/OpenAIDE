@@ -60,3 +60,13 @@ it("keeps close available after startup fails", async () => {
   header.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click();
   expect(nativeWindow.close).toHaveBeenCalledOnce();
 });
+
+it("shows the reason a rejected startup command reports", async () => {
+  vi.useFakeTimers();
+  const { invoke } = await import("@tauri-apps/api/core");
+  vi.mocked(invoke).mockRejectedValueOnce("The App Server did not become ready in time.");
+  document.documentElement.innerHTML = startupHtml;
+  await import("./main");
+  await vi.waitFor(() => expect(document.querySelector(".desktop-startup-label")!.textContent)
+    .toBe("OpenAIDE could not start: The App Server did not become ready in time."));
+});

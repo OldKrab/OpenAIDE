@@ -71,9 +71,9 @@ void start().catch((error) => {
   window.clearInterval(startupElapsedTimer);
   const root = document.getElementById("root");
   if (root) {
-    const message = error instanceof Error
-      ? `OpenAIDE could not start: ${error.message}`
-      : "OpenAIDE could not start.";
+    // A rejected Tauri command carries its Rust `Err(String)` as a bare string.
+    const detail = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    const message = detail ? `OpenAIDE could not start: ${detail}` : "OpenAIDE could not start.";
     const label = root.querySelector<HTMLElement>(".desktop-startup-label");
     if (label) label.textContent = message;
     const retry = root.querySelector<HTMLButtonElement>(".desktop-startup-retry");
