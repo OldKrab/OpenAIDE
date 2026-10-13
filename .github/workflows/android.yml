@@ -92,34 +92,43 @@ jobs:
           npm ci
           npm run build:typescript-deps
           npm run build --workspace openaide-frontend
-      - name: Check and build APKs
-        run: gradle -p apps/android --no-daemon $BUNDLED_RUNTIME testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
-      - name: Build signed user APK
-        id: signed
+      - name: Stage the signing key
+        id: key
         if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE }}
-          OPENAIDE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
           REQUIRE_SIGNING: ${{ inputs.release }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            umask 077
-            export OPENAIDE_ANDROID_KEYSTORE="$RUNNER_TEMP/openaide-debug.p12"
-            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$OPENAIDE_ANDROID_KEYSTORE"
-            trap 'rm -f "$OPENAIDE_ANDROID_KEYSTORE"' EXIT
-            gradle -p apps/android --no-daemon $BUNDLED_RUNTIME assembleRelease
-            echo 'built=true' >> "$GITHUB_OUTPUT"
-          else
+          if [ -z "$KEYSTORE_BASE64" ]; then
             if [ "$REQUIRE_SIGNING" = true ]; then
               echo '::error::Canonical releases require Android signing secrets.'
               exit 1
             fi
-            echo '::notice::Android signing secrets are not configured; only debug APKs are available.'
+            echo '::notice::Android signing secrets are not configured; APKs are signed with a per-runner debug key.'
+            exit 0
           fi
-      # The debug APK is signed per runner and cannot update an installed app, so it is
-      # only the fallback when no stable-key user APK exists.
+          # Every APK built after this step, debug and release, carries the same key.
+          umask 077
+          keystore="$RUNNER_TEMP/openaide-debug.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          {
+            echo "OPENAIDE_ANDROID_KEYSTORE=$keystore"
+            echo "OPENAIDE_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo 'staged=true' >> "$GITHUB_OUTPUT"
+      - name: Check and build APKs
+        run: gradle -p apps/android --no-daemon $BUNDLED_RUNTIME testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+      - name: Build user APK
+        if: steps.key.outputs.staged == 'true'
+        run: gradle -p apps/android --no-daemon $BUNDLED_RUNTIME assembleRelease
+      - name: Remove the signing key
+        if: always() && steps.key.outputs.staged == 'true'
+        run: rm -f "$OPENAIDE_ANDROID_KEYSTORE"
+      # With the stable key staged the user APK is the one to install; the debug APK is
+      # only the fallback when it is missing (pull requests, unconfigured forks).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: steps.signed.outputs.built != 'true'
+        if: steps.key.outputs.staged != 'true'
         with:
           name: android-debug
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
