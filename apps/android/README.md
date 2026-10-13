@@ -117,7 +117,7 @@ The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
 2. Download and unzip the runtime and APK artifacts. Prefer `app-release.apk`
-   from `openaide-android-user` for everyday use; `app-debug.apk` is for development.
+   from `android-user` for everyday use; `app-debug.apk` is for development.
 3. Transfer `openaide-termux-arm64.tar.gz` into Termux and extract it:
 
    ```sh
@@ -169,7 +169,7 @@ uploads the debug APK, a compiled device-test APK, unit/lint reports and the ARM
 Termux runtime. Device tests still require a configured phone; CI compilation is
 not a substitute for executing them via ADB.
 With the persistent signing secrets configured, CI also produces
-`openaide-android-user/app-release.apk`, a non-debuggable user build. The debug
+`android-user/app-release.apk`, a non-debuggable user build. The debug
 artifact remains available for device tests. Store distribution still needs its
 own signing/review process; the current persistent development certificate is
 retained for in-place updates on existing test phones.
