@@ -91,9 +91,12 @@ impl RpcGateway {
             FILE_VIEWER_OPEN => {
                 let params: FileViewerOpenParams =
                     serde_json::from_value(params).map_err(responses::invalid_params)?;
-                let workspace = self
-                    .task_snapshots
-                    .workspace_root_for_client(&client.client_instance_id, &params.task_id)?;
+                let (workspace, _) = self.file_workspace_root(
+                    &client.client_instance_id,
+                    params.task_id.as_ref(),
+                    params.project_id.as_ref(),
+                    params.worktree_id.as_ref(),
+                )?;
                 FileViewerReadKind::Open { workspace, params }
             }
             FILE_VIEWER_OPEN_FROM_HANDLE => FileViewerReadKind::FromHandle(

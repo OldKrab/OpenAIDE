@@ -5188,3 +5188,91 @@ fn client_server_request(client_id: &str) -> ServerRequestDraft {
         params: json!({ "key": "agent.secret" }),
     }
 }
+
+fn file_access_git(root: &std::path::Path, args: &[&str]) {
+    assert!(std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid"
+        ])
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap()
+        .status
+        .success());
+}
+
+#[test]
+fn file_access_resolves_a_project_and_only_its_own_worktrees() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let mut add_project = |name: &str, request_id: &str| {
+        let root = store.root().join("workspace").join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        file_access_git(&root, &["init", "-q", "-b", "main"]);
+        std::fs::write(root.join("file.txt"), name).unwrap();
+        file_access_git(&root, &["add", "."]);
+        file_access_git(&root, &["commit", "-qm", "initial"]);
+        let added = response_value(gateway.handle_inbound(
+            connection_id.clone(),
+            request(request_id, "project/add", json!({ "workspaceRoot": root })),
+            AppServerTime(2),
+        ));
+        let project_id: openaide_app_server_protocol::ids::ProjectId =
+            serde_json::from_value(added["result"]["project"]["projectId"].clone()).unwrap();
+        (root, project_id)
+    };
+    let (first_root, first) = add_project("first", "2");
+    let (second_root, second) = add_project("second", "3");
+    let linked = store.root().join("workspace/first-linked");
+    file_access_git(
+        &first_root,
+        &["worktree", "add", "-qb", "review", linked.to_str().unwrap()],
+    );
+    let linked_id = gateway
+        .worktrees
+        .refresh_project(&first_root)
+        .unwrap()
+        .unwrap()
+        .repository
+        .worktrees
+        .into_iter()
+        .find(|worktree| !worktree.is_main)
+        .unwrap()
+        .worktree_id;
+    gateway.worktrees.refresh_project(&second_root).unwrap();
+    let client = ClientInstanceId::from("client-1");
+
+    let (root, kind) = gateway
+        .file_workspace_root(&client, None, Some(&first), None)
+        .unwrap();
+    assert_eq!(std::path::Path::new(&root), first_root);
+    assert_eq!(kind, "projectRoot");
+
+    let (root, kind) = gateway
+        .file_workspace_root(&client, None, Some(&first), Some(&linked_id))
+        .unwrap();
+    assert_eq!(
+        std::fs::canonicalize(root).unwrap(),
+        std::fs::canonicalize(&linked).unwrap()
+    );
+    assert_eq!(kind, "worktree");
+
+    // A worktree identifier from another repository does not widen a Project's reach.
+    assert!(gateway
+        .file_workspace_root(&client, None, Some(&second), Some(&linked_id))
+        .is_err());
+    // The scope must be exactly one of a Task and a Project.
+    assert!(gateway
+        .file_workspace_root(&client, None, None, None)
+        .is_err());
+    assert!(gateway
+        .file_workspace_root(&client, Some(&"task-1".into()), Some(&first), None)
+        .is_err());
+}

@@ -49,6 +49,8 @@ fn empty() -> ProjectFilesResult {
         error: None,
         branch: None,
         base: None,
+        default_branch: None,
+        total: None,
         diff: None,
     }
 }
@@ -61,6 +63,8 @@ fn entry(path: String, directory: bool) -> ProjectFileEntry {
         old_path: None,
         line: None,
         text: None,
+        added: None,
+        removed: None,
     }
 }
 /// Missing leaf paths are allowed only for reviewing deletions; their existing parent
