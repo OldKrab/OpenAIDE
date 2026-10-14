@@ -54,6 +54,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await selectHistory(page, "Detail reviewer");
     await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toHaveCount(0);
+    // A name longer than the bar truncates; it must not widen Chat past the viewport.
+    const returnBox = await page.getByRole("button", { name: "Back to Main Agent" }).boundingBox();
+    expect(returnBox.x + returnBox.width).toBeLessThanOrEqual(viewport.width);
+    const nestedBox = await chat.getByText("Nested review result", { exact: true }).boundingBox();
+    expect(nestedBox.x + nestedBox.width).toBeLessThanOrEqual(viewport.width);
     // A Subagent whose Agent reported no details shows no empty disclosure.
     await expect(page.getByRole("button", { name: /^Subagent details/ })).toHaveCount(0);
     await page.getByRole("button", { name: /^Switch agent\. Currently viewing/ }).click();

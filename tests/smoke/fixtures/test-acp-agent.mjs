@@ -177,7 +177,7 @@ async function runPrompt(message) {
       textUpdate(childId, "agent_thought_chunk", "Checking the implementation", "child-thought");
       update(childId, {
         sessionUpdate: "subagent_spawned", subagentSessionId: nestedId,
-        name: "Detail reviewer", task: "Check a nested detail", capabilities: {},
+        name: "Detail reviewer for a name longer than a phone-width inspection bar", task: "Check a nested detail", capabilities: {},
       });
       textUpdate(nestedId, "agent_message_chunk", "Nested review result", "nested-result");
       update(childId, {
