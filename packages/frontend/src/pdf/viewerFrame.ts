@@ -61,12 +61,15 @@ export function buildPdfViewerDocument(script: string, nonce: string) {
  */
 export function openPdfViewerFrame({
   bytes,
+  documentUrl,
   host,
   onEvent,
   theme,
   title,
 }: {
   bytes: ArrayBuffer;
+  /** A shell-served renderer document; without one the frame is built from the packaged script. */
+  documentUrl?: string;
   host: HTMLElement;
   onEvent: (event: Extract<PdfViewerEvent, { type: "openaide.pdf.page" | "openaide.pdf.scale" }>) => void;
   theme: PdfViewerTheme;
@@ -109,13 +112,19 @@ export function openPdfViewerFrame({
   };
   window.addEventListener("message", onMessage);
   timeout = window.setTimeout(() => settle({ kind: "failed", reason: "startup_timeout" }), RENDERER_READY_TIMEOUT_MS);
-  host.append(frame);
-  void loadRendererScript().then(
-    (script) => {
-      if (!disposed) frame.srcdoc = buildPdfViewerDocument(script, globalThis.crypto.randomUUID().replaceAll("-", ""));
-    },
-    () => settle({ kind: "failed", reason: "renderer_unavailable" }),
-  );
+  if (documentUrl) {
+    // A navigated frame keeps its own response policy; a `srcdoc` frame would inherit the page's.
+    frame.src = documentUrl;
+    host.append(frame);
+  } else {
+    host.append(frame);
+    void loadRendererScript().then(
+      (script) => {
+        if (!disposed) frame.srcdoc = buildPdfViewerDocument(script, globalThis.crypto.randomUUID().replaceAll("-", ""));
+      },
+      () => settle({ kind: "failed", reason: "renderer_unavailable" }),
+    );
+  }
   return {
     loaded,
     setTheme: (next) => send({ type: "openaide.pdf.theme", theme: next }),

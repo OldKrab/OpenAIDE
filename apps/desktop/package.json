@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && npm run build:renderers",
+    "build:renderers": "vite build --config ../../packages/frontend/vite.pdf-renderer.config.ts --emptyOutDir=false",
     "check": "tsc -p tsconfig.json --noEmit",
     "dev": "vite",
     "tauri": "tauri",

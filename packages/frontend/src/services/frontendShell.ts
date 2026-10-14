@@ -224,6 +224,12 @@ export type FrontendShell = {
   fileViewerDownloads?: FileViewerDownloads;
   /** Byte access for previews rendered by Frontend (PDF); omitted shells show the fallback. */
   fileViewerContent?: FileViewerContent;
+  /**
+   * A shell-served PDF renderer document. A shell whose page CSP would also bind a
+   * `srcdoc` sandbox (Desktop) serves the renderer from its own origin under the renderer's
+   * policy; omitted shells build the sandbox from the packaged script.
+   */
+  pdfRendererDocumentUrl?: string;
 };
 
 let installedShell: FrontendShell | undefined;

@@ -49,6 +49,11 @@ export async function runDesktopDevelopment({
     cwd: repositoryRoot,
     env: environment,
   });
+  // The dev server serves the page, but the native renderer scheme reads `dist` directly.
+  await run(`npm${commandSuffix}`, ["run", "build:renderers", "--workspace", "openaide-desktop"], {
+    cwd: repositoryRoot,
+    env: environment,
+  });
   await run(
     `npm${commandSuffix}`,
     tauriArguments,

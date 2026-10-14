@@ -32,6 +32,7 @@ async function start() {
     },
   });
   window.clearInterval(startupElapsedTimer);
+  let connection = bootstrap.connection;
   const session = createReliableLocalHttpBackendConnection({
     ...bootstrap.connection,
     connectionId: bootstrap.clientInstanceId,
@@ -39,6 +40,7 @@ async function start() {
       let disposed = false;
       let stop: (() => void) | undefined;
       void listen<LocalHttpConnection>("desktop-app-server-replaced", ({ payload }) => {
+        connection = payload;
         replace(payload);
       }).then((unsubscribe) => {
         if (disposed) unsubscribe();
@@ -50,7 +52,7 @@ async function start() {
       };
     },
   });
-  const shell = createDesktopShell(bootstrap, session);
+  const shell = createDesktopShell(bootstrap, session, () => connection);
   startFrontend(shell);
   void invoke("desktop_update_mark_interactive")
     .then(() => invoke("desktop_auto_check_for_update"))

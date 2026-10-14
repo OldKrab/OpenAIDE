@@ -14,9 +14,10 @@ import { quitDesktop } from "./desktopQuitLifecycle";
 import { createDesktopProjectPicker } from "./desktopProjectPicker";
 import { createDesktopServerRecovery } from "./desktopServerRecovery";
 import { createDesktopUpdates } from "./desktopUpdates";
-import type { DesktopBootstrap } from "./desktopBootstrap";
+import type { DesktopBootstrap, LocalHttpConnection } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
 import { createDesktopSupportExports } from "./desktopSupportExports";
+import { createDesktopFileViewerContent, desktopPdfRendererDocumentUrl } from "./desktopFileViewer";
 import { createDesktopSecretMessageHandler } from "./desktopSecrets";
 
 type DesktopRoute =
@@ -28,6 +29,8 @@ type DesktopRoute =
 export function createDesktopShell(
   host: DesktopBootstrap,
   session: AppServerSession,
+  /** The App Server endpoint in use now; it changes when Desktop replaces the App Server. */
+  connection: () => LocalHttpConnection,
 ): FrontendShell {
   document.body.dataset.platform = host.platform;
   const nativeWindow = getCurrentWindow();
@@ -311,6 +314,8 @@ export function createDesktopShell(
       reload: () => window.location.reload(),
     },
     fileViewer: true,
+    fileViewerContent: createDesktopFileViewerContent(connection, host.clientInstanceId),
+    pdfRendererDocumentUrl: desktopPdfRendererDocumentUrl(host.platform),
   };
 }
 

@@ -19,6 +19,7 @@ use tauri::{Emitter, Manager};
 
 mod desktop_app_server_hold;
 mod desktop_remote;
+mod desktop_renderer_protocol;
 mod desktop_runtime;
 mod desktop_secrets;
 #[cfg(test)]
@@ -152,6 +153,9 @@ fn main() {
         // plugin's required static config deliberately has no usable key;
         // each check builds an updater from compiled Release/Recovery trust.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .register_uri_scheme_protocol(desktop_renderer_protocol::SCHEME, |ctx, request| {
+            desktop_renderer_protocol::handle(ctx.app_handle(), request.uri().path())
+        })
         .setup(|app| {
             let app_local_data = app.path().app_local_data_dir()?;
             // Tauri's `executable_dir` means a user-level bin directory and is
