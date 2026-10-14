@@ -33,3 +33,14 @@ Every new or changed operation emits structured start and terminal events with a
 ## Prototype
 
 The contract is the `task-review-panel` prototype as approved. It used fixture data and stand-ins for Subagents, jump to a message, permissions, and Plan. Two things it did not exercise: the turn-end refresh, and remembering layout choices across reloads.
+
+## As built
+
+All four slices are implemented. Where the result differs from the prototype or leaves something open:
+
+- The panel starts at 58% of the Task Page instead of half, because the list column and a diff do not both fit in half of a 1280-pixel window. The list column narrows with the panel, not with the window.
+- A phone shows one opened file at a time; File Tabs appear from the wide layout up.
+- The Project viewer is presentation state of the App Shell, not a route: a reload returns to the surface underneath. Giving it a route needs a shell navigation contract and is marked in the code.
+- "Ask in a new Task" starts the new Task with one quote or comment. Collecting several before starting has no Composer to hold them and is not built.
+- The workspace suggestion reads the paths of tool steps already in Chat. A shell command that reports no location does not produce a suggestion, which is why it is only ever offered.
+- A view kept behind the other one (the tree behind Changes, read diffs behind Files) stays mounted so its folders, scroll position, and comments in progress survive the switch.
