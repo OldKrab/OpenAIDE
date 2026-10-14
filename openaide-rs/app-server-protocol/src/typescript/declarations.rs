@@ -559,6 +559,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskToolImagePreviewResult>(output, config);
     push_decl::<ProjectFilesParams>(output, config);
     push_decl::<ProjectFilesResult>(output, config);
+    push_decl::<ProjectChangeBase>(output, config);
     push_decl::<ProjectFileEntry>(output, config);
     push_decl::<ProjectFileDiff>(output, config);
     push_decl::<ProjectDiffHunk>(output, config);

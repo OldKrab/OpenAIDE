@@ -1131,6 +1131,8 @@ defaultBranch: string | null,
  */
 total: number | null, diff: ProjectFileDiff | null, };
 
+export type ProjectChangeBase = "uncommitted" | "defaultBranch";
+
 export type ProjectFileEntry = { path: string, name: string, directory: boolean, status: string | null, oldPath: string | null, line: number | null, text: string | null,
 /**
  * Lines added and removed against the requested base; changes only.
