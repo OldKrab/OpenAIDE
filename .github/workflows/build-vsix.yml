@@ -207,5 +207,7 @@ jobs:
 
   android:
     if: inputs.android
-    # Android signing secrets are not forwarded: manual builds produce debug APKs.
+    # The stable signing key must reach the APK build, or the APK cannot update an
+    # installed app signed by pushes to main.
     uses: ./.github/workflows/android.yml
+    secrets: inherit
