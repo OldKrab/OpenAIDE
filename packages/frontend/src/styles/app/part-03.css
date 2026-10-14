@@ -428,7 +428,7 @@
 }
 
 /* Step durations stay out of the scan until the reader reaches for a row; a running
-   step's clock is the exception. Touch has no hover, so it shows them all. */
+   step's clock is the exception. Touch has no hover, so opening a row is the reach. */
 .time-mark {
   flex: none;
   display: inline-flex;
@@ -453,8 +453,13 @@
 }
 
 @media (hover: none) {
-  .time-mark {
+  .activity-step.open > .activity-disclosure-trigger .activity-step-time {
     opacity: 1;
+  }
+
+  /* A mark that cannot be revealed gives its width back to the row title. */
+  .activity-step:not(.open) .activity-step-time:not([data-live="true"]) {
+    display: none;
   }
 }
 
