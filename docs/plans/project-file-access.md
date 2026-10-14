@@ -1,6 +1,6 @@
 # Project file access: production integration
 
-Status: accepted. Production integration of the reviewed project-access prototype.
+Status: accepted. Production integration of the reviewed project-access prototype. The product behavior below is superseded by the [Project files rework](project-files-rework.md); the App Server boundary and verification record stand until that rework changes them.
 
 ## Product behavior
 

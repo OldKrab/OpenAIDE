@@ -77,7 +77,7 @@ An editable `>`-prefixed quotation inserted into the Composer from selected visi
 _Avoid_: Reply, Reply Reference, source metadata
 
 **File Quote**:
-An editable `>`-prefixed quotation inserted into the Composer from selected File Viewer text or lines, including the file display path, source line range or HEAD/working-copy diff locations, and captured text as ordinary User text.
+An editable `>`-prefixed quotation inserted into the Composer from selected File Viewer lines, including the file display path, source line range or HEAD/working-copy diff locations, and captured text as ordinary User text. The user's comment, when there is one, follows it as plain text. A path from a workspace other than the Task Workspace names that workspace's folder.
 _Avoid_: Persisted Comment, review thread, live line anchor
 
 **Queued Message**:
@@ -165,22 +165,23 @@ A lightweight OpenAIDE record for a user work area, such as a folder, workspace,
 _Avoid_: Git remote or shell-specific workspace identity as the primary identity
 
 **Task Page**:
-The main user-facing page for one Task's Chat, Composer, permissions, folded activity, and Project files destination.
+The main user-facing page for one Task's Chat, Composer, permissions, folded activity, and the Project files panel beside Chat.
 _Avoid_: Squeezing the main work surface into Task Navigation
 
 **Task Panel**:
-The former Task Page column beside Chat. Project files replaces its File Viewer presentation; it is not a second simultaneous file surface.
+The Task Page column beside Chat. Project files is its occupant; it is resizable and can be maximized over Chat.
 _Avoid_: Files panel as the column name, treating File Viewer as that column's only possible occupant, a second Task Page
 
 **Project files**:
-The Web/Desktop Task Page destination for workspace directory browsing, filename/content search, and read-only working-change review through the existing File Viewer. VS Code uses its native file navigation and editor.
+The Web/Desktop read-only surface for one workspace (a Project root or a worktree of its repository), with separate Changes and Files views. It opens beside Chat from a Task and as a full page from a Project. It reports what changed in the workspace, never which Task changed it. VS Code uses its native file navigation and editor.
+_Avoid_: Task changes, changes by this Task, a Task-scoped file surface
 
 **File Viewer**:
-A read-only reader in Project files that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface and, in Web, PDF documents with selectable text. It shares the wide Project files destination with the navigator. On narrow screens users move between list and reader. Back to conversation restores the mounted Chat and Composer draft.
+A read-only reader in Project files that displays a bounded point-in-time snapshot of a selected file, including PNG, JPEG, WebP, and GIF through the shared image inspection surface and, in Web, PDF documents with selectable text. On a wide window it sits beside the list; on a phone list and reader are separate screens.
 _Avoid_: Treating a browser download or file-manager reveal as the File Viewer, live editor, global editor pane, naming the Task Panel after files
 
 **File Tab**:
-A File Viewer entry for one selected file, retaining that file's visible location within the Task Page while other files may be opened in neighboring tabs.
+A Files view entry for one opened file, retaining that file's visible location while other files are opened in neighboring tabs. The Changes view has no File Tabs.
 _Avoid_: Global editor tab, independent Task surface
 
 **Settings**:
