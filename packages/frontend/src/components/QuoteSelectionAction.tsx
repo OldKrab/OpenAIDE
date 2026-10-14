@@ -7,7 +7,8 @@ type QuoteSelection = {
   text: string;
   x: number;
   y: number;
-  placement: "above" | "below";
+  /** Docked placement ignores x and y; styles pin it to the Chat's lower edge. */
+  placement: "above" | "below" | "docked";
   viewportWidth: number;
 };
 
@@ -25,6 +26,9 @@ export function QuoteSelectionAction({
   const [selection, setSelection] = useState<QuoteSelection | undefined>();
   const [actionWidth, setActionWidth] = useState(0);
   const selectingWithPointer = useRef(false);
+  // A touch selection owns the space around itself: the platform draws its
+  // selection toolbar and handles there, above anything the page can render.
+  const selectedByTouch = useRef(false);
   const actionRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -38,15 +42,23 @@ export function QuoteSelectionAction({
     const dismiss = () => setSelection(undefined);
     const update = () => {
       if (selectingWithPointer.current) return;
-      setSelection(readQuoteSelection(root));
+      setSelection(readQuoteSelection(root, selectedByTouch.current));
     };
     const settlePointerSelection = () => {
       selectingWithPointer.current = false;
       update();
     };
-    const beginPointerSelection = () => {
+    const beginPointerSelection = (event: PointerEvent) => {
       selectingWithPointer.current = true;
+      selectedByTouch.current = event.pointerType === "touch";
       dismiss();
+    };
+    // Touch ends a long-press selection or a scroll with pointercancel, never
+    // pointerup. Later handle drags raise no pointer events at all, so the
+    // gesture must settle here or every following selectionchange is ignored.
+    const cancelPointerSelection = () => {
+      selectingWithPointer.current = false;
+      update();
     };
     const dismissOutside = (event: PointerEvent) => {
       const target = event.target;
@@ -63,14 +75,14 @@ export function QuoteSelectionAction({
     document.addEventListener("keydown", dismissOnEscape);
     root.addEventListener("pointerdown", beginPointerSelection);
     root.addEventListener("pointerup", settlePointerSelection);
-    root.addEventListener("pointercancel", dismiss);
+    root.addEventListener("pointercancel", cancelPointerSelection);
     return () => {
       document.removeEventListener("selectionchange", update);
       document.removeEventListener("pointerdown", dismissOutside, true);
       document.removeEventListener("keydown", dismissOnEscape);
       root.removeEventListener("pointerdown", beginPointerSelection);
       root.removeEventListener("pointerup", settlePointerSelection);
-      root.removeEventListener("pointercancel", dismiss);
+      root.removeEventListener("pointercancel", cancelPointerSelection);
     };
   }, [root]);
 
@@ -97,6 +109,7 @@ export function QuoteSelectionAction({
   const x = actionWidth > 0
     ? clamp(selection.x, minimumX, Math.max(minimumX, selection.viewportWidth - minimumX))
     : selection.x;
+  const docked = selection.placement === "docked";
   return (
     <button
       aria-label="Quote selected text"
@@ -108,7 +121,7 @@ export function QuoteSelectionAction({
       }}
       onPointerDown={(event) => event.preventDefault()}
       ref={actionRef}
-      style={{ left: x, top: selection.y }}
+      style={docked ? undefined : { left: x, top: selection.y }}
       type="button"
     >
       <Quote aria-hidden="true" size={14} />
@@ -117,7 +130,7 @@ export function QuoteSelectionAction({
   );
 }
 
-function readQuoteSelection(root: HTMLElement): QuoteSelection | undefined {
+function readQuoteSelection(root: HTMLElement, docked: boolean): QuoteSelection | undefined {
   const selection = root.ownerDocument.getSelection();
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return undefined;
   const range = selection.getRangeAt(0);
@@ -126,6 +139,7 @@ function readQuoteSelection(root: HTMLElement): QuoteSelection | undefined {
   if (!startSource || startSource !== endSource || !root.contains(startSource)) return undefined;
   const text = quoteableSelectionText(selection.toString());
   if (!text) return undefined;
+  if (docked) return { source: startSource, text, x: 0, y: 0, placement: "docked", viewportWidth: 0 };
   // Range end follows document order. Selection focus is the actual endpoint
   // where a pointer or keyboard selection finished, including backward drags.
   const rect = selectionFocusRect(selection, range, root.ownerDocument)
