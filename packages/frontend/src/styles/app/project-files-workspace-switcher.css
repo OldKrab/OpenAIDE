@@ -1,0 +1,131 @@
+/* Project files workspace chip and its menu of the Project root and worktrees. */
+/* Workspace chip: a control, deliberately quieter than the view switch beside it. */
+.project-files-switcher {
+  position: relative;
+  min-width: 0;
+}
+
+.project-files-workspace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  font-size: 12px;
+}
+
+.project-files-workspace:disabled {
+  opacity: 1;
+}
+
+.project-files-workspace:not(:disabled):hover,
+.project-files-workspace[aria-expanded="true"] {
+  background: var(--oa-raised);
+}
+
+/* The folder name is what identifies the workspace; a long branch name gives way first. */
+.project-files-workspace strong {
+  flex: 0 1 auto;
+  min-width: 3ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.project-files-workspace span {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oa-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-files-workspace span > svg {
+  margin-right: 3px;
+  vertical-align: -2px;
+}
+
+.project-files-workspace svg {
+  flex: none;
+  color: var(--oa-muted);
+}
+
+.project-files-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+}
+
+.project-files-menu {
+  position: absolute;
+  z-index: 20;
+  top: 32px;
+  left: 0;
+  width: 280px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-panel);
+  box-shadow: 0 10px 28px color-mix(in oklch, black 22%, transparent);
+}
+
+.project-files-sheet-title {
+  margin: 0;
+  padding: 6px 8px 4px;
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.project-files-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+
+.project-files-menu button:hover {
+  background: var(--oa-raised);
+}
+
+.project-files-menu button[aria-selected="true"] {
+  background: var(--oa-selected);
+}
+
+.project-files-menu button > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-files-menu strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.project-files-menu small {
+  display: block;
+  margin-top: 2px;
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.project-files-menu svg {
+  flex: none;
+  color: var(--oa-muted);
+}

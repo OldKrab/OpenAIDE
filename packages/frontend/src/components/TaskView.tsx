@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { CircleAlert, ListTodo } from "lucide-react";
 import type {
   AppPreferencesRecord,
@@ -38,9 +38,12 @@ import { useReturnToMainHistory } from "./useReturnToMainHistory";
 import { useTaskHistoryView } from "./useTaskHistoryView";
 import { AgentFileOpenContext } from "./agentFileOpen";
 import { ExistingFileReferencesContext, existingFileReferencesFor } from "./existingFileReferences";
-import { ProjectFileWorkspace } from "./ProjectFileWorkspace";
 import { ProjectFilesButton } from "./ProjectFilesButton";
 import { TerminalButton } from "./terminals/TerminalButton";
+import { ProjectFilesPanel } from "./ProjectFilesPanel";
+import { recentToolPaths } from "./projectFilesModel";
+import { useFileSearchShortcuts } from "./useFileSearchShortcuts";
+import { useTaskProjectFiles } from "./useTaskProjectFiles";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
@@ -49,7 +52,6 @@ import { useCurrentCallback } from "./useCurrentCallback";
 import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
 import { TaskSessionReloadNotice } from "./TaskSessionReloadNotice";
 import { currentFrontendShell } from "../services/frontendShell";
-import { useTaskFileViewer } from "./useTaskFileViewer";
 import { useSubagentSessions } from "./useSubagentSessions";
 import { SubagentInspectionBar } from "./SubagentInspectionBar";
 import { SubagentNavigator } from "./SubagentNavigator";
@@ -95,6 +97,7 @@ export function TaskView({
   fileViewer: fileViewerConnection,
   headerActionsTarget,
   headerOverflowTarget,
+  projectFiles,
   onLoadChatPage,
   onLoadComposerHistory,
   onLoadToolImagePreview,
@@ -155,6 +158,8 @@ export function TaskView({
   headerActionsTarget?: HTMLElement | null;
   /** Where the less frequent header controls go; the bar itself when absent. */
   headerOverflowTarget?: HTMLElement | null;
+  /** The Task's Project and its worktrees, from which the selectable workspaces are listed. */
+  projectFiles?: Pick<Parameters<typeof useTaskProjectFiles>[0], "project" | "repository">;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadComposerHistory?: () => Promise<string[]>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
@@ -198,36 +203,10 @@ export function TaskView({
   const overflowTarget = headerOverflowTarget ?? headerActionsTarget;
   const quoteRequestSequence = useRef(0);
   const [quoteRequest, setQuoteRequest] = useState<{ id: number; taskId: string; text: string }>();
-  const [projectFilesOpen, setProjectFilesOpen] = useState(false);
-  const [projectFileRequest, setProjectFileRequest] = useState<{ taskId: string; path: string; line?: number; sequence: number }>();
-  const [projectFilesShortcut, setProjectFilesShortcut] = useState<{ mode: "files" | "search"; sequence: number }>();
-  useEffect(() => setProjectFilesOpen(false), [snapshot.task.task_id]);
   const fileViewerEnabled = currentFrontendShell()?.fileViewer === true && fileViewerConnection !== undefined;
-  const fileViewer = useTaskFileViewer({
-    connection: fileViewerEnabled ? fileViewerConnection : undefined,
-    enabled: fileViewerEnabled,
-    workspaceRoot: snapshot.task.workspace_root,
-    taskId: snapshot.task.task_id,
-  });
-  useEffect(() => {
-    if (!fileViewerEnabled || projectFilesOpen) return;
-    const openFiles = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return;
-      if (event.key.toLowerCase() !== "p" && !(event.shiftKey && event.key.toLowerCase() === "f")) return;
-      event.preventDefault();
-      setProjectFilesShortcut(previous => ({ mode: event.key.toLowerCase() === "p" ? "files" : "search", sequence: (previous?.sequence ?? 0) + 1 }));
-      setProjectFilesOpen(true);
-    };
-    window.addEventListener("keydown", openFiles);
-    return () => window.removeEventListener("keydown", openFiles);
-  }, [fileViewerEnabled, projectFilesOpen]);
   const fileReferences = useMemo(() => fileViewerEnabled && fileViewerConnection
     ? existingFileReferencesFor(fileViewerConnection, snapshot.task.task_id)
     : undefined, [fileViewerConnection, fileViewerEnabled, snapshot.task.task_id]);
-  const openAgentFile = useCallback((path: string, line?: number) => {
-    setProjectFilesOpen(true);
-    setProjectFileRequest(previous => ({ taskId: snapshot.task.task_id, path, line, sequence: (previous?.sequence ?? 0) + 1 }));
-  }, [snapshot.task.task_id]);
   const queueOverlayRef = useCallback((node: HTMLDivElement | null) => (
     node ? installTaskQueueOverlayClearance(node) : undefined
   ), []);
@@ -305,6 +284,22 @@ export function TaskView({
   }, [quoteAvailable, snapshot.task.task_id, subagents.selectSubagent]);
   // Composer unmounts under Subagent inspection, so a retained request would be inserted again.
   const clearQuoteRequest = useCallback(() => setQuoteRequest(undefined), []);
+  const recentPaths = useMemo(() => (fileViewerEnabled ? recentToolPaths(chatItems) : []), [chatItems, fileViewerEnabled]);
+  const files = useTaskProjectFiles({
+    canComment: quoteAvailable,
+    changePrompt: intents.changePrompt,
+    connection: fileViewerConnection,
+    enabled: fileViewerEnabled,
+    onBeforeComment: () => subagents.selectSubagent(undefined),
+    project: projectFiles?.project,
+    prompt: taskInput.prompt,
+    recentPaths,
+    refreshWorktrees: snapshot.task.project_id ? intents.refreshWorkspace : undefined,
+    repository: projectFiles?.repository,
+    task: snapshot.task,
+    turnOpen: turnBusy,
+  });
+  useFileSearchShortcuts(fileViewerEnabled, files.openSearch);
   const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
   const queue = useMemo(() => {
     const current = snapshot.message_queue ?? { revision: 0, items: [] };
@@ -499,7 +494,9 @@ export function TaskView({
       className="task-surface task-work-stack"
       data-composer-drop-scope
       data-desktop-window={desktopWindow?.platform}
-      data-project-files={projectFilesOpen}
+      data-file-viewer={files.opened ? (files.open ? "open" : "collapsed") : undefined}
+      data-file-viewer-maximized={files.open && files.maximized ? true : undefined}
+      style={files.opened ? { "--task-panel-ratio": files.splitRatio } as CSSProperties : undefined}
     >
       <div className="task-work-stack-header">
         <TaskHeader
@@ -554,10 +551,10 @@ export function TaskView({
             taskId={snapshot.task.task_id}
             workspaceRoot={snapshot.task.workspace_root}
           />
-          {fileViewerEnabled && <ProjectFilesButton open={projectFilesOpen} onOpen={() => setProjectFilesOpen(true)} target={headerActionsTarget} />}
+          {files.available && <ProjectFilesButton count={files.count} {...files.totals} open={files.open} onToggle={() => files.show(!files.open)} target={headerActionsTarget} />}
         </div>
       </div>
-      <div className="task-workbench">
+      <div className="task-workbench" data-file-viewer={files.open ? "open" : undefined}>
         <div className="chat-column task-conversation">
         {visiblePlan ? (
           <aside aria-label="Current plan" className="task-plan-column">
@@ -576,7 +573,7 @@ export function TaskView({
           canRestoreTask={onRestoreTask !== undefined}
           chat={chat}
           chatScroll={chatScroll}
-          headerActionsTarget={projectFilesOpen ? null : overflowTarget}
+          headerActionsTarget={overflowTarget}
           commandCatalog={snapshot.agent_commands}
           items={chatItems}
           liveTextPresentation={subagents.selected ? subagents.liveTextPresentation : liveTextPresentation}
@@ -716,15 +713,16 @@ export function TaskView({
         )}
         </div>
       </div>
-      {fileViewerEnabled && fileViewerConnection && <ProjectFileWorkspace
-        key={`${snapshot.task.task_id}:${snapshot.task.workspace_root}`}
-        connection={fileViewerConnection} taskId={snapshot.task.task_id} workspaceRoot={snapshot.task.workspace_root}
-        worktreeName={snapshot.task.worktree_name} gitRef={snapshot.task.git_ref}
-        viewer={fileViewer} visible={projectFilesOpen} shortcutMode={projectFilesShortcut}
-        fileRequest={projectFileRequest?.taskId === snapshot.task.task_id ? projectFileRequest : undefined}
-        onBack={() => { setProjectFilesOpen(false); requestAnimationFrame(() => document.querySelector<HTMLElement>(".project-files-entry")?.focus()); }}
-        onQuote={quoteAvailable ? text => { requestQuote(text); setProjectFilesOpen(false); requestAnimationFrame(() => document.querySelector<HTMLElement>(".task-conversation [role=textbox]")?.focus()); } : undefined}
-      />}
+      {files.opened && files.panel && fileViewerConnection ? (
+        <ProjectFilesPanel
+          agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
+          collapsed={!files.open}
+          connection={fileViewerConnection}
+          key={snapshot.task.task_id}
+          variant="task"
+          {...files.panel}
+        />
+      ) : null}
 
       {visiblePlan ? (
         <>
@@ -757,7 +755,7 @@ export function TaskView({
 
   if (!fileViewerEnabled) return taskSurface;
   return (
-    <AgentFileOpenContext.Provider value={openAgentFile}>
+    <AgentFileOpenContext.Provider value={files.openFile}>
       <ExistingFileReferencesContext.Provider value={fileReferences}>{taskSurface}</ExistingFileReferencesContext.Provider>
     </AgentFileOpenContext.Provider>
   );

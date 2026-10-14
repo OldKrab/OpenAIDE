@@ -1,22 +1,3 @@
-.task-panel-toggle {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: var(--oa-radius-sm);
-  background: transparent;
-  color: var(--oa-muted);
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-}
-
-.task-panel-toggle:hover,
-.task-panel-toggle:focus-visible,
-.task-panel-toggle[aria-pressed="true"] {
-  background: var(--oa-raised);
-  color: var(--oa-text);
-}
-
 .task-workbench[data-file-viewer="open"],
 .task-workbench[data-file-viewer="collapsed"] {
   overflow: hidden;
@@ -115,32 +96,6 @@
   gap: 4px;
   padding-inline-end: 6px;
   border-bottom: 1px solid var(--oa-border);
-}
-
-.file-viewer-chrome .task-panel-toggle,
-.file-viewer-back-to-chat {
-  flex: none;
-  align-self: center;
-}
-
-.file-viewer-back-to-chat {
-  min-height: 44px;
-  border: 0;
-  border-radius: var(--oa-radius-sm);
-  background: transparent;
-  color: var(--oa-text);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px 0 8px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.file-viewer-back-to-chat:hover,
-.file-viewer-back-to-chat:focus-visible {
-  background: var(--oa-raised);
 }
 
 .file-viewer-chrome-actions {
@@ -594,5 +549,53 @@
 
   .file-viewer-pending-icon {
     animation: none;
+  }
+}
+
+/* Project files as a Task Panel: it can take the whole Task Page, and it keeps clear of the
+   window buttons a Desktop App Shell draws over the header strip. */
+.task-work-stack[data-file-viewer-maximized="true"] > .task-panel {
+  width: 100%;
+  border-left: 0;
+}
+
+.task-work-stack[data-file-viewer-maximized="true"] > .task-panel .task-panel-splitter {
+  display: none;
+}
+
+.task-work-stack[data-desktop-window="windows"] > .task-panel .project-files-head {
+  padding-inline-end: 148px;
+}
+
+body[data-shell="desktop"] .task-work-stack[data-desktop-window="macos"][data-file-viewer-maximized="true"] > .task-panel .project-files-head {
+  padding-inline-start: 84px;
+}
+
+.task-panel-splitter:hover,
+.task-panel-splitter:focus-visible {
+  background: color-mix(in oklch, var(--oa-focus) 45%, transparent);
+}
+
+/* Plan belongs to Chat: it gives way when Project files takes the whole Task Page. Chat under
+   the panel keeps its state but leaves focus order and the accessibility tree. */
+.task-work-stack[data-file-viewer-maximized="true"] > .task-workbench ~ .task-plan-drawer-backdrop,
+.task-work-stack[data-file-viewer-maximized="true"] > .task-workbench ~ .task-plan-drawer {
+  display: none;
+}
+
+.task-work-stack[data-file-viewer-maximized="true"] > .task-work-stack-header,
+.task-work-stack[data-file-viewer-maximized="true"] > .task-workbench {
+  visibility: hidden;
+}
+
+@media (max-width: 760px) {
+  .task-work-stack[data-file-viewer="open"] > .task-workbench ~ .task-plan-drawer-backdrop,
+  .task-work-stack[data-file-viewer="open"] > .task-workbench ~ .task-plan-drawer {
+    display: none;
+  }
+
+  .task-work-stack[data-file-viewer="open"] > .task-work-stack-header,
+  .task-work-stack[data-file-viewer="open"] > .task-workbench {
+    visibility: hidden;
   }
 }

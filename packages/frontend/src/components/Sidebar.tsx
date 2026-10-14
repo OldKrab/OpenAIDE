@@ -41,6 +41,7 @@ type SidebarProps = {
   onForkTask?: (taskId: string) => void;
   onAddProject?: () => void;
   onLoadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
+  onBrowseProjectFiles?: (projectId: string) => void;
   onManageWorktrees?: (projectId: string) => void;
   onRemoveProject?: (project: {
     projectId: string;
@@ -114,6 +115,7 @@ export const Sidebar = memo(function Sidebar({
   onForkTask,
   onAddProject,
   onLoadNativeSessions,
+  onBrowseProjectFiles,
   onManageWorktrees,
   onRemoveProject,
   onRenameProject,
@@ -370,6 +372,7 @@ export const Sidebar = memo(function Sidebar({
                   setProjectRowLimits((current) => new Map(current).set(group.key, historyLimit));
                   onLoadNativeSessions(undefined, group.key, targetRowCount);
                 }}
+                onBrowseFiles={onBrowseProjectFiles ? () => onBrowseProjectFiles(group.key) : undefined}
                 onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(group.key) : undefined}
                 onNewTask={() => onNewTask(group.key)}
                 onRemoveProject={onRemoveProject ? () => onRemoveProject({

@@ -13,9 +13,9 @@ describe("Task File Viewer", () => {
     const tab = sourceSnapshot("", { kind: "binary", error: "unsupported", basename: "build.vsix" });
     let tree: ReturnType<typeof create>;
     const renderPanel = (downloads?: { save: typeof save }) => (
-      <FileViewerPanel collapsed={false} downloads={downloads} onClose={vi.fn()}
-        onOpenFromHandle={vi.fn()} onQuote={vi.fn()} onRefresh={vi.fn()}
-        onSelect={vi.fn()} onSplitRatio={vi.fn()} splitRatio={0.45} tab={tab} tabs={[tab]} />
+      <FileViewerPanel downloads={downloads} onClose={vi.fn()}
+        onOpenFromHandle={vi.fn()} onRefresh={vi.fn()}
+        onSelect={vi.fn()} tab={tab} tabs={[tab]} />
     );
     act(() => { tree = create(renderPanel()); });
     expect(tree!.root.findAllByProps({ "aria-label": "Download file" })).toHaveLength(0);
@@ -34,9 +34,9 @@ describe("Task File Viewer", () => {
       label: "photo.jpg", mediaType: "image/jpeg", dataUrl: "data:image/jpeg;base64,/9j/",
     } });
     let tree: ReturnType<typeof create>;
-    act(() => { tree = create(<FileViewerPanel collapsed={false} onClose={vi.fn()}
-      onOpenFromHandle={vi.fn()} onQuote={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()}
-      onSplitRatio={vi.fn()} splitRatio={0.45} tab={tab} tabs={[tab]} />); });
+    act(() => { tree = create(<FileViewerPanel onClose={vi.fn()}
+      onOpenFromHandle={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()}
+      tab={tab} tabs={[tab]} />); });
     expect(JSON.stringify(tree!.toJSON())).toContain("Reduced image preview");
     expect(JSON.stringify(tree!.toJSON())).not.toContain("first 1 MiB");
   });
@@ -160,77 +160,77 @@ describe("Task File Viewer", () => {
     expect(tree!.root.findAllByProps({ "aria-label": "File Viewer" })).toHaveLength(0);
   });
 
-  it("quotes a source line into Composer as ordinary quoted text", () => {
-    const onQuote = vi.fn();
+  it("comments on a line range and lets the note be edited or removed", () => {
+    const tab = sourceSnapshot("first\nsecond\nthird");
+    const notes: { id: string; start: number; end: number; text: string; quoted: string }[] = [];
+    const onSaveNote = vi.fn((draft: Omit<(typeof notes)[number], "id">, replaces?: string) => {
+      const index = notes.findIndex((note) => note.id === replaces);
+      if (index >= 0) notes[index] = { ...draft, id: replaces! };
+      else notes.push({ ...draft, id: "note-1" });
+    });
+    const onRemoveNote = vi.fn();
+    const panel = () => (
+      <FileViewerPanel
+        onClose={vi.fn()}
+        onOpenFromHandle={vi.fn()}
+        onRefresh={vi.fn()}
+        onSelect={vi.fn()}
+        readerNotes={(path) => ({ path, notes: [...notes], onSaveNote, onRemoveNote })}
+        tab={tab}
+        tabs={[tab]}
+      />
+    );
+    let tree: ReturnType<typeof create>;
+    act(() => { tree = create(panel()); });
+    const line = (index: number) => tree!.root.findByProps({ "data-index": index });
+    const submit = () => tree!.root.findByProps({ type: "submit" });
+    const send = () => tree!.root.findByProps({ "aria-label": "Comment on the selected lines" }).props.onSubmit({ preventDefault() {} });
+
+    // The first line opens the comment box under it; a second line stretches the range.
+    act(() => line(0).props.onClick({ shiftKey: false }));
+    expect(submit().children.join("")).toBe("Quote only");
+    act(() => line(1).props.onClick({ shiftKey: false }));
+    act(() => tree!.root.findByProps({ "aria-label": "Comment" }).props.onChange({ target: { value: "why two?" } }));
+    expect(submit().children.join("")).toBe("Add comment");
+    act(() => send());
+    expect(onSaveNote).toHaveBeenLastCalledWith(
+      { start: 0, end: 1, text: "why two?", quoted: "deploy/local-web.sh:1–2\nfirst\nsecond" },
+      undefined,
+    );
+
+    act(() => tree!.update(panel()));
+    act(() => tree!.root.findByProps({ "aria-label": "Edit comment" }).props.onClick());
+    expect(submit().children.join("")).toBe("Save");
+    act(() => tree!.root.findByProps({ "aria-label": "Comment" }).props.onChange({ target: { value: "why both?" } }));
+    act(() => send());
+    expect(onSaveNote).toHaveBeenLastCalledWith(expect.objectContaining({ text: "why both?" }), "note-1");
+
+    act(() => tree!.update(panel()));
+    act(() => tree!.root.findByProps({ "aria-label": "Edit comment" }).props.onClick());
+    act(() => tree!.root.findByProps({ className: "code-compose-remove" }).props.onClick());
+    expect(onRemoveNote).toHaveBeenCalledWith("note-1");
+  });
+
+  it("shows a bare quote differently from a comment and leaves source read-only without an owner", () => {
+    const tab = sourceSnapshot("only line");
+    const quoted = { id: "q", start: 0, end: 0, text: "", quoted: "deploy/local-web.sh:1\nonly line" };
     let tree: ReturnType<typeof create>;
     act(() => {
       tree = create(
-        <FileViewerPanel
-          collapsed={false}
-          onClose={vi.fn()}
-          onOpenFromHandle={vi.fn()}
-          onQuote={onQuote}
-          onRefresh={vi.fn()}
-          onSelect={vi.fn()}
-          onSplitRatio={vi.fn()}
-          splitRatio={0.45}
-          tab={sourceSnapshot("first\nquoted line")}
-          tabs={[sourceSnapshot("first\nquoted line")]}
-        />,
+        <FileViewerPanel onClose={vi.fn()} onOpenFromHandle={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()}
+          readerNotes={(path) => ({ path, notes: [quoted], onSaveNote: vi.fn() })} tab={tab} tabs={[tab]} />,
       );
     });
+    expect(tree!.root.findAllByProps({ "aria-label": "Edit comment" })).toHaveLength(0);
+    expect(tree!.root.findByProps({ "aria-label": "Quoted lines: add a comment or remove" })).toBeTruthy();
 
     act(() => {
-      tree!.root.findByProps({ "aria-label": "Select line 2" }).props.onClick({ detail: 0 });
+      tree!.update(
+        <FileViewerPanel onClose={vi.fn()} onOpenFromHandle={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} tab={tab} tabs={[tab]} />,
+      );
     });
-    act(() => {
-      tree!.root.findByProps({ "aria-label": "Comment" }).props.onClick();
-    });
-
-    expect(onQuote).toHaveBeenCalledWith("deploy/local-web.sh:2\nquoted line");
-  });
-
-  it("returns to Chat after quoting a line on a narrow Task Page", () => {
-    const matchMedia = vi.fn((query: string) => ({
-      matches: query.includes("max-width: 760px"),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }));
-    vi.stubGlobal("matchMedia", matchMedia);
-    const onQuote = vi.fn();
-    const onToggleCollapsed = vi.fn();
-    let tree: ReturnType<typeof create>;
-    try {
-      act(() => {
-        tree = create(
-          <FileViewerPanel
-            collapsed={false}
-            onClose={vi.fn()}
-            onOpenFromHandle={vi.fn()}
-            onQuote={onQuote}
-            onRefresh={vi.fn()}
-            onSelect={vi.fn()}
-            onSplitRatio={vi.fn()}
-            onToggleCollapsed={onToggleCollapsed}
-            splitRatio={0.45}
-            tab={sourceSnapshot("quoted line")}
-            tabs={[sourceSnapshot("quoted line")]}
-          />,
-        );
-      });
-
-      act(() => {
-        tree!.root.findByProps({ "aria-label": "Select line 1" }).props.onClick({ detail: 0 });
-      });
-      act(() => {
-        tree!.root.findByProps({ "aria-label": "Comment" }).props.onClick();
-      });
-
-      expect(onQuote).toHaveBeenCalledWith("deploy/local-web.sh:1\nquoted line");
-      expect(onToggleCollapsed).toHaveBeenCalledOnce();
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    act(() => tree!.root.findByProps({ "data-index": 0 }).props.onClick({ shiftKey: false }));
+    expect(tree!.root.findAllByProps({ "aria-label": "Comment" })).toHaveLength(0);
   });
 
   it("highlights rust source from the snapshot language", () => {
@@ -238,14 +238,10 @@ describe("Task File Viewer", () => {
     act(() => {
       tree = create(
         <FileViewerPanel
-          collapsed={false}
           onClose={vi.fn()}
           onOpenFromHandle={vi.fn()}
-          onQuote={vi.fn()}
           onRefresh={vi.fn()}
           onSelect={vi.fn()}
-          onSplitRatio={vi.fn()}
-          splitRatio={0.45}
           tab={sourceSnapshot("fn main() {}", { language: "rs" })}
           tabs={[sourceSnapshot("fn main() {}", { language: "rs" })]}
         />,
@@ -263,14 +259,10 @@ describe("Task File Viewer", () => {
     act(() => {
       tree = create(
         <FileViewerPanel
-          collapsed={false}
           onClose={vi.fn()}
           onOpenFromHandle={vi.fn()}
-          onQuote={vi.fn()}
           onRefresh={vi.fn()}
           onSelect={vi.fn()}
-          onSplitRatio={vi.fn()}
-          splitRatio={0.45}
           tab={tab}
           tabs={[tab]}
         />,
@@ -281,7 +273,7 @@ describe("Task File Viewer", () => {
     expect(preview).toContain("Heading");
     expect(preview).toContain("bold");
     expect(preview).not.toContain("**bold**");
-    expect(tree!.root.findAllByProps({ "aria-label": "Select line 1" })).toHaveLength(0);
+    expect(tree!.root.findAllByProps({ "data-index": 0 })).toHaveLength(0);
 
     act(() => {
       tree!.root.findByProps({ "aria-label": "Show raw Markdown" }).props.onClick();
@@ -289,38 +281,12 @@ describe("Task File Viewer", () => {
 
     const raw = JSON.stringify(tree!.toJSON());
     expect(raw).toContain("**bold**");
-    expect(tree!.root.findByProps({ "aria-label": "Select line 3" })).toBeTruthy();
+    expect(tree!.root.findByProps({ "data-index": 2 })).toBeTruthy();
 
     act(() => {
       tree!.root.findByProps({ "aria-label": "Show Markdown preview" }).props.onClick();
     });
     expect(JSON.stringify(tree!.toJSON())).not.toContain("**bold**");
-  });
-
-  it("returns to Chat from the File Viewer chrome", () => {
-    const tab = sourceSnapshot("ok\n");
-    const onToggleCollapsed = vi.fn();
-    let tree: ReturnType<typeof create>;
-    act(() => {
-      tree = create(
-        <FileViewerPanel
-          collapsed={false}
-          onClose={vi.fn()}
-          onOpenFromHandle={vi.fn()}
-          onQuote={vi.fn()}
-          onRefresh={vi.fn()}
-          onSelect={vi.fn()}
-          onSplitRatio={vi.fn()}
-          onToggleCollapsed={onToggleCollapsed}
-          splitRatio={0.45}
-          tab={tab}
-          tabs={[tab]}
-        />,
-      );
-    });
-
-    act(() => tree!.root.findByProps({ "aria-label": "Back to Chat" }).props.onClick());
-    expect(onToggleCollapsed).toHaveBeenCalledOnce();
   });
 });
 
@@ -334,20 +300,16 @@ function FileViewerHarness({
   const viewer = useTaskFileViewer({
     connection: { request: request as never },
     enabled: true,
-    taskId: "task-1",
+    scope: { taskId: "task-1" },
   });
   return (
     <div>
       <button aria-label="Open sample path" onClick={() => void viewer.openPath(openPath)} type="button" />
       <FileViewerPanel
-        collapsed={viewer.collapsed}
         onClose={viewer.closeTab}
         onOpenFromHandle={viewer.openFromHandle}
-        onQuote={vi.fn()}
         onRefresh={(handle) => void viewer.refresh(handle)}
         onSelect={viewer.selectTab}
-        onSplitRatio={viewer.setSplitRatio}
-        splitRatio={viewer.splitRatio}
         tab={viewer.activeTab}
         tabs={viewer.tabs}
       />

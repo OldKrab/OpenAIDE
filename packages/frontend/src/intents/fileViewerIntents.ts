@@ -6,7 +6,9 @@ import {
   type BackendConnection,
   type FileViewerHandleId,
   type FileViewerSnapshot,
+  type ProjectId,
   type TaskId,
+  type WorktreeId,
 } from "@openaide/app-server-client";
 import type {
   FileViewerContent,
@@ -58,17 +60,26 @@ export async function readFileViewerContent(
   return result;
 }
 
+/** Exactly one of Task and Project names the workspace; a worktree selects a sibling root. */
+export type FileViewerScope = { taskId?: string; projectId?: string; worktreeId?: string };
+
 export async function openFileViewer(
   connection: FileViewerConnection,
-  taskId: string,
+  scope: FileViewerScope,
   path: string,
   line?: number,
 ): Promise<FileViewerSnapshot> {
   return requestFileViewerSnapshot(connection, "open", FILE_VIEWER_OPEN, {
-    taskId: taskId as TaskId,
+    ...(scope.taskId ? { taskId: scope.taskId as TaskId } : {}),
+    ...(scope.projectId ? { projectId: scope.projectId as ProjectId } : {}),
+    ...(scope.worktreeId ? { worktreeId: scope.worktreeId as WorktreeId } : {}),
     path,
     ...(line ? { line } : {}),
-  }, { task_id: taskId });
+  }, {
+    scope_kind: scope.worktreeId ? "worktree" : scope.taskId ? "task" : "project",
+    ...(scope.taskId ? { task_id: scope.taskId } : {}),
+    ...(scope.projectId ? { project_id: scope.projectId } : {}),
+  });
 }
 
 export async function openFileViewerFromHandle(

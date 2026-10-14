@@ -1,4 +1,5 @@
 import { NewTaskView } from "./NewTaskView";
+import { ProjectFilesPage } from "./ProjectFilesPage";
 import { TaskLoadingView, TaskView } from "./TaskView";
 import { taskTurnOpen } from "./taskSurfaceHelpers";
 import type { AppController } from "./appController";
@@ -93,6 +94,8 @@ type AppPrimaryTaskSurfaceProps = {
   onCheckProject?: (projectId: string) => Promise<void>;
   onRemoveProject?: (projectId: string) => void;
   planDrawerOpen?: boolean;
+  /** The Project whose files cover the primary surface, and how to leave that page. */
+  projectFilesPage?: { projectId: string; onClose: () => void };
   workspaceRecovery?: {
     manageWorktrees: (projectId: string) => void;
     openProjectSettings: () => void;
@@ -114,6 +117,7 @@ export function AppPrimaryTaskSurface({
   onCheckProject,
   onRemoveProject,
   planDrawerOpen,
+  projectFilesPage,
   workspaceRecovery,
 }: AppPrimaryTaskSurfaceProps) {
   const {
@@ -149,7 +153,32 @@ export function AppPrimaryTaskSurface({
     : undefined;
   const recoveryActions = createAgentRecoveryActions(controller);
 
+  const browsedProject = projectFilesPage
+    ? view.navigation.projects.find((project) => project.projectId === projectFilesPage.projectId)
+    : undefined;
+  if (projectFilesPage && browsedProject && callbacks.task.fileViewer) {
+    return (
+      <ProjectFilesPage
+        connection={callbacks.task.fileViewer}
+        onAsk={(prompt) => {
+          projectFilesPage.onClose();
+          callbacks.navigation.openNewTask(browsedProject.projectId);
+          intents.newTask.changePrompt(prompt);
+        }}
+        onClose={projectFilesPage.onClose}
+        project={browsedProject}
+        refreshWorktrees={browsedProject.worktreeRepositoryId ? () => intents.newTask.refreshWorktrees(browsedProject) : undefined}
+        repository={browsedProject.worktreeRepositoryId
+          ? primaryTask.newTask.worktreeRepositories[browsedProject.worktreeRepositoryId]
+          : undefined}
+      />
+    );
+  }
+
   if (renderableTaskSnapshot && !openingNativeSession) {
+    const taskProject = view.navigation.projects.find(
+      (project) => project.projectId === renderableTaskSnapshot.task.project_id,
+    );
     return (
       <TaskView
         activeTask={activeTask}
@@ -167,6 +196,12 @@ export function AppPrimaryTaskSurface({
         fileViewer={callbacks.task.fileViewer}
         headerActionsTarget={headerActionsTarget}
         headerOverflowTarget={headerOverflowTarget}
+        projectFiles={{
+          project: taskProject,
+          repository: taskProject?.worktreeRepositoryId
+            ? primaryTask.newTask.worktreeRepositories[taskProject.worktreeRepositoryId]
+            : undefined,
+        }}
         intents={intents.task}
         onCancel={renderableTaskSnapshot.task.has_messages || taskTurnOpen(renderableTaskSnapshot.task.status)
           ? callbacks.task.cancel

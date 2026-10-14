@@ -1,0 +1,778 @@
+/* Project files: Changes and Files of one workspace, beside Chat or as a Project page. */
+.project-files-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  font: 13px var(--oa-ui-font);
+}
+
+:where(.project-files-panel, .project-files-palette) button {
+  font: inherit;
+  color: inherit;
+}
+
+:where(.project-files-panel, .project-files-palette) button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+:where(.project-files-panel, .project-files-palette) :is(button, input):focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: -2px;
+}
+
+.project-files-added {
+  color: var(--oa-success);
+}
+
+.project-files-removed {
+  color: var(--oa-danger);
+}
+
+/* Entry in the Task header: how much the workspace changed, before the panel is open. */
+.project-files-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-md);
+  background: transparent;
+  color: var(--oa-text);
+  font: 12px var(--oa-ui-font);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An open panel shows the totals itself; the entry shrinks so the Task title keeps its room. */
+.task-work-stack-header .project-files-entry[aria-expanded="true"] > span {
+  display: none;
+}
+
+.project-files-entry:hover {
+  background: var(--oa-raised);
+}
+
+.project-files-entry[aria-expanded="true"] {
+  background: var(--oa-selected);
+  border-color: transparent;
+}
+
+.project-files-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  flex: none;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--oa-border);
+}
+
+.project-files-spacer {
+  flex: 1;
+}
+
+.project-files-back {
+  display: none;
+}
+
+.project-files-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+}
+
+.project-files-icon:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.project-files-icon[aria-busy="true"] svg {
+  animation: task-refresh-spin 900ms linear infinite;
+}
+
+.project-files-link {
+  flex: none;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-focus);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.project-files-link:hover {
+  background: var(--oa-raised);
+}
+
+/* Segmented switches: view, base, and how diffs are shown. */
+.project-files-segment {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-panel);
+}
+
+.project-files-segment button {
+  padding: 3px 9px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.project-files-segment button[aria-pressed="true"] {
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  box-shadow: 0 0 0 1px var(--oa-border);
+}
+
+.project-files-segment small {
+  margin-left: 3px;
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.project-files-mode {
+  background: var(--oa-raised);
+}
+
+.project-files-mode button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 22px;
+  padding: 0;
+}
+
+.project-files-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 5px 8px 5px 12px;
+  border-bottom: 1px solid var(--oa-border);
+  background: color-mix(in oklch, var(--oa-focus) 9%, transparent);
+  font-size: 12px;
+}
+
+.project-files-hint > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-files-hint svg {
+  flex: none;
+  color: var(--oa-muted);
+}
+
+.project-files-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  container: project-files / inline-size;
+}
+
+.project-files-nav {
+  flex: 0 0 232px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--oa-border);
+  background: var(--oa-panel);
+}
+
+.project-files-nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: none;
+  padding: 8px;
+}
+
+.project-files-nav-head .project-files-segment {
+  background: var(--oa-bg);
+  min-width: 0;
+}
+
+.project-files-nav-head .project-files-segment button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-files-nav-head .project-files-segment button[aria-pressed="true"] {
+  background: var(--oa-selected);
+  box-shadow: none;
+}
+
+.project-files-nav-title {
+  padding-left: 4px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.project-files-summary {
+  margin: 0;
+  padding: 0 12px 8px;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.project-files-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 12px;
+}
+
+.project-files-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 27px;
+  padding-right: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.project-files-row:hover {
+  background: var(--oa-raised);
+}
+
+.project-files-row[aria-current] {
+  background: var(--oa-selected);
+}
+
+.project-files-row svg {
+  flex: none;
+  color: var(--oa-muted);
+}
+
+.project-files-chevron {
+  width: 13px;
+  flex: none;
+}
+
+.project-files-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-files-row-label small {
+  margin-left: 8px;
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.project-files-row[data-deleted="true"] .project-files-row-label {
+  color: var(--oa-muted);
+  text-decoration: line-through;
+}
+
+.project-files-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font: 11px var(--oa-mono-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-files-status {
+  width: 12px;
+  color: var(--oa-warning);
+  font-weight: 600;
+  text-align: center;
+}
+
+.project-files-status[data-status="A"] {
+  color: var(--oa-success);
+}
+
+.project-files-status[data-status="D"],
+.project-files-status[data-status="!"] {
+  color: var(--oa-danger);
+}
+
+.project-files-note {
+  margin: 12px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.project-files-more {
+  margin: 6px 12px;
+  padding: 5px 9px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  font-size: 12px;
+}
+
+.project-files-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--oa-danger) 45%, var(--oa-border));
+  border-radius: var(--oa-radius-sm);
+  color: var(--oa-danger);
+  font: 12px var(--oa-ui-font);
+  white-space: normal;
+}
+
+.project-files-error button {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  font-size: 12px;
+}
+
+.project-files-reader {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-files-reader-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-files-reader-view[hidden] {
+  display: none;
+}
+
+.project-files-viewbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  height: 34px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--oa-border);
+  background: var(--oa-panel);
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.project-files-reader-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.project-files-stack section {
+  border-bottom: 1px solid var(--oa-border);
+}
+
+.project-files-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px 0 6px;
+  border-bottom: 1px solid var(--oa-border);
+  background: var(--oa-panel);
+  font: 12px var(--oa-mono-font);
+}
+
+.project-files-file-fold {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.project-files-file-fold svg {
+  flex: none;
+  color: var(--oa-muted);
+}
+
+.project-files-file-dir {
+  overflow: hidden;
+  color: var(--oa-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-files-file-head strong {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.project-files-one {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.project-files-one .project-files-file-head {
+  flex: none;
+  padding-left: 12px;
+}
+
+.project-files-one .project-files-file-head strong {
+  flex: 1;
+}
+
+.project-files-one .project-files-diff {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.project-files-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+}
+
+/* A narrow reader moves the links and the stepper under the file name instead of clipping them. */
+.project-files-one > .project-files-file-head {
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding-left: 10px;
+}
+
+.project-files-one > .project-files-file-head > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-files-step button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+}
+
+.project-files-step small {
+  color: var(--oa-muted);
+  font: 11px var(--oa-ui-font);
+  white-space: nowrap;
+}
+
+/* On one page each diff is as tall as its content and the page scrolls; a diff still to be
+   read keeps some height so the sections below it are not all near the viewport at once. */
+.project-files-stack .file-code-reader {
+  flex: none;
+  overflow-y: visible;
+}
+
+.project-files-stack .project-files-diff[data-pending="true"] {
+  min-height: 160px;
+}
+
+.project-files-diff .file-code-reader .file-viewer-source {
+  padding-bottom: 10px;
+}
+
+.project-files-diff > p {
+  margin: 0;
+  padding: 12px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.project-files-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: auto;
+  padding: 28px;
+  color: var(--oa-muted);
+  text-align: center;
+}
+
+.project-files-empty strong {
+  color: var(--oa-text);
+  font-weight: 600;
+}
+
+/* Files: opened files fill the reader. */
+.project-files-reader > .file-viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-files-reader .file-viewer-frame {
+  display: flex;
+  flex-direction: column;
+}
+
+.project-files-reader .file-viewer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.project-files-reader .file-viewer-chrome {
+  min-height: 34px;
+  background: var(--oa-panel);
+}
+
+.project-files-reader .file-viewer-tab {
+  flex-shrink: 0;
+  max-width: 240px;
+}
+
+.project-files-reader .file-viewer-tab svg {
+  flex-shrink: 0;
+}
+
+.project-files-reader .file-viewer-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Project viewer: the same panel as a page, without Chat. */
+.project-files-page {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-files-page > .project-files-panel {
+  flex: 1;
+}
+
+/* The list gives room back to the reader when the panel itself is narrow, whatever the window. */
+@container project-files (max-width: 640px) {
+  .project-files-nav {
+    flex-basis: 188px;
+  }
+}
+
+/* Phone: list and reader are separate screens; Changes and Files are the main tabs and the
+   workspace is a small chip beside Back. */
+@media (max-width: 760px) {
+  .project-files-head {
+    height: auto;
+    min-height: 46px;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 0 4px;
+  }
+  .project-files-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    height: 36px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--oa-radius-sm);
+    background: transparent;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .project-files-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .project-files-switcher {
+    position: static;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .project-files-workspace {
+    height: 34px;
+    border-radius: 17px;
+    background: transparent;
+    font-size: 13px;
+  }
+  .project-files-workspace strong {
+    font-weight: 500;
+  }
+  .project-files-workspace span {
+    display: none;
+  }
+  .project-files-panel[data-phone-page="list"] .project-files-spacer {
+    display: none;
+  }
+  .project-files-head > .project-files-view {
+    order: 8;
+    flex: 1 0 100%;
+    gap: 0;
+    margin: 0 -4px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .project-files-view button {
+    flex: 1;
+    height: 44px;
+    padding: 0;
+    border-radius: 0;
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .project-files-view button[aria-pressed="true"] {
+    background: transparent;
+    box-shadow: inset 0 -2px var(--oa-text);
+    font-weight: 600;
+  }
+  .project-files-view small {
+    margin-left: 5px;
+    padding: 1px 6px;
+    border-radius: 9px;
+    background: var(--oa-raised);
+    font-size: 12px;
+  }
+  .project-files-panel[data-phone-page="reader"] :is(.project-files-switcher, .project-files-view, .project-files-hint, .project-files-nav),
+  .project-files-panel[data-phone-page="list"] .project-files-reader {
+    display: none;
+  }
+  .project-files-nav {
+    flex: 1;
+    border-right: 0;
+  }
+  .project-files-nav-head {
+    padding: 10px 8px;
+  }
+  .project-files-nav-head .project-files-segment {
+    flex: 1;
+  }
+  .project-files-nav-head .project-files-segment button {
+    flex: 1;
+    padding: 5px 10px;
+    font-size: 13px;
+  }
+  .project-files-row {
+    min-height: 40px;
+    font-size: 14px;
+  }
+  .project-files-mode {
+    margin-right: 2px;
+  }
+  .project-files-mode button {
+    width: 40px;
+    height: 32px;
+  }
+  .project-files-file-head {
+    min-height: 42px;
+  }
+  .project-files-step button {
+    width: 40px;
+    height: 36px;
+  }
+  .project-files-reader .file-viewer-tabs {
+    display: none;
+  }
+  .project-files-reader .file-viewer-chrome {
+    justify-content: flex-end;
+  }
+  .project-files-sheet-backdrop {
+    z-index: 59;
+    background: color-mix(in oklch, black 32%, transparent);
+  }
+  .project-files-menu {
+    position: fixed;
+    z-index: 60;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    padding: 8px 8px calc(14px + env(safe-area-inset-bottom));
+    border-width: 1px 0 0;
+    border-radius: 18px 18px 0 0;
+  }
+  .project-files-menu::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 2px auto 6px;
+    border-radius: 2px;
+    background: var(--oa-border-strong);
+  }
+  .project-files-sheet-title {
+    padding: 4px 12px 8px;
+    font-size: 13px;
+  }
+  .project-files-menu button {
+    min-height: 60px;
+    gap: 14px;
+    padding: 8px 12px;
+    border-radius: var(--oa-radius-md);
+    font-size: 15px;
+  }
+  .project-files-menu small {
+    font-size: 13px;
+  }
+  .project-files-menu svg {
+    width: 18px;
+    height: 18px;
+  }
+}
