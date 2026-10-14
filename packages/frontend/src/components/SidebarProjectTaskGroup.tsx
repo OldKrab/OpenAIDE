@@ -1,5 +1,5 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
-import { Check, Folder, FolderOpen, GitBranch, Monitor, MoreHorizontal, Pencil, Plus, SquareTerminal, Trash2, X } from "lucide-react";
+import { Check, Folder, FolderOpen, FolderTree, GitBranch, Monitor, MoreHorizontal, Pencil, Plus, SquareTerminal, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
@@ -50,6 +50,8 @@ type SidebarProjectTaskGroupProps = {
   onLoadMore: (historyLimit: number, targetRowCount: number) => void;
   onManageWorktrees?: () => void;
   onNewTask: () => void;
+  /** Opens Project files as a page; absent where the App Shell cannot read files. */
+  onBrowseFiles?: () => void;
   onRemoveProject?: () => void;
   onRenameProject?: (label: string) => Promise<void>;
   onOpenNativeSession: (session: AgentListedSession) => void;
@@ -96,6 +98,7 @@ export function SidebarProjectTaskGroup({
   onLoadMore,
   onManageWorktrees,
   onNewTask,
+  onBrowseFiles,
   onRemoveProject,
   onRenameProject,
   onOpenNativeSession,
@@ -252,6 +255,7 @@ export function SidebarProjectTaskGroup({
                 <SquareTerminal size={13} />Open terminal
               </button>
             ) : null}
+            {onBrowseFiles ? <button onClick={() => { setMenuOpen(false); onBrowseFiles(); }} role="menuitem" type="button"><FolderTree size={13} />Browse files</button> : null}
             {canManageWorktrees && onManageWorktrees ? <button onClick={() => { setMenuOpen(false); onManageWorktrees(); }} role="menuitem" type="button"><GitBranch size={13} />Manage worktrees</button> : null}
             {onRenameProject ? <button onClick={() => { setMenuOpen(false); setRenameDraft(group.label); setRenameError(undefined); setRenaming(true); }} role="menuitem" type="button"><Pencil size={13} />Rename Project</button> : null}
             {onRemoveProject ? <button className="danger" onClick={() => { setMenuOpen(false); onRemoveProject(); }} role="menuitem" type="button"><Trash2 size={13} />Remove Project</button> : null}

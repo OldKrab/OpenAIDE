@@ -7,28 +7,38 @@ import { ProjectFilesButton } from "./ProjectFilesButton";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-it("moves the same accessible files action into the title row and back on resize", async () => {
+it("shows the change count in the Task header and as a badge in a compact header", async () => {
   const container = document.createElement("div");
   const titleRow = document.createElement("header");
   document.body.append(titleRow, container);
   const root = createRoot(container);
-  const open = vi.fn();
+  const toggle = vi.fn();
   try {
-    await act(async () => root.render(<ProjectFilesButton open={false} onOpen={open} />));
-    expect(container.querySelector("button")?.textContent).toBe("Project files");
-    await act(async () => root.render(<ProjectFilesButton open={false} onOpen={open} target={titleRow} />));
+    await act(async () => root.render(<ProjectFilesButton open={false} onToggle={toggle} />));
+    expect(container.querySelector("button")?.textContent).toBe("Files");
+    expect(container.querySelector("button")?.getAttribute("aria-label")).toBe("Project files");
+
+    await act(async () => root.render(<ProjectFilesButton added={12} count={3} open={false} onToggle={toggle} removed={4} />));
+    expect(container.querySelector("button")?.textContent).toBe("3 files+12−4");
+    expect(container.querySelector("button")?.getAttribute("aria-label")).toBe(
+      "Project files, 3 changed files, 12 added, 4 removed",
+    );
+
+    await act(async () =>
+      root.render(<ProjectFilesButton added={12} count={3} open={false} onToggle={toggle} removed={4} target={titleRow} />),
+    );
     expect(container.querySelector("button")).toBeNull();
     const button = titleRow.querySelector("button")!;
-    expect(button.getAttribute("aria-label")).toBe("Project files");
-    expect(button.textContent).toBe("");
-    expect(button.querySelector("svg")).not.toBeNull();
+    expect(button.textContent).toBe("3");
+    expect(button.getAttribute("aria-label")).toContain("3 changed files");
     await act(async () => button.click());
-    expect(open).toHaveBeenCalledOnce();
-    await act(async () => root.render(<ProjectFilesButton open={true} onOpen={open} target={titleRow} />));
+    expect(toggle).toHaveBeenCalledOnce();
+
+    await act(async () => root.render(<ProjectFilesButton open={true} onToggle={toggle} target={titleRow} />));
     expect(titleRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
-    await act(async () => root.render(<ProjectFilesButton open={true} onOpen={open} />));
+    expect(titleRow.querySelector("button")?.textContent).toBe("");
+    await act(async () => root.render(<ProjectFilesButton open={true} onToggle={toggle} />));
     expect(titleRow.querySelector("button")).toBeNull();
-    expect(container.querySelector("button")?.textContent).toBe("Project files");
   } finally {
     await act(async () => root.unmount());
     titleRow.remove();

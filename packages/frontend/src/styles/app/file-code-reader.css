@@ -3,47 +3,39 @@
   min-height: 0;
   overflow: auto;
   position: relative;
+  /* Comment boxes stay the reader's width while long code lines scroll sideways. */
+  container-type: inline-size;
   font: 12.5px/21px var(--oa-mono-font);
   color: var(--oa-text);
 }
 .file-code-reader .file-viewer-source {
-  padding: 12px 0 28px;
+  padding: 4px 0 28px;
   min-width: max-content;
+  outline: 0;
 }
+/* The number column is sized to its longest number instead of a fixed gutter. */
 .file-code-reader .file-viewer-line {
-  grid-template-columns: 84px minmax(0, 1fr);
+  grid-template-columns: calc(var(--code-digits, 3) * 1ch + 18px) minmax(0, 1fr);
   min-height: 21px;
   line-height: 21px;
 }
 .file-code-reader[data-diff="true"] .file-viewer-line {
-  grid-template-columns: 32px 32px 20px minmax(0, 1fr);
+  grid-template-columns:
+    calc(var(--code-digits, 3) * 1ch + 12px) calc(var(--code-digits, 3) * 1ch + 12px)
+    20px minmax(0, 1fr);
 }
 .file-code-reader .file-viewer-gutter {
-  padding: 0;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  display: block;
+  padding: 0 8px 0 0;
+  text-align: right;
+  font-size: 11px;
   user-select: none;
 }
-.code-line-number {
-  background: transparent;
-  border: 0;
-  padding: 0 8px;
-  min-width: 28px;
-  min-height: 21px;
-  font: 11px/21px var(--oa-mono-font);
-  color: var(--oa-muted);
-  touch-action: none;
-  user-select: none;
+.file-code-reader:not([data-diff="true"]) .file-viewer-code {
+  padding-left: 6px;
+}
+.file-code-reader[data-selectable="true"] .file-viewer-line {
   cursor: pointer;
-}
-.code-line-number:hover {
-  background: var(--oa-selected);
-  color: var(--oa-text);
-}
-.code-line-number:focus-visible {
-  outline: 2px solid var(--oa-focus);
-  outline-offset: -2px;
 }
 .code-diff-sign {
   text-align: center;
@@ -56,8 +48,21 @@
 .file-code-reader [data-kind="remove"] {
   background: color-mix(in oklch, var(--oa-danger) 12%, transparent);
 }
+.file-code-reader .file-viewer-line[data-noted="true"] {
+  box-shadow: inset 2px 0 var(--oa-muted);
+}
 .file-code-reader .file-viewer-line[data-selected="true"] {
-  background: var(--oa-selected);
+  background: color-mix(in oklch, var(--oa-focus) 16%, transparent);
+  box-shadow: inset 2px 0 var(--oa-focus);
+}
+.file-code-reader .file-viewer-source:focus-visible .file-viewer-line[data-cursor="true"] {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .file-code-reader[data-selectable="true"] .file-viewer-line:hover:not([data-selected="true"]) {
+    background-image: linear-gradient(color-mix(in oklch, var(--oa-text) 5%, transparent) 0 0);
+  }
 }
 .code-hunk-heading {
   padding: 6px 12px;
@@ -66,48 +71,180 @@
   font-size: 11px;
   user-select: none;
 }
-.code-selection-actions {
-  position: fixed;
-  z-index: 70;
+
+/* Comment box and saved notes sit in the flow under their lines. */
+.code-inline {
+  position: sticky;
+  left: 0;
+  width: 100cqw;
+  box-sizing: border-box;
+  padding: 6px 10px 8px;
+  font: 13px/1.45 var(--oa-ui-font);
+  white-space: normal;
+}
+.code-compose {
+  max-width: 560px;
+  overflow: hidden;
+  background: var(--oa-bg);
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-lg);
+  box-shadow: 0 6px 20px color-mix(in oklch, black 10%, transparent);
+}
+.code-compose:focus-within {
+  border-color: var(--oa-focus);
+}
+.code-compose-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 6px;
-  max-width: calc(100vw - 16px);
-  background: var(--oa-panel);
-  border: 1px solid var(--oa-border-strong);
-  border-radius: var(--oa-radius-md);
-  box-shadow: 0 4px 12px color-mix(in oklch, var(--oa-text) 12%, transparent);
-  font: 11px var(--oa-ui-font);
+  padding: 4px 4px 0 12px;
   color: var(--oa-muted);
+  font-size: 12px;
 }
-.code-selection-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  font: 12px var(--oa-ui-font);
+.code-compose-head strong {
   color: var(--oa-text);
-  border: 1px solid var(--oa-border);
-  background: transparent;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.code-compose-head span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-compose-head button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
   border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
   cursor: pointer;
 }
-.code-selection-actions button:last-child {
-  background: var(--oa-selected);
+.code-compose textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  max-height: 160px;
+  padding: 4px 12px 8px;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  border-radius: 0;
+  resize: none;
+  background: transparent;
+  color: var(--oa-text);
+  font: 14px/1.45 var(--oa-ui-font);
 }
-.code-selection-actions .code-select-range {
-  display: none;
+.code-compose-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 8px 8px;
 }
-@media (pointer: coarse) {
-  .code-selection-actions .code-select-range {
-    display: inline-flex;
-  }
-  .code-line-number {
-    min-height: 26px;
-  }
+.code-compose-foot button {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-text);
+  color: var(--oa-bg);
+  font: 500 13px var(--oa-ui-font);
+  cursor: pointer;
+}
+.code-compose-foot .code-compose-remove {
+  margin-right: auto;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--oa-danger);
+}
+.code-compose button:focus-visible,
+.code-comment:focus-visible,
+.code-quoted:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+.code-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  max-width: 560px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-raised);
+  color: var(--oa-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.code-comment svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--oa-muted);
+}
+.code-comment p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A quote with no comment is only a marker on its lines, never a bubble that reads like a comment. */
+.code-inline:has(.code-quoted) {
+  padding-top: 2px;
+  padding-bottom: 4px;
+}
+.code-quoted {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--oa-border);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--oa-muted);
+  font: 11px var(--oa-ui-font);
+  cursor: pointer;
+}
+@media (max-width: 760px) {
   .file-code-reader .file-viewer-line {
-    line-height: 26px;
-    min-height: 26px;
+    min-height: 28px;
+    line-height: 28px;
+  }
+  .code-inline {
+    padding: 8px;
+  }
+  .code-compose,
+  .code-comment {
+    max-width: none;
+  }
+  /* 16px keeps mobile browsers from zooming the page when the field takes focus. */
+  .code-compose textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .code-compose-head button {
+    width: 44px;
+    height: 40px;
+  }
+  .code-compose-foot button {
+    height: 40px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+  .code-quoted {
+    height: 28px;
+    border-radius: 14px;
+    font-size: 12px;
+  }
+  .code-comment {
+    padding: 10px 12px;
   }
 }

@@ -2,7 +2,7 @@ import { act, create } from "react-test-renderer";
 import { expect, it, vi } from "vitest";
 import { FILE_VIEWER_RELEASE, type FileViewerSnapshot } from "@openaide/app-server-client";
 import { useTaskFileViewer } from "./useTaskFileViewer";
-it("discards and releases an open completed after switching Tasks", async () => {
+it("discards and releases an open completed after switching workspaces", async () => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   let finish!: (value: FileViewerSnapshot) => void;
   const request = vi.fn((method: string) =>
@@ -14,7 +14,7 @@ it("discards and releases an open completed after switching Tasks", async () => 
   );
   let viewer!: ReturnType<typeof useTaskFileViewer>;
   function Harness({ taskId }: { taskId: string }) {
-    viewer = useTaskFileViewer({ taskId, enabled: true, connection: { request: request as never } });
+    viewer = useTaskFileViewer({ scope: { taskId }, enabled: true, connection: { request: request as never } });
     return <span>{viewer.tabs.length}</span>;
   }
   let tree!: ReturnType<typeof create>;

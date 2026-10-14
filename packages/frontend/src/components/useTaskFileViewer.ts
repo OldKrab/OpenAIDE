@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BackendConnection, FileViewerSnapshot } from "@openaide/app-server-client";
 import {
+  type FileViewerScope,
   openFileViewer,
   openFileViewerFromHandle,
   refreshFileViewer,
@@ -17,19 +18,21 @@ export type FileViewerPendingTab = {
 };
 export type FileViewerTab = FileViewerSnapshot | FileViewerPendingTab;
 
-/** One ephemeral tab/capability owner per Task and transport. Late completions are
- * released, never inserted into a different Task or a tab the user already closed. */
+/** One ephemeral tab/capability owner per workspace and transport. Late completions are
+ * released, never inserted into a different workspace or a tab the user already closed.
+ * Changing the workspace releases every handle the previous one held. */
 export function useTaskFileViewer({
   connection: input,
   enabled,
-  taskId,
+  scope,
   workspaceRoot,
 }: {
   connection?: FileViewerConnection;
   enabled: boolean;
-  taskId: string;
+  scope: FileViewerScope;
   workspaceRoot?: string;
 }) {
+  const { taskId, projectId, worktreeId } = scope;
   const request = input?.request;
   const owner = useMemo(
     () => ({
@@ -39,7 +42,7 @@ export function useTaskFileViewer({
       requests: new Map<string, number>(),
       sequence: 0,
     }),
-    [request, taskId, workspaceRoot, enabled],
+    [request, taskId, projectId, worktreeId, workspaceRoot, enabled],
   );
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
@@ -48,8 +51,6 @@ export function useTaskFileViewer({
   const [activeHandle, setActiveHandle] = useState<string>();
   const activeRef = useRef(activeHandle);
   activeRef.current = activeHandle;
-  const [collapsed, setCollapsed] = useState(false);
-  const [splitRatio, setSplitRatio] = useState(0.45);
   const update = useCallback((next: FileViewerTab[]) => {
     tabsRef.current = next;
     setTabs(next);
@@ -63,7 +64,6 @@ export function useTaskFileViewer({
   useEffect(() => {
     update([]);
     setActiveHandle(undefined);
-    setCollapsed(false);
     return () => {
       owner.pending.clear();
       owner.requests.clear();
@@ -93,7 +93,6 @@ export function useTaskFileViewer({
         setActiveHandle(snapshot.handle);
         activeRef.current = snapshot.handle;
       }
-      setCollapsed(false);
     },
     [owner, update],
   );
@@ -117,7 +116,7 @@ export function useTaskFileViewer({
       owner.pending.set(key, pending.handle);
       settle(pending, "", true);
       try {
-        const snapshot = await openFileViewer(owner.connection, taskId, key, line);
+        const snapshot = await openFileViewer(owner.connection, { taskId, projectId, worktreeId }, key, line);
         if (currentOwner.current !== owner || owner.pending.get(key) !== pending.handle) {
           void releaseFileViewer(owner.connection, snapshot.handle).catch(() => undefined);
           return;
@@ -141,7 +140,7 @@ export function useTaskFileViewer({
         if (owner.pending.get(key) === pending.handle) owner.pending.delete(key);
       }
     },
-    [enabled, owner, settle, taskId],
+    [enabled, owner, settle, taskId, projectId, worktreeId],
   );
   const openFromHandle = useCallback(
     async (handle: string, href: string) => {
@@ -203,14 +202,10 @@ export function useTaskFileViewer({
   return {
     activeTab,
     focusTab,
-    collapsed,
     closeTab,
     openFromHandle,
     openPath,
     refresh,
-    setCollapsed,
-    setSplitRatio,
-    splitRatio,
     tabs,
     selectTab: (handle: string) => {
       owner.sequence++;
