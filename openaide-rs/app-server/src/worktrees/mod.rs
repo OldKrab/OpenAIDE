@@ -189,6 +189,19 @@ impl WorktreeManager {
         })
     }
 
+    /// Resolves a worktree selected for read-only file access. Only worktrees already recorded
+    /// for the repository of `anchor` qualify, so an identifier cannot reach another repository.
+    pub fn sibling_worktree_root(
+        &self,
+        anchor: &Path,
+        worktree_id: &WorktreeId,
+    ) -> Result<PathBuf, RuntimeError> {
+        let read = self.store.lock_worktree_write();
+        let path = WorktreeCatalog::read(&self.store)?.sibling_worktree_path(anchor, worktree_id);
+        drop(read);
+        path.ok_or_else(|| RuntimeError::TaskNotFound(format!("Worktree {}", worktree_id.as_str())))
+    }
+
     /// Discovers and durably synchronizes the repository only when `project_root` is a Git top level.
     pub fn refresh_project(
         &self,

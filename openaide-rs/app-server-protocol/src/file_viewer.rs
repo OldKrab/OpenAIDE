@@ -1,13 +1,23 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::{FileViewerHandleId, TaskId};
+use crate::ids::{FileViewerHandleId, ProjectId, TaskId, WorktreeId};
 use crate::task::ToolImagePreview;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct FileViewerOpenParams {
-    pub task_id: TaskId,
+    /// Exactly one of `task_id` and `project_id` names the workspace that relative paths
+    /// resolve against; `worktree_id` selects another worktree of the same repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub task_id: Option<TaskId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project_id: Option<ProjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub worktree_id: Option<WorktreeId>,
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,

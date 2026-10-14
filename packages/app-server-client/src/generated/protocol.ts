@@ -1089,7 +1089,20 @@ export type TaskToolImagePreviewParams = { taskId: TaskId, artifactId: string, }
 
 export type TaskToolImagePreviewResult = { preview?: ToolImagePreview | null, };
 
-export type ProjectFilesParams = { taskId: TaskId, path: string, query: string, content: boolean, caseSensitive: boolean,
+export type ProjectFilesParams = {
+/**
+ * Exactly one of `task_id` and `project_id` names the scope: a Task authorizes its Task
+ * Workspace, a Project its root.
+ */
+taskId?: TaskId, projectId?: ProjectId,
+/**
+ * Selects another worktree of the scope's repository instead of its default root.
+ */
+worktreeId?: WorktreeId,
+/**
+ * What changes and diffs compare against. Absent means uncommitted work.
+ */
+base?: ProjectChangeBase, path: string, query: string, content: boolean, caseSensitive: boolean,
 /**
  * Search respects ignore files unless explicitly requested. Tree browsing includes ignored files.
  */
@@ -1107,9 +1120,22 @@ truncated: boolean,
 /**
  * Classified code only: unavailable, permissionDenied, outsideWorkspace, notRepository, timeout, tooLarge, changed.
  */
-error: string | null, branch: string | null, base: string | null, diff: ProjectFileDiff | null, };
+error: string | null, branch: string | null, base: string | null,
+/**
+ * Short name of the default branch when comparing against it would differ from
+ * uncommitted work; absent on that branch itself or when none can be found.
+ */
+defaultBranch: string | null,
+/**
+ * Number of changed files before paging; changes only.
+ */
+total: number | null, diff: ProjectFileDiff | null, };
 
-export type ProjectFileEntry = { path: string, name: string, directory: boolean, status: string | null, oldPath: string | null, line: number | null, text: string | null, };
+export type ProjectFileEntry = { path: string, name: string, directory: boolean, status: string | null, oldPath: string | null, line: number | null, text: string | null,
+/**
+ * Lines added and removed against the requested base; changes only.
+ */
+added: number | null, removed: number | null, };
 
 export type ProjectFileDiff = { path: string, oldPath: string | null, binary: boolean, conflicted: boolean, hunks: Array<ProjectDiffHunk>, };
 
@@ -1117,7 +1143,12 @@ export type ProjectDiffHunk = { heading: string, lines: Array<ProjectDiffLine>, 
 
 export type ProjectDiffLine = { kind: string, text: string, oldLine: number | null, newLine: number | null, };
 
-export type FileViewerOpenParams = { taskId: TaskId, path: string, line?: number | null, };
+export type FileViewerOpenParams = {
+/**
+ * Exactly one of `task_id` and `project_id` names the workspace that relative paths
+ * resolve against; `worktree_id` selects another worktree of the same repository.
+ */
+taskId?: TaskId, projectId?: ProjectId, worktreeId?: WorktreeId, path: string, line?: number | null, };
 
 export type FileViewerOpenFromHandleParams = { handle: FileViewerHandleId, href: string, };
 

@@ -1,7 +1,10 @@
 use super::*;
 fn params(path: &str) -> ProjectFilesParams {
     ProjectFilesParams {
-        task_id: "task".into(),
+        task_id: Some("task".into()),
+        project_id: None,
+        worktree_id: None,
+        base: None,
         path: path.into(),
         query: String::new(),
         content: false,
@@ -383,4 +386,146 @@ fn git_review_uses_linked_worktree_and_reports_conflicts() {
         .unwrap();
     assert!(diff.conflicted);
     assert!(diff.hunks.is_empty());
+}
+
+fn commit(root: &Path, message: &str) {
+    git_command(root, &["add", "."]);
+    git_command(
+        root,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            message,
+        ],
+    );
+}
+fn since_default_branch(path: &str) -> ProjectFilesParams {
+    ProjectFilesParams {
+        base: Some(ProjectChangeBase::DefaultBranch),
+        ..params(path)
+    }
+}
+fn counts(result: &ProjectFilesResult, path: &str) -> (Option<u32>, Option<u32>) {
+    let entry = result
+        .entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .unwrap_or_else(|| panic!("{path} is not listed"));
+    (entry.added, entry.removed)
+}
+
+#[test]
+fn changes_report_line_counts_and_total() {
+    let root = tempfile::tempdir().unwrap();
+    let p = root.path();
+    git_command(p, &["init", "-q", "-b", "main"]);
+    fs::write(p.join("edit.txt"), "one\ntwo\nthree\n").unwrap();
+    fs::write(p.join("gone.txt"), "a\nb\n").unwrap();
+    fs::write(p.join("old.txt"), "same\ncontent\n").unwrap();
+    fs::write(p.join("image.bin"), [0u8, 1, 2]).unwrap();
+    commit(p, "initial");
+    fs::write(p.join("edit.txt"), "one\nchanged\nthree\nfour\n").unwrap();
+    fs::remove_file(p.join("gone.txt")).unwrap();
+    git_command(p, &["mv", "old.txt", "new.txt"]);
+    fs::write(p.join("image.bin"), [0u8, 9, 9, 9]).unwrap();
+    fs::write(p.join("fresh.txt"), "x\ny\nz\n").unwrap();
+
+    let changes = run(p, "fileViewer/changes", &params(""));
+    assert!(changes.error.is_none());
+    assert_eq!(changes.total, Some(5));
+    assert_eq!(counts(&changes, "edit.txt"), (Some(2), Some(1)));
+    assert_eq!(counts(&changes, "gone.txt"), (Some(0), Some(2)));
+    assert_eq!(counts(&changes, "new.txt"), (Some(0), Some(0)));
+    assert_eq!(counts(&changes, "fresh.txt"), (Some(3), Some(0)));
+    // A binary change has no line counts rather than a misleading zero.
+    assert_eq!(counts(&changes, "image.bin"), (None, None));
+    // On the default branch there is nothing else to compare against.
+    assert_eq!(changes.default_branch, None);
+}
+
+#[test]
+fn default_branch_base_includes_committed_and_uncommitted_work() {
+    let root = tempfile::tempdir().unwrap();
+    let p = root.path();
+    git_command(p, &["init", "-q", "-b", "main"]);
+    fs::write(p.join("kept.txt"), "base\n").unwrap();
+    fs::write(p.join("removed.txt"), "base\n").unwrap();
+    commit(p, "base");
+    git_command(p, &["switch", "-qc", "feature"]);
+    fs::write(p.join("committed.txt"), "one\ntwo\n").unwrap();
+    fs::remove_file(p.join("removed.txt")).unwrap();
+    commit(p, "feature work");
+    fs::write(p.join("kept.txt"), "base\nlocal\n").unwrap();
+    fs::write(p.join("untracked.txt"), "new\n").unwrap();
+
+    let uncommitted = run(p, "fileViewer/changes", &params(""));
+    assert_eq!(uncommitted.default_branch.as_deref(), Some("main"));
+    let paths = |result: &ProjectFilesResult| {
+        result
+            .entries
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(paths(&uncommitted), ["kept.txt", "untracked.txt"]);
+
+    let since = run(p, "fileViewer/changes", &since_default_branch(""));
+    assert!(since.error.is_none());
+    assert_eq!(
+        paths(&since),
+        ["committed.txt", "kept.txt", "removed.txt", "untracked.txt"]
+    );
+    assert_eq!(counts(&since, "committed.txt"), (Some(2), Some(0)));
+    assert_eq!(counts(&since, "removed.txt"), (Some(0), Some(1)));
+    assert_eq!(counts(&since, "untracked.txt"), (Some(1), Some(0)));
+
+    let diff = run(p, "fileViewer/diff", &since_default_branch("committed.txt"))
+        .diff
+        .unwrap();
+    assert_eq!(diff.hunks[0].lines.len(), 2);
+    // The file is committed on this branch, so it is not an uncommitted change.
+    assert_eq!(
+        run(p, "fileViewer/diff", &params("committed.txt"))
+            .error
+            .as_deref(),
+        Some("changed")
+    );
+}
+
+#[test]
+fn default_branch_base_prefers_the_remote_tracking_branch_and_reports_absence() {
+    let root = tempfile::tempdir().unwrap();
+    let p = root.path();
+    git_command(p, &["init", "-q", "-b", "main"]);
+    fs::write(p.join("first.txt"), "first\n").unwrap();
+    commit(p, "published");
+    // The remote-tracking ref stays at the published commit while local main moves on.
+    git_command(p, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    fs::write(p.join("second.txt"), "second\n").unwrap();
+    commit(p, "local only");
+
+    let since = run(p, "fileViewer/changes", &since_default_branch(""));
+    assert_eq!(since.default_branch.as_deref(), Some("main"));
+    assert_eq!(since.entries.len(), 1);
+    assert_eq!(since.entries[0].path, "second.txt");
+
+    let other = tempfile::tempdir().unwrap();
+    let q = other.path();
+    git_command(q, &["init", "-q", "-b", "trunk"]);
+    fs::write(q.join("file.txt"), "content\n").unwrap();
+    commit(q, "initial");
+    assert_eq!(
+        run(q, "fileViewer/changes", &params("")).default_branch,
+        None
+    );
+    assert_eq!(
+        run(q, "fileViewer/changes", &since_default_branch(""))
+            .error
+            .as_deref(),
+        Some("noDefaultBranch")
+    );
 }
