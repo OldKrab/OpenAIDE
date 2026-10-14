@@ -1,7 +1,7 @@
 use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex, MutexGuard},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crate::protocol::host::HostRequest;
@@ -32,10 +32,24 @@ use super::{
     InboundProtocolMessage, RpcGateway,
 };
 
+/// A client request waiting this long for the protocol lock is user-visible latency:
+/// every request and publication on this gateway is serialized behind one mutex.
+const SLOW_LOCK_WAIT: Duration = Duration::from_millis(100);
+
 #[derive(Clone)]
 pub struct SharedRpcGateway {
     gateway: Arc<Mutex<RpcGateway>>,
     deliveries: DeliverySignal,
+    slow_lock_wait: Duration,
+}
+
+/// Protocol lock timing of one committed Task update publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskUpdatePublication {
+    /// Time spent queued behind other holders of the protocol lock.
+    pub lock_wait: Duration,
+    /// Time the publication held the lock while projecting and queueing events.
+    pub lock_held: Duration,
 }
 
 /// Gateway access that may have queued client deliveries. Releasing it wakes
@@ -96,7 +110,14 @@ impl SharedRpcGateway {
         Self {
             gateway: Arc::new(Mutex::new(gateway)),
             deliveries: DeliverySignal::default(),
+            slow_lock_wait: SLOW_LOCK_WAIT,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_slow_lock_wait(mut self, threshold: Duration) -> Self {
+        self.slow_lock_wait = threshold;
+        self
     }
 
     /// Wake source for transport links waiting on this gateway's deliveries.
@@ -215,7 +236,9 @@ impl SharedRpcGateway {
                 )
             };
         }
+        let wait_started_at = Instant::now();
         let mut gateway = self.lock();
+        self.log_slow_client_lock_wait(&connection_id, &message, wait_started_at.elapsed());
         let outcome = gateway.handle_inbound(connection_id.clone(), message, now);
         // An authenticated request that completes after a long Agent operation is fresh
         // client-liveness evidence. Renew before releasing the protocol lock so the expiry
@@ -569,12 +592,49 @@ impl SharedRpcGateway {
             .observe_connection_activity(connection_id, now)
     }
 
+    /// Publishes one committed Task update. Deliveries reach links through the delivery
+    /// signal; the caller receives only lock timing for its batch diagnostics.
     pub fn publish_committed_task_update(
         &self,
         update: &TaskUpdate,
         now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        self.lock().publish_task_update(update, now)
+    ) -> TaskUpdatePublication {
+        let wait_started_at = Instant::now();
+        let mut gateway = self.lock();
+        let held_since = Instant::now();
+        gateway.publish_task_update(update, now);
+        TaskUpdatePublication {
+            lock_wait: held_since.duration_since(wait_started_at),
+            lock_held: held_since.elapsed(),
+        }
+    }
+
+    fn log_slow_client_lock_wait(
+        &self,
+        connection_id: &ConnectionId,
+        message: &InboundProtocolMessage,
+        wait: Duration,
+    ) {
+        if wait < self.slow_lock_wait {
+            return;
+        }
+        let (kind, method) = match message {
+            InboundProtocolMessage::ClientRequest { method, .. } => ("request", Some(method)),
+            InboundProtocolMessage::ClientNotification { method, .. } => {
+                ("notification", Some(method))
+            }
+            InboundProtocolMessage::ClientResponse { .. } => ("response", None),
+        };
+        crate::logging::info(
+            "gateway_lock_wait_slow",
+            json!({
+                "operation": "protocol_lock",
+                "connection_id": connection_id.as_str(),
+                "transport_operation_kind": kind,
+                "method": method,
+                "wait_ms": wait.as_millis(),
+            }),
+        );
     }
 
     pub fn publish_worktree_repository_update(

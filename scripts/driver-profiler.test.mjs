@@ -38,6 +38,15 @@ test("correlated timings survive while prompts, paths, arbitrary errors and URLs
   assert.equal(safeRecord({ timestamp_ms: 999, event: "rpc_request_completed" }, "app_server", 1000), undefined);
 });
 
+test("protocol lock diagnostics survive capture", () => {
+  const batch = { operation: "task_update_publication", count: 6, published_count: 4, coalesced_count: 2,
+    wait_ms: 10, max_hold_ms: 40, update_kind: "navigation_project_entries_changed", duration_ms: 55 };
+  assert.deepEqual(safeRecord({ timestamp_ms: 2000, event: "task_update_batch_published", fields: batch }, "app_server", 1000).fields, batch);
+  const wait = { operation: "protocol_lock", connection_id: "local-http:conn-1", transport_operation_kind: "request",
+    method: "settings/getRuntime", wait_ms: 4378 };
+  assert.deepEqual(safeRecord({ timestamp_ms: 2000, event: "gateway_lock_wait_slow", fields: wait }, "app_server", 1000).fields, wait);
+});
+
 test("retention preserves a boundary segment and never removes unrelated files", () => {
   const options = { windowMs: 600_000, segmentMs: 30_000 };
   assert.equal(expiredSegment("369999.jsonl", 1_000_000, options), true);
