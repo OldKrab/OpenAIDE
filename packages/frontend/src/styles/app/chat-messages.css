@@ -629,6 +629,15 @@
   transform: translateX(-50%);
 }
 
+.quote-selection-action[data-placement="docked"] {
+  /* Touch selection: stay clear of the platform selection toolbar and handles
+     by resting on the Chat's lower edge, beside jump-to-latest. */
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  transform: none;
+}
+
 .quote-selection-action:hover {
   /* Host hover tokens may be translucent; keep the popover surface opaque. */
   background:

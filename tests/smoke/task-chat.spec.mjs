@@ -977,6 +977,27 @@ test("quotes selected rendered Chat text into the Composer at desktop and narrow
   await expect.poll(() => composer.evaluate(composerText)).toBe(
     "> linked text\n> inline\n> const selected = true;\n> const next = 2;\n",
   );
+
+  // A touch long-press ends in pointercancel, and the platform selection
+  // toolbar then covers the selection: Quote rests on Chat's lower edge.
+  const link = agent.getByRole("link", { name: "linked text" });
+  await link.dispatchEvent("pointerdown", { bubbles: true, pointerType: "touch" });
+  await selectRenderedText(link);
+  await link.dispatchEvent("pointercancel", { bubbles: true, pointerType: "touch" });
+  await expect(quote).toBeVisible();
+  const dockedBounds = await quote.boundingBox();
+  const selectedBounds = await link.boundingBox();
+  const composerBounds = await composer.boundingBox();
+  expect(dockedBounds).not.toBeNull();
+  expect(selectedBounds).not.toBeNull();
+  expect(composerBounds).not.toBeNull();
+  expect(dockedBounds.y).toBeGreaterThan(selectedBounds.y + selectedBounds.height);
+  expect(dockedBounds.y + dockedBounds.height).toBeLessThanOrEqual(composerBounds.y);
+  expect(dockedBounds.x).toBeGreaterThanOrEqual(0);
+  await quote.click();
+  await expect.poll(() => composer.evaluate(composerText)).toBe(
+    "> linked text\n> inline\n> const selected = true;\n> const next = 2;\n> linked text\n",
+  );
 });
 
 test("keeps a Task actions popup interactive after the pointer leaves its row", async ({ page }) => {

@@ -68,6 +68,45 @@ it("waits for pointer selection to settle before showing Quote", async () => {
   expect(document.querySelector('[aria-label="Quote selected text"]')).not.toBeNull();
 });
 
+it("docks Quote after a touch selection that ends in pointercancel", async () => {
+  mount(<QuoteTestSurface onQuote={vi.fn()} />);
+  const source = document.querySelector<HTMLElement>("[data-quote-source]")!;
+  const messageList = source.parentElement!;
+  const text = source.firstChild!;
+
+  await act(async () => messageList.dispatchEvent(pointerEvent("pointerdown", "touch")));
+  select(text, 0, 5);
+  await act(async () => messageList.dispatchEvent(pointerEvent("pointercancel", "touch")));
+
+  const quote = document.querySelector<HTMLButtonElement>('[aria-label="Quote selected text"]')!;
+  expect(quote.dataset.placement).toBe("docked");
+  expect(quote.style.left).toBe("");
+  expect(quote.style.top).toBe("");
+
+  // Dragging a selection handle changes the selection without pointer events.
+  select(text, 0, 2);
+  await act(async () => document.dispatchEvent(new Event("selectionchange")));
+  expect(document.querySelector('[aria-label="Quote selected text"]')).toBeNull();
+  select(text, 0, 10);
+  await act(async () => document.dispatchEvent(new Event("selectionchange")));
+  expect(document.querySelector<HTMLElement>('[aria-label="Quote selected text"]')!.dataset.placement).toBe("docked");
+});
+
+it("returns to the floating placement for a mouse selection after touch", async () => {
+  mount(<QuoteTestSurface onQuote={vi.fn()} />);
+  const source = document.querySelector<HTMLElement>("[data-quote-source]")!;
+  const messageList = source.parentElement!;
+
+  await act(async () => messageList.dispatchEvent(pointerEvent("pointerdown", "touch")));
+  await act(async () => messageList.dispatchEvent(pointerEvent("pointercancel", "touch")));
+  await act(async () => messageList.dispatchEvent(pointerEvent("pointerdown", "mouse")));
+  select(source.firstChild!, 0, 5);
+  await act(async () => messageList.dispatchEvent(pointerEvent("pointerup", "mouse")));
+
+  // jsdom lays nothing out, so only the return to an anchored placement is observable.
+  expect(document.querySelector<HTMLElement>('[aria-label="Quote selected text"]')!.dataset.placement).not.toBe("docked");
+});
+
 it("anchors Quote above the selection endpoint instead of its middle", async () => {
   mockRangeRects({
     collapsed: rect(240, 200, 0, 20),
@@ -96,6 +135,11 @@ function QuoteTestSurface({ onQuote }: { onQuote: (text: string) => void }) {
       <QuoteSelectionAction onQuote={onQuote} root={messageList} />
     </>
   );
+}
+
+function pointerEvent(type: string, pointerType: string) {
+  // jsdom has no PointerEvent constructor; the action reads only pointerType.
+  return Object.assign(new Event(type, { bubbles: true }), { pointerType });
 }
 
 function mount(element: React.ReactNode) {
