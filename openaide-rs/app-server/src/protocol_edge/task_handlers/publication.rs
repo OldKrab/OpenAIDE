@@ -265,6 +265,9 @@ impl RpcGateway {
         project_id: &ProjectId,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
+        // TODO: Build both section snapshots before taking the protocol lock. Each projection
+        // reads the whole Project's Tasks and Native Sessions while client requests wait;
+        // the Task update publisher only bounds how many projections run, not their cost.
         let mut events = Vec::new();
         for section in [Tasks, Archive] {
             let selected = [project_id.clone()];

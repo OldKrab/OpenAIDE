@@ -3,12 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use openaide_app_server::client_lifecycle::AppServerTime;
+use openaide_app_server::protocol_edge::run_task_update_publisher;
 use openaide_app_server::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
-use openaide_app_server::task_events::{TaskUpdate, TaskUpdateReceiver};
-
-#[cfg(test)]
-#[path = "protocol_edge_process_tests.rs"]
-mod tests;
 
 pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
     let task_updates = dispatcher.take_task_updates();
@@ -116,10 +112,12 @@ pub(super) fn run_local_http_handoff(
     mut dispatcher: ProtocolEdgeStdioDispatcher,
     wait_for_last_client: impl FnOnce(),
 ) {
+    // Names stay distinct within the 15-character Linux thread name, so profiler
+    // thread samples identify which publisher holds the protocol lock.
     if let Some(host_requests) = dispatcher.take_host_requests() {
         let gateway = dispatcher.shared_gateway();
         let host_bridge = dispatcher.host_bridge();
-        thread::spawn(move || {
+        spawn_named("openaide-host-requests", move || {
             for request in host_requests {
                 let response = gateway.respond_to_acp_host_request(&request);
                 let _ = host_bridge.try_handle_response(&response);
@@ -128,15 +126,13 @@ pub(super) fn run_local_http_handoff(
     }
     if let Some(task_updates) = dispatcher.take_task_updates() {
         let gateway = dispatcher.shared_gateway();
-        thread::spawn(move || {
-            forward_local_http_task_updates(task_updates, |update| {
-                gateway.publish_committed_task_update(&update, AppServerTime::now());
-            });
+        spawn_named("openaide-pub-tasks", move || {
+            run_task_update_publisher(task_updates, gateway);
         });
     }
     if let Some(worktree_updates) = dispatcher.take_worktree_updates() {
         let gateway = dispatcher.shared_gateway();
-        thread::spawn(move || {
+        spawn_named("openaide-pub-worktrees", move || {
             for repository in worktree_updates {
                 gateway.publish_worktree_repository_update(repository, AppServerTime::now());
             }
@@ -144,7 +140,7 @@ pub(super) fn run_local_http_handoff(
     }
     if let Some(agent_status_updates) = dispatcher.take_agent_status_updates() {
         let gateway = dispatcher.shared_gateway();
-        thread::spawn(move || {
+        spawn_named("openaide-pub-agents", move || {
             for _ in agent_status_updates {
                 gateway.publish_agent_status_update(AppServerTime::now());
             }
@@ -159,11 +155,13 @@ pub(super) fn run_local_http_handoff(
     );
 }
 
-fn forward_local_http_task_updates(
-    task_updates: TaskUpdateReceiver,
-    mut publish: impl FnMut(TaskUpdate),
-) {
-    for update in task_updates {
-        publish(update);
+/// A missing publisher would silently stop client updates, so spawn failure stays fatal.
+fn spawn_named(name: &str, work: impl FnOnce() + Send + 'static) {
+    if let Err(error) = thread::Builder::new().name(name.to_string()).spawn(work) {
+        openaide_app_server::logging::error(
+            "protocol_edge_thread_spawn_failed",
+            serde_json::json!({ "operation": name, "error_kind": format!("{:?}", error.kind()) }),
+        );
+        panic!("failed to spawn {name}: {error}");
     }
 }

@@ -25,7 +25,7 @@ const defaults = {
 };
 const maxSegmentBytes = 8 * 1024 * 1024;
 const maxReadBytes = 1024 * 1024;
-const fields = new Set(("task_id turn_id session_id native_session_id request_id client_request_id connection_id client_id operation_id agent_id method operation outcome outcome_kind response_kind reason reason_code stage status previous_status error_kind error_code error_recoverable attempt retry_count duration_ms elapsed_ms wait_ms timeout_ms count event_count server_request_count sequence revision queue_depth body_bytes output_bytes http_status transport_operation_kind surface generation accepted").split(" "));
+const fields = new Set(("task_id turn_id session_id native_session_id request_id client_request_id connection_id client_id operation_id agent_id method operation outcome outcome_kind response_kind reason reason_code stage status previous_status error_kind error_code error_recoverable attempt retry_count duration_ms elapsed_ms wait_ms timeout_ms count published_count coalesced_count max_hold_ms update_kind event_count server_request_count sequence revision queue_depth body_bytes output_bytes http_status transport_operation_kind surface generation accepted").split(" "));
 
 /** Profiler copies only correlation metadata, never raw diagnostics or protocol payloads. */
 export function safeRecord(value, source, cutoff) {

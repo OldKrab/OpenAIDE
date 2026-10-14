@@ -27,12 +27,14 @@ pub mod stdio;
 mod support_handlers;
 mod task_config_handlers;
 mod task_handlers;
+mod task_update_publisher;
 mod worktree_handlers;
 
 pub use delivery_signal::DeliverySignal;
 pub(crate) use messages::event_deliveries;
 pub use messages::{GatewayEventDelivery, GatewayOutcome, GatewayResponse, InboundProtocolMessage};
-pub use shared_gateway::SharedRpcGateway;
+pub use shared_gateway::{SharedRpcGateway, TaskUpdatePublication};
+pub use task_update_publisher::run_task_update_publisher;
 
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::methods::{

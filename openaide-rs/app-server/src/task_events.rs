@@ -61,6 +61,21 @@ pub enum TaskUpdateKind {
     },
 }
 
+impl TaskUpdateKind {
+    /// Stable metadata-only name for diagnostics.
+    pub fn diagnostic_name(&self) -> &'static str {
+        match self {
+            Self::Changed(_) => "changed",
+            Self::HistorySync(_) => "history_sync",
+            Self::ToolDetailChanged { .. } => "tool_detail_changed",
+            Self::SubagentCatalogChanged { .. } => "subagent_catalog_changed",
+            Self::SubagentHistoryChanged { .. } => "subagent_history_changed",
+            Self::NavigationProjectEntriesChanged { .. } => "navigation_project_entries_changed",
+            Self::NavigationRefreshStateChanged { .. } => "navigation_refresh_state_changed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskUpdate {
     pub task_id: String,
