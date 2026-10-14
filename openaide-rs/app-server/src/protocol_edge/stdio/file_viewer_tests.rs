@@ -155,6 +155,11 @@ fn file_viewer_download_streams_current_bytes_without_preview_limits() {
         headers.contains("filename*=UTF-8''%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0%20build.vsix"),
         "{headers}"
     );
+    // Desktop reads preview bytes cross-origin, from its own page.
+    assert!(
+        headers.contains("Access-Control-Allow-Origin: *"),
+        "{headers}"
+    );
     assert_eq!(body, current);
 }
 

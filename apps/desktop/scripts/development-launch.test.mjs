@@ -27,6 +27,11 @@ test("F5 builds and starts Desktop with isolated development storage", async () 
       },
       {
         command: "npm.cmd",
+        args: ["run", "build:renderers", "--workspace", "openaide-desktop"],
+        cwd: repositoryRoot,
+      },
+      {
+        command: "npm.cmd",
         args: [
           "run",
           "tauri",

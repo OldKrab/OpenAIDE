@@ -119,7 +119,8 @@ fn serve(
             }
         })
         .collect();
-    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n")?;
+    // Desktop reads preview bytes from its own origin; the bearer token, not the origin, authorizes.
+    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n")?;
     // Bound the transfer to its initial length even when an Agent is appending to the file.
     let copied = std::io::copy(&mut file.take(size), stream)?;
     if copied != size {

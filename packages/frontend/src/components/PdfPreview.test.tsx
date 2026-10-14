@@ -35,8 +35,8 @@ describe("PDF preview", () => {
     vi.unstubAllGlobals();
   });
 
-  const render = (content: FileViewerContent | undefined, onRefresh = vi.fn()) => act(async () => root.render(
-    <PdfPreview content={content} onClose={vi.fn()} onRefresh={onRefresh} tab={tab} telemetry={telemetry} />,
+  const render = (content: FileViewerContent | undefined, onRefresh = vi.fn(), rendererDocumentUrl?: string) => act(async () => root.render(
+    <PdfPreview content={content} onClose={vi.fn()} onRefresh={onRefresh} rendererDocumentUrl={rendererDocumentUrl} tab={tab} telemetry={telemetry} />,
   ));
   const reader = (result: FileViewerContentResult) => ({ read: vi.fn(async () => result) });
   const fromFrame = (frame: HTMLIFrameElement, data: unknown, source: unknown = frame.contentWindow) => act(async () => {
@@ -73,6 +73,7 @@ describe("PDF preview", () => {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.title).toBe("report.pdf preview");
     expect(frame.srcdoc).toContain("connect-src 'none'");
+    expect(telemetry).toHaveBeenCalledWith("pdf_preview_start", expect.objectContaining({ renderer_source: "packaged" }));
     const postMessage = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => undefined);
 
     // Another window cannot drive the viewer, and nothing is sent before the renderer is ready.
@@ -94,6 +95,24 @@ describe("PDF preview", () => {
 
     surface.querySelector<HTMLButtonElement>('[aria-label="Fit PDF to width"]')!.click();
     expect(postMessage).toHaveBeenLastCalledWith({ type: "openaide.pdf.zoom", zoom: "fit" }, "*", []);
+  });
+
+  it("navigates the sandbox to a shell-served renderer document instead of building one", async () => {
+    const bytes = new ArrayBuffer(16);
+    await render(reader({ kind: "bytes", bytes }), vi.fn(), "openaide-renderer://localhost/pdf.html");
+    const frame = surface.querySelector("iframe")!;
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("src")).toBe("openaide-renderer://localhost/pdf.html");
+    expect(frame.hasAttribute("srcdoc")).toBe(false);
+    // The shell serves the script beside its document; the parent does not fetch it.
+    expect(fetch).not.toHaveBeenCalled();
+    const postMessage = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => undefined);
+
+    await fromFrame(frame, { type: "openaide.pdf.ready", version: PDF_RENDERER_VERSION });
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide.pdf.load", bytes }), "*", [bytes]);
+    await fromFrame(frame, { type: "openaide.pdf.loaded", pageCount: 1 });
+    expect(surface.textContent).toContain("Page 1 of 1");
+    expect(telemetry).toHaveBeenCalledWith("pdf_preview_start", expect.objectContaining({ renderer_source: "shell" }));
   });
 
   it("replaces the viewer with a classified failure for an encrypted document", async () => {

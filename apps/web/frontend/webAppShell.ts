@@ -18,6 +18,7 @@ import {
 } from "../../../packages/frontend/src/shells/domBootstrap";
 import type { HostChannelMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import { clientInstanceIdForBootstrap } from "../../../packages/frontend/src/services/backendInitialization";
+import { readFileViewerContentOverHttp } from "../../../packages/frontend/src/services/fileViewerContentHttp";
 import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import {
   createRuntimeLogger,
@@ -226,29 +227,12 @@ export function createWebAppShell(): FrontendShell {
           operationId,
           preview: "1",
         });
-        const response = await fetch(`/__openaide-app-server/download?${search}`, {
-          credentials: "same-origin",
-          cache: "no-store",
+        return readFileViewerContentOverHttp(
+          `/__openaide-app-server/download?${search}`,
+          { credentials: "same-origin" },
+          maxBytes,
           signal,
-        });
-        if (response.status !== 200) {
-          await response.body?.cancel();
-          switch (response.status) {
-            case 400: return { kind: "notAFile" };
-            case 401:
-            case 403: return { kind: "permissionDenied" };
-            case 404: return { kind: "notFound" };
-            default: return { kind: "unavailable" };
-          }
-        }
-        // The endpoint always declares the length; refuse an oversized file before buffering it.
-        const declared = Number(response.headers.get("content-length") ?? Number.NaN);
-        if (!Number.isFinite(declared) || declared > maxBytes) {
-          await response.body?.cancel();
-          return { kind: Number.isFinite(declared) ? "tooLarge" : "unavailable" };
-        }
-        const bytes = await response.arrayBuffer();
-        return bytes.byteLength > maxBytes ? { kind: "tooLarge" } : { kind: "bytes", bytes };
+        );
       },
     },
     taskNotifications,

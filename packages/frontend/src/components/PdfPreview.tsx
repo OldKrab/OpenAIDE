@@ -40,10 +40,12 @@ export function PdfPreview({
   content = currentFrontendShell()?.fileViewerContent,
   onClose,
   onRefresh,
+  rendererDocumentUrl = currentFrontendShell()?.pdfRendererDocumentUrl,
   tab,
   telemetry = hostTelemetry,
 }: {
   content?: FileViewerContent;
+  rendererDocumentUrl?: string;
   /** Injectable so tests can assert the start and terminal diagnostics. */
   telemetry?: (event: string, fields: Record<string, unknown>) => void;
   onClose: (handle: string) => void;
@@ -78,7 +80,11 @@ export function PdfPreview({
       });
       if (!controller.signal.aborted) setState(next);
     };
-    telemetry("pdf_preview_start", { operation_id: operationId, attempt: 1 });
+    telemetry("pdf_preview_start", {
+      operation_id: operationId,
+      attempt: 1,
+      renderer_source: rendererDocumentUrl ? "shell" : "packaged",
+    });
     void (async () => {
       if (!content) return finish({ phase: "failed", reason: "unsupported" });
       const source = await readFileViewerContent(content, tab.handle, PDF_SOURCE_LIMIT_BYTES, controller.signal);
@@ -87,6 +93,7 @@ export function PdfPreview({
       if (controller.signal.aborted || !host.current) return finish({ phase: "failed", reason: "unavailable" }, sourceBytes);
       const opened = openPdfViewerFrame({
         bytes: source.bytes,
+        documentUrl: rendererDocumentUrl,
         host: host.current,
         onEvent: (event) => {
           if (event.type === "openaide.pdf.page") setPage(event.page);
@@ -107,7 +114,7 @@ export function PdfPreview({
       frame.current?.dispose();
       frame.current = undefined;
     };
-  }, [content, tab, telemetry]);
+  }, [content, rendererDocumentUrl, tab, telemetry]);
 
   useEffect(() => {
     if (state.phase === "ready") frame.current?.setTheme({ background: theme.background, text: theme.text });
