@@ -47,6 +47,9 @@
   min-width: 0;
   min-height: 0;
   display: grid;
+  /* The column is the pane width: a child with unbreakable content truncates
+     or scrolls inside itself instead of widening Chat past the viewport. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   justify-items: center;
   gap: 0;
