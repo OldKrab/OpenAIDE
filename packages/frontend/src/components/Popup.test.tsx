@@ -2,7 +2,7 @@
 
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, onTestFinished } from "vitest";
 import { anchoredPopupMaxHeight, PopupDialog, PopupMenu } from "./Popup";
 
 it("limits an upward popup to the space above its trigger", () => {
@@ -65,6 +65,32 @@ it("restores the trigger on Escape", async () => {
   expect(document.activeElement).toBe(trigger);
 });
 
+it("stays anchored when an open menu's trigger element is replaced", async () => {
+  // jsdom reports a 0x0 viewport, which would clamp every position to the padding.
+  const html = document.documentElement;
+  Object.defineProperty(html, "clientWidth", { configurable: true, value: 1024 });
+  Object.defineProperty(html, "clientHeight", { configurable: true, value: 768 });
+  onTestFinished(() => {
+    delete (html as { clientWidth?: number }).clientWidth;
+    delete (html as { clientHeight?: number }).clientHeight;
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<SwappingTriggerMenu locked={false} />));
+
+  // A grouped composer menu stays open while its trigger locks into a span.
+  await act(async () => root.render(<SwappingTriggerMenu locked />));
+
+  const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+  await expect.poll(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return menu.style.transform;
+  }).toBe("translate(100px, 596px)");
+});
+
 it("traps modal content and dismisses only through the dialog boundary", async () => {
   const container = document.createElement("div");
   document.body.append(container);
@@ -108,5 +134,28 @@ function TestDialog() {
         <button onClick={() => setOpen(false)} type="button">Close</button>
       </PopupDialog>
     </>
+  );
+}
+
+function SwappingTriggerMenu({ locked }: { locked: boolean }) {
+  return (
+    <PopupMenu
+      label="Options"
+      onOpenChange={() => undefined}
+      open
+      placement="top-start"
+      trigger={(props) => locked ? (
+        <span
+          ref={(node) => {
+            if (node) node.getBoundingClientRect = () => new DOMRect(100, 600, 80, 30);
+            props.ref(node);
+          }}
+        >
+          Options
+        </span>
+      ) : <button {...props} aria-label="Options" type="button">Options</button>}
+    >
+      <button role="menuitem" type="button">Model</button>
+    </PopupMenu>
   );
 }
