@@ -24,15 +24,15 @@
     padding-block-end: 12px;
   }
 
-  .chat-agent-block > .chat-agent:nth-last-child(2) > p:last-child {
-    padding-inline-end: 44px;
+  /* An inline spacer reserves room on the last line only; padding on the paragraph
+     would narrow every line of it. */
+  .chat-agent-block > .chat-agent:nth-last-child(2) > p:last-child::after {
+    content: "";
+    display: inline-block;
+    width: 44px;
   }
 
   /* The always-visible duration sits beside Copy; the last line keeps room for both. */
-  .chat-agent-block:has(.chat-action-time) > .chat-agent:nth-last-child(2) > p:last-child {
-    padding-inline-end: 0;
-  }
-
   .chat-agent-block:has(.chat-action-time) > .chat-agent:nth-last-child(2) > p:last-child::after {
     content: "";
     width: 116px;
