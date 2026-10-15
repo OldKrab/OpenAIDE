@@ -193,7 +193,7 @@ task creation, streaming, tool approvals, attachments, Back navigation, rotation
 reconnection, and recovery after Termux is stopped. APK compilation alone does
 not establish working Codex execution on Android.
 
-Remote push notifications, support-export downloads and automatic runtime-update application
+Remote push notifications and automatic runtime-update application
 are not implemented. Shared task and settings behavior stays
 in the existing Frontend and App Server.
 
@@ -216,6 +216,13 @@ and choose **App settings**) for setup, battery controls and
 **Advanced → Connection diagnostics → Share**. Offline setup calls this **Share diagnostics**.
 Logs include picker readability/delivery and WebView error
 metadata, but exclude file names, URLs, message content and secrets.
+
+Downloads the workspace starts (File Viewer, sent files, support exports) are
+fetched again by the app through its gateway and saved to Downloads; Android 8–9
+asks where to save instead of requiring a storage permission. The WebView saves
+nothing itself, and only downloads from the workspace's own origin are accepted.
+The gateway cookie stays in the app, so the system download manager is not used.
+Diagnostics record each download's outcome and duration, not its name or URL.
 
 The Android document picker grants access only to selected, readable `content:`
 URIs. The WebView resource policy allows those exact documents while continuing

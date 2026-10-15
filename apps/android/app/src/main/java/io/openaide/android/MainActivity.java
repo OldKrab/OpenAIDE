@@ -62,6 +62,7 @@ public final class MainActivity extends Activity {
     private boolean settingsOpen;
     private boolean credentialsUnavailable;
     private WorkspaceConnectionBridge connectionBridge;
+    private WorkspaceDownloads downloads;
     private boolean pendingSettings;
     private BackNavigation backNavigation;
 
@@ -83,6 +84,7 @@ public final class MainActivity extends Activity {
         generation++;
         connecting = false;
         if (connectionBridge != null) { connectionBridge.dispose(); connectionBridge = null; }
+        if (downloads != null) { downloads.dispose(); downloads = null; }
         if (browser != null) { browser.destroy(); browser = null; }
         resourcePolicy.clear();
         LinearLayout layout = new LinearLayout(this);
@@ -383,6 +385,9 @@ public final class MainActivity extends Activity {
                 return true;
             }
         });
+        // Without a listener the WebView drops every download the Web Shell starts.
+        downloads = new WorkspaceDownloads(this, profile);
+        browser.setDownloadListener(downloads);
         browser.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onConsoleMessage(ConsoleMessage message) {
                 if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR || message.messageLevel() == ConsoleMessage.MessageLevel.WARNING)
@@ -435,6 +440,10 @@ public final class MainActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request == 4 && connectionBridge != null) {
             connectionBridge.onActivityResult(request, result, data);
+            return;
+        }
+        if (request == WorkspaceDownloads.SAVE_REQUEST) {
+            if (downloads != null) downloads.onActivityResult(result, data);
             return;
         }
         if (request == 5) {
@@ -520,6 +529,7 @@ public final class MainActivity extends Activity {
         generation++;
         worker.shutdownNow();
         if (connectionBridge != null) connectionBridge.dispose();
+        if (downloads != null) downloads.dispose();
         if (fileCallback != null) {
             diagnostics.record("file_picker", "activity_destroyed", 0, SystemClock.elapsedRealtime() - pickerStarted);
             fileCallback.onReceiveValue(null);

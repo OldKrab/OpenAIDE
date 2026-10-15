@@ -128,6 +128,55 @@ public final class DeviceChecks extends InstrumentationTestCase {
         getInstrumentation().runOnMainSync(activity::finish);
     }
 
+    /** The Web Shell downloads by clicking an `<a download>`; the WebView saves nothing unless the shell does. */
+    public void testWorkspaceDownloadIsSavedToDownloads() throws Exception {
+        if (android.os.Build.VERSION.SDK_INT < 29) return; // Older Android asks the user where to save.
+        var context = getInstrumentation().getTargetContext();
+        MainActivity activity = (MainActivity) getInstrumentation().startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        // Any Task route serves the Frontend document, so its last segment names a file no earlier run left behind.
+        String name = "openaide-download-check-" + System.nanoTime();
+        Uri saved = null;
+        try {
+            waitForBrowser(activity);
+            var field = MainActivity.class.getDeclaredField("browser");
+            field.setAccessible(true);
+            var page = (android.webkit.WebView) field.get(activity);
+            CountDownLatch clicked = new CountDownLatch(1);
+            android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+            handler.post(new Runnable() {
+                @Override public void run() {
+                    page.evaluateJavascript("document.readyState === 'complete' && location.origin === 'http://127.0.0.1:5476' && "
+                        + "(()=>{const link=document.createElement('a');link.href='/task/" + name + "';link.download='';link.click();return true})()", value -> {
+                        if ("true".equals(value)) clicked.countDown();
+                        else handler.postDelayed(this, 50);
+                    });
+                }
+            });
+            try { assertTrue("Workspace page did not load", clicked.await(10, TimeUnit.SECONDS)); }
+            finally { handler.removeCallbacksAndMessages(null); }
+            Uri downloads = android.provider.MediaStore.Downloads.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            long deadline = android.os.SystemClock.elapsedRealtime() + 15_000;
+            long size = 0;
+            while (saved == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+                try (var rows = context.getContentResolver().query(downloads,
+                        new String[]{android.provider.MediaStore.MediaColumns._ID, android.provider.MediaStore.MediaColumns.SIZE},
+                        android.provider.MediaStore.MediaColumns.DISPLAY_NAME + " LIKE ? AND " + android.provider.MediaStore.MediaColumns.IS_PENDING + " = 0",
+                        new String[]{name + "%"}, null)) {
+                    if (rows != null && rows.moveToFirst()) {
+                        saved = android.content.ContentUris.withAppendedId(downloads, rows.getLong(0));
+                        size = rows.getLong(1);
+                    }
+                }
+                if (saved == null) Thread.sleep(100);
+            }
+            assertNotNull("The download was not saved to Downloads", saved);
+            assertTrue("The saved download is empty", size > 0);
+        } finally {
+            if (saved != null) context.getContentResolver().delete(saved, null, null);
+            getInstrumentation().runOnMainSync(activity::finish);
+        }
+    }
+
     public void testTermuxReturnsStructuredPreflightThroughPendingIntent() throws Exception {
         var context = getInstrumentation().getTargetContext();
         var activity = getInstrumentation().startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
