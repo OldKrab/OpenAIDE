@@ -1787,7 +1787,7 @@ describe("Sidebar", () => {
     expect(taskRows(tree)).toHaveLength(20);
   });
 
-  it("hides the active task when its project group is collapsed", () => {
+  it("hides idle history when its project group is collapsed", () => {
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
@@ -2224,7 +2224,7 @@ describe("Sidebar", () => {
     expect(rowTitles(tree)).toEqual(["Earlier active", "Later active"]);
   });
 
-  it("does not displace pinned rows to force a selected unpinned task into pagination", () => {
+  it("keeps pinned rows and the selected task beyond the per-Project limit", () => {
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
@@ -2260,8 +2260,68 @@ describe("Sidebar", () => {
       />,
     );
 
-    expect(rowTitles(tree)).toEqual(["Pinned new", "Pinned old"]);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load more");
+    expect(rowTitles(tree)).toEqual(["Pinned new", "Pinned old", "Selected unpinned"]);
+    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+  });
+
+  it("does not let live rows use up a Project's history limit", () => {
+    const onLoadNativeSessions = vi.fn();
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        maxTasksPerProject={2}
+        nativeSessions={nativeSessions()}
+        onLoadNativeSessions={onLoadNativeSessions}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        showArchived={false}
+        tasks={[
+          task({ task_id: "running", project_id: "project_1", status: "active", title: "Running", last_activity: "2026-07-02T10:00:00.000Z" }),
+          task({ task_id: "waiting", project_id: "project_1", status: "waiting", title: "Waiting", last_activity: "2026-07-02T09:59:00.000Z" }),
+          task({ task_id: "unread", project_id: "project_1", unread: true, title: "Unread", last_activity: "2026-07-02T09:58:00.000Z" }),
+          ...[1, 2, 3, 4].map((index) => task({
+            task_id: `idle_${index}`,
+            project_id: "project_1",
+            title: `Idle ${index}`,
+            last_activity: `2026-07-02T09:0${index}:00.000Z`,
+          })),
+        ]}
+      />,
+    );
+
+    expect(rowTitles(tree)).toEqual(["Running", "Waiting", "Unread", "Idle 4", "Idle 3"]);
+    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
+    expect(rowTitles(tree)).toEqual(["Running", "Waiting", "Unread", "Idle 4", "Idle 3", "Idle 2", "Idle 1"]);
+    // App Server demand counts every row the group now shows.
+    expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 7);
+  });
+
+  it("keeps live rows visible while their Project group is collapsed", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        activeTaskId="selected"
+        groupByProject={true}
+        nativeSessions={nativeSessions()}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        showArchived={false}
+        tasks={[
+          task({ task_id: "running", project_id: "project_1", status: "active", title: "Running" }),
+          task({ task_id: "selected", project_id: "project_1", title: "Selected" }),
+          task({ task_id: "idle", project_id: "project_1", title: "Idle" }),
+        ]}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
+
+    const live = tree.root.findByProps({ className: "project-task-group-live" });
+    expect(live.findAll((node) => node.props.className === "task-title").map((node) => node.children.join("")))
+      .toEqual(["Running", "Selected"]);
+    const collapsed = tree.root.findByProps({ className: "project-task-group-rows collapsed" });
+    expect(collapsed.props["aria-hidden"]).toBe(true);
+    expect(collapsed.findAll((node) => node.props.className === "task-title").map((node) => node.children.join("")))
+      .toEqual(["Idle"]);
   });
 
   it("uses the primary new task action instead of per-project create controls", () => {

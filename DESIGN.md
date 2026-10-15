@@ -295,6 +295,7 @@ Shared radius, fill, and border can create useful coherence. Vary them when role
 - The phone shell is a first-class design surface, not a narrow desktop layout. Follow current Android conventions: edge-to-edge layout with system bar insets, predictive back, bottom sheets for secondary flows, 48dp minimum touch targets, and primary actions within thumb reach.
 - Native screens, the launch screen, and screens rendered in a WebView share one visual language and the same tokens, so the person cannot tell where one technology ends.
 - Use larger type, radii, and spacing than the desktop scale where touch and viewing distance call for it.
+- Exception: the phone Task Navigation list is dense, with 36px rows stacked edge to edge, so a short screen shows the work in several Projects at once. A slightly missed tap lands on a neighbouring row, never on dead space.
 - Camera, permission, and system dialogs are introduced by the app's own designed step, never shown cold.
 
 ### Web

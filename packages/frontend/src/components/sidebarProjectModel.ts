@@ -73,15 +73,33 @@ export function projectGroupRows(tasks: TaskSummary[], sessions: AgentListedSess
   ].sort(compareProjectGroupRows);
 }
 
-export function recentVisibleRows(rows: SidebarProjectRow[], maxRows: number, activeRow?: SidebarProjectRow) {
-  const visible = rows.slice(0, maxRows);
-  if (activeRow && !visible.some((row) => sameProjectGroupRow(row, activeRow))) {
-    if (visible.length === maxRows && visible.every(rowPinned)) {
-      return visible;
-    }
-    return [activeRow, ...visible.slice(0, Math.max(0, maxRows - 1))];
-  }
-  return visible;
+/**
+ * Live rows show work the user may need to act on now, so the per-Project presentation limit
+ * never hides them: pinned and unread Tasks, the open Task, and Tasks that are running,
+ * stopping, or waiting for the user. Every other row is history.
+ */
+export function projectRowLive(row: SidebarProjectRow, activeTaskId?: string) {
+  if (row.kind !== "task") return false;
+  const { task } = row;
+  return task.pinned
+    || task.unread
+    || task.task_id === activeTaskId
+    || taskInProgress(task)
+    || task.status === "stopping"
+    || task.status === "waiting";
+}
+
+export function projectHistoryRowCount(rows: SidebarProjectRow[], activeTaskId?: string) {
+  return rows.filter((row) => !projectRowLive(row, activeTaskId)).length;
+}
+
+/**
+ * Keeps every live row plus the newest `historyLimit` history rows. Rows keep their sorted
+ * position, so a row that turns live or idle never jumps within its Project group.
+ */
+export function liveFirstVisibleRows(rows: SidebarProjectRow[], historyLimit: number, activeTaskId?: string) {
+  let historyShown = 0;
+  return rows.filter((row) => projectRowLive(row, activeTaskId) || historyShown++ < historyLimit);
 }
 
 export function recentVisibleGroups(
@@ -178,15 +196,4 @@ function activityMillis(value: string | undefined) {
   if (!trimmed) return 0;
   const parsed = /^\d+$/.test(trimmed) ? Number(trimmed) : Date.parse(trimmed);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function sameProjectGroupRow(left: SidebarProjectRow, right: SidebarProjectRow) {
-  if (left.kind !== right.kind) return false;
-  if (left.kind === "task" && right.kind === "task") {
-    return left.task.task_id === right.task.task_id;
-  }
-  if (left.kind === "session" && right.kind === "session") {
-    return left.session.session_id === right.session.session_id;
-  }
-  return false;
 }
