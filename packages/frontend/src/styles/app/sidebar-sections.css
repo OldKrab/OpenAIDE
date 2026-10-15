@@ -203,6 +203,13 @@ body[data-shell="web"] .task-list {
   grid-template-rows: 0fr;
 }
 
+/* Live rows stay visible while their collapsed group hides idle history. */
+.project-task-group-live {
+  min-width: 0;
+  display: grid;
+  padding-left: 6px;
+}
+
 .project-task-group-rows-inner {
   min-height: 0;
   display: grid;

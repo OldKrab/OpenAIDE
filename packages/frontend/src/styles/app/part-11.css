@@ -153,8 +153,8 @@ body[data-input-modality="pointer"] button:focus-visible {
     scrollbar-gutter: stable;
     margin-right: -8px;
     padding-right: 4px;
-    padding-bottom: 24px;
-    scroll-padding-bottom: 24px;
+    padding-bottom: 12px;
+    scroll-padding-bottom: 12px;
   }
 
   body[data-shell="web"] .web-workbench-shell .sidebar .sidebar-footer {
@@ -256,12 +256,30 @@ body[data-input-modality="pointer"] button:focus-visible {
     padding: 0 0 10px;
   }
 
-  body[data-shell="web"] .sidebar-search,
   body[data-shell="web"] .settings-button,
   body[data-shell="web"] .archive-mode-button,
-  body[data-shell="web"] .project-task-more,
   body[data-shell="web"] .session-more {
     min-height: 44px;
+  }
+
+  /* Task Navigation is dense on phones: stacked 36px rows leave no dead space between
+     targets, so a short screen can show more of the user's Projects. */
+  body[data-shell="web"] .project-task-more {
+    min-height: 36px;
+  }
+
+  body[data-shell="web"] .sidebar-actions {
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+
+  body[data-shell="web"] .sidebar-search {
+    min-height: 40px;
+    padding-block: 0;
+  }
+
+  body[data-shell="web"] .task-section-head {
+    margin-bottom: 2px;
   }
 
   body[data-shell="web"] .web-workbench-shell .project-task-more,
@@ -284,7 +302,7 @@ body[data-input-modality="pointer"] button:focus-visible {
   }
 
   body[data-shell="web"] .task-row-action {
-    min-height: 44px;
+    min-height: 36px;
     min-width: 44px;
     width: 44px;
     opacity: 1;
@@ -300,39 +318,57 @@ body[data-input-modality="pointer"] button:focus-visible {
   }
 
   body[data-shell="web"] .task-row-menu {
-    top: 44px;
+    top: 36px;
     right: 0;
   }
 
   body[data-shell="web"] .sidebar-actions > button {
     width: 100%;
-    min-height: 44px;
+    min-height: 36px;
     min-width: 0;
     white-space: nowrap;
   }
 
   body[data-shell="web"] .task-open {
-    min-height: 44px;
-    padding-block: 8px;
+    min-height: 36px;
+    padding-block: 4px;
   }
 
+  /* Typed text stays 16px so iOS Safari does not zoom on focus; the empty
+     placeholder matches the 14px sidebar rows. */
   body[data-shell="web"] .sidebar-search input {
-    min-height: 44px;
+    min-height: 40px;
     font-size: 16px;
+  }
+
+  body[data-shell="web"] .sidebar-search input::placeholder {
+    font-size: 14px;
   }
 
   body[data-shell="web"] .sidebar-search .sidebar-search-clear {
     width: 44px;
     min-width: 44px;
-    min-height: 44px;
-    height: 44px;
+    min-height: 40px;
+    height: 40px;
     margin-right: -6px;
+  }
+
+  /* Touch targets already give each row breathing room; tighter group spacing
+     lets a short phone screen fit another Task. */
+  body[data-shell="web"] .project-task-group {
+    gap: 0;
+    padding-block: 2px;
   }
 
   body[data-shell="web"] .project-task-group-header {
     min-height: 44px;
     height: auto;
+    margin-bottom: 0;
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  body[data-shell="web"] .project-task-more {
+    margin-top: 0;
   }
 
   body[data-shell="web"] .project-task-group-actions > button {

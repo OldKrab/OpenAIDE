@@ -10,8 +10,9 @@ import {
 } from "../state/taskNavigationPolicy";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
+import { useTaskNavigationFit } from "./useTaskNavigationFit";
 import { SidebarTaskRow } from "./SidebarTaskRow";
-import { groupedTasks, projectGroupRows, recentVisibleGroups } from "./sidebarProjectModel";
+import { groupedTasks, projectGroupRows, projectHistoryRowCount, recentVisibleGroups } from "./sidebarProjectModel";
 import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
@@ -192,6 +193,22 @@ export const Sidebar = memo(function Sidebar({
   const visibleGroups = groupByProject
     ? recentVisibleGroups(groups, Math.max(1, visibleProjectLimit), activeProjectKey)
     : [];
+  const projectHasMore = (projectKey: string) =>
+    !showArchived && nativeSessions.hasMoreProjectIds?.includes(projectKey) === true;
+  const projectCollapsed = (projectKey: string) => !groupSearchQuery && collapsedProjectKeys.has(projectKey);
+  // Load More pins a group's history limit; collapsed groups show live rows only. Every other
+  // visible group shrinks its history to fit the viewport, up to the per-Project limit.
+  const fittedHistory = useTaskNavigationFit(
+    taskListRef,
+    visibleGroups
+      .filter((group) => !projectRowLimits.has(group.key) && !projectCollapsed(group.key))
+      .map((group) => ({
+        key: group.key,
+        history: projectHistoryRowCount(projectGroupRows(group.tasks, group.nativeSessions), activeTaskId),
+        cap: initialProjectRowLimit,
+        moreAlways: projectHasMore(group.key),
+      })),
+  );
   const hiddenProjectCount = groupByProject ? Math.max(0, groups.length - visibleGroups.length) : 0;
   const selectedSessionProjectCollapsed =
     groupByProject &&
@@ -337,19 +354,19 @@ export const Sidebar = memo(function Sidebar({
               <SidebarProjectTaskGroup
                 activeTaskId={activeTaskId}
                 agentIcons={agentIcons}
-                collapsed={groupSearchQuery ? false : collapsedProjectKeys.has(group.key)}
+                collapsed={projectCollapsed(group.key)}
                 group={group}
                 key={group.key}
-                maxTasks={projectRowLimits.get(group.key) ?? initialProjectRowLimit}
+                historyLimit={
+                  projectRowLimits.get(group.key) ?? fittedHistory.get(group.key) ?? initialProjectRowLimit
+                }
                 pageSize={projectPageSize}
                 nativeSessionAgentId={nativeSessionAgentId}
                 nativeSessionAgentName={nativeSessionAgentName}
                 nativeSessions={group.nativeSessions}
                 nativeSessionMutations={nativeSessionMutations}
                 nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
-                nativeSessionsHaveMore={
-                  !showArchived && nativeSessions.hasMoreProjectIds?.includes(group.key) === true
-                }
+                nativeSessionsHaveMore={projectHasMore(group.key)}
                 searching={hasSearchQuery}
                 loading={
                   !showArchived && nativeSessions.loadingProjectIds?.includes(group.key) === true
@@ -365,17 +382,10 @@ export const Sidebar = memo(function Sidebar({
                 onArchiveOlderTasks={onArchiveOlderTasks}
                 onForkNativeSession={onForkNativeSession}
                 onForkTask={onForkTask}
-                onLoadMore={(visibleIncrement) =>
-                  {
-                    const nextLimit = (projectRowLimits.get(group.key) ?? initialProjectRowLimit) + visibleIncrement;
-                    setProjectRowLimits((current) => {
-                    const next = new Map(current);
-                    next.set(group.key, nextLimit);
-                    return next;
-                    });
-                    onLoadNativeSessions(undefined, group.key, nextLimit);
-                  }
-                }
+                onLoadMore={(historyLimit, targetRowCount) => {
+                  setProjectRowLimits((current) => new Map(current).set(group.key, historyLimit));
+                  onLoadNativeSessions(undefined, group.key, targetRowCount);
+                }}
                 onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(group.key) : undefined}
                 onNewTask={() => onNewTask(group.key)}
                 onRemoveProject={onRemoveProject ? () => onRemoveProject({

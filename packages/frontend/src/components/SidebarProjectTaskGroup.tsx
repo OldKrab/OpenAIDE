@@ -5,9 +5,11 @@ import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import {
+  liveFirstVisibleRows,
   projectGroupRows,
-  recentVisibleRows,
+  projectRowLive,
   type SidebarProjectGroup,
+  type SidebarProjectRow,
 } from "./sidebarProjectModel";
 import { useSidebarTaskPreview } from "./SidebarTaskPreview";
 import { useRef } from "react";
@@ -19,7 +21,8 @@ type SidebarProjectTaskGroupProps = {
   agentIcons?: import("./AgentIcon").AgentIconLookup;
   collapsed: boolean;
   group: SidebarProjectGroup;
-  maxTasks: number;
+  /** History rows to show beside live rows, which are never limited. */
+  historyLimit: number;
   pageSize: number;
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
@@ -41,7 +44,8 @@ type SidebarProjectTaskGroupProps = {
   onArchiveOlderTasks?: ArchiveOlderTasksAction;
   onForkNativeSession?: (session: AgentListedSession) => void;
   onForkTask?: (taskId: string) => void;
-  onLoadMore: (visibleIncrement: number) => void;
+  /** Reveals more history; `targetRowCount` is the total row demand for App Server discovery. */
+  onLoadMore: (historyLimit: number, targetRowCount: number) => void;
   onManageWorktrees?: () => void;
   onNewTask: () => void;
   onRemoveProject?: () => void;
@@ -66,7 +70,7 @@ export function SidebarProjectTaskGroup({
   agentIcons,
   collapsed,
   group,
-  maxTasks,
+  historyLimit,
   pageSize,
   nativeSessionAgentId,
   nativeSessionAgentName,
@@ -110,14 +114,12 @@ export function SidebarProjectTaskGroup({
   const [renameError, setRenameError] = useState<string>();
   const headerRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
-  const activeTask = group.tasks.find((task) => task.task_id === activeTaskId);
   const taskRows = projectGroupRows(group.tasks, []);
   const allRows = projectGroupRows(group.tasks, nativeSessions);
-  const activeRow = activeTask
-    ? allRows.find((row) => row.kind === "task" && row.task.task_id === activeTask.task_id)
-    : undefined;
-  const visibleRows = recentVisibleRows(allRows, maxTasks, activeRow);
+  const visibleRows = liveFirstVisibleRows(allRows, historyLimit, activeTaskId);
+  const liveRows = visibleRows.filter((row) => projectRowLive(row, activeTaskId));
   const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
+  const shownHistory = visibleRows.length - liveRows.length;
   const countSummary = loading
     ? "Loading…"
     : projectGroupCountSummary(taskRows.length, nativeSessions.length, searching && nativeSessionsHaveMore);
@@ -140,6 +142,50 @@ export function SidebarProjectTaskGroup({
       setRenameSaving(false);
     }
   };
+
+  const renderRow = (row: SidebarProjectRow) => (
+    row.kind === "task" ? (
+      <SidebarTaskRow
+        key={`task:${row.task.task_id}`}
+        activeTaskId={activeTaskId}
+        agentIcon={agentIcons?.[row.task.agent_id]}
+        canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
+        onDeleteSession={deletableAgentIds.has(row.task.agent_id) ? onDeleteSession : undefined}
+        forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
+        onArchiveTask={onArchiveTask}
+        onArchiveOlderTasks={onArchiveOlderTasks}
+        onForkTask={onForkTask}
+        onOpenTask={onOpenTask}
+        onRestoreTask={onRestoreTask}
+        onSetTaskPinned={onSetTaskPinned}
+        onSetTaskTitle={onSetTaskTitle}
+        showArchived={showArchived}
+        task={row.task}
+      />
+    ) : (
+      <SidebarNativeSessionRow
+        archived={showArchived}
+        agentIcon={agentIcons?.[row.session.agent_id ?? nativeSessionAgentId]}
+        canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
+        onDeleteSession={deletableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) ? onDeleteSession : undefined}
+        key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
+        mutation={nativeSessionMutations[
+          `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
+        ]}
+        nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
+        nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
+        nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
+        onArchiveNativeSession={onArchiveNativeSession}
+        onArchiveOlderNativeSessions={onArchiveOlderNativeSessions}
+        onForkNativeSession={onForkNativeSession}
+        onOpenNativeSession={onOpenNativeSession}
+        onRestoreNativeSession={onRestoreNativeSession}
+        onSetNativeSessionPinned={onSetNativeSessionPinned}
+        onSetNativeSessionTitle={onSetNativeSessionTitle}
+        session={row.session}
+      />
+    )
+  );
 
   return (
     <section className="project-task-group" aria-label={group.label}>
@@ -195,6 +241,9 @@ export function SidebarProjectTaskGroup({
           </PopupMenu>
         </div>
       </div>
+      {collapsed && liveRows.length > 0 ? (
+        <div className="project-task-group-live">{liveRows.map(renderRow)}</div>
+      ) : null}
       <div
         aria-hidden={collapsed}
         className={`project-task-group-rows ${collapsed ? "collapsed" : "expanded"}`}
@@ -202,55 +251,16 @@ export function SidebarProjectTaskGroup({
       >
         {/* Keep rows mounted so closing can animate before the clipped region reaches zero height. */}
         <div className="project-task-group-rows-inner">
-          {visibleRows.map((row) =>
-            row.kind === "task" ? (
-              <SidebarTaskRow
-                key={`task:${row.task.task_id}`}
-                activeTaskId={activeTaskId}
-                agentIcon={agentIcons?.[row.task.agent_id]}
-                canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
-                onDeleteSession={deletableAgentIds.has(row.task.agent_id) ? onDeleteSession : undefined}
-                forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
-                onArchiveTask={onArchiveTask}
-                onArchiveOlderTasks={onArchiveOlderTasks}
-                onForkTask={onForkTask}
-                onOpenTask={onOpenTask}
-                onRestoreTask={onRestoreTask}
-                onSetTaskPinned={onSetTaskPinned}
-                onSetTaskTitle={onSetTaskTitle}
-                showArchived={showArchived}
-                task={row.task}
-              />
-            ) : (
-              <SidebarNativeSessionRow
-                archived={showArchived}
-                agentIcon={agentIcons?.[row.session.agent_id ?? nativeSessionAgentId]}
-                canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
-                onDeleteSession={deletableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) ? onDeleteSession : undefined}
-                key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
-                mutation={nativeSessionMutations[
-                  `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
-                ]}
-                nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
-                nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
-                nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
-                onArchiveNativeSession={onArchiveNativeSession}
-                onArchiveOlderNativeSessions={onArchiveOlderNativeSessions}
-                onForkNativeSession={onForkNativeSession}
-                onOpenNativeSession={onOpenNativeSession}
-                onRestoreNativeSession={onRestoreNativeSession}
-                onSetNativeSessionPinned={onSetNativeSessionPinned}
-                onSetNativeSessionTitle={onSetNativeSessionTitle}
-                session={row.session}
-              />
-            ),
-          )}
+          {(collapsed ? visibleRows.filter((row) => !projectRowLive(row, activeTaskId)) : visibleRows).map(renderRow)}
           {hiddenCount > 0 || nativeSessionsHaveMore ? (
             <button
               aria-busy={loading || undefined}
               className="project-task-more"
               disabled={loading}
-              onClick={() => onLoadMore(hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize)}
+              onClick={() => {
+                const nextHistoryLimit = shownHistory + (hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize);
+                onLoadMore(nextHistoryLimit, liveRows.length + nextHistoryLimit);
+              }}
               type="button"
             >
               {searching ? "Search more tasks" : "Load more"}
