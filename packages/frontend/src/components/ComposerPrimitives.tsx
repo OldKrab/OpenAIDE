@@ -29,8 +29,11 @@ export const Selector = forwardRef<HTMLButtonElement, {
 }, forwardedRef) {
   const classes = ["composer-pill", className].filter(Boolean).join(" ");
   if (locked) {
+    // A grouped menu can stay open while its trigger locks for a pending
+    // change; the span keeps the popup anchored in place of the button.
     return (
       <span
+        ref={popupTrigger?.ref}
         aria-busy={pending || undefined}
         aria-disabled
         aria-describedby={describedBy}

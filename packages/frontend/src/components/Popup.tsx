@@ -30,7 +30,7 @@ import { useBackNavigation } from "./useBackNavigation";
 
 export type PopupTriggerProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   "data-oa-popup-trigger"?: true;
-  ref: RefCallback<HTMLButtonElement>;
+  ref: RefCallback<HTMLElement>;
 };
 
 type AnchoredPopupProps = {
@@ -330,8 +330,11 @@ function BrowserAnchoredPopup({
     strategy: "fixed",
     whileElementsMounted: autoUpdate,
   });
+  // Only a caller-supplied anchor becomes the position reference. Floating UI
+  // freezes a position reference, so pinning the trigger here would leave the
+  // popup measuring a detached node when the trigger element is replaced.
   useLayoutEffect(() => {
-    refs.setPositionReference(anchorRef?.current ?? refs.domReference.current);
+    if (anchorRef) refs.setPositionReference(anchorRef.current);
   }, [anchorRef, open, refs]);
   const click = useClick(context);
   const dismiss = useDismiss(context, { outsidePressEvent: "pointerdown" });
@@ -373,7 +376,7 @@ function BrowserAnchoredPopup({
     <>
       {trigger({
         ...referenceProps,
-        ref: refs.setReference as RefCallback<HTMLButtonElement>,
+        ref: refs.setReference as RefCallback<HTMLElement>,
       })}
       {transition.isMounted ? (
         <FloatingPortal id="openaide-popup-layer">
