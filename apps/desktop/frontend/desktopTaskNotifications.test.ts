@@ -4,15 +4,33 @@ import type { TaskSummary } from "@openaide/app-shell-contracts";
 import { createDesktopTaskNotifications, type DesktopNotificationHost } from "./desktopTaskNotifications";
 
 describe("Desktop Task notifications", () => {
-  it("is available and turns on without a browser permission prompt", async () => {
+  it("is on by default and obtains permission without a prompt", async () => {
     const host = fakeHost();
     const manager = createDesktopTaskNotifications(host);
     await settled();
 
-    expect(manager.getSettings()).toEqual({ status: "off" });
-    await manager.setEnabled(true);
-
     expect(manager.getSettings()).toEqual({ status: "enabled" });
+  });
+
+  it("stays off across restarts once the user turns it off", async () => {
+    const host = fakeHost();
+    await createDesktopTaskNotifications(host).setEnabled(false);
+
+    const restarted = createDesktopTaskNotifications(host);
+    await settled();
+
+    expect(restarted.getSettings()).toEqual({ status: "off" });
+  });
+
+  it("stays silent for attention that existed before notifications turned on by default", async () => {
+    const host = fakeHost();
+    const manager = createDesktopTaskNotifications(host);
+    await settled();
+    manager.reconcile("root-1", []);
+
+    manager.reconcile("root-1", [task("attention-early", "2026-10-16T08:59:00.000Z")]);
+
+    expect(host.sent).toHaveLength(0);
   });
 
   it("shows an unattended Task Attention Event natively and routes its click to the Task", async () => {
@@ -114,11 +132,11 @@ function fakeHost({ focused = false, focusedTaskId }: { focused?: boolean; focus
   return host;
 }
 
-function task(eventId: string): TaskSummary {
+function task(eventId: string, occurredAt = "2026-10-16T09:00:30.000Z"): TaskSummary {
   return {
     task_id: "task-1",
     title: "Fix the build",
-    attention: { event_id: eventId, reason: "needsAnswer", occurred_at: "2026-10-16T09:00:30.000Z" },
+    attention: { event_id: eventId, reason: "needsAnswer", occurred_at: occurredAt },
   } as TaskSummary;
 }
 

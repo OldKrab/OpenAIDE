@@ -34,6 +34,11 @@ export type WebTaskNotificationEnvironment = {
    * that Task (ADR 0027 Desktop); without it any focused tab suppresses (Web App).
    */
   focusedTaskId?(): string | undefined;
+  /**
+   * Turns notifications on until the user chooses. Only a shell whose permission needs no
+   * user gesture sets it (Desktop); browsers grant permission only from an explicit action.
+   */
+  enabledByDefault?: boolean;
   notificationsSupported(): boolean;
   notificationPermission(): NotificationPermission;
   requestNotificationPermission(): Promise<NotificationPermission>;
@@ -71,6 +76,11 @@ export function createWebTaskNotificationManager(
     observedAt: number;
   }>();
   const handled = readHandled(environment.storage);
+  if (environment.enabledByDefault && environment.storage.getItem(ENABLED_KEY) === null) {
+    // Recorded as a choice so a later Off persists; events before now stay silent.
+    environment.storage.setItem(ENABLED_KEY, "true");
+    environment.storage.setItem(ENABLED_AT_KEY, new Date(environment.now()).toISOString());
+  }
   const startupBaseline = new Set<string>();
   const active = new Map<string, { eventId: string; notification: { close(): void } }>();
   let stateRootId: string | undefined;
@@ -137,7 +147,8 @@ export function createWebTaskNotificationManager(
     },
     async setEnabled(enabled) {
       if (!enabled) {
-        environment.storage.removeItem(ENABLED_KEY);
+        // An explicit Off, unlike an absent choice, keeps a default-on shell off.
+        environment.storage.setItem(ENABLED_KEY, "false");
         environment.storage.removeItem(ENABLED_AT_KEY);
         closeAll();
         refreshSettings();
