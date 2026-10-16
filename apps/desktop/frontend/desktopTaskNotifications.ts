@@ -41,10 +41,13 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
   let nextId = 1;
   const changed = () => { for (const listener of focusListeners) listener(); };
 
-  void host.isPermissionGranted().then(
-    (granted) => { permission = granted ? "granted" : "denied"; changed(); },
-    () => { console.warn("desktop_notification_permission_read_failed error_kind=plugin"); },
-  );
+  // Desktop permission needs no prompt, so a default-on choice obtains it right away.
+  void host.isPermissionGranted()
+    .then((granted) => granted ? "granted" : host.requestPermission())
+    .then(
+      (state) => { permission = state; changed(); },
+      () => { console.warn("desktop_notification_permission_read_failed error_kind=plugin"); },
+    );
   void host.isFocused().then((value) => { focused = value; changed(); }, () => undefined);
   void host.onFocusChanged((value) => { focused = value; changed(); });
   // Without a listener the plugin reports no clicks, so it must exist before the first notification.
@@ -69,6 +72,7 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
     isFocused: () => focused,
     focusedTaskId: host.focusedTaskId,
     notificationsSupported: () => true,
+    enabledByDefault: true,
     notificationPermission: () => permission,
     async requestNotificationPermission() {
       try {
