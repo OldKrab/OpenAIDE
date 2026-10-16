@@ -64,6 +64,9 @@ public final class MainActivity extends Activity {
     private WorkspaceConnectionBridge connectionBridge;
     private WorkspaceDownloads downloads;
     private boolean pendingSettings;
+    /** Set by a Task notification; the workspace routes to it once its page is loaded. */
+    static final String EXTRA_TASK_ID = "task_id";
+    private String pendingTask;
     private BackNavigation backNavigation;
 
     @Override public void onCreate(Bundle savedState) {
@@ -74,6 +77,7 @@ public final class MainActivity extends Activity {
         try { profile = connections.load(); }
         catch (RuntimeException error) { profile = ConnectionProfile.local(); credentialsUnavailable = true; }
         showConnection();
+        pendingTask = getIntent().getStringExtra(EXTRA_TASK_ID);
         if (credentialsUnavailable) openSetup("welcome");
         else if (getIntent().getBooleanExtra("show_settings", false)) showSettings();
         else if (preferences.getBoolean("configured", false) || checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) requestConnection();
@@ -164,6 +168,14 @@ public final class MainActivity extends Activity {
         browser.evaluateJavascript("history.pushState(null, '', '/settings?tab=remote'); window.dispatchEvent(new PopStateEvent('popstate'))", null);
     }
 
+    private void navigateToTask() {
+        if (browser == null || pendingTask == null) return;
+        String path = "/task/" + Uri.encode(pendingTask);
+        pendingTask = null;
+        diagnostics.record("task_notification", "opened", 0, 0);
+        browser.evaluateJavascript("history.pushState(null, '', " + org.json.JSONObject.quote(path) + "); window.dispatchEvent(new PopStateEvent('popstate'))", null);
+    }
+
     private void openSetup(String screen) {
         if (settingsOpen) return;
         settingsOpen = true;
@@ -203,6 +215,11 @@ public final class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         if (intent.getBooleanExtra("show_settings", false)) showSettings();
+        else if (intent.getStringExtra(EXTRA_TASK_ID) != null) {
+            pendingTask = intent.getStringExtra(EXTRA_TASK_ID);
+            // A shown page routes now; otherwise the page's load or the reconnect below routes it.
+            if (browser != null && profile.owns(browser.getUrl())) navigateToTask();
+        }
     }
 
     @Override protected void onResume() {
@@ -359,6 +376,7 @@ public final class MainActivity extends Activity {
                 if (!profile.owns(url)) return;
                 connectionBridge.attach();
                 if (pendingSettings) navigateToConnectionSettings();
+                else navigateToTask();
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) mainFrameFailed = true;

@@ -29,6 +29,11 @@ export type WebTaskNotificationEnvironment = {
   notificationIconUrl: string;
   now(): number;
   isFocused(): boolean;
+  /**
+   * The Task the focused window shows. A shell that provides it suppresses only events of
+   * that Task (ADR 0027 Desktop); without it any focused tab suppresses (Web App).
+   */
+  focusedTaskId?(): string | undefined;
   notificationsSupported(): boolean;
   notificationPermission(): NotificationPermission;
   requestNotificationPermission(): Promise<NotificationPermission>;
@@ -197,7 +202,7 @@ export function createWebTaskNotificationManager(
       rememberAndPublish(event.event_id);
       return;
     }
-    if (wasFocusedAt(occurredAt)) {
+    if (attendedAt(task.task_id, occurredAt)) {
       rememberAndPublish(event.event_id);
       return;
     }
@@ -237,6 +242,12 @@ export function createWebTaskNotificationManager(
   function rememberAndPublish(eventId: string) {
     rememberHandled(eventId);
     environment.publish({ type: "handled", tabId, eventId });
+  }
+
+  function attendedAt(taskId: string, occurredAt: number) {
+    if (!environment.focusedTaskId) return wasFocusedAt(occurredAt);
+    // Reconcile runs as the authoritative change arrives, so current focus stands for focus at occurrence.
+    return environment.isFocused() && environment.focusedTaskId() === taskId;
   }
 
   function wasFocusedAt(occurredAt: number) {

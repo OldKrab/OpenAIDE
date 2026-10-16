@@ -216,7 +216,7 @@ export type FrontendShell = {
   supportExports?: {
     save(request: { fileHandleId: string; label: string }): Promise<"saved" | "cancelled">;
   };
-  /** Browser-profile notification integration; omitted by non-Web shells. */
+  /** OS notifications for Task Attention Events, by the Web and Desktop shells; omitted elsewhere. */
   taskNotifications?: WebTaskNotificationManager;
   /** Opens Agent File References in the Task Panel File Viewer. Omitted by VS Code. */
   fileViewer?: true;
