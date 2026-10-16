@@ -1,6 +1,6 @@
 import type { FileViewerContent } from "../../../packages/frontend/src/services/frontendShell";
 import { readFileViewerContentOverHttp } from "../../../packages/frontend/src/services/fileViewerContentHttp";
-import type { DesktopBootstrap, LocalHttpConnection } from "./desktopBootstrap";
+import { localHttpRouteUrl, type DesktopBootstrap, type LocalHttpConnection } from "./desktopBootstrap";
 
 /** Served by the native shell (`desktop_renderer_protocol.rs`) under the renderer's own CSP. */
 const RENDERER_SCHEME = "openaide-renderer";
@@ -16,7 +16,7 @@ export function createDesktopFileViewerContent(
   return {
     read({ handle, maxBytes, operationId }, signal) {
       const { endpointUrl, authToken } = connection();
-      const url = viewerDownloadUrl(endpointUrl);
+      const url = localHttpRouteUrl(endpointUrl, "download");
       if (!url) return Promise.resolve({ kind: "unavailable" });
       url.search = new URLSearchParams({
         clientInstanceId,
@@ -34,18 +34,4 @@ export function desktopPdfRendererDocumentUrl(platform: DesktopBootstrap["platfo
   return platform === "windows"
     ? `http://${RENDERER_SCHEME}.localhost/pdf.html`
     : `${RENDERER_SCHEME}://localhost/pdf.html`;
-}
-
-/** Mirrors the native support-export download: the RPC endpoint ends in `/probe`. */
-function viewerDownloadUrl(endpointUrl: string) {
-  let url: URL;
-  try {
-    url = new URL(endpointUrl);
-  } catch {
-    return undefined;
-  }
-  const prefix = url.pathname.replace(/\/+$/, "");
-  if (!prefix.endsWith("/probe")) return undefined;
-  url.pathname = `${prefix.slice(0, -"/probe".length)}/download`;
-  return url;
 }

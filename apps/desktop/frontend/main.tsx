@@ -8,8 +8,10 @@ import {
   type LocalHttpConnection,
 } from "./desktopBootstrap";
 
+import { refuseUnclaimedFileDrops } from "./desktopFileUploads";
 import { initializeStartupWindow } from "./desktopStartupWindow";
 
+refuseUnclaimedFileDrops(window);
 initializeStartupWindow();
 
 const startupStartedAt = performance.now();
