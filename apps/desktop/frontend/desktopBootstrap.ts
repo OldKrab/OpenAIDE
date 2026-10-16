@@ -4,6 +4,25 @@ export type LocalHttpConnection = {
   authToken: string;
 };
 
+/**
+ * Addresses another App Server HTTP route beside the RPC endpoint, which ends in `/probe`.
+ * A paired computer's gateway keeps the same layout under its own base path.
+ */
+export function localHttpRouteUrl(endpointUrl: string, route: "download" | "upload") {
+  let url: URL;
+  try {
+    url = new URL(endpointUrl);
+  } catch {
+    return undefined;
+  }
+  const prefix = url.pathname.replace(/\/+$/, "");
+  if (!prefix.endsWith("/probe")) return undefined;
+  url.pathname = `${prefix.slice(0, -"/probe".length)}/${route}`;
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+
 export type DesktopRuntimeEnvironment =
   | { kind: "native" }
   | { kind: "wsl"; distro: string };

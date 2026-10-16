@@ -18,13 +18,13 @@ import {
 } from "../../../packages/frontend/src/shells/domBootstrap";
 import type { HostChannelMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import { clientInstanceIdForBootstrap } from "../../../packages/frontend/src/services/backendInitialization";
+import { uploadFileOverHttp } from "../../../packages/frontend/src/services/fileUploadHttp";
 import { readFileViewerContentOverHttp } from "../../../packages/frontend/src/services/fileViewerContentHttp";
 import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import {
   createRuntimeLogger,
   safeWebviewTelemetryFields,
 } from "../src/runtime-logger.mjs";
-import { uploadFile } from "./fileUpload";
 import { writeBrowserClipboardText } from "../../../packages/frontend/src/shells/browserClipboard";
 import { createWebSecretStore } from "./webSecretVault";
 import { createWebSecretMessageHandler } from "./webSecrets";
@@ -135,14 +135,15 @@ export function createWebAppShell(): FrontendShell {
     files: {
       kind: "webUpload",
       upload: (taskId, file, onProgress, signal) =>
-        uploadFile(
+        uploadFileOverHttp({
+          target: { url: "/__openaide-app-server/upload" },
           taskId,
           file,
-          clientInstanceIdForBootstrap(bootstrap()),
+          clientInstanceId: clientInstanceIdForBootstrap(bootstrap()),
           onProgress,
           signal,
-          (reason) => logger.info("file_upload_chunk_fallback", { reason }),
-        ),
+          log: (level, event, fields) => logger[level](event, fields),
+        }),
     },
     messages: { post, subscribe: subscribeWindowMessages },
     navigation: {

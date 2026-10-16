@@ -25,6 +25,7 @@ import type { DesktopBootstrap, LocalHttpConnection } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
 import { createDesktopSupportExports } from "./desktopSupportExports";
 import { createDesktopFileViewerContent, desktopPdfRendererDocumentUrl } from "./desktopFileViewer";
+import { createDesktopFileUploads } from "./desktopFileUploads";
 import { createDesktopSecretMessageHandler } from "./desktopSecrets";
 import { createDesktopTaskNotifications } from "./desktopTaskNotifications";
 
@@ -277,6 +278,9 @@ export function createDesktopShell(
       },
     },
     supportExports: createDesktopSupportExports(invoke),
+    // TODO: add `sentFiles` so a sent file can be saved from Desktop. It needs a native save
+    // that streams to disk; the support-export save holds the whole file in memory.
+    files: createDesktopFileUploads(connection, host.clientInstanceId),
     navigation: {
       openNewTask: (projectId) => navigate({ surface: "task", projectId }),
       openNativeSession: (agentId, nativeSessionId, projectId) => navigate({
