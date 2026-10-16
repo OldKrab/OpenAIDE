@@ -68,8 +68,10 @@ same client, independently of WebView. Active local work holds a bounded, renewe
 When the view is hidden and local work becomes idle, monitoring stops. A short
 settling period protects a send immediately followed by screen lock. Temporary
 status failures have a two-minute recovery grace, followed by a visible recovery
-notification rather than an unbounded wake lock. End-of-work/attention notifications
-are local-only; remote push notifications are not implemented.
+notification rather than an unbounded wake lock. The same task reads carry each Task's
+attention event: a task that finishes or needs you while the app is hidden gets its own
+notification, which opens that task. They are local-only; remote push notifications are
+not implemented.
 
 Hidden WebView timers pause; returning resumes the existing transport and draft.
 Idle foreground checks run less frequently, status reads coalesce, and ordinary

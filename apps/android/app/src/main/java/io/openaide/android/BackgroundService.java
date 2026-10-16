@@ -11,11 +11,16 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.service.notification.StatusBarNotification;
 import android.util.Log;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class BackgroundService extends Service {
+    private static final String TASK_TAG = "task:";
+    private static final int TASK_NOTIFICATION = 3;
     private WorkProtection protection;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -25,7 +30,8 @@ public final class BackgroundService extends Service {
     private boolean polling;
     private final Runnable pollTask = this::poll;
     private long settlingUntil;
-    private int previousActive;
+    private final AttentionNotifications attention = new AttentionNotifications();
+    private long hiddenSince;
     private String notificationText = "";
 
     @Override public void onCreate() {
@@ -48,7 +54,9 @@ public final class BackgroundService extends Service {
             return START_NOT_STICKY;
         }
         if (intent != null && intent.hasExtra("visible")) {
-            visible = intent.getBooleanExtra("visible", false);
+            boolean next = intent.getBooleanExtra("visible", false);
+            if (!next && (visible || hiddenSince == 0)) hiddenSince = System.currentTimeMillis();
+            visible = next;
             if (!visible) settlingUntil = SystemClock.elapsedRealtime() + 10_000;
         }
         updateLock();
@@ -71,11 +79,7 @@ public final class BackgroundService extends Service {
                 long now = SystemClock.elapsedRealtime();
                 if (result != null) {
                     policy.observe(result.active, now);
-                    if (previousActive > 0 && result.active == 0 && !visible) {
-                        getSystemService(NotificationManager.class).notify(2,
-                            notification(result.waiting > 0 ? "Your agent needs your attention" : "Agent work ended. Open to review the result.", "completion"));
-                    }
-                    previousActive = result.active;
+                    presentAttention(result);
                     updateNotification(result.active > 0 ? "Working · safe to lock the screen"
                         : result.waiting > 0 ? "Waiting for your response · battery saving" : "Ready · battery saving");
                 } else updateNotification("Connection interrupted · checking again");
@@ -87,6 +91,38 @@ public final class BackgroundService extends Service {
                 else handler.postDelayed(pollTask, result == null ? 10_000 : result.active > 0 || !visible ? 5_000 : 15_000);
             });
         });
+    }
+
+    /** Shows each new Task Attention Event that occurred out of sight and withdraws superseded ones. */
+    private void presentAttention(ServerStatus status) {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        Map<String, String> shown = new HashMap<>();
+        for (StatusBarNotification active : manager.getActiveNotifications()) {
+            String tag = active.getTag();
+            String eventId = active.getNotification().extras.getString("event_id");
+            if (tag != null && tag.startsWith(TASK_TAG) && eventId != null) shown.put(tag.substring(TASK_TAG.length()), eventId);
+        }
+        java.util.List<String> stale = AttentionNotifications.stale(shown, status.attention);
+        for (String taskId : stale) manager.cancel(TASK_TAG + taskId, TASK_NOTIFICATION);
+        java.util.List<AttentionNotifications.Attention> show = attention.observe(status.attention, visible, hiddenSince);
+        for (AttentionNotifications.Attention event : show) {
+            manager.notify(TASK_TAG + event.taskId, TASK_NOTIFICATION, taskNotification(event));
+            Log.i("OpenAIDE", "task_attention_notification outcome=shown reason=" + event.reason);
+        }
+        if (!stale.isEmpty()) Log.i("OpenAIDE", "task_attention_notification outcome=withdrawn count=" + stale.size());
+        if (!show.isEmpty() && !manager.areNotificationsEnabled()) Log.w("OpenAIDE", "task_attention_notification outcome=blocked");
+    }
+
+    private Notification taskNotification(AttentionNotifications.Attention event) {
+        // A distinct request code per Task keeps each notification's target Task.
+        PendingIntent open = PendingIntent.getActivity(this, event.taskId.hashCode(),
+            new Intent(this, MainActivity.class).putExtra(MainActivity.EXTRA_TASK_ID, event.taskId),
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        android.os.Bundle extras = new android.os.Bundle();
+        extras.putString("event_id", event.eventId);
+        return new Notification.Builder(this, "completion").setSmallIcon(R.drawable.ic_agent)
+            .setContentTitle(AttentionNotifications.title(event.reason)).setContentText(event.title)
+            .setContentIntent(open).setAutoCancel(true).setExtras(extras).build();
     }
 
     private void updateLock() {

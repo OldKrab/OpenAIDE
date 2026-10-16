@@ -3,6 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import {
+  isPermissionGranted,
+  onAction,
+  removeActive,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CLIENT_DETACH, type AppServerSession } from "@openaide/app-server-client";
 import type { HostToWebviewMessage, SettingsIntent, SettingsTabId } from "@openaide/app-shell-contracts";
@@ -19,6 +26,7 @@ import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfac
 import { createDesktopSupportExports } from "./desktopSupportExports";
 import { createDesktopFileViewerContent, desktopPdfRendererDocumentUrl } from "./desktopFileViewer";
 import { createDesktopSecretMessageHandler } from "./desktopSecrets";
+import { createDesktopTaskNotifications } from "./desktopTaskNotifications";
 
 type DesktopRoute =
   | { surface: "nativeSession"; agentId: string; nativeSessionId: string; projectId?: string }
@@ -316,6 +324,25 @@ export function createDesktopShell(
     fileViewer: true,
     fileViewerContent: createDesktopFileViewerContent(connection, host.clientInstanceId),
     pdfRendererDocumentUrl: desktopPdfRendererDocumentUrl(host.platform),
+    taskNotifications: createDesktopTaskNotifications({
+      storage: window.localStorage,
+      isPermissionGranted,
+      requestPermission,
+      sendNotification,
+      removeActive,
+      onAction,
+      initiallyFocused: () => document.hasFocus(),
+      isFocused: () => nativeWindow.isFocused(),
+      onFocusChanged: (listener) => nativeWindow.onFocusChanged(({ payload }) => listener(payload)),
+      focusedTaskId: () => route.surface === "task" ? route.taskId : undefined,
+      async focusWindow() {
+        await nativeWindow.unminimize();
+        await nativeWindow.show();
+        await nativeWindow.setFocus();
+      },
+      openTask: (taskId) => navigate({ surface: "task", taskId }),
+      now: () => Date.now(),
+    }),
   };
 }
 

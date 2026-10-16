@@ -16,7 +16,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Open tasks of the local App Server, as the background service needs them. */
-class ServerStatus(@JvmField val active: Int, @JvmField val waiting: Int) {
+internal class ServerStatus(
+    @JvmField val active: Int,
+    @JvmField val waiting: Int,
+    /** The current Task Attention Event of each open task that has one. */
+    @JvmField val attention: List<AttentionNotifications.Attention>,
+) {
     companion object {
         /** 1 for a task that is working, 0 for one waiting on the user, -1 for one at rest, null when unknown. */
         @JvmStatic fun kind(status: String): Int? = when (status) {
@@ -106,21 +111,33 @@ internal object LocalServer {
         var waiting = 0
         var cursor: Any? = null
         val seen = HashSet<String>()
+        val attention = ArrayList<AttentionNotifications.Attention>()
         repeat(MAX_TASK_PAGES) {
             val params = JSONObject().put("lifecycle", "open")
             if (cursor != null) params.put("cursor", cursor)
             val tasks = request(server, "task/list", params, REQUEST_TIMEOUT_MS)
             val page = tasks.optJSONArray("tasks") ?: throw IOException("Invalid task status")
             for (index in 0 until page.length()) {
-                when (ServerStatus.kind(page.getJSONObject(index).optString("status")) ?: throw IOException("Unknown task status")) {
+                val task = page.getJSONObject(index)
+                when (ServerStatus.kind(task.optString("status")) ?: throw IOException("Unknown task status")) {
                     1 -> active++
                     0 -> waiting++
                 }
+                attention(task)?.let(attention::add)
             }
-            cursor = tasks.opt("nextCursor")?.takeIf { it != JSONObject.NULL } ?: return ServerStatus(active, waiting)
+            cursor = tasks.opt("nextCursor")?.takeIf { it != JSONObject.NULL } ?: return ServerStatus(active, waiting, attention)
             if (!seen.add(cursor.toString())) throw IOException("Invalid task cursor")
         }
         throw IOException("Too many task pages")
+    }
+
+    private fun attention(task: JSONObject): AttentionNotifications.Attention? {
+        val event = task.optJSONObject("attention") ?: return null
+        val taskId = task.optString("taskId").ifEmpty { return null }
+        val eventId = event.optString("eventId").ifEmpty { return null }
+        val title = task.optJSONObject("title")?.optString("value")?.ifEmpty { null } ?: "Untitled task"
+        return AttentionNotifications.Attention(taskId, title, eventId, event.optString("reason"),
+            AttentionNotifications.timestamp(event.optString("occurredAt")))
     }
 
     private fun start(context: Context, result: CompletableFuture<Endpoint>) {

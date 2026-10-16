@@ -93,12 +93,15 @@ export function createWebAppShell(): FrontendShell {
   const publishRoute = () => {
     window.dispatchEvent(new CustomEvent(WEB_ROUTE_EVENT, { detail: bootstrap() }));
   };
-  const taskNotifications = createWebTaskNotificationManager(
+  const connectionSettings = androidConnectionSettings(window);
+  // The Android App's WebView has no Notification API and pauses while hidden, so the
+  // app's background service presents Task Attention Events natively instead.
+  const taskNotifications = connectionSettings ? undefined : createWebTaskNotificationManager(
     webTaskNotificationEnvironment((taskId) => navigate(`/task/${encodeURIComponent(taskId)}`)),
   );
   return {
     appearance,
-    connectionSettings: androidConnectionSettings(window),
+    connectionSettings,
     bootstrap,
     clipboard: { writeText: writeBrowserClipboardText },
     sentFiles: {

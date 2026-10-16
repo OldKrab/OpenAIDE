@@ -1,0 +1,127 @@
+import { describe, expect, it, vi } from "vitest";
+import type { ActionPerformed, Options } from "@tauri-apps/plugin-notification";
+import type { TaskSummary } from "@openaide/app-shell-contracts";
+import { createDesktopTaskNotifications, type DesktopNotificationHost } from "./desktopTaskNotifications";
+
+describe("Desktop Task notifications", () => {
+  it("is available and turns on without a browser permission prompt", async () => {
+    const host = fakeHost();
+    const manager = createDesktopTaskNotifications(host);
+    await settled();
+
+    expect(manager.getSettings()).toEqual({ status: "off" });
+    await manager.setEnabled(true);
+
+    expect(manager.getSettings()).toEqual({ status: "enabled" });
+  });
+
+  it("shows an unattended Task Attention Event natively and routes its click to the Task", async () => {
+    const host = fakeHost();
+    const manager = createDesktopTaskNotifications(host);
+    await settled();
+    await manager.setEnabled(true);
+    manager.reconcile("root-1", []);
+
+    manager.reconcile("root-1", [task("attention-1")]);
+
+    expect(host.sent).toEqual([expect.objectContaining({
+      title: "Answer needed",
+      body: "Fix the build",
+      extra: { taskId: "task-1" },
+    })]);
+    host.tap(host.sent[0]);
+    await settled();
+    expect(host.openTask).toHaveBeenCalledWith("task-1");
+    expect(host.focusWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays quiet for an event of the Task the focused window shows", async () => {
+    const host = fakeHost({ focused: true, focusedTaskId: "task-1" });
+    const manager = createDesktopTaskNotifications(host);
+    await settled();
+    await manager.setEnabled(true);
+    manager.reconcile("root-1", []);
+
+    manager.reconcile("root-1", [task("attention-1")]);
+
+    expect(host.sent).toHaveLength(0);
+  });
+
+  it("notifies while the focused window shows another Task", async () => {
+    const host = fakeHost({ focused: true, focusedTaskId: "task-2" });
+    const manager = createDesktopTaskNotifications(host);
+    await settled();
+    await manager.setEnabled(true);
+    manager.reconcile("root-1", []);
+
+    manager.reconcile("root-1", [task("attention-1")]);
+
+    expect(host.sent).toHaveLength(1);
+  });
+
+  it("routes a click on a notification shown before the window reloaded", async () => {
+    const host = fakeHost();
+    createDesktopTaskNotifications(host);
+    await settled();
+
+    host.tap({ id: 41, title: "Task finished", extra: { taskId: "task-9" } });
+    await settled();
+
+    expect(host.openTask).toHaveBeenCalledWith("task-9");
+    expect(host.focusWindow).toHaveBeenCalledTimes(1);
+  });
+});
+
+function fakeHost({ focused = false, focusedTaskId }: { focused?: boolean; focusedTaskId?: string } = {}) {
+  const values = new Map<string, string>();
+  let actionListener: ((event: ActionPerformed) => void) | undefined;
+  const now = Date.parse("2026-10-16T09:00:00.000Z");
+  const sent: Options[] = [];
+  const openTask = vi.fn<(taskId: string) => void>();
+  const focusWindow = vi.fn<() => Promise<void>>(async () => undefined);
+  const host: DesktopNotificationHost & {
+    sent: Options[];
+    openTask: typeof openTask;
+    focusWindow: typeof focusWindow;
+    tap(options: Options): void;
+  } = {
+    sent,
+    storage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => { values.set(key, value); },
+      removeItem: (key) => { values.delete(key); },
+    },
+    isPermissionGranted: async () => false,
+    requestPermission: async () => "granted",
+    sendNotification: (options) => { sent.push(options); },
+    removeActive: async () => undefined,
+    onAction: async (listener) => { actionListener = listener; },
+    initiallyFocused: () => focused,
+    isFocused: async () => focused,
+    onFocusChanged: async () => undefined,
+    focusedTaskId: () => focusedTaskId,
+    focusWindow,
+    openTask,
+    now: () => now,
+    tap(options) {
+      actionListener?.({
+        actionId: "tap",
+        inputValue: null,
+        notification: { ...options, id: options.id ?? 0, groupSummary: false, data: {}, extra: options.extra ?? {}, attachments: [] },
+      });
+    },
+  };
+  return host;
+}
+
+function task(eventId: string): TaskSummary {
+  return {
+    task_id: "task-1",
+    title: "Fix the build",
+    attention: { event_id: eventId, reason: "needsAnswer", occurred_at: "2026-10-16T09:00:30.000Z" },
+  } as TaskSummary;
+}
+
+async function settled() {
+  for (let index = 0; index < 5; index += 1) await Promise.resolve();
+}
