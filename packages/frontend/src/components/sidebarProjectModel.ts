@@ -79,36 +79,31 @@ export function projectGroupRows(tasks: TaskSummary[], sessions: AgentListedSess
  * stopping, or waiting for the user. Every other row is history.
  */
 export function projectRowLive(row: SidebarProjectRow, activeTaskId?: string) {
-  if (row.kind !== "task") return false;
-  const { task } = row;
-  return task.pinned
-    || task.unread
-    || task.task_id === activeTaskId
-    || taskInProgress(task)
-    || task.status === "stopping"
-    || task.status === "waiting";
+  return rowLiveByState(row) || (row.kind === "task" && row.task.task_id === activeTaskId);
 }
 
 /**
  * Keeps every live row plus the newest `historyLimit` history rows. Rows keep their sorted
- * position, so a row that turns live or idle never jumps within its Project group.
+ * position, so a row that turns live or idle never jumps within its Project group. An idle open
+ * Task keeps its own history slot and is added only when that window would hide it, so opening a
+ * visible Task never resizes the group.
  */
 export function liveFirstVisibleRows(rows: SidebarProjectRow[], historyLimit: number, activeTaskId?: string) {
   let historyShown = 0;
-  return rows.filter((row) => projectRowLive(row, activeTaskId) || historyShown++ < historyLimit);
+  return rows.filter((row) =>
+    rowLiveByState(row)
+    || historyShown++ < historyLimit
+    || (row.kind === "task" && row.task.task_id === activeTaskId));
 }
 
-export function recentVisibleGroups(
-  groups: SidebarProjectGroup[],
-  maxGroups: number,
-  activeProjectKey?: string,
-) {
-  const visible = groups.slice(0, maxGroups);
-  const activeGroup = activeProjectKey ? groups.find((group) => group.key === activeProjectKey) : undefined;
-  if (activeGroup && !visible.some((group) => group.key === activeGroup.key)) {
-    return [activeGroup, ...visible.slice(0, Math.max(0, maxGroups - 1))];
-  }
-  return visible;
+function rowLiveByState(row: SidebarProjectRow) {
+  if (row.kind !== "task") return false;
+  const { task } = row;
+  return task.pinned
+    || task.unread
+    || taskInProgress(task)
+    || task.status === "stopping"
+    || task.status === "waiting";
 }
 
 function newestActivity(tasks: TaskSummary[]) {

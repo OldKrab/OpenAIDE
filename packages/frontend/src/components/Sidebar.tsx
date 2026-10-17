@@ -11,7 +11,7 @@ import {
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
-import { groupedTasks, projectGroupRows, recentVisibleGroups } from "./sidebarProjectModel";
+import { groupedTasks, projectGroupRows } from "./sidebarProjectModel";
 import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
@@ -85,7 +85,6 @@ type SidebarProps = {
   modal?: boolean;
   projects?: ProjectOption[];
   maxTasksPerProject?: number;
-  maxVisibleProjects?: number;
   loadingTasks?: boolean;
   showNativeSessions?: boolean;
   codexIntegrationInstalling?: boolean;
@@ -142,7 +141,6 @@ export const Sidebar = memo(function Sidebar({
   modal = false,
   projects = [],
   maxTasksPerProject,
-  maxVisibleProjects = 5,
   loadingTasks = false,
   showNativeSessions = true,
   codexIntegrationInstalling = false,
@@ -155,7 +153,6 @@ export const Sidebar = memo(function Sidebar({
   const { cancelDisable, confirmDisable, pendingDisable, requestDisable } = useAgentDisableConfirmation();
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
   const [projectRowLimits, setProjectRowLimits] = useState<Map<string, number>>(() => new Map());
-  const [visibleProjectLimit, setVisibleProjectLimit] = useState(maxVisibleProjects);
   const displayedNativeSessions = showNativeSessions
     ? nativeSessions
     : { adoptingSessionId: undefined, error: undefined, items: [], loaded: true, loading: false, nextCursor: undefined };
@@ -188,14 +185,11 @@ export const Sidebar = memo(function Sidebar({
   const initialProjectRowLimit = maxTasksPerProject
     ?? initialTaskNavigationRowsPerProject(groups.length);
   const projectPageSize = taskNavigationPageSize(groups.length);
-  const activeProjectKey = activeTask?.project_id;
-  const visibleGroups = groupByProject
-    ? recentVisibleGroups(groups, Math.max(1, visibleProjectLimit), activeProjectKey)
-    : [];
+  // Every Project group renders; each group's own presentation limit keeps the list bounded.
+  const visibleGroups = groupByProject ? groups : [];
   const projectHasMore = (projectKey: string) =>
     !showArchived && nativeSessions.hasMoreProjectIds?.includes(projectKey) === true;
   const projectCollapsed = (projectKey: string) => !groupSearchQuery && collapsedProjectKeys.has(projectKey);
-  const hiddenProjectCount = groupByProject ? Math.max(0, groups.length - visibleGroups.length) : 0;
   const selectedSessionProjectCollapsed =
     groupByProject &&
     !groupSearchQuery &&
@@ -464,15 +458,6 @@ export const Sidebar = memo(function Sidebar({
               : hasSearchQuery ? "Search more tasks" : "Load more tasks"}
           </button>
         ) : null}
-        {!showWorkspaceSetup && groupByProject && hiddenProjectCount > 0 ? (
-          <button
-            className="project-more"
-            onClick={() => setVisibleProjectLimit((current) => current + maxVisibleProjects)}
-            type="button"
-          >
-            Show {Math.min(maxVisibleProjects, hiddenProjectCount)} more projects
-          </button>
-        ) : null}
       </div></div></SidebarTaskPreviewProvider>
       <div className="sidebar-footer">
         {!showArchived && onAddProject ? (
@@ -530,7 +515,6 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.modal === next.modal &&
     prev.projects === next.projects &&
     prev.maxTasksPerProject === next.maxTasksPerProject &&
-    prev.maxVisibleProjects === next.maxVisibleProjects &&
     prev.loadingTasks === next.loadingTasks &&
     prev.showNativeSessions === next.showNativeSessions &&
     prev.codexIntegrationInstalling === next.codexIntegrationInstalling;
