@@ -58,7 +58,7 @@ pub(crate) fn respond(
 ) -> Response<Cow<'static, [u8]>> {
     match path {
         PDF_DOCUMENT => {
-            eprintln!("desktop_renderer_served asset=pdf_document");
+            desktop_log!("desktop_renderer_served asset=pdf_document");
             Response::builder()
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
                 .header(header::CONTENT_SECURITY_POLICY, pdf_document_csp(windows))
@@ -70,7 +70,7 @@ pub(crate) fn respond(
         // The asset resolver answers a missing file with `index.html`, so only script counts.
         PDF_SCRIPT => match script().filter(|(_, mime)| mime.contains("javascript")) {
             Some((bytes, _)) => {
-                eprintln!(
+                desktop_log!(
                     "desktop_renderer_served asset=pdf_script bytes={}",
                     bytes.len()
                 );
@@ -82,14 +82,14 @@ pub(crate) fn respond(
                     .expect("renderer script response")
             }
             None => {
-                eprintln!(
+                desktop_log!(
                     "desktop_renderer_request_failed asset=pdf_script error_kind=asset_missing"
                 );
                 not_found()
             }
         },
         _ => {
-            eprintln!("desktop_renderer_request_failed asset=unknown error_kind=not_found");
+            desktop_log!("desktop_renderer_request_failed asset=unknown error_kind=not_found");
             not_found()
         }
     }

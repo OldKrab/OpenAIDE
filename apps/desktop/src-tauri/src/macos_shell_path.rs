@@ -12,11 +12,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) fn apply_to(server: &mut Command) -> Result<(), &'static str> {
     let mut shell = Command::new(std::env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into()));
     let started = Instant::now();
-    eprintln!(
+    desktop_log!(
         "{{\"event\":\"desktop_shell_path_started\",\"operation\":\"desktop/shell_path\",\"attempt\":1}}"
     );
     let result = configure_from_shell(server, &mut shell, Duration::from_secs(10));
-    eprintln!(
+    desktop_log!(
         "{{\"event\":\"desktop_shell_path_completed\",\"operation\":\"desktop/shell_path\",\"outcome\":\"{}\",\"duration_ms\":{}}}",
         result.as_ref().err().copied().unwrap_or("success"),
         started.elapsed().as_millis()

@@ -338,7 +338,7 @@ async fn check_for_update(
 
     let operation_id = format!("desktop-update-check-{}", uuid::Uuid::new_v4());
     let started_at = Instant::now();
-    eprintln!("desktop_update_check_started operation_id={operation_id}");
+    desktop_log!("desktop_update_check_started operation_id={operation_id}");
     let update = match check_with_trusted_identity(&app, &config).await {
         Ok(update) => update,
         Err(error) => {
@@ -410,7 +410,7 @@ pub(crate) async fn desktop_download_update(
 
     let operation_id = format!("desktop-update-download-{}", uuid::Uuid::new_v4());
     let started_at = Instant::now();
-    eprintln!(
+    desktop_log!(
         "desktop_update_download_started operation_id={operation_id} target_version={}",
         candidate.offer.version
     );
@@ -588,7 +588,7 @@ pub(crate) async fn desktop_install_update(
     }
     let operation_id = format!("desktop-update-install-{}", uuid::Uuid::new_v4());
     let started_at = Instant::now();
-    eprintln!(
+    desktop_log!(
         "desktop_update_install_started operation_id={operation_id} target_version={}",
         candidate.offer.version
     );
@@ -765,7 +765,7 @@ fn log_terminal(
     let error = error
         .map(|error| format!(" error_kind={}", format!("{error:?}").to_ascii_lowercase()))
         .unwrap_or_default();
-    eprintln!(
+    desktop_log!(
         "desktop_update_{operation}_completed operation_id={operation_id} outcome={outcome} duration_ms={}{}",
         started_at.elapsed().as_millis(),
         error

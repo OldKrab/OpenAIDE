@@ -6,7 +6,7 @@ use objc2_app_kit::{
 /// webview layers until WebKit performs the final viewport layout.
 pub fn configure(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     let started_at = std::time::Instant::now();
-    eprintln!("desktop_webview_resize_presentation_started");
+    desktop_log!("desktop_webview_resize_presentation_started");
     let result = window.with_webview(|webview| unsafe {
         let webview: &NSView = &*webview.inner().cast();
         configure_view(webview);
@@ -21,14 +21,14 @@ pub fn configure(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     });
     match result {
         Ok(()) => {
-            eprintln!(
+            desktop_log!(
                 "desktop_webview_resize_presentation_completed outcome=success duration_ms={}",
                 started_at.elapsed().as_millis()
             );
             Ok(())
         }
         Err(error) => {
-            eprintln!(
+            desktop_log!(
                 "desktop_webview_resize_presentation_completed outcome=failure error_kind=native_view_configuration duration_ms={}",
                 started_at.elapsed().as_millis()
             );
@@ -47,7 +47,7 @@ fn configure_view(view: &NSView) {
 /// starts. AppKit otherwise withholds that resize until its animation ends.
 pub fn prepare_native_zoom(window: &tauri::WebviewWindow) -> Result<(), String> {
     let started_at = std::time::Instant::now();
-    eprintln!("desktop_native_zoom_prepare_started");
+    desktop_log!("desktop_native_zoom_prepare_started");
     window
         .with_webview(move |platform_webview| unsafe {
             let webview: &NSView = &*platform_webview.inner().cast();
@@ -65,7 +65,7 @@ pub fn prepare_native_zoom(window: &tauri::WebviewWindow) -> Result<(), String> 
                 webview.setFrameSize(content_size);
                 webview.layoutSubtreeIfNeeded();
             }
-            eprintln!(
+            desktop_log!(
                 "desktop_native_zoom_prepare_completed outcome=success duration_ms={}",
                 started_at.elapsed().as_millis()
             );
@@ -77,12 +77,12 @@ pub fn prepare_native_zoom(window: &tauri::WebviewWindow) -> Result<(), String> 
 /// during the resize animation.
 pub fn perform_native_zoom(window: &tauri::WebviewWindow) -> Result<(), String> {
     let started_at = std::time::Instant::now();
-    eprintln!("desktop_native_zoom_perform_started");
+    desktop_log!("desktop_native_zoom_perform_started");
     window
         .with_webview(move |platform_webview| unsafe {
             let native_window: &NSWindow = &*platform_webview.ns_window().cast();
             native_window.zoom(None);
-            eprintln!(
+            desktop_log!(
                 "desktop_native_zoom_perform_completed outcome=success duration_ms={}",
                 started_at.elapsed().as_millis()
             );

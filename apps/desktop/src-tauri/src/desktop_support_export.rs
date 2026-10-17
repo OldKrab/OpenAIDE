@@ -98,7 +98,7 @@ pub(crate) async fn desktop_save_support_export(
     )?;
     let operation_id = format!("desktop-support-export-{}", uuid::Uuid::new_v4());
     let started_at = Instant::now();
-    eprintln!("desktop_support_export_save_started operation_id={operation_id} attempt_count=1");
+    desktop_log!("desktop_support_export_save_started operation_id={operation_id} attempt_count=1");
 
     let mut dialog = app
         .dialog()
@@ -118,7 +118,7 @@ pub(crate) async fn desktop_save_support_export(
         .await
         .map_err(|_| "The support export Save dialog closed unexpectedly.".to_string())?;
     let Some(destination) = destination else {
-        eprintln!(
+        desktop_log!(
             "desktop_support_export_save_completed operation_id={operation_id} outcome=cancelled duration_ms={} attempt_count=1",
             started_at.elapsed().as_millis()
         );
@@ -127,7 +127,7 @@ pub(crate) async fn desktop_save_support_export(
     let destination = match destination.into_path() {
         Ok(destination) => destination,
         Err(_) => {
-            eprintln!(
+            desktop_log!(
                 "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=invalid_destination duration_ms={} attempt_count=1",
                 started_at.elapsed().as_millis()
             );
@@ -137,7 +137,7 @@ pub(crate) async fn desktop_save_support_export(
     let bytes = match download_support_export(url, &connection.auth_token).await {
         Ok(bytes) => bytes,
         Err(error) => {
-            eprintln!(
+            desktop_log!(
                 "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=download duration_ms={} attempt_count=1",
                 started_at.elapsed().as_millis()
             );
@@ -145,7 +145,7 @@ pub(crate) async fn desktop_save_support_export(
         }
     };
     if std::fs::write(&destination, bytes).is_err() {
-        eprintln!(
+        desktop_log!(
             "desktop_support_export_save_completed operation_id={operation_id} outcome=failure error_kind=file_write duration_ms={} attempt_count=1",
             started_at.elapsed().as_millis()
         );
@@ -156,16 +156,16 @@ pub(crate) async fn desktop_save_support_export(
         Ok(mut preferences) => {
             remember_export_directory(&mut preferences, &destination);
             if write_bootstrap_preferences(&state.preferences_path, &preferences).is_err() {
-                eprintln!(
+                desktop_log!(
                     "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_write"
                 );
             }
         }
-        Err(_) => eprintln!(
+        Err(_) => desktop_log!(
             "desktop_support_export_directory_remember_failed operation_id={operation_id} error_kind=preference_lock"
         ),
     }
-    eprintln!(
+    desktop_log!(
         "desktop_support_export_save_completed operation_id={operation_id} outcome=success duration_ms={} attempt_count=1",
         started_at.elapsed().as_millis()
     );

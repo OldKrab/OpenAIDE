@@ -26,11 +26,11 @@ fn secret_operation<T>(
 ) -> Result<T, String> {
     let operation_id = format!("desktop-secret-{}", uuid::Uuid::new_v4());
     let started_at = Instant::now();
-    eprintln!(
+    desktop_log!(
         "desktop_secret_operation_started operation_id={operation_id} operation={operation} attempt_count=1"
     );
     let result = run();
-    eprintln!(
+    desktop_log!(
         "desktop_secret_operation_completed operation_id={operation_id} operation={operation} outcome={} duration_ms={} attempt_count=1",
         if result.is_ok() { "success" } else { "failure" },
         started_at.elapsed().as_millis(),

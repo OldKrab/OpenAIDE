@@ -86,9 +86,9 @@ impl DesktopRemoteState {
         }
         let key = device_key(&self.key_path)?;
         let started_at = Instant::now();
-        eprintln!("desktop_remote_endpoint_bind_started attempt_count=1");
-        let result = remote::bind(key).await;
-        eprintln!(
+        desktop_log!("desktop_remote_endpoint_bind_started attempt_count=1");
+        let result = remote::bind(key, logger()).await;
+        desktop_log!(
             "desktop_remote_endpoint_bind_completed outcome={} duration_ms={} attempt_count=1",
             if result.is_ok() { "success" } else { "failure" },
             started_at.elapsed().as_millis()
@@ -196,7 +196,7 @@ pub(crate) async fn desktop_remote_pair(
     });
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
-    eprintln!("desktop_remote_computer_selected reason=paired");
+    desktop_log!("desktop_remote_computer_selected reason=paired");
     crate::restart_desktop(&app);
     Ok(())
 }
@@ -224,7 +224,7 @@ pub(crate) fn desktop_remote_use(
     if preferences.remote_computer == id {
         return Ok(());
     }
-    eprintln!(
+    desktop_log!(
         "desktop_remote_computer_selected reason={}",
         if id.is_some() { "chosen" } else { "local" }
     );
@@ -250,7 +250,7 @@ pub(crate) fn desktop_remote_forget(
     let was_current = preferences.forget(&id);
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
-    eprintln!("desktop_remote_computer_forgotten was_current={was_current}");
+    desktop_log!("desktop_remote_computer_forgotten was_current={was_current}");
     if was_current {
         crate::restart_desktop(&app);
     }
@@ -267,7 +267,7 @@ pub(crate) fn use_this_computer(state: &DesktopState) -> Result<bool, String> {
         return Ok(false);
     }
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
-    eprintln!("desktop_remote_computer_selected reason=recovered");
+    desktop_log!("desktop_remote_computer_selected reason=recovered");
     Ok(true)
 }
 
@@ -280,7 +280,7 @@ fn report_failure(app: &tauri::AppHandle, failure: remote::Failure) {
     {
         return;
     }
-    eprintln!(
+    desktop_log!(
         "desktop_remote_failure_reported error_class={}",
         failure.class()
     );
@@ -335,7 +335,7 @@ fn logger() -> remote::Logger {
                     .collect::<String>()
             })
             .unwrap_or_default();
-        eprintln!("desktop_{event}{fields}");
+        desktop_log!("desktop_{event}{fields}");
     })
 }
 
@@ -387,7 +387,7 @@ fn device_key(path: &Path) -> Result<remote::SecretKey, String> {
     }
     let key = remote::new_device_key();
     write_device_key(path, &remote::device_key_text(&key)).map_err(|()| unavailable())?;
-    eprintln!("desktop_remote_device_key_created");
+    desktop_log!("desktop_remote_device_key_created");
     Ok(key)
 }
 
