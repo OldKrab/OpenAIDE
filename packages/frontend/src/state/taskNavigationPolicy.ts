@@ -4,12 +4,12 @@ export function taskNavigationPageSize(projectCount: number): number {
 }
 
 /**
- * Keeps one Project useful without letting many Projects monopolize the sidebar. Task Navigation
- * applies it to history rows only; live rows are never limited and may shrink history further
- * to fit the viewport.
+ * Fixed per-Project history limit for Task Navigation. Live rows show on top of it, so it stays
+ * small with many Projects; it depends only on the Project count, so collapsing or expanding one
+ * Project never resizes another.
  */
 export function initialTaskNavigationRowsPerProject(projectCount: number): number {
   if (projectCount <= 1) return 20;
   if (projectCount === 2) return 7;
-  return 5;
+  return 3;
 }

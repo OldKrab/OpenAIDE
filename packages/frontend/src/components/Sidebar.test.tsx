@@ -1864,7 +1864,7 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "project-task-group-new" })).toHaveLength(0);
   });
 
-  it("shows the first five project groups and reveals more projects in batches", () => {
+  it("shows every project group without a separate project limit", () => {
     const projects = Array.from({ length: 7 }, (_, index) => ({
       projectId: `project_${index + 1}`,
       label: `Project ${index + 1}`,
@@ -1873,7 +1873,6 @@ describe("Sidebar", () => {
       <Sidebar
         {...sidebarCallbacks()}
         groupByProject={true}
-        maxVisibleProjects={5}
         nativeSessions={nativeSessions()}
         projects={projects}
         showArchived={false}
@@ -1881,13 +1880,9 @@ describe("Sidebar", () => {
       />,
     );
 
-    expect(tree.root.findAllByProps({ className: "project-task-group" })).toHaveLength(5);
-    expect(tree.root.findByProps({ className: "project-more" }).children.join("")).toBe("Show 2 more projects");
-
-    act(() => tree.root.findByProps({ className: "project-more" }).props.onClick());
-
     expect(tree.root.findAllByProps({ className: "project-task-group" })).toHaveLength(7);
-    expect(tree.root.findAllByProps({ className: "project-more" })).toHaveLength(0);
+    expect(tree.root.findAll((node) => node.type === "button" && node.children.join("").includes("more projects")))
+      .toHaveLength(0);
   });
 
   it("presents further pages of an unfinished project search as more searching", () => {
@@ -2294,6 +2289,71 @@ describe("Sidebar", () => {
     expect(rowTitles(tree)).toEqual(["Running", "Waiting", "Unread", "Idle 4", "Idle 3", "Idle 2", "Idle 1"]);
     // App Server demand counts every row the group now shows.
     expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 7);
+  });
+
+  it("shows live rows plus three history rows per Project and keeps other Projects stable on collapse", () => {
+    const projectTasks = (projectId: string, label: string) => [
+      task({ task_id: `${projectId}_running`, project_id: projectId, status: "active", title: `${label} running` }),
+      ...[1, 2, 3, 4, 5].map((index) => task({
+        task_id: `${projectId}_idle_${index}`,
+        project_id: projectId,
+        title: `${label} idle ${index}`,
+        last_activity: `2026-07-02T09:0${index}:00.000Z`,
+      })),
+    ];
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessions={nativeSessions()}
+        projects={[
+          { projectId: "project_a", label: "A" },
+          { projectId: "project_b", label: "B" },
+          { projectId: "project_c", label: "C" },
+        ]}
+        showArchived={false}
+        tasks={[...projectTasks("project_a", "A"), ...projectTasks("project_b", "B"), ...projectTasks("project_c", "C")]}
+      />,
+    );
+    const groupTitles = (label: string) => tree.root.findByProps({ "aria-label": label, className: "project-task-group" })
+      .findAll((node) => node.props.className === "task-title")
+      .map((node) => node.children.join(""));
+
+    expect(groupTitles("B")).toEqual(["B running", "B idle 5", "B idle 4", "B idle 3"]);
+    act(() => tree.root.findByProps({ "aria-label": "A", className: "project-task-group" })
+      .findByProps({ className: "project-task-group-toggle" }).props.onClick());
+    expect(groupTitles("B")).toEqual(["B running", "B idle 5", "B idle 4", "B idle 3"]);
+    expect(groupTitles("C")).toEqual(["C running", "C idle 5", "C idle 4", "C idle 3"]);
+  });
+
+  it("keeps a Project the same size when an idle visible task opens", () => {
+    const tasks = [1, 2, 3, 4, 5].map((index) => task({
+      task_id: `idle_${index}`,
+      project_id: "project_1",
+      title: `Idle ${index}`,
+      last_activity: `2026-07-02T09:0${index}:00.000Z`,
+    }));
+    const sidebar = (activeTaskId?: string) => (
+      <Sidebar
+        {...sidebarCallbacks()}
+        activeTaskId={activeTaskId}
+        groupByProject={true}
+        maxTasksPerProject={3}
+        nativeSessions={nativeSessions()}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        showArchived={false}
+        tasks={tasks}
+      />
+    );
+    const tree = render(sidebar());
+    expect(rowTitles(tree)).toEqual(["Idle 5", "Idle 4", "Idle 3"]);
+
+    act(() => tree.update(sidebar("idle_4")));
+    expect(rowTitles(tree)).toEqual(["Idle 5", "Idle 4", "Idle 3"]);
+
+    // A task opened from outside the window, e.g. from search, is added rather than hidden.
+    act(() => tree.update(sidebar("idle_1")));
+    expect(rowTitles(tree)).toEqual(["Idle 5", "Idle 4", "Idle 3", "Idle 1"]);
   });
 
   it("keeps live rows visible while their Project group is collapsed", () => {

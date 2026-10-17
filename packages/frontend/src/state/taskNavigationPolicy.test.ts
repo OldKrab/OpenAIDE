@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import { initialTaskNavigationRowsPerProject, taskNavigationPageSize } from "./taskNavigationPolicy";
 
 describe("Task Navigation presentation budget", () => {
-  it("allocates 20 rows for one Project, 7 for two, and 5 for three or more", () => {
+  it("allocates 20 history rows for one Project, 7 for two, and 3 for three or more", () => {
     expect(initialTaskNavigationRowsPerProject(1)).toBe(20);
     expect(initialTaskNavigationRowsPerProject(2)).toBe(7);
-    expect(initialTaskNavigationRowsPerProject(5)).toBe(5);
+    expect(initialTaskNavigationRowsPerProject(3)).toBe(3);
+    expect(initialTaskNavigationRowsPerProject(5)).toBe(3);
   });
 
   it("reveals seven more rows when there are at least three Projects", () => {

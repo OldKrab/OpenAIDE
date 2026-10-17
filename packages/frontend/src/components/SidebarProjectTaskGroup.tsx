@@ -119,7 +119,6 @@ export function SidebarProjectTaskGroup({
   const visibleRows = liveFirstVisibleRows(allRows, historyLimit, activeTaskId);
   const liveRows = visibleRows.filter((row) => projectRowLive(row, activeTaskId));
   const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
-  const shownHistory = visibleRows.length - liveRows.length;
   const countSummary = loading
     ? "Loading…"
     : projectGroupCountSummary(taskRows.length, nativeSessions.length, searching && nativeSessionsHaveMore);
@@ -258,8 +257,8 @@ export function SidebarProjectTaskGroup({
               className="project-task-more"
               disabled={loading}
               onClick={() => {
-                const nextHistoryLimit = shownHistory + (hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize);
-                onLoadMore(nextHistoryLimit, liveRows.length + nextHistoryLimit);
+                const increment = hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize;
+                onLoadMore(historyLimit + increment, visibleRows.length + increment);
               }}
               type="button"
             >
