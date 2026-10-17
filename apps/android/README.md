@@ -230,6 +230,14 @@ The Android document picker grants access only to selected, readable `content:`
 URIs. The WebView resource policy allows those exact documents while continuing
 to block arbitrary providers, local files and external network resources.
 
+A WebView never offers the camera for a file input, so the app does: when the
+Web Shell asks for images, the picker also offers a new photo. The camera writes
+it to the app's cache through the app's own provider, and the photo is delivered
+as one more selected document. Android refuses the camera to an app that declares
+the camera permission (pairing scans with it) until that permission is granted, so
+attaching images asks for it until it is granted or refused for good; without it,
+the picker offers documents alone.
+
 Existing Codex sessions are grouped by their original working directory. A CLI
 session started in Termux home appears under the home Project, even if commands
 later operate inside a repository. Add that original folder as a Project to find
@@ -279,7 +287,7 @@ Keep OpenAIDE unlocked and visible. `--renderer-only` avoids all system key inpu
 and checks the renderer Back event instead; it is not a physical Back-button test.
 
 `DeviceChecks` exercises native status reads from the local App Server, the gateway's
-refusal of requests without the shell's cookie, the real Termux PendingIntent callback, selected-image result delivery,
+refusal of requests without the shell's cookie, the real Termux PendingIntent callback, selected-image and captured-photo result delivery,
 Android wake-lock release and offline setup network isolation. Build the instrumentation APK and run:
 
 ```sh

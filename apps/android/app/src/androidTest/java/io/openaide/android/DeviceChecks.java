@@ -128,6 +128,36 @@ public final class DeviceChecks extends InstrumentationTestCase {
         getInstrumentation().runOnMainSync(activity::finish);
     }
 
+    /** A camera writes to the output it was given and returns no data; that photo reaches the file input. */
+    public void testCapturedPhotoIsDeliveredThroughTheAndroidResultBoundary() throws Exception {
+        var context = getInstrumentation().getTargetContext();
+        MainActivity activity = (MainActivity) getInstrumentation().startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try {
+            waitForBrowser(activity);
+            CountDownLatch delivered = new CountDownLatch(1);
+            AtomicReference<Uri[]> selected = new AtomicReference<>();
+            AtomicReference<Uri> output = new AtomicReference<>();
+            var callback = MainActivity.class.getDeclaredField("fileCallback");
+            callback.setAccessible(true);
+            var capture = MainActivity.class.getDeclaredField("camera");
+            capture.setAccessible(true);
+            getInstrumentation().runOnMainSync(() -> {
+                try {
+                    Intent chooser = ((CameraCapture) capture.get(activity)).chooser(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*"));
+                    Intent camera = ((Intent[]) chooser.getParcelableArrayExtra(Intent.EXTRA_INITIAL_INTENTS))[0];
+                    output.set(camera.getParcelableExtra(android.provider.MediaStore.EXTRA_OUTPUT));
+                    try (var photo = context.getContentResolver().openOutputStream(output.get())) { photo.write(new byte[]{(byte) 0xff, (byte) 0xd8, (byte) 0xff}); }
+                    callback.set(activity, (android.webkit.ValueCallback<Uri[]>) result -> { selected.set(result); delivered.countDown(); });
+                    activity.onActivityResult(2, android.app.Activity.RESULT_OK, null);
+                } catch (Exception error) { throw new AssertionError(error); }
+            });
+            assertTrue("Photo result timed out", delivered.await(10, TimeUnit.SECONDS));
+            assertNotNull("Captured photo was rejected", selected.get());
+            assertEquals(output.get(), selected.get()[0]);
+            assertEquals("image/jpeg", context.getContentResolver().getType(output.get()));
+        } finally { getInstrumentation().runOnMainSync(activity::finish); }
+    }
+
     /** The Web Shell downloads by clicking an `<a download>`; the WebView saves nothing unless the shell does. */
     public void testWorkspaceDownloadIsSavedToDownloads() throws Exception {
         if (android.os.Build.VERSION.SDK_INT < 29) return; // Older Android asks the user where to save.
