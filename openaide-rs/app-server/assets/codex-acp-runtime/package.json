@@ -2,9 +2,6 @@
   "name": "openaide-codex-acp-runtime",
   "private": true,
   "dependencies": {
-    "@openaide/codex-acp": "2.0.0"
-  },
-  "overrides": {
-    "@openai/codex": "0.159.2"
+    "@openaide/codex-acp": "2.1.0"
   }
 }

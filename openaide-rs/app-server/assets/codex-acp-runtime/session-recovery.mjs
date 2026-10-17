@@ -16,7 +16,7 @@ const recoveryFailure = (code, fresh = false) => Object.assign(new Error(fresh
 const writeRecoveryLog = (event) => console.error(JSON.stringify(event));
 
 /**
- * Version-scoped bridge for Codex 0.159.2 and earlier native history. Its resume RPC restores
+ * Version-scoped bridge for Codex 0.160.1 and earlier native history. Its resume RPC restores
  * model/approval history but rebuilds sandbox permissions from current config.
  * Read the native-owned rollout before resume can append those new defaults;
  * no OpenAIDE option cache or global Codex configuration is replayed or changed.
