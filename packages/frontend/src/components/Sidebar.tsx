@@ -10,9 +10,8 @@ import {
 } from "../state/taskNavigationPolicy";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
-import { useTaskNavigationFit } from "./useTaskNavigationFit";
 import { SidebarTaskRow } from "./SidebarTaskRow";
-import { groupedTasks, projectGroupRows, projectHistoryRowCount, recentVisibleGroups } from "./sidebarProjectModel";
+import { groupedTasks, projectGroupRows, recentVisibleGroups } from "./sidebarProjectModel";
 import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
@@ -196,19 +195,6 @@ export const Sidebar = memo(function Sidebar({
   const projectHasMore = (projectKey: string) =>
     !showArchived && nativeSessions.hasMoreProjectIds?.includes(projectKey) === true;
   const projectCollapsed = (projectKey: string) => !groupSearchQuery && collapsedProjectKeys.has(projectKey);
-  // Load More pins a group's history limit; collapsed groups show live rows only. Every other
-  // visible group shrinks its history to fit the viewport, up to the per-Project limit.
-  const fittedHistory = useTaskNavigationFit(
-    taskListRef,
-    visibleGroups
-      .filter((group) => !projectRowLimits.has(group.key) && !projectCollapsed(group.key))
-      .map((group) => ({
-        key: group.key,
-        history: projectHistoryRowCount(projectGroupRows(group.tasks, group.nativeSessions), activeTaskId),
-        cap: initialProjectRowLimit,
-        moreAlways: projectHasMore(group.key),
-      })),
-  );
   const hiddenProjectCount = groupByProject ? Math.max(0, groups.length - visibleGroups.length) : 0;
   const selectedSessionProjectCollapsed =
     groupByProject &&
@@ -357,9 +343,7 @@ export const Sidebar = memo(function Sidebar({
                 collapsed={projectCollapsed(group.key)}
                 group={group}
                 key={group.key}
-                historyLimit={
-                  projectRowLimits.get(group.key) ?? fittedHistory.get(group.key) ?? initialProjectRowLimit
-                }
+                historyLimit={projectRowLimits.get(group.key) ?? initialProjectRowLimit}
                 pageSize={projectPageSize}
                 nativeSessionAgentId={nativeSessionAgentId}
                 nativeSessionAgentName={nativeSessionAgentName}

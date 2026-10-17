@@ -89,10 +89,6 @@ export function projectRowLive(row: SidebarProjectRow, activeTaskId?: string) {
     || task.status === "waiting";
 }
 
-export function projectHistoryRowCount(rows: SidebarProjectRow[], activeTaskId?: string) {
-  return rows.filter((row) => !projectRowLive(row, activeTaskId)).length;
-}
-
 /**
  * Keeps every live row plus the newest `historyLimit` history rows. Rows keep their sorted
  * position, so a row that turns live or idle never jumps within its Project group.

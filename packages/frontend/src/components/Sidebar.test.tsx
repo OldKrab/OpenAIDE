@@ -2296,6 +2296,41 @@ describe("Sidebar", () => {
     expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 7);
   });
 
+  it("shows live rows plus three history rows per Project and keeps other Projects stable on collapse", () => {
+    const projectTasks = (projectId: string, label: string) => [
+      task({ task_id: `${projectId}_running`, project_id: projectId, status: "active", title: `${label} running` }),
+      ...[1, 2, 3, 4, 5].map((index) => task({
+        task_id: `${projectId}_idle_${index}`,
+        project_id: projectId,
+        title: `${label} idle ${index}`,
+        last_activity: `2026-07-02T09:0${index}:00.000Z`,
+      })),
+    ];
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessions={nativeSessions()}
+        projects={[
+          { projectId: "project_a", label: "A" },
+          { projectId: "project_b", label: "B" },
+          { projectId: "project_c", label: "C" },
+        ]}
+        showArchived={false}
+        tasks={[...projectTasks("project_a", "A"), ...projectTasks("project_b", "B"), ...projectTasks("project_c", "C")]}
+      />,
+    );
+    const groupTitles = (label: string) => tree.root.findByProps({ "aria-label": label, className: "project-task-group" })
+      .findAll((node) => node.props.className === "task-title")
+      .map((node) => node.children.join(""));
+
+    expect(groupTitles("B")).toEqual(["B running", "B idle 5", "B idle 4", "B idle 3"]);
+    act(() => tree.root.findByProps({ "aria-label": "A", className: "project-task-group" })
+      .findByProps({ className: "project-task-group-toggle" }).props.onClick());
+    expect(groupTitles("B")).toEqual(["B running", "B idle 5", "B idle 4", "B idle 3"]);
+    expect(groupTitles("C")).toEqual(["C running", "C idle 5", "C idle 4", "C idle 3"]);
+  });
+
   it("keeps live rows visible while their Project group is collapsed", () => {
     const tree = render(
       <Sidebar
