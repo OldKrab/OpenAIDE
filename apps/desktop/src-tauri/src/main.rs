@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 
+// First, so every module below can use `desktop_log!`.
+#[macro_use]
+mod desktop_log;
 mod desktop_app_server_hold;
 mod desktop_remote;
 mod desktop_renderer_protocol;
@@ -157,6 +160,7 @@ fn main() {
             desktop_renderer_protocol::handle(ctx.app_handle(), request.uri().path())
         })
         .setup(|app| {
+            desktop_log::install(&app.path().app_log_dir()?);
             let app_local_data = app.path().app_local_data_dir()?;
             // Tauri's `executable_dir` means a user-level bin directory and is
             // unsupported on Windows and macOS; the sidecar lives by this process.
@@ -297,11 +301,11 @@ const DEVELOPMENT_RESTART_EXIT_CODE: i32 = 75;
 pub(crate) fn restart_desktop(app: &tauri::AppHandle) {
     #[cfg(all(target_os = "macos", debug_assertions))]
     if std::env::var_os("OPENAIDE_DEVELOPMENT_RUNNER_PID").is_some() {
-        eprintln!("desktop_restart_requested owner=development_runner");
+        desktop_log!("desktop_restart_requested owner=development_runner");
         app.exit(DEVELOPMENT_RESTART_EXIT_CODE);
         return;
     }
-    eprintln!("desktop_restart_requested owner=desktop");
+    desktop_log!("desktop_restart_requested owner=desktop");
     app.restart();
 }
 
@@ -316,7 +320,7 @@ fn watch_development_runner(app: &tauri::App) {
         return;
     };
     let app_handle = app.handle().clone();
-    eprintln!("desktop_development_runner_watch_started");
+    desktop_log!("desktop_development_runner_watch_started");
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_millis(400));
@@ -327,7 +331,7 @@ fn watch_development_runner(app: &tauri::App) {
             if alive {
                 continue;
             }
-            eprintln!("desktop_development_runner_watch_completed outcome=parent_ended");
+            desktop_log!("desktop_development_runner_watch_completed outcome=parent_ended");
             app_handle.exit(0);
             break;
         }
@@ -494,7 +498,7 @@ async fn launch_app_server_for_desktop(
     operation_id: String,
 ) -> Result<LocalHttpConnection, String> {
     let started_at = Instant::now();
-    eprintln!("desktop_app_server_handoff_started operation_id={operation_id}");
+    desktop_log!("desktop_app_server_handoff_started operation_id={operation_id}");
     let joined = tauri::async_runtime::spawn_blocking(move || {
         launch_app_server_handoff(
             &runtime_paths,
@@ -510,14 +514,14 @@ async fn launch_app_server_for_desktop(
     .await;
     match joined {
         Err(_) => {
-            eprintln!(
+            desktop_log!(
                 "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage=task_join duration_ms={}",
                 started_at.elapsed().as_millis()
             );
             Err("App Server handoff task failed".to_string())
         }
         Ok(Err(error)) => {
-            eprintln!(
+            desktop_log!(
                 "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage={} duration_ms={}",
                 error.stage,
                 started_at.elapsed().as_millis()
@@ -525,7 +529,7 @@ async fn launch_app_server_for_desktop(
             Err(error.user_message)
         }
         Ok(Ok(connection)) => {
-            eprintln!(
+            desktop_log!(
                 "desktop_app_server_handoff_completed operation_id={operation_id} outcome=success duration_ms={}",
                 started_at.elapsed().as_millis()
             );
@@ -588,7 +592,7 @@ async fn desktop_ensure_app_server(
         .map_err(|_| "desktop bootstrap preferences unavailable")?
         .environment
         .clone();
-    eprintln!(
+    desktop_log!(
         "desktop_app_server_ensure_started operation_id={operation_id} had_connection={} reason_code={}",
         cached.is_some(),
         if cached.is_some() {
@@ -610,7 +614,7 @@ async fn desktop_ensure_app_server(
         .lock()
         .map_err(|_| "desktop connection state unavailable")? = Some(connection.clone());
     let _ = app.emit("desktop-app-server-replaced", &connection);
-    eprintln!(
+    desktop_log!(
         "desktop_app_server_ensure_completed operation_id={operation_id} outcome=success duration_ms={}",
         started_at.elapsed().as_millis()
     );
@@ -849,7 +853,7 @@ fn record_desktop_telemetry(payload: serde_json::Value) {
         .get("surface")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown");
-    eprintln!("desktop_webview_event event={event} surface={surface}");
+    desktop_log!("desktop_webview_event event={event} surface={surface}");
 }
 
 #[tauri::command]

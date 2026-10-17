@@ -368,3 +368,34 @@ fn the_rust_client_names_an_app_server_of_another_protocol_major() {
 
     assert_eq!(result, Err(Failure::Incompatible));
 }
+
+#[test]
+fn the_rust_client_records_how_far_a_failed_connect_got() {
+    use openaide_remote_client::{Failure, RemoteClient, SecretKey};
+
+    let fixture = fixture();
+    let endpoint = fixture.device_endpoint(7, Vec::new());
+    let events = std::sync::Arc::new(Mutex::new(Vec::<(&'static str, serde_json::Value)>::new()));
+    let log: openaide_remote_client::Logger = {
+        let events = events.clone();
+        std::sync::Arc::new(move |event, fields| events.lock().unwrap().push((event, fields)))
+    };
+
+    let result = fixture.run(async move {
+        endpoint.close().await;
+        let client = RemoteClient::new(endpoint, SecretKey::generate().public(), log);
+        client.connection().await.map(|_| ())
+    });
+
+    assert_eq!(result, Err(Failure::Unreachable));
+    let events = events.lock().unwrap();
+    let (_, completed) = events
+        .iter()
+        .find(|(event, _)| *event == "remote_connect_completed")
+        .expect("the attempt's terminal event");
+    assert_eq!(completed["outcome"], "unreachable");
+    assert_eq!(completed["stage"], "endpoint_closed");
+    assert_eq!(completed["endpoint_closed"], true);
+    assert!(completed["relay_connected"].is_boolean());
+    assert!(completed["direct_addresses"].is_u64());
+}

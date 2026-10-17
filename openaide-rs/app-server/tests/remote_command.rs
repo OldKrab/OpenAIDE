@@ -146,7 +146,7 @@ fn a_device_pairs_with_the_code_from_the_terminal_and_is_removed_there() {
     let quiet: Logger = std::sync::Arc::new(|_, _| {});
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let client = runtime.block_on(async {
-        let endpoint = bind(new_device_key()).await.unwrap();
+        let endpoint = bind(new_device_key(), quiet.clone()).await.unwrap();
         let paired = redeem(&endpoint, &invite, "Test phone", Some("Model"), &quiet)
             .await
             .unwrap();

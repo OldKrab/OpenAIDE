@@ -132,20 +132,20 @@ impl AppServerHold {
             }
             state.failures = 0;
             let Some(target) = target else {
-                eprintln!("desktop_app_server_hold_ended reason_code=not_owned");
+                desktop_log!("desktop_app_server_hold_ended reason_code=not_owned");
                 return;
             };
             let started_at = Instant::now();
             match self.initialize(&mut state, &target) {
                 Ok(()) => {
-                    eprintln!(
+                    desktop_log!(
                         "desktop_app_server_hold_started outcome=success duration_ms={}",
                         started_at.elapsed().as_millis()
                     );
                     state.held = Some(target);
                 }
                 // The next step tries again; the interval is the retry.
-                Err(error) => eprintln!(
+                Err(error) => desktop_log!(
                     "desktop_app_server_hold_started outcome=failure error_kind={} duration_ms={}",
                     error.class(),
                     started_at.elapsed().as_millis()
@@ -159,7 +159,7 @@ impl AppServerHold {
         match self.request(&mut state, &target, "client/heartbeat", json!({})) {
             Ok(()) => {
                 if state.failures > 0 {
-                    eprintln!(
+                    desktop_log!(
                         "desktop_app_server_hold_heartbeat_recovered attempt_count={}",
                         state.failures
                     );
@@ -169,7 +169,7 @@ impl AppServerHold {
             Err(error) => {
                 state.failures += 1;
                 if state.failures == 1 {
-                    eprintln!(
+                    desktop_log!(
                         "desktop_app_server_hold_heartbeat_failed error_kind={}",
                         error.class()
                     );
@@ -193,7 +193,9 @@ impl AppServerHold {
         }
         state.ended = true;
         let Some(target) = state.held.take() else {
-            eprintln!("desktop_app_server_hold_ended reason_code={reason_code} outcome=not_held");
+            desktop_log!(
+                "desktop_app_server_hold_ended reason_code={reason_code} outcome=not_held"
+            );
             return;
         };
         let started_at = Instant::now();
@@ -204,7 +206,7 @@ impl AppServerHold {
             Err(HoldError::Refused) => "refused",
             Err(HoldError::Malformed) => "malformed",
         };
-        eprintln!(
+        desktop_log!(
             "desktop_app_server_hold_ended reason_code={reason_code} outcome={outcome} duration_ms={}",
             started_at.elapsed().as_millis()
         );

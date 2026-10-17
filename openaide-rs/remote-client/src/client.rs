@@ -4,8 +4,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use iroh::endpoint::{presets, Connection, ConnectionError, RecvStream, SendStream};
-use iroh::{Endpoint, PublicKey, SecretKey};
+use iroh::endpoint::{
+    presets, ConnectError, ConnectWithOptsError, Connection, ConnectionError, RecvStream,
+    SendStream,
+};
+use iroh::{Endpoint, PublicKey, SecretKey, Watcher};
 use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
 use serde::{Deserialize, Serialize};
 
@@ -96,12 +99,39 @@ pub fn device_key_from_text(text: &str) -> Option<SecretKey> {
 
 /// Binds this device's endpoint on the public relays and address lookup the App
 /// Server uses. One endpoint per key: a second would compete for its relay.
-pub async fn bind(key: SecretKey) -> Result<Endpoint, Failure> {
-    Endpoint::builder(presets::N0)
+///
+/// Logs each time the endpoint gains or loses its home relay, for as long as it
+/// lives: without a relay a remote App Server can be reached only directly.
+pub async fn bind(key: SecretKey, log: Logger) -> Result<Endpoint, Failure> {
+    let endpoint = Endpoint::builder(presets::N0)
         .secret_key(key)
         .bind()
         .await
-        .map_err(|_| Failure::Unreachable)
+        .map_err(|_| Failure::Unreachable)?;
+    let mut statuses = endpoint.home_relay_status();
+    tokio::spawn(async move {
+        let mut connected = None;
+        let mut changed_at = Instant::now();
+        loop {
+            let now = statuses.get().iter().any(|status| status.is_connected());
+            if connected != Some(now) {
+                (log)(
+                    "remote_endpoint_relay_changed",
+                    serde_json::json!({
+                        "connected": now,
+                        "previous_duration_ms": connected.map(|_| elapsed_ms(changed_at)),
+                    }),
+                );
+                connected = Some(now);
+                changed_at = Instant::now();
+            }
+            // Ends with the last clone of the endpoint.
+            if statuses.updated().await.is_err() {
+                break;
+            }
+        }
+    });
+    Ok(endpoint)
 }
 
 /// Spends an invite: connects to the App Server it names and presents its secret.
@@ -225,34 +255,43 @@ impl RemoteClient {
             serde_json::json!({ "attempt": attempt }),
         );
         let result = self.connect().await;
-        (self.log)(
-            "remote_connect_completed",
-            serde_json::json!({
-                "attempt": attempt,
-                "outcome": match &result {
-                    Ok(connection) => path_name(connection),
-                    Err(failure) => failure.class(),
-                },
-                "duration_ms": elapsed_ms(started),
-            }),
-        );
-        let connection = result?;
+        let mut fields = serde_json::json!({
+            "attempt": attempt,
+            "outcome": match &result {
+                Ok(connection) => path_name(connection),
+                Err((failure, _)) => failure.class(),
+            },
+            "duration_ms": elapsed_ms(started),
+        });
+        // A failure that never reaches the App Server leaves no trace there, so
+        // this side records how far the attempt got and what its endpoint could use.
+        if let Err((_, stage)) = &result {
+            let address = self.endpoint.addr();
+            fields["stage"] = (*stage).into();
+            fields["endpoint_closed"] = self.endpoint.is_closed().into();
+            fields["relay_connected"] = relay_connected(&self.endpoint).into();
+            fields["direct_addresses"] = address.ip_addrs().count().into();
+        }
+        (self.log)("remote_connect_completed", fields);
+        let connection = result.map_err(|(failure, _)| failure)?;
         *current = Some(connection.clone());
         Ok(connection)
     }
 
-    async fn connect(&self) -> Result<Connection, Failure> {
+    /// Fails with the reason and the stage it was reached at.
+    async fn connect(&self) -> Result<Connection, (Failure, &'static str)> {
         let connecting = self.endpoint.connect(self.server, &self.alpn);
         let connection = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
             Ok(Ok(connection)) => connection,
             // An App Server of another protocol major does not offer this name.
             Ok(Err(error)) if names_no_protocol(&error.to_string()) => {
-                return Err(Failure::Incompatible)
+                return Err((Failure::Incompatible, "protocol"))
             }
-            Ok(Err(_)) | Err(_) => return Err(Failure::Unreachable),
+            Ok(Err(error)) => return Err((Failure::Unreachable, connect_stage(&error))),
+            Err(_) => return Err((Failure::Unreachable, "timeout")),
         };
         match tokio::time::timeout(REFUSAL_WAIT, connection.closed()).await {
-            Ok(reason) => Err(failure_of(&reason)),
+            Ok(reason) => Err((failure_of(&reason), "refused")),
             Err(_) => Ok(connection),
         }
     }
@@ -307,6 +346,28 @@ fn failure_of(reason: &ConnectionError) -> Failure {
         Ok(CLOSE_UNKNOWN_PROTOCOL) => Failure::Incompatible,
         _ => Failure::Unreachable,
     }
+}
+
+/// Names how far a failed attempt got, from the error's variant alone.
+fn connect_stage(error: &ConnectError) -> &'static str {
+    match error {
+        ConnectError::Connect { source, .. } => match source {
+            ConnectWithOptsError::NoAddress { .. } => "no_address",
+            ConnectWithOptsError::EndpointClosed { .. } => "endpoint_closed",
+            _ => "dial",
+        },
+        ConnectError::Connecting { .. } => "handshake",
+        ConnectError::Connection { .. } => "connection",
+        _ => "unknown",
+    }
+}
+
+fn relay_connected(endpoint: &Endpoint) -> bool {
+    endpoint
+        .home_relay_status()
+        .get()
+        .iter()
+        .any(|status| status.is_connected())
 }
 
 /// TLS answers an unknown application protocol with alert 120, which the
