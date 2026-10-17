@@ -7,10 +7,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
-    <!-- Scanning a Pairing Code; a phone without a camera pastes the code or shows its own. -->
+    <!-- Scanning a Pairing Code and taking a photo to attach; a phone without a camera pastes the code or shows its own. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <queries><package android:name="com.termux" /><package android:name="com.termux.boot" /></queries>
+    <queries>
+        <package android:name="com.termux" /><package android:name="com.termux.boot" />
+        <!-- Finds the camera apps that may write an attached photo. -->
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
+    </queries>
     <application
         android:name=".OpenAideApplication"
         android:label="OpenAIDE"
@@ -20,6 +24,12 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true">
         <receiver android:name=".TermuxCommand" android:exported="false" />
+        <!-- Lets the camera write a photo the Web Shell attaches; see CameraCapture. -->
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.captures"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/capture_paths" />
+        </provider>
         <!-- The scanner library locks itself to landscape; a phone is held upright. -->
         <activity android:name="com.journeyapps.barcodescanner.CaptureActivity"
             android:screenOrientation="fullSensor" tools:replace="android:screenOrientation" />
