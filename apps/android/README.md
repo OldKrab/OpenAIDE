@@ -81,12 +81,12 @@ does not depend on rendering the chat or keeping its WebView awake.
 The installer obtains the runtime URL and SHA-256 automatically from the canonical
 `v<APK version>` release in `OldKrab/OpenAIDE`, checks the exact artifact URL and digest,
 and verifies the archive before extraction. Users do not enter checksums or package lists.
-The canonical release includes the signed APK and matching `openaide-termux-arm64.tar.gz`
-asset together, enabling fresh-phone one-tap installation. Until that version is published,
+The canonical release includes the signed APK and matching
+`openaide-app-server-android-arm64-VERSION.tar.gz` asset together, enabling fresh-phone one-tap installation. Until that version is published,
 the app reports an unavailable download without installing unverified content.
 
 A test build can carry the archive instead, so local work can be tried before its
-version is published: `gradle -PopenaideBundledRuntime=/path/to/openaide-termux-arm64.tar.gz`.
+version is published: `gradle -PopenaideBundledRuntime=/path/to/openaide-app-server-android-arm64.tar.gz`.
 CI does this for every build that is not a release. Termux cannot read the app's
 files, so setup hands the archive over on loopback at a random, short-lived address,
 and the installer accepts it only with the digest fixed when the APK was built. Such
@@ -118,13 +118,13 @@ keeps working with Codex; the step that failed is in
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
-2. Download and unzip the runtime and APK artifacts. Prefer `app-release.apk`
-   from `android-user` for everyday use; `app-debug.apk` is for development.
-3. Transfer `openaide-termux-arm64.tar.gz` into Termux and extract it:
+2. Download and unzip the `app-server-android-arm64` and `android` artifacts. Use
+   `openaide-android.apk` for everyday use; `android-debug` is for development.
+3. Transfer `openaide-app-server-android-arm64.tar.gz` into Termux and extract it:
 
    ```sh
    mkdir -p ~/.local/share/openaide-android
-   tar -xzf openaide-termux-arm64.tar.gz -C ~/.local/share/openaide-android
+   tar -xzf openaide-app-server-android-arm64.tar.gz -C ~/.local/share/openaide-android
    ```
 
 4. Set `allow-external-apps=true` in `~/.termux/termux.properties`. This allows
@@ -167,15 +167,15 @@ shared Frontend, runs existing Web Shell tests and packages the Termux runtime,
 which is the App Server alone.
 It runs on every pull request, pushes to `main` and `android/**`, and manual dispatch,
 so shared Frontend and transport changes cannot bypass Android builds. Each run
-uploads the debug APK, a compiled device-test APK, unit/lint reports and the ARM64
-Termux runtime. Device tests still require a configured phone; CI compilation is
-not a substitute for executing them via ADB.
-With the persistent signing secrets configured, CI also produces
-`android-user/app-release.apk`, a non-debuggable user build. The debug
-artifact remains available for device tests. Store distribution still needs its
-own signing/review process; the current persistent development certificate is
+uploads the ARM64 Termux runtime as `app-server-android-arm64`; a failed run also
+uploads its unit/lint reports as `android-apk-diagnostics`. Device tests still require
+a configured phone; CI compilation is not a substitute for executing them via ADB.
+With the persistent signing secrets configured, pushes and manual dispatch produce
+`android/openaide-android.apk`, a non-debuggable user build signed with the stable
+key. Pull requests and runs without the secrets upload
+`android-debug/openaide-android-debug.apk` instead. Store distribution still needs
+its own signing/review process; the current persistent development certificate is
 retained for in-place updates on existing test phones.
-Signed user builds run only on pushes and manual dispatch, not pull requests.
 The canonical Release workflow also requires a signed user APK and matching runtime
 before publishing its immutable draft. The APK takes its version from root `package.json`;
 its sideload version code is `major * 1000000 + minor * 1000 + patch`. Prereleases

@@ -11,11 +11,6 @@ on:
         description: Version stamped into the package
         type: string
         required: true
-      artifact_suffix:
-        description: Suffix isolating non-release artifacts
-        type: string
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -57,7 +52,7 @@ jobs:
         run: node scripts/set-release-artifact-version.mjs "${{ inputs.version }}"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ steps.target.outputs.server_artifact }}${{ inputs.artifact_suffix }}
+          name: ${{ steps.target.outputs.server_artifact }}
           path: app-server
       - name: Restore App Server executable permission
         if: runner.os != 'Windows'
@@ -112,7 +107,7 @@ jobs:
             "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: vsix-${{ inputs.target }}${{ inputs.artifact_suffix }}
+          name: vscode-${{ inputs.target }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

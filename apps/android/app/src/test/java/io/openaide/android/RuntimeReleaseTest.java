@@ -11,6 +11,12 @@ public class RuntimeReleaseTest {
         assertTrue(BuildConfig.VERSION_CODE > 7);
     }
 
+    @Test public void assetIsTheVersionedAndroidAppServerArchive() {
+        assertEquals("openaide-app-server-android-arm64-0.9.1.tar.gz", RuntimeRelease.assetName("0.9.1"));
+        assertEquals("openaide-app-server-android-arm64-0.10.0-rc.1.tar.gz", RuntimeRelease.assetName("0.10.0-rc.1"));
+        assertThrows(IllegalArgumentException.class, () -> RuntimeRelease.assetName("0.9.1/../x"));
+    }
+
     @Test public void versionCannotChangeTheReleaseOriginOrPath() {
         for (String version : new String[]{null, "", "v0.5.5", "0.5.5/../latest", "0.5.5?other=1", "0.5.5\n", "0.5.5-rc.0"}) {
             assertThrows(IllegalArgumentException.class, () -> RuntimeRelease.releaseTag(version));

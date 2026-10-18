@@ -181,6 +181,13 @@ test("release publishing produces every supported VSIX and desktop package", () 
   assert.match(release, /openaide-desktop-windows-x64-\$RELEASE_VERSION\.exe/);
   assert.match(release, /openaide-desktop-macos-arm64-\$RELEASE_VERSION\.dmg/);
   assert.match(release, /name: app-server-linux-x64-musl\n/);
+  assert.match(release, /pattern: vscode-\*\n/);
+  assert.match(release, /name: android\n/);
+  assert.match(release, /name: app-server-android-arm64\n/);
+  // The Android app looks up exactly this asset in the release matching its version.
+  assert.match(release, /test -s "release\/openaide-app-server-android-arm64-\$RELEASE_VERSION\.tar\.gz"/);
+  assert.match(release, /release\/openaide-app-server-android-arm64-\*\.tar\.gz/);
+  assert.match(release, /name: desktop-windows-x64\n/);
   assert.match(release, /node scripts\/package-app-server-archive\.mjs/);
   assert.match(release, /openaide-app-server" remote help/);
   assert.match(release, /test -s "release\/openaide-app-server-linux-x64-\$RELEASE_VERSION\.tar\.gz"/);
@@ -224,8 +231,10 @@ test("manual artifact builds can select VSIX, desktop, or all without publishing
   assert.match(workflow, /short_sha="\$\{GITHUB_SHA:0:7\}"/);
   assert.match(workflow, /version="\$\{base_version\}\.g\$\{short_sha\}"/);
   assert.match(workflow, /version="\$\{base_version\}-g\$\{short_sha\}"/);
-  assert.match(vsixBuild, /name: vsix-\$\{\{ inputs\.target \}\}/);
-  assert.match(desktopBuild, /name: desktop-\$\{\{ inputs\.target \}\}/);
+  // Installable artifacts are named after the release asset they hold, without openaide-.
+  assert.match(vsixBuild, /name: vscode-\$\{\{ inputs\.target \}\}\n/);
+  assert.match(desktopBuild, /name: desktop-\$\{\{ steps\.target\.outputs\.artifact_platform \}\}\n/);
+  assert.doesNotMatch(`${workflow}\n${vsixBuild}\n${desktopBuild}`, /artifact_suffix/);
   assert.doesNotMatch(`${workflow}\n${vsixBuild}\n${desktopBuild}`, /vsce publish/);
   assert.doesNotMatch(workflow, /action-gh-release|contents: write|push:\s*\n\s*tags:/);
 });

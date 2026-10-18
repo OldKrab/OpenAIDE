@@ -11,11 +11,6 @@ on:
         description: Version stamped into the executable
         type: string
         required: true
-      artifact_suffix:
-        description: Suffix isolating non-release artifacts
-        type: string
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -91,7 +86,7 @@ jobs:
           fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: app-server-${{ inputs.target }}${{ inputs.artifact_suffix }}
+          name: app-server-${{ inputs.target }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14

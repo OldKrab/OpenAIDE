@@ -20,7 +20,7 @@ def protocolMajor = protocolVersion.group(1) as int
 def frontendDist = rootProject.file('../../packages/frontend/dist')
 def frontendAssets = layout.buildDirectory.dir('generated/frontend-assets')
 // A test build may carry the App Server archive so it can be tried before its version is published:
-// gradle -PopenaideBundledRuntime=/path/to/openaide-termux-arm64.tar.gz assembleDebug
+// gradle -PopenaideBundledRuntime=/path/to/openaide-app-server-android-arm64.tar.gz assembleDebug
 // Release builds leave it out and download the published archive.
 def bundledRuntime = project.hasProperty('openaideBundledRuntime') ? file(project.property('openaideBundledRuntime')) : null
 if (bundledRuntime != null && !bundledRuntime.isFile()) throw new GradleException('Bundled runtime archive not found')
@@ -99,7 +99,7 @@ def copyBundledRuntime = tasks.register('copyBundledRuntime') {
     doLast {
         delete target
         mkdir target
-        if (bundledRuntime != null) copy { from bundledRuntime; into target; rename { 'openaide-termux-arm64.bin' } }
+        if (bundledRuntime != null) copy { from bundledRuntime; into target; rename { 'openaide-app-server-android-arm64.bin' } }
     }
 }
 androidComponents.onVariants(androidComponents.selector().all()) { variant ->

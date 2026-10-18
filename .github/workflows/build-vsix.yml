@@ -81,7 +81,6 @@ jobs:
     name: Resolve artifact graph
     runs-on: ubuntu-24.04
     outputs:
-      artifact_suffix: ${{ steps.build.outputs.artifact_suffix }}
       version: ${{ steps.build.outputs.version }}
       server_linux_x64_musl: ${{ steps.build.outputs.server_linux_x64_musl }}
       server_win32_x64: ${{ steps.build.outputs.server_win32_x64 }}
@@ -107,7 +106,6 @@ jobs:
         run: |
           if [[ -n "$REQUESTED_VERSION" ]]; then
             version="$REQUESTED_VERSION"
-            artifact_suffix=""
           else
             base_version="$(node -p "require('./package.json').version")"
             short_sha="${GITHUB_SHA:0:7}"
@@ -117,12 +115,8 @@ jobs:
             else
               version="${base_version}-g${short_sha}"
             fi
-            artifact_suffix="-g${short_sha}"
           fi
-          {
-            echo "version=$version"
-            echo "artifact_suffix=$artifact_suffix"
-          } >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           node scripts/resolve-release-artifact-graph.mjs \
             "$ARTIFACT_SELECTION" \
             "$VSIX_TARGET" \
@@ -135,7 +129,6 @@ jobs:
     with:
       target: linux-x64-musl
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
 
   server-win32-x64:
     if: needs.prepare.outputs.server_win32_x64 == 'true'
@@ -144,7 +137,6 @@ jobs:
     with:
       target: win32-x64
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
 
   server-darwin-arm64:
     if: needs.prepare.outputs.server_darwin_arm64 == 'true'
@@ -153,7 +145,6 @@ jobs:
     with:
       target: darwin-arm64
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
 
   vsix-linux-x64:
     if: needs.prepare.outputs.vsix_linux_x64 == 'true'
@@ -162,7 +153,6 @@ jobs:
     with:
       target: linux-x64
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
 
   vsix-win32-x64:
     if: needs.prepare.outputs.vsix_win32_x64 == 'true'
@@ -171,7 +161,6 @@ jobs:
     with:
       target: win32-x64
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
 
   vsix-darwin-arm64:
     if: needs.prepare.outputs.vsix_darwin_arm64 == 'true'
@@ -180,7 +169,6 @@ jobs:
     with:
       target: darwin-arm64
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
 
   desktop-win32-x64:
     if: needs.prepare.outputs.desktop_win32_x64 == 'true'
@@ -189,7 +177,6 @@ jobs:
     with:
       target: win32-x64
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
       enable_windows_updates: ${{ inputs.enable_windows_updates }}
     secrets:
       DESKTOP_UPDATE_RELEASE_PRIVATE_KEY: ${{ secrets.DESKTOP_UPDATE_RELEASE_PRIVATE_KEY }}
@@ -202,7 +189,6 @@ jobs:
     with:
       target: darwin-arm64
       version: ${{ needs.prepare.outputs.version }}
-      artifact_suffix: ${{ needs.prepare.outputs.artifact_suffix }}
       enable_windows_updates: false
 
   android:

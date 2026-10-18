@@ -21,9 +21,9 @@ permissions:
   contents: read
 
 env:
-  # CI artifact carrying the Android App Server runtime. The tarball inside keeps the
-  # published release asset name that installed apps look up, so it must not follow this.
-  RUNTIME_ARTIFACT: android-app-server-arm64
+  # The Android App Server archive, named like the other App Server artifacts. Release adds
+  # the version to the tarball; the app built from the same commit looks up that name.
+  RUNTIME_ARTIFACT: app-server-android-arm64
 
 concurrency:
   group: android-${{ github.ref }}
@@ -54,7 +54,7 @@ jobs:
         # Diagnostics only: a green run leaves just the installable artifacts.
         if: failure()
         with:
-          name: android-browser-checks
+          name: android-browser-diagnostics
           path: test-results/
   apk:
     # Test builds carry the App Server built from the same commit, so local work
@@ -71,7 +71,7 @@ jobs:
           path: ${{ runner.temp }}/runtime
       - name: Carry the runtime in test builds
         if: ${{ !inputs.release }}
-        run: echo "BUNDLED_RUNTIME=-PopenaideBundledRuntime=$RUNNER_TEMP/runtime/openaide-termux-arm64.tar.gz" >> "$GITHUB_ENV"
+        run: echo "BUNDLED_RUNTIME=-PopenaideBundledRuntime=$RUNNER_TEMP/runtime/openaide-app-server-android-arm64.tar.gz" >> "$GITHUB_ENV"
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
@@ -117,11 +117,17 @@ jobs:
             echo "OPENAIDE_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
           } >> "$GITHUB_ENV"
           echo 'staged=true' >> "$GITHUB_OUTPUT"
+      # The APKs are named after the release asset openaide-android-VERSION.apk; only the
+      # Release workflow adds the version.
       - name: Check and build APKs
-        run: gradle -p apps/android --no-daemon $BUNDLED_RUNTIME testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+        run: |
+          gradle -p apps/android --no-daemon $BUNDLED_RUNTIME testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+          cp apps/android/app/build/outputs/apk/debug/app-debug.apk apps/android/build/openaide-android-debug.apk
       - name: Build user APK
         if: steps.key.outputs.staged == 'true'
-        run: gradle -p apps/android --no-daemon $BUNDLED_RUNTIME assembleRelease
+        run: |
+          gradle -p apps/android --no-daemon $BUNDLED_RUNTIME assembleRelease
+          cp apps/android/app/build/outputs/apk/release/app-release.apk apps/android/build/openaide-android.apk
       - name: Remove the signing key
         if: always() && steps.key.outputs.staged == 'true'
         run: rm -f "$OPENAIDE_ANDROID_KEYSTORE"
@@ -131,19 +137,19 @@ jobs:
         if: steps.key.outputs.staged != 'true'
         with:
           name: android-debug
-          path: apps/android/app/build/outputs/apk/debug/app-debug.apk
+          path: apps/android/build/openaide-android-debug.apk
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         # Diagnostics only: a green run leaves just the installable artifacts.
         if: failure()
         with:
-          name: android-reports
+          name: android-apk-diagnostics
           path: apps/android/app/build/reports/
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: github.event_name != 'pull_request'
         with:
-          name: android-user
-          path: apps/android/app/build/outputs/apk/release/app-release.apk
+          name: android
+          path: apps/android/build/openaide-android.apk
           if-no-files-found: warn
   runtime:
     runs-on: ubuntu-24.04
@@ -193,9 +199,9 @@ jobs:
         run: |
           node apps/android/scripts/package-runtime.mjs
           chmod +x apps/android/build/runtime/bin/openaide-app-server
-          tar -czf apps/android/build/openaide-termux-arm64.tar.gz -C apps/android/build runtime
+          tar -czf apps/android/build/openaide-app-server-android-arm64.tar.gz -C apps/android/build runtime
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ${{ env.RUNTIME_ARTIFACT }}
-          path: apps/android/build/openaide-termux-arm64.tar.gz
+          path: apps/android/build/openaide-app-server-android-arm64.tar.gz
           if-no-files-found: error
