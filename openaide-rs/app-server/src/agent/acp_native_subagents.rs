@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::agent::acp_draft_subagents::{
+    DraftSubagentNotification, DraftSubagentSpawned, DraftSubagentState, DraftSubagentStateUpdate,
+    DraftSubagentUpdate,
+};
 use crate::agent::acp_host_capabilities::AcpSessionEventSinkMap;
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
-use crate::agent::acp_schema::{
-    SessionNotification, SessionUpdate, SubagentSpawnedUpdate, SubagentState, SubagentStateUpdate,
-};
+use crate::agent::acp_schema::{SessionNotification, SessionUpdate};
 use crate::agent::events::{
     AgentEvent, AgentNativeSubagentCapabilities, AgentNativeSubagentDetail,
     AgentNativeSubagentDetailsUpdate, AgentNativeSubagentSpawned, AgentNativeSubagentState,
@@ -26,13 +28,7 @@ struct RouterState {
     negotiated: bool,
     codex_adapter: bool,
     children: HashMap<String, ChildRoute>,
-    /// Exact child prompts read from the raw announcement, keyed by child session id.
-    /// The typed draft schema has no field for this adapter extension.
-    spawn_prompts: HashMap<String, String>,
 }
-
-/// Announcements are consumed in arrival order, so only an unrouted one strands an entry.
-const MAX_PENDING_SPAWN_PROMPTS: usize = 64;
 
 #[derive(Clone)]
 struct ChildRoute {
@@ -69,25 +65,20 @@ impl AcpNativeSubagentRouter {
             );
         if !negotiated {
             state.children.clear();
-            state.spawn_prompts.clear();
         }
     }
 
-    /// Keeps the exact prompt an adapter attached to a raw `subagent_spawned`
-    /// until the typed announcement for the same child is routed.
-    pub(super) fn remember_spawn_prompt(&self, params: &serde_json::Value) {
-        let Some((child_session_id, prompt)) = raw_spawn_prompt(params) else {
-            return;
-        };
-        let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
-        if !state.negotiated {
-            return;
+    /// Applies one draft Subagent update.
+    pub(super) fn route_draft(
+        &self,
+        notification: DraftSubagentNotification,
+    ) -> Result<(), RuntimeError> {
+        match notification.update {
+            DraftSubagentUpdate::Spawned(spawned) => self.spawn(notification.session_id, spawned),
+            DraftSubagentUpdate::StateChanged(update) => {
+                self.state_changed(notification.session_id, update)
+            }
         }
-        if state.spawn_prompts.len() >= MAX_PENDING_SPAWN_PROMPTS {
-            // Only announcements that never routed are left, such as load replay.
-            state.spawn_prompts.clear();
-        }
-        state.spawn_prompts.insert(child_session_id, prompt);
     }
 
     pub(super) fn route(
@@ -97,14 +88,6 @@ impl AcpNativeSubagentRouter {
         let outer_session_id = notification.session_id.to_string();
         let outer_meta = notification.meta;
         match notification.update {
-            SessionUpdate::SubagentSpawned(spawned) => {
-                self.spawn(outer_session_id, spawned)?;
-                Ok(RoutedSessionNotification::Handled)
-            }
-            SessionUpdate::SubagentStateUpdate(update) => {
-                self.state_changed(outer_session_id, update)?;
-                Ok(RoutedSessionNotification::Handled)
-            }
             SessionUpdate::SessionInfoUpdate(info)
                 if self.child_attribution(&outer_session_id).is_some() =>
             {
@@ -176,30 +159,27 @@ impl AcpNativeSubagentRouter {
     fn spawn(
         &self,
         parent_session_id: String,
-        spawned: SubagentSpawnedUpdate,
+        spawned: DraftSubagentSpawned,
     ) -> Result<(), RuntimeError> {
-        let child_session_id = spawned.subagent_session_id.to_string();
+        let prompt = spawned.prompt();
+        let child_session_id = spawned.subagent_session_id;
         let (root_session_id, root_sink) = self.root_for_parent(&parent_session_id)?;
-        let mut details = codex_details(spawned.meta.as_ref());
-        details.extend(claude_details(spawned.meta.as_ref()));
+        let meta = spawned.meta.as_ref().and_then(serde_json::Value::as_object);
+        let mut details = codex_details(meta);
+        details.extend(claude_details(meta));
         let child_name = spawned.name.clone();
-        let (codex_adapter, prompt) = {
-            let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
+        let (codex_adapter, known_child) = {
+            let state = self.inner.lock().expect("ACP Subagent router poisoned");
             (
                 state.codex_adapter,
-                state.spawn_prompts.remove(&child_session_id),
+                state.children.contains_key(&child_session_id),
             )
         };
+        // Codex's `task` is a placeholder, not the delegated prompt.
         let delegated_task = (!codex_adapter).then_some(spawned.task);
         // Codex ACP re-announces an already routed child when the parent sends it
-        // another message. The draft protocol currently has no separate event for it.
-        let parent_interaction = codex_adapter
-            && self
-                .inner
-                .lock()
-                .expect("ACP Subagent router poisoned")
-                .children
-                .contains_key(&child_session_id);
+        // another message. The draft protocol has no separate event for it.
+        let parent_interaction = codex_adapter && known_child;
         let event = AgentNativeSubagentSpawned {
             parent_native_session_id: parent_session_id.clone(),
             native_session_id: child_session_id.clone(),
@@ -224,7 +204,7 @@ impl AcpNativeSubagentRouter {
             let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
             if !state.negotiated {
                 return Err(RuntimeError::InvalidParams(
-                    "ACP Agent sent Subagent traffic without bilateral negotiation".to_string(),
+                    "ACP Agent sent Subagent traffic that OpenAIDE did not offer".to_string(),
                 ));
             }
             crate::logging::info(
@@ -288,14 +268,14 @@ impl AcpNativeSubagentRouter {
     fn state_changed(
         &self,
         parent_session_id: String,
-        update: SubagentStateUpdate,
+        update: DraftSubagentStateUpdate,
     ) -> Result<(), RuntimeError> {
-        let child_session_id = update.subagent_session_id.to_string();
+        let child_session_id = update.subagent_session_id;
         let (root_session_id, expected_parent, started_at) = {
             let state = self.inner.lock().expect("ACP Subagent router poisoned");
             if !state.negotiated {
                 return Err(RuntimeError::InvalidParams(
-                    "ACP Agent sent Subagent traffic without bilateral negotiation".to_string(),
+                    "ACP Agent sent Subagent traffic that OpenAIDE did not offer".to_string(),
                 ));
             }
             let route = state.children.get(&child_session_id).ok_or_else(|| {
@@ -320,11 +300,12 @@ impl AcpNativeSubagentRouter {
             .cloned()
             .ok_or_else(|| RuntimeError::NotReady("Task event sink is unavailable".to_string()))?;
         let state = match update.state {
-            SubagentState::Completed => AgentNativeSubagentState::Completed,
-            SubagentState::Failed => AgentNativeSubagentState::Failed,
-            SubagentState::Cancelled => AgentNativeSubagentState::Cancelled,
-            SubagentState::Disconnected => AgentNativeSubagentState::Disconnected,
-            _ => AgentNativeSubagentState::Disconnected,
+            DraftSubagentState::Completed => AgentNativeSubagentState::Completed,
+            DraftSubagentState::Failed => AgentNativeSubagentState::Failed,
+            DraftSubagentState::Cancelled => AgentNativeSubagentState::Cancelled,
+            DraftSubagentState::Disconnected | DraftSubagentState::Unrecognized => {
+                AgentNativeSubagentState::Disconnected
+            }
         };
         root_sink.subagent_state_changed(AgentNativeSubagentStateUpdate {
             parent_native_session_id: parent_session_id,
@@ -354,7 +335,7 @@ impl AcpNativeSubagentRouter {
             .negotiated;
         if !negotiated {
             return Err(RuntimeError::InvalidParams(
-                "ACP Agent sent Subagent traffic without bilateral negotiation".to_string(),
+                "ACP Agent sent Subagent traffic that OpenAIDE did not offer".to_string(),
             ));
         }
         if let Some(sink) = self
@@ -483,17 +464,6 @@ fn claude_details(
             })
     })
     .collect()
-}
-
-/// Reads the adapter-extension `prompt` of a raw `session/update` announcement.
-fn raw_spawn_prompt(params: &serde_json::Value) -> Option<(String, String)> {
-    let update = params.get("update")?;
-    if update.get("sessionUpdate")?.as_str()? != "subagent_spawned" {
-        return None;
-    }
-    let child_session_id = update.get("subagentSessionId")?.as_str()?;
-    let prompt = update.get("prompt")?.as_str()?;
-    (!prompt.trim().is_empty()).then(|| (child_session_id.to_string(), prompt.to_string()))
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use serde::Deserialize;
 use crate::agent::acp_background_work::{
     route_async_task_update, AsyncTaskRouting, SESSION_STATE_METHOD,
 };
+use crate::agent::acp_draft_subagents::{decode_draft_subagent_update, DraftSubagentNotification};
 use crate::agent::acp_early_session_catalogs::EarlySessionCatalogs;
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
@@ -73,6 +74,7 @@ where
     let state_trace = notification_trace.clone();
     let state_session_traces = notification_session_traces.clone();
     let notification_load_replay = context.load_replay;
+    let raw_load_replay = notification_load_replay.clone();
     let raw_native_subagents = context.native_subagents.clone();
     let notification_native_subagents = context.native_subagents;
     let agent_reports = context.agent_reports;
@@ -114,7 +116,17 @@ where
                     );
                     return Ok(Handled::Yes);
                 }
-                raw_native_subagents.remember_spawn_prompt(notification.params());
+                if let Some(draft) = decode_draft_subagent_update(&notification) {
+                    handle_draft_subagent_notification(
+                        &notification,
+                        draft,
+                        &state_trace,
+                        &state_session_traces,
+                        &raw_load_replay,
+                        &raw_native_subagents,
+                    );
+                    return Ok(Handled::Yes);
+                }
                 trace_session_state_change(&notification, &state_trace, &state_session_traces);
                 let notification = match route_async_task_update(&notification) {
                     AsyncTaskRouting::NotAsyncTask => notification,
@@ -441,51 +453,103 @@ fn handle_session_update_notification(
     load_replay: &LoadReplayCaptures,
 ) -> Option<SessionNotification> {
     log_tool_call_status_received(&notification);
-    let owning_trace = {
-        let mut session_traces = session_traces
-            .lock()
-            .expect("ACP session trace map lock poisoned");
-        let owning_trace = session_traces
-            .get(&notification.session_id.to_string())
-            .cloned();
-        // A child session never opens through this client, so it inherits the
-        // trace of the session that announced it. Otherwise its traffic falls
-        // back to whichever Task first opened the shared Agent process.
-        if let (Some(parent_trace), SessionUpdate::SubagentSpawned(spawned)) =
-            (&owning_trace, &notification.update)
-        {
-            session_traces.insert(
-                spawned.subagent_session_id.to_string(),
-                parent_trace.clone(),
-            );
-        }
-        owning_trace.or_else(|| trace.clone())
-    };
-    if let Some(trace) = owning_trace {
+    let session_id = notification.session_id.to_string();
+    if let Some(trace) = session_trace(&session_id, None, trace, session_traces) {
         trace.record("agent_to_client", "session/update", &notification);
     }
-    let mut active = load_replay
-        .lock()
-        .expect("ACP load replay capture lock poisoned");
-    let outer_session_id = notification.session_id.to_string();
-    if let Some(capture) = active.values_mut().find(|capture| {
-        capture.session_id == notification.session_id
-            || capture.subagent_session_ids.contains(&outer_session_id)
-    }) {
-        match notification.update {
-            SessionUpdate::SubagentSpawned(spawned) => {
-                capture
-                    .subagent_session_ids
-                    .insert(spawned.subagent_session_id.to_string());
-            }
-            SessionUpdate::SubagentStateUpdate(_)
-                if notification.session_id == capture.session_id => {}
-            update if notification.session_id == capture.session_id => capture.updates.push(update),
-            _ => {}
-        }
+    if absorbed_by_load_replay(load_replay, &session_id, None, Some(&notification.update)) {
         return None;
     }
     Some(notification)
+}
+
+/// Draft Subagent updates have no type in the released schema. They take the
+/// same trace and load-replay path as a typed update before the router applies them.
+fn handle_draft_subagent_notification(
+    notification: &UntypedMessage,
+    draft: Result<DraftSubagentNotification, serde_json::Error>,
+    trace: &Option<AcpTraceSession>,
+    session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
+    load_replay: &LoadReplayCaptures,
+    native_subagents: &AcpNativeSubagentRouter,
+) {
+    let draft = match draft {
+        Ok(draft) => draft,
+        Err(error) => {
+            crate::logging::warn(
+                "acp_subagent_update_rejected",
+                serde_json::json!({
+                    "form": "draft",
+                    "error_kind": "malformed",
+                    "error_category": format!("{:?}", error.classify()),
+                }),
+            );
+            return;
+        }
+    };
+    let announced_child = draft.announced_child();
+    if let Some(trace) = session_trace(&draft.session_id, announced_child, trace, session_traces) {
+        trace.record("agent_to_client", "session/update", notification.params());
+    }
+    if absorbed_by_load_replay(load_replay, &draft.session_id, announced_child, None) {
+        return;
+    }
+    if let Err(error) = native_subagents.route_draft(draft) {
+        crate::logging::warn(
+            "acp_subagent_update_rejected",
+            serde_json::json!({
+                "form": "draft",
+                "error_kind": error.code(),
+            }),
+        );
+    }
+}
+
+/// The trace that records `session_id`'s traffic. A child session never opens
+/// through this client, so the child a session announces inherits that
+/// session's trace. Otherwise its traffic falls back to whichever Task first
+/// opened the shared Agent process.
+fn session_trace(
+    session_id: &str,
+    announced_child: Option<&str>,
+    trace: &Option<AcpTraceSession>,
+    session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
+) -> Option<AcpTraceSession> {
+    let mut session_traces = session_traces
+        .lock()
+        .expect("ACP session trace map lock poisoned");
+    let owning_trace = session_traces.get(session_id).cloned();
+    if let (Some(parent_trace), Some(child_session_id)) = (&owning_trace, announced_child) {
+        session_traces.insert(child_session_id.to_string(), parent_trace.clone());
+    }
+    owning_trace.or_else(|| trace.clone())
+}
+
+/// Lets an active `session/load` capture absorb one update of the loaded
+/// session or of a child it announced. Only a root `update` joins the replay;
+/// child streams stay out of the main projection. Returns whether it was absorbed.
+fn absorbed_by_load_replay(
+    load_replay: &LoadReplayCaptures,
+    session_id: &str,
+    announced_child: Option<&str>,
+    update: Option<&SessionUpdate>,
+) -> bool {
+    let mut active = load_replay
+        .lock()
+        .expect("ACP load replay capture lock poisoned");
+    let Some(capture) = active.values_mut().find(|capture| {
+        *capture.session_id.0 == *session_id || capture.subagent_session_ids.contains(session_id)
+    }) else {
+        return false;
+    };
+    if let Some(child_session_id) = announced_child {
+        capture
+            .subagent_session_ids
+            .insert(child_session_id.to_string());
+    } else if let Some(update) = update.filter(|_| *capture.session_id.0 == *session_id) {
+        capture.updates.push(update.clone());
+    }
+    true
 }
 
 /// An Agent may publish a session's catalogs before this client finishes attaching the

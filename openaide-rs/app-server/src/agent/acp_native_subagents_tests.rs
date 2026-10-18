@@ -5,6 +5,7 @@ struct CaptureSink {
     spawns: Mutex<Vec<AgentNativeSubagentSpawned>>,
     updates: Mutex<Vec<AgentEvent>>,
     details: Mutex<Vec<AgentNativeSubagentDetailsUpdate>>,
+    states: Mutex<Vec<AgentNativeSubagentState>>,
 }
 
 impl AgentSessionEventSink for CaptureSink {
@@ -36,6 +37,14 @@ impl AgentSessionEventSink for CaptureSink {
         Ok(())
     }
 
+    fn subagent_state_changed(
+        &self,
+        event: AgentNativeSubagentStateUpdate,
+    ) -> Result<(), RuntimeError> {
+        self.states.lock().unwrap().push(event.state);
+        Ok(())
+    }
+
     fn subagent_details_changed(
         &self,
         event: AgentNativeSubagentDetailsUpdate,
@@ -46,11 +55,57 @@ impl AgentSessionEventSink for CaptureSink {
 }
 
 fn claude_router(capture: &Arc<CaptureSink>) -> AcpNativeSubagentRouter {
+    router_for(
+        capture,
+        "claude-code",
+        "@agentclientprotocol/claude-agent-acp",
+    )
+}
+
+fn codex_router(capture: &Arc<CaptureSink>) -> AcpNativeSubagentRouter {
+    router_for(capture, "custom.codex-subagent-fix", "@openaide/codex-acp")
+}
+
+fn router_for(
+    capture: &Arc<CaptureSink>,
+    agent_id: &str,
+    implementation_name: &str,
+) -> AcpNativeSubagentRouter {
     let sinks: AcpSessionEventSinkMap = Arc::default();
     sinks.lock().unwrap().insert("root".into(), capture.clone());
-    let router = AcpNativeSubagentRouter::new("claude-code", sinks);
-    router.set_negotiated(true, Some("@agentclientprotocol/claude-agent-acp"));
+    let router = AcpNativeSubagentRouter::new(agent_id, sinks);
+    router.set_negotiated(true, Some(implementation_name));
     router
+}
+
+fn draft(session_id: &str, update: serde_json::Value) -> DraftSubagentNotification {
+    let message = agent_client_protocol::UntypedMessage::new(
+        "session/update",
+        serde_json::json!({ "sessionId": session_id, "update": update }),
+    )
+    .unwrap();
+    crate::agent::acp_draft_subagents::decode_draft_subagent_update(&message)
+        .unwrap()
+        .unwrap()
+}
+
+fn draft_spawn(meta: serde_json::Value) -> DraftSubagentNotification {
+    draft_spawn_with(serde_json::json!({ "_meta": meta }))
+}
+
+/// A draft announcement of `child` by `root`, with `fields` added or replaced.
+fn draft_spawn_with(fields: serde_json::Value) -> DraftSubagentNotification {
+    let mut update = serde_json::json!({
+        "sessionUpdate": "subagent_spawned",
+        "subagentSessionId": "child",
+        "name": "Researcher",
+        "task": "Delegated task for Researcher",
+        "capabilities": {},
+    });
+    for (key, value) in fields.as_object().unwrap() {
+        update[key] = value.clone();
+    }
+    draft("root", update)
 }
 
 fn claude_meta(subagent: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
@@ -71,31 +126,14 @@ fn detail_pairs(details: &[AgentNativeSubagentDetail]) -> Vec<(&str, &str)> {
 fn exact_spawn_prompt_opens_the_child_history_once() {
     let capture = Arc::new(CaptureSink::default());
     let router = claude_router(&capture);
-    let spawn = || {
-        router.remember_spawn_prompt(&serde_json::json!({
-            "sessionId": "root",
-            "update": {
-                "sessionUpdate": "subagent_spawned",
-                "subagentSessionId": "child",
-                "name": "Researcher",
+    for _ in 0..2 {
+        router
+            .route_draft(draft_spawn_with(serde_json::json!({
                 "task": "Summary",
                 "prompt": "Read the project guide",
-            },
-        }));
-        router
-            .route(SessionNotification::new(
-                "root",
-                SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
-                    "child",
-                    "Researcher",
-                    "Summary",
-                    Default::default(),
-                )),
-            ))
+            })))
             .unwrap();
-    };
-    spawn();
-    spawn();
+    }
 
     let updates = capture.updates.lock().unwrap();
     assert_eq!(
@@ -113,20 +151,8 @@ fn exact_spawn_prompt_opens_the_child_history_once() {
 fn spawn_without_the_prompt_extension_adds_no_user_message() {
     let capture = Arc::new(CaptureSink::default());
     let router = claude_router(&capture);
-    router.remember_spawn_prompt(&serde_json::json!({
-        "sessionId": "root",
-        "update": { "sessionUpdate": "subagent_spawned", "subagentSessionId": "child" },
-    }));
     router
-        .route(SessionNotification::new(
-            "root",
-            SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
-                "child",
-                "Researcher",
-                "Summary",
-                Default::default(),
-            )),
-        ))
+        .route_draft(draft_spawn_with(serde_json::json!({ "prompt": "  " })))
         .unwrap();
     assert!(capture.updates.lock().unwrap().is_empty());
 }
@@ -136,17 +162,13 @@ fn claude_spawn_metadata_becomes_typed_details() {
     let capture = Arc::new(CaptureSink::default());
     let router = claude_router(&capture);
     router
-        .route(SessionNotification::new(
-            "root",
-            SessionUpdate::SubagentSpawned(
-                SubagentSpawnedUpdate::new("child", "Researcher", "Summary", Default::default())
-                    .meta(claude_meta(serde_json::json!({
-                        "type": "Explore",
-                        "requestedModel": "sonnet",
-                        "unknown": "ignored",
-                    }))),
-            ),
-        ))
+        .route_draft(draft_spawn(serde_json::Value::Object(claude_meta(
+            serde_json::json!({
+                "type": "Explore",
+                "requestedModel": "sonnet",
+                "unknown": "ignored",
+            }),
+        ))))
         .unwrap();
     assert_eq!(
         detail_pairs(&capture.spawns.lock().unwrap()[0].details),
@@ -155,19 +177,29 @@ fn claude_spawn_metadata_becomes_typed_details() {
 }
 
 #[test]
+fn codex_spawn_metadata_becomes_typed_details() {
+    let capture = Arc::new(CaptureSink::default());
+    let router = codex_router(&capture);
+    router
+        .route_draft(draft_spawn(serde_json::json!({
+            "codex": {
+                "subagent": { "path": "/root/researcher" },
+                "collaboration": { "model": "gpt-5", "unknown": "ignored" },
+            },
+        })))
+        .unwrap();
+    assert_eq!(
+        detail_pairs(&capture.spawns.lock().unwrap()[0].details),
+        [("Path", "/root/researcher"), ("Model", "gpt-5")],
+    );
+}
+
+#[test]
 fn child_session_info_reports_the_resolved_model() {
     let capture = Arc::new(CaptureSink::default());
     let router = claude_router(&capture);
     router
-        .route(SessionNotification::new(
-            "root",
-            SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
-                "child",
-                "Researcher",
-                "Summary",
-                Default::default(),
-            )),
-        ))
+        .route_draft(draft_spawn(serde_json::Value::Null))
         .unwrap();
     let info = |session_id: &str| {
         SessionNotification::new(
@@ -210,19 +242,9 @@ fn repeated_codex_child_announcement_marks_a_parent_interaction() {
     router.set_negotiated(true, None);
 
     for _ in 0..2 {
-        let notification = SessionNotification::new(
-            "root",
-            SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
-                "child",
-                "Researcher",
-                "Delegated task for Researcher",
-                Default::default(),
-            )),
-        );
-        assert!(matches!(
-            router.route(notification).unwrap(),
-            RoutedSessionNotification::Handled,
-        ));
+        router
+            .route_draft(draft_spawn(serde_json::Value::Null))
+            .unwrap();
     }
 
     let spawns = capture.spawns.lock().unwrap();
@@ -235,21 +257,10 @@ fn repeated_codex_child_announcement_marks_a_parent_interaction() {
 #[test]
 fn custom_codex_identity_preserves_interactions_without_placeholder_prompts() {
     let capture = Arc::new(CaptureSink::default());
-    let sinks: AcpSessionEventSinkMap = Arc::default();
-    sinks.lock().unwrap().insert("root".into(), capture.clone());
-    let router = AcpNativeSubagentRouter::new("custom.codex-subagent-fix", sinks);
-    router.set_negotiated(true, Some("@openaide/codex-acp"));
+    let router = codex_router(&capture);
     for _ in 0..2 {
         router
-            .route(SessionNotification::new(
-                "root",
-                SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
-                    "child",
-                    "Researcher",
-                    "Delegated task for Researcher",
-                    Default::default(),
-                )),
-            ))
+            .route_draft(draft_spawn(serde_json::Value::Null))
             .unwrap();
     }
     router
@@ -270,23 +281,37 @@ fn custom_codex_identity_preserves_interactions_without_placeholder_prompts() {
 }
 
 #[test]
+fn codex_terminal_state_reaches_the_root_session() {
+    let capture = Arc::new(CaptureSink::default());
+    let router = codex_router(&capture);
+    router
+        .route_draft(draft_spawn(serde_json::Value::Null))
+        .unwrap();
+    router
+        .route_draft(draft(
+            "root",
+            serde_json::json!({
+                "sessionUpdate": "subagent_state_update",
+                "subagentSessionId": "child",
+                "state": "cancelled",
+            }),
+        ))
+        .unwrap();
+    assert_eq!(
+        capture.states.lock().unwrap().as_slice(),
+        [AgentNativeSubagentState::Cancelled],
+    );
+}
+
+#[test]
 fn unrelated_custom_adapter_retains_real_child_prompts() {
     let capture = Arc::new(CaptureSink::default());
-    let sinks: AcpSessionEventSinkMap = Arc::default();
-    sinks.lock().unwrap().insert("root".into(), capture.clone());
     // A Codex-like configured id must not select another implementation's policy.
-    let router = AcpNativeSubagentRouter::new("custom.codex-example", sinks);
-    router.set_negotiated(true, Some("other-agent"));
+    let router = router_for(&capture, "custom.codex-example", "other-agent");
     router
-        .route(SessionNotification::new(
-            "root",
-            SessionUpdate::SubagentSpawned(SubagentSpawnedUpdate::new(
-                "child",
-                "Researcher",
-                "Read the project guide",
-                Default::default(),
-            )),
-        ))
+        .route_draft(draft_spawn_with(serde_json::json!({
+            "task": "Read the project guide",
+        })))
         .unwrap();
     router
         .route(SessionNotification::new(

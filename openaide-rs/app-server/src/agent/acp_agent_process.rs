@@ -274,13 +274,9 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 first_open.as_ref(),
             )
             .await?;
-            let client_enabled = crate::agent::acp_host::native_subagents_enabled();
-            let agent_advertised = initialize
-                .agent_capabilities
-                .session_capabilities
-                .subagents
-                .is_some();
-            let negotiated = client_enabled && agent_advertised;
+            // The released Subagent form is gated on the client capability alone:
+            // an Agent that supports it sends child sessions once it is offered.
+            let negotiated = crate::agent::acp_host::native_subagents_enabled();
             native_subagents.set_negotiated(
                 negotiated,
                 initialize
@@ -293,12 +289,8 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 serde_json::json!({
                     "operation_id": attachment_lifetime.operation_id(),
                     "agent_id": config.agent_id,
-                    "client_enabled": client_enabled,
-                    "agent_advertised": agent_advertised,
                     "negotiated": negotiated,
-                    "reason_code": if !client_enabled { "client_disabled" }
-                        else if !agent_advertised { "agent_unsupported" }
-                        else { "bilateral_support" },
+                    "reason_code": if negotiated { "client_enabled" } else { "client_disabled" },
                     "duration_ms": connection_started_at.elapsed().as_millis(),
                 }),
             );
