@@ -86,10 +86,10 @@ Before that release:
    that Tauri bundled the exact App Server binary built for that platform.
 6. The workflow creates a draft GitHub Release, attaches the complete verified
    asset set, publishes the draft, and verifies immutability. Windows Desktop
-   filenames end in `-unsigned` until Authenticode signing is configured. macOS
-   Desktop bundles are ad-hoc signed and end in `-unnotarized` until Developer ID
-   signing and Apple notarization are configured. Users must explicitly approve
-   these preview installers with the operating system. This GitHub Release is
+   installers are unsigned until Authenticode signing is configured. macOS
+   Desktop bundles are ad-hoc signed until Developer ID signing and Apple
+   notarization are configured. Users must explicitly approve these preview
+   installers with the operating system. This GitHub Release is
    the canonical release. Every
    release then reconciles the same downloaded bytes with Open VSX; stable
    releases also reconcile them with the VS Code Marketplace.
@@ -101,7 +101,8 @@ package, Cargo, lockfile, and Tauri manifests stamped only during artifact
 creation stay at `0.0.0` in source and must not be updated by hand.
 
 Android builds read the same root version and pin one-tap installation to the matching
-canonical release's `openaide-termux-arm64.tar.gz` asset and GitHub SHA-256 digest.
+canonical release's `openaide-app-server-android-arm64-VERSION.tar.gz` asset and GitHub
+SHA-256 digest. Releases up to 0.9.0 published it as `openaide-termux-arm64.tar.gz`.
 Canonical publication requires `OPENAIDE_ANDROID_DEBUG_KEYSTORE` and
 `OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD`; it must not substitute a temporary key
 or omit the APK. Android APK and runtime assets are attached before the draft is

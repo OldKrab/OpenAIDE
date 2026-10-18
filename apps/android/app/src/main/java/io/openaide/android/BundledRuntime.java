@@ -24,7 +24,7 @@ import java.util.concurrent.Callable;
  * lived, and the installer trusts only the digest fixed when the APK was built.
  */
 final class BundledRuntime {
-    static final String ASSET = "runtime/openaide-termux-arm64.bin";
+    static final String ASSET = "runtime/openaide-app-server-android-arm64.bin";
     private static final int OFFER_MS = 10 * 60_000;
 
     private BundledRuntime() {}

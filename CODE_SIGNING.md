@@ -46,9 +46,8 @@ CI must not silently publish an unsigned replacement under a signed filename.
 
 Current macOS bundles use Apple's free ad-hoc code signature so the bundle has
 an internally consistent code seal. Ad-hoc signing does not establish an
-OpenAIDE publisher identity and is not Apple notarization. Release filenames
-therefore include `-unnotarized`, and users may still need to approve the first
-launch in macOS Privacy & Security settings.
+OpenAIDE publisher identity and is not Apple notarization, so users may still
+need to approve the first launch in macOS Privacy & Security settings.
 
 Developer ID signing and notarization will be documented here if they become
 available. Until then, OpenAIDE does not describe macOS packages as trusted,

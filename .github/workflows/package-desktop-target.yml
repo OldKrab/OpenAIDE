@@ -11,11 +11,6 @@ on:
         description: Version stamped into the package
         type: string
         required: true
-      artifact_suffix:
-        description: Suffix isolating non-release artifacts
-        type: string
-        required: false
-        default: ""
       enable_windows_updates:
         description: Build Windows with the production updater identity
         type: boolean
@@ -83,12 +78,12 @@ jobs:
         run: node scripts/set-release-artifact-version.mjs "${{ inputs.version }}"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: app-server-${{ inputs.target }}${{ inputs.artifact_suffix }}
+          name: app-server-${{ inputs.target }}
           path: app-server
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         if: inputs.target == 'win32-x64'
         with:
-          name: app-server-linux-x64-musl${{ inputs.artifact_suffix }}
+          name: app-server-linux-x64-musl
           path: wsl-app-server
       - name: Restore App Server executable permission
         if: runner.os != 'Windows'
@@ -194,7 +189,7 @@ jobs:
           fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: desktop-${{ inputs.target }}${{ inputs.artifact_suffix }}
+          name: desktop-${{ steps.target.outputs.artifact_platform }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
@@ -212,7 +207,7 @@ jobs:
       # A failed smoke retry reuses the uploaded installer instead of recompiling it.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: desktop-win32-x64${{ inputs.artifact_suffix }}
+          name: desktop-windows-x64
           path: artifacts
       - name: Extract packaged Windows desktop
         shell: pwsh

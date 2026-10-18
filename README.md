@@ -82,8 +82,8 @@ Download the package for your platform from
 
 | Platform | Release file | Current trust status |
 | --- | --- | --- |
-| Windows x64 | `openaide-desktop-win32-x64-VERSION-unsigned.exe` | Unsigned until SignPath Foundation accepts the project |
-| macOS Apple Silicon | `openaide-desktop-darwin-arm64-VERSION-unnotarized.dmg` | Ad-hoc signed, but not Apple-notarized |
+| Windows x64 | `openaide-desktop-windows-x64-VERSION.exe` | Unsigned until SignPath Foundation accepts the project |
+| macOS Apple Silicon | `openaide-desktop-macos-arm64-VERSION.dmg` | Ad-hoc signed, but not Apple-notarized |
 
 Windows may show an unknown-publisher warning. Windows releases use a separate
 OpenAIDE updater signature so an installed update is accepted only when its
