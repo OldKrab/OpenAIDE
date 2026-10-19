@@ -271,6 +271,29 @@ impl Store {
         })
     }
 
+    /// Applies an Agent-reported identity patch. `None` leaves a field as it is.
+    pub fn update_subagent_identity(
+        &self,
+        task_id: &str,
+        native_session_id: &str,
+        name: Option<String>,
+        delegated_task: Option<String>,
+        cancel: Option<bool>,
+    ) -> Result<SubagentRecord, RuntimeError> {
+        self.mutate_subagent_record(task_id, native_session_id, |record| {
+            if let Some(name) = name {
+                record.name = name;
+            }
+            if let Some(delegated_task) = delegated_task {
+                record.delegated_task = delegated_task;
+            }
+            if let Some(cancel) = cancel {
+                record.capabilities.cancel = cancel;
+            }
+            Ok(())
+        })
+    }
+
     /// Replaces stored details that share a label with an incoming one and
     /// appends the rest, so a later Agent report refines the announced value.
     pub fn merge_subagent_details(

@@ -3,6 +3,7 @@ import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import {
   TASK_CLOSE_PLAN,
   TASK_STOP_BACKGROUND_COMMAND,
+  TASK_STOP_SUBAGENT,
   TASK_QUEUE_APPEND,
   TASK_QUEUE_REMOVE,
   TASK_QUEUE_RESUME,
@@ -10,6 +11,7 @@ import {
   TASK_SEND,
   TASK_SET_PERMISSION_POLICY,
   type AttachmentHandleId,
+  type SubagentId,
 } from "@openaide/app-server-client";
 
 afterEach(() => {
@@ -107,6 +109,34 @@ describe("task mutation intents", () => {
       type: "taskInput:error",
       taskId: "task-a",
       message: "Background command is not running",
+    });
+  });
+
+  it("asks App Server to stop one Subagent and reports whether it accepted", async () => {
+    const { stopSubagentIntent } = await import("./taskMutationIntents");
+    const request = vi.fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("Subagent is not running"));
+    const dispatch = vi.fn();
+    const dependencies = {
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch,
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    };
+    const subagentId = "subagent-1" as SubagentId;
+
+    await expect(stopSubagentIntent(dependencies, taskSnapshot(), subagentId)).resolves.toBe(true);
+    expect(request).toHaveBeenCalledWith(TASK_STOP_SUBAGENT, { taskId: "task-a", subagentId });
+    expect(dispatch).not.toHaveBeenCalled();
+
+    await expect(stopSubagentIntent(dependencies, taskSnapshot(), subagentId)).resolves.toBe(false);
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:error",
+      taskId: "task-a",
+      message: "Subagent is not running",
     });
   });
 

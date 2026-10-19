@@ -497,6 +497,23 @@ impl AttachedNativeSession {
             })?
     }
 
+    /// The worker only hands the notification to the connection, so the wait
+    /// is short; a timeout means the worker itself is stuck.
+    pub(super) fn stop_subagent(&self, native_session_id: String) -> Result<(), RuntimeError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.command_tx
+            .send(AcpSessionCommand::StopSubagent {
+                native_session_id,
+                reply_tx,
+            })
+            .map_err(|_| self.attachment_stopped_error())?;
+        reply_rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|_| {
+                RuntimeError::OutcomeUnknown("Stopping the Subagent timed out".to_string())
+            })?
+    }
+
     pub(super) fn cancel(&self) -> Result<(), RuntimeError> {
         let cancel_result = self
             .cancel_tx

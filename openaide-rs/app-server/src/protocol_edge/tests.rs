@@ -4340,6 +4340,19 @@ impl TaskCancelWorkflow for RejectingTaskCancel {
         })
     }
 
+    fn stop_subagent_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskStopSubagentParams,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "Subagent stop unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
     fn stop_background_command_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,

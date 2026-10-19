@@ -7,6 +7,8 @@ use agent_client_protocol::{
     Agent, Client, ConnectTo, ConnectionTo, Handled, JsonRpcMessage, UntypedMessage,
 };
 use serde::Deserialize;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_background_work::{
     route_async_task_update, AsyncTaskRouting, SESSION_STATE_METHOD,
@@ -78,6 +80,8 @@ where
     let raw_native_subagents = context.native_subagents.clone();
     let notification_native_subagents = context.native_subagents;
     let agent_reports = context.agent_reports;
+    let raw_agent_id = notification_agent_id.clone();
+    let undecodable_kinds = Arc::new(Mutex::new(HashSet::<String>::new()));
 
     // ACP request callbacks run inside the shared connection's dispatch loop. Every host wait
     // must be spawned so one session cannot block updates and responses for every other session.
@@ -133,6 +137,9 @@ where
                     AsyncTaskRouting::Forward(state_change) => state_change,
                     AsyncTaskRouting::Drop => return Ok(Handled::Yes),
                 };
+                if session_update_is_undecodable(&notification, &raw_agent_id, &undecodable_kinds) {
+                    return Ok(Handled::Yes);
+                }
                 Ok(Handled::No {
                     message: (notification, cx),
                     retry: false,
@@ -454,10 +461,20 @@ fn handle_session_update_notification(
 ) -> Option<SessionNotification> {
     log_tool_call_status_received(&notification);
     let session_id = notification.session_id.to_string();
-    if let Some(trace) = session_trace(&session_id, None, trace, session_traces) {
+    let announced_child = match &notification.update {
+        SessionUpdate::SubagentUpdate(update) => Some(update.session_id.to_string()),
+        _ => None,
+    };
+    let announced_child = announced_child.as_deref();
+    if let Some(trace) = session_trace(&session_id, announced_child, trace, session_traces) {
         trace.record("agent_to_client", "session/update", &notification);
     }
-    if absorbed_by_load_replay(load_replay, &session_id, None, Some(&notification.update)) {
+    if absorbed_by_load_replay(
+        load_replay,
+        &session_id,
+        announced_child,
+        Some(&notification.update),
+    ) {
         return None;
     }
     Some(notification)
@@ -619,6 +636,49 @@ fn log_tool_call_status_received(notification: &SessionNotification) {
 
 /// Leaves the update to the session handlers. `retry` asks the dispatch loop to hold an
 /// update none of them accepts and offer it to the next handler that is registered.
+/// The typed handler would reject a `session/update` it cannot decode without
+/// any trace, which once hid a whole new update form. Reports each such kind
+/// once per connection and drops the update. Returns whether it was dropped.
+fn session_update_is_undecodable(
+    notification: &UntypedMessage,
+    agent_id: &str,
+    reported_kinds: &Mutex<HashSet<String>>,
+) -> bool {
+    if notification.method() != "session/update" {
+        return false;
+    }
+    let Err(error) = SessionNotification::deserialize(notification.params()) else {
+        return false;
+    };
+    let kind = notification
+        .params()
+        .get("update")
+        .and_then(|update| update.get("sessionUpdate"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|kind| {
+            kind.len() <= 64
+                && kind
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+        })
+        .unwrap_or("unreadable");
+    if reported_kinds
+        .lock()
+        .expect("ACP undecodable update set poisoned")
+        .insert(kind.to_string())
+    {
+        crate::logging::warn(
+            "acp_session_update_undecodable",
+            serde_json::json!({
+                "agent_id": agent_id,
+                "update_kind": kind,
+                "error_category": format!("{:?}", error.classify()),
+            }),
+        );
+    }
+    true
+}
+
 fn unhandled_session_update<Cx>(
     notification: SessionNotification,
     cx: Cx,

@@ -247,10 +247,15 @@ impl LivePromptProjection {
     }
 
     /// Projects the exact prompt a parent delegated as the child's User message.
-    pub(super) fn emit_user_prompt(&self, text: String) -> Result<(), RuntimeError> {
+    /// `source_message_id` keeps each delegated message of a reused child apart.
+    pub(super) fn emit_user_prompt(
+        &self,
+        text: String,
+        source_message_id: Option<String>,
+    ) -> Result<(), RuntimeError> {
         self.sink.emit(AgentEvent::UserMessageChunk {
             text,
-            source_message_id: None,
+            source_message_id,
         })
     }
 

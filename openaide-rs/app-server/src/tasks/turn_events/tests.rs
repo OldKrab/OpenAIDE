@@ -78,6 +78,7 @@ fn later_subagent_details_replace_the_announced_value_with_the_same_label() {
         name: "Researcher".to_string(),
         delegated_task: Some("Summary".to_string()),
         parent_interaction: false,
+        parent_records_delegation: false,
         capabilities: AgentNativeSubagentCapabilities::default(),
         details: vec![detail("Agent type", "Explore"), detail("Model", "sonnet")],
     })
@@ -119,6 +120,7 @@ fn codex_child_history_explains_parent_lifecycle_without_inventing_prompts() {
         name: "Researcher".to_string(),
         delegated_task: None,
         parent_interaction: false,
+        parent_records_delegation: false,
         capabilities: AgentNativeSubagentCapabilities::default(),
         details: Vec::new(),
     })
@@ -134,6 +136,7 @@ fn codex_child_history_explains_parent_lifecycle_without_inventing_prompts() {
         // A fresh router after session/resume cannot classify the repeat from
         // process memory; the durable child identity must still recover it.
         parent_interaction: false,
+        parent_records_delegation: false,
         capabilities: AgentNativeSubagentCapabilities::default(),
         details: Vec::new(),
     })
@@ -2805,7 +2808,7 @@ fn tool_event(status: AgentToolCallStatus) -> AgentEvent {
     })
 }
 
-fn test_runtime() -> (
+pub(super) fn test_runtime() -> (
     tempfile::TempDir,
     Store,
     TaskMutations,
@@ -2823,7 +2826,7 @@ fn test_runtime() -> (
     (dir, store, mutations, ServerRequestRuntime::new())
 }
 
-fn running_task(task_id: &str) -> TaskRecord {
+pub(super) fn running_task(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
         title: Default::default(),

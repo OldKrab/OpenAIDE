@@ -151,7 +151,8 @@ impl AgentSessionEventSink for TaskSessionEventSink {
     fn subagent_spawned(&self, event: AgentNativeSubagentSpawned) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let now = now_string();
-        let prompt_unavailable = event.delegated_task.is_none();
+        // A released-form child gets its prompt as a child message, not here.
+        let prompt_unavailable = !event.parent_records_delegation && event.delegated_task.is_none();
         let child_already_exists = match self
             .mutations
             .store()
@@ -172,6 +173,12 @@ impl AgentSessionEventSink for TaskSessionEventSink {
         } else {
             "Parent Agent"
         };
+        let parent_records_delegation = event.parent_records_delegation;
+        let announced_identity = (
+            event.name.clone(),
+            event.delegated_task.clone().unwrap_or_default(),
+            event.capabilities.cancel,
+        );
         let mut record = self.mutations.store().record_subagent_spawn(
             &self.task_id,
             &event.parent_native_session_id,
@@ -191,6 +198,22 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 })
                 .collect(),
         )?;
+        if parent_records_delegation {
+            if child_already_exists {
+                // A resumed connection announces a stored child again; the
+                // announcement is its current identity.
+                let (name, delegated_task, cancel) = announced_identity;
+                record = self.mutations.store().update_subagent_identity(
+                    &self.task_id,
+                    &record.native_session_id,
+                    Some(name),
+                    Some(delegated_task),
+                    Some(cancel),
+                )?;
+            }
+            // The parent's own Tool rows show this delegation in its Chat.
+            return self.publish_subagent_snapshots(&record.subagent_id);
+        }
         if parent_interaction {
             record = self.mutations.store().update_subagent_status(
                 &self.task_id,
@@ -413,12 +436,37 @@ impl AgentSessionEventSink for TaskSessionEventSink {
         self.publish_subagent_snapshots(&record.subagent_id)
     }
 
+    fn subagent_identity_changed(
+        &self,
+        event: crate::agent::events::AgentNativeSubagentIdentityUpdate,
+    ) -> Result<(), RuntimeError> {
+        let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
+        let record = self.mutations.store().update_subagent_identity(
+            &self.task_id,
+            &event.native_session_id,
+            event.name,
+            event.delegated_task,
+            event.cancel,
+        )?;
+        self.publish_subagent_snapshots(&record.subagent_id)
+    }
+
     fn subagent_state_changed(
         &self,
         event: AgentNativeSubagentStateUpdate,
     ) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let (stored_status, activity_status) = match event.state {
+            AgentNativeSubagentState::Running => {
+                // A reused child works again. Released-form children have no
+                // Delegated Activity row to reopen.
+                let record = self.mutations.store().update_subagent_status(
+                    &self.task_id,
+                    &event.native_session_id,
+                    crate::storage::subagents::SubagentStatusRecord::Running,
+                )?;
+                return self.publish_subagent_snapshots(&record.subagent_id);
+            }
             AgentNativeSubagentState::Completed => (
                 crate::storage::subagents::SubagentStatusRecord::Completed,
                 ActivityStatus::Completed,

@@ -7,7 +7,7 @@ pub use session_deletion::*;
 use crate::attachment::PreSendAttachment;
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,
-    QueuedMessageId, TaskId, TaskListCursor, TurnId, WorktreeId,
+    QueuedMessageId, SubagentId, TaskId, TaskListCursor, TurnId, WorktreeId,
 };
 use crate::snapshot::AgentConfigOptionCurrentValue;
 use crate::snapshot::{
@@ -386,6 +386,20 @@ pub struct TaskStopBackgroundCommandParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskStopBackgroundCommandResult {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStopSubagentParams {
+    pub task_id: TaskId,
+    /// A Running Subagent of this Task whose capabilities include `cancel`.
+    pub subagent_id: SubagentId,
+}
+
+/// The stop was sent to the Agent. The Subagent's status changes only through
+/// the Agent's own later report, published as an ordered Subagent change.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStopSubagentResult {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

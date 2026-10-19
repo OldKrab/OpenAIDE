@@ -4,6 +4,8 @@ mod compaction;
 mod config;
 mod permissions;
 mod questions;
+#[cfg(test)]
+mod released_subagent_tests;
 mod session;
 #[cfg(test)]
 mod tests;

@@ -213,6 +213,14 @@ impl AgentRuntime for AcpAgentRuntime {
         self.kernel.stop_background_command(session, command_id)
     }
 
+    fn stop_subagent(
+        &self,
+        session: &AgentSessionKey,
+        native_session_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.kernel.stop_subagent(session, native_session_id)
+    }
+
     fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.kernel.cancel_session(session)
     }

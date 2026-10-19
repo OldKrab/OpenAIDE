@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::agent::acp_active_prompt::{cancel_active_prompt, send_steering_prompt_request};
 use crate::agent::acp_background_work::BackgroundWork;
 use crate::agent::acp_config_options_apply::SessionConfigRequests;
+use crate::agent::acp_native_subagent_stop::stop_native_subagent;
 use crate::agent::acp_prompt_runner::{
     dispatch_session_notification, run_prompt, PromptRunContext,
 };
@@ -283,6 +284,17 @@ pub(super) async fn run(
                                 serde_json::json!({ "error": error.to_string() }),
                             );
                         }
+                    }
+                    AcpSessionCommand::StopSubagent {
+                        native_session_id,
+                        reply_tx,
+                    } => {
+                        let _ = reply_tx.send(stop_native_subagent(
+                            active_session.connection(),
+                            active_session.session_id(),
+                            trace.as_ref(),
+                            native_session_id,
+                        ));
                     }
                     AcpSessionCommand::StopBackgroundCommand { reply_tx, .. } => {
                         // No prompt is active, so no command is tracked as live.

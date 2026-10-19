@@ -571,6 +571,55 @@ fn load_replay_isolates_native_child_streams_from_the_main_projection() {
 }
 
 #[test]
+fn load_replay_absorbs_released_subagent_announcements_and_child_messages() {
+    let load_replay = Arc::new(Mutex::new(HashMap::from([(
+        "session_1".to_string(),
+        LoadReplayCapture {
+            session_id: "session_1".into(),
+            updates: Vec::new(),
+            subagent_session_ids: HashSet::new(),
+        },
+    )])));
+    let traces = Arc::new(Mutex::new(HashMap::new()));
+    let notification = |session_id: &str, update: serde_json::Value| -> SessionNotification {
+        serde_json::from_value(serde_json::json!({ "sessionId": session_id, "update": update }))
+            .unwrap()
+    };
+
+    let announcement = notification(
+        "session_1",
+        serde_json::json!({
+            "sessionUpdate": "subagent_update",
+            "sessionId": "child_1",
+            "state": { "state": "idle", "stopReason": "end_turn" },
+        }),
+    );
+    assert!(
+        handle_session_update_notification(announcement, &None, &traces, &load_replay).is_none()
+    );
+    let child_message = notification(
+        "child_1",
+        serde_json::json!({
+            "sessionUpdate": "session_message",
+            "messageId": "toolu_1",
+            "recipientSessionId": "child_1",
+            "content": [{ "type": "text", "text": "replayed prompt" }],
+        }),
+    );
+    assert!(
+        handle_session_update_notification(child_message, &None, &traces, &load_replay).is_none()
+    );
+
+    let capture = load_replay.lock().unwrap();
+    let capture = capture.get("session_1").unwrap();
+    assert!(capture.subagent_session_ids.contains("child_1"));
+    assert!(
+        capture.updates.is_empty(),
+        "stored Subagent history, not the replay, is authoritative"
+    );
+}
+
+#[test]
 fn pending_permission_does_not_block_updates_for_other_sessions() {
     let load_replay = Arc::new(Mutex::new(HashMap::from([(
         "streaming_session".to_string(),
@@ -1101,4 +1150,36 @@ fn agent_state_report_is_traced_with_its_session() {
     assert!(traces[0].0.contains("task_owner"));
     assert_eq!(traces[0].1.matches("\"_session/state_changed\"").count(), 1);
     assert!(traces[0].1.contains("\"state\":\"running\""));
+}
+
+#[test]
+fn undecodable_session_updates_are_dropped_and_reported_once_per_kind() {
+    let reported = Mutex::new(HashSet::new());
+    let update = |kind: &str| {
+        UntypedMessage::new(
+            "session/update",
+            serde_json::json!({
+                "sessionId": "session_1",
+                "update": { "sessionUpdate": kind },
+            }),
+        )
+        .unwrap()
+    };
+
+    assert!(session_update_is_undecodable(
+        &update("future_update_kind"),
+        "claude-code",
+        &reported
+    ));
+    assert!(session_update_is_undecodable(
+        &update("future_update_kind"),
+        "claude-code",
+        &reported
+    ));
+    assert_eq!(reported.lock().unwrap().len(), 1);
+    assert!(!session_update_is_undecodable(
+        &update("session_info_update"),
+        "claude-code",
+        &reported
+    ));
 }

@@ -16,6 +16,7 @@ use crate::agent::acp_background_work::{
 use crate::agent::acp_config_options_apply::SessionConfigRequests;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
+use crate::agent::acp_native_subagent_stop::stop_native_subagent;
 use crate::agent::acp_response_boundary::take_preceding_session_updates;
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_with_catalog_snapshot, deliver_session_commands_catalog,
@@ -300,6 +301,17 @@ pub(super) async fn run_prompt(
                         let _ = reply_tx.send(Err(RuntimeError::NotReady(
                             "ACP session already has an active prompt".to_string(),
                         )));
+                    }
+                    AcpSessionCommand::StopSubagent {
+                        native_session_id,
+                        reply_tx,
+                    } => {
+                        let _ = reply_tx.send(stop_native_subagent(
+                            active_session.connection(),
+                            active_session.session_id(),
+                            context.trace.as_ref(),
+                            native_session_id,
+                        ));
                     }
                     AcpSessionCommand::StopBackgroundCommand { command_id, reply_tx } => {
                         // The turn keeps running; the command's own state

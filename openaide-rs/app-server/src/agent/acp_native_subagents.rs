@@ -16,6 +16,13 @@ use crate::agent::events::{
 use crate::agent::{AgentEventSink, AgentSessionEventSink};
 use crate::protocol::errors::RuntimeError;
 
+#[path = "acp_native_subagents_released.rs"]
+mod released;
+
+use released::ReleasedSessionMessage;
+
+const SUBAGENT_NOT_OFFERED: &str = "ACP Agent sent Subagent traffic that OpenAIDE did not offer";
+
 #[derive(Clone)]
 pub(super) struct AcpNativeSubagentRouter {
     agent_id: String,
@@ -36,7 +43,11 @@ struct ChildRoute {
     root_session_id: String,
     name: String,
     projection: LivePromptProjection,
+    /// When the current run started; the released form restarts it per run.
     started_at: std::time::Instant,
+    /// The last released-form status, so repeated reports of one status are
+    /// applied once. The draft form does not track it.
+    state: Option<AgentNativeSubagentState>,
 }
 
 pub(super) enum RoutedSessionNotification {
@@ -88,6 +99,28 @@ impl AcpNativeSubagentRouter {
         let outer_session_id = notification.session_id.to_string();
         let outer_meta = notification.meta;
         match notification.update {
+            SessionUpdate::SubagentUpdate(update) => {
+                self.route_released_update(outer_session_id, update)?;
+                Ok(RoutedSessionNotification::Handled)
+            }
+            SessionUpdate::SessionMessage(message) => {
+                self.released_message(ReleasedSessionMessage {
+                    session_id: outer_session_id,
+                    message_id: message.message_id.to_string(),
+                    sender_session_id: message.sender_session_id,
+                    recipient_session_id: message.recipient_session_id,
+                    content: message.content.value().cloned().unwrap_or_default(),
+                })
+            }
+            SessionUpdate::SessionMessageChunk(chunk) => {
+                self.released_message(ReleasedSessionMessage {
+                    session_id: outer_session_id,
+                    message_id: chunk.message_id.to_string(),
+                    sender_session_id: chunk.sender_session_id,
+                    recipient_session_id: chunk.recipient_session_id,
+                    content: vec![chunk.content],
+                })
+            }
             SessionUpdate::SessionInfoUpdate(info)
                 if self.child_attribution(&outer_session_id).is_some() =>
             {
@@ -114,6 +147,25 @@ impl AcpNativeSubagentRouter {
                 }
             }
         }
+    }
+
+    fn released_message(
+        &self,
+        message: ReleasedSessionMessage,
+    ) -> Result<RoutedSessionNotification, RuntimeError> {
+        let session_id = message.session_id.clone();
+        if !self.route_released_message(message)? {
+            // Only a child's transcript shows inter-session messages; a root
+            // session's own Tool rows already show what it sent.
+            crate::logging::info(
+                "acp_subagent_message_ignored",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "reason": "not_a_subagent_session",
+                }),
+            );
+        }
+        Ok(RoutedSessionNotification::Handled)
     }
 
     pub(super) fn permission_attribution(
@@ -186,6 +238,7 @@ impl AcpNativeSubagentRouter {
             name: spawned.name,
             delegated_task,
             parent_interaction,
+            parent_records_delegation: false,
             capabilities: AgentNativeSubagentCapabilities {
                 cancel: spawned.capabilities.cancel,
                 close: spawned.capabilities.close,
@@ -204,7 +257,7 @@ impl AcpNativeSubagentRouter {
             let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
             if !state.negotiated {
                 return Err(RuntimeError::InvalidParams(
-                    "ACP Agent sent Subagent traffic that OpenAIDE did not offer".to_string(),
+                    SUBAGENT_NOT_OFFERED.to_string(),
                 ));
             }
             crate::logging::info(
@@ -226,13 +279,14 @@ impl AcpNativeSubagentRouter {
                     name: child_name,
                     projection: projection.clone(),
                     started_at: std::time::Instant::now(),
+                    state: None,
                 });
             first_announcement
         };
         // The exact prompt opens the child history as its User message, the same
         // row a child `user_message_chunk` would produce.
         if let Some(prompt) = prompt.filter(|_| first_announcement && !codex_adapter) {
-            projection.emit_user_prompt(prompt)?;
+            projection.emit_user_prompt(prompt, None)?;
         }
         Ok(())
     }
@@ -275,7 +329,7 @@ impl AcpNativeSubagentRouter {
             let state = self.inner.lock().expect("ACP Subagent router poisoned");
             if !state.negotiated {
                 return Err(RuntimeError::InvalidParams(
-                    "ACP Agent sent Subagent traffic that OpenAIDE did not offer".to_string(),
+                    SUBAGENT_NOT_OFFERED.to_string(),
                 ));
             }
             let route = state.children.get(&child_session_id).ok_or_else(|| {
@@ -335,7 +389,7 @@ impl AcpNativeSubagentRouter {
             .negotiated;
         if !negotiated {
             return Err(RuntimeError::InvalidParams(
-                "ACP Agent sent Subagent traffic that OpenAIDE did not offer".to_string(),
+                SUBAGENT_NOT_OFFERED.to_string(),
             ));
         }
         if let Some(sink) = self
@@ -354,6 +408,7 @@ impl AcpNativeSubagentRouter {
 
 fn native_state_name(state: AgentNativeSubagentState) -> &'static str {
     match state {
+        AgentNativeSubagentState::Running => "running",
         AgentNativeSubagentState::Completed => "completed",
         AgentNativeSubagentState::Failed => "failed",
         AgentNativeSubagentState::Cancelled => "cancelled",

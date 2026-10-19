@@ -1,7 +1,7 @@
 use crate::project_files::{ProjectFilesParams, ProjectFilesResult};
 use crate::task::{
     TaskQueueResumeParams, TaskQueueResumeResult, TaskStopBackgroundCommandParams,
-    TaskStopBackgroundCommandResult,
+    TaskStopBackgroundCommandResult, TaskStopSubagentParams, TaskStopSubagentResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -699,6 +699,12 @@ protocol_method!(
     TASK_STOP_BACKGROUND_COMMAND,
     TaskStopBackgroundCommandParams,
     TaskStopBackgroundCommandResult
+);
+protocol_method!(
+    TaskStopSubagent,
+    TASK_STOP_SUBAGENT,
+    TaskStopSubagentParams,
+    TaskStopSubagentResult
 );
 protocol_method!(
     TaskClosePlan,

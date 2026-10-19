@@ -116,8 +116,22 @@ pub struct AgentNativeSubagentSpawned {
     /// The provider uses a repeated announcement to signal a parent-to-child interaction.
     /// This stays typed at the Agent boundary instead of leaking provider metadata downstream.
     pub parent_interaction: bool,
+    /// The parent's own Tool rows already show this delegation in its Chat, so
+    /// the Task must not add a "Delegated to" row. True for the released ACP form.
+    pub parent_records_delegation: bool,
     pub capabilities: AgentNativeSubagentCapabilities,
     pub details: Vec<AgentNativeSubagentDetail>,
+}
+
+/// A change to an announced child's identity. Each `Some` field replaces the
+/// stored value; `None` leaves it unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentNativeSubagentIdentityUpdate {
+    pub native_session_id: String,
+    pub name: Option<String>,
+    /// `Some("")` clears the delegated task.
+    pub delegated_task: Option<String>,
+    pub cancel: Option<bool>,
 }
 
 /// Recognized Agent metadata learned after the announcement, such as the model
@@ -142,6 +156,9 @@ pub struct AgentNativeSubagentDetail {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentNativeSubagentState {
+    /// The child works again, for example after its parent messaged it. Only
+    /// the released ACP form reports it; any stored status may return to it.
+    Running,
     Completed,
     Failed,
     Cancelled,

@@ -1,11 +1,12 @@
 use super::*;
 
 #[derive(Default)]
-struct CaptureSink {
-    spawns: Mutex<Vec<AgentNativeSubagentSpawned>>,
-    updates: Mutex<Vec<AgentEvent>>,
-    details: Mutex<Vec<AgentNativeSubagentDetailsUpdate>>,
-    states: Mutex<Vec<AgentNativeSubagentState>>,
+pub(super) struct CaptureSink {
+    pub(super) spawns: Mutex<Vec<AgentNativeSubagentSpawned>>,
+    pub(super) updates: Mutex<Vec<AgentEvent>>,
+    pub(super) details: Mutex<Vec<AgentNativeSubagentDetailsUpdate>>,
+    pub(super) states: Mutex<Vec<AgentNativeSubagentState>>,
+    pub(super) identities: Mutex<Vec<crate::agent::events::AgentNativeSubagentIdentityUpdate>>,
 }
 
 impl AgentSessionEventSink for CaptureSink {
@@ -52,9 +53,17 @@ impl AgentSessionEventSink for CaptureSink {
         self.details.lock().unwrap().push(event);
         Ok(())
     }
+
+    fn subagent_identity_changed(
+        &self,
+        event: crate::agent::events::AgentNativeSubagentIdentityUpdate,
+    ) -> Result<(), RuntimeError> {
+        self.identities.lock().unwrap().push(event);
+        Ok(())
+    }
 }
 
-fn claude_router(capture: &Arc<CaptureSink>) -> AcpNativeSubagentRouter {
+pub(super) fn claude_router(capture: &Arc<CaptureSink>) -> AcpNativeSubagentRouter {
     router_for(
         capture,
         "claude-code",
@@ -66,7 +75,7 @@ fn codex_router(capture: &Arc<CaptureSink>) -> AcpNativeSubagentRouter {
     router_for(capture, "custom.codex-subagent-fix", "@openaide/codex-acp")
 }
 
-fn router_for(
+pub(super) fn router_for(
     capture: &Arc<CaptureSink>,
     agent_id: &str,
     implementation_name: &str,

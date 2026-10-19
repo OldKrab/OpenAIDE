@@ -25,6 +25,7 @@ import type {
   McpServerDefinition,
   TaskSnapshot as ProtocolTaskSnapshot,
   TaskId,
+  SubagentId,
   TaskSearchFilesResult,
   ToolImagePreview,
   WorkspaceBrowserRoot,
@@ -130,6 +131,8 @@ export type TaskCallbacks = {
   resumeQueue?: () => Promise<void>;
   cancel: () => void;
   stopBackgroundCommand?: (commandId: string) => void;
+  /** Resolves whether App Server accepted the stop request. */
+  stopSubagent?: (subagentId: SubagentId) => Promise<boolean>;
   closePlan?: () => Promise<void>;
   fileBrowser?: TaskFileBrowserCallbacks;
   /** Starts one earlier-page request and returns its viewport/reducer generation. */

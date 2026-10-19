@@ -437,6 +437,19 @@ pub trait AgentRuntime: Send + Sync {
         ))
     }
 
+    /// Asks the Agent to stop one Native Subagent of this session. Success
+    /// means the request was sent; the Subagent's status changes only through
+    /// the Agent's later report.
+    fn stop_subagent(
+        &self,
+        _session: &AgentSessionKey,
+        _native_session_id: &str,
+    ) -> Result<(), RuntimeError> {
+        Err(RuntimeError::CapabilityMissing(
+            "agent_subagent_stop".to_string(),
+        ))
+    }
+
     fn cancel_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         Ok(())
     }
@@ -537,6 +550,13 @@ pub trait AgentSessionEventSink: Send + Sync {
     fn subagent_details_changed(
         &self,
         _event: crate::agent::events::AgentNativeSubagentDetailsUpdate,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn subagent_identity_changed(
+        &self,
+        _event: crate::agent::events::AgentNativeSubagentIdentityUpdate,
     ) -> Result<(), RuntimeError> {
         Ok(())
     }

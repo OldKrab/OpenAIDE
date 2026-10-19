@@ -154,6 +154,12 @@ pub(crate) trait TaskCancelWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: openaide_app_server_protocol::task::TaskStopBackgroundCommandParams,
     ) -> Result<(), ProtocolError>;
+    /// Asks the Agent to stop one Native Subagent and leaves the Task turn running.
+    fn stop_subagent_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskStopSubagentParams,
+    ) -> Result<(), ProtocolError>;
     fn recover_stuck_sessions(
         &self,
         params: SupportRecoverStuckSessionsParams,
