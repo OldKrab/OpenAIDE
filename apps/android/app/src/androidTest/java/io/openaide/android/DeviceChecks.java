@@ -143,8 +143,7 @@ public final class DeviceChecks extends InstrumentationTestCase {
             capture.setAccessible(true);
             getInstrumentation().runOnMainSync(() -> {
                 try {
-                    Intent chooser = ((CameraCapture) capture.get(activity)).chooser(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*"));
-                    Intent camera = ((Intent[]) chooser.getParcelableArrayExtra(Intent.EXTRA_INITIAL_INTENTS))[0];
+                    Intent camera = ((CameraCapture) capture.get(activity)).intent();
                     output.set(camera.getParcelableExtra(android.provider.MediaStore.EXTRA_OUTPUT));
                     try (var photo = context.getContentResolver().openOutputStream(output.get())) { photo.write(new byte[]{(byte) 0xff, (byte) 0xd8, (byte) 0xff}); }
                     callback.set(activity, (android.webkit.ValueCallback<Uri[]>) result -> { selected.set(result); delivered.countDown(); });

@@ -53,8 +53,8 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private long pickerStarted;
     private CameraCapture camera;
-    /** The document picker held while Android asks whether the camera may join it. */
-    private Intent pendingPicker;
+    /** Take photo is waiting on Android's camera permission prompt. */
+    private boolean awaitingCamera;
     private final AndroidDiagnostics diagnostics = new AndroidDiagnostics();
     /** When the screen was last left, so a resume can say how long the app was away. */
     private long pausedAt;
@@ -270,12 +270,18 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request == CAMERA_PERMISSION_REQUEST) {
-            Intent picker = pendingPicker;
-            pendingPicker = null;
+            boolean awaited = awaitingCamera;
+            awaitingCamera = false;
             boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
             diagnostics.record("file_picker", granted ? "camera_permission_granted" : "camera_permission_denied", 0,
                 SystemClock.elapsedRealtime() - pickerStarted);
-            if (picker != null && fileCallback != null) openPicker(picker, granted);
+            if (!awaited || fileCallback == null) return;
+            if (granted) openCamera();
+            else {
+                fileCallback.onReceiveValue(null);
+                fileCallback = null;
+                Toast.makeText(this, "Allow camera access for OpenAIDE in Android settings to take a photo.", Toast.LENGTH_LONG).show();
+            }
             return;
         }
         if (connectionBridge != null && SetupPagePolicy.isConnectionRoute(profile, browser.getUrl())) {
@@ -430,25 +436,35 @@ public final class MainActivity extends Activity {
                 if (fileCallback != null) {
                     diagnostics.record("file_picker", "replaced", 0, SystemClock.elapsedRealtime() - pickerStarted);
                     fileCallback.onReceiveValue(null);
-                    pendingPicker = null;
+                    awaitingCamera = false;
                     camera.discard();
                 }
                 fileCallback = callback;
                 pickerStarted = SystemClock.elapsedRealtime();
+                String[] types = params.getAcceptTypes();
+                if (CameraCapture.wantsPhoto(params.isCaptureEnabled(), types) && camera.available()) {
+                    diagnostics.record("file_picker", "camera_started", 0, 0);
+                    if (camera.permitted()) openCamera();
+                    else {
+                        // Android denies at once, without asking, once the user has refused for good.
+                        awaitingCamera = true;
+                        diagnostics.record("file_picker", "camera_permission_requested", 0, 0);
+                        requestPermissions(new String[]{CameraCapture.PERMISSION}, CAMERA_PERMISSION_REQUEST);
+                    }
+                    return true;
+                }
                 diagnostics.record("file_picker", "started", 0, 0);
                 Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE);
-                String[] types = params.getAcceptTypes();
                 picker.setType(types.length == 1 && types[0].contains("/") ? types[0] : "*/*");
                 if (types.length > 1) picker.putExtra(Intent.EXTRA_MIME_TYPES, types);
                 picker.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
                 picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                boolean offerCamera = CameraCapture.acceptsImages(types) && camera.available();
-                if (offerCamera && !camera.permitted()) {
-                    // Android denies at once, without asking, once the user has refused for good.
-                    pendingPicker = picker;
-                    diagnostics.record("file_picker", "camera_permission_requested", 0, 0);
-                    requestPermissions(new String[]{CameraCapture.PERMISSION}, CAMERA_PERMISSION_REQUEST);
-                } else openPicker(picker, offerCamera);
+                try { startActivityForResult(picker, FILE_REQUEST); }
+                catch (ActivityNotFoundException error) {
+                    diagnostics.record("file_picker", "unavailable", 0, SystemClock.elapsedRealtime() - pickerStarted);
+                    fileCallback.onReceiveValue(null);
+                    fileCallback = null;
+                }
                 return true;
             }
         });
@@ -469,24 +485,17 @@ public final class MainActivity extends Activity {
         browser.loadUrl(profile.endpoint);
     }
 
-    /** Opens the document picker for the pending file input, with the camera beside it when offered. */
-    private void openPicker(Intent documents, boolean offerCamera) {
-        Intent picker = documents;
-        if (offerCamera) {
-            try {
-                picker = camera.chooser(documents);
-                diagnostics.record("file_picker", "camera_offered", 0, SystemClock.elapsedRealtime() - pickerStarted);
-            } catch (IOException | RuntimeException error) {
-                camera.discard();
-                diagnostics.record("file_picker", "camera_unavailable", 0, SystemClock.elapsedRealtime() - pickerStarted);
-            }
-        }
-        try { startActivityForResult(picker, FILE_REQUEST); }
-        catch (ActivityNotFoundException error) {
+    /** Opens the camera for the pending Take photo input; its result arrives as a picker result. */
+    private void openCamera() {
+        try {
+            startActivityForResult(camera.intent(), FILE_REQUEST);
+            diagnostics.record("file_picker", "camera_opened", 0, SystemClock.elapsedRealtime() - pickerStarted);
+        } catch (IOException | RuntimeException error) {
             camera.discard();
-            diagnostics.record("file_picker", "unavailable", 0, SystemClock.elapsedRealtime() - pickerStarted);
+            diagnostics.record("file_picker", "camera_unavailable", 0, SystemClock.elapsedRealtime() - pickerStarted);
             fileCallback.onReceiveValue(null);
             fileCallback = null;
+            Toast.makeText(this, "Could not open the camera.", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -508,8 +517,10 @@ public final class MainActivity extends Activity {
             return;
         }
         if (request == FILE_REQUEST && fileCallback != null) {
-            Uri photo = camera.photo(result, data);
-            Uri[] selected = photo != null ? new Uri[]{photo} : WebChromeClient.FileChooserParams.parseResult(result, data);
+            boolean capturing = camera.capturing();
+            Uri photo = camera.photo(result);
+            Uri[] selected = capturing ? (photo == null ? null : new Uri[]{photo})
+                : WebChromeClient.FileChooserParams.parseResult(result, data);
             diagnostics.record("file_picker", selected == null ? "cancelled" : photo != null ? "captured" : "selected",
                 selected == null ? 0 : selected.length, SystemClock.elapsedRealtime() - pickerStarted);
             ValueCallback<Uri[]> callback = fileCallback;

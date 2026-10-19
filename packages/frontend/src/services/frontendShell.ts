@@ -210,6 +210,8 @@ export type FrontendShell = {
   };
   /** Shell-specific acquisition; shared Frontend receives only opaque handles. */
   files?: FrontendFileAcquisition;
+  /** The shell opens its camera for an image input with `capture`, so the composer offers Take photo. */
+  photoCapture?: true;
   /** Opens a durable sent file using the host-native interaction. */
   sentFiles?: SentFileInteraction;
   /** Saves an App Server-owned export through a client-bound opaque handle. */

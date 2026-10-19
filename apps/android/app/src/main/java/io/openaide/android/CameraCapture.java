@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.provider.MediaStore;
 import androidx.core.content.FileProvider;
@@ -13,13 +12,14 @@ import java.io.File;
 import java.io.IOException;
 
 /**
- * Offers a new photo beside the document picker when the Web Shell asks for images.
- * A WebView, unlike Chrome, never adds the camera to a file input; the app must.
+ * Takes a photo for a Web Shell file input that asks for one (`capture`, Take photo).
+ * A WebView, unlike Chrome, never opens the camera for a file input; the app must.
  * The photo is written to this app's cache through its own FileProvider, so the
  * WebView receives it as a content document like any picked file. Android refuses
  * the camera intent from an app that declares CAMERA (pairing scans with it) until
- * the permission is granted, so the caller asks first or offers documents alone.
- * Owns at most one pending capture, from opening the picker to its result.
+ * the permission is granted, so the caller asks first. Inputs without `capture`
+ * never reach the camera, so attaching images never asks for it.
+ * Owns at most one pending capture, from opening the camera to its result.
  */
 final class CameraCapture {
     static final String PERMISSION = Manifest.permission.CAMERA;
@@ -32,6 +32,9 @@ final class CameraCapture {
     private Uri pendingUri;
 
     CameraCapture(Activity activity) { this.activity = activity; }
+
+    /** Whether a file input asks for a new photo rather than a document. */
+    static boolean wantsPhoto(boolean capture, String[] types) { return capture && acceptsImages(types); }
 
     /** Whether a file input's accepted types include images. */
     static boolean acceptsImages(String[] types) {
@@ -46,10 +49,13 @@ final class CameraCapture {
             && new Intent(MediaStore.ACTION_IMAGE_CAPTURE).resolveActivity(activity.getPackageManager()) != null;
     }
 
+    /** Whether the camera is writing a photo that its result will deliver. */
+    boolean capturing() { return pending != null; }
+
     boolean permitted() { return activity.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED; }
 
-    /** Wraps the document picker in a chooser that also offers a new photo. */
-    Intent chooser(Intent documents) throws IOException {
+    /** The camera intent writing the pending photo. */
+    Intent intent() throws IOException {
         discard();
         File directory = new File(activity.getCacheDir(), DIRECTORY);
         if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Camera directory unavailable");
@@ -60,20 +66,14 @@ final class CameraCapture {
             .putExtra(MediaStore.EXTRA_OUTPUT, pendingUri)
             .addFlags(GRANTS);
         camera.setClipData(ClipData.newRawUri("", pendingUri));
-        // A camera started from a chooser's extra targets does not always receive the intent's own grant.
-        for (ResolveInfo app : activity.getPackageManager().queryIntentActivities(camera, PackageManager.MATCH_DEFAULT_ONLY))
-            activity.grantUriPermission(app.activityInfo.packageName, pendingUri, GRANTS);
-        return Intent.createChooser(documents, "Attach images")
-            .putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{camera});
+        return camera;
     }
 
-    /** The photo a picker result carries, or null when the user chose documents or cancelled. */
-    Uri photo(int result, Intent data) {
+    /** The photo a camera result carries, or null when the user cancelled or nothing was written. */
+    Uri photo(int result) {
         if (pending == null) return null;
-        // A camera returns no data, or returns the output it was given; the document picker returns its choice.
-        boolean documents = data != null && data.getClipData() != null
-            || data != null && data.getData() != null && !data.getData().equals(pendingUri);
-        if (result != Activity.RESULT_OK || documents || pending.length() == 0) { discard(); return null; }
+        // A camera writes to the output it was given; what it returns as data varies by app.
+        if (result != Activity.RESULT_OK || pending.length() == 0) { discard(); return null; }
         Uri photo = pendingUri;
         // The WebView reads it inside this app; the camera needs no access once it has written.
         activity.revokeUriPermission(photo, GRANTS);

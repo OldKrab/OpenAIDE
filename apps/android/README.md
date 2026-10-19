@@ -230,13 +230,12 @@ The Android document picker grants access only to selected, readable `content:`
 URIs. The WebView resource policy allows those exact documents while continuing
 to block arbitrary providers, local files and external network resources.
 
-A WebView never offers the camera for a file input, so the app does: when the
-Web Shell asks for images, the picker also offers a new photo. The camera writes
-it to the app's cache through the app's own provider, and the photo is delivered
-as one more selected document. Android refuses the camera to an app that declares
-the camera permission (pairing scans with it) until that permission is granted, so
-attaching images asks for it until it is granted or refused for good; without it,
-the picker offers documents alone.
+A WebView never opens the camera for a file input, so the app does it for the
+composer's **Take photo**, an image input with `capture`. The camera writes the
+photo to the app's cache through the app's own provider, and it is delivered as
+a selected document. Android refuses the camera to an app that declares the camera
+permission (pairing scans with it) until that permission is granted, so Take photo
+asks for it; **Attach images** opens the document picker and never asks.
 
 Existing Codex sessions are grouped by their original working directory. A CLI
 session started in Termux home appears under the home Project, even if commands
