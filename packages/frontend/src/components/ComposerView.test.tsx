@@ -323,6 +323,26 @@ describe("Composer view behavior", () => {
     expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
   });
 
+  it("offers Take photo only where the shell opens a camera, apart from Attach images", async () => {
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    const fileBrowser: TaskFileBrowserCallbacks = { ...fileBrowserCallbacks(), photoCapture: true };
+    const renderer = renderComposer({ fileBrowser });
+
+    click(buttonByLabel(renderer.root, "Add context"));
+
+    expect(menuButtonByStrongLabel(renderer.root, "Take photo").props.disabled).toBeFalsy();
+    const inputs = renderer.root.findAllByProps({ type: "file", accept: "image/*" });
+    expect(inputs).toHaveLength(2);
+    // Attach images stays a plain picker, so choosing an image never asks for the camera.
+    expect(inputs.filter((input) => input.props.capture === undefined)).toHaveLength(1);
+    const camera = renderer.root.findByProps({ type: "file", capture: "environment" });
+    expect(camera.props.multiple).toBeFalsy();
+    act(() => camera.props.onChange({ currentTarget: { value: "photo.jpg" }, target: { files: [photo] } }));
+    await settleRenderer();
+    expect(fileBrowser.attachImage).toHaveBeenCalledWith(photo);
+    expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
+  });
+
   it("keeps file upload progress in the same attachment list, blocks Send, and cancels it", async () => {
     const selected = new File(["0123456789"], "model.bin");
     let uploadSignal: AbortSignal | undefined;

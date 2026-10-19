@@ -203,6 +203,7 @@ function createFileBrowserCallbacks({
 
   return {
     ownerKey: `new-task-files:${operation.id}`,
+    ...(currentFrontendShell()?.photoCapture ? { photoCapture: true as const } : {}),
     ...(files ? { attachmentMode: files.kind, attachFiles: async (
       selectedFiles: File[],
       options: { onProgress: (progress: { loaded: number; total: number }) => void; signal: AbortSignal; maxFiles: number },

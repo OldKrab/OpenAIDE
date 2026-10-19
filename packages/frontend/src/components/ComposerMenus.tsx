@@ -1,4 +1,4 @@
-import { FileUp, Image, Plus } from "lucide-react";
+import { Camera, FileUp, Image, Plus } from "lucide-react";
 import type { ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import {
@@ -80,6 +80,7 @@ export function ComposerControls({
   const controlsLocked = disabled || agentLocked;
   const configControlsLocked = disabled || configLocked;
   const imageUploadRef = useRef<HTMLInputElement | null>(null);
+  const photoCaptureRef = useRef<HTMLInputElement | null>(null);
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
   const fileAcquisitionActive = useRef(false);
   const uploadControllers = useRef(new Set<AbortController>());
@@ -227,6 +228,17 @@ export function ComposerControls({
         style={{ display: "none" }}
         type="file"
       />
+      {fileBrowser?.photoCapture ? (
+        <input
+          accept="image/*"
+          capture="environment"
+          disabled={disabled || !imageAttachmentsAllowed}
+          onChange={(event) => uploadImages(Array.from(event.target.files ?? []), event.currentTarget)}
+          ref={photoCaptureRef}
+          style={{ display: "none" }}
+          type="file"
+        />
+      ) : null}
       <div className="composer-menu-anchor">
         <PopupMenu
           className="composer-popover"
@@ -263,6 +275,15 @@ export function ComposerControls({
               label="Attach images"
               onClick={() => imageUploadRef.current?.click()}
             />
+            {fileBrowser?.photoCapture ? (
+              <MenuButton
+                description="Use this device's camera."
+                disabled={disabled || !imageAttachmentsAllowed}
+                icon={<Camera size={13} />}
+                label="Take photo"
+                onClick={() => photoCaptureRef.current?.click()}
+              />
+            ) : null}
         </PopupMenu>
       </div>
       {showAgentSelector ? (

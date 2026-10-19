@@ -169,6 +169,8 @@ export type TaskFileBrowserCallbacks = {
   attachFileReference: (entryId: FileBrowserEntryId) => Promise<void>;
   attachImage: (file: File, draft?: NewTaskDraftInput) => Promise<void>;
   attachmentMode?: "webUpload" | "nativePicker";
+  /** Offers Take photo beside Attach images; see FrontendShell.photoCapture. */
+  photoCapture?: true;
   attachFiles?: (
     files: File[],
     options: {

@@ -104,6 +104,8 @@ export function createWebAppShell(): FrontendShell {
     connectionSettings,
     bootstrap,
     clipboard: { writeText: writeBrowserClipboardText },
+    // The Android App opens its camera for a capture input; browsers vary, and Chrome already offers one.
+    ...(connectionSettings ? { photoCapture: true as const } : {}),
     sentFiles: {
       sentFileAction: "download",
       openSentFile({ attachmentIndex, label, messageId, taskId }) {
