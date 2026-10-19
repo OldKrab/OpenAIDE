@@ -8,6 +8,8 @@ const history = new Map();
 const pendingClientRequests = new Map();
 const supportsNativeSubagents = process.argv.includes("--native-subagents");
 let nativeSubagentsNegotiated = false;
+/** Released-form child session id to its parent session id. */
+const releasedChildren = new Map();
 const nativeSessionScenario = process.argv.includes("--active-writer") ? "active-writer" : undefined;
 let nextSession = 1;
 let nextClientRequest = 1;
@@ -188,6 +190,41 @@ async function runPrompt(message) {
         sessionUpdate: "subagent_state_update", subagentSessionId: childId, state: "completed",
       });
       textUpdate(sessionId, "agent_message_chunk", "Main review result", `main-${promptNumber}`);
+    }
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
+
+  if (text.includes("smoke:released-subagents")) {
+    if (!nativeSubagentsNegotiated) {
+      textUpdate(sessionId, "agent_message_chunk", "Native Subagent capability was not negotiated");
+    } else {
+      // The released ACP form: the parent announces each child with subagent_update,
+      // and the delegated prompt reaches the child as a session_message.
+      const finished = `${sessionId}:researcher:${promptNumber}`;
+      const running = `${sessionId}:explorer:${promptNumber}`;
+      for (const [childId, title, task] of [
+        [finished, "Researcher", "Survey the code"],
+        [running, "Explorer", "Explore the history"],
+      ]) {
+        releasedChildren.set(childId, sessionId);
+        update(sessionId, {
+          sessionUpdate: "subagent_update", sessionId: childId, title, description: task,
+          capabilities: { cancel: {} }, state: { state: "running" },
+        });
+        update(childId, {
+          sessionUpdate: "session_message", messageId: `${childId}:prompt`,
+          senderSessionId: sessionId, recipientSessionId: childId,
+          content: [{ type: "text", text: `${task} please` }],
+        });
+      }
+      textUpdate(finished, "agent_message_chunk", "Survey result", "survey-result");
+      update(sessionId, {
+        sessionUpdate: "subagent_update", sessionId: finished,
+        state: { state: "idle", stopReason: "end_turn" },
+      });
+      textUpdate(sessionId, "agent_message_chunk", "Main delegation result", `main-${promptNumber}`);
     }
     respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
     session.activePrompts.delete(String(message.id));
@@ -476,6 +513,15 @@ async function permissionScenario(sessionId, message, promptNumber) {
 }
 
 function cancelSession(sessionId) {
+  const parentId = releasedChildren.get(sessionId);
+  if (parentId) {
+    // A released-form child stops on its own cancel and reports it to its parent.
+    update(parentId, {
+      sessionUpdate: "subagent_update", sessionId,
+      state: { state: "idle", stopReason: "cancelled" },
+    });
+    return;
+  }
   const session = sessions.get(sessionId);
   if (!session) return;
   for (const prompt of session.activePrompts.values()) {

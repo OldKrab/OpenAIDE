@@ -90,6 +90,14 @@ impl AgentGateway {
         self.agent.resume_session(request)
     }
 
+    pub(crate) fn stop_subagent(
+        &self,
+        session: &AgentSessionKey,
+        native_session_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.agent.stop_subagent(session, native_session_id)
+    }
+
     pub(crate) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.agent.close_session(session)
     }

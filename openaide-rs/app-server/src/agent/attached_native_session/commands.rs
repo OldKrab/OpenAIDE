@@ -42,6 +42,12 @@ pub(in crate::agent) enum AcpSessionCommand {
         command_id: String,
         reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
     },
+    /// Stops one Native Subagent, whether or not a prompt is active: a
+    /// Subagent can outlive the prompt that started it.
+    StopSubagent {
+        native_session_id: String,
+        reply_tx: mpsc::Sender<Result<(), RuntimeError>>,
+    },
 }
 
 pub(in crate::agent) enum AcpSessionConfigCommand {

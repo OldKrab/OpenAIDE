@@ -2,11 +2,13 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use agent_client_protocol::{AcpAgent, Agent, Channel, Client, ConnectTo, RawJsonRpcMessage};
+use agent_client_protocol::{
+    AcpAgent, Agent, Channel, Client, ConnectTo, RawJsonRpcMessage, RawJsonRpcResponse,
+};
 use tokio::sync::{watch, Notify};
 use tokio::time::Instant;
 
-use crate::agent::acp_schema::{RequestId, Response};
+use crate::agent::acp_schema::RequestId;
 
 /// Retention policy shared by every process of a pool. It is a live value so
 /// a change applies to running processes as well as later ones.
@@ -133,7 +135,8 @@ impl AcpProcessLifetime {
                 }
             }
             RawJsonRpcMessage::Response(response) => {
-                let (Response::Result { id, .. } | Response::Error { id, .. }) = response;
+                let (RawJsonRpcResponse::Result { id, .. } | RawJsonRpcResponse::Error { id, .. }) =
+                    response;
                 if from_client {
                     state.agent_requests.remove(id);
                 }
@@ -212,9 +215,16 @@ struct RetainedAgent {
 
 impl ConnectTo<Client> for RetainedAgent {
     async fn connect_to(self, client: impl ConnectTo<Agent>) -> agent_client_protocol::Result<()> {
-        let (agent_channel, agent_future) =
+        let (agent_channel, agent_driver) =
             ConnectTo::<Client>::into_channel_and_future(self.agent);
-        let (client_channel, client_future) = client.into_channel_and_future();
+        // An Agent process always owns its stdio work. Without a driver nothing
+        // would ever report the process ending, so refuse to serve it.
+        let agent_future = agent_driver.ok_or_else(|| {
+            agent_client_protocol::util::internal_error(
+                "ACP Agent process has no connection driver",
+            )
+        })?;
+        let (client_channel, client_driver) = client.into_channel_and_future();
         // Inspect complete frames without rewriting IDs, ordering, batches, or
         // unknown methods. The SDK still owns process-group termination on drop.
         let bridge = Channel::bridge_with_inspection(
@@ -238,7 +248,14 @@ impl ConnectTo<Client> for RetainedAgent {
                     "Process exited with exit status: 0",
                 ))
             }),
-            result = async { tokio::try_join!(client_future, bridge).map(|_| ()) } => result,
+            // A passive client endpoint owns no work of its own; the bridge then
+            // observes its closure. Absence of a driver is not completion.
+            result = async {
+                match client_driver {
+                    Some(client_future) => tokio::try_join!(client_future, bridge).map(|_| ()),
+                    None => bridge.await,
+                }
+            } => result,
         }
     }
 }

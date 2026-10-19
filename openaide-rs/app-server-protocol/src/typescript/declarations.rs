@@ -167,9 +167,10 @@ use crate::task::{
     TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
     TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
     TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult, TaskTitleSelection,
-    TaskToolImagePreviewParams, TaskToolImagePreviewResult, TerminalOutputSnapshot,
-    ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
+    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult, TaskStopSubagentParams,
+    TaskStopSubagentResult, TaskTitleSelection, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
+    WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -547,6 +548,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskCancelResult>(output, config);
     push_decl::<TaskStopBackgroundCommandParams>(output, config);
     push_decl::<TaskStopBackgroundCommandResult>(output, config);
+    push_decl::<TaskStopSubagentParams>(output, config);
+    push_decl::<TaskStopSubagentResult>(output, config);
     push_decl::<TaskChatPageParams>(output, config);
     push_decl::<TaskChatPageResult>(output, config);
     push_decl::<ComposerHistoryScope>(output, config);

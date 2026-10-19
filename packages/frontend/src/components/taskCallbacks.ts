@@ -29,6 +29,7 @@ import {
   appendTaskQueueIntent,
   cancelTaskIntent,
   stopBackgroundCommandIntent,
+  stopSubagentIntent,
   closeTaskPlanIntent,
   removeTaskQueueMessageIntent,
   reloadNativeSessionIntent,
@@ -117,6 +118,18 @@ export function createTaskCallbacks({
         commandId,
       );
     },
+    stopSubagent: (subagentId) => stopSubagentIntent(
+      {
+        backendConnection,
+        clientInstanceId,
+        createSnapshotRequestId,
+        dispatch,
+        postHostMessage,
+        stateRootId: state.appServerStateRootId,
+      },
+      state.snapshot,
+      subagentId,
+    ),
     closePlan: () => closeTaskPlanIntent(
       {
         backendConnection,

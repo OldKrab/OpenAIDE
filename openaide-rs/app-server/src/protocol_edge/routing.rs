@@ -367,6 +367,9 @@ impl RpcGateway {
             openaide_app_server_protocol::methods::TASK_STOP_BACKGROUND_COMMAND => {
                 self.handle_task_stop_background_command(connection_id, id, params, meta)
             }
+            openaide_app_server_protocol::methods::TASK_STOP_SUBAGENT => {
+                self.handle_task_stop_subagent(connection_id, id, params, meta)
+            }
             TASK_CHAT_PAGE => self.handle_task_chat_page(connection_id, id, params, meta),
             TASK_COMPOSER_HISTORY => {
                 self.handle_task_composer_history(connection_id, id, params, meta)

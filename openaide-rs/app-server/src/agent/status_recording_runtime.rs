@@ -185,6 +185,14 @@ impl AgentRuntime for AgentStatusRecordingRuntime {
         self.inner.stop_background_command(session, command_id)
     }
 
+    fn stop_subagent(
+        &self,
+        session: &AgentSessionKey,
+        native_session_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.inner.stop_subagent(session, native_session_id)
+    }
+
     fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.inner.cancel_session(session)
     }

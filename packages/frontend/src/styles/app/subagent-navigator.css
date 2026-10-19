@@ -310,6 +310,7 @@
   overflow-wrap: anywhere;
 }
 
+.subagent-inspection-stop,
 .subagent-inspection-return {
   align-items: center;
   background: var(--oa-raised);
@@ -326,11 +327,18 @@
   padding: 5px 10px;
 }
 
+.subagent-inspection-stop:hover:not(:disabled),
 .subagent-inspection-return:hover {
   background: var(--oa-selected);
   border-color: var(--oa-border);
 }
 
+.subagent-inspection-stop:disabled {
+  color: var(--oa-muted);
+  cursor: default;
+}
+
+.subagent-inspection-stop:focus-visible,
 .subagent-inspection-return:focus-visible {
   outline: 2px solid var(--oa-focus);
   outline-offset: 1px;

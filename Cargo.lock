@@ -45,19 +45,17 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "2.0.0"
-source = "git+https://github.com/OldKrab/rust-sdk?rev=fca6e7168b79961bd12464761f23f0054a8772b8#fca6e7168b79961bd12464761f23f0054a8772b8"
+version = "3.4.0"
+source = "git+https://github.com/OldKrab/rust-sdk?rev=6ba3746ca40f11c10bf59c1dff983bf11c09e924#6ba3746ca40f11c10bf59c1dff983bf11c09e924"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
  "async-io",
  "async-process",
- "blocking",
  "futures",
  "futures-concurrency",
  "rustc-hash",
  "rustix",
- "schemars 1.2.1",
  "serde",
  "serde_json",
  "shell-words",
@@ -68,8 +66,8 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "2.0.0"
-source = "git+https://github.com/OldKrab/rust-sdk?rev=fca6e7168b79961bd12464761f23f0054a8772b8#fca6e7168b79961bd12464761f23f0054a8772b8"
+version = "3.4.0"
+source = "git+https://github.com/OldKrab/rust-sdk?rev=6ba3746ca40f11c10bf59c1dff983bf11c09e924#6ba3746ca40f11c10bf59c1dff983bf11c09e924"
 dependencies = [
  "quote",
  "syn 3.0.0",
@@ -77,8 +75,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "1.7.0"
-source = "git+https://github.com/agentclientprotocol/agent-client-protocol?rev=2fc02e6105baf2a27cc3981a4f46a851fd946d69#2fc02e6105baf2a27cc3981a4f46a851fd946d69"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "430e900fdb40a811c1a3e0d85b1134e485d96699f8b90889a15c1da6a0b26c3f"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -87,7 +86,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "strum",
- "tracing",
 ]
 
 [[package]]
@@ -327,9 +325,9 @@ dependencies = [
 
 [[package]]
 name = "blocking"
-version = "1.6.2"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e83f8d02be6967315521be875afa792a316e28d57b5a2d401897e2a7921b7f21"
+checksum = "a70e4329df6cb94385eed412ec92375c3cdd8a6e502493d1229b6414e4036dfa"
 dependencies = [
  "async-channel",
  "async-task",
@@ -922,11 +920,10 @@ dependencies = [
 
 [[package]]
 name = "event-listener"
-version = "5.4.1"
+version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
+checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
- "concurrent-queue",
  "parking",
  "pin-project-lite",
 ]
@@ -1319,9 +1316,9 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermit-abi"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
+checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hex"

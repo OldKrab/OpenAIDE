@@ -3,6 +3,7 @@ import {
   TASK_CANCEL,
   TASK_CLOSE_PLAN,
   TASK_STOP_BACKGROUND_COMMAND,
+  TASK_STOP_SUBAGENT,
   TASK_QUEUE_APPEND,
   TASK_QUEUE_MOVE,
   TASK_QUEUE_REMOVE,
@@ -18,6 +19,7 @@ import {
   type StateRootId,
   type TaskId,
   type QueuedMessageId,
+  type SubagentId,
 } from "@openaide/app-server-client";
 import type { TaskPermissionPolicy, TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
@@ -161,6 +163,35 @@ export async function stopBackgroundCommandIntent(
       taskId,
       message: taskMutationErrorMessage(error, "Unable to stop the background command."),
     });
+  }
+}
+
+/**
+ * Asks App Server to stop one Subagent; the Task turn keeps running. Resolves
+ * whether the request was accepted. The Subagent's status changes only through
+ * App Server's later ordered Subagent change.
+ */
+export async function stopSubagentIntent(
+  dependencies: TaskMutationIntentDependencies,
+  snapshot: TaskSnapshot | undefined,
+  subagentId: SubagentId,
+): Promise<boolean> {
+  if (!snapshot) return false;
+  const taskId = snapshot.task.task_id;
+  try {
+    if (!dependencies.backendConnection?.request) throw new Error("App Server connection unavailable.");
+    await dependencies.backendConnection.request(TASK_STOP_SUBAGENT, {
+      taskId: taskId as TaskId,
+      subagentId,
+    });
+    return true;
+  } catch (error) {
+    dependencies.dispatch({
+      type: "taskInput:error",
+      taskId,
+      message: taskMutationErrorMessage(error, "Unable to stop the Subagent."),
+    });
+    return false;
   }
 }
 

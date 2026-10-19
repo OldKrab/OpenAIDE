@@ -8,13 +8,12 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "@openaide/app-shell-contracts";
-import type { AppServerSession, BackendConnection, ToolImagePreview } from "@openaide/app-server-client";
+import type { AppServerSession, BackendConnection, SubagentId, ToolImagePreview } from "@openaide/app-server-client";
 import type {
   AppState,
   TaskChatScrollState,
   TaskComposerInput,
   TaskLiveTextPresentation,
-  TaskOpenError,
 } from "../state/store";
 import { Composer } from "./Composer";
 import { composerAvailability, composerCanSubmit } from "./composerAvailability";
@@ -61,6 +60,7 @@ export {
   questionResponseForMessage,
 } from "./taskChatPresentation";
 export { chatRowKey, formatElapsedDuration } from "./TaskChatTimeline";
+export { TaskLoadingView } from "./TaskLoadingView";
 
 
 export type TaskViewIntents = {
@@ -70,61 +70,6 @@ export type TaskViewIntents = {
   recordScroll: (scrollState: TaskChatScrollState) => void;
   reportAttachmentError: (message?: string) => void;
 };
-
-export function TaskLoadingView({
-  error,
-  errorKind,
-  label = "Opening task",
-  onRetry,
-}: {
-  error?: string;
-  errorKind?: TaskOpenError["kind"];
-  label?: string;
-  onRetry?: () => void;
-}) {
-  if (error) {
-    if (errorKind === "conflict") {
-      return (
-        <section className="task-surface task-loading" aria-label="Session open elsewhere">
-          <p>Session open elsewhere.</p>
-          <small className="inline-error" role="alert">{error}</small>
-          {onRetry ? <button type="button" onClick={onRetry}>Try again</button> : null}
-        </section>
-      );
-    }
-    if (errorKind === "notFound") {
-      return (
-        <section className="task-surface task-loading" aria-label="Task not found">
-          <p>Task not found.</p>
-          <small className="inline-error" role="alert">
-            This Task does not exist or is no longer available.
-          </small>
-        </section>
-      );
-    }
-    return (
-      <section className="task-surface task-loading" aria-label="Unable to open task">
-        <p>Unable to open task.</p>
-        <small className="inline-error" role="alert">
-          {error}
-        </small>
-        {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
-      </section>
-    );
-  }
-  return (
-    <section className="task-surface task-loading" aria-label={label}>
-      <div className="task-loading-status" role="status" aria-live="polite">
-        <span className="working-status-dots" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
-        <span>{label}</span>
-      </div>
-    </section>
-  );
-}
 
 export function TaskView({
   activeTask,
@@ -141,6 +86,7 @@ export function TaskView({
   intents,
   onCancel,
   onStopBackgroundCommand,
+  onStopSubagent,
   onClosePlan,
   onAddToQueue,
   fileBrowser,
@@ -198,6 +144,7 @@ export function TaskView({
   intents: TaskViewIntents;
   onCancel: () => void;
   onStopBackgroundCommand?: (commandId: string) => void;
+  onStopSubagent?: (subagentId: SubagentId) => Promise<boolean>;
   onClosePlan?: () => Promise<void>;
   onAddToQueue?: (notBefore?: string) => void;
   fileBrowser?: TaskFileBrowserCallbacks;
@@ -695,6 +642,7 @@ export function TaskView({
         {subagents.selected ? (
           <SubagentInspectionBar
             onReturn={() => subagents.selectSubagent(undefined)}
+            onStop={backendReady ? onStopSubagent : undefined}
             selected={subagents.selected}
           />
         ) : recovery && agentRecoveryActions ? <AgentRecoveryPanel

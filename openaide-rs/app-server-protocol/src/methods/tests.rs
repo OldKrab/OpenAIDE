@@ -100,6 +100,7 @@ fn task_methods_use_task_namespace() {
         TaskStopBackgroundCommand::METHOD,
         "task/stopBackgroundCommand"
     );
+    assert_eq!(TaskStopSubagent::METHOD, "task/stopSubagent");
     assert_eq!(TaskOpen::METHOD, "task/open");
     assert_eq!(TaskMarkRead::METHOD, "task/markRead");
     assert_eq!(TaskList::METHOD, "task/list");

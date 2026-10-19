@@ -1,6 +1,6 @@
 # Draft Subagent Protocol Is Isolated
 
-Status: accepted
+Status: accepted; the dependency pin in the first paragraph is superseded by [ADR-0067](0067-native-subagents-use-released-acp-crates.md)
 
 Until ACP Subagent Sessions ship in released Rust crates, OpenAIDE pins the exact reviewed commit from agentclientprotocol/agent-client-protocol PR #1992 and isolates its temporary types at the existing ACP schema seam; it never follows a moving branch or maintains independent copies of the draft wire contract. Once the complete App Server and Frontend path is ready, OpenAIDE advertises only canonical `clientCapabilities.subagents: {}` to every ACP Agent and relies on bilateral negotiation rather than a vendor capability alias.
 

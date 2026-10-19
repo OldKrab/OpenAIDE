@@ -257,6 +257,14 @@ impl AcpActiveSessionManager {
         self.sessions.stop_background_command(session, command_id)
     }
 
+    pub(super) fn stop_subagent(
+        &self,
+        session: &AgentSessionKey,
+        native_session_id: &str,
+    ) -> Result<(), RuntimeError> {
+        self.sessions.stop_subagent(session, native_session_id)
+    }
+
     pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.sessions.cancel_session(session)
     }

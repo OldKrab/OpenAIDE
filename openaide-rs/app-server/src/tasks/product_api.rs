@@ -72,6 +72,7 @@ mod set_config_option;
 mod set_permission_policy;
 mod set_pinned;
 mod set_title;
+mod stop_subagent;
 mod support_recovery;
 mod workflows;
 
@@ -598,6 +599,14 @@ impl TaskCancelWorkflow for TaskProductApi {
         params: openaide_app_server_protocol::task::TaskStopBackgroundCommandParams,
     ) -> Result<(), ProtocolError> {
         self.stop_background_command(client_instance_id, params)
+    }
+
+    fn stop_subagent_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskStopSubagentParams,
+    ) -> Result<(), ProtocolError> {
+        self.stop_subagent(client_instance_id, params)
     }
 
     fn recover_stuck_sessions(

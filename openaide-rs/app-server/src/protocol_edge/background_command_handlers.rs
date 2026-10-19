@@ -1,6 +1,7 @@
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::task::{
-    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult,
+    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult, TaskStopSubagentParams,
+    TaskStopSubagentResult,
 };
 use serde_json::Value;
 
@@ -38,5 +39,31 @@ impl RpcGateway {
             meta,
             TaskStopBackgroundCommandResult {},
         )
+    }
+
+    pub(super) fn handle_task_stop_subagent(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskStopSubagentParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Subagent stop");
+        if let Err(error) = self
+            .task_cancel
+            .stop_subagent_for_client(&client.client_instance_id, params)
+        {
+            return self.error(connection_id, id, meta, error);
+        }
+        self.result::<TaskStopSubagentResult>(connection_id, id, meta, TaskStopSubagentResult {})
     }
 }
