@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.10.0 - 2026-10-19
+
+### Remote Devices
+- Pair a phone or another computer by Pairing Code instead of an address, reverse proxy, and password. Devices connect by key over iroh, directly when the networks allow it and through public relays otherwise; Settings → Remote explains what the relays can see.
+- Use OpenAIDE on another computer from the Desktop app: pair it in Settings → Remote and choose where agents work.
+- Keep a computer without a window reachable with `openaide-app-server remote`, which also shows Pairing Codes as text and QR codes, lists and removes devices, and stops cleanly under a service manager.
+- Install the App Server on a Linux computer without an App Shell from the new `openaide-app-server-linux-x64-0.10.0.tar.gz` archive, with a guide for pairing and running it as a systemd user service.
+- Show Reconnecting in an open Task when the App Server stops answering, and show the current state at once when a suspended page returns.
+
+### Android
+- Connect to a computer by scanning or pasting its Pairing Code, or by showing the phone's own code. The app keeps several paired computers and switches between them.
+- Run This phone with the App Server in Termux and the interface bundled in the APK, without a Node Web Shell. Local work needs Codex or Claude installed in Termux.
+- Notify when a Task on this phone needs attention, and open that Task from the notification.
+- Save workspace downloads, such as File Viewer files and log exports, to Downloads.
+- Take a photo for the Composer from the new Take photo action; Attach images no longer asks for camera access.
+- Reconnect to the computer at once when the app returns to the screen.
+- Export one phone log that includes connection attempts, separate from the computer's logs.
+
+### Desktop
+- Notify when a Task needs attention, on by default, and open the Task from the notification.
+- Attach files and drop them onto a Task.
+- Preview PDF files in the File Viewer.
+- Keep the App Server running while the app is open in the background, so running Tasks and paired devices are not dropped.
+- Start with a WSL environment even when a shell startup file asks for input, and show why startup failed when it does.
+- On macOS, set the work surface below the window chrome and move it as a Task opens or closes. The installer window no longer cuts off its labels and lists the steps to open an app that is not notarized.
+
+### Settings
+- Reorganize Settings into General, Agents, MCP servers, Skills, Worktrees, Remote, and Troubleshooting, with one search across every section.
+- Show developer tools in Troubleshooting without an unlock gesture.
+
+### Task and Chat
+- Keep every Project and its running, waiting, unread, pinned, and open Tasks visible in the sidebar, with a fixed number of history rows per Project.
+- Name the Agent in an open Task at every width, and offer sign-in when a signed-out Agent refuses a prompt.
+- Show the Agent's own reason when it ends a turn with an error.
+- Stop a running Subagent from its header, and count Monitors and commands a Subagent leaves running as Background work.
+- Offer Quote after a touch selection, and stop a sent or deleted Quote from reappearing after a Subagent history is inspected.
+- Remove the account limits label that appeared at every ten-percent step; the meters and their readouts remain.
+- Fix narrow layouts: no sideways scrolling in Chat, full-width text beside Copy, long Subagent names, and step durations on touch only while a step is open.
+- Keep an open menu anchored while the Agent applies a changed option, and open Tasks faster while session history refreshes.
+
+### Agents
+- Update Claude Code's ACP adapter to 1.7.0 and the managed Codex ACP runtime to 2.1.0.
+
+### Upgrading
+- Android connections set up with an address and password are reset; pair the computer again from Settings → Remote. HTTP Basic sign-in, Reconnect Termux, and Start after reboot are removed.
+- This phone needs the matching runtime, offered by setup after the update. The runtime asset is now `openaide-app-server-android-arm64-0.10.0.tar.gz`, and the APK supports ARM64 phones only.
+
 ## 0.9.0 - 2026-10-10
 
 ### Background work
