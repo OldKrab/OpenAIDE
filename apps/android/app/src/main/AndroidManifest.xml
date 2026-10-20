@@ -10,6 +10,12 @@
     <!-- Scanning a Pairing Code and taking a photo to attach; a phone without a camera pastes the code or shows its own. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Installing this app's own update after the user taps Install; see AppUpdates. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Lets Android 12+ skip its second confirmation when this app updates itself. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- Keeps the daily update check scheduled across restarts. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <queries>
         <package android:name="com.termux" /><package android:name="com.termux.boot" />
         <!-- Finds the camera apps that may write an attached photo. -->
@@ -24,6 +30,8 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true">
         <receiver android:name=".TermuxCommand" android:exported="false" />
+        <receiver android:name=".AppUpdateReceiver" android:exported="false" />
+        <service android:name=".AppUpdateJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
         <!-- Lets the camera write a photo the Web Shell attaches; see CameraCapture. -->
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.captures"

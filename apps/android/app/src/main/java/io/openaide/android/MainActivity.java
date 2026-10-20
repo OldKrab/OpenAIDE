@@ -67,7 +67,8 @@ public final class MainActivity extends Activity {
     private boolean credentialsUnavailable;
     private WorkspaceConnectionBridge connectionBridge;
     private WorkspaceDownloads downloads;
-    private boolean pendingSettings;
+    /** The Settings tab to show once the workspace page is loaded, or null. */
+    private String pendingSettings;
     /** Set by a Task notification; the workspace routes to it once its page is loaded. */
     static final String EXTRA_TASK_ID = "task_id";
     private String pendingTask;
@@ -82,9 +83,12 @@ public final class MainActivity extends Activity {
         try { profile = connections.load(); }
         catch (RuntimeException error) { profile = ConnectionProfile.local(); credentialsUnavailable = true; }
         showConnection();
+        AppUpdateJob.schedule(this);
+        AppUpdates.get(this).checkIfDue();
         pendingTask = getIntent().getStringExtra(EXTRA_TASK_ID);
         if (credentialsUnavailable) openSetup("welcome");
-        else if (getIntent().getBooleanExtra("show_settings", false)) showSettings();
+        else if (getIntent().getBooleanExtra("show_settings", false)) showSettings("remote");
+        else if (getIntent().getBooleanExtra(AppUpdates.EXTRA_SHOW, false)) showSettings("general");
         else if (preferences.getBoolean("configured", false) || checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) requestConnection();
         else openSetup("welcome");
     }
@@ -145,7 +149,7 @@ public final class MainActivity extends Activity {
         setup.setStateListAnimator(null);
         setup.setBackgroundColor(Color.TRANSPARENT);
         setup.setOnClickListener(view -> {
-            pendingSettings = false;
+            pendingSettings = null;
             openSetup(getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false) ? "settings" : "welcome");
         });
         layout.addView(setup, centered(dp(260), dp(48), 4));
@@ -160,17 +164,19 @@ public final class MainActivity extends Activity {
         setContentView(scroll);
     }
 
-    private void showSettings() {
-        pendingSettings = true;
+    /** Shows a phone Settings tab: "remote" for connection controls, "general" for updates. */
+    private void showSettings(String tab) {
+        pendingSettings = tab;
         if (browser != null) navigateToConnectionSettings();
         else if (getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false)) requestConnection();
         else openSetup("welcome");
     }
 
     private void navigateToConnectionSettings() {
-        if (browser == null) return;
-        pendingSettings = false;
-        browser.evaluateJavascript("history.pushState(null, '', '/settings?tab=remote'); window.dispatchEvent(new PopStateEvent('popstate'))", null);
+        if (browser == null || pendingSettings == null) return;
+        String path = "/settings?tab=" + Uri.encode(pendingSettings);
+        pendingSettings = null;
+        browser.evaluateJavascript("history.pushState(null, '', " + org.json.JSONObject.quote(path) + "); window.dispatchEvent(new PopStateEvent('popstate'))", null);
     }
 
     private void navigateToTask() {
@@ -219,7 +225,8 @@ public final class MainActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent.getBooleanExtra("show_settings", false)) showSettings();
+        if (intent.getBooleanExtra("show_settings", false)) showSettings("remote");
+        else if (intent.getBooleanExtra(AppUpdates.EXTRA_SHOW, false)) showSettings("general");
         else if (intent.getStringExtra(EXTRA_TASK_ID) != null) {
             pendingTask = intent.getStringExtra(EXTRA_TASK_ID);
             // A shown page routes now; otherwise the page's load or the reconnect below routes it.
@@ -234,6 +241,7 @@ public final class MainActivity extends Activity {
         diagnostics.record("app_foreground", "resumed", 0, pausedAt == 0 ? 0 : android.os.SystemClock.elapsedRealtime() - pausedAt);
         // Before any request of this return: they must not wait on an endpoint whose network Android stopped.
         RemoteNode.INSTANCE.shown();
+        AppUpdates.get(this).resumed(this);
         if (browser != null) {
             browser.resumeTimers();
             browser.onResume();
@@ -395,7 +403,7 @@ public final class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) {
                 if (!profile.owns(url)) return;
                 connectionBridge.attach();
-                if (pendingSettings) navigateToConnectionSettings();
+                if (pendingSettings != null) navigateToConnectionSettings();
                 else navigateToTask();
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -412,7 +420,7 @@ public final class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 if (SetupPagePolicy.opensSettings(profile, view.getUrl(), uri.toString(), request.isForMainFrame(), request.hasGesture())) {
-                    showSettings();
+                    showSettings("remote");
                     return true;
                 }
                 if (profile.owns(uri.toString())) return false;

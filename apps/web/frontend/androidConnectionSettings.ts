@@ -1,7 +1,12 @@
 import type { ConnectionCommand, ConnectionSettings, ConnectionSnapshot } from "../../../packages/frontend/src/services/connectionSettings";
+import type { DesktopUpdateCapability } from "../../../packages/frontend/src/services/frontendShell";
+import { androidAppUpdates, type AndroidUpdateCommand } from "./androidAppUpdates";
 import { androidSystemAppearance } from "./androidSystemAppearance";
 
-export function androidConnectionSettings(host: Window): ConnectionSettings | undefined {
+/** Phone controls the Android App serves over one native channel: connection settings and its own updates. */
+export type AndroidConnectionSettings = ConnectionSettings & { appUpdates: DesktopUpdateCapability };
+
+export function androidConnectionSettings(host: Window): AndroidConnectionSettings | undefined {
   if (!/(?:^| )OpenAIDE-Android\/1(?: |$)/.test(host.navigator.userAgent)) return undefined;
   let port: MessagePort | undefined;
   const appearance = androidSystemAppearance(host, color => {
@@ -30,6 +35,8 @@ export function androidConnectionSettings(host: Window): ConnectionSettings | un
         } else if (message.type === "state" && typeof message.state?.remote === "boolean") {
           state = message.state;
           notify();
+        } else if (message.type === "update") {
+          updates.receive(message.update);
         }
       } catch { }
     };
@@ -44,25 +51,28 @@ export function androidConnectionSettings(host: Window): ConnectionSettings | un
     for (const request of pending.values()) request.finish(unavailable());
   });
   host.addEventListener("pageshow", () => appearance.refresh());
+  const execute = (command: ConnectionCommand | AndroidUpdateCommand) => new Promise<void>((resolve, reject) => {
+    const id = ++sequence;
+    const timeout = host.setTimeout(() => pending.get(id)?.finish(unavailable()), 8000);
+    const request = {
+      send: () => {
+        try { port?.postMessage(JSON.stringify({ id, command })); }
+        catch { request.finish(unavailable()); }
+      },
+      finish: (error?: Error) => {
+        host.clearTimeout(timeout);
+        pending.delete(id);
+        if (error) reject(error); else resolve();
+      },
+    };
+    pending.set(id, request);
+    request.send();
+  });
+  const updates = androidAppUpdates(execute);
   return {
     snapshot: () => state,
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    execute: (command: ConnectionCommand) => new Promise<void>((resolve, reject) => {
-      const id = ++sequence;
-      const timeout = host.setTimeout(() => pending.get(id)?.finish(unavailable()), 8000);
-      const request = {
-        send: () => {
-          try { port?.postMessage(JSON.stringify({ id, command })); }
-          catch { request.finish(unavailable()); }
-        },
-        finish: (error?: Error) => {
-          host.clearTimeout(timeout);
-          pending.delete(id);
-          if (error) reject(error); else resolve();
-        },
-      };
-      pending.set(id, request);
-      request.send();
-    }),
+    execute,
+    appUpdates: updates.capability,
   };
 }

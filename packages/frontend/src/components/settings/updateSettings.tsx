@@ -44,7 +44,7 @@ export function useUpdateGroup(capability: DesktopUpdateCapability | undefined):
       setActionError(true);
     }
   };
-  const status = updateStatus(snapshot);
+  const status = updateStatus(snapshot, capability.installation);
   const offer = snapshot.offer;
   const ready = snapshot.kind === "readyToUpdate";
 
@@ -170,7 +170,7 @@ function UpdateAction({
       <>
         <SettingsButton onClick={onDefer} variant="quiet">Not now</SettingsButton>
         <SettingsButton icon={<RotateCw aria-hidden="true" size={14} />} onClick={() => void restart()} variant="primary">
-          Restart and update
+          {capability.installation === "systemInstaller" ? "Install update" : "Restart and update"}
         </SettingsButton>
       </>
     );
@@ -182,7 +182,11 @@ function UpdateAction({
   );
 }
 
-export function updateStatus(snapshot: DesktopUpdateSnapshot): { tone: SettingsTone; label: string; detail?: string } {
+export function updateStatus(
+  snapshot: DesktopUpdateSnapshot,
+  installation: DesktopUpdateCapability["installation"] = "restart",
+): { tone: SettingsTone; label: string; detail?: string } {
+  const systemInstaller = installation === "systemInstaller";
   if (snapshot.kind === "unavailable") {
     const reason = snapshot.unavailableReason === "developmentBuild"
       ? "Updates are disabled in development builds."
@@ -207,9 +211,19 @@ export function updateStatus(snapshot: DesktopUpdateSnapshot): { tone: SettingsT
     };
   }
   if (snapshot.kind === "readyToUpdate") {
-    return { tone: "warn", label: `Version ${snapshot.offer?.version ?? "update"} is ready`, detail: "Restart OpenAIDE to apply it." };
+    return {
+      tone: "warn",
+      label: `Version ${snapshot.offer?.version ?? "update"} is ready`,
+      detail: systemInstaller ? "Install it when you are ready. OpenAIDE closes while it installs." : "Restart OpenAIDE to apply it.",
+    };
   }
-  if (snapshot.kind === "applying") return { tone: "busy", label: "Applying update", detail: "OpenAIDE will reopen automatically." };
+  if (snapshot.kind === "applying") {
+    return {
+      tone: "busy",
+      label: "Applying update",
+      detail: systemInstaller ? "Confirm in the installer if asked, then open OpenAIDE again." : "OpenAIDE will reopen automatically.",
+    };
+  }
   if (snapshot.kind === "failed") return { tone: "warn", label: "Update needs attention", detail: updateErrorCopy(snapshot.error) };
   return {
     tone: "ok",

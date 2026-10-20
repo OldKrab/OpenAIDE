@@ -196,7 +196,7 @@ reconnection, and recovery after Termux is stopped. APK compilation alone does
 not establish working Codex execution on Android.
 
 Remote push notifications and automatic runtime-update application
-are not implemented. Shared task and settings behavior stays
+are not implemented; app updates are described in [App updates](#app-updates). Shared task and settings behavior stays
 in the existing Frontend and App Server.
 
 Android Back navigates page history, then backgrounds the app. Returning wakes
@@ -268,6 +268,29 @@ assets, rejects all other resources/navigation, disables file/provider access, a
 applies a CSP that forbids network requests, frames and inline scripts. The camera
 scanner is a separate native screen that returns only the code's text. See
 [Android WebView bridge security guidance](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges).
+
+## App updates
+
+The app updates itself from the newest stable GitHub release; prereleases and
+drafts are never offered. It checks when it starts, at most every 12 hours, and
+once a day while closed, through a persisted `JobScheduler` job. A newer version
+posts one notification; tapping it opens Settings → General → Updates. Nothing is
+downloaded or installed until the user taps there.
+
+The release must carry `openaide-android-<version>.apk` at its canonical download
+address with a GitHub `sha256` digest. The app streams it to its cache, checks the
+size and digest, then checks that the archive's package, version and signing
+certificate match the installed app before offering Install. Install hands the APK
+to Android's package installer. Android asks once for **Install unknown apps**, and
+may ask to confirm the update; Android 12 and newer can skip that confirmation.
+Debug and side-by-side builds show updates as unavailable, because their package
+or signature differs from the release.
+
+Only the APK is replaced. The App Server in Termux keeps running; when the new
+app opens, setup offers the matching runtime as it does after a manual update.
+A phone that uses a paired computer never downloads a runtime. Each check,
+download, install and notification logs `app_update_*` start and terminal events
+with the version, outcome and a classified reason.
 
 ## Device validation
 
