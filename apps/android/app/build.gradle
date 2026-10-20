@@ -118,4 +118,6 @@ dependencies {
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
     implementation 'com.google.zxing:core:3.5.3'
     testImplementation 'junit:junit:4.13.2'
+    // Local unit tests see Android's stubbed org.json; this is the reference implementation it mirrors.
+    testImplementation 'org.json:json:20250517'
 }

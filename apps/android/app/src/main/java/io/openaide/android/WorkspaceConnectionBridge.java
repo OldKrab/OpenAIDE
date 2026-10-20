@@ -18,10 +18,15 @@ final class WorkspaceConnectionBridge {
     private final ConnectionController controller;
     private final SystemBarAppearance appearance;
     private WebMessagePort port;
+    private final Activity activity;
+    private final AppUpdates updates;
+    private Runnable updatesSubscription;
     private final AndroidDiagnostics diagnostics = new AndroidDiagnostics();
 
     WorkspaceConnectionBridge(Activity activity, WebView browser, ConnectionProfile profile, BooleanSupplier visible, Runnable changed, java.util.function.Consumer<String> setup) {
+        this.activity = activity;
         this.browser = browser;
+        updates = AppUpdates.get(activity);
         this.profile = profile;
         this.visible = visible;
         appearance = new SystemBarAppearance(activity, browser);
@@ -55,7 +60,9 @@ final class WorkspaceConnectionBridge {
                         reply(id, false);
                         return;
                     }
-                    controller.receive(request.getJSONObject("command"));
+                    JSONObject command = request.getJSONObject("command");
+                    if (command.optString("action").startsWith("update_")) updates.command(activity, command);
+                    else controller.receive(command);
                     diagnostics.record("connection_controls", "accepted", id, android.os.SystemClock.elapsedRealtime() - started);
                     reply(id, true);
                 } catch (Exception error) { diagnostics.record("connection_controls", "invalid_request", 0, 0); }
@@ -64,6 +71,8 @@ final class WorkspaceConnectionBridge {
         browser.postWebMessage(new WebMessage("openaide:connection-controls:1", new WebMessagePort[]{channel[1]}),
             Uri.parse(profile.endpoint.substring(0, profile.endpoint.length() - 1)));
         if (settingsRoute()) controller.resume();
+        // Every workspace page gets the update state, so navigation can mark an available update.
+        updatesSubscription = updates.subscribe(state -> send("update", "update", state));
     }
 
     private boolean settingsRoute() { return SetupPagePolicy.isConnectionRoute(profile, browser.getUrl()); }
@@ -84,6 +93,7 @@ final class WorkspaceConnectionBridge {
     void onRequestPermissionsResult(int request, String[] permissions, int[] results) { controller.onRequestPermissionsResult(request, permissions, results); }
     void onActivityResult(int request, int result, Intent data) { controller.onActivityResult(request, result, data); }
     void detach() {
+        if (updatesSubscription != null) { updatesSubscription.run(); updatesSubscription = null; }
         if (port != null) { port.close(); port = null; }
     }
     void dispose() { detach(); controller.dispose(); }
