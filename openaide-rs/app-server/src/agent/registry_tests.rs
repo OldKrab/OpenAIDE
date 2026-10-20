@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::agent::managed_acp_provisioner::ManagedAcpRuntime;
 
 fn catalog_record(value: serde_json::Value) -> AgentCatalogRecord {
     serde_json::from_value(value).unwrap()
@@ -212,5 +213,5 @@ fn registry_overlay_does_not_let_legacy_custom_records_replace_builtin_codex() {
 
     assert_eq!(codex.source_kind, AgentSourceKind::BuiltIn);
     assert_ne!(config.command, "codex-acp");
-    assert!(config.uses_product_pinned_codex_package());
+    assert_eq!(config.managed_runtime(), Some(ManagedAcpRuntime::Codex));
 }

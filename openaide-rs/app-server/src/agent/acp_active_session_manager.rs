@@ -6,13 +6,13 @@ use tokio::sync::mpsc as tokio_mpsc;
 use crate::agent::acp_agent_process::{
     AcpAgentProcessOpen, AcpSessionOpenRequest, AcpStartedSession,
 };
-use crate::agent::acp_agent_process_pool::AcpAgentProcessPool;
+use crate::agent::acp_agent_process_pool::{AcpAgentProcessPool, ProcessStopReason};
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwnerId;
 use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
 use crate::agent::attached_native_session::{AttachedNativeSession, SessionIdleTimeouts};
 use crate::agent::attached_native_session_registry::AttachedNativeSessionRegistry;
-use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
+use crate::agent::managed_acp_provisioner::ManagedAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
@@ -59,8 +59,8 @@ impl AcpActiveSessionManager {
         self.trace_state = trace_state;
     }
 
-    pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
-        self.processes.with_codex_provisioner(provisioner);
+    pub(super) fn with_managed_provisioner(&mut self, provisioner: ManagedAcpProvisioner) {
+        self.processes.with_managed_provisioner(provisioner);
     }
 
     pub(super) fn with_account_limits(
@@ -91,6 +91,11 @@ impl AcpActiveSessionManager {
     pub(super) fn with_session_idle_close_timeout(&mut self, timeout: Duration) {
         self.session_idle
             .send_modify(|timeouts| timeouts.close = timeout);
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_startup_install_grace(&mut self, grace: Duration) {
+        self.processes.with_startup_install_grace(grace);
     }
 
     #[cfg(test)]
@@ -333,9 +338,13 @@ impl AcpActiveSessionManager {
                     close_starting_session(&close_tx);
                     // A session request that never answers leaves the shared Agent
                     // process unusable for retries. Evict only the process that
-                    // handled this request so a concurrent replacement survives.
-                    self.processes
-                        .stop_session_process(&agent_id, &process_session);
+                    // handled this request so a concurrent replacement survives; the
+                    // pool keeps a process that is still starting (see `stop_process`).
+                    self.processes.stop_session_process(
+                        &agent_id,
+                        &process_session,
+                        ProcessStopReason::SessionStartTimeout,
+                    );
                     Err(RuntimeError::NotReady(
                         "ACP session start timed out".to_string(),
                     ))
@@ -345,8 +354,11 @@ impl AcpActiveSessionManager {
                     // request. Remove it immediately and retry once so a dead
                     // process cannot turn a transient switch into a hard failure.
                     let _ = process_session.terminal_owner.close();
-                    self.processes
-                        .stop_session_process(&agent_id, &process_session);
+                    self.processes.stop_session_process(
+                        &agent_id,
+                        &process_session,
+                        ProcessStopReason::SessionStartProcessEnded,
+                    );
                     if attempt < MAX_SESSION_OPEN_ATTEMPTS {
                         crate::logging::info(
                             "acp_session_start_retry",

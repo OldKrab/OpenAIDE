@@ -1,6 +1,6 @@
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "../AgentIcon";
-import { CODEX_INTEGRATION_INSTALLING_LABEL } from "../agentActivityPresentation";
+import { agentIntegrationInstallingLabel } from "../agentActivityPresentation";
 import { AgentRecoveryButtons, type AgentRecoveryActions, type AgentRecoveryKind } from "../AgentRecovery";
 import { AgentEnvEditor, AgentIconPicker } from "./AgentCustomFields";
 import { agentStatusCopy, type AgentDraft } from "./agentSettingsModel";
@@ -28,7 +28,7 @@ export function agentStatus(agent: AgentSettingsRecord): { tone: SettingsTone; t
     case "disabled": return { tone: "off", text: "Off" };
     case "connected": return { tone: "ok", text: "Connected" };
     case "ready": return { tone: "ok", text: "Ready" };
-    case "installing": return { tone: "busy", text: CODEX_INTEGRATION_INSTALLING_LABEL };
+    case "installing": return { tone: "busy", text: agentIntegrationInstallingLabel(agent.label) };
     case "launching": return { tone: "busy", text: "Starting" };
     case "authenticating": return { tone: "busy", text: "Signing in" };
     case "disconnected": return { tone: "off", text: "Not connected" };

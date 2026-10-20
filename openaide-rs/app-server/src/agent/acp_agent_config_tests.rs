@@ -2,6 +2,7 @@ use super::AcpAgentConfig;
 use super::{
     command_not_found_error, process_args, resolve_command_in_paths, windows_command_extensions,
 };
+use crate::agent::managed_acp_provisioner::ManagedAcpRuntime;
 use crate::protocol::errors::RuntimeError;
 use std::ffi::OsStr;
 use std::fs;
@@ -19,9 +20,8 @@ fn built_in_codex_uses_the_product_pinned_adapter() {
     assert!(version
         .split('.')
         .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())));
-    assert!(config.uses_product_pinned_codex_package());
+    assert_eq!(config.managed_runtime(), Some(ManagedAcpRuntime::Codex));
     assert!(config.env.is_empty());
-    assert_eq!(config.diagnostic_launcher_kind(), "managed_package");
 }
 
 #[test]
@@ -46,6 +46,18 @@ fn built_in_claude_uses_an_exact_stable_package_pin() {
     }
     assert!(config.env.is_empty());
     assert!(config.secret_env.is_empty());
+    assert_eq!(config.managed_runtime(), Some(ManagedAcpRuntime::Claude));
+}
+
+#[test]
+fn replaced_built_in_launch_is_not_managed() {
+    let mut config = AcpAgentConfig::claude_code();
+    config.args[1] = "@openaide/claude-agent-acp@0.0.1".to_string();
+    assert_eq!(config.managed_runtime(), None);
+
+    let mut config = AcpAgentConfig::claude_code();
+    config.agent_id = "custom".to_string();
+    assert_eq!(config.managed_runtime(), None);
 }
 
 #[test]

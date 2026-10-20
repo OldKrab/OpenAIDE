@@ -136,3 +136,55 @@ fn safe_log_snapshot_preserves_acp_failure_metadata_without_error_content() {
     assert!(!snapshot.contains("private"));
     assert_eq!(rows[1]["fields"], json!({}));
 }
+
+#[test]
+fn safe_log_snapshot_keeps_agent_process_exit_and_rpc_correlation() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("runtime.jsonl");
+    let records = [
+        json!({"event":"acp_agent_connection_failed","fields":{
+            "operation_id":"0b9e5f9c-1f7e-4c1e-9a43-5c1d2b7f8e10", "agent_id":"claude-code",
+            "error_kind":"transport_error", "outcome_kind":"process_exit",
+            "operation":"session-start", "exit_code":127, "exit_signal":null,
+            "active_session_count":0, "launcher_kind":"configured_command"
+        }}),
+        json!({"event":"acp_agent_process_stop_deferred","fields":{
+            "operation":"agent/process_lifetime", "stop_reason":"probe_timeout",
+            "initialized":false, "process_age_ms":8000, "stopped":false
+        }}),
+        json!({"event":"rpc_request_started","fields":{
+            "method":"agent/probe", "request_id":17, "connection_id":"client-1",
+            "message_kind":"request"
+        }}),
+        json!({"event":"rpc_request_started","fields":{
+            "method":"/home/private/path", "exit_code":"127", "initialized":"yes"
+        }}),
+    ];
+    fs::write(
+        &path,
+        records
+            .iter()
+            .map(|r| r.to_string() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
+    let snapshot = String::from_utf8(safe_log_snapshot(&path).unwrap()).unwrap();
+    let rows: Vec<serde_json::Value> = snapshot
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows[0]["fields"]["exit_code"], 127);
+    assert_eq!(rows[0]["fields"]["outcome_kind"], "process_exit");
+    assert_eq!(rows[0]["fields"]["operation"], "session-start");
+    assert_eq!(
+        rows[0]["fields"]["operation_id"],
+        "0b9e5f9c-1f7e-4c1e-9a43-5c1d2b7f8e10"
+    );
+    assert_eq!(rows[1]["fields"]["stop_reason"], "probe_timeout");
+    assert_eq!(rows[1]["fields"]["initialized"], false);
+    assert_eq!(rows[1]["fields"]["process_age_ms"], 8000);
+    assert_eq!(rows[2]["fields"]["method"], "agent/probe");
+    assert_eq!(rows[2]["fields"]["request_id"], 17);
+    assert!(!snapshot.contains("private"));
+    assert_eq!(rows[3]["fields"], json!({}));
+}

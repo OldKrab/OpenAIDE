@@ -3,7 +3,7 @@ use std::sync::Arc;
 pub use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_runtime_kernel::AcpRuntimeKernel;
 use crate::agent::acp_trace::AcpTraceState;
-use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
+use crate::agent::managed_acp_provisioner::ManagedAcpProvisioner;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::status_cache::AgentStatusCache;
@@ -44,7 +44,8 @@ impl AcpAgentRuntime {
         }
     }
 
-    pub(crate) fn new_with_managed_codex(
+    /// A runtime that installs the product-pinned Codex and Claude adapters on demand.
+    pub(crate) fn new_with_managed_runtimes(
         registry: AgentRegistryHandle,
         host_bridge: HostBridge,
         storage_root: std::path::PathBuf,
@@ -54,7 +55,7 @@ impl AcpAgentRuntime {
         runtime.kernel.with_account_limits(statuses.clone());
         runtime
             .kernel
-            .with_codex_provisioner(CodexAcpProvisioner::new_with_statuses(
+            .with_managed_provisioner(ManagedAcpProvisioner::new_with_statuses(
                 storage_root,
                 statuses,
             ));
@@ -98,6 +99,12 @@ impl AcpAgentRuntime {
     #[cfg(test)]
     fn with_session_idle_close_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.kernel.with_session_idle_close_timeout(timeout);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_startup_install_grace(mut self, grace: std::time::Duration) -> Self {
+        self.kernel.with_startup_install_grace(grace);
         self
     }
 

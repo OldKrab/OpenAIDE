@@ -467,9 +467,11 @@ fn pending_agent_request_suspends_expiration_until_client_response() {
 #[test]
 fn probe_timeout_stops_a_process_that_never_initializes() {
     let temp = tempfile::tempdir().unwrap();
+    // A zero startup grace stands for a process that has outlasted any package install.
     let runtime = std::sync::Arc::new(
         fixture_with_host(&temp, "held_initialize", HostBridge::disabled())
-            .with_process_idle_timeouts(NEVER, NEVER),
+            .with_process_idle_timeouts(NEVER, NEVER)
+            .with_startup_install_grace(Duration::ZERO),
     );
     // Listing launches the process, which then holds inside `initialize`.
     // TODO: a listing in flight when its process is stopped waits out its whole
@@ -493,6 +495,43 @@ fn probe_timeout_stops_a_process_that_never_initializes() {
         "{error}"
     );
     wait_for_exit(&pid);
+}
+
+#[test]
+fn probe_timeout_keeps_a_process_still_starting_for_a_later_retry() {
+    let temp = tempfile::tempdir().unwrap();
+    // The default startup grace applies: the held `initialize` stands for an `npx`
+    // launch that is still installing its package.
+    let runtime = std::sync::Arc::new(
+        fixture_with_host(&temp, "held_initialize", HostBridge::disabled())
+            .with_process_idle_timeouts(NEVER, NEVER),
+    );
+    let cwd = temp.path().to_path_buf();
+    let listing_runtime = runtime.clone();
+    let listing = thread::spawn(move || list(&listing_runtime, &cwd));
+    let pid = wait_until_held(&temp);
+    let error = runtime
+        .probe_with_timeout(
+            AgentProbeRequest {
+                agent_id: "codex".into(),
+            },
+            EXPIRES,
+        )
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("ACP Agent probe timed out"),
+        "{error}"
+    );
+    assert!(
+        process_exists(&pid),
+        "a starting process survives the timeout"
+    );
+
+    release(&temp);
+    let listed = listing.join().unwrap().unwrap();
+    assert_eq!(listed.sessions[0].session_id, pid);
+    // The retry reaches the same process once it has initialized.
+    assert_eq!(list_pid(&runtime, temp.path()), pid);
 }
 
 const AGENT: &str = r#"

@@ -1265,7 +1265,7 @@ describe("Sidebar", () => {
   it("keeps saved rows visible while the Codex integration installs", () => {
     const tree = render(
       <Sidebar
-        codexIntegrationInstalling
+        installingAgentLabel="Codex"
         nativeSessions={nativeSessions({
           items: [nativeSession({ session_id: "session_1", title: "Existing" })],
         })}
@@ -1280,6 +1280,20 @@ describe("Sidebar", () => {
     expect(textContent(tree)).toContain("Installing the Codex integration…");
     expect(textContent(tree)).toContain("This can take a minute.");
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
+  });
+
+  it("names the Agent whose integration installs", () => {
+    const tree = render(
+      <Sidebar
+        installingAgentLabel="Claude Code"
+        nativeSessions={nativeSessions({ items: [] })}
+        showArchived={false}
+        tasks={[]}
+        {...sidebarCallbacks()}
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Installing the Claude Code integration…");
   });
 
   it("refreshes external sessions from the sidebar header", () => {
