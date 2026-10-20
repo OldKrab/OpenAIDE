@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use super::{package_root, provisioning_error, provisioning_io_error};
+use super::{package_root, provisioning_error, provisioning_io_error, ManagedAcpRuntime};
 use crate::agent::acp_agent_config::resolved_command_or_name;
 use crate::protocol::errors::RuntimeError;
 
@@ -69,16 +69,18 @@ impl ArtifactDigests {
     }
 
     pub(super) fn validate(&self, version_root: &Path) -> Result<(), RuntimeError> {
-        let dist = package_root(version_root).join("dist");
+        let codex = ManagedAcpRuntime::Codex;
+        let io_error = |error| provisioning_io_error(codex, error);
+        let dist = package_root(codex, version_root).join("dist");
         for (name, expected) in [
             ("index.js", &self.index),
             ("openaide-session-recovery.mjs", &self.helper),
         ] {
-            let mut file = File::open(dist.join(name)).map_err(provisioning_io_error)?;
+            let mut file = File::open(dist.join(name)).map_err(io_error)?;
             let mut digest = Sha256::new();
             let mut buffer = [0; 16 * 1024];
             loop {
-                let length = file.read(&mut buffer).map_err(provisioning_io_error)?;
+                let length = file.read(&mut buffer).map_err(io_error)?;
                 if length == 0 {
                     break;
                 }
@@ -86,6 +88,7 @@ impl ArtifactDigests {
             }
             if hex_digest(&digest.finalize()) != *expected {
                 return Err(provisioning_error(
+                    codex,
                     "installed Codex integration did not match the managed patch".to_string(),
                 ));
             }

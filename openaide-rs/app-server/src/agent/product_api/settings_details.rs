@@ -115,7 +115,7 @@ fn built_in_launch_label(agent_id: &str, api: &AgentProductApi) -> String {
     else {
         return String::new();
     };
-    if config.uses_product_pinned_codex_package() {
+    if config.managed_runtime().is_some() {
         // The pinned package is installed once per user and started with Node
         // from that installation; its path is not a command a user could reuse.
         let package = config.args.last().map(String::as_str).unwrap_or_default();

@@ -39,6 +39,11 @@ pub(super) fn acp_connection_terminal_diagnostics(
     }
 }
 
+/// Exit code of an Agent process that ended on its own, as reported by the ACP transport.
+pub(super) fn process_exit_code(error: &RuntimeError) -> Option<i32> {
+    numeric_status_after(&error.to_string(), "exit status:")
+}
+
 fn numeric_status_after(message: &str, marker: &str) -> Option<i32> {
     let suffix = message.split_once(marker)?.1.trim_start();
     let end = suffix

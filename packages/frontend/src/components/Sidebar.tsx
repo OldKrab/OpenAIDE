@@ -20,7 +20,7 @@ import { AgentDisableDialog } from "./AgentDisableDialog";
 import { useAgentDisableConfirmation } from "./useAgentDisableConfirmation";
 import { SidebarComputer, type ComputerLink } from "./SidebarComputer";
 import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
-import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
+import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -87,7 +87,8 @@ type SidebarProps = {
   maxTasksPerProject?: number;
   loadingTasks?: boolean;
   showNativeSessions?: boolean;
-  codexIntegrationInstalling?: boolean;
+  /** The label of an Agent whose managed integration is installing, if any. */
+  installingAgentLabel?: string;
 };
 
 export const Sidebar = memo(function Sidebar({
@@ -143,7 +144,7 @@ export const Sidebar = memo(function Sidebar({
   maxTasksPerProject,
   loadingTasks = false,
   showNativeSessions = true,
-  codexIntegrationInstalling = false,
+  installingAgentLabel,
 }: SidebarProps) {
   const taskListRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -195,7 +196,7 @@ export const Sidebar = memo(function Sidebar({
     !groupSearchQuery &&
     nativeSessionProjectId !== undefined &&
     collapsedProjectKeys.has(nativeSessionProjectId);
-  const showEmptyState = !taskListError && !codexIntegrationInstalling &&
+  const showEmptyState = !taskListError && !installingAgentLabel &&
     (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
@@ -320,11 +321,11 @@ export const Sidebar = memo(function Sidebar({
             ) : null}
           </div>
         ) : null}
-        {!showWorkspaceSetup && !showArchived && showNativeSessions && codexIntegrationInstalling ? (
+        {!showWorkspaceSetup && !showArchived && showNativeSessions && installingAgentLabel ? (
           <div aria-busy={true} className="native-session-activity" role="status">
             <LoaderCircle aria-hidden="true" className="spin" size={14} />
             <span>
-              {CODEX_INTEGRATION_INSTALLING_LABEL}
+              {agentIntegrationInstallingLabel(installingAgentLabel)}
               <small>This can take a minute.</small>
             </span>
           </div>
@@ -517,5 +518,5 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.maxTasksPerProject === next.maxTasksPerProject &&
     prev.loadingTasks === next.loadingTasks &&
     prev.showNativeSessions === next.showNativeSessions &&
-    prev.codexIntegrationInstalling === next.codexIntegrationInstalling;
+    prev.installingAgentLabel === next.installingAgentLabel;
 }

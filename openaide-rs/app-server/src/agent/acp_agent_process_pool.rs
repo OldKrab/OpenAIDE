@@ -10,12 +10,16 @@ use crate::agent::acp_agent_process::{
     AcpAgentProcessOpen,
 };
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwner};
+use crate::agent::acp_npx_cache_repair::repair_after_early_exit;
+use crate::agent::acp_process_diagnostics::process_exit_code;
 use crate::agent::acp_process_lifetime::{
     AcpProcessLifetime, ProcessIdleTimeouts, ProcessOperation,
 };
 use crate::agent::acp_runtime_threading::block_on_new_runtime;
 use crate::agent::attached_native_session::record_terminal_error;
-use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
+use crate::agent::managed_acp_provisioner::{
+    ManagedAcpProvisioner, ManagedAcpRuntime, PreparedManagedAcpLaunch,
+};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentForkedSession, AgentListSessionsRequest, AgentSecretResolver,
@@ -29,6 +33,45 @@ const DEFAULT_LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const LIST_REPLY_TIMEOUT_GRACE: Duration = Duration::from_secs(1);
 /// Outlasts the process's own bound on the request, so the process reports the timeout.
 const ACCOUNT_LIMITS_REPLY_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long a process that has not answered `initialize` survives request timeouts. A
+/// first `npx -y` launch installs the Agent package before it can answer; stopping it
+/// then kills npm mid-install and leaves a cache entry later launches cannot start.
+const STARTUP_INSTALL_GRACE: Duration = Duration::from_secs(5 * 60);
+
+/// Why App Server stops an Agent process; recorded so a stop can be traced to its cause.
+#[derive(Clone, Copy)]
+pub(super) enum ProcessStopReason {
+    ProbeTimeout,
+    SessionStartTimeout,
+    SessionStartProcessEnded,
+    AuthEnvironmentChanged,
+    AuthFailed,
+    AuthReconnect,
+    AuthCancelled,
+    Logout,
+    AgentShutdown,
+}
+
+impl ProcessStopReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ProbeTimeout => "probe_timeout",
+            Self::SessionStartTimeout => "session_start_timeout",
+            Self::SessionStartProcessEnded => "session_start_process_ended",
+            Self::AuthEnvironmentChanged => "auth_environment_changed",
+            Self::AuthFailed => "auth_failed",
+            Self::AuthReconnect => "auth_reconnect",
+            Self::AuthCancelled => "auth_cancelled",
+            Self::Logout => "logout",
+            Self::AgentShutdown => "agent_shutdown",
+        }
+    }
+
+    /// A request deadline, as opposed to an explicit user action or a process that ended.
+    fn is_request_timeout(self) -> bool {
+        matches!(self, Self::ProbeTimeout | Self::SessionStartTimeout)
+    }
+}
 
 pub(super) struct AcpAgentProcessPool {
     registry: AgentRegistryHandle,
@@ -37,7 +80,8 @@ pub(super) struct AcpAgentProcessPool {
     idle_timeouts: tokio::sync::watch::Sender<ProcessIdleTimeouts>,
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
     list_timeout: Duration,
-    codex_provisioner: Option<CodexAcpProvisioner>,
+    startup_install_grace: Duration,
+    managed_provisioner: Option<ManagedAcpProvisioner>,
     /// Where a process's pushed Account Limits are recorded; absent in runtimes built without
     /// product state.
     account_limits: Option<crate::agent::status_cache::AgentStatusCache>,
@@ -101,7 +145,8 @@ impl AcpAgentProcessPool {
             idle_timeouts: tokio::sync::watch::Sender::new(ProcessIdleTimeouts::default()),
             auth_environments: Mutex::new(HashMap::new()),
             list_timeout: DEFAULT_LIST_TIMEOUT,
-            codex_provisioner: None,
+            startup_install_grace: STARTUP_INSTALL_GRACE,
+            managed_provisioner: None,
             account_limits: None,
         }
     }
@@ -113,16 +158,18 @@ impl AcpAgentProcessPool {
         self.account_limits = Some(statuses);
     }
 
-    pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
-        self.codex_provisioner = Some(provisioner);
+    pub(super) fn with_managed_provisioner(&mut self, provisioner: ManagedAcpProvisioner) {
+        self.managed_provisioner = Some(provisioner);
     }
 
+    /// Passive discovery must not start a managed install; only a user action does.
     pub(super) fn allows_passive_session_discovery(&self, agent_id: &str) -> bool {
-        agent_id != "codex"
-            || self
-                .codex_provisioner
-                .as_ref()
-                .is_none_or(CodexAcpProvisioner::is_provisioned)
+        let Some(runtime) = ManagedAcpRuntime::for_agent(agent_id) else {
+            return true;
+        };
+        self.managed_provisioner
+            .as_ref()
+            .is_none_or(|provisioner| provisioner.is_provisioned(runtime))
     }
 
     #[cfg(test)]
@@ -135,6 +182,11 @@ impl AcpAgentProcessPool {
     pub(super) fn set_process_idle_timeouts(&self, short: Duration, long: Duration) {
         self.idle_timeouts
             .send_replace(ProcessIdleTimeouts { short, long });
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_startup_install_grace(&mut self, grace: Duration) {
+        self.startup_install_grace = grace;
     }
 
     #[cfg(test)]
@@ -182,8 +234,13 @@ impl AcpAgentProcessPool {
         })
     }
 
-    pub(super) fn stop_session_process(&self, agent_id: &str, session: &AcpAgentProcessSession) {
-        self.stop_process(agent_id, &session.process);
+    pub(super) fn stop_session_process(
+        &self,
+        agent_id: &str,
+        session: &AcpAgentProcessSession,
+        reason: ProcessStopReason,
+    ) {
+        self.stop_process(agent_id, &session.process, reason);
     }
 
     pub(super) fn list_sessions(
@@ -352,7 +409,7 @@ impl AcpAgentProcessPool {
         match reply_rx.recv_timeout(timeout) {
             Ok(result) => result,
             Err(_) => {
-                self.stop_process(agent_id, &process);
+                self.stop_process(agent_id, &process, ProcessStopReason::ProbeTimeout);
                 Err(RuntimeError::NotReady(
                     "ACP Agent probe timed out".to_string(),
                 ))
@@ -383,7 +440,11 @@ impl AcpAgentProcessPool {
                 .expect("ACP auth environment registry poisoned")
                 .insert(agent_id.clone(), environment);
             if let Some(process) = self.existing_process(&agent_id) {
-                self.stop_process(&agent_id, &process);
+                self.stop_process(
+                    &agent_id,
+                    &process,
+                    ProcessStopReason::AuthEnvironmentChanged,
+                );
             }
             previous
         } else {
@@ -411,12 +472,12 @@ impl AcpAgentProcessPool {
         if result.is_err() && has_auth_environment {
             self.restore_auth_environment(&agent_id, previous_environment);
             if let Some(process) = self.existing_process(&agent_id) {
-                self.stop_process(&agent_id, &process);
+                self.stop_process(&agent_id, &process, ProcessStopReason::AuthFailed);
             }
         }
         let (result, reconnect) = result?;
         if reconnect {
-            self.stop_process(&agent_id, &process);
+            self.stop_process(&agent_id, &process, ProcessStopReason::AuthReconnect);
             self.probe(&agent_id, Duration::from_secs(30))?;
         }
         Ok(result)
@@ -470,7 +531,7 @@ impl AcpAgentProcessPool {
 
     pub(super) fn cancel_authentication(&self, agent_id: &str) {
         if let Some(process) = self.existing_process(agent_id) {
-            self.stop_process(agent_id, &process);
+            self.stop_process(agent_id, &process, ProcessStopReason::AuthCancelled);
         }
     }
 
@@ -494,7 +555,7 @@ impl AcpAgentProcessPool {
                 .lock()
                 .expect("ACP auth environment registry poisoned")
                 .remove(agent_id);
-            self.stop_process(agent_id, &process);
+            self.stop_process(agent_id, &process, ProcessStopReason::Logout);
         }
         result
     }
@@ -523,17 +584,46 @@ impl AcpAgentProcessPool {
         })
     }
 
-    fn stop_process(&self, agent_id: &str, process: &AcpAgentProcessClient) {
-        if self.remove_process_if_current(agent_id, process) {
+    /// A request timeout leaves a process that has not answered `initialize` running for
+    /// the startup install grace: the caller still fails, and a retry reuses the process
+    /// once its launcher finishes installing. Explicit stops always apply.
+    fn stop_process(
+        &self,
+        agent_id: &str,
+        process: &AcpAgentProcessClient,
+        reason: ProcessStopReason,
+    ) {
+        let initialized = process.lifetime.is_initialized();
+        let age = process.lifetime.age();
+        let deferred =
+            reason.is_request_timeout() && !initialized && age < self.startup_install_grace;
+        let stopped = !deferred && self.remove_process_if_current(agent_id, process);
+        if stopped {
             let _ = process.shutdown_tx.send(true);
         }
+        logging::info(
+            if deferred {
+                "acp_agent_process_stop_deferred"
+            } else {
+                "acp_agent_process_stop_requested"
+            },
+            serde_json::json!({
+                "operation": "agent/process_lifetime",
+                "operation_id": process.lifetime.operation_id(),
+                "agent_id": agent_id,
+                "stop_reason": reason.as_str(),
+                "initialized": initialized,
+                "process_age_ms": age.as_millis(),
+                "stopped": stopped,
+            }),
+        );
     }
 
     /// Stops the pooled process for one Agent so a later launch is a new process.
     /// A missing process already satisfies the request.
     pub(super) fn shutdown_agent(&self, agent_id: &str) {
         if let Some(process) = self.existing_process(agent_id) {
-            self.stop_process(agent_id, &process);
+            self.stop_process(agent_id, &process, ProcessStopReason::AgentShutdown);
         }
     }
 
@@ -554,7 +644,17 @@ impl AcpAgentProcessPool {
         agent_id: &str,
         first_open: Option<AcpAgentProcessOpen>,
     ) -> Result<(AcpAgentProcessClient, ProcessOperation), RuntimeError> {
-        let mut config = self.registry.require_acp_config(agent_id)?;
+        let config = self.registry.require_acp_config(agent_id)?;
+        // Resolve the managed installation from the declared launch before the auth
+        // environment replaces the Agent identity with its secret storage identity.
+        let prepared = match &self.managed_provisioner {
+            Some(provisioner) => provisioner.prepare(config)?,
+            None => PreparedManagedAcpLaunch {
+                config,
+                lease: None,
+            },
+        };
+        let mut config = prepared.config;
         let mut secret_resolver = None;
         if let Some(auth) = self
             .auth_environments
@@ -570,14 +670,6 @@ impl AcpAgentProcessPool {
             config.agent_id = auth.secret_storage_agent_id;
             secret_resolver = auth.secret_resolver;
         }
-        let prepared = match &self.codex_provisioner {
-            Some(provisioner) => provisioner.prepare(config)?,
-            None => crate::agent::codex_acp_provisioner::PreparedCodexAcpLaunch {
-                config,
-                lease: None,
-            },
-        };
-        let config = prepared.config;
         config.ensure_command_available()?;
         let host_bridge = self.host_bridge.clone();
         let terminal_registry = AcpHostTerminalRegistry::new(host_bridge.clone());
@@ -609,12 +701,19 @@ impl AcpAgentProcessPool {
             .map(|statuses| statuses.report_recorder(agent_id));
         let worker_agent_id = agent_id.to_string();
         let worker_terminal_error = terminal_error.clone();
+        let launcher_kind = if prepared.lease.is_some() {
+            "managed_package"
+        } else {
+            "configured_command"
+        };
         let worker_runtime_lease = prepared.lease;
         let processes = Arc::downgrade(&self.processes);
+        let launch_config = config.clone();
         thread::spawn(move || {
             let _runtime_lease = worker_runtime_lease;
             let result = block_on_new_runtime(run_acp_agent_process(AcpAgentProcessInput {
                 config,
+                launcher_kind,
                 first_open,
                 open_rx,
                 list_rx,
@@ -639,13 +738,29 @@ impl AcpAgentProcessPool {
             }
             if let Err(error) = result {
                 record_terminal_error(&worker_terminal_error, &error);
+                let exit_code = process_exit_code(&error);
+                let initialized = lifetime.is_initialized();
                 logging::warn(
                     "acp_agent_process_ended",
                     serde_json::json!({
-                        "agentId": worker_agent_id,
-                        "error": error.to_string(),
+                        "operation": "agent/process_lifetime",
+                        "operation_id": lifetime.operation_id(),
+                        "agent_id": worker_agent_id,
+                        "error_kind": error.reason(),
+                        "exit_code": exit_code,
+                        "initialized": initialized,
+                        "process_age_ms": lifetime.age().as_millis(),
                     }),
                 );
+                // TODO: Back off relaunching an Agent whose process keeps exiting before
+                // `initialize`; every demand currently relaunches it immediately.
+                if exit_code.is_some() && !initialized {
+                    repair_after_early_exit(
+                        &worker_agent_id,
+                        &launch_config,
+                        lifetime.operation_id(),
+                    );
+                }
             }
         });
         drop(open_tx);
@@ -683,3 +798,7 @@ fn lock_listing_dispatch(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "acp_agent_process_pool_tests.rs"]
+mod tests;

@@ -115,6 +115,9 @@ pub(super) struct AcpAgentProcessOpen {
 
 pub(super) struct AcpAgentProcessInput {
     pub(super) config: AcpAgentConfig,
+    /// `managed_package` when the pool resolved a managed installation, which
+    /// the prepared `node <entrypoint>` command no longer shows.
+    pub(super) launcher_kind: &'static str,
     pub(super) first_open: Option<AcpAgentProcessOpen>,
     pub(super) open_rx: tokio_mpsc::UnboundedReceiver<AcpAgentProcessOpen>,
     pub(super) list_rx: tokio_mpsc::UnboundedReceiver<AcpAgentProcessList>,
@@ -167,6 +170,7 @@ pub(super) struct AcpAgentProcessList {
 pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result<(), RuntimeError> {
     let AcpAgentProcessInput {
         config,
+        launcher_kind,
         first_open,
         mut open_rx,
         mut list_rx,
@@ -206,7 +210,6 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         .as_ref()
         .map(|open| open.request.task_id().to_string());
     let has_initial_session = first_open.is_some();
-    let launcher_kind = config.diagnostic_launcher_kind();
     logging::info(
         "acp_agent_launch_selected",
         serde_json::json!({
@@ -274,6 +277,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                 first_open.as_ref(),
             )
             .await?;
+            attachment_lifetime.mark_initialized();
             // The released Subagent form is gated on the client capability alone:
             // an Agent that supports it sends child sessions once it is offered.
             let negotiated = crate::agent::acp_host::native_subagents_enabled();

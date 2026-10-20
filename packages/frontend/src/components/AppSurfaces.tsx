@@ -52,9 +52,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       .map((agent) => agent.id)),
     [controller.agents],
   );
-  const codexIntegrationInstalling = controller.agents?.some(
-    (agent) => agent.id === "codex" && agent.status === "installing",
-  ) === true;
+  // Only managed integrations report `installing`; one install is shown at a time.
+  const installingAgentLabel = controller.agents?.find(
+    (agent) => agent.status === "installing",
+  )?.label;
   // Task rows and headers render Agent identity from the App Server catalog, not from
   // Task metadata, so custom Agent icons follow the Agent rather than the Task. Disabled
   // Agents leave that catalog but keep their configured icon in the Settings projection,
@@ -400,7 +401,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         <Sidebar
           activeTaskId={activeNavigationTaskId}
           agentIcons={agentIcons}
-          codexIntegrationInstalling={codexIntegrationInstalling}
+          installingAgentLabel={installingAgentLabel}
           groupByProject={true}
           nativeSessions={navigation.nativeSessions}
           nativeSessionMutations={navigation.nativeSessionMutations}
@@ -541,7 +542,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <Sidebar
         activeTaskId={sidebarActiveTaskId}
         agentIcons={agentIcons}
-        codexIntegrationInstalling={codexIntegrationInstalling}
+        installingAgentLabel={installingAgentLabel}
         groupByProject={true}
         hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
         modal={mobileLayoutActive && mobileNavigation.active}

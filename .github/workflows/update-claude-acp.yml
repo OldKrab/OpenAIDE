@@ -42,7 +42,7 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Update the exact adapter pin
+      - name: Update the exact adapter pin and its lockfile
         id: adapter
         env:
           CLAUDE_ACP_TARGET_VERSION: ${{ inputs.version }}
@@ -54,9 +54,9 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      - name: Verify the launch configuration
+      - name: Verify the launch configuration and managed installation
         if: steps.adapter.outputs.changed == 'true'
-        run: cargo test --locked -p openaide-app-server agent::acp_agent_config::tests
+        run: cargo test --locked -p openaide-app-server -- agent::acp_agent_config::tests agent::managed_acp_provisioner::tests
 
       - name: Open the update pull request
         if: steps.adapter.outputs.changed == 'true'
@@ -75,7 +75,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git switch --create "$branch"
-          git add packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json
+          git add packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json \
+            packages/app-shell-contracts/src/agentCatalog/claude-acp/package-lock.json
           git diff --cached --check
           git commit --message "Update Claude ACP to $LATEST_VERSION"
           git push --set-upstream origin "$branch"
@@ -83,4 +84,4 @@ jobs:
             --base main \
             --head "$branch" \
             --title "Update Claude ACP to $LATEST_VERSION" \
-            --body "Updates the exact built-in Claude ACP launch pin to the published npm release. The focused launch configuration tests passed before this pull request was opened."
+            --body "Updates the exact built-in Claude ACP pin and its install lockfile to the published npm release. The focused launch configuration and managed installation tests passed before this pull request was opened."
