@@ -215,7 +215,8 @@ distribution.
 
 Use **Settings → Remote** (or long-press the launcher icon
 and choose **App settings**) for setup, battery controls and
-**Advanced → Connection diagnostics → Share**. Offline setup calls this **Share diagnostics**.
+**Advanced → Share diagnostics**. In the workspace, the same log is in
+**Settings → Troubleshooting → Logs from this phone → Share**.
 Logs include picker readability/delivery and WebView error
 metadata, but exclude file names, URLs, message content and secrets.
 

@@ -70,9 +70,14 @@ async fn a_request_reaches_the_local_listener_and_its_response_returns() {
         .unwrap();
 
     let mut seen = None;
-    forward(edge_read, edge_write, &target, |head| {
-        seen = Some(head.connection_id.clone());
-    })
+    let mut stalls = Vec::new();
+    forward(
+        edge_read,
+        edge_write,
+        &target,
+        |head| seen = Some(head.connection_id.clone()),
+        |stall| stalls.push(stall),
+    )
     .await
     .unwrap();
 
@@ -80,6 +85,8 @@ async fn a_request_reaches_the_local_listener_and_its_response_returns() {
     device.read_to_end(&mut response).await.unwrap();
     assert!(response.ends_with(b"pong"));
     assert_eq!(seen, Some(None));
+    // A device that keeps reading is never reported.
+    assert!(stalls.is_empty());
     let request = local.await.unwrap();
     assert!(request.starts_with("POST /app HTTP/1.1\r\nAuthorization: Bearer local-token\r\n"));
     assert!(request.ends_with("\r\n\r\nping"));
@@ -99,7 +106,63 @@ async fn an_oversized_head_is_refused_before_reaching_the_local_listener() {
         .await
         .unwrap();
 
-    let result = forward(edge_read, edge_write, &target, |_| {}).await;
+    let result = forward(edge_read, edge_write, &target, |_| {}, |_| {}).await;
 
     assert!(matches!(result, Err(BridgeError::InvalidHead)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_device_that_stops_taking_data_is_reported_while_the_write_waits() {
+    // Room for less than the response: the write waits until the device reads.
+    let (mut device, mut edge) = tokio::io::duplex(16);
+    let response = [b'x'; 64];
+    let stalls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = stalls.clone();
+    let copying = tokio::spawn(async move {
+        copy_to_device(&mut &response[..], &mut edge, |stall| {
+            seen.lock().unwrap().push(stall)
+        })
+        .await
+    });
+
+    tokio::time::sleep(WRITE_STALL + Duration::from_secs(1)).await;
+    assert_eq!(*stalls.lock().unwrap(), vec![WriteStall::Started]);
+
+    let mut received = vec![0u8; 64];
+    device.read_exact(&mut received).await.unwrap();
+    copying.await.unwrap().unwrap();
+    let stalls = stalls.lock().unwrap();
+    assert!(matches!(
+        stalls[..],
+        [WriteStall::Started, WriteStall::Ended { delivered: true, waited }] if waited >= WRITE_STALL
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_write_that_fails_after_a_stall_is_reported_as_undelivered() {
+    let (device, mut edge) = tokio::io::duplex(16);
+    let response = [b'x'; 64];
+    let stalls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = stalls.clone();
+    let copying = tokio::spawn(async move {
+        copy_to_device(&mut &response[..], &mut edge, |stall| {
+            seen.lock().unwrap().push(stall)
+        })
+        .await
+    });
+
+    tokio::time::sleep(WRITE_STALL + Duration::from_secs(1)).await;
+    drop(device);
+
+    assert!(copying.await.unwrap().is_err());
+    assert!(matches!(
+        stalls.lock().unwrap()[..],
+        [
+            WriteStall::Started,
+            WriteStall::Ended {
+                delivered: false,
+                ..
+            }
+        ]
+    ));
 }
