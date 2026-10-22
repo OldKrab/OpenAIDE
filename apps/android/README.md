@@ -118,8 +118,8 @@ keeps working with Codex; the step that failed is in
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
-2. Download and unzip the `app-server-android-arm64` and `android` artifacts. Use
-   `openaide-android.apk` for everyday use; `android-debug` is for development.
+2. Download and unzip the `app-server-android-arm64` and `android` artifacts, and
+   install `openaide-android.apk`.
 3. Transfer `openaide-app-server-android-arm64.tar.gz` into Termux and extract it:
 
    ```sh
@@ -170,10 +170,11 @@ so shared Frontend and transport changes cannot bypass Android builds. Each run
 uploads the ARM64 Termux runtime as `app-server-android-arm64`; a failed run also
 uploads its unit/lint reports as `android-apk-diagnostics`. Device tests still require
 a configured phone; CI compilation is not a substitute for executing them via ADB.
-With the persistent signing secrets configured, pushes and manual dispatch produce
-`android/openaide-android.apk`, a non-debuggable user build signed with the stable
-key. Pull requests and runs without the secrets upload
-`android-debug/openaide-android-debug.apk` instead. Store distribution still needs
+With the persistent signing secrets configured, pushes, manual dispatch and pull
+requests from this repository produce `android/openaide-android.apk`, a
+non-debuggable user build signed with the stable key. Fork pull requests and runs
+without the secrets upload no APK, since a per-runner debug key cannot update an
+installed app. Store distribution still needs
 its own signing/review process; the current persistent development certificate is
 retained for in-place updates on existing test phones.
 The canonical Release workflow also requires a signed user APK and matching runtime

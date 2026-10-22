@@ -94,7 +94,8 @@ jobs:
           npm run build --workspace openaide-frontend
       - name: Stage the signing key
         id: key
-        if: github.event_name != 'pull_request'
+        # Fork pull requests get no secrets and so build no installable APK.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           KEYSTORE_BASE64: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE }}
           KEYSTORE_PASSWORD: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
@@ -122,7 +123,6 @@ jobs:
       - name: Check and build APKs
         run: |
           gradle -p apps/android --no-daemon $BUNDLED_RUNTIME testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
-          cp apps/android/app/build/outputs/apk/debug/app-debug.apk apps/android/build/openaide-android-debug.apk
       - name: Build user APK
         if: steps.key.outputs.staged == 'true'
         run: |
@@ -131,26 +131,20 @@ jobs:
       - name: Remove the signing key
         if: always() && steps.key.outputs.staged == 'true'
         run: rm -f "$OPENAIDE_ANDROID_KEYSTORE"
-      # With the stable key staged the user APK is the one to install; the debug APK is
-      # only the fallback when it is missing (pull requests, unconfigured forks).
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: steps.key.outputs.staged != 'true'
-        with:
-          name: android-debug
-          path: apps/android/build/openaide-android-debug.apk
-          if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         # Diagnostics only: a green run leaves just the installable artifacts.
         if: failure()
         with:
           name: android-apk-diagnostics
           path: apps/android/app/build/reports/
+      # Only the user APK signed with the stable key is published: a per-runner debug key
+      # cannot update an installed app.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: github.event_name != 'pull_request'
+        if: steps.key.outputs.staged == 'true'
         with:
           name: android
           path: apps/android/build/openaide-android.apk
-          if-no-files-found: warn
+          if-no-files-found: error
   runtime:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
