@@ -172,7 +172,8 @@ uploads its unit/lint reports as `android-apk-diagnostics`. Device tests still r
 a configured phone; CI compilation is not a substitute for executing them via ADB.
 With the persistent signing secrets configured, pushes, manual dispatch and pull
 requests from this repository produce `android/openaide-android.apk`, a
-non-debuggable user build signed with the stable key. Fork pull requests and runs
+non-debuggable user build signed with the stable key, and outside releases also the
+unzipped `openaide-android.apk` artifact, which a phone can install from its link. Fork pull requests and runs
 without the secrets upload no APK, since a per-runner debug key cannot update an
 installed app. Store distribution still needs
 its own signing/review process; the current persistent development certificate is

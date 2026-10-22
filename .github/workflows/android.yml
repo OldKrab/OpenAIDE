@@ -145,6 +145,14 @@ jobs:
           name: android
           path: apps/android/build/openaide-android.apk
           if-no-files-found: error
+      # The same APK unzipped, so a phone can install it straight from the artifact link.
+      # The artifact takes the file name; Release keeps reading the zipped one above.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.key.outputs.staged == 'true' && !inputs.release
+        with:
+          path: apps/android/build/openaide-android.apk
+          archive: false
+          if-no-files-found: error
   runtime:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
