@@ -46,7 +46,12 @@ pub(crate) struct Connector {
 }
 
 impl Connector {
-    pub(crate) fn new(target: Target, host_key: PublicKey, credential: Credential, log: Log) -> Self {
+    pub(crate) fn new(
+        target: Target,
+        host_key: PublicKey,
+        credential: Credential,
+        log: Log,
+    ) -> Self {
         Self {
             target,
             host_key,

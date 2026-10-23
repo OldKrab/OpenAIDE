@@ -9,7 +9,10 @@ fn the_public_key_line_is_an_ed25519_authorized_keys_entry() {
     assert!(line.starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"));
     assert!(line.ends_with(" openaide-android"));
     assert!(is_key_line(&line));
-    assert_eq!(public_key_line(SEED.to_vec(), "openaide-android".into()).unwrap(), line);
+    assert_eq!(
+        public_key_line(SEED.to_vec(), "openaide-android".into()).unwrap(),
+        line
+    );
 }
 
 #[test]
@@ -80,7 +83,10 @@ fn against_a_real_ssh_host() {
     });
 
     let host_key = read_host_key(target.clone()).unwrap();
-    println!("host key {}", host_key_fingerprint(host_key.clone()).unwrap());
+    println!(
+        "host key {}",
+        host_key_fingerprint(host_key.clone()).unwrap()
+    );
     let line = public_key_line(seed.clone(), "openaide-android".into()).unwrap();
     authorize_key(
         target.clone(),
