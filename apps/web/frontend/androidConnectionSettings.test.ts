@@ -107,17 +107,43 @@ describe("Android connection controls", () => {
     expect(test.capability!.snapshot()).toBeUndefined();
     expect(changed).toHaveBeenCalledOnce();
   });
-  it("switches through the phone's own commands", async () => {
+  it("switches through the phone's own commands and resolves with what the switch came to", async () => {
     const test = harness();
     test.attach();
     const sent = () => test.port.postMessage.mock.calls.map(([message]) => JSON.parse(message));
-    const answer = () => { for (const request of sent()) test.receive({ type: "result", id: request.id, accepted: true }); };
-    const toStudio = test.capability!.computers.use("studio");
-    answer();
+    const answer = (reply: Record<string, unknown>) => test.receive({ type: "result", id: sent().at(-1).id, ...reply });
+    const toStudio = test.capability!.computers.use("studio", "computer-switch-1");
+    answer({ accepted: true, outcome: "switched" });
     await expect(toStudio).resolves.toBe("switched");
-    const toPhone = test.capability!.computers.use();
-    answer();
-    await toPhone;
-    expect(sent().map((request) => request.command)).toEqual([{ action: "use_computer", id: "studio" }, { action: "local" }]);
+    const toPhone = test.capability!.computers.use(undefined);
+    answer({ accepted: true, outcome: "cancelled" });
+    await expect(toPhone).resolves.toBe("cancelled");
+    expect(sent().map((request) => request.command)).toEqual([
+      { action: "use_computer", id: "studio", operationId: "computer-switch-1" },
+      { action: "local" },
+    ]);
+  });
+  it("keeps the phone's sentence when a computer cannot be reached", async () => {
+    const test = harness();
+    test.attach();
+    const toStudio = test.capability!.computers.use("studio");
+    const request = JSON.parse(test.port.postMessage.mock.calls[0][0]);
+    test.receive({ type: "result", id: request.id, accepted: false, error: "Your computer is unreachable." });
+    await expect(toStudio).rejects.toThrow("Your computer is unreachable.");
+  });
+  it("waits for a slow switch longer than for other commands, and cancels it", async () => {
+    vi.useFakeTimers();
+    const test = harness();
+    test.attach();
+    let settled = false;
+    const toStudio = test.capability!.computers.use("studio").finally(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(settled).toBe(false);
+    void test.capability!.computers.cancel!();
+    const [switching, cancelling] = test.port.postMessage.mock.calls.map(([message]) => JSON.parse(message));
+    expect(cancelling.command).toEqual({ action: "cancel_switch" });
+    test.receive({ type: "result", id: cancelling.id, accepted: true, outcome: "cancelled" });
+    test.receive({ type: "result", id: switching.id, accepted: true, outcome: "cancelled" });
+    await expect(toStudio).resolves.toBe("cancelled");
   });
 });

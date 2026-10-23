@@ -65,6 +65,15 @@ final class WorkspaceConnectionBridge {
                         reply(id, false);
                         return;
                     }
+                    if (SetupPagePolicy.switchesComputer(command.optString("action"))) {
+                        WebMessagePort asked = port;
+                        controller.switchComputer(command, (outcome, problem) -> {
+                            // A later page numbers its requests anew; only the page that asked is answered.
+                            if (port == asked) answer(id, outcome, problem);
+                        });
+                        diagnostics.record("connection_controls", "switch_requested", id, android.os.SystemClock.elapsedRealtime() - started);
+                        return;
+                    }
                     if (command.optString("action").startsWith("update_")) updates.command(activity, command);
                     else controller.receive(command);
                     diagnostics.record("connection_controls", "accepted", id, android.os.SystemClock.elapsedRealtime() - started);
@@ -92,6 +101,17 @@ final class WorkspaceConnectionBridge {
         if (port == null) return;
         try { port.postMessage(new WebMessage(new JSONObject().put("type", "result").put("id", id).put("accepted", accepted).toString())); }
         catch (Exception ignored) { }
+    }
+
+    /** The end of a switch: its outcome, or the sentence saying why nothing changed. */
+    private void answer(int id, String outcome, String problem) {
+        if (port == null) return;
+        try {
+            JSONObject result = new JSONObject().put("type", "result").put("id", id).put("accepted", problem == null);
+            if (problem == null) result.put("outcome", outcome);
+            else result.put("error", problem);
+            port.postMessage(new WebMessage(result.toString()));
+        } catch (Exception ignored) { }
     }
 
     void resume() {

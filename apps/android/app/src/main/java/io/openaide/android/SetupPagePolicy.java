@@ -22,7 +22,12 @@ final class SetupPagePolicy {
      * navigation needs no Settings route (ADR-0070). Every other connection command
      * changes this phone's setup and stays limited to the Settings sections.
      */
-    private static final java.util.Set<String> EVERY_PAGE_ACTIONS = java.util.Set.of("use_computer", "local");
+    private static final java.util.Set<String> EVERY_PAGE_ACTIONS = java.util.Set.of("use_computer", "local", "cancel_switch");
+
+    /** Switch commands are answered when the switch ends, not when they are accepted. */
+    private static final java.util.Set<String> SWITCH_ACTIONS = java.util.Set.of("use_computer", "local", "cancel_switch");
+
+    static boolean switchesComputer(String action) { return SWITCH_ACTIONS.contains(action); }
 
     static boolean allowedOnEveryPage(String action) { return EVERY_PAGE_ACTIONS.contains(action); }
 

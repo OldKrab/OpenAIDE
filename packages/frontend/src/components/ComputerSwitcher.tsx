@@ -47,7 +47,7 @@ export function ComputerSwitcher({ link, onManage, openRequest = 0, snapshot, sw
   switcher: ComputerSwitch;
 }) {
   const [open, setOpen] = useState(false);
-  const { pending, failed } = useComputerSwitch(switcher);
+  const { cancellable, pending, failed } = useComputerSwitch(switcher);
   useEffect(() => {
     if (openRequest > 0) setOpen(true);
   }, [openRequest]);
@@ -123,6 +123,11 @@ export function ComputerSwitcher({ link, onManage, openRequest = 0, snapshot, sw
             {row.current ? <Check aria-hidden="true" className="computer-switcher-check" size={14} /> : null}
           </button>
         ))}
+        {pending !== undefined && cancellable ? (
+          <button className="computer-switcher-manage" onClick={() => switcher.cancel()} role="menuitem" type="button">
+            Cancel switching
+          </button>
+        ) : null}
         {failed ? <p className="computer-switcher-error" role="alert">{failed.message}</p> : null}
         <button
           className="computer-switcher-manage"

@@ -1,4 +1,4 @@
-import type { ComputersCapability, ComputersSnapshot } from "../../../packages/frontend/src/services/computers";
+import type { ComputerSwitchResult, ComputersCapability, ComputersSnapshot } from "../../../packages/frontend/src/services/computers";
 import type { ConnectionCommand, ConnectionSettings, ConnectionSnapshot } from "../../../packages/frontend/src/services/connectionSettings";
 import type { DesktopUpdateCapability } from "../../../packages/frontend/src/services/frontendShell";
 import { androidAppUpdates, type AndroidUpdateCommand } from "./androidAppUpdates";
@@ -14,6 +14,16 @@ export type AndroidConnectionSettings = ConnectionSettings & {
   computers: ComputersCapability;
 };
 
+/** The phone connects the chosen computer first (ADR-0070); these carry the page's correlation id and a Cancel. */
+type SwitchCommand =
+  | { action: "use_computer"; id: string; operationId?: string }
+  | { action: "local"; operationId?: string }
+  | { action: "cancel_switch" };
+
+const SWITCH_ACTIONS = new Set(["use_computer", "local", "cancel_switch"]);
+/** Bounds a switch the phone never answers; the user can Cancel well before it. */
+const SWITCH_TIMEOUT_MS = 180_000;
+
 export function androidConnectionSettings(host: Window): AndroidConnectionSettings | undefined {
   if (!/(?:^| )OpenAIDE-Android\/1(?: |$)/.test(host.navigator.userAgent)) return undefined;
   let port: MessagePort | undefined;
@@ -25,7 +35,7 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
   let computers: ComputersSnapshot | undefined;
   let sequence = 0;
   const listeners = new Set<() => void>();
-  const pending = new Map<number, { send(): void; finish(error?: Error): void }>();
+  const pending = new Map<number, { send(): void; finish(error?: Error, outcome?: unknown): void }>();
   const unavailable = () => new Error("Phone settings are unavailable. Reopen Settings and try again.");
   const notify = () => listeners.forEach(listener => listener());
   host.addEventListener("message", event => {
@@ -40,7 +50,9 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
       try {
         const message = JSON.parse(event.data);
         if (message.type === "result") {
-          pending.get(message.id)?.finish(message.accepted ? undefined : unavailable());
+          // A switch the phone refused carries the sentence for the user.
+          const refused = typeof message.error === "string" && message.error ? new Error(message.error) : unavailable();
+          pending.get(message.id)?.finish(message.accepted ? undefined : refused, message.outcome);
         } else if (message.type === "state" && typeof message.state?.remote === "boolean") {
           state = message.state;
           notify();
@@ -63,23 +75,31 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
     for (const request of pending.values()) request.finish(unavailable());
   });
   host.addEventListener("pageshow", () => appearance.refresh());
-  const execute = (command: ConnectionCommand | AndroidUpdateCommand) => new Promise<void>((resolve, reject) => {
+  /** Sends one command; a switch is answered when it ends, which a slow computer or this phone's start can delay. */
+  const request = (command: ConnectionCommand | AndroidUpdateCommand | SwitchCommand) => new Promise<unknown>((resolve, reject) => {
     const id = ++sequence;
-    const timeout = host.setTimeout(() => pending.get(id)?.finish(unavailable()), 8000);
-    const request = {
+    const switching = SWITCH_ACTIONS.has(command.action);
+    const timeout = host.setTimeout(() => pending.get(id)?.finish(unavailable()), switching ? SWITCH_TIMEOUT_MS : 8000);
+    const entry = {
       send: () => {
         try { port?.postMessage(JSON.stringify({ id, command })); }
-        catch { request.finish(unavailable()); }
+        catch { entry.finish(unavailable()); }
       },
-      finish: (error?: Error) => {
+      finish: (error?: Error, outcome?: unknown) => {
         host.clearTimeout(timeout);
         pending.delete(id);
-        if (error) reject(error); else resolve();
+        if (error) reject(error); else resolve(outcome);
       },
     };
-    pending.set(id, request);
-    request.send();
+    pending.set(id, entry);
+    entry.send();
   });
+  const execute = async (command: ConnectionCommand | AndroidUpdateCommand) => { await request(command); };
+  const switchTo = async (id: string | undefined, operationId: string | undefined): Promise<ComputerSwitchResult> => {
+    const outcome = await request(id ? { action: "use_computer", id, operationId } : { action: "local", operationId });
+    // The phone replaces this page after it answers `switched`.
+    return outcome === "unchanged" || outcome === "cancelled" ? outcome : "switched";
+  };
   const updates = androidAppUpdates(execute);
   const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
   return {
@@ -90,13 +110,8 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
     computers: {
       snapshot: () => computers,
       subscribe,
-      // The phone replaces this page once it accepted a switch.
-      // TODO: the phone disconnects before it connects the chosen computer and
-      // offers no Cancel; connect first and answer before replacing the page (ADR-0070).
-      use: async id => {
-        await execute(id ? { action: "use_computer", id } : { action: "local" });
-        return "switched";
-      },
+      use: switchTo,
+      cancel: async () => { await request({ action: "cancel_switch" }); },
       forget: id => execute({ action: "forget_computer", id }),
       openPairing: () => execute({ action: "pair_setup" }),
     },

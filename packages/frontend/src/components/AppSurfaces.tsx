@@ -17,6 +17,8 @@ import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
 import { computerLink } from "./ComputerSwitcher";
+import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
+import { useComputerPlace } from "./useComputerPlace";
 import { useComputers } from "../services/computers";
 import { computerSwitch } from "../services/computerSwitch";
 
@@ -256,6 +258,15 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
   const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, "remote");
   const switchComputer = frontendShell?.computers ? computerSwitch(frontendShell.computers) : undefined;
+  useComputerPlace({
+    backendReady,
+    bootstrap,
+    hasProject: (projectId) => navigation.projects.some((project) => project.projectId === projectId),
+    openNewTask: callbacks.navigation.openNewTask,
+    openTask: callbacks.navigation.openTask,
+    snapshot: computers,
+  });
+  const computerSwitchConfirm = switchComputer ? <ComputerSwitchConfirm snapshot={computers} switcher={switchComputer} /> : null;
   const desktopTitleBar = desktopWindow
     ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
     : undefined;
@@ -456,6 +467,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         />
         {projectFolderDialog}
         {projectRemoveDialog}
+        {computerSwitchConfirm}
       </main>
     );
   }
@@ -618,6 +630,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       >
          {projectFolderDialog}
          {projectRemoveDialog}
+         {computerSwitchConfirm}
+        {computerSwitchConfirm}
         <header
           className="mobile-workbench-bar"
           data-has-permission-policy={hasMobilePermissionPolicy || undefined}

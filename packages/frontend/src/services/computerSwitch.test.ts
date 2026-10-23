@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComputerSwitchResult, ComputersCapability } from "./computers";
-import { computerSwitch } from "./computerSwitch";
+import { computerSwitch, reportComputerSwitchArrival } from "./computerSwitch";
+import { reportUnsentInput } from "./unsentInput";
 
 function capability(use: ComputersCapability["use"], cancel?: () => Promise<void>): ComputersCapability {
   return {
@@ -24,7 +27,10 @@ describe("computer switch", () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    sessionStorage.clear();
+  });
 
   it("is one switch per shell, shared by every place that offers it", () => {
     const shell = capability(async () => "switched");
@@ -86,5 +92,50 @@ describe("computer switch", () => {
     fail = false;
     await store.request("studio");
     expect(store.snapshot().failed).toBeUndefined();
+  });
+
+  describe("with unsent input", () => {
+    let stopReporting: () => void;
+    beforeEach(() => { stopReporting = reportUnsentInput(() => true); });
+    afterEach(() => stopReporting());
+
+    it("asks before connecting and connects once the user agrees", async () => {
+      const use = vi.fn(async () => "switched" as const);
+      const store = computerSwitch(capability(use));
+      await store.request("studio");
+      expect(use).not.toHaveBeenCalled();
+      expect(store.snapshot()).toEqual({ confirming: "studio", cancellable: false });
+      await store.confirm();
+      expect(use).toHaveBeenCalledWith("studio", expect.stringMatching(/^computer-switch-/));
+      expect(store.snapshot()).toEqual({ pending: "studio", cancellable: false });
+    });
+
+    it("stays put and connects nothing when the user keeps the input", async () => {
+      const use = vi.fn(async () => "switched" as const);
+      const store = computerSwitch(capability(use));
+      await store.request();
+      store.decline();
+      expect(use).not.toHaveBeenCalled();
+      expect(store.snapshot()).toEqual({ cancellable: false });
+      expect(console.info).toHaveBeenLastCalledWith(expect.stringContaining("outcome=declined"));
+    });
+  });
+
+  it("asks nothing once the input is gone", async () => {
+    const stopReporting = reportUnsentInput(() => true);
+    stopReporting();
+    const use = vi.fn(async () => "unchanged" as const);
+    await computerSwitch(capability(use)).request("studio");
+    expect(use).toHaveBeenCalledOnce();
+  });
+
+  it("closes the diagnostics of a switch on the page that replaced it", async () => {
+    await computerSwitch(capability(async () => "switched")).request("studio");
+    const operationId = (vi.mocked(console.info).mock.calls[0][0] as string).match(/operation_id=(\S+)/)![1];
+    reportComputerSwitchArrival();
+    expect(console.info).toHaveBeenLastCalledWith(expect.stringMatching(new RegExp(`^computer_switch_ready operation_id=${operationId} duration_ms=\\d+$`)));
+    vi.mocked(console.info).mockClear();
+    reportComputerSwitchArrival();
+    expect(console.info).not.toHaveBeenCalled();
   });
 });

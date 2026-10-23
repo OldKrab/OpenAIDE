@@ -33,7 +33,7 @@ Status: agreed design ([ADR-0070](../adr/0070-switching-computers-is-in-place-an
 ## Slice 3: connect first, unsent input, and place
 
 - Connect first on both App Shells: the target row shows Connecting with Cancel; failure is shown in the list; nothing changes until connected. Android `RemoteNode` connects the target before disconnecting the previous one.
-- Before applying a connected switch, the Frontend asks when the page has a draft, a selected attachment, or an upload in progress; declining closes the new connection.
+- Before connecting, the Frontend asks when the page has a draft, a selected attachment, or an upload in progress; declining connects nothing. Asking first needs no held connection between connect and apply, and a refused or cancelled connection still leaves the input in place.
 - Place: the Frontend records the last Task, Project, or New Task Project per computer id in device storage and restores it after the first replica load, falling back to the start page when it no longer exists. Settings is never restored. Add an inline TODO where drafts are dropped, naming per-computer draft persistence as the follow-up.
 - Tests: switcher state for connect, fail, cancel, and confirm; place restore with an existing and a missing Task.
 

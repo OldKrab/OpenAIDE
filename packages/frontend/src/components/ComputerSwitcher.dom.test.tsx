@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComputerSwitchResult, ComputersSnapshot } from "../services/computers";
 import { computerSwitch } from "../services/computerSwitch";
+import { reportUnsentInput } from "../services/unsentInput";
+import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { ComputerSwitcher, computerLink, type ComputerLink } from "./ComputerSwitcher";
 
 const studio = { id: "studio-key", name: "Studio", current: false };
@@ -36,16 +38,21 @@ describe("ComputerSwitcher", () => {
       onUse = vi.fn(async (_id?: string, _operationId?: string): Promise<ComputerSwitchResult> => "switched"),
       onManage = vi.fn(),
       openRequest = 0,
+      cancel = undefined as (() => Promise<void>) | undefined,
     } = {},
   ) {
     const switcher = computerSwitch({
       snapshot: () => snapshot,
       subscribe: () => () => undefined,
       use: onUse,
+      cancel,
       forget: async () => undefined,
     });
     act(() => root.render(
-      <ComputerSwitcher link={link} onManage={onManage} openRequest={openRequest} snapshot={snapshot} switcher={switcher} />,
+      <>
+        <ComputerSwitcher link={link} onManage={onManage} openRequest={openRequest} snapshot={snapshot} switcher={switcher} />
+        <ComputerSwitchConfirm snapshot={snapshot} switcher={switcher} />
+      </>,
     ));
     return { onUse, onManage };
   }
@@ -167,5 +174,44 @@ describe("ComputerSwitcher", () => {
     expect(computerLink({ status: "connecting" })).toBe("connecting");
     expect(computerLink({ status: "reconnecting", message: "" })).toBe("reconnecting");
     expect(computerLink({ status: "unavailable", message: "" })).toBe("notConnected");
+  });
+
+  it("offers Cancel while the shell is still connecting", async () => {
+    let answer!: (result: ComputerSwitchResult) => void;
+    const onUse = vi.fn(() => new Promise<ComputerSwitchResult>((resolve) => { answer = resolve; }));
+    const cancel = vi.fn(async () => answer("cancelled"));
+    render({ device: "computer", computers: [studio] }, { onUse, cancel });
+    open();
+    act(() => menuItems()[1].click());
+    open();
+    const cancelItem = menuItems().find((item) => item.textContent === "Cancel switching")!;
+    await act(async () => cancelItem.click());
+    expect(cancel).toHaveBeenCalledOnce();
+    open();
+    expect(menuItems().some((item) => item.textContent === "Cancel switching")).toBe(false);
+    expect(trigger()!.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("asks before dropping unsent input and switches only once the user agrees", async () => {
+    const stopReporting = reportUnsentInput(() => true);
+    try {
+      const { onUse } = render({ device: "computer", computers: [studio] });
+      open();
+      act(() => menuItems()[1].click());
+      const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
+      expect(dialog()!.textContent).toContain("Switch to Studio?");
+      expect(onUse).not.toHaveBeenCalled();
+      const button = (name: string) => Array.from(dialog()!.querySelectorAll("button")).find((item) => item.textContent === name)!;
+      await act(async () => button("Cancel").click());
+      expect(dialog()).toBeNull();
+      expect(onUse).not.toHaveBeenCalled();
+      open();
+      act(() => menuItems()[1].click());
+      await act(async () => button("Discard and switch").click());
+      expect(onUse).toHaveBeenCalledWith("studio-key", expect.any(String));
+      expect(dialog()).toBeNull();
+    } finally {
+      stopReporting();
+    }
   });
 });

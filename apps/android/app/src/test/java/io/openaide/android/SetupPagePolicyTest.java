@@ -18,8 +18,14 @@ public class SetupPagePolicyTest {
     @Test public void onlySwitchingComputersWorksFromEveryPage() {
         assertTrue(SetupPagePolicy.allowedOnEveryPage("use_computer"));
         assertTrue(SetupPagePolicy.allowedOnEveryPage("local"));
+        assertTrue(SetupPagePolicy.allowedOnEveryPage("cancel_switch"));
         for (String action : new String[]{"state", "forget_computer", "pair_setup", "install", "grant", "background", "diagnostics", ""})
             assertFalse(SetupPagePolicy.allowedOnEveryPage(action));
+    }
+
+    @Test public void onlySwitchCommandsAreAnsweredWhenTheSwitchEnds() {
+        for (String action : new String[]{"use_computer", "local", "cancel_switch"}) assertTrue(SetupPagePolicy.switchesComputer(action));
+        for (String action : new String[]{"state", "forget_computer", "update_check", ""}) assertFalse(SetupPagePolicy.switchesComputer(action));
     }
 
     @Test public void servesOnlyBundledSetupAssets() {

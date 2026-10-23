@@ -13,6 +13,11 @@ class ReconnectPolicyTest {
         assertTrue(ReconnectPolicy.staleAfterHidden(ReconnectPolicy.STALE_AFTER_HIDDEN_MS + 1))
     }
 
+    @Test fun aFailedDialKeepsTheEndpointOfTheConnectionInUse() {
+        assertTrue(ReconnectPolicy.retireAfterFailedDial(carriesLiveConnection = false))
+        assertFalse(ReconnectPolicy.retireAfterFailedDial(carriesLiveConnection = true))
+    }
+
     @Test fun attemptsGrowAndStayWithinTheBudget() {
         assertEquals(4_000L, ReconnectPolicy.attemptTimeoutMs(0, 0))
         assertEquals(8_000L, ReconnectPolicy.attemptTimeoutMs(1, 4_000))

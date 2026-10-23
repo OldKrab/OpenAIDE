@@ -26,6 +26,13 @@ internal object ReconnectPolicy {
 
     fun staleAfterHidden(hiddenMs: Long): Boolean = hiddenMs > STALE_AFTER_HIDDEN_MS
 
+    /**
+     * Whether a failed dial gives the next attempt a new endpoint. Not while the
+     * endpoint carries the connection in use, as when a switch to another computer
+     * dials first: retiring it would end the computer the user is still on.
+     */
+    fun retireAfterFailedDial(carriesLiveConnection: Boolean): Boolean = !carriesLiveConnection
+
     /** How long attempt [index] (from zero) may take after [spentMs] of the budget, or zero for no further attempt. */
     fun attemptTimeoutMs(index: Int, spentMs: Long): Long {
         if (index < 0 || index >= ATTEMPT_TIMEOUTS_MS.size) return 0

@@ -38,24 +38,41 @@ final class ConnectionController extends ContextWrapper {
     private int operationSequence;
     private String operationName;
     private JSONObject joinCode;
+    private final ComputerSwitch<computer.iroh.Connection> switcher;
 
     ConnectionController(Activity activity, View view, boolean localTools) {
         super(activity);
         this.activity = activity;
         this.view = view;
         this.localTools = localTools;
+        switcher = RemotePairing.computerSwitch(activity, () -> { if (!isDestroyed()) changed(); });
     }
 
     void receive(JSONObject message) {
         if (disposed) return;
         String command = message.optString("action");
-        if (!localTools && !java.util.Arrays.asList("state", "close", "local", "use_computer", "forget_computer", "pair_setup", "app_settings", "diagnostics").contains(command)) {
+        if (!localTools && !java.util.Arrays.asList("state", "close", "forget_computer", "pair_setup", "app_settings", "diagnostics").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
         }
         try { action(message); }
         catch (Exception error) { notice = "That action could not finish. Please try again."; emit(); }
+    }
+
+    /**
+     * Switches the computer in use, connecting first (ADR-0070); [reply] answers
+     * the page once, before a switch that took effect replaces it.
+     */
+    void switchComputer(JSONObject message, ComputerSwitch.Reply reply) {
+        if (disposed) { reply.done(null, "Phone settings are unavailable. Reopen Settings and try again."); return; }
+        String action = message.optString("action");
+        if (action.equals("cancel_switch")) { reply.done(switcher.cancel() ? "cancelled" : "unchanged", null); return; }
+        ConnectionStore store = new ConnectionStore(this);
+        ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
+        String target = action.equals("use_computer") ? message.optString("id") : null;
+        String operationId = message.has("operationId") ? message.optString("operationId") : null;
+        switcher.request(selected == null ? null : selected.id, target, operationId, reply);
     }
 
     private void action(JSONObject message) throws Exception {
@@ -67,14 +84,6 @@ final class ConnectionController extends ContextWrapper {
             case "close": view.close(); break;
             case "state": emit(); break;
             case "check": check(); break;
-            case "local": new ConnectionStore(this).selectLocal(); changed(); break;
-            case "use_computer":
-                if (!new ConnectionStore(this).selectPaired(message.optString("id"))) { emit(); break; }
-                // A connection to the computer used until now must not outlive the choice.
-                RemoteNode.INSTANCE.disconnect();
-                diagnostics.record("connection_computer_selected", "selected", 0, 0);
-                changed();
-                break;
             case "pair_setup": view.setup("remote"); break;
             case "scan": scan(); break;
             case "pair": pair(message.optString("code")); break;
@@ -292,6 +301,8 @@ final class ConnectionController extends ContextWrapper {
     void dispose() {
         if (busy) diagnostics.record(operationName, "view_closed", operationSequence, SystemClock.elapsedRealtime() - operationStarted);
         disposed = true;
+        // A page that goes away mid-switch cannot be answered; the switch ends with it.
+        switcher.cancel();
         RemotePairing.stopJoin();
         worker.shutdownNow();
     }

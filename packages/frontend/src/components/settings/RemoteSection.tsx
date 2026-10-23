@@ -94,8 +94,11 @@ type SettingsComputers = {
   snapshot: ComputersSnapshot | undefined;
   /** Id of the computer being switched to; "" stands for this device. */
   switching: string | undefined;
+  /** The pending switch can still be ended. */
+  cancellable: boolean;
   failed: { id: string; message: string } | undefined;
   use(id?: string): void;
+  cancel(): void;
   forget(id: string): Promise<void>;
   openPairing(): Promise<void>;
 };
@@ -117,11 +120,13 @@ function useSettingsComputers(capability: ComputersCapability | undefined): Sett
   return {
     snapshot,
     switching: switched.pending,
+    cancellable: switched.cancellable,
     failed: pairFailed ? { id: "pair", message: pairFailed } : switched.failed,
     use: (id) => {
       setPairFailed(undefined);
       void switcher?.request(id);
     },
+    cancel: () => switcher?.cancel(),
     forget: async (id) => {
       if (!capability) return;
       try {
@@ -154,6 +159,9 @@ function computersGroup(
   const onPhone = snapshot?.device === "phone";
   const here = onPhone ? "This phone" : "This computer";
   const rows: SettingsRow[] = [];
+  const cancelButton = (id: string) => computers.switching === id && computers.cancellable
+    ? <SettingsButton onClick={() => computers.cancel()} variant="quiet">Cancel</SettingsButton>
+    : undefined;
   if (snapshot) {
     rows.push({
       id: onPhone ? "this-phone" : "this-computer",
@@ -164,14 +172,17 @@ function computersGroup(
       selected: !remote,
       error: computers.failed?.id === "" ? computers.failed.message : undefined,
       control: (
-        <SettingsChoice
-          active={!remote}
-          busy={computers.switching === ""}
-          busyLabel="Switching…"
-          disabled={busy}
-          label={here}
-          onUse={() => computers.use()}
-        />
+        <>
+          {cancelButton("")}
+          <SettingsChoice
+            active={!remote}
+            busy={computers.switching === ""}
+            busyLabel="Switching…"
+            disabled={busy}
+            label={here}
+            onUse={() => computers.use()}
+          />
+        </>
       ),
     });
   }
@@ -187,7 +198,7 @@ function computersGroup(
       error: computers.failed?.id === computer.id ? computers.failed.message : undefined,
       control: (
         <>
-          <SettingsButton ariaLabel={`Forget ${name}`} disabled={busy} onClick={() => onForget(computer)} variant="quiet">Forget</SettingsButton>
+          {cancelButton(computer.id) ?? <SettingsButton ariaLabel={`Forget ${name}`} disabled={busy} onClick={() => onForget(computer)} variant="quiet">Forget</SettingsButton>}
           <SettingsChoice
             active={computer.current}
             busy={computers.switching === computer.id}

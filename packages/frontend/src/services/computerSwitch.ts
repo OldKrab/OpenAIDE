@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from "react";
 import type { ComputersCapability } from "./computers";
+import { hasUnsentInput } from "./unsentInput";
 
 export type ComputerSwitchState = {
   /** The row being connected: a computer id, or "" for this device. */
   pending?: string;
+  /** The row waiting for the user to agree to drop their unsent input. */
+  confirming?: string;
   /** The shell can still end the pending switch. */
   cancellable: boolean;
   /** The last refused switch and the shell's sentence for it. */
@@ -13,10 +16,20 @@ export type ComputerSwitchState = {
 export type ComputerSwitch = {
   snapshot(): ComputerSwitchState;
   subscribe(listener: () => void): () => void;
-  /** Asks the shell to switch; settles when the shell accepted, refused, or cancelled. */
+  /**
+   * Asks the shell to switch; settles when the shell accepted, refused, or
+   * cancelled, or when the switch waits for `confirm` because of unsent input.
+   */
   request(id?: string): Promise<void>;
+  /** Drops the unsent input and goes on with the switch waiting for it. */
+  confirm(): Promise<void>;
+  /** Keeps the unsent input and stays on the computer in use. */
+  decline(): void;
   cancel(): void;
 };
+
+/** Survives the shell's page replacement so the reloaded page can close the switch's diagnostics. */
+const ARRIVAL_KEY = "openaide.computerSwitchArrival";
 
 const idle: ComputerSwitchState = { cancellable: false };
 const switches = new WeakMap<ComputersCapability, ComputerSwitch>();
@@ -35,6 +48,22 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
     state = next;
     listeners.forEach((listener) => listener());
   };
+  let waiting: Attempt | undefined;
+  const run = async (attempt: Attempt) => {
+    const row = attempt.id ?? "";
+    const { operationId, target } = attempt;
+    publish({ pending: row, cancellable: Boolean(capability.cancel) });
+    try {
+      const result = await capability.use(attempt.id, operationId);
+      console.info(`computer_switch_completed operation_id=${operationId} target=${target} outcome=${result} duration_ms=${elapsed(attempt)}`);
+      if (result === "switched") rememberArrival(attempt);
+      // A switched shell replaces this page; until then the row stays pending.
+      publish(result === "switched" ? { pending: row, cancellable: false } : idle);
+    } catch (cause) {
+      console.warn(`computer_switch_completed operation_id=${operationId} target=${target} outcome=refused duration_ms=${elapsed(attempt)}`);
+      publish({ cancellable: false, failed: { id: row, message: refusal(cause) } });
+    }
+  };
   const store: ComputerSwitch = {
     snapshot: () => state,
     subscribe(listener) {
@@ -42,23 +71,38 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
       return () => listeners.delete(listener);
     },
     async request(id) {
-      if (state.pending !== undefined) return;
+      if (state.pending !== undefined || state.confirming !== undefined) return;
       const row = id ?? "";
-      publish({ pending: row, cancellable: Boolean(capability.cancel) });
-      const operationId = `computer-switch-${crypto.randomUUID()}`;
-      const startedAt = performance.now();
-      const target = id ? "computer" : "this_device";
-      const elapsed = () => Math.round(performance.now() - startedAt);
-      console.info(`computer_switch_started operation_id=${operationId} target=${target}`);
-      try {
-        const result = await capability.use(id, operationId);
-        console.info(`computer_switch_completed operation_id=${operationId} target=${target} outcome=${result} duration_ms=${elapsed()}`);
-        // A switched shell replaces this page; until then the row stays pending.
-        publish(result === "switched" ? { pending: row, cancellable: false } : idle);
-      } catch (cause) {
-        console.warn(`computer_switch_completed operation_id=${operationId} target=${target} outcome=refused duration_ms=${elapsed()}`);
-        publish({ cancellable: false, failed: { id: row, message: refusal(cause) } });
+      const attempt = {
+        id,
+        operationId: `computer-switch-${crypto.randomUUID()}`,
+        startedAt: performance.now(),
+        target: id ? "computer" : "this_device",
+      };
+      console.info(`computer_switch_started operation_id=${attempt.operationId} target=${attempt.target}`);
+      if (hasUnsentInput()) {
+        // ADR-0070 asks before connecting rather than after: a refused or
+        // cancelled connection then still leaves the input in place.
+        waiting = attempt;
+        publish({ confirming: row, cancellable: false });
+        return;
       }
+      await run(attempt);
+    },
+    async confirm() {
+      const attempt = waiting;
+      if (!attempt) return;
+      waiting = undefined;
+      // TODO: drafts are dropped with the page on a confirmed switch. Keep them
+      // per computer and Task in device storage so a switch loses nothing (ADR-0070).
+      await run(attempt);
+    },
+    decline() {
+      const attempt = waiting;
+      if (!attempt) return;
+      waiting = undefined;
+      console.info(`computer_switch_completed operation_id=${attempt.operationId} target=${attempt.target} outcome=declined duration_ms=${elapsed(attempt)}`);
+      publish(idle);
     },
     cancel() {
       if (state.pending === undefined || !state.cancellable || !capability.cancel) return;
@@ -70,6 +114,37 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
   };
   switches.set(capability, store);
   return store;
+}
+
+type Attempt = { id?: string; operationId: string; startedAt: number; target: string };
+
+const elapsed = (attempt: Attempt) => Math.round(performance.now() - attempt.startedAt);
+
+function rememberArrival(attempt: Attempt) {
+  try {
+    sessionStorage.setItem(ARRIVAL_KEY, JSON.stringify({ operationId: attempt.operationId, switchedAt: Date.now() }));
+  } catch {
+    // Diagnostics only; a page without storage simply does not report arrival.
+  }
+}
+
+/**
+ * Closes the diagnostics of a switch that replaced the previous page, once this
+ * page first reaches a ready App Server. A shell that moves the page to another
+ * origin starts with empty storage; its own diagnostics cover the switch.
+ */
+export function reportComputerSwitchArrival() {
+  let arrival: { operationId?: unknown; switchedAt?: unknown } | undefined;
+  try {
+    const stored = sessionStorage.getItem(ARRIVAL_KEY);
+    sessionStorage.removeItem(ARRIVAL_KEY);
+    arrival = stored ? JSON.parse(stored) as typeof arrival : undefined;
+  } catch {
+    return;
+  }
+  if (typeof arrival?.operationId !== "string" || typeof arrival.switchedAt !== "number") return;
+  const operationId = /^[\w-]{1,80}$/.test(arrival.operationId) ? arrival.operationId : "invalid";
+  console.info(`computer_switch_ready operation_id=${operationId} duration_ms=${Math.max(0, Date.now() - arrival.switchedAt)}`);
 }
 
 /** The shell refuses with a sentence for the user; anything else gets a generic one. */

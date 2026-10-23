@@ -9,6 +9,8 @@ import {
 } from "../services/hostBridge";
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
+import { reportUnsentInput } from "../services/unsentInput";
+import { hasUnsentComposerInput } from "./composerDraftPolicy";
 import {
   appReducer,
   bindAppServerReplicaEpoch,
@@ -153,6 +155,9 @@ function useAppControllerCore({
   const initialBootstrap = useMemo(() => getBootstrap(), []);
   const clientInstanceId = useMemo(() => clientInstanceIdForBootstrap(initialBootstrap), [initialBootstrap]);
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
+  const latestState = useRef(state);
+  latestState.current = state;
+  useEffect(() => reportUnsentInput(() => hasUnsentComposerInput(latestState.current)), []);
   const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "enter" });
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
   const [navigationFocusedTaskId, setNavigationFocusedTaskId] = useState<string | null | undefined>(
