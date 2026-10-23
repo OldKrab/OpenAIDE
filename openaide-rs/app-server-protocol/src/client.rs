@@ -195,6 +195,10 @@ pub enum ShellKind {
     /// The App Server's own `remote` command: a same-machine client with no
     /// window that keeps the App Server running for Remote Devices.
     Terminal,
+    /// The App Server's own keeper on an SSH Computer: a same-machine client
+    /// with no window that holds the App Server while it has work or a recent
+    /// App Shell, then leaves (ADR-0069).
+    Keeper,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

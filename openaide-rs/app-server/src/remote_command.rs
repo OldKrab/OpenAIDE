@@ -19,8 +19,8 @@ use openaide_app_server_protocol::devices::{
 use openaide_app_server_protocol::methods::{DEVICES_CREATE_INVITE, DEVICES_REMOVE};
 use serde_json::json;
 
-mod launch;
-mod local_client;
+pub(crate) mod launch;
+pub(crate) mod local_client;
 mod text;
 
 use launch::Connection;

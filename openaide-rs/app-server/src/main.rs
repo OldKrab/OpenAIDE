@@ -13,6 +13,7 @@ use openaide_app_server::transport::shell_control::ShellControlDispatcher;
 use openaide_app_server::Runtime;
 
 mod app_server_handoff;
+mod keeper_command;
 mod protocol_edge_process;
 mod remote_command;
 
@@ -42,6 +43,9 @@ fn main() {
     let arguments: Vec<String> = env::args().skip(1).collect();
     if arguments.first().map(String::as_str) == Some("remote") {
         std::process::exit(run_remote_command(&arguments[1..], &storage_root));
+    }
+    if arguments.first().map(String::as_str) == Some("keep") {
+        std::process::exit(run_keeper_command(&arguments[1..], &storage_root));
     }
 
     match protocol_mode().as_deref() {
@@ -140,11 +144,26 @@ fn run_shell_control_stdio(storage_root: PathBuf) {
 }
 
 fn run_remote_command(arguments: &[String], storage_root: &std::path::Path) -> i32 {
+    with_roots(storage_root, |state_root, runtime_root| {
+        remote_command::run(arguments, state_root, runtime_root)
+    })
+}
+
+fn run_keeper_command(arguments: &[String], storage_root: &std::path::Path) -> i32 {
+    with_roots(storage_root, |state_root, runtime_root| {
+        keeper_command::run(arguments, state_root, runtime_root)
+    })
+}
+
+fn with_roots(
+    storage_root: &std::path::Path,
+    command: impl FnOnce(&StateRoot, &std::path::Path) -> i32,
+) -> i32 {
     let runtime_root = env::var_os(RUNTIME_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(default_runtime_root);
     match StateRoot::resolve(storage_root) {
-        Ok(state_root) => remote_command::run(arguments, &state_root, &runtime_root),
+        Ok(state_root) => command(&state_root, &runtime_root),
         Err(error) => {
             openaide_app_server::logging::error(
                 "protocol_edge_state_root_failed",

@@ -44,6 +44,7 @@ pub(crate) struct Answer {
 }
 
 pub(crate) struct LocalClient {
+    kind: ShellKind,
     address: SocketAddr,
     path: String,
     auth_token: String,
@@ -55,6 +56,16 @@ pub(crate) struct LocalClient {
 impl LocalClient {
     /// Reads the loopback address the App Server published. Any other host is refused.
     pub(crate) fn new(endpoint_url: &str, auth_token: &str) -> Result<Self, ClientError> {
+        Self::with_kind(ShellKind::Terminal, endpoint_url, auth_token)
+    }
+
+    /// A client that introduces itself as `kind`: `terminal` for the `remote`
+    /// command, `keeper` for the keeper on an SSH Computer.
+    pub(crate) fn with_kind(
+        kind: ShellKind,
+        endpoint_url: &str,
+        auth_token: &str,
+    ) -> Result<Self, ClientError> {
         let rest = endpoint_url
             .strip_prefix("http://")
             .ok_or(ClientError::Malformed)?;
@@ -67,12 +78,17 @@ impl LocalClient {
             return Err(ClientError::Malformed);
         }
         let instance = uuid::Uuid::new_v4().simple().to_string();
+        let prefix = match kind {
+            ShellKind::Keeper => "keeper",
+            _ => "terminal",
+        };
         Ok(Self {
+            kind,
             address,
             path: path.to_string(),
             auth_token: auth_token.to_string(),
-            connection_id: format!("terminal-{instance}"),
-            client_instance_id: format!("terminal-{instance}"),
+            connection_id: format!("{prefix}-{instance}"),
+            client_instance_id: format!("{prefix}-{instance}"),
             next_request: 0,
         })
     }
@@ -83,7 +99,7 @@ impl LocalClient {
             json!({
                 "clientInstanceId": self.client_instance_id,
                 "shell": {
-                    "kind": ShellKind::Terminal,
+                    "kind": self.kind,
                     "name": "OpenAIDE",
                     "version": env!("CARGO_PKG_VERSION"),
                 },

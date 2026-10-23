@@ -305,7 +305,7 @@ export type ClientWorkspaceRoot = { path: string, };
 
 export type ShellDescriptor = { kind: ShellKind, name?: string | null, version?: string | null, };
 
-export type ShellKind = "web" | "desktop" | "mobile" | "vscodeExtension" | "terminal";
+export type ShellKind = "web" | "desktop" | "mobile" | "vscodeExtension" | "terminal" | "keeper";
 
 export type RequestedSurface = { "kind": "home" } | { "kind": "project", projectId: ProjectId, } | { "kind": "newTask", projectId?: ProjectId | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "settings", section?: SettingsSection | null, };
 

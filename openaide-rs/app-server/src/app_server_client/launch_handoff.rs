@@ -54,6 +54,17 @@ impl LaunchWaiter for SleepLaunchWaiter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LaunchHandoffPolicy {
     pub max_wait_attempts: usize,
+    pub incompatible: IncompatibleServerPolicy,
+}
+
+/// What to do with a running App Server of another version for the same state root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncompatibleServerPolicy {
+    /// Ask it to stop and start this version. Same-machine App Shells are installed
+    /// with their App Server, so the newest one installed wins.
+    Replace,
+    /// Return it untouched, for a caller that must ask the user first (ADR-0069).
+    Report,
 }
 
 impl Default for LaunchHandoffPolicy {
@@ -62,6 +73,7 @@ impl Default for LaunchHandoffPolicy {
             // Startup and authenticated replacement share one bounded 50-second
             // window, below the shell adapters' final 60-second safety ceiling.
             max_wait_attempts: 200,
+            incompatible: IncompatibleServerPolicy::Replace,
         }
     }
 }
@@ -100,6 +112,11 @@ impl AttachOrLaunchHandoff {
                 AttachOrLaunchRunResult::Fail { reason } => {
                     return Ok(LaunchHandoffResult::Fail { reason });
                 }
+                AttachOrLaunchRunResult::ReplaceIncompatible { target, reason }
+                    if self.policy.incompatible == IncompatibleServerPolicy::Report =>
+                {
+                    return Ok(LaunchHandoffResult::Incompatible { target, reason });
+                }
                 AttachOrLaunchRunResult::ReplaceIncompatible { target, reason } => {
                     let replacement = request_local_http_replacement(&target)?;
                     let max_wait_attempts = match replacement {
@@ -132,9 +149,21 @@ impl AttachOrLaunchHandoff {
 
 #[derive(Debug)]
 pub enum LaunchHandoffResult {
-    AttachExisting { target: EndpointTarget },
-    LaunchNew { lock: RuntimeLock },
-    Fail { reason: AttachOrLaunchFailure },
+    AttachExisting {
+        target: EndpointTarget,
+    },
+    LaunchNew {
+        lock: RuntimeLock,
+    },
+    Fail {
+        reason: AttachOrLaunchFailure,
+    },
+    /// Only under [`IncompatibleServerPolicy::Report`]: a live App Server of another
+    /// version, left running.
+    Incompatible {
+        target: EndpointTarget,
+        reason: AttachOrLaunchFailure,
+    },
 }
 
 #[derive(Debug, Error)]
