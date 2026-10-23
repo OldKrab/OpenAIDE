@@ -69,6 +69,7 @@ pub struct SnapshotBuilder {
     task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
     task_snapshots: Arc<dyn TaskSnapshotSource>,
     devices: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow>,
+    terminals: crate::terminals::Terminals,
 }
 
 /// Groups snapshot projections so adding one source does not widen every construction call.
@@ -166,6 +167,7 @@ impl SnapshotBuilder {
             task_navigation: sources.task_navigation,
             task_snapshots: sources.task_snapshots,
             devices: Arc::new(crate::remote_devices::NoRemoteDevices),
+            terminals: crate::terminals::Terminals::default(),
         }
     }
 
@@ -174,6 +176,12 @@ impl SnapshotBuilder {
         devices: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow>,
     ) -> Self {
         self.devices = devices;
+        self
+    }
+
+    /// The gateway and subscriptions read one registry, so a response and a snapshot agree.
+    pub(crate) fn with_terminals(mut self, terminals: crate::terminals::Terminals) -> Self {
+        self.terminals = terminals;
         self
     }
 
@@ -264,6 +272,9 @@ impl SnapshotProvider for SnapshotBuilder {
             },
             SubscriptionScope::Devices => SubscriptionSnapshot::Devices {
                 devices: self.devices.snapshot(),
+            },
+            SubscriptionScope::Terminals => SubscriptionSnapshot::Terminals {
+                terminals: self.terminals.snapshot(),
             },
             SubscriptionScope::Agents => SubscriptionSnapshot::Agents {
                 agents: self.agents.snapshot()?,

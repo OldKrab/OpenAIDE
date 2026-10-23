@@ -21,7 +21,7 @@ import { quitDesktop } from "./desktopQuitLifecycle";
 import { createDesktopProjectPicker } from "./desktopProjectPicker";
 import { createDesktopServerRecovery } from "./desktopServerRecovery";
 import { createDesktopUpdates } from "./desktopUpdates";
-import type { DesktopBootstrap, LocalHttpConnection } from "./desktopBootstrap";
+import { localHttpRouteUrl, type DesktopBootstrap, type LocalHttpConnection } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
 import { createDesktopSupportExports } from "./desktopSupportExports";
 import { createDesktopFileViewerContent, desktopPdfRendererDocumentUrl } from "./desktopFileViewer";
@@ -332,6 +332,18 @@ export function createDesktopShell(
     recovery: {
       openExternal: (url) => { void openUrl(url); },
       reload: () => window.location.reload(),
+    },
+    terminals: {
+      socketUrl() {
+        const url = localHttpRouteUrl(connection().endpointUrl, "terminal");
+        if (!url) throw new Error("The App Server endpoint has no Terminal route.");
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        return url.toString();
+      },
+      // The native Quit asks before closing Terminals, from this count (`desktop_quit.rs`).
+      openCountChanged(count) {
+        void invoke("desktop_set_open_terminals", { count }).catch(() => undefined);
+      },
     },
     fileViewer: true,
     fileViewerContent: createDesktopFileViewerContent(connection, host.clientInstanceId),

@@ -44,6 +44,23 @@ test("relays an authenticated App Server socket in both directions", async (t) =
   assert.doesNotMatch(JSON.stringify(events), /app-server-token|browser-credential/);
 });
 
+test("relays a Terminal socket to the route beside the session endpoint", async (t) => {
+  const upstreamRequests = [];
+  const upstream = http.createServer();
+  upstream.on("upgrade", (request, socket) => {
+    upstreamRequests.push(request);
+    socket.end("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+  });
+  const { port, events } = await startProxy(t, upstream);
+
+  const browser = await upgrade(port, "/__openaide-app-server/terminal");
+  browser.socket.resume();
+  await once(browser.socket, "close");
+
+  assert.equal(upstreamRequests[0].url, "/rpc/terminal");
+  assert.equal(events[0].fields.route, "terminal");
+});
+
 test("reports the App Server closing a relayed socket", async (t) => {
   const upstream = http.createServer();
   upstream.on("upgrade", (_request, socket) => {

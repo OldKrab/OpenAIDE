@@ -13,6 +13,7 @@ const POLL_FALLBACK_WAKE: Duration = Duration::from_millis(250);
 
 mod http;
 mod session_socket;
+mod terminal_socket;
 mod uploads;
 mod viewer_downloads;
 mod websocket;
@@ -22,6 +23,7 @@ use http::{
     write_event_stream_heartbeat, write_file_download, write_http_response,
 };
 use session_socket::handle_session_socket;
+use terminal_socket::handle_terminal_socket;
 use uploads::handle_file_upload;
 
 pub struct LocalHttpProbeListener {
@@ -138,7 +140,18 @@ pub fn handle_app_stream(
         |_stream, request| Ok(handle_session_poll(handler, request)),
         |stream, request| handle_file_upload(stream, handler, request),
         |stream, request| handle_file_download(stream, handler, request),
-        |stream, request| handle_session_socket(stream, handler, request),
+        |stream, request| {
+            let terminal = request
+                .target
+                .split('?')
+                .next()
+                .is_some_and(|path| path.ends_with(crate::terminals::TERMINAL_SOCKET_PATH));
+            if terminal {
+                handle_terminal_socket(stream, handler, request)
+            } else {
+                handle_session_socket(stream, handler, request)
+            }
+        },
     )
 }
 

@@ -295,6 +295,10 @@ _Avoid_: Host as a product term
 A phone or computer other than the one running the App Server whose App Shell connects to that App Server as a regular client. It is trusted because it was paired, has full access, and stays trusted until any client removes it.
 _Avoid_: Account, login, linked phone
 
+**Terminal**:
+The user's own interactive shell on the App Server's computer, opened from a Project or Task and starting in its folder. It belongs to no Task, outlives the clients viewing it, and ends when closed, when its shell exits, or when App Server stops.
+_Avoid_: Console, Agent terminal, treating a Terminal as Task context
+
 **Pairing Code**:
 A short plain-text code, also drawn as a QR code, that adds a Remote Device. Either a trusted client shows a single-use code the new device reads, or the new device shows a code a trusted client reads and confirms.
 _Avoid_: Password, token, invite link

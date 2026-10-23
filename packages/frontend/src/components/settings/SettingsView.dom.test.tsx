@@ -253,6 +253,6 @@ function fakeDeviceIntents() {
     createInvite: vi.fn(async () => ({ code: "OAI1ABCDEFGH", expiresAtMs: Date.now() + 600_000 })),
     previewJoinRequest: vi.fn(),
     remove: vi.fn(async () => undefined),
-    replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0 })),
+    replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0, openTerminals: 0 })),
   };
 }

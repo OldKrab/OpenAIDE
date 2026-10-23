@@ -54,6 +54,7 @@ import { useNewTaskWorkspace } from "./useNewTaskWorkspace";
 import { useTaskWorkspace } from "./useTaskWorkspace";
 import type { NewTaskViewIntents, NewTaskViewState } from "./NewTaskView";
 import type { TaskViewIntents } from "./TaskView";
+import { createTerminalIntents, type TerminalIntents } from "../intents/terminalIntents";
 import { mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
 import { useNativeSessionRouteLifecycle } from "./useNativeSessionRouteLifecycle";
 import { initialTaskNavigationRowsPerProject } from "../state/taskNavigationPolicy";
@@ -103,6 +104,7 @@ export type AppControllerView = {
     toolDetails: AppState["toolDetails"];
   };
   settings: AppState["settings"];
+  terminals?: AppState["terminals"];
 };
 
 /** Render-ready state and user-intent operations consumed by App surfaces. */
@@ -127,6 +129,8 @@ export type AppController = {
       rename: (projectId: string, label: string) => Promise<import("@openaide/app-server-client").ProjectSummary>;
     };
     task: TaskViewIntents;
+    /** Absent until the App Server session exists. */
+    terminals?: TerminalIntents;
   };
   preferences: AppPreferencesRecord;
   retryTaskOpen: () => void;
@@ -337,6 +341,10 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
   const workspaceCapability = useMemo(() => getWorkspaceCapability(), []);
   const backendConnection = options.backendConnection ?? defaultBackendConnection;
   const request = backendConnection?.request;
+  const terminalIntents = useMemo(
+    () => (request ? createTerminalIntents({ request }) : undefined),
+    [request],
+  );
   const core = useAppControllerCore({ backendConnection });
   const { createSnapshotRequestId: _createSnapshotRequestId, dispatch, newTaskSnapshot, state, ...renderState } = core;
   const routedTaskId = state.snapshot?.task.task_id;
@@ -559,6 +567,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
           return (await request(PROJECT_REFRESH, { projectId: projectId as ProjectId })).project;
         },
       },
+      terminals: terminalIntents,
       task: {
         refreshWorkspace: async () => {
           const task = decoratedSnapshot?.task ?? decoratedActiveTask;
@@ -621,6 +630,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         toolDetails: state.toolDetails,
       },
       settings: state.settings,
+      terminals: state.terminals,
     },
   };
 }

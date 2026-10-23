@@ -133,6 +133,22 @@ pub trait TaskSnapshotSource: Send + Sync {
             target: None,
         })
     }
+
+    /// Resolves where a Terminal opened from a Task starts: its Task Workspace, and the Project
+    /// root that identifies its Project.
+    fn terminal_folder_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<(String, String), ProtocolError> {
+        let _ = (client_instance_id, task_id);
+        Err(ProtocolError {
+            code: ProtocolErrorCode::NotFound,
+            message: "Task is unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
 }
 
 /// Supplies process-local history reconciliation state for otherwise durable Task snapshots.
@@ -388,6 +404,24 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         crate::tasks::access::require_client_task_access(&task, client_instance_id)
             .map_err(task_snapshot_error)?;
         Ok(task.workspace_root)
+    }
+
+    fn terminal_folder_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<(String, String), ProtocolError> {
+        let task = self
+            .store
+            .read_task(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(task_snapshot_error)?;
+        let project_root = task
+            .project_root
+            .clone()
+            .unwrap_or_else(|| task.workspace_root.clone());
+        Ok((task.workspace_root, project_root))
     }
 }
 

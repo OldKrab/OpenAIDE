@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ChatMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
 import { TaskView } from "./TaskView";
+import { TerminalSurfaceContext } from "./terminals/terminalSurface";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,6 +31,28 @@ it("keeps one message picker in the mobile header across task switches", () => {
   act(() => root!.unmount());
   root = undefined;
   expect(header.childElementCount).toBe(0);
+});
+
+it("opens the Task's Project Terminals from the header, starting new ones in its Workspace", () => {
+  // jsdom has no layout; the message picker scrolls its marker into view on mount.
+  Element.prototype.scrollIntoView ??= vi.fn();
+  const host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  const openPage = vi.fn();
+  const task = snapshot("task-a");
+  task.task.project_id = "project-1";
+  const terminals = [{ terminalId: "t1", projectId: "project-1" as never, folder: "/w", status: "busy" as const, openedAt: 1 }];
+
+  act(() => root!.render(
+    <TerminalSurfaceContext.Provider value={{ terminals, openPage }}>
+      <TaskView {...taskViewProps(task)} />
+    </TerminalSurfaceContext.Provider>,
+  ));
+  const entry = host.querySelector<HTMLButtonElement>('[aria-label="Terminal, 1 open"]');
+  act(() => entry!.click());
+
+  expect(openPage).toHaveBeenCalledWith({ projectId: "project-1", taskId: "task-a" });
 });
 
 function taskViewProps(taskSnapshot: TaskSnapshot) {

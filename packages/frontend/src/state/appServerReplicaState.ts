@@ -48,6 +48,7 @@ export function applyAppServerReplica(
     permissionResponses: initial.permissionResponses,
     questionResponses: initial.questionResponses,
     projects: initial.projects,
+    terminals: undefined,
     taskInputs: initial.taskInputs,
     chatPages: initial.chatPages,
     toolDetails: initial.toolDetails,
@@ -83,6 +84,8 @@ function invalidateProcessOwnedState(state: AppState): AppState {
     ...state,
     permissionResponses: {},
     questionResponses: {},
+    // Terminals live in the App Server's memory and end with its process.
+    terminals: undefined,
     taskLiveTextPresentation: {},
     taskInputs,
     toolDetails: {},

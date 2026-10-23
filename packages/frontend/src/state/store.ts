@@ -19,7 +19,7 @@ import {
   type ProjectOption,
   type WorkspaceRoot,
 } from "./composerOptions";
-import type { DeviceCollectionSnapshot, MessageId, WorktreeRepositorySnapshot } from "@openaide/app-server-client";
+import type { DeviceCollectionSnapshot, MessageId, TerminalCollectionSnapshot, WorktreeRepositorySnapshot } from "@openaide/app-server-client";
 
 export type PendingComposerSend = {
   prompt: string;
@@ -204,6 +204,8 @@ export type AppState = {
   showArchived: boolean;
   projects: ProjectOption[];
   worktreeRepositories: Record<string, WorktreeRepositorySnapshot>;
+  /** The App Server process's Terminals (ADR-0071); absent until its baseline arrives. */
+  terminals?: TerminalCollectionSnapshot;
   workspaceRoots: WorkspaceRoot[];
   workspaceRootsLoaded: boolean;
   taskInputs: Record<string, TaskComposerInput>;

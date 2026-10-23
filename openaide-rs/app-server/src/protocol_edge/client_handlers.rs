@@ -163,6 +163,7 @@ impl RpcGateway {
                 .other_client_summaries(&context.client_instance_id),
             active_turns: saturating_u32(blockers.active_turns),
             pending_task_requests: saturating_u32(blockers.pending_task_requests),
+            open_terminals: saturating_u32(self.terminals.open_count()),
         };
         responses::result(connection_id, id, meta, result)
     }
@@ -237,8 +238,12 @@ impl RpcGateway {
                 )
             }
         };
+        // An open Terminal is active work the update would end, so it needs the same
+        // confirmation; the client reads the count from the Terminal list.
         if !params.stop_active_work
-            && (blockers.active_turns > 0 || blockers.pending_task_requests > 0)
+            && (blockers.active_turns > 0
+                || blockers.pending_task_requests > 0
+                || self.terminals.open_count() > 0)
         {
             return responses::result(
                 connection_id,

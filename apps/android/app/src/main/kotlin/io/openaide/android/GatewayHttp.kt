@@ -50,6 +50,8 @@ internal object GatewayHttp {
             head.method == "POST" && path.endsWith("/upload/chunk") -> "/upload/chunk"
             head.method == "POST" && path.endsWith("/upload") -> "/upload"
             head.method == "GET" && path.endsWith("/download") -> "/download"
+            // A Terminal byte stream (ADR-0071) beside the session socket.
+            head.method == "GET" && head.upgrade && path == "$PROXY_PREFIX/terminal" -> "/terminal"
             else -> ""
         }
         return "/probe$suffix$query"

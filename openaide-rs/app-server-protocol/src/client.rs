@@ -8,7 +8,7 @@ use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot, ProtocolVersion
 ///
 /// Bump `minor` when adding methods, fields, or events. Bump `major` and reset
 /// `minor` for any change an older client cannot ignore.
-pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 2 };
+pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 3 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +101,10 @@ pub struct ClientReplacementImpactResult {
     pub other_clients: Vec<AttachedClientSummary>,
     pub active_turns: u32,
     pub pending_task_requests: u32,
+    /// Terminals whose shells a replacement would end (ADR-0071). Absent from App Servers
+    /// before protocol 2.3.
+    #[serde(default)]
+    pub open_terminals: u32,
 }
 
 /// What a client reported about itself in `client/initialize`. Labels for the user, not
@@ -266,6 +270,10 @@ pub enum ShellCapability {
     RevealFile,
     ResolveFileReveal,
     PickLocalFile,
+    /// Read nowhere and no longer advertised; Terminals are an App Server feature (ADR-0071)
+    /// and VS Code opens its own through an App Shell capability. Clients up to protocol 2.2
+    /// still send it, so it must keep deserializing.
+    // TODO(protocol-3): remove with the next major protocol version, which drops 2.x clients.
     OpenTerminal,
     ReadSecret,
     WriteSecret,

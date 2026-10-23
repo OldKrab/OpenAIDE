@@ -79,16 +79,21 @@ pub struct SshReady {
 
 #[derive(Debug, uniffi::Enum)]
 pub enum SshLaunch {
-    Ready { ready: SshReady },
+    Ready {
+        ready: SshReady,
+    },
     /// An older App Server whose protocol this app cannot speak runs there;
     /// only a confirmed replacement can help.
-    UpdateRequired { running_version: String },
+    UpdateRequired {
+        running_version: String,
+    },
 }
 
 /// The SHA-256 fingerprint the user compares, such as `SHA256:…`.
 #[uniffi::export]
 pub fn host_key_fingerprint(host_key: String) -> Result<String, SshError> {
-    let key = PublicKey::from_openssh(&host_key).map_err(|_| SshError::new("trust", "host_key_invalid"))?;
+    let key = PublicKey::from_openssh(&host_key)
+        .map_err(|_| SshError::new("trust", "host_key_invalid"))?;
     Ok(key.fingerprint(HashAlg::Sha256).to_string())
 }
 
@@ -205,7 +210,11 @@ impl SshComputer {
             Box::new(move |stage| events.stage(stage.as_str().to_string())),
         );
         let mut transport = self.transport();
-        let mode = if replace { StartMode::Replace } else { StartMode::Keep };
+        let mode = if replace {
+            StartMode::Replace
+        } else {
+            StartMode::Keep
+        };
         let mut fetch = || self.open_release();
         match launcher.launch(&mut transport, mode, &mut fetch, &operation_id) {
             Ok(Launched::Ready(ready)) => {

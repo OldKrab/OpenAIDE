@@ -268,7 +268,7 @@ function deviceIntents() {
     createInvite: vi.fn(async () => ({ code: "OAI1ABCDEFGH", expiresAtMs: Date.now() + 600_000 })),
     previewJoinRequest: vi.fn(async () => ({ deviceId: "device_1", name: "Phone", model: "Example 9", serverName: "workstation", alreadyTrusted: false })),
     remove: vi.fn(async () => undefined),
-    replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0 })),
+    replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0, openTerminals: 0 })),
   };
 }
 
@@ -438,6 +438,7 @@ it("offers to update an older App Server on the SSH computer and lists what the 
       otherClients: [{ kind: "web", appVersion: "0.9.0", reconnecting: false }, { kind: "keeper", reconnecting: false }],
       activeTurns: 2,
       pendingTaskRequests: 1,
+      openTerminals: 3,
     }),
   };
   await mountSettings({ deviceIntents: intents, state: { activeTab: "remote", loading: false } });
@@ -452,6 +453,7 @@ it("offers to update an older App Server on the SSH computer and lists what the 
     "OpenAIDE in a browser 0.9.0",
     "Agents working in 2 Tasks",
     "1 question waiting for an answer",
+    "3 terminals will close",
   ]);
   expect(ssh.update).not.toHaveBeenCalled();
   await click("Update and restart");
@@ -582,11 +584,13 @@ it("asks before an update stops active work", async () => {
   const capability = updates({ revision: 3, installedVersion: "1.0.0", kind: "readyToUpdate", offer: { version: "1.1.0", notes: "Fixes", sizeBytes: 10 } });
   vi.mocked(capability.restartAndUpdate).mockResolvedValueOnce("activeWork").mockResolvedValueOnce("started");
   useShell({ desktopUpdates: capability });
-  await mountSettings();
+  const intents = { ...deviceIntents(), replacementImpact: vi.fn(async () => ({ activeTurns: 1, pendingTaskRequests: 0, openTerminals: 2 })) };
+  await mountSettings({ deviceIntents: intents });
 
   await click("Restart and update");
   await settle();
   expect(pageText()).toContain("OpenAIDE is still working.");
+  expect(pageText()).toContain("2 terminals will close.");
 
   await click("Stop work and update");
   await settle();

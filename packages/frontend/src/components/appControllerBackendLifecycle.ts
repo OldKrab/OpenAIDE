@@ -393,6 +393,13 @@ export function useAppControllerBackendLifecycle({
                   dispatch: dispatchForCurrentReplica,
                   scope: { kind: "devices" },
                 }));
+                // Terminals never gate readiness either: only the Terminal page and quit warnings read them.
+                stopSubscriptions.push(startAppServerStateSubscription({
+                  backendConnection: subscriptionConnection,
+                  context: subscriptionContext,
+                  dispatch: dispatchForCurrentReplica,
+                  scope: { kind: "terminals" },
+                }));
                 for (const project of result.snapshot.projects?.projects ?? []) {
                   if (!project.worktreeRepositoryId) continue;
                   stopSubscriptions.push(startAppServerStateSubscription({

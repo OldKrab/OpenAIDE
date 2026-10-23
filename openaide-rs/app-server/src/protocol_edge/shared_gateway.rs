@@ -685,6 +685,18 @@ impl SharedRpcGateway {
         self.lock().publish_background_device_collection_update(now)
     }
 
+    pub fn terminals(&self) -> crate::terminals::Terminals {
+        self.lock_quiet().terminals.clone()
+    }
+
+    pub fn publish_terminal_collection_update(
+        &self,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        self.lock()
+            .publish_background_terminal_collection_update(now)
+    }
+
     pub fn publish_committed_task_update_for_connection(
         &self,
         connection_id: &ConnectionId,
@@ -778,6 +790,9 @@ impl SharedRpcGateway {
     }
 
     pub fn shutdown(&self) -> Result<ShutdownCompletion, RuntimeError> {
+        // Terminals never keep App Server alive (ADR-0071); clients warn before stopping it.
+        // Close them outside the protocol lock.
+        self.terminals().close_all();
         self.lock().shutdown()
     }
 
