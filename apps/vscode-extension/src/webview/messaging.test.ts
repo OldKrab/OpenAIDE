@@ -61,6 +61,7 @@ vi.mock("vscode", () => ({
     parse: (value: string) => ({ value }),
   },
   window: {
+    createTerminal: vi.fn(() => ({ show: vi.fn() })),
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
     showOpenDialog: vi.fn(),
@@ -744,6 +745,18 @@ describe("webview messaging composer routes", () => {
 
     expect(vscode.env.openExternal).toHaveBeenCalledWith({ value: "https://nodejs.org/en/download" });
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
+  });
+
+  it("opens VS Code's own terminal at an absolute Task Workspace folder", async () => {
+    const posted: unknown[] = [];
+    vi.mocked(vscode.window.createTerminal).mockClear();
+    await handleWebviewMessage({ type: "shell.terminal.open", payload: { folder: "/workspace/app" } }, context({}, posted));
+    await handleWebviewMessage({ type: "shell.terminal.open", payload: { folder: "relative/app" } }, context({}, posted));
+
+    expect(vscode.window.createTerminal).toHaveBeenCalledTimes(1);
+    expect(vscode.window.createTerminal).toHaveBeenCalledWith({ name: "app", cwd: "/workspace/app" });
+    const terminal = vi.mocked(vscode.window.createTerminal).mock.results[0].value as { show: ReturnType<typeof vi.fn> };
+    expect(terminal.show).toHaveBeenCalled();
   });
 
   it("writes clipboard text through VS Code and acknowledges the request", async () => {

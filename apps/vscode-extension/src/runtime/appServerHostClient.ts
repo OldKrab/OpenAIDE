@@ -310,7 +310,6 @@ export class AppServerHostClient {
             "revealFile",
             "resolveFileReveal",
             "pickLocalFile",
-            "openTerminal",
             "readSecret",
             "writeSecret",
             "showNotification",

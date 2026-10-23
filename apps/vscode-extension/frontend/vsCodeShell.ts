@@ -201,6 +201,9 @@ export function createVsCodeShell(): FrontendShell {
     workspace: {
       openFolder: () => vscode?.postMessage({ type: "workspace.openFolder" }),
     },
+    nativeTerminal: {
+      open: (folder) => vscode?.postMessage({ type: "shell.terminal.open", payload: { folder } }),
+    },
     projects: {
       pickFolder() {
         if (!vscode) return Promise.reject(new Error("VS Code folder picker unavailable."));
