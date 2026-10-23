@@ -1,6 +1,6 @@
 # SSH Computers Are Started Like Termux
 
-Status: proposed
+Status: accepted
 
 The Desktop App and the Mobile App can make a Linux computer reachable over SSH the place where agents work. The App Shell installs the App Server there, starts it, and reaches it the way the Mobile App reaches its App Server in Termux: it holds the per-process token and is a client of that App Server, with the loopback endpoint carried through the SSH connection instead of a local socket. No Pairing Code, key exchange with the App Server, or relay is involved; the user's SSH access is the proof. Pairing with a computer ([ADR-0063](0063-desktop-can-use-another-computers-app-server.md)) stays the way to reach an App Server someone else started.
 
