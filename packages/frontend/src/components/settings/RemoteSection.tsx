@@ -3,6 +3,7 @@ import { Laptop, Monitor, Plus, QrCode, Smartphone, Wifi } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
 import { computerName, currentComputer, useComputers, type ComputersCapability, type ComputersSnapshot, type ShellComputer } from "../../services/computers";
+import { computerSwitch, useComputerSwitch } from "../../services/computerSwitch";
 import { currentFrontendShell } from "../../services/frontendShell";
 import { PopupDialog } from "../Popup";
 import { InviteDialog, JoinDialog } from "./devicePairingDialogs";
@@ -94,19 +95,20 @@ type SettingsComputers = {
   /** Id of the computer being switched to; "" stands for this device. */
   switching: string | undefined;
   failed: { id: string; message: string } | undefined;
-  use(id?: string): Promise<void>;
+  use(id?: string): void;
   forget(id: string): Promise<void>;
   openPairing(): Promise<void>;
 };
 
 /**
- * The shell owns the computers and replaces the page to apply a switch, so a
- * settled `use` means the shell accepted it or refused with a sentence.
+ * The shell owns the computers and applies a switch; the switch itself is the
+ * one the Task navigation shows too, so both agree on what is connecting.
  */
 function useSettingsComputers(capability: ComputersCapability | undefined): SettingsComputers {
   const snapshot = useComputers(capability);
-  const [switching, setSwitching] = useState<string>();
-  const [failed, setFailed] = useState<{ id: string; message: string }>();
+  const switcher = capability ? computerSwitch(capability) : undefined;
+  const switched = useComputerSwitch(switcher);
+  const [pairFailed, setPairFailed] = useState<string>();
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -114,20 +116,11 @@ function useSettingsComputers(capability: ComputersCapability | undefined): Sett
   }, []);
   return {
     snapshot,
-    switching,
-    failed,
-    use: async (id) => {
-      if (!capability || switching !== undefined) return;
-      setFailed(undefined);
-      setSwitching(id ?? "");
-      try {
-        await capability.use(id);
-      } catch (cause) {
-        if (mounted.current) {
-          setSwitching(undefined);
-          setFailed({ id: id ?? "", message: errorSentence(cause, "OpenAIDE could not switch. Try again.") });
-        }
-      }
+    switching: switched.pending,
+    failed: pairFailed ? { id: "pair", message: pairFailed } : switched.failed,
+    use: (id) => {
+      setPairFailed(undefined);
+      void switcher?.request(id);
     },
     forget: async (id) => {
       if (!capability) return;
@@ -138,10 +131,11 @@ function useSettingsComputers(capability: ComputersCapability | undefined): Sett
       }
     },
     openPairing: async () => {
+      setPairFailed(undefined);
       try {
         await capability?.openPairing?.();
       } catch (cause) {
-        if (mounted.current) setFailed({ id: "pair", message: errorSentence(cause, "Pairing could not open. Try again.") });
+        if (mounted.current) setPairFailed(errorSentence(cause, "Pairing could not open. Try again."));
       }
     },
   };
@@ -176,7 +170,7 @@ function computersGroup(
           busyLabel="Switching…"
           disabled={busy}
           label={here}
-          onUse={() => void computers.use()}
+          onUse={() => computers.use()}
         />
       ),
     });
@@ -200,7 +194,7 @@ function computersGroup(
             busyLabel="Switching…"
             disabled={busy}
             label={name}
-            onUse={() => void computers.use(computer.id)}
+            onUse={() => computers.use(computer.id)}
           />
         </>
       ),
@@ -287,7 +281,7 @@ function PairComputerDialog({ pair: spend, onClose }: { pair: (code: string) => 
   return (
     <PopupDialog className="settings-confirm" label="Pair with another computer" onOpenChange={(open) => { if (!open && !busy) onClose(); }} open>
       <strong>Pair a computer</strong>
-      <p>On the other computer, open Settings, Remote, choose Show code, then copy it here. OpenAIDE restarts and opens that computer's projects.</p>
+      <p>On the other computer, open Settings, Remote, choose Show code, then copy it here. OpenAIDE then opens that computer's projects.</p>
       <textarea
         aria-label="Pairing code"
         autoFocus

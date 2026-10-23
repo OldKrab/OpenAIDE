@@ -1,9 +1,9 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { Check, Monitor, MonitorSmartphone } from "lucide-react";
 import { computerName, currentComputer, type ComputersSnapshot } from "../services/computers";
+import { useComputerSwitch, type ComputerSwitch } from "../services/computerSwitch";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import { PopupMenu } from "./Popup";
-import { errorSentence } from "./settings/settingsKit";
 
 export type ComputerLink = "connected" | "connecting" | "reconnecting" | "notResponding" | "notConnected";
 
@@ -37,17 +37,17 @@ type Row = { id: string; label: string; current: boolean };
  * trigger names the other computer in use, with the dot alone saying the link
  * is healthy; this device needs only the icon.
  */
-export function ComputerSwitcher({ link, onManage, onUse, openRequest = 0, snapshot }: {
+export function ComputerSwitcher({ link, onManage, openRequest = 0, snapshot, switcher }: {
   link: ComputerLink;
   onManage: () => void;
-  onUse: (id?: string) => Promise<void>;
   /** Increments when a shell command asks to open the list. */
   openRequest?: number;
   snapshot: ComputersSnapshot | undefined;
+  /** The shell's switch, shared with Settings so both show the same attempt. */
+  switcher: ComputerSwitch;
 }) {
   const [open, setOpen] = useState(false);
-  const [pending, setPending] = useState<string>();
-  const [failed, setFailed] = useState<{ id: string; message: string }>();
+  const { pending, failed } = useComputerSwitch(switcher);
   useEffect(() => {
     if (openRequest > 0) setOpen(true);
   }, [openRequest]);
@@ -70,12 +70,7 @@ export function ComputerSwitcher({ link, onManage, onUse, openRequest = 0, snaps
       setOpen(false);
       return;
     }
-    setFailed(undefined);
-    setPending(row.id);
-    void requestSwitch(onUse, row.id || undefined).catch((cause: unknown) => {
-      setPending(undefined);
-      setFailed({ id: row.id, message: errorSentence(cause, "OpenAIDE could not switch. Try again.") });
-    });
+    void switcher.request(row.id || undefined);
   };
   const pickByNumber = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.altKey || event.ctrlKey || event.metaKey || !/^[1-9]$/.test(event.key)) return;
@@ -145,20 +140,3 @@ export function ComputerSwitcher({ link, onManage, onUse, openRequest = 0, snaps
   );
 }
 
-/**
- * Logs the switch request at the Frontend boundary. Acceptance is terminal
- * here: the shell then replaces the page, and its own events carry the rest.
- */
-async function requestSwitch(onUse: (id?: string) => Promise<void>, id: string | undefined) {
-  const operationId = crypto.randomUUID();
-  const startedAt = performance.now();
-  const target = id ? "computer" : "this_device";
-  console.info(`computer_switch_started operation_id=${operationId} target=${target}`);
-  try {
-    await onUse(id);
-    console.info(`computer_switch_completed operation_id=${operationId} target=${target} outcome=accepted duration_ms=${Math.round(performance.now() - startedAt)}`);
-  } catch (cause) {
-    console.warn(`computer_switch_completed operation_id=${operationId} target=${target} outcome=refused duration_ms=${Math.round(performance.now() - startedAt)}`);
-    throw cause;
-  }
-}

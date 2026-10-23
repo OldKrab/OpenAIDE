@@ -1,31 +1,28 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::io::{BufRead, BufReader, Read};
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::PathBuf;
 use std::sync::{
     Mutex,
     atomic::{AtomicBool, Ordering},
 };
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::thread;
-use std::time::{Duration, Instant};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{Emitter, Manager};
 
 // First, so every module below can use `desktop_log!`.
 #[macro_use]
 mod desktop_log;
 mod desktop_app_server_hold;
+mod desktop_app_server_launch;
+mod desktop_connection;
 mod desktop_remote;
 mod desktop_renderer_protocol;
 mod desktop_runtime;
 mod desktop_secrets;
-#[cfg(test)]
-#[path = "desktop_server_recovery_tests.rs"]
-mod desktop_server_recovery_tests;
 mod desktop_support_export;
 mod desktop_update;
 mod desktop_update_receipt;
@@ -49,41 +46,10 @@ use desktop_runtime::{
     write_bootstrap_preferences,
 };
 use desktop_update::DesktopUpdateState;
-use startup_process::StartupChild;
-use wsl_runtime::{discover_wsl_distros, launch_wsl_app_server_handoff, translate_path_with_wsl};
+use wsl_runtime::{discover_wsl_distros, translate_path_with_wsl};
 
-const HANDOFF_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_HANDOFF_LINE_BYTES: usize = 8 * 1024;
-const MIN_AUTH_TOKEN_BYTES: usize = 32;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LocalHttpConnection {
-    kind: String,
-    endpoint_url: String,
-    auth_token: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopBootstrap {
-    client_instance_id: String,
-    connection: LocalHttpConnection,
-    platform: &'static str,
-    runtime_environment: DesktopRuntimeEnvironment,
-    runtime_options: DesktopRuntimeOptions,
-    /// Names the paired computer whose App Server this Desktop uses instead of its own.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    remote_computer: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopRuntimeOptions {
-    wsl_distros: Vec<String>,
-}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,15 +60,9 @@ struct DesktopBootstrapContext {
     remote_computer: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-struct DesktopBootstrapProgress {
-    message: String,
-    stage: &'static str,
-}
-
+/// This Desktop's own settings and where its App Server lives. Which App Server
+/// the window uses belongs to [`desktop_connection::DesktopConnections`].
 struct DesktopState {
-    client_instance_id: String,
-    connection: Mutex<Option<LocalHttpConnection>>,
     runtime_paths: DesktopRuntimePaths,
     preferences: Mutex<DesktopBootstrapPreferences>,
     preferences_path: PathBuf,
@@ -117,8 +77,6 @@ impl DesktopState {
         wsl_resource_binary: PathBuf,
     ) -> Self {
         Self {
-            client_instance_id: format!("desktop-{}", uuid::Uuid::new_v4()),
-            connection: Mutex::new(None),
             runtime_paths,
             preferences: Mutex::new(preferences),
             preferences_path,
@@ -126,25 +84,6 @@ impl DesktopState {
         }
     }
 
-    /// The native updater waits for this Desktop-owned listener to disappear before
-    /// handing the signed bundle to the platform installer.
-    fn app_server_endpoint_url(&self) -> Result<String, String> {
-        self.connection
-            .lock()
-            .map_err(|_| "Desktop runtime state is unavailable.".to_string())?
-            .as_ref()
-            .map(|connection| connection.endpoint_url.clone())
-            .ok_or_else(|| "Desktop runtime is not connected.".to_string())
-    }
-
-    /// False while a paired computer's App Server is in use: this Desktop then
-    /// started no process it could restore or must wait for.
-    fn owns_app_server(&self) -> bool {
-        self.preferences
-            .lock()
-            .map(|preferences| preferences.remote().is_none())
-            .unwrap_or(true)
-    }
 }
 
 fn main() {
@@ -175,6 +114,7 @@ fn main() {
                 preferences_path,
                 resource_dir.join("wsl").join("openaide-app-server"),
             ));
+            app.manage(desktop_connection::DesktopConnections::default());
             app.manage(desktop_remote::DesktopRemoteState::new(&app_local_data));
             app.manage(DesktopUpdateState::for_build(
                 app_local_data.join("desktop-update-receipt.json"),
@@ -225,11 +165,13 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            desktop_bootstrap,
+            desktop_connection::desktop_bootstrap,
             desktop_bootstrap_context,
-            desktop_ensure_app_server,
+            desktop_connection::desktop_ensure_app_server,
             desktop_take_pending_quit,
             desktop_app_server_hold::complete_desktop_quit,
+            desktop_app_server_hold::desktop_update_prepare_local,
+            desktop_app_server_hold::desktop_update_finish_local,
             desktop_webview_log::record_desktop_telemetry,
             desktop_webview_log::record_desktop_webview_log,
             prepare_desktop_native_zoom,
@@ -245,6 +187,7 @@ fn main() {
             desktop_remote::desktop_remote_snapshot,
             desktop_remote::desktop_remote_pair,
             desktop_remote::desktop_remote_use,
+            desktop_remote::desktop_remote_cancel,
             desktop_remote::desktop_remote_forget,
             desktop_update::desktop_update_snapshot,
             desktop_update::desktop_check_for_update,
@@ -365,226 +308,6 @@ fn arm_macos_quit_watchdog(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-async fn desktop_bootstrap(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, DesktopState>,
-) -> Result<DesktopBootstrap, String> {
-    let (environment, remote) = {
-        let preferences = state
-            .preferences
-            .lock()
-            .map_err(|_| "desktop bootstrap preferences unavailable")?;
-        (
-            preferences.environment.clone(),
-            preferences.remote().cloned(),
-        )
-    };
-    let remote_computer = remote.as_ref().map(|computer| computer.name.clone());
-    let runtime_options = DesktopRuntimeOptions {
-        wsl_distros: discover_wsl_distros(),
-    };
-    if let Some(connection) = state
-        .connection
-        .lock()
-        .map_err(|_| "desktop connection state unavailable")?
-        .clone()
-    {
-        return Ok(DesktopBootstrap {
-            client_instance_id: state.client_instance_id.clone(),
-            connection,
-            platform: std::env::consts::OS,
-            runtime_environment: environment,
-            runtime_options,
-            remote_computer,
-        });
-    }
-
-    let operation_id = format!("desktop-bootstrap-{}", uuid::Uuid::new_v4());
-    let connection = match &remote {
-        Some(computer) => {
-            emit_bootstrap_progress(&app, "remote", format!("Connecting to {}", computer.name));
-            desktop_remote::connect(&app, computer).await?
-        }
-        None => {
-            launch_app_server_for_desktop(
-                state.runtime_paths.clone(),
-                state.wsl_resource_binary.clone(),
-                environment.clone(),
-                Some(app.clone()),
-                operation_id,
-            )
-            .await?
-        }
-    };
-    *state
-        .connection
-        .lock()
-        .map_err(|_| "desktop connection state unavailable")? = Some(connection.clone());
-    let mut preferences = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?;
-    if preferences.previous_environment.take().is_some() {
-        write_bootstrap_preferences(&state.preferences_path, &preferences)?;
-    }
-    drop(preferences);
-    Ok(DesktopBootstrap {
-        client_instance_id: state.client_instance_id.clone(),
-        connection,
-        platform: std::env::consts::OS,
-        runtime_environment: environment,
-        runtime_options,
-        remote_computer,
-    })
-}
-
-struct HandoffFailure {
-    stage: &'static str,
-    user_message: String,
-}
-
-/// Runs the App Server handoff and always reports one terminal line. Callers own the
-/// decision to ask for a process; the handoff itself may elect an App Server that is
-/// already running. Progress goes to the startup window only while it is listening.
-async fn launch_app_server_for_desktop(
-    runtime_paths: DesktopRuntimePaths,
-    wsl_resource_binary: PathBuf,
-    environment: DesktopRuntimeEnvironment,
-    progress_app: Option<tauri::AppHandle>,
-    operation_id: String,
-) -> Result<LocalHttpConnection, String> {
-    let started_at = Instant::now();
-    desktop_log!("desktop_app_server_handoff_started operation_id={operation_id}");
-    let joined = tauri::async_runtime::spawn_blocking(move || {
-        launch_app_server_handoff(
-            &runtime_paths,
-            &environment,
-            &wsl_resource_binary,
-            |stage, message| {
-                if let Some(app) = progress_app.as_ref() {
-                    emit_bootstrap_progress(app, stage, message);
-                }
-            },
-        )
-    })
-    .await;
-    match joined {
-        Err(_) => {
-            desktop_log!(
-                "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage=task_join duration_ms={}",
-                started_at.elapsed().as_millis()
-            );
-            Err("App Server handoff task failed".to_string())
-        }
-        Ok(Err(error)) => {
-            desktop_log!(
-                "desktop_app_server_handoff_completed operation_id={operation_id} outcome=failure stage={} duration_ms={}",
-                error.stage,
-                started_at.elapsed().as_millis()
-            );
-            Err(error.user_message)
-        }
-        Ok(Ok(connection)) => {
-            desktop_log!(
-                "desktop_app_server_handoff_completed operation_id={operation_id} outcome=success duration_ms={}",
-                started_at.elapsed().as_millis()
-            );
-            Ok(connection)
-        }
-    }
-}
-
-/// A live App Server answers HTTP on its published loopback endpoint. Any HTTP status
-/// proves a listener; the endpoint is loopback-only and token-guarded, so a 401 still
-/// means the process is there. Only a connection failure means the process is gone.
-async fn app_server_endpoint_reachable(connection: &LocalHttpConnection) -> bool {
-    let Ok(url) = url::Url::parse(&connection.endpoint_url) else {
-        return false;
-    };
-    let Ok(client) = reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(750))
-        .timeout(Duration::from_secs(2))
-        .no_proxy()
-        .build()
-    else {
-        return false;
-    };
-    client
-        .get(url)
-        .bearer_auth(&connection.auth_token)
-        .send()
-        .await
-        .is_ok()
-}
-
-/// Restores the Desktop-owned App Server after machine sleep or an idle shutdown. An
-/// already reachable endpoint is reused; a new process is published to the WebView
-/// through the same replacement event the client already handles.
-#[tauri::command]
-async fn desktop_ensure_app_server(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, DesktopState>,
-) -> Result<Option<LocalHttpConnection>, String> {
-    // The gateway to a paired computer lives as long as this process, and the
-    // session's own retries reopen its connection.
-    if !state.owns_app_server() {
-        return Ok(None);
-    }
-    let operation_id = format!("desktop-ensure-app-server-{}", uuid::Uuid::new_v4());
-    let started_at = Instant::now();
-    let cached = state
-        .connection
-        .lock()
-        .map_err(|_| "desktop connection state unavailable")?
-        .clone();
-    if let Some(connection) = &cached {
-        if app_server_endpoint_reachable(connection).await {
-            return Ok(None);
-        }
-    }
-    let environment = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?
-        .environment
-        .clone();
-    desktop_log!(
-        "desktop_app_server_ensure_started operation_id={operation_id} had_connection={} reason_code={}",
-        cached.is_some(),
-        if cached.is_some() {
-            "endpoint_unreachable"
-        } else {
-            "no_connection"
-        }
-    );
-    let connection = launch_app_server_for_desktop(
-        state.runtime_paths.clone(),
-        state.wsl_resource_binary.clone(),
-        environment,
-        None,
-        operation_id.clone(),
-    )
-    .await?;
-    *state
-        .connection
-        .lock()
-        .map_err(|_| "desktop connection state unavailable")? = Some(connection.clone());
-    let _ = app.emit("desktop-app-server-replaced", &connection);
-    desktop_log!(
-        "desktop_app_server_ensure_completed operation_id={operation_id} outcome=success duration_ms={}",
-        started_at.elapsed().as_millis()
-    );
-    Ok(Some(connection))
-}
-
-fn emit_bootstrap_progress(app: &tauri::AppHandle, stage: &'static str, message: String) {
-    let _ = app.emit(
-        "desktop-bootstrap-progress",
-        DesktopBootstrapProgress { message, stage },
-    );
-}
-
-#[tauri::command]
 fn set_desktop_runtime_environment(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
@@ -678,125 +401,6 @@ fn desktop_prepare_project_folder(
         },
     )
     .map_err(|error| error.to_string())
-}
-
-fn launch_app_server_handoff(
-    runtime_paths: &DesktopRuntimePaths,
-    environment: &DesktopRuntimeEnvironment,
-    wsl_resource_binary: &Path,
-    progress: impl Fn(&'static str, String),
-) -> Result<LocalHttpConnection, HandoffFailure> {
-    if let DesktopRuntimeEnvironment::Wsl { distro } = environment {
-        return launch_wsl_app_server_handoff(distro, wsl_resource_binary, progress);
-    }
-    create_directory(&runtime_paths.storage_root, "storage_create")?;
-    create_directory(&runtime_paths.runtime_root, "runtime_create")?;
-
-    let mut command = Command::new(&runtime_paths.app_server_binary);
-    #[cfg(target_os = "macos")]
-    macos_shell_path::apply_to(&mut command).map_err(|_| {
-        failure(
-            "shell_environment",
-            "OpenAIDE could not load your terminal PATH. Check your shell startup files and retry.",
-        )
-    })?;
-    command
-        .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
-        .env("OPENAIDE_STORAGE_ROOT", &runtime_paths.storage_root)
-        .env("OPENAIDE_RUNTIME_ROOT", &runtime_paths.runtime_root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
-    #[cfg(target_os = "windows")]
-    // The App Server remains a console binary for VSIX use, but Desktop owns it
-    // as a background child and must not flash a second console window.
-    command.creation_flags(CREATE_NO_WINDOW);
-    let mut child = command
-        .spawn()
-        .map_err(|_| failure("process_spawn", "OpenAIDE could not start its App Server."))?;
-    let mut startup = StartupChild::new(&mut child);
-    let stdout = startup.take_stdout().ok_or_else(|| {
-        failure(
-            "stdout_missing",
-            "The App Server did not provide startup information.",
-        )
-    })?;
-    let line = read_handoff_line(stdout)?;
-    let connection: LocalHttpConnection = serde_json::from_str(line.trim()).map_err(|_| {
-        failure(
-            "json_invalid",
-            "The App Server returned invalid startup information.",
-        )
-    })?;
-    validate_connection(&connection)?;
-    startup.accept();
-    thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(connection)
-}
-
-fn read_handoff_line(stdout: impl Read + Send + 'static) -> Result<String, HandoffFailure> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        let mut line = String::new();
-        let result = BufReader::new(stdout)
-            .take((MAX_HANDOFF_LINE_BYTES + 1) as u64)
-            .read_line(&mut line)
-            .map(|_| line);
-        let _ = sender.send(result);
-    });
-    match receiver.recv_timeout(HANDOFF_TIMEOUT) {
-        Ok(Ok(line)) if !line.trim().is_empty() && line.len() <= MAX_HANDOFF_LINE_BYTES => Ok(line),
-        Ok(Ok(_)) => Err(failure(
-            "line_invalid",
-            "The App Server returned invalid startup information.",
-        )),
-        Ok(Err(_)) => Err(failure(
-            "line_read",
-            "OpenAIDE could not read App Server startup information.",
-        )),
-        Err(_) => Err(failure(
-            "timeout",
-            "The App Server did not become ready in time.",
-        )),
-    }
-}
-
-fn create_directory(path: &std::path::Path, stage: &'static str) -> Result<(), HandoffFailure> {
-    std::fs::create_dir_all(path)
-        .map_err(|_| failure(stage, "OpenAIDE could not prepare its local storage."))
-}
-
-fn validate_connection(connection: &LocalHttpConnection) -> Result<(), HandoffFailure> {
-    if connection.kind != "localHttp" || connection.auth_token.len() < MIN_AUTH_TOKEN_BYTES {
-        return Err(failure(
-            "connection_invalid",
-            "The App Server returned invalid startup information.",
-        ));
-    }
-    let endpoint = url::Url::parse(&connection.endpoint_url).map_err(|_| {
-        failure(
-            "endpoint_invalid",
-            "The App Server returned an invalid local endpoint.",
-        )
-    })?;
-    let loopback = endpoint.scheme() == "http"
-        && matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost" | "::1"));
-    if !loopback {
-        return Err(failure(
-            "endpoint_not_loopback",
-            "The App Server returned an unsafe endpoint.",
-        ));
-    }
-    Ok(())
-}
-
-fn failure(stage: &'static str, user_message: &str) -> HandoffFailure {
-    HandoffFailure {
-        stage,
-        user_message: user_message.to_string(),
-    }
 }
 
 #[tauri::command]

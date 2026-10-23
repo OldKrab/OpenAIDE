@@ -90,7 +90,13 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
     computers: {
       snapshot: () => computers,
       subscribe,
-      use: id => execute(id ? { action: "use_computer", id } : { action: "local" }),
+      // The phone replaces this page once it accepted a switch.
+      // TODO: the phone disconnects before it connects the chosen computer and
+      // offers no Cancel; connect first and answer before replacing the page (ADR-0070).
+      use: async id => {
+        await execute(id ? { action: "use_computer", id } : { action: "local" });
+        return "switched";
+      },
       forget: id => execute({ action: "forget_computer", id }),
       openPairing: () => execute({ action: "pair_setup" }),
     },

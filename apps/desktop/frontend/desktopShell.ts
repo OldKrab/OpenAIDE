@@ -45,14 +45,13 @@ export function createDesktopShell(
   document.body.dataset.platform = host.platform;
   const nativeWindow = getCurrentWindow();
   const nativeWebview = getCurrentWebview();
-  // Desktop owns the App Server process, so return-to-app restores it here. The
+  // Desktop always runs this computer's App Server, even while the window uses a
+  // paired computer's (ADR-0070), so return-to-app restores it here. The
   // subscription lives as long as the WebView. Native focus is the reliable
   // machine-resume signal on macOS, and re-broadcasting it as `openaide:resume`
   // also wakes the shared transport and restarts suspended animations.
-  // With a paired computer in use there is no process here to restore; the
-  // session's own retries reopen the connection.
   const remote = Boolean(host.remoteComputer);
-  if (!remote) createDesktopServerRecovery({ invoke });
+  createDesktopServerRecovery({ invoke });
   void nativeWindow.onFocusChanged(({ payload: focused }) => {
     if (focused) window.dispatchEvent(new Event("openaide:resume"));
   });
@@ -256,7 +255,7 @@ export function createDesktopShell(
       }),
       select: (environment) => invoke("set_desktop_runtime_environment", { environment }),
     } : undefined,
-    computers: createDesktopComputers(invoke),
+    computers: createDesktopComputers(invoke, () => leaveForAnotherComputer(session)),
     desktopUpdates,
     desktopCommands: {
       subscribe(listener) {
@@ -346,6 +345,26 @@ export function createDesktopShell(
       },
     }),
   };
+}
+
+const SWITCH_DETACH_TIMEOUT_MS = 1_000;
+
+/**
+ * Detaches from the App Server the window leaves, so this computer's App Server
+ * does not keep a client for a window that moved on, then reloads onto the one
+ * now in use. A paired computer's link is already closed, so its detach fails
+ * at once and changes nothing.
+ */
+async function leaveForAnotherComputer(session: AppServerSession) {
+  const startedAt = performance.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await Promise.race([
+    session.request(CLIENT_DETACH, {}).then(() => "detached", () => "detachFailed"),
+    new Promise<string>((resolve) => { timer = setTimeout(() => resolve("detachTimeout"), SWITCH_DETACH_TIMEOUT_MS); }),
+  ]);
+  clearTimeout(timer);
+  console.info(`desktop_computer_switch_window_reload outcome=${outcome} duration_ms=${Math.round(performance.now() - startedAt)}`);
+  window.location.reload();
 }
 
 function nextAnimationFrame() {

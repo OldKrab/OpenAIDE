@@ -8,21 +8,24 @@ fn computer(id: &str, name: &str) -> RemoteComputer {
 }
 
 #[test]
-fn pairing_selects_the_computer_and_replaces_an_earlier_pairing_with_it() {
+fn pairing_remembers_the_computer_and_replaces_an_earlier_pairing_with_it() {
     let mut preferences = DesktopBootstrapPreferences::default();
-    preferences.pair(computer("a", "Studio"));
-    preferences.pair(computer("b", "Laptop"));
-    preferences.pair(computer("a", "Studio again"));
+    preferences.remember(computer("a", "Studio"));
+    preferences.remember(computer("b", "Laptop"));
+    preferences.remember(computer("a", "Studio again"));
 
     assert_eq!(preferences.remote_computers.len(), 2);
-    assert_eq!(preferences.remote(), Some(&computer("a", "Studio again")));
+    assert_eq!(preferences.paired("a"), Some(&computer("a", "Studio again")));
+    // Using it is a switch of its own, saved once the computer answers.
+    assert_eq!(preferences.remote(), None);
 }
 
 #[test]
 fn forgetting_the_computer_in_use_returns_to_this_computer() {
     let mut preferences = DesktopBootstrapPreferences::default();
-    preferences.pair(computer("a", "Studio"));
-    preferences.pair(computer("b", "Laptop"));
+    preferences.remember(computer("a", "Studio"));
+    preferences.remember(computer("b", "Laptop"));
+    preferences.remote_computer = Some("b".to_string());
 
     assert!(!preferences.forget("a"));
     assert_eq!(preferences.remote(), Some(&computer("b", "Laptop")));

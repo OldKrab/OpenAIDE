@@ -13,17 +13,29 @@ export type ComputersSnapshot = {
 };
 
 /**
+ * What a switch request came to. `switched` means the shell is replacing the
+ * page with the computer chosen; the other two leave the page as it is.
+ */
+export type ComputerSwitchResult = "switched" | "unchanged" | "cancelled";
+
+/**
  * Shell-owned choice of whose App Server is in use (ADR-0070). The shell keeps
- * the list; the shared Frontend renders it and asks for a switch. A switch that
- * takes effect replaces the page, so `use` settles only when the shell accepted
- * the request or refused it with a sentence for the user.
+ * the list; the shared Frontend renders it and asks for a switch. The shell
+ * connects the chosen computer first and replaces the page only once it
+ * answered; a computer it could not reach rejects with a sentence for the user.
  */
 export type ComputersCapability = {
   /** Undefined until the shell reports its first list. */
   snapshot(): ComputersSnapshot | undefined;
   subscribe(listener: () => void): () => void;
-  /** Uses another computer, or this device when no id is given. */
-  use(id?: string): Promise<void>;
+  /**
+   * Uses another computer, or this device when no id is given. `operationId`
+   * correlates the shell's diagnostics with the Frontend's.
+   */
+  use(id: string | undefined, operationId?: string): Promise<ComputerSwitchResult>;
+  /** Ends a switch that is still connecting; absent where a switch cannot be cancelled. */
+  cancel?(): Promise<void>;
+  /** Forgetting the computer in use moves to this device first. */
   forget(id: string): Promise<void>;
   /** Spends the invite code another computer shows; absent where pairing has its own screen. */
   pair?(code: string): Promise<void>;

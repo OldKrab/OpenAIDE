@@ -20,6 +20,7 @@ import { AgentDisableDialog } from "./AgentDisableDialog";
 import { useAgentDisableConfirmation } from "./useAgentDisableConfirmation";
 import { ComputerSwitcher, type ComputerLink } from "./ComputerSwitcher";
 import type { ComputersSnapshot } from "../services/computers";
+import type { ComputerSwitch } from "../services/computerSwitch";
 import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
 
@@ -79,7 +80,8 @@ type SidebarProps = {
   computerLink?: ComputerLink;
   /** Increments when a shell command asks to open the computer list. */
   computerSwitcherRequest?: number;
-  onUseComputer?: (id?: string) => Promise<void>;
+  /** Present when the shell can switch computers. */
+  computerSwitch?: ComputerSwitch;
   onManageComputers?: () => void;
   showArchived: boolean;
   taskListError?: string;
@@ -137,7 +139,7 @@ export const Sidebar = memo(function Sidebar({
   computers,
   computerLink,
   computerSwitcherRequest,
-  onUseComputer,
+  computerSwitch,
   onManageComputers,
   settingsActive = false,
   showArchived,
@@ -483,13 +485,13 @@ export const Sidebar = memo(function Sidebar({
               {settingsStatus ? <small>{settingsStatus}</small> : null}
             </span>
           </button>
-          {onUseComputer && onManageComputers ? (
+          {computerSwitch && onManageComputers ? (
             <ComputerSwitcher
               link={computerLink ?? "connecting"}
               onManage={onManageComputers}
-              onUse={onUseComputer}
               openRequest={computerSwitcherRequest}
               snapshot={computers}
+              switcher={computerSwitch}
             />
           ) : null}
         </div>
@@ -522,6 +524,7 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.computers === next.computers &&
     prev.computerLink === next.computerLink &&
     prev.computerSwitcherRequest === next.computerSwitcherRequest &&
+    prev.computerSwitch === next.computerSwitch &&
     prev.settingsActive === next.settingsActive &&
     prev.showArchived === next.showArchived &&
     prev.taskListError === next.taskListError &&

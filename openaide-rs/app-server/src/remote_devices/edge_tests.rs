@@ -399,3 +399,46 @@ fn the_rust_client_records_how_far_a_failed_connect_got() {
     assert!(completed["relay_connected"].is_boolean());
     assert!(completed["direct_addresses"].is_u64());
 }
+
+#[test]
+fn a_stopped_gateway_refuses_its_port_and_leaves_the_app_server() {
+    use openaide_remote_client::{Gateway, RemoteClient};
+
+    let fixture = fixture();
+    let shown = fixture
+        .devices
+        .create_invite("desk".to_string(), AppServerTime::now().0)
+        .unwrap();
+    fixture.wait_for_access(RemoteAccessState::On);
+    let invite = openaide_remote_client::InviteCode::decode(&shown.code).unwrap();
+    let endpoint = fixture.device_endpoint(6, Vec::new());
+    // A shell keeps its endpoint for the life of the process, across switches.
+    let _kept = endpoint.clone();
+
+    let (address, served) = fixture.run(async move {
+        let paired =
+            openaide_remote_client::redeem(&endpoint, &invite, "Laptop", None, &quiet())
+                .await
+                .unwrap();
+        let client = std::sync::Arc::new(RemoteClient::new(endpoint, paired.id, quiet()));
+        let gateway = Gateway::start(client, quiet(), |_| {}).await.unwrap();
+        let served = through_gateway(
+            gateway.address,
+            format!(
+                "POST /probe HTTP/1.1\r\nAuthorization: Bearer {}\r\n\r\n",
+                gateway.token
+            ),
+        )
+        .await;
+        let address = gateway.address;
+        // Switching to another computer ends this one's gateway while the process lives on.
+        gateway.stop().await;
+        (address, served)
+    });
+
+    assert!(served.starts_with("HTTP/1.1 200 OK"));
+    assert!(std::net::TcpStream::connect(address).is_err());
+    wait_until("the App Server to see the device leave", || {
+        fixture.devices.snapshot().devices[0].connection.is_none()
+    });
+}

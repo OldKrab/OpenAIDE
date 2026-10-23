@@ -18,7 +18,9 @@ use crate::CREATE_NO_WINDOW;
 use crate::desktop_runtime::decode_wsl_list;
 #[cfg(target_os = "windows")]
 use crate::startup_process::StartupChild;
-use crate::{HandoffFailure, LocalHttpConnection, failure, read_handoff_line, validate_connection};
+use crate::desktop_app_server_launch::{
+    HandoffFailure, LocalHttpConnection, failure, read_handoff_line, validate_connection,
+};
 
 #[cfg(target_os = "windows")]
 pub(crate) fn discover_wsl_distros() -> Vec<String> {

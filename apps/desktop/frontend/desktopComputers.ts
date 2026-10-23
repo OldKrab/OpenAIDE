@@ -1,12 +1,20 @@
 import type { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import type { ComputersCapability, ComputersSnapshot, ShellComputer } from "../../../packages/frontend/src/services/computers";
+import type { ComputerSwitchResult, ComputersCapability, ComputersSnapshot, ShellComputer } from "../../../packages/frontend/src/services/computers";
+
+/** What the native side reports for a switch it was asked for. */
+type NativeSwitchOutcome = "switched" | "alreadyInUse" | "cancelled";
 
 /**
  * The Desktop's paired computers (ADR-0063), kept by the native side in its
- * bootstrap preferences. A switch or a pairing that takes effect restarts the
- * Desktop, so their promises settle only when the native side refused.
+ * bootstrap preferences. The native side connects the chosen computer first and
+ * keeps this computer's App Server running (ADR-0070); once it switched, the
+ * window leaves its App Server and reloads onto the new one.
  */
-export function createDesktopComputers(invoke: typeof tauriInvoke): ComputersCapability {
+export function createDesktopComputers(
+  invoke: typeof tauriInvoke,
+  /** Leaves the App Server in use and reloads the window onto the one now chosen. */
+  reload: () => Promise<void>,
+): ComputersCapability {
   let snapshot: ComputersSnapshot | undefined;
   let reading: Promise<void> | undefined;
   const listeners = new Set<() => void>();
@@ -34,11 +42,24 @@ export function createDesktopComputers(invoke: typeof tauriInvoke): ComputersCap
       if (snapshot?.error) void read();
       return () => listeners.delete(listener);
     },
-    use: (id) => invoke("desktop_remote_use", { id: id ?? null }),
-    async forget(id) {
-      await invoke("desktop_remote_forget", { id });
-      await read();
+    async use(id, operationId) {
+      return settle(await invoke<NativeSwitchOutcome>("desktop_remote_use", { id: id ?? null, operationId: operationId ?? null }));
     },
-    pair: (code) => invoke("desktop_remote_pair", { code }),
+    cancel: async () => {
+      await invoke<boolean>("desktop_remote_cancel");
+    },
+    async forget(id) {
+      // Forgetting the computer in use moves the window to this computer first.
+      if (await settle(await invoke<NativeSwitchOutcome>("desktop_remote_forget", { id, operationId: null })) !== "switched") await read();
+    },
+    async pair(code) {
+      if (await settle(await invoke<NativeSwitchOutcome>("desktop_remote_pair", { code, operationId: null })) !== "switched") await read();
+    },
   };
+
+  async function settle(outcome: NativeSwitchOutcome): Promise<ComputerSwitchResult> {
+    if (outcome === "alreadyInUse") return "unchanged";
+    if (outcome === "switched") await reload();
+    return outcome;
+  }
 }

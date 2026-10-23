@@ -18,6 +18,7 @@ import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
 import { computerLink } from "./ComputerSwitcher";
 import { useComputers } from "../services/computers";
+import { computerSwitch } from "../services/computerSwitch";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -254,7 +255,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   }), [addProject, callbacks.navigation, frontendShell]);
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
   const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, "remote");
-  const useComputer = frontendShell?.computers ? frontendShell.computers.use : undefined;
+  const switchComputer = frontendShell?.computers ? computerSwitch(frontendShell.computers) : undefined;
   const desktopTitleBar = desktopWindow
     ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
     : undefined;
@@ -448,7 +449,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           computers={computers}
           computerSwitcherRequest={computerSwitcherRequest}
           onManageComputers={openComputerSettings}
-          onUseComputer={useComputer}
+          computerSwitch={switchComputer}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
@@ -589,7 +590,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         computers={computers}
         computerSwitcherRequest={computerSwitcherRequest}
         onManageComputers={closeAfter(openComputerSettings)}
-        onUseComputer={useComputer}
+        computerSwitch={switchComputer}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
         tasks={visibleTasks}

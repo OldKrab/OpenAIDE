@@ -334,7 +334,7 @@ function desktopComputers(computers = [studio]) {
     snapshot: () => snapshot,
     subscribe: () => () => undefined,
     pair: vi.fn().mockResolvedValue(undefined),
-    use: vi.fn().mockResolvedValue(undefined),
+    use: vi.fn().mockResolvedValue("switched"),
     forget: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -349,7 +349,7 @@ it("shows which computer the Desktop is connected to and switches to another", a
   await click("Use Studio");
   await settle();
 
-  expect(computers.use).toHaveBeenCalledWith(studio.id);
+  expect(computers.use).toHaveBeenCalledWith(studio.id, expect.stringMatching(/^computer-switch-/));
 });
 
 it("forgets a paired computer only after saying what happens", async () => {

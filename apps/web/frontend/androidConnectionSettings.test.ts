@@ -114,7 +114,7 @@ describe("Android connection controls", () => {
     const answer = () => { for (const request of sent()) test.receive({ type: "result", id: request.id, accepted: true }); };
     const toStudio = test.capability!.computers.use("studio");
     answer();
-    await toStudio;
+    await expect(toStudio).resolves.toBe("switched");
     const toPhone = test.capability!.computers.use();
     answer();
     await toPhone;

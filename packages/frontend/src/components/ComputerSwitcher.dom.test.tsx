@@ -3,7 +3,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ComputersSnapshot } from "../services/computers";
+import type { ComputerSwitchResult, ComputersSnapshot } from "../services/computers";
+import { computerSwitch } from "../services/computerSwitch";
 import { ComputerSwitcher, computerLink, type ComputerLink } from "./ComputerSwitcher";
 
 const studio = { id: "studio-key", name: "Studio", current: false };
@@ -32,13 +33,19 @@ describe("ComputerSwitcher", () => {
     snapshot: ComputersSnapshot | undefined,
     {
       link = "connected" as ComputerLink,
-      onUse = vi.fn(async (_id?: string): Promise<void> => undefined),
+      onUse = vi.fn(async (_id?: string, _operationId?: string): Promise<ComputerSwitchResult> => "switched"),
       onManage = vi.fn(),
       openRequest = 0,
     } = {},
   ) {
+    const switcher = computerSwitch({
+      snapshot: () => snapshot,
+      subscribe: () => () => undefined,
+      use: onUse,
+      forget: async () => undefined,
+    });
     act(() => root.render(
-      <ComputerSwitcher link={link} onManage={onManage} onUse={onUse} openRequest={openRequest} snapshot={snapshot} />,
+      <ComputerSwitcher link={link} onManage={onManage} openRequest={openRequest} snapshot={snapshot} switcher={switcher} />,
     ));
     return { onUse, onManage };
   }
@@ -85,24 +92,24 @@ describe("ComputerSwitcher", () => {
   });
 
   it("asks the shell to switch and shows the switch in progress", async () => {
-    let accept!: () => void;
-    const onUse = vi.fn(() => new Promise<void>((resolve) => { accept = resolve; }));
+    let accept!: (result: ComputerSwitchResult) => void;
+    const onUse = vi.fn(() => new Promise<ComputerSwitchResult>((resolve) => { accept = resolve; }));
     render({ device: "computer", computers: [studio] }, { onUse });
     open();
     act(() => menuItems()[1].click());
-    expect(onUse).toHaveBeenCalledWith("studio-key");
+    expect(onUse).toHaveBeenCalledWith("studio-key", expect.any(String));
     expect(trigger()!.getAttribute("aria-busy")).toBe("true");
     open();
     expect(menuItems()[1].textContent).toContain("Connecting…");
     expect(menuItems().every((item) => item.getAttribute("aria-disabled") === "true" || item.textContent === "Pair or manage computers…")).toBe(true);
-    await act(async () => accept());
+    await act(async () => accept("unchanged"));
   });
 
   it("switches back to this device without an id", () => {
     const { onUse } = render({ device: "computer", computers: [{ ...studio, current: true }] });
     open();
     act(() => menuItems()[0].click());
-    expect(onUse).toHaveBeenCalledWith(undefined);
+    expect(onUse).toHaveBeenCalledWith(undefined, expect.any(String));
   });
 
   it("closes without switching when the computer in use is chosen", () => {
@@ -114,7 +121,7 @@ describe("ComputerSwitcher", () => {
   });
 
   it("keeps the user in place with the shell's sentence when the switch is refused", async () => {
-    const onUse = vi.fn(async () => { throw new Error("Studio could not be reached."); });
+    const onUse = vi.fn(async (): Promise<ComputerSwitchResult> => { throw new Error("Studio could not be reached."); });
     render({ device: "computer", computers: [studio] }, { onUse });
     open();
     await act(async () => menuItems()[1].click());
@@ -128,7 +135,7 @@ describe("ComputerSwitcher", () => {
     const { onUse } = render({ device: "computer", computers: [studio, laptop] });
     open();
     press("3");
-    expect(onUse).toHaveBeenCalledWith("laptop-key");
+    expect(onUse).toHaveBeenCalledWith("laptop-key", expect.any(String));
   });
 
   it("ignores numbers without a row", () => {
