@@ -20,6 +20,7 @@ export function createAppServerSocketProxy({ startAppServer, currentEndpoint, lo
     const context = {
       socket_id: `web-socket-${Date.now()}-${++nextSocketNumber}`,
       connection_id: url.searchParams.get("connectionId") ?? undefined,
+      route: terminalRoute(url) ? "terminal" : "session",
     };
     let outcome;
     const finish = (reason, fields = {}) => {
@@ -66,7 +67,9 @@ export function createAppServerSocketProxy({ startAppServer, currentEndpoint, lo
     const proxyReq = http.request({
       hostname: endpoint.url.hostname,
       port: Number(endpoint.url.port),
-      path: endpoint.url.pathname + url.search,
+      // A Terminal byte stream (ADR-0071) sits beside the session socket; its
+      // single-use attach token travels inside the stream, never in the URL.
+      path: endpoint.url.pathname + (terminalRoute(url) ? "/terminal" : "") + url.search,
       method: "GET",
       headers,
     });
@@ -120,6 +123,10 @@ export function createAppServerSocketProxy({ startAppServer, currentEndpoint, lo
     });
     proxyReq.end();
   };
+}
+
+function terminalRoute(url) {
+  return url.pathname === "/__openaide-app-server/terminal";
 }
 
 function reject(socket, status, statusText) {
