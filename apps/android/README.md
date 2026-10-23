@@ -189,9 +189,10 @@ gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
 
 The APK is built for ARM64 only. The iroh library adds about 14 MB.
 
-Only a release pins the Linux App Server, with `-PopenaideSshAppServerSha256=HEX`,
-so other builds leave SSH computers out. A test build can carry the archive instead,
-with the version its binary reports:
+A release pins the published Linux App Server with `-PopenaideSshAppServerSha256=HEX`;
+a build with neither property leaves SSH computers out. CI test builds carry the
+Linux App Server built from the same commit, about 48 MB more. A local test build can
+carry an archive too, with the version its binary reports:
 `gradle -PopenaideSshAppServerArchive=/path/to/openaide-app-server-linux-x64.tar.gz -PopenaideSshAppServerVersion=0.0.0 assembleDebug`.
 
 CI separately cross-compiles the App Server with the Android NDK, builds the

@@ -56,10 +56,31 @@ jobs:
         with:
           name: android-browser-diagnostics
           path: test-results/
+  version:
+    # The version the APK reports, stamped into the Linux App Server test builds carry.
+    if: ${{ !inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - id: read
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+  linux-app-server:
+    # A release has already built this artifact in the calling workflow.
+    if: ${{ !inputs.release }}
+    needs: version
+    uses: ./.github/workflows/build-app-server-target.yml
+    with:
+      target: linux-x64-musl
+      version: ${{ needs.version.outputs.version }}
   apk:
     # Test builds carry the App Server built from the same commit, so local work
     # can be tried before the version is published. Releases download the published one.
-    needs: runtime
+    needs: [runtime, linux-app-server]
+    # The Linux App Server job is skipped in releases, which would skip this job too.
+    if: ${{ !cancelled() && needs.runtime.result == 'success' && (inputs.release || needs.linux-app-server.result == 'success') }}
     runs-on: ubuntu-24.04
     # Includes building the SSH client library and its bindings.
     timeout-minutes: 35
@@ -74,9 +95,8 @@ jobs:
         if: ${{ !inputs.release }}
         run: echo "BUNDLED_RUNTIME=-PopenaideBundledRuntime=$RUNNER_TEMP/runtime/openaide-app-server-android-arm64.tar.gz" >> "$GITHUB_ENV"
       # SSH Computers upload the Linux App Server only if its SHA-256 is built in. The release
-      # pins the binary published beside this APK; other builds leave SSH Computers out.
+      # pins the binary published beside this APK; test builds carry the one from this commit.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        if: ${{ inputs.release }}
         with:
           name: app-server-linux-x64-musl
           path: ${{ runner.temp }}/linux-app-server
@@ -109,6 +129,12 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Carry the Linux App Server in test builds
+        if: ${{ !inputs.release }}
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          node scripts/package-app-server-archive.mjs "$RUNNER_TEMP/linux-app-server/openaide-app-server" "$version" "$RUNNER_TEMP/ssh-archive"
+          echo "SSH_APP_SERVER=-PopenaideSshAppServerArchive=$RUNNER_TEMP/ssh-archive/openaide-app-server-linux-x64-$version.tar.gz" >> "$GITHUB_ENV"
       - name: Build the Frontend shipped in the APK
         run: |
           npm ci
