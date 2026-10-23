@@ -77,6 +77,8 @@ export function createAppServerSession(
     async initialize(params, meta) {
       const startedAt = Date.now();
       const initialGeneration = generation;
+      // An earlier attempt may have ended unavailable; only a failure during this one counts.
+      const statusAtStart = status;
       logger.info("app_server_session_initialize_started", {
         generation,
         has_client_request_id: Boolean(meta?.clientRequestId),
@@ -92,7 +94,7 @@ export function createAppServerSession(
         // Only the current generation may publish readiness or its baseline.
         while (recoveryGate) await recoveryGate.promise;
         if (closed) throw new Error("App Server session closed during initialization");
-        if (status.status === "unavailable") throw status.error;
+        if (status.status === "unavailable" && status !== statusAtStart) throw status.error;
         if (generation === initialGeneration) updateStatus({ status: "ready", generation });
         logger.info("app_server_session_initialize_completed", {
           generation,

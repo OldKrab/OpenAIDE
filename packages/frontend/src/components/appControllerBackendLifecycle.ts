@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -7,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
-import type { AppServerSession } from "@openaide/app-server-client";
+import { AppServerProtocolError, type AppServerSession } from "@openaide/app-server-client";
 import { refreshAgentSettingsThroughBackend } from "../intents/agentSettingsIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
@@ -23,6 +24,7 @@ import {
   postHostMessage,
   subscribeHostMessages,
 } from "../services/hostBridge";
+import { subscribeToBrowserResume } from "../services/browserResume";
 import { startHostMessageSession } from "../services/hostMessageSession";
 import { agentOptionsFromProtocol } from "../state/appServerAgents";
 import { actionsFromInitialSnapshot } from "../state/appServerInitialSnapshot";
@@ -46,6 +48,7 @@ import {
   type AsyncOperationOwner,
 } from "../state/asyncOperationOwner";
 import { postControllerStarted, postStartupRequests } from "./appControllerEffects";
+import { createAppServerInitializeRetry, type AppServerInitializeRetry } from "./appServerInitializeRetry";
 import { dispatchStartupReadError, useRoutedBootstrap } from "./appControllerRouting";
 import {
   replicaIdentityFromSnapshot,
@@ -139,6 +142,8 @@ export function useAppControllerBackendLifecycle({
     replicaIdentity,
   } = useAppServerReplicaLifecycle(dispatch, onReplicaChanged);
   const backendInitialized = useRef(false);
+  /** Runs a waiting retry of the first initialize at once; false when none is waiting. */
+  const retryInitializeNow = useRef<(() => boolean) | undefined>(undefined);
   const [backendInitializationReady, setBackendInitializationReady] = useState(false);
   const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
   const failedSubscriptionBaselines = useRef(new Map<string, string>());
@@ -196,6 +201,7 @@ export function useAppControllerBackendLifecycle({
   useEffect(() => {
     if (initialBootstrap.surface === "invalid") return;
     let active = true;
+    let initializeRetry: AppServerInitializeRetry | undefined;
     const serverRequestBridge = backendConnection?.handleRequest
       ? startAppServerServerRequestBridge({
           backendConnection: { handleRequest: backendConnection.handleRequest },
@@ -319,161 +325,180 @@ export function useAppControllerBackendLifecycle({
       });
     }, () => {
       if (backendConnection) {
-        const initializeStartedAt = Date.now();
-        sendWebviewTelemetry(postHostMessage, "app_server_initialize_started", {
-          surface: initialBootstrap.surface,
-          task_id: initialBootstrap.taskId,
-        });
-        void backendConnection
-          .initialize(initializeParamsForBootstrap(initialBootstrap))
-          .then((result) => {
-            if (!active) return;
-            const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
-            const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
-            initializedDispatch({ type: "appServer:ready" });
-            const currentBootstrap = bootstrapRef.current;
-            const ingestion = actionsFromInitialSnapshot(result.snapshot, {
-              includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
-              retainedNewTaskContext: retainedNewTaskContextForInitialization(
-                result.snapshot,
-                currentNewTaskContext.current,
-              ),
-            });
-            const subscriptionContext = mappingContextFromClientSnapshot(result.snapshot);
-            stateSubscriptionContext.current = subscriptionContext;
-            for (const action of ingestion.actions) {
-              if (action.type === "settings:preferences") setPreferences(action.preferences);
-              if (action.type === "snapshot" && action.snapshot.lifecycle === "prepared") {
-                newTaskController.updateSnapshot(action.snapshot);
-                continue;
+        let initializeAttempts = 0;
+        const attemptInitialize = () => {
+          const initializeStartedAt = Date.now();
+          const attempt = ++initializeAttempts;
+          sendWebviewTelemetry(postHostMessage, "app_server_initialize_started", {
+            surface: initialBootstrap.surface,
+            task_id: initialBootstrap.taskId,
+            attempt,
+          });
+          let initializeSucceeded = false;
+          void backendConnection
+            .initialize(initializeParamsForBootstrap(initialBootstrap))
+            .then((result) => {
+              initializeSucceeded = true;
+              if (!active) return;
+              const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
+              const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
+              initializedDispatch({ type: "appServer:ready" });
+              const currentBootstrap = bootstrapRef.current;
+              const ingestion = actionsFromInitialSnapshot(result.snapshot, {
+                includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
+                retainedNewTaskContext: retainedNewTaskContextForInitialization(
+                  result.snapshot,
+                  currentNewTaskContext.current,
+                ),
+              });
+              const subscriptionContext = mappingContextFromClientSnapshot(result.snapshot);
+              stateSubscriptionContext.current = subscriptionContext;
+              for (const action of ingestion.actions) {
+                if (action.type === "settings:preferences") setPreferences(action.preferences);
+                if (action.type === "snapshot" && action.snapshot.lifecycle === "prepared") {
+                  newTaskController.updateSnapshot(action.snapshot);
+                  continue;
+                }
+                initializedDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
               }
-              initializedDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
-            }
-            if (result.snapshot.agents) {
-              setAgents(agentOptionsFromProtocol(result.snapshot.agents));
-            }
-            if (backendConnection) {
-              const subscriptionConnection = { subscribeState: backendConnection.subscribeState };
-              stopSubscriptions.push(startAppServerStateSubscription({
-                backendConnection: subscriptionConnection,
-                context: subscriptionContext,
-                dispatch: dispatchForCurrentReplica,
-                onBaselineLost: () => markGlobalSubscriptionLost("projects"),
-                onBaselineError: (error) => markSubscriptionError("projects", error),
-                onBaselineReady: () => markSubscriptionReady("projects"),
-                scope: { kind: "projects" },
-              }));
-              stopSubscriptions.push(startAppServerStateSubscription({
-                backendConnection: subscriptionConnection,
-                context: subscriptionContext,
-                currentAgentId: () => currentAgentId.current,
-                dispatch: dispatchForCurrentReplica,
-                onBaselineLost: () => markGlobalSubscriptionLost("agents"),
-                onBaselineError: (error) => markSubscriptionError("agents", error),
-                onBaselineReady: () => markSubscriptionReady("agents"),
-                scope: { kind: "agents" },
-                setAgents,
-              }));
-              // Devices never gates readiness: the list only feeds Settings and the new-device notice.
-              stopSubscriptions.push(startAppServerStateSubscription({
-                backendConnection: subscriptionConnection,
-                context: subscriptionContext,
-                dispatch: dispatchForCurrentReplica,
-                scope: { kind: "devices" },
-              }));
-              for (const project of result.snapshot.projects?.projects ?? []) {
-                if (!project.worktreeRepositoryId) continue;
+              if (result.snapshot.agents) {
+                setAgents(agentOptionsFromProtocol(result.snapshot.agents));
+              }
+              if (backendConnection) {
+                const subscriptionConnection = { subscribeState: backendConnection.subscribeState };
                 stopSubscriptions.push(startAppServerStateSubscription({
                   backendConnection: subscriptionConnection,
                   context: subscriptionContext,
                   dispatch: dispatchForCurrentReplica,
-                  scope: {
-                    kind: "worktreeRepository",
-                    repositoryId: project.worktreeRepositoryId,
-                  },
+                  onBaselineLost: () => markGlobalSubscriptionLost("projects"),
+                  onBaselineError: (error) => markSubscriptionError("projects", error),
+                  onBaselineReady: () => markSubscriptionReady("projects"),
+                  scope: { kind: "projects" },
                 }));
+                stopSubscriptions.push(startAppServerStateSubscription({
+                  backendConnection: subscriptionConnection,
+                  context: subscriptionContext,
+                  currentAgentId: () => currentAgentId.current,
+                  dispatch: dispatchForCurrentReplica,
+                  onBaselineLost: () => markGlobalSubscriptionLost("agents"),
+                  onBaselineError: (error) => markSubscriptionError("agents", error),
+                  onBaselineReady: () => markSubscriptionReady("agents"),
+                  scope: { kind: "agents" },
+                  setAgents,
+                }));
+                // Devices never gates readiness: the list only feeds Settings and the new-device notice.
+                stopSubscriptions.push(startAppServerStateSubscription({
+                  backendConnection: subscriptionConnection,
+                  context: subscriptionContext,
+                  dispatch: dispatchForCurrentReplica,
+                  scope: { kind: "devices" },
+                }));
+                for (const project of result.snapshot.projects?.projects ?? []) {
+                  if (!project.worktreeRepositoryId) continue;
+                  stopSubscriptions.push(startAppServerStateSubscription({
+                    backendConnection: subscriptionConnection,
+                    context: subscriptionContext,
+                    dispatch: dispatchForCurrentReplica,
+                    scope: {
+                      kind: "worktreeRepository",
+                      repositoryId: project.worktreeRepositoryId,
+                    },
+                  }));
+                }
               }
-            }
-            if (initialBootstrap.surface === "settings") {
-              if (initialBootstrap.settingsTab) {
-                initializedDispatch({ type: "settings:tab", tab: initialBootstrap.settingsTab });
+              if (initialBootstrap.surface === "settings") {
+                if (initialBootstrap.settingsTab) {
+                  initializedDispatch({ type: "settings:tab", tab: initialBootstrap.settingsTab });
+                }
+                initializedDispatch({ type: "settings:start" });
+                void refreshSettingsProjectionsThroughBackend({
+                  backendConnection: { request: backendConnection.request },
+                  currentAgentId: currentAgentId.current,
+                  dispatch: initializedDispatch,
+                  setAgents,
+                  state,
+                }).catch((error) => {
+                  initializedDispatch({
+                    type: "settings:error",
+                    message: error instanceof Error
+                      ? error.message
+                      : "Unable to load Agent settings from App Server",
+                  });
+                });
               }
-              initializedDispatch({ type: "settings:start" });
-              void refreshSettingsProjectionsThroughBackend({
+              // Task surfaces render Agent identity for Tasks whose Agent is no longer in the
+              // runtime catalog, and the Settings projection is the only source for a disabled
+              // Agent's configured icon. Load it once per client so history keeps it after a
+              // restart, not only after Settings was opened.
+              void refreshAgentSettingsThroughBackend({
                 backendConnection: { request: backendConnection.request },
                 currentAgentId: currentAgentId.current,
                 dispatch: initializedDispatch,
                 setAgents,
                 state,
-              }).catch((error) => {
-                initializedDispatch({
-                  type: "settings:error",
-                  message: error instanceof Error
-                    ? error.message
-                    : "Unable to load Agent settings from App Server",
-                });
+              }).catch(() => undefined);
+              // Route opening also starts App Server recovery work, so the route effect must
+              // own task/open even when initialize already supplied cached task state.
+              backendInitialized.current = true;
+              setBackendInitializationReady(true);
+              setBackendSessionReady(true);
+              sendWebviewTelemetry(postHostMessage, "app_server_initialize_completed", {
+                surface: initialBootstrap.surface,
+                task_id: initialBootstrap.taskId,
+                duration_ms: Date.now() - initializeStartedAt,
+                attempt,
               });
-            }
-            // Task surfaces render Agent identity for Tasks whose Agent is no longer in the
-            // runtime catalog, and the Settings projection is the only source for a disabled
-            // Agent's configured icon. Load it once per client so history keeps it after a
-            // restart, not only after Settings was opened.
-            void refreshAgentSettingsThroughBackend({
-              backendConnection: { request: backendConnection.request },
-              currentAgentId: currentAgentId.current,
-              dispatch: initializedDispatch,
-              setAgents,
-              state,
-            }).catch(() => undefined);
-            // Route opening also starts App Server recovery work, so the route effect must
-            // own task/open even when initialize already supplied cached task state.
-            backendInitialized.current = true;
-            setBackendInitializationReady(true);
-            setBackendSessionReady(true);
-            sendWebviewTelemetry(postHostMessage, "app_server_initialize_completed", {
-              surface: initialBootstrap.surface,
-              task_id: initialBootstrap.taskId,
-              duration_ms: Date.now() - initializeStartedAt,
+              const projectSelection = ingestion.newTaskProjectSelection;
+              sendWebviewTelemetry(postHostMessage, "new_task_initial_project_selected", {
+                surface: initialBootstrap.surface,
+                project_id: projectSelection.projectId,
+                selection_source: projectSelection.source,
+                client_identity_source: initialBootstrap.clientInstanceId ? "shell" : "web_storage",
+                shell_project_present: projectSelection.shellProjectPresent,
+                shell_project_valid: projectSelection.shellProjectValid,
+                retained_project_present: projectSelection.retainedProjectPresent,
+                retained_project_valid: projectSelection.retainedProjectValid,
+                default_project_present: projectSelection.defaultProjectPresent,
+                default_project_valid: projectSelection.defaultProjectValid,
+              });
+              const globalBaselinesReady = pendingGlobalSubscriptionBaselines.current.size === 0;
+              setBackendReady(globalBaselinesReady);
+              if (failedSubscriptionBaselines.current.size === 0 && globalBaselinesReady) {
+                setBackendConnectionState({ status: "ready" });
+              }
+            })
+            .catch((error) => {
+              if (!active) return;
+              sendWebviewTelemetry(postHostMessage, "app_server_initialize_failed", {
+                surface: initialBootstrap.surface,
+                task_id: initialBootstrap.taskId,
+                duration_ms: Date.now() - initializeStartedAt,
+                attempt,
+                error_name: errorName(error),
+                ...(error instanceof AppServerProtocolError ? { error_code: error.protocolError.code } : {}),
+              });
+              backendInitialized.current = false;
+              setBackendInitializationReady(false);
+              setBackendSessionReady(false);
+              setBackendReady(false);
+              const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
+              setBackendConnectionState({ status: "unavailable", message });
+              dispatch({
+                type: "appServer:error",
+                message,
+              });
+              dispatchStartupReadError(bootstrap, dispatch, message);
+              // A failure while applying a successful initialize is not retried:
+              // the connection keeps that result, and a retry would apply it again.
+              if (!initializeSucceeded) initializeRetry?.failed();
             });
-            const projectSelection = ingestion.newTaskProjectSelection;
-            sendWebviewTelemetry(postHostMessage, "new_task_initial_project_selected", {
-              surface: initialBootstrap.surface,
-              project_id: projectSelection.projectId,
-              selection_source: projectSelection.source,
-              client_identity_source: initialBootstrap.clientInstanceId ? "shell" : "web_storage",
-              shell_project_present: projectSelection.shellProjectPresent,
-              shell_project_valid: projectSelection.shellProjectValid,
-              retained_project_present: projectSelection.retainedProjectPresent,
-              retained_project_valid: projectSelection.retainedProjectValid,
-              default_project_present: projectSelection.defaultProjectPresent,
-              default_project_valid: projectSelection.defaultProjectValid,
-            });
-            const globalBaselinesReady = pendingGlobalSubscriptionBaselines.current.size === 0;
-            setBackendReady(globalBaselinesReady);
-            if (failedSubscriptionBaselines.current.size === 0 && globalBaselinesReady) {
-              setBackendConnectionState({ status: "ready" });
-            }
-          })
-          .catch((error) => {
-            if (!active) return;
-            sendWebviewTelemetry(postHostMessage, "app_server_initialize_failed", {
-              surface: initialBootstrap.surface,
-              task_id: initialBootstrap.taskId,
-              duration_ms: Date.now() - initializeStartedAt,
-              error_name: errorName(error),
-            });
-            backendInitialized.current = false;
-            setBackendInitializationReady(false);
-            setBackendSessionReady(false);
-            setBackendReady(false);
-            const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
-            setBackendConnectionState({ status: "unavailable", message });
-            dispatch({
-              type: "appServer:error",
-              message,
-            });
-            dispatchStartupReadError(bootstrap, dispatch, message);
-          });
+        };
+        initializeRetry = createAppServerInitializeRetry({
+          attempt: attemptInitialize,
+          subscribeToResume: subscribeToBrowserResume,
+        });
+        retryInitializeNow.current = initializeRetry.retryNow;
+        attemptInitialize();
       } else {
         sendWebviewTelemetry(postHostMessage, "app_server_connection_unavailable", {
           surface: initialBootstrap.surface,
@@ -501,6 +526,8 @@ export function useAppControllerBackendLifecycle({
     });
     return () => {
       active = false;
+      initializeRetry?.dispose();
+      retryInitializeNow.current = undefined;
       backendInitialized.current = false;
       setBackendInitializationReady(false);
       setBackendSessionReady(false);
@@ -585,6 +612,13 @@ export function useAppControllerBackendLifecycle({
     stateSubscriptionContext,
   });
 
+  // The connection's Retry also starts over a first initialize that failed.
+  const routeRetryTaskOpen = taskRouteLifecycle.retryTaskOpen;
+  const retryTaskOpen = useCallback(() => {
+    if (retryInitializeNow.current?.()) return;
+    routeRetryTaskOpen();
+  }, [routeRetryTaskOpen]);
+
   return {
     acceptSnapshotRequest,
     backendInitialized,
@@ -598,7 +632,7 @@ export function useAppControllerBackendLifecycle({
     createSnapshotRequestId,
     operationOwner,
     replicaEpoch,
-    retryTaskOpen: taskRouteLifecycle.retryTaskOpen,
+    retryTaskOpen,
   };
 }
 

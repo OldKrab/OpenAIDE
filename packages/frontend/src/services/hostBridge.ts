@@ -129,6 +129,7 @@ function createFrontendDiagnosticsLogger(): DiagnosticsLogger {
   };
 }
 
+import { subscribeToBrowserResume } from "./browserResume";
 import { rearmSuspendedAnimations } from "./resumeAnimations";
 
 /** Transport identity is disposable and must never double as the logical App Shell client. */
@@ -138,31 +139,9 @@ function createTransportConnectionId() {
 
 /** Converts browser lifecycle restoration into a replayable transport receive wake-up. */
 function subscribeToBrowserWake(wake: () => void) {
-  let wasHidden = document.visibilityState === "hidden";
-  const resumed = () => {
+  return subscribeToBrowserResume(() => {
     // A suspended renderer stops its poll and can leave CSS animations frozen.
     rearmSuspendedAnimations();
     wake();
-  };
-  const handleVisibilityChange = () => {
-    const hidden = document.visibilityState === "hidden";
-    if (wasHidden && !hidden) resumed();
-    wasHidden = hidden;
-  };
-  const handlePageShow = () => resumed();
-  const handleOnline = () => resumed();
-  // Focus covers a machine resume where the window was never hidden.
-  const handleFocus = () => resumed();
-  document.addEventListener?.("visibilitychange", handleVisibilityChange);
-  window.addEventListener?.("pageshow", handlePageShow);
-  window.addEventListener?.("online", handleOnline);
-  window.addEventListener?.("focus", handleFocus);
-  window.addEventListener?.("openaide:resume", handlePageShow);
-  return () => {
-    document.removeEventListener?.("visibilitychange", handleVisibilityChange);
-    window.removeEventListener?.("pageshow", handlePageShow);
-    window.removeEventListener?.("online", handleOnline);
-    window.removeEventListener?.("focus", handleFocus);
-    window.removeEventListener?.("openaide:resume", handlePageShow);
-  };
+  });
 }
