@@ -12,7 +12,10 @@ public class AttentionNotificationsTest {
 
     @Test public void startupBacklogStaysSilent() {
         AttentionNotifications policy = new AttentionNotifications();
-        assertTrue(policy.observe(List.of(event("task-1", "event-1", HIDDEN_AT + 5)), false, HIDDEN_AT).isEmpty());
+        AttentionNotifications.Decision decision = policy.observe(List.of(event("task-1", "event-1", HIDDEN_AT + 5)), false, HIDDEN_AT);
+
+        assertTrue(decision.show.isEmpty());
+        assertEquals(1, decision.baseline);
     }
 
     @Test public void eventAfterLeavingTheScreenNotifiesOnce() {
@@ -20,19 +23,26 @@ public class AttentionNotificationsTest {
         policy.observe(Collections.emptyList(), true, 0);
         List<AttentionNotifications.Attention> current = List.of(event("task-1", "event-1", HIDDEN_AT + 5));
 
-        List<AttentionNotifications.Attention> shown = policy.observe(current, false, HIDDEN_AT);
+        List<AttentionNotifications.Attention> shown = policy.observe(current, false, HIDDEN_AT).show;
 
         assertEquals(1, shown.size());
         assertEquals("task-1", shown.get(0).taskId);
-        assertTrue(policy.observe(current, false, HIDDEN_AT).isEmpty());
+        AttentionNotifications.Decision repeated = policy.observe(current, false, HIDDEN_AT);
+        assertTrue(repeated.show.isEmpty());
+        assertEquals(0, repeated.baseline + repeated.inSight);
     }
 
     @Test public void eventThatOccurredInSightStaysInProduct() {
         AttentionNotifications policy = new AttentionNotifications();
         policy.observe(Collections.emptyList(), true, 0);
 
-        assertTrue(policy.observe(List.of(event("task-1", "event-1", HIDDEN_AT + 5)), true, 0).isEmpty());
-        assertTrue(policy.observe(List.of(event("task-2", "event-2", HIDDEN_AT - 5)), false, HIDDEN_AT).isEmpty());
+        AttentionNotifications.Decision visible = policy.observe(List.of(event("task-1", "event-1", HIDDEN_AT + 5)), true, 0);
+        AttentionNotifications.Decision before = policy.observe(List.of(event("task-2", "event-2", HIDDEN_AT - 5)), false, HIDDEN_AT);
+
+        assertTrue(visible.show.isEmpty());
+        assertEquals(1, visible.inSight);
+        assertTrue(before.show.isEmpty());
+        assertEquals(1, before.inSight);
     }
 
     @Test public void notificationIsWithdrawnOnceItsEventIsNoLongerCurrent() {

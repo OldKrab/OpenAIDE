@@ -11,6 +11,7 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use super::{GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGateway};
 use file_upload::{AppendChunkOutcome, ChunkUploadError, ChunkUploadRegistry, ChunkUploadRequest};
 
+mod attention_wait;
 mod event_streams;
 mod file_upload;
 pub mod listener;

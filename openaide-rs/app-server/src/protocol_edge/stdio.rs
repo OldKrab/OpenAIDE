@@ -83,7 +83,7 @@ impl ProtocolEdgeStdioDispatcher {
         let (agent_statuses, agent_status_updates) =
             crate::agent::status_cache::AgentStatusCache::channel();
         let agent_runtime = Arc::new(
-            AcpAgentRuntime::new_with_managed_codex(
+            AcpAgentRuntime::new_with_managed_runtimes(
                 agent_registry.clone(),
                 host_bridge.clone(),
                 state_root.path().to_path_buf(),

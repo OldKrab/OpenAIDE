@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use agent_client_protocol::AcpAgent;
 
 use crate::agent::acp_trace::AcpTraceSession;
+use crate::agent::managed_acp_provisioner::ManagedAcpRuntime;
 use crate::agent::AgentSecretResolver;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -12,22 +13,6 @@ use crate::protocol::host::HostBridge;
 #[cfg(test)]
 #[path = "acp_agent_config_tests.rs"]
 mod tests;
-
-// Launch policy follows the exact dependency graph installed by the provisioner.
-const CODEX_ACP_POLICY: &str = include_str!("../../assets/codex-acp-runtime/package.json");
-
-fn product_codex_acp_spec() -> String {
-    let policy: serde_json::Value =
-        serde_json::from_str(CODEX_ACP_POLICY).expect("embedded Codex ACP policy is valid JSON");
-    let version = policy["dependencies"]["@openaide/codex-acp"]
-        .as_str()
-        .expect("embedded Codex ACP policy includes its package version");
-    format!("@openaide/codex-acp@{version}")
-}
-// The shared catalog and App Server consume the same workflow-managed policy.
-const CLAUDE_ACP_POLICY: &str = include_str!(
-    "../../../../packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json"
-);
 
 #[derive(Debug, Clone)]
 pub struct AcpAgentConfig {
@@ -51,30 +36,23 @@ impl AcpAgentConfig {
     /// This declaration identifies the locked package policy. Production resolves it
     /// to the per-user managed installation before any process command is evaluated.
     pub(crate) fn codex_managed_package() -> Self {
-        Self {
-            agent_id: "codex".to_string(),
-            command: resolved_command_or_name("npx"),
-            args: vec!["-y".to_string(), product_codex_acp_spec()],
-            env: Vec::new(),
-            secret_env: Vec::new(),
-        }
+        Self::managed_package(ManagedAcpRuntime::Codex)
     }
 
     /// Pin the Claude adapter rather than selecting an arbitrary executable from PATH.
     /// The adapter bundles the Claude runtime and owns authentication and session storage.
+    /// Like Codex, production resolves it to the per-user managed installation.
     pub fn claude_code() -> Self {
-        let policy: serde_json::Value = serde_json::from_str(CLAUDE_ACP_POLICY)
-            .expect("embedded Claude ACP policy is valid JSON");
-        let version = policy["dependencies"]["@openaide/claude-agent-acp"]
-            .as_str()
-            .expect("embedded Claude ACP policy includes its package version");
+        Self::managed_package(ManagedAcpRuntime::Claude)
+    }
+
+    /// The declaration keeps the `npx -y` form so a runtime without the provisioner
+    /// (tests, embedders) can still launch the same pinned package.
+    fn managed_package(runtime: ManagedAcpRuntime) -> Self {
         Self {
-            agent_id: "claude-code".to_string(),
+            agent_id: runtime.agent_id().to_string(),
             command: resolved_command_or_name("npx"),
-            args: vec![
-                "-y".to_string(),
-                format!("@openaide/claude-agent-acp@{version}"),
-            ],
+            args: vec!["-y".to_string(), runtime.declared_spec()],
             env: Vec::new(),
             secret_env: Vec::new(),
         }
@@ -138,24 +116,16 @@ impl AcpAgentConfig {
         }
     }
 
-    pub(crate) fn diagnostic_launcher_kind(&self) -> &'static str {
-        let command_name = Path::new(&self.command).file_stem().and_then(OsStr::to_str);
-        if command_name.is_some_and(|name| name.eq_ignore_ascii_case("npx"))
-            && self.args == ["-y", &product_codex_acp_spec()]
-        {
-            "managed_package"
-        } else {
-            "configured_command"
-        }
-    }
-
-    pub(crate) fn uses_product_pinned_codex_package(&self) -> bool {
-        self.agent_id == "codex"
-            && Path::new(&self.command)
-                .file_stem()
-                .and_then(OsStr::to_str)
-                .is_some_and(|name| name.eq_ignore_ascii_case("npx"))
-            && self.args == ["-y", &product_codex_acp_spec()]
+    /// The managed runtime this unchanged product declaration resolves to. A
+    /// replaced launch (tests, Custom Agents under a built-in id) keeps its command.
+    pub(crate) fn managed_runtime(&self) -> Option<ManagedAcpRuntime> {
+        let runtime = ManagedAcpRuntime::for_agent(&self.agent_id)?;
+        let launcher_is_npx = Path::new(&self.command)
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.eq_ignore_ascii_case("npx"));
+        (launcher_is_npx && self.args == ["-y".to_string(), runtime.declared_spec()])
+            .then_some(runtime)
     }
 
     pub(super) fn secret_env_values(

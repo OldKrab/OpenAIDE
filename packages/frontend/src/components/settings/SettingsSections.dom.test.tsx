@@ -594,6 +594,18 @@ it("asks before an update stops active work", async () => {
   expect(capability.restartAndUpdate).toHaveBeenNthCalledWith(2, { stopActiveWork: true });
 });
 
+it("hands a ready update to the system installer instead of restarting", async () => {
+  const capability = { ...updates({ revision: 3, installedVersion: "1.0.0", kind: "readyToUpdate", offer: { version: "1.1.0", notes: "Fixes", sizeBytes: 10 } }), installation: "systemInstaller" as const };
+  useShell({ desktopUpdates: capability });
+  await mountSettings();
+
+  expect(row("OpenAIDE 1.0.0").textContent).toContain("OpenAIDE closes while it installs.");
+  expect(buttons("Restart and update")).toHaveLength(0);
+  await click("Install update");
+
+  expect(capability.restartAndUpdate).toHaveBeenCalledOnce();
+});
+
 it("explains why a development build cannot update", async () => {
   useShell({ desktopUpdates: updates({ revision: 1, installedVersion: "1.0.0", kind: "unavailable", unavailableReason: "developmentBuild" }) });
   await mountSettings();

@@ -129,6 +129,11 @@ export type DesktopUpdateSnapshot = {
 
 /** Fixed native updater operations; callers cannot provide trust or transport configuration. */
 export type DesktopUpdateCapability = {
+  /**
+   * How an update is applied: the shell restarts itself (default), or hands the
+   * package to the operating system's installer, which closes the app.
+   */
+  installation?: "restart" | "systemInstaller";
   snapshot(): DesktopUpdateSnapshot;
   subscribe(listener: () => void): () => void;
   check(): Promise<void>;

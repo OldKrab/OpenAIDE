@@ -38,20 +38,30 @@ final class AttentionNotifications {
         }
     }
 
+    /** What one list decided: the events to show, and how many new ones stayed silent and why. */
+    static final class Decision {
+        final List<Attention> show = new ArrayList<>();
+        /** New events in the first list the service read. */
+        int baseline;
+        /** New events that occurred while the app was on the screen. */
+        int inSight;
+    }
+
     private final Set<String> handled = new LinkedHashSet<>();
     private boolean baselineInstalled;
 
     /** Applies one authoritative list; `hiddenSince` is the wall-clock time the app left the screen. */
-    List<Attention> observe(List<Attention> current, boolean visible, long hiddenSince) {
-        List<Attention> show = new ArrayList<>();
+    Decision observe(List<Attention> current, boolean visible, long hiddenSince) {
+        Decision decision = new Decision();
         boolean baseline = !baselineInstalled;
         baselineInstalled = true;
         for (Attention attention : current) {
-            if (!remember(attention.eventId) || baseline) continue;
-            if (visible || attention.occurredAt < hiddenSince) continue;
-            show.add(attention);
+            if (!remember(attention.eventId)) continue;
+            if (baseline) decision.baseline++;
+            else if (visible || attention.occurredAt < hiddenSince) decision.inSight++;
+            else decision.show.add(attention);
         }
-        return show;
+        return decision;
     }
 
     /** The Tasks whose shown notification, by Task id to event id, no longer matches their current event. */

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.1 - 2026-10-20
+
+### Agents
+- Install Claude Code once into OpenAIDE's own storage, the way Codex is installed, and show "Installing the Claude Code integration…" while it downloads. This fixes Claude Code failing to start on every launch after a first start was interrupted while npm installed it.
+- Keep an Agent that is still installing through a slow first start instead of stopping it, and repair a broken npx cache entry left by an interrupted install.
+- Record why an Agent process ended — exit code, whether it initialized, and why App Server stopped it — in logs and support exports.
+
+### Android
+- Update the app from the newest stable release: a notification announces a new version, and Settings → General → Updates downloads, verifies, and installs it.
+
 ## 0.10.0 - 2026-10-19
 
 ### Remote Devices

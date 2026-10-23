@@ -56,6 +56,31 @@ describe("AppServerSession", () => {
     }
   });
 
+  it("declares a later initialization ready after an earlier one ended unavailable", async () => {
+    vi.useFakeTimers();
+    const obsolete = deferred<StateSubscribeResult>();
+    const raw = fakeConnection(async () => obsolete.promise);
+    const session = createAppServerSession(raw.connection);
+    const statuses: string[] = [];
+    session.handleSessionStatus((status) => statuses.push(status.status));
+    session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, { onSnapshot: vi.fn() });
+    const first = session.initialize(initializeParams()).then(() => "ready", (error: Error) => error.message);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      raw.invalidate();
+      raw.fail(new Error("Recovery failed"));
+      obsolete.resolve(taskSubscription("obsolete", 1));
+      await expect(first).resolves.toMatch(/Recovery failed/);
+      expect(statuses.at(-1)).toBe("unavailable");
+
+      await expect(session.initialize(initializeParams())).resolves.toEqual(initializeResult());
+      expect(statuses.at(-1)).toBe("ready");
+    } finally {
+      session.close();
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["failed", "closed"])("does not declare initialization ready after recovery is %s", async (outcome) => {
     vi.useFakeTimers();
     const obsolete = deferred<StateSubscribeResult>();

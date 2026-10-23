@@ -96,8 +96,17 @@ settling period protects a send immediately followed by screen lock. Temporary
 status failures have a two-minute recovery grace, followed by a visible recovery
 notification rather than an unbounded wake lock. The same task reads carry each Task's
 attention event: a task that finishes or needs you while the app is hidden gets its own
-notification, which opens that task. They are local-only; remote push notifications are
-not implemented.
+notification, which opens that task.
+
+With a paired computer, the same service keeps a watch on the computer's attention
+events instead, so its tasks notify too. It holds no wake lock and does not stop when
+idle: one `taskAttention/wait` stays open over the paired connection, and the computer
+answers when the set changes or after 25 seconds. Its notification shows **Connected**,
+**Reconnecting…**, or why it stopped (phone removed, versions differ, computer too old).
+**Turn off** ends it, as for local work; Settings shows the same switch as **Task notifications** while a computer is in use. A lost connection is retried at once, then at
+growing intervals up to a minute; while the phone sleeps, retries wait until Android
+next lets the app run. There is no push service: notifications stop when the app
+process is gone.
 
 Hidden WebView timers pause; returning resumes the existing transport and draft.
 Idle foreground checks run less frequently, status reads coalesce, and ordinary
@@ -144,8 +153,8 @@ keeps working with Codex; the step that failed is in
 The runtime artifact currently targets ARM64 phones only.
 
 1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
-2. Download and unzip the `app-server-android-arm64` and `android` artifacts. Use
-   `openaide-android.apk` for everyday use; `android-debug` is for development.
+2. Download and unzip the `app-server-android-arm64` and `android` artifacts, and
+   install `openaide-android.apk`.
 3. Transfer `openaide-app-server-android-arm64.tar.gz` into Termux and extract it:
 
    ```sh
@@ -203,10 +212,12 @@ so shared Frontend and transport changes cannot bypass Android builds. Each run
 uploads the ARM64 Termux runtime as `app-server-android-arm64`; a failed run also
 uploads its unit/lint reports as `android-apk-diagnostics`. Device tests still require
 a configured phone; CI compilation is not a substitute for executing them via ADB.
-With the persistent signing secrets configured, pushes and manual dispatch produce
-`android/openaide-android.apk`, a non-debuggable user build signed with the stable
-key. Pull requests and runs without the secrets upload
-`android-debug/openaide-android-debug.apk` instead. Store distribution still needs
+With the persistent signing secrets configured, pushes, manual dispatch and pull
+requests from this repository produce `android/openaide-android.apk`, a
+non-debuggable user build signed with the stable key, and outside releases also the
+unzipped `openaide-android.apk` artifact, which a phone can install from its link. Fork pull requests and runs
+without the secrets upload no APK, since a per-runner debug key cannot update an
+installed app. Store distribution still needs
 its own signing/review process; the current persistent development certificate is
 retained for in-place updates on existing test phones.
 The canonical Release workflow also requires a signed user APK and matching runtime
@@ -228,8 +239,8 @@ task creation, streaming, tool approvals, attachments, Back navigation, rotation
 reconnection, and recovery after Termux is stopped. APK compilation alone does
 not establish working Codex execution on Android.
 
-Remote push notifications and automatic runtime-update application
-are not implemented. Shared task and settings behavior stays
+Push notifications after the app process is gone and automatic runtime-update application
+are not implemented; app updates are described in [App updates](#app-updates). Shared task and settings behavior stays
 in the existing Frontend and App Server.
 
 Android Back navigates page history, then backgrounds the app. Returning wakes
@@ -243,14 +254,20 @@ Termux** in Android settings; Doze, vendor restrictions, force-stop, reboot or
 memory pressure can still interrupt execution. This is not a guarantee against
 Android killing processes. Turning off background mode releases protection; it
 does not cancel tasks or stop the Termux server. The service uses the `specialUse`
-type for user-enabled local agent execution, which requires review before store
-distribution.
+type for user-enabled local agent execution and for the paired-computer watch, which
+requires review before store distribution.
 
 Use **Settings → Remote** (or long-press the launcher icon
 and choose **App settings**) for setup, battery controls and
-**Advanced → Connection diagnostics → Share**. Offline setup calls this **Share diagnostics**.
+**Advanced → Share diagnostics**. In the workspace, the same log is in
+**Settings → Troubleshooting → Logs from this phone → Share**.
 Logs include picker readability/delivery and WebView error
 metadata, but exclude file names, URLs, message content and secrets.
+To explain a missing Task notification, they record each new attention event as
+shown, blocked (app or channel), suppressed (startup baseline or in sight) or
+withdrawn, the notification permission answer, and why background work stopped.
+The paired-computer watch records `remote_attention` when it starts, when it first
+watches, each persisting retry with its cause, and how it ended.
 
 Downloads the workspace starts (File Viewer, sent files, support exports) are
 fetched again by the app through its gateway and saved to Downloads; Android 8–9
@@ -301,6 +318,29 @@ assets, rejects all other resources/navigation, disables file/provider access, a
 applies a CSP that forbids network requests, frames and inline scripts. The camera
 scanner is a separate native screen that returns only the code's text. See
 [Android WebView bridge security guidance](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges).
+
+## App updates
+
+The app updates itself from the newest stable GitHub release; prereleases and
+drafts are never offered. It checks when it starts, at most every 12 hours, and
+once a day while closed, through a persisted `JobScheduler` job. A newer version
+posts one notification; tapping it opens Settings → General → Updates. Nothing is
+downloaded or installed until the user taps there.
+
+The release must carry `openaide-android-<version>.apk` at its canonical download
+address with a GitHub `sha256` digest. The app streams it to its cache, checks the
+size and digest, then checks that the archive's package, version and signing
+certificate match the installed app before offering Install. Install hands the APK
+to Android's package installer. Android asks once for **Install unknown apps**, and
+may ask to confirm the update; Android 12 and newer can skip that confirmation.
+Debug and side-by-side builds show updates as unavailable, because their package
+or signature differs from the release.
+
+Only the APK is replaced. The App Server in Termux keeps running; when the new
+app opens, setup offers the matching runtime as it does after a manual update.
+A phone that uses a paired computer never downloads a runtime. Each check,
+download, install and notification logs `app_update_*` start and terminal events
+with the version, outcome and a classified reason.
 
 ## Device validation
 

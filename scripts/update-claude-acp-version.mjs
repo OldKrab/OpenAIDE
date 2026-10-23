@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -20,7 +22,7 @@ function requireExactVersion(value, source) {
 
 // A requested version comes from the adapter's publish workflow; a scheduled
 // run follows the `latest` dist-tag. Either must already resolve on npm,
-// because the built-in launches this exact version through npx.
+// because App Server installs this exact version from the lockfile.
 async function publishedVersion(requested) {
   const override = process.env.CLAUDE_ACP_PUBLISHED_VERSION;
   if (override) {
@@ -36,6 +38,29 @@ async function publishedVersion(requested) {
 
   const metadata = await response.json();
   return metadata.version;
+}
+
+// App Server installs the managed runtime with `npm ci`, so the lockfile must
+// describe the pinned version's whole graph, including every platform binary.
+async function updateLockfile(version) {
+  const lockfilePath = path.join(path.dirname(policyPath), "package-lock.json");
+  if (process.env.CLAUDE_ACP_SKIP_LOCKFILE !== "1") {
+    const result = spawnSync(
+      "npm",
+      ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"],
+      { cwd: path.dirname(policyPath), shell: process.platform === "win32", stdio: "inherit" },
+    );
+    if (result.status !== 0) {
+      throw new Error(`npm could not lock ${packageName}@${version}`);
+    }
+  }
+  const lock = JSON.parse(await readFile(lockfilePath, "utf8"));
+  if (
+    lock.packages?.[""]?.dependencies?.[packageName] !== version ||
+    lock.packages?.[`node_modules/${packageName}`]?.version !== version
+  ) {
+    throw new Error(`package-lock.json does not lock ${packageName}@${version}`);
+  }
 }
 
 async function emitOutput(name, value) {
@@ -58,6 +83,7 @@ const changed = current !== latest;
 if (changed) {
   policy.dependencies[packageName] = latest;
   await writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
+  await updateLockfile(latest);
   console.log(`${packageName} pin updated from ${current} to ${latest}`);
 } else {
   console.log(`${packageName} is already current at ${current}`);

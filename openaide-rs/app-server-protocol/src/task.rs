@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod attention;
 mod session_deletion;
+pub use attention::*;
 pub use session_deletion::*;
 
 use crate::attachment::PreSendAttachment;

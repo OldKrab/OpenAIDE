@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::Instant;
 
 /// Where a trusted stream is delivered: the local listener and the token it accepts.
 #[derive(Clone)]
@@ -28,6 +29,11 @@ const MAX_HEAD_BYTES: usize = 16 * 1024;
 const HEAD_TIMEOUT: Duration = Duration::from_secs(30);
 const HEAD_END: &[u8] = b"\r\n\r\n";
 const CONNECTION_ID_HEADER: &str = "x-openaide-connection-id";
+const COPY_CHUNK_BYTES: usize = 64 * 1024;
+/// A write to the device that waits this long means the device is not taking
+/// data: its connection stalled, or it stopped reading this stream. Healthy
+/// writes finish in about one round trip, even over a relay.
+const WRITE_STALL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum BridgeError {
@@ -52,6 +58,16 @@ impl BridgeError {
     }
 }
 
+/// A response write to the device that waited at least [`WRITE_STALL`].
+///
+/// `Started` is reported once the wait passes the threshold, so a stall that
+/// never ends is still visible; `Ended` follows only if the write finishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriteStall {
+    Started,
+    Ended { waited: Duration, delivered: bool },
+}
+
 /// The rewritten request head and the facts the edge records about it.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct TrustedHead {
@@ -59,12 +75,14 @@ pub(crate) struct TrustedHead {
     pub connection_id: Option<String>,
 }
 
-/// Runs until either side finishes. `on_head` sees the protocol connection id once.
+/// Runs until either side finishes. `on_head` sees the protocol connection id
+/// once; `on_stall` sees every response write that waits on the device.
 pub(crate) async fn forward<R, W>(
     mut recv: R,
     mut send: W,
     target: &BridgeTarget,
     on_head: impl FnOnce(&TrustedHead),
+    on_stall: impl FnMut(WriteStall),
 ) -> Result<(), BridgeError>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -96,7 +114,7 @@ where
         copied
     };
     let downstream = async {
-        let copied = tokio::io::copy(&mut local_read, &mut send).await;
+        let copied = copy_to_device(&mut local_read, &mut send, on_stall).await;
         let _ = send.shutdown().await;
         copied
     };
@@ -110,6 +128,40 @@ where
             Ok(_) => downstream.await.map(|_| ()).map_err(|_| BridgeError::Stream),
             Err(_) => Err(BridgeError::Stream),
         },
+    }
+}
+
+/// Copies the response to the device, timing each write so a device that stops
+/// taking data is reported while the wait is still running.
+async fn copy_to_device<R, W>(
+    from: &mut R,
+    to: &mut W,
+    mut on_stall: impl FnMut(WriteStall),
+) -> std::io::Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let mut buffer = vec![0u8; COPY_CHUNK_BYTES];
+    loop {
+        let read = from.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let write = to.write_all(&buffer[..read]);
+        tokio::pin!(write);
+        if let Ok(result) = tokio::time::timeout(WRITE_STALL, &mut write).await {
+            result?;
+            continue;
+        }
+        on_stall(WriteStall::Started);
+        let result = write.await;
+        on_stall(WriteStall::Ended {
+            waited: started.elapsed(),
+            delivered: result.is_ok(),
+        });
+        result?;
     }
 }
 

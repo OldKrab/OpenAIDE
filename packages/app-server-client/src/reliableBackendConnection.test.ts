@@ -549,6 +549,37 @@ describe("ReliableBackendConnection", () => {
     }
   });
 
+  it("starts a rejected first initialization over on a fresh transport", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableLocalHttpBackendConnection({
+      endpointUrl: "http://app-server.test/rpc", authToken: "token-1", connectionId: "connection-1",
+      fetch: transport.fetch, retryDelayMs: 1, heartbeatIntervalMs: 60_000,
+    });
+    const statuses: string[] = [];
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    const params = {
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" as const }, requestedSurface: { kind: "home" as const },
+      capabilities: { protocol: [], shell: [] },
+    };
+    try {
+      transport.rejectNextInitialization("incompatibleProtocol");
+      await expect(connection.initialize(params)).rejects.toMatchObject({
+        protocolError: { code: "incompatibleProtocol" },
+      });
+      await expect(connection.request(TASK_LIST, { lifecycle: "open" })).rejects.toThrow("not initialized");
+
+      // As after the computer is updated: the same connection initializes again.
+      await expect(connection.initialize(params)).resolves.toEqual(initializeResult("cursor-2"));
+      await expect(connection.request(TASK_LIST, { lifecycle: "open" })).resolves.toEqual({ tasks: [], revision: 2 });
+      expect(transport.initializedSessions()).toEqual(["session-1", "session-2"]);
+      expect(transport.taskListSessions()).toEqual(["session-2"]);
+      expect(statuses.at(-1)).toBe("ready");
+    } finally {
+      connection.close();
+    }
+  });
+
   it("rejects an unannounced local server identity change", async () => {
     const transport = createExpiringSessionTransport("transport");
     const connection = createReliableLocalHttpBackendConnection({
@@ -760,6 +791,7 @@ function createExpiringSessionTransport(
   let expireReplayOnNextReceive = false;
   let rejectAcknowledgementOnNextReceive = false;
   let failNextReplacementInitialization = false;
+  let rejectNextInitialization: string | undefined;
   let rejectedAcknowledgementCount = 0;
   let frozenPollCount = 0;
   let opened = 0;
@@ -843,6 +875,16 @@ function createExpiringSessionTransport(
       }
       if (message.method === CLIENT_INITIALIZE) {
         initialized.push(sessionId);
+        if (rejectNextInitialization) {
+          const code = rejectNextInitialization;
+          rejectNextInitialization = undefined;
+          enqueue(sessionId, {
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { error: { code, message: "Update OpenAIDE on your computer", recoverable: false } },
+          });
+          return response(204, "");
+        }
         if (sessionId !== "session-1" && failNextReplacementInitialization) {
           failNextReplacementInitialization = false;
           enqueue(sessionId, {
@@ -932,6 +974,9 @@ function createExpiringSessionTransport(
     },
     failNextReplacementInitialization() {
       failNextReplacementInitialization = true;
+    },
+    rejectNextInitialization(code: string) {
+      rejectNextInitialization = code;
     },
     restartServer() {
       currentServerId = "server-2";

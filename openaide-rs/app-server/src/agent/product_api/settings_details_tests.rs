@@ -116,9 +116,10 @@ fn built_in_agent_settings_show_what_is_really_started() {
     assert!(codex.ends_with(", installed by OpenAIDE"), "{codex}");
     let claude = launch(CLAUDE_CODE_AGENT_ID);
     assert!(
-        claude.contains(" -y @openaide/claude-agent-acp@"),
+        claude.starts_with("@openaide/claude-agent-acp@"),
         "{claude}"
     );
+    assert!(claude.ends_with(", installed by OpenAIDE"), "{claude}");
     assert!(launch(OPENCODE_AGENT_ID).ends_with(" acp"));
 }
 

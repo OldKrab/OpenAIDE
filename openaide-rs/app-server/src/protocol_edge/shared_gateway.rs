@@ -592,6 +592,30 @@ impl SharedRpcGateway {
             .observe_connection_activity(connection_id, now)
     }
 
+    /// The Task attention cursor this connection would be answered with now.
+    ///
+    /// A held `taskAttention/wait` calls this on every delivery wake, so it renews
+    /// the client's liveness like any transport activity, never signals other links,
+    /// and reads Task storage outside the protocol lock. `None` ends the hold: the
+    /// client is no longer initialized, or the read failed and the dispatched
+    /// request reports why.
+    pub(crate) fn task_attention_cursor(
+        &self,
+        connection_id: &ConnectionId,
+        now: AppServerTime,
+    ) -> Option<String> {
+        let snapshots = {
+            let mut gateway = self.lock_quiet();
+            if !gateway.observe_connection_activity(connection_id, now) {
+                return None;
+            }
+            gateway.task_snapshots.clone()
+        };
+        super::task_attention_handlers::current_task_attention(snapshots.as_ref())
+            .ok()
+            .map(|result| result.cursor)
+    }
+
     /// Publishes one committed Task update. Deliveries reach links through the delivery
     /// signal; the caller receives only lock timing for its batch diagnostics.
     pub fn publish_committed_task_update(

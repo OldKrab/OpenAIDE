@@ -463,6 +463,57 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.backendReady).toBe(false);
   });
 
+  it("retries a failed initialization when the app returns and from Retry", async () => {
+    const windowEvents = new EventTarget();
+    vi.stubGlobal("window", Object.assign(windowEvents, {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    }));
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+    const initialize = vi.fn(async () => {
+      if (initialize.mock.calls.length < 3) throw new Error("Update OpenAIDE on your computer");
+      return { snapshot: clientSnapshot() };
+    });
+    backendConnection = {
+      initialize,
+      request: vi.fn() as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+    });
+    expect(latestController?.backendConnectionState).toEqual({
+      status: "unavailable",
+      message: "Update OpenAIDE on your computer",
+    });
+
+    await act(async () => {
+      windowEvents.dispatchEvent(new Event("openaide:resume"));
+      await Promise.resolve();
+    });
+    expect(initialize).toHaveBeenCalledTimes(2);
+    expect(latestController?.backendConnectionState.status).toBe("unavailable");
+
+    await act(async () => {
+      latestController?.retryTaskOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(initialize).toHaveBeenCalledTimes(3);
+    expect(latestController?.state.appServerError).toBeUndefined();
+    expect(latestController?.backendConnectionState.status).not.toBe("unavailable");
+
+    // Once initialized, a resume belongs to the connection, not to another initialize.
+    await act(async () => {
+      windowEvents.dispatchEvent(new Event("openaide:resume"));
+      await Promise.resolve();
+    });
+    expect(initialize).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps a completed open task unread until the user returns attention", async () => {
     const windowEvents = new EventTarget();
     const documentEvents = new EventTarget();

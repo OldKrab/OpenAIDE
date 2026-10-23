@@ -3,6 +3,7 @@ package io.openaide.android
 import android.content.Context
 import android.os.SystemClock
 import computer.iroh.Connection
+import computer.iroh.ConnectionStats
 import computer.iroh.Endpoint
 import computer.iroh.EndpointAddr
 import computer.iroh.EndpointId
@@ -14,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -228,6 +230,7 @@ internal object RemoteNode {
             val refusal = withTimeoutOrNull(REFUSAL_WAIT_MS) { opened.closed() }
             if (refusal != null) throw Unavailable(failure(refusal))
             connection = opened
+            watchReceive(opened, attempt)
             outcome = if (opened.paths().any { it.isSelected && it.isRelay }) "relay" else "direct"
             rememberRelay(node, store, id, server.id, relay, attempt)
             return opened
@@ -242,6 +245,52 @@ internal object RemoteNode {
         } finally {
             diagnostics.record("remote_connect", outcome, attempt, SystemClock.elapsedRealtime() - started)
         }
+    }
+
+    /**
+     * Records when the connection in use stops receiving from the computer while
+     * the app is on screen, which "Connecting…" logic cannot see: the connection
+     * still looks open. The end record says whether this phone kept sending and
+     * losing packets meanwhile, which tells a dead return path from a computer
+     * that stopped answering. Healthy connections stay quiet.
+     */
+    // TODO: once a stall's cause is known from these records, decide whether a
+    // stall should replace the endpoint as a return to the screen does.
+    private fun watchReceive(opened: Connection, attempt: Int) = scope.launch {
+        val watch = ReceiveWatch()
+        var atStall: ConnectionStats? = null
+        while (connection === opened && opened.closeReason() == null) {
+            val stats = runCatching { opened.stats() }.getOrNull() ?: break
+            val change = watch.sample(SystemClock.elapsedRealtime(), stats.udpRxDatagrams, hiddenAt == 0L)
+            if (change is ReceiveWatch.Change.Stalled) atStall = stats
+            if (change != null) recordReceive(change, attempt, opened, stats, atStall)
+            delay(ReceiveWatch.SAMPLE_MS)
+        }
+        val ended = watch.end(SystemClock.elapsedRealtime()) ?: return@launch
+        recordReceive(ended, attempt, opened, runCatching { opened.stats() }.getOrNull(), atStall)
+    }
+
+    private fun recordReceive(change: ReceiveWatch.Change, attempt: Int, opened: Connection, stats: ConnectionStats?, atStall: ConnectionStats?) {
+        val (outcome, silentMs) = when (change) {
+            is ReceiveWatch.Change.Stalled -> "stalled" to change.silentMs
+            is ReceiveWatch.Change.Resumed -> "resumed" to change.silentMs
+            is ReceiveWatch.Change.Hidden -> "hidden" to change.silentMs
+            is ReceiveWatch.Change.Ended -> "ended" to change.silentMs
+        }
+        val fields = HashMap<String, Any>()
+        val selected = runCatching { opened.paths().firstOrNull { it.isSelected } }.getOrNull()
+        fields["route"] = when { selected == null -> "none"; selected.isRelay -> "relay"; else -> "direct" }
+        if (selected != null) fields["rtt_ms"] = selected.rttMs.toLong()
+        if (stats != null) {
+            fields["rx_datagrams"] = stats.udpRxDatagrams
+            fields["tx_datagrams"] = stats.udpTxDatagrams
+            fields["lost_packets"] = stats.lostPackets
+            if (atStall != null && change !is ReceiveWatch.Change.Stalled) {
+                fields["tx_during_stall"] = stats.udpTxDatagrams - atStall.udpTxDatagrams
+                fields["lost_during_stall"] = stats.lostPackets - atStall.lostPackets
+            }
+        }
+        diagnostics.record("remote_connection_receive", outcome, attempt, silentMs, fields)
     }
 
     /** Keeps the relay the computer answered through, so the next connect can skip the address lookup. */

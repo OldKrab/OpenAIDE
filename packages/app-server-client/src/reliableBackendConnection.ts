@@ -118,7 +118,9 @@ function createReliableHttpBackendConnection(
   let initializedServerId: string | undefined;
   let initializeParams: InitializeParams | undefined;
   let initializeMeta: RequestMeta | undefined;
+  /** Settles once per attempt; a failed attempt is forgotten so the caller can try again. */
   let initializePromise: Promise<InitializeResult> | undefined;
+  let initializeAttempts = 0;
   let recoveryPromise: Promise<InitializeResult> | undefined;
   let recoveringGeneration: HttpConnectionGeneration | undefined;
   let terminalError: unknown;
@@ -142,15 +144,18 @@ function createReliableHttpBackendConnection(
     },
     initialize(params, meta) {
       if (initializePromise) return initializePromise;
+      if (closed) return Promise.reject(new Error("Backend connection is closed"));
       const startedAt = Date.now();
+      const attempt = ++initializeAttempts;
       logger.info("backend_initialize_started", {
         connection_id: options.connectionId,
+        attempt,
         has_client_request_id: Boolean(meta?.clientRequestId),
       });
       initializeParams = params;
       initializeMeta = meta;
       const generation = active;
-      initializePromise = initializeGeneration(generation).catch(async (error) => {
+      const initialization = initializeGeneration(generation).catch(async (error) => {
         // Expiry can race the first initialization response. In that case the
         // caller observes the replacement initialization, not a stale failure.
         if (recoveryPromise) return recoveryPromise;
@@ -160,21 +165,27 @@ function createReliableHttpBackendConnection(
           // recovery has completed. This is the replacement's cached result.
           return active.connection.initialize(params, meta);
         }
+        throw error;
+      }).catch((error) => {
         logger.warn("backend_initialize_failed", {
           connection_id: options.connectionId,
+          attempt,
           duration_ms: Date.now() - startedAt,
           ...diagnosticErrorFields(error),
         });
+        if (initializePromise === initialization) forgetFailedInitialization();
         throw error;
       });
-      void initializePromise.then(
+      initializePromise = initialization;
+      void initialization.then(
         () => logger.info("backend_initialize_completed", {
           connection_id: options.connectionId,
+          attempt,
           duration_ms: Date.now() - startedAt,
         }),
         () => undefined,
       );
-      return initializePromise;
+      return initialization;
     },
     async request(method, params, meta) {
       if (closed) throw new Error("Backend connection is closed");
@@ -382,6 +393,27 @@ function createReliableHttpBackendConnection(
       for (const listener of eventListeners) listener(event);
     });
     for (const registration of requestRegistrations) registration.bind(generation.connection);
+  }
+
+  /**
+   * A first initialization that failed leaves no session to recover, so the
+   * caller may only start over. Its transport is replaced too: the rejected
+   * initialize stays cached in that generation, and a terminal transport error
+   * belongs to it, not to the next attempt, which may meet an App Server that
+   * has since started, come back, or been updated.
+   */
+  function forgetFailedInitialization() {
+    if (closed) return;
+    initializePromise = undefined;
+    initializeParams = undefined;
+    initializeMeta = undefined;
+    initializedServerId = undefined;
+    lastInvalidation = undefined;
+    terminalError = undefined;
+    const previous = active;
+    active = createGeneration();
+    bindGeneration(active);
+    closeGeneration(previous);
   }
 
   async function initializeGeneration(

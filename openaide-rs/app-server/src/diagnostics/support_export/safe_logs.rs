@@ -79,8 +79,31 @@ fn safe_log_fields(fields: &serde_json::Map<String, Value>) -> serde_json::Map<S
             let diagnostic_field = match name.as_str() {
                 "operation" => Some(matches!(
                     value.as_str(),
-                    Some("session/new" | "session/load" | "session/resume")
+                    Some(
+                        "session/new"
+                            | "session/load"
+                            | "session/resume"
+                            | "session-start"
+                            | "session-load"
+                            | "session-resume"
+                            | "agent/list_sessions"
+                            | "agent/list_sessions/page"
+                            | "agent/process_lifetime"
+                            | "agent/npx_cache_repair"
+                    )
                 )),
+                // Protocol method names; client-supplied, so only the method grammar passes.
+                "method" => Some(value.as_str().is_some_and(protocol_method)),
+                "exit_code"
+                | "exit_signal"
+                | "attempt"
+                | "process_age_ms"
+                | "idle_timeout_ms"
+                | "lock_wait_ms"
+                | "dispatch_ms"
+                | "active_session_count"
+                | "active_prompt_count" => Some(value.is_i64() || value.is_u64()),
+                "initialized" | "stopped" | "has_initial_session" => Some(value.is_boolean()),
                 "error_kind" => Some(matches!(
                     value.as_str(),
                     Some(
@@ -115,6 +138,17 @@ fn safe_log_fields(fields: &serde_json::Map<String, Value>) -> serde_json::Map<S
                     | "project_id"
                     | "agent_id"
                     | "task_id"
+                    // Correlation identifiers that join one operation across layers.
+                    | "operation_id"
+                    | "request_id"
+                    | "client_request_id"
+                    | "connection_id"
+                    // Code-owned identifiers, never Agent or user content.
+                    | "outcome_kind"
+                    | "launcher_kind"
+                    | "stop_reason"
+                    | "message_kind"
+                    | "response_kind"
                     | "outcome"
                     | "selection_source"
                     | "client_identity_source"
@@ -134,4 +168,16 @@ fn safe_log_fields(fields: &serde_json::Map<String, Value>) -> serde_json::Map<S
             Some((name.clone(), safe_value))
         })
         .collect()
+}
+
+/// `segment(/segment)*` with lowercase ASCII, digits, and `_` — the App Server Protocol
+/// method shape. Anything else a client sends as a method stays out of the export.
+fn protocol_method(value: &str) -> bool {
+    value.len() <= 64
+        && value.split('/').all(|segment| {
+            segment.starts_with(|character: char| character.is_ascii_lowercase())
+                && segment.chars().all(|character| {
+                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+                })
+        })
 }

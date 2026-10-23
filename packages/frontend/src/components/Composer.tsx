@@ -33,7 +33,7 @@ import { appendQuoteToDraft } from "./quoteSelection";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
 import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
-import { CODEX_INTEGRATION_INSTALLING_LABEL } from "./agentActivityPresentation";
+import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
 import {
   FileMentionPicker,
   fileMentionTokenAtCursor,
@@ -152,7 +152,7 @@ export function Composer({
     ? { ...configOptions, pending_change: presentedConfigChange }
     : configOptions;
   const configLoadingLabel = agents.find((agent) => agent.id === selection.agentId)?.status === "installing"
-    ? CODEX_INTEGRATION_INSTALLING_LABEL
+    ? agentIntegrationInstallingLabel(selection.agentLabel)
     : `Connecting to ${selection.agentLabel}…`;
   const configMutationId = presentedConfigChange?.mutation_id;
   const [configChangeStage, setConfigChangeStage] = useState<{ index: number; mutationId: string }>();

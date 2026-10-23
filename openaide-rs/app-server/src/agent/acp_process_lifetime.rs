@@ -37,12 +37,16 @@ struct Lifetime {
     changed: Notify,
     timeouts: watch::Receiver<ProcessIdleTimeouts>,
     operation_id: String,
+    launched_at: Instant,
 }
 
 struct State {
     last_activity: Instant,
     long_retention: bool,
     stopping: bool,
+    /// Set once ACP `initialize` answers. Before that a launcher such as `npx -y`
+    /// may still be installing the Agent package.
+    initialized: bool,
     admitted_operations: usize,
     agent_requests: HashSet<RequestId>,
 }
@@ -61,13 +65,35 @@ impl AcpProcessLifetime {
                 last_activity: Instant::now(),
                 long_retention: false,
                 stopping: false,
+                initialized: false,
                 admitted_operations: 0,
                 agent_requests: HashSet::new(),
             }),
             changed: Notify::new(),
             timeouts,
             operation_id: uuid::Uuid::new_v4().to_string(),
+            launched_at: Instant::now(),
         }))
+    }
+
+    pub(super) fn mark_initialized(&self) {
+        self.0
+            .state
+            .lock()
+            .expect("ACP lifetime poisoned")
+            .initialized = true;
+    }
+
+    pub(super) fn is_initialized(&self) -> bool {
+        self.0
+            .state
+            .lock()
+            .expect("ACP lifetime poisoned")
+            .initialized
+    }
+
+    pub(super) fn age(&self) -> Duration {
+        self.0.launched_at.elapsed()
     }
 
     pub(super) fn same_process(&self, other: &Self) -> bool {

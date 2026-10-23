@@ -15,15 +15,29 @@ async function fixture(t, version) {
   const root = await mkdtemp(path.join(tmpdir(), "openaide-claude-acp-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const policy = path.join(root, "package.json");
+  const lockfile = path.join(root, "package-lock.json");
   const output = path.join(root, "output");
   await writeFile(policy, `${JSON.stringify({ dependencies: { [packageName]: version } }, null, 2)}\n`);
   await writeFile(output, "");
+  // npm is not run: the fixture stands in for the lockfile it would write.
+  const lock = (lockedVersion) => writeFile(lockfile, JSON.stringify({
+    packages: {
+      "": { dependencies: { [packageName]: lockedVersion } },
+      [`node_modules/${packageName}`]: { version: lockedVersion },
+    },
+  }));
   const execute = (env) => run(process.execPath, [script], {
-    env: { ...process.env, CLAUDE_ACP_MANIFEST_PATH: policy, GITHUB_OUTPUT: output, ...env },
+    env: {
+      ...process.env,
+      CLAUDE_ACP_MANIFEST_PATH: policy,
+      CLAUDE_ACP_SKIP_LOCKFILE: "1",
+      GITHUB_OUTPUT: output,
+      ...env,
+    },
     timeout: 30_000,
   });
   const pinned = async () => JSON.parse(await readFile(policy, "utf8")).dependencies[packageName];
-  return { execute, output, pinned };
+  return { execute, lock, output, pinned };
 }
 
 test("a current pin is left unchanged", async (t) => {
@@ -35,6 +49,7 @@ test("a current pin is left unchanged", async (t) => {
 
 test("a newer published version replaces the exact pin", async (t) => {
   const setup = await fixture(t, "1.2.3");
+  await setup.lock("1.3.0");
   await setup.execute({ CLAUDE_ACP_PUBLISHED_VERSION: "1.3.0" });
   assert.equal(await setup.pinned(), "1.3.0");
   assert.match(await readFile(setup.output, "utf8"), /^changed=true\ncurrent=1\.2\.3\nlatest=1\.3\.0$/m);
@@ -45,4 +60,10 @@ test("a requested version must be exact and match the registry", async (t) => {
   await assert.rejects(setup.execute({ CLAUDE_ACP_TARGET_VERSION: "^1.3.0", CLAUDE_ACP_PUBLISHED_VERSION: "1.3.0" }));
   await assert.rejects(setup.execute({ CLAUDE_ACP_TARGET_VERSION: "1.3.0", CLAUDE_ACP_PUBLISHED_VERSION: "1.4.0" }));
   assert.equal(await setup.pinned(), "1.2.3");
+});
+
+test("a lockfile that does not lock the new pin fails the update", async (t) => {
+  const setup = await fixture(t, "1.2.3");
+  await setup.lock("1.2.3");
+  await assert.rejects(setup.execute({ CLAUDE_ACP_PUBLISHED_VERSION: "1.3.0" }));
 });

@@ -6,7 +6,7 @@ use crate::agent::acp_active_session_manager::AcpActiveSessionManager;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_runtime_threading::close_in_parallel;
 use crate::agent::acp_trace::AcpTraceState;
-use crate::agent::codex_acp_provisioner::CodexAcpProvisioner;
+use crate::agent::managed_acp_provisioner::ManagedAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentForkedSession, AgentListSessionsRequest,
@@ -49,8 +49,8 @@ impl AcpRuntimeKernel {
         self.active_sessions.with_trace_state(trace_state);
     }
 
-    pub(super) fn with_codex_provisioner(&mut self, provisioner: CodexAcpProvisioner) {
-        self.active_sessions.with_codex_provisioner(provisioner);
+    pub(super) fn with_managed_provisioner(&mut self, provisioner: ManagedAcpProvisioner) {
+        self.active_sessions.with_managed_provisioner(provisioner);
     }
 
     pub(super) fn with_account_limits(
@@ -287,6 +287,11 @@ impl AcpRuntimeKernel {
     pub(super) fn with_session_idle_close_timeout(&mut self, timeout: Duration) {
         self.active_sessions
             .with_session_idle_close_timeout(timeout);
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_startup_install_grace(&mut self, grace: Duration) {
+        self.active_sessions.with_startup_install_grace(grace);
     }
 
     #[cfg(test)]

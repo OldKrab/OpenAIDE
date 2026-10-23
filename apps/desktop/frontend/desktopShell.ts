@@ -354,6 +354,9 @@ export function createDesktopShell(
       },
       openTask: (taskId) => navigate({ surface: "task", taskId }),
       now: () => Date.now(),
+      record: (event, fields) => {
+        void invoke("record_desktop_webview_log", { event, fields }).catch(() => undefined);
+      },
     }),
   };
 }

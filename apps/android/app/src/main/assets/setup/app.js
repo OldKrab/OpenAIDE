@@ -59,10 +59,13 @@ const info = {
   settings: ['How the connection works', 'How the connection works', 'Your phone and computer each have their own key, and the connection is encrypted end to end with those keys. There is no account or password.', network],
   local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, the tools it needs, a signed-in agent (Codex or Claude) and storage, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
   background: ['How does this affect battery?', 'Background work', 'Protection keeps the phone awake only while agents are working and is released when work is idle. Running agents still use battery and data, so plug in for long tasks.', 'Do not force-stop OpenAIDE or Termux during work. Some phones also need background activity allowed in their own battery settings.'],
+  notifications: ['How does this affect battery?', 'Task notifications', 'While OpenAIDE is hidden, it keeps one quiet connection to your computer, which answers when a task finishes or needs you. The phone is not kept awake.', 'Notifications stop if OpenAIDE is force-stopped. Some phones also need background activity allowed in their own battery settings.'],
 };
-function hint() { return info[screen] ? `<button class="hint" id="about" type="button">${info[screen][0]}</button>` : ''; }
+// The background screen explains what it controls for the workspace in use.
+function infoKey() { return screen === 'background' && state.remote ? 'notifications' : screen; }
+function hint() { return info[infoKey()] ? `<button class="hint" id="about" type="button">${info[infoKey()][0]}</button>` : ''; }
 function openSheet() {
-  const [, title, ...paragraphs] = info[screen];
+  const [, title, ...paragraphs] = info[infoKey()];
   sheet.querySelector('h2').textContent = title;
   sheet.querySelector('.sheet-body').innerHTML = paragraphs.map(text => `<p>${text}</p>`).join('');
   sheet.hidden = false;
@@ -152,8 +155,11 @@ function render() {
       + row('qr', computers.length ? 'Add another computer' : 'Add a computer', 'remote_screen', '', 'Pair with a code')
       + (state.sshAvailable ? row('server', 'Add an SSH computer', 'ssh_add', '', 'A Linux computer you sign in to') : '')
       + '</div><div class="group">'
-      // Work on an SSH Computer is watched from this phone, like local work; a paired computer watches its own.
-      + (remote && !ssh.some(computer => computer.current) ? '' : row('battery', 'Background work', 'background_screen', state.background ? 'On' : 'Off'))
+      // A paired computer's Tasks only notify here; work on this phone or an SSH Computer
+      // is also held by this phone in the background.
+      + (remote && !ssh.some(computer => computer.current)
+        ? row('bell', 'Task notifications', 'background_screen', state.background ? 'On' : 'Off')
+        : row('battery', 'Background work', 'background_screen', state.background ? 'On' : 'Off'))
       + row('wrench', 'Advanced', 'advanced_screen')
       + '</div>' + (computers.length ? hint() : '');
   } else if (screen === 'local') {
@@ -191,12 +197,14 @@ function render() {
       + (join ? `<div class="qr" role="img" aria-label="Pairing code"><svg viewBox="-2 -2 ${join.qr.size + 4} ${join.qr.size + 4}" shape-rendering="crispEdges"><path d="${escape(join.qr.path)}"/></svg></div><p class="code">${escape(join.text)}</p><p class="waiting"><span class="pulse" aria-hidden="true"></span>Waiting for your computer</p>${hint()}`
         : '<p class="waiting"><span class="pulse" aria-hidden="true"></span>Preparing this phone’s code…</p>');
   } else if (screen === 'background') {
-    page.innerHTML = heading('Keep work going')
-      + `<div class="group"><label class="row">${icon('power')}<span class="copy"><strong>Background work</strong></span><input id="background" type="checkbox" ${state.background ? 'checked' : ''}></label>`
-      + row('battery', 'Battery access', 'battery', state.appBattery && state.termuxBattery ? 'Allowed' : 'Review')
+    // One setting: it keeps local work running, or a paired computer's Task notifications arriving.
+    const remote = state.remote;
+    page.innerHTML = heading(remote ? 'Stay notified' : 'Keep work going')
+      + `<div class="group"><label class="row">${icon('power')}<span class="copy"><strong>${remote ? 'Task notifications' : 'Background work'}</strong></span><input id="background" type="checkbox" ${state.background ? 'checked' : ''}></label>`
+      + row('battery', 'Battery access', 'battery', state.appBattery && (remote || state.termuxBattery) ? 'Allowed' : 'Review')
       + row('bell', 'Notifications', 'app_settings', state.notifications ? 'Allowed' : 'Review')
       + '</div>'
-      + (state.batterySaver ? '<p class="caution">Battery Saver is on. Android may pause local work.</p>' : '')
+      + (state.batterySaver ? `<p class="caution">Battery Saver is on. Android may pause ${remote ? 'notifications' : 'local work'}.</p>` : '')
       + hint();
     document.getElementById('background').addEventListener('change', event => send('background', { enabled: event.target.checked }));
   } else {

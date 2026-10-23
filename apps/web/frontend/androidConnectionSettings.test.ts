@@ -63,6 +63,29 @@ describe("Android connection controls", () => {
     test.attach();
     expect(test.port.postMessage).toHaveBeenCalledTimes(1);
   });
+  it("keeps the newest app update snapshot from the native channel", () => {
+    const test = harness();
+    test.attach();
+    const updates = test.capability!.appUpdates;
+    const changed = vi.fn();
+    updates.subscribe(changed);
+    test.receive({ type: "update", update: { revision: 2, installedVersion: "1.0.0", kind: "available", offer: { version: "1.1.0", notes: "", sizeBytes: 1 } } });
+    test.receive({ type: "update", update: { revision: 1, installedVersion: "1.0.0", kind: "idle" } });
+    expect(updates.snapshot()).toMatchObject({ revision: 2, kind: "available" });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(updates.installation).toBe("systemInstaller");
+  });
+  it("forwards update taps to the app and reports the installer handoff as started", async () => {
+    const test = harness();
+    test.attach();
+    const install = test.capability!.appUpdates.restartAndUpdate();
+    const request = JSON.parse(test.port.postMessage.mock.calls[0][0]);
+    expect(request.command).toEqual({ action: "update_install" });
+    test.receive({ type: "result", id: request.id, accepted: true });
+    await expect(install).resolves.toBe("started");
+    void test.capability!.appUpdates.openReleaseNotes("1.1.0");
+    expect(JSON.parse(test.port.postMessage.mock.calls[1][0]).command).toEqual({ action: "update_notes", version: "1.1.0" });
+  });
   it("reports native route rejection", async () => {
     const test = harness();
     test.attach();
