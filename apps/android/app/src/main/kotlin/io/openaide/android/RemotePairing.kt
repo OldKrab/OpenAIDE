@@ -4,10 +4,12 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import computer.iroh.Connection
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -81,6 +83,54 @@ internal object RemotePairing {
             } catch (error: RemoteNode.Unavailable) { message(error.failure) }
             main.post { callback.done(problem) }
         }
+    }
+
+    /**
+     * The phone's steps for one page's [ComputerSwitch]: reach this phone's own App
+     * Server or a paired computer's while the one in use stays live, then save the
+     * choice and move the connection to it. The star keeps the iroh type out of the
+     * Java signature: CI's Java 17 compiler cannot read iroh's newer class files.
+     */
+    @JvmStatic fun computerSwitch(context: Context, replacePage: Runnable): ComputerSwitch<*> {
+        val application = context.applicationContext
+        val diagnostics = AndroidDiagnostics()
+        return ComputerSwitch(RemoteNode.scope, { main.post(it) }, SystemClock::elapsedRealtime,
+            { event, outcome, durationMs, fields -> diagnostics.record(event, outcome, 0, durationMs, fields) },
+            object : ComputerSwitch.Steps<Connection?> {
+                override suspend fun connect(target: String?): Connection? {
+                    if (!WorkspaceGateway.start(application, target == null)) {
+                        throw ComputerSwitch.Failed("gateway", "OpenAIDE could not start its connection on this phone. Restart the app and try again.")
+                    }
+                    if (target == null) {
+                        // Starting the App Server in Termux cannot be interrupted; a Cancel ignores its result.
+                        try { LocalServer.endpoint(application) } catch (error: LocalServer.Unavailable) {
+                            throw ComputerSwitch.Failed("local_unavailable", "Your local workspace could not start. Try again, or check this phone in Connection settings.")
+                        }
+                        return null
+                    }
+                    val server = PairedServers.find(ConnectionStore(application).pairedServers(), target)
+                        ?: throw ComputerSwitch.Failed("not_paired", "This phone is no longer paired with that computer.")
+                    return try { RemoteNode.reachForSwitch(application, server) } catch (error: RemoteNode.Unavailable) {
+                        throw ComputerSwitch.Failed(error.failure.name.lowercase(), message(error.failure))
+                    }
+                }
+
+                override fun apply(target: String?, connected: Connection?) {
+                    val store = ConnectionStore(application)
+                    if (target == null) {
+                        store.selectLocal()
+                        // The computer left behind keeps its work; only this phone's link to it ends.
+                        RemoteNode.disconnect()
+                    } else {
+                        check(store.selectPaired(target))
+                        RemoteNode.adopt(connected!!)
+                    }
+                }
+
+                override fun discard(connected: Connection?) { connected?.let(RemoteNode::abandon) }
+
+                override fun replacePage() = replacePage.run()
+            })
     }
 
     @JvmStatic fun message(failure: RemoteNode.Failure): String = when (failure) {

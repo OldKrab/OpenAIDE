@@ -299,6 +299,10 @@ _Avoid_: Account, login, linked phone
 A short plain-text code, also drawn as a QR code, that adds a Remote Device. Either a trusted client shows a single-use code the new device reads, or the new device shows a code a trusted client reads and confirms.
 _Avoid_: Password, token, invite link
 
+**SSH Computer**:
+A Linux computer reached over SSH where an App Shell installs, starts, and keeps the App Server, and holds its token like a same-machine App Shell. It is not a Remote Device: no Pairing Code is involved.
+_Avoid_: Remote host, server, SSH remote
+
 **Desktop Update**:
 A newer official OpenAIDE Desktop App release offered inside the installed Desktop App. The user may review its Release Notes, initiate download and staging, and restart OpenAIDE to apply it.
 _Avoid_: Silently replacing a running release, treating a downloaded update as already applied

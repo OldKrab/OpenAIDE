@@ -3,6 +3,8 @@ import type { TaskSummary } from "@openaide/app-shell-contracts";
 const ENABLED_KEY = "openaide.desktopNotifications.enabled";
 const ENABLED_AT_KEY = "openaide.desktopNotifications.enabledAt";
 const HANDLED_KEY = "openaide.desktopNotifications.handled";
+/** Where a manager keeps its receipts; a second manager on the same storage needs its own. */
+export const TASK_NOTIFICATION_RECEIPTS_KEY = HANDLED_KEY;
 const MAX_HANDLED_EVENTS = 500;
 const PRESENCE_STALE_AFTER_MS = 30_000;
 

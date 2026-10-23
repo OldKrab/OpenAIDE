@@ -1,9 +1,10 @@
 //! Desktop as a Remote Device of an App Server on another computer (ADR-0063).
 //!
-//! The shell pairs by Pairing Code and then starts no App Server of its own:
-//! the WebView talks to a loopback gateway that carries its requests to the
-//! paired computer. Which computer is in use is a bootstrap preference, so a
-//! change takes effect through the same restart as a runtime environment change.
+//! The shell pairs by Pairing Code. While a paired computer is in use, the
+//! WebView talks to a loopback gateway that carries its requests there, and this
+//! computer's App Server keeps running (ADR-0070). A choice takes effect in place
+//! through [`crate::desktop_connection`]; it is saved for the next start once the
+//! computer answered.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,8 +16,12 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
+use crate::DesktopState;
+use crate::desktop_app_server_launch::LocalHttpConnection;
+use crate::desktop_connection::{
+    ConnectError, DesktopConnections, SwitchError, SwitchOutcome, ensure_local, reload_window,
+};
 use crate::desktop_runtime::{DesktopBootstrapPreferences, write_bootstrap_preferences};
-use crate::{DesktopState, LocalHttpConnection};
 
 /// A computer whose App Server trusts this Desktop: its public key and the name
 /// it gave itself. Neither is a credential; the device key is stored apart.
@@ -35,12 +40,18 @@ impl DesktopBootstrapPreferences {
             .find(|computer| &computer.id == id)
     }
 
-    /// Remembers a computer, replacing an earlier pairing with it, and selects it.
-    fn pair(&mut self, computer: RemoteComputer) {
+    /// Remembers a computer, replacing an earlier pairing with it. Using it is a
+    /// switch of its own, saved once the computer answers.
+    fn remember(&mut self, computer: RemoteComputer) {
         self.remote_computers
             .retain(|known| known.id != computer.id);
-        self.remote_computer = Some(computer.id.clone());
         self.remote_computers.push(computer);
+    }
+
+    fn paired(&self, id: &str) -> Option<&RemoteComputer> {
+        self.remote_computers
+            .iter()
+            .find(|computer| computer.id == id)
     }
 
     /// Forgets a computer; true when it was the one in use.
@@ -67,7 +78,6 @@ pub(crate) struct RemoteComputerSummary {
 pub(crate) struct DesktopRemoteState {
     endpoint: tokio::sync::Mutex<Option<remote::Endpoint>>,
     key_path: PathBuf,
-    failure_reported: AtomicBool,
 }
 
 impl DesktopRemoteState {
@@ -75,7 +85,6 @@ impl DesktopRemoteState {
         Self {
             endpoint: tokio::sync::Mutex::new(None),
             key_path: app_local_data.join("device.key"),
-            failure_reported: AtomicBool::new(false),
         }
     }
 
@@ -100,33 +109,124 @@ impl DesktopRemoteState {
     }
 }
 
-/// Opens the gateway to the selected computer. The computer is reached first, so
+/// Opens a gateway to `computer`. The computer is reached first, so a switch or
 /// startup can name the problem instead of showing an empty workspace.
 pub(crate) async fn connect(
     app: &tauri::AppHandle,
     computer: &RemoteComputer,
-) -> Result<LocalHttpConnection, String> {
-    let server = computer
-        .id
-        .parse::<remote::PublicKey>()
-        .map_err(|_| "The saved pairing is damaged. Pair with the computer again.".to_string())?;
-    let endpoint = app.state::<DesktopRemoteState>().endpoint().await?;
+) -> Result<(LocalHttpConnection, remote::Gateway), ConnectError> {
+    let server = computer.id.parse::<remote::PublicKey>().map_err(|_| ConnectError {
+        class: "pairing_damaged",
+        message: "The saved pairing is damaged. Pair with the computer again.".to_string(),
+    })?;
+    let this_computer = |message: String| ConnectError {
+        class: "endpoint",
+        message,
+    };
+    let endpoint = app
+        .state::<DesktopRemoteState>()
+        .endpoint()
+        .await
+        .map_err(this_computer)?;
     let client = Arc::new(remote::RemoteClient::new(endpoint, server, logger()));
     client
         .connection()
         .await
-        .map_err(|failure| message(failure, &computer.name))?;
+        .map_err(|failure| ConnectError {
+            class: failure.class(),
+            message: message(failure, &computer.name),
+        })?;
     let reporter = app.clone();
+    let name = computer.name.clone();
+    // Each connection says once that retrying cannot help, so a later switch to
+    // the same or another computer can be told again.
+    let reported = AtomicBool::new(false);
     let gateway = remote::Gateway::start(client, logger(), move |failure| {
-        report_failure(&reporter, failure)
+        if !reported.swap(true, Ordering::AcqRel) {
+            report_failure(&reporter, &name, failure);
+        }
     })
     .await
-    .map_err(|_| "OpenAIDE could not start its connection on this computer.".to_string())?;
-    Ok(LocalHttpConnection {
+    .map_err(|_| this_computer("OpenAIDE could not start its connection on this computer.".to_string()))?;
+    let connection = LocalHttpConnection {
         kind: "localHttp".to_string(),
         endpoint_url: format!("http://{}/probe", gateway.address),
-        auth_token: gateway.token,
-    })
+        auth_token: gateway.token.clone(),
+    };
+    Ok((connection, gateway))
+}
+
+/// Moves the window to a paired computer, or to this computer for `None`, once
+/// the target answers. Saving the choice is the last step, so a failure changes
+/// nothing.
+pub(crate) async fn switch(
+    app: &tauri::AppHandle,
+    target: Option<String>,
+    operation_id: &str,
+) -> Result<SwitchOutcome, SwitchError> {
+    let state = app.state::<DesktopState>();
+    let computer = match &target {
+        Some(id) => Some(
+            state
+                .preferences
+                .lock()
+                .map_err(|_| SwitchError::Failed("Desktop preferences are unavailable.".to_string()))?
+                .paired(id)
+                .cloned()
+                .ok_or_else(|| SwitchError::Failed("This computer is no longer paired.".to_string()))?,
+        ),
+        None => None,
+    };
+    let connections = app.state::<DesktopConnections>();
+    connections
+        .switch(
+            target,
+            operation_id,
+            || async {
+                match &computer {
+                    Some(computer) => connect(app, computer)
+                        .await
+                        .map(|(connection, gateway)| (connection, Some(gateway))),
+                    None => ensure_local(app, None, operation_id.to_string())
+                        .await
+                        .map(|connection| (connection, None))
+                        .map_err(|message| ConnectError {
+                            class: "app_server_start",
+                            message,
+                        }),
+                }
+            },
+            |target| {
+                let mut preferences = state
+                    .preferences
+                    .lock()
+                    .map_err(|_| "Desktop preferences are unavailable.".to_string())?;
+                preferences.remote_computer = target.clone();
+                write_bootstrap_preferences(&state.preferences_path, &preferences)
+            },
+        )
+        .await
+}
+
+/// What a switch the window asked for came to; the window reloads after `switched`.
+fn outcome_name(result: Result<SwitchOutcome, SwitchError>) -> Result<&'static str, String> {
+    match result {
+        Ok(SwitchOutcome::Switched) => Ok("switched"),
+        Ok(SwitchOutcome::AlreadyInUse) => Ok("alreadyInUse"),
+        Err(SwitchError::Cancelled) => Ok("cancelled"),
+        Err(SwitchError::Failed(message)) => Err(message),
+    }
+}
+
+/// A correlation id from the window, used in logs only when it is plainly safe.
+fn operation_id_or_new(candidate: Option<String>) -> String {
+    candidate
+        .filter(|id| {
+            !id.is_empty()
+                && id.len() <= 80
+                && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+        .unwrap_or_else(|| format!("desktop-computer-switch-{}", uuid::Uuid::new_v4()))
 }
 
 #[tauri::command]
@@ -148,14 +248,15 @@ pub(crate) fn desktop_remote_snapshot(
         .collect())
 }
 
-/// Spends the invite another computer shows, then restarts into its workspace.
+/// Spends the invite another computer shows, then switches to that computer.
 #[tauri::command]
 pub(crate) async fn desktop_remote_pair(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
     remote_state: tauri::State<'_, DesktopRemoteState>,
     code: String,
-) -> Result<(), String> {
+    operation_id: Option<String>,
+) -> Result<&'static str, String> {
     let invite = remote::InviteCode::decode(&code).map_err(|error| {
         match error {
             remote::PairingCodeError::WrongKind => {
@@ -182,79 +283,76 @@ pub(crate) async fn desktop_remote_pair(
         }
         other => message(other, "The other computer"),
     })?;
-    let mut preferences = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?;
-    preferences.pair(RemoteComputer {
-        id: paired.id.to_string(),
-        name: if paired.name.is_empty() {
-            "Computer".to_string()
-        } else {
-            paired.name
-        },
-    });
-    write_bootstrap_preferences(&state.preferences_path, &preferences)?;
-    drop(preferences);
-    desktop_log!("desktop_remote_computer_selected reason=paired");
-    crate::restart_desktop(&app);
-    Ok(())
+    let id = paired.id.to_string();
+    {
+        let mut preferences = state
+            .preferences
+            .lock()
+            .map_err(|_| "desktop bootstrap preferences unavailable")?;
+        preferences.remember(RemoteComputer {
+            id: id.clone(),
+            name: if paired.name.is_empty() {
+                "Computer".to_string()
+            } else {
+                paired.name
+            },
+        });
+        write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+    }
+    desktop_log!("desktop_remote_computer_paired");
+    outcome_name(switch(&app, Some(id), &operation_id_or_new(operation_id)).await)
 }
 
-/// Chooses a paired computer, or this computer when `id` is absent.
+/// Switches the window to a paired computer, or to this computer when `id` is
+/// absent: `switched` (the window reloads), `alreadyInUse`, or `cancelled`. A
+/// computer that cannot be reached is an error and changes nothing.
 #[tauri::command]
-pub(crate) fn desktop_remote_use(
+pub(crate) async fn desktop_remote_use(
     app: tauri::AppHandle,
-    state: tauri::State<'_, DesktopState>,
     id: Option<String>,
-) -> Result<(), String> {
-    let mut preferences = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?;
-    if let Some(id) = &id {
-        if !preferences
-            .remote_computers
-            .iter()
-            .any(|computer| &computer.id == id)
-        {
-            return Err("This computer is no longer paired.".to_string());
-        }
-    }
-    if preferences.remote_computer == id {
-        return Ok(());
-    }
-    desktop_log!(
-        "desktop_remote_computer_selected reason={}",
-        if id.is_some() { "chosen" } else { "local" }
-    );
-    preferences.remote_computer = id;
-    write_bootstrap_preferences(&state.preferences_path, &preferences)?;
-    drop(preferences);
-    crate::restart_desktop(&app);
-    Ok(())
+    operation_id: Option<String>,
+) -> Result<&'static str, String> {
+    outcome_name(switch(&app, id, &operation_id_or_new(operation_id)).await)
 }
 
-/// Forgets a pairing on this side. The other computer keeps listing this one
-/// until it is removed there; its key alone opens nothing here.
+/// Ends the switch attempt in progress; the window stays where it is.
 #[tauri::command]
-pub(crate) fn desktop_remote_forget(
+pub(crate) fn desktop_remote_cancel(connections: tauri::State<'_, DesktopConnections>) -> bool {
+    let cancelled = connections.cancel();
+    desktop_log!("desktop_computer_switch_cancel_requested pending={cancelled}");
+    cancelled
+}
+
+/// Forgets a pairing on this side. Forgetting the computer in use first moves
+/// the window to this computer. The other computer keeps listing this one until
+/// it is removed there; its key alone opens nothing here.
+#[tauri::command]
+pub(crate) async fn desktop_remote_forget(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
+    connections: tauri::State<'_, DesktopConnections>,
     id: String,
-) -> Result<(), String> {
-    let mut preferences = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?;
-    let was_current = preferences.forget(&id);
-    write_bootstrap_preferences(&state.preferences_path, &preferences)?;
-    drop(preferences);
-    desktop_log!("desktop_remote_computer_forgotten was_current={was_current}");
-    if was_current {
-        crate::restart_desktop(&app);
+    operation_id: Option<String>,
+) -> Result<&'static str, String> {
+    let in_use = connections.computer_in_use() == Some(Some(id.clone()));
+    let outcome = if in_use {
+        outcome_name(switch(&app, None, &operation_id_or_new(operation_id)).await)?
+    } else {
+        "alreadyInUse"
+    };
+    if outcome == "cancelled" {
+        return Ok(outcome);
     }
-    Ok(())
+    {
+        let mut preferences = state
+            .preferences
+            .lock()
+            .map_err(|_| "desktop bootstrap preferences unavailable")?;
+        preferences.forget(&id);
+        write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+    }
+    desktop_log!("desktop_remote_computer_forgotten was_in_use={in_use}");
+    Ok(outcome)
 }
 
 /// Returns to this computer's own App Server on the next start.
@@ -271,38 +369,30 @@ pub(crate) fn use_this_computer(state: &DesktopState) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Says once per run that retrying cannot help, and offers the way back.
-fn report_failure(app: &tauri::AppHandle, failure: remote::Failure) {
-    if app
-        .state::<DesktopRemoteState>()
-        .failure_reported
-        .swap(true, Ordering::AcqRel)
-    {
-        return;
-    }
+/// Says that retrying cannot help, and offers the way back to this computer.
+fn report_failure(app: &tauri::AppHandle, name: &str, failure: remote::Failure) {
     desktop_log!(
         "desktop_remote_failure_reported error_class={}",
         failure.class()
     );
-    let name = app
-        .state::<DesktopState>()
-        .preferences
-        .lock()
-        .ok()
-        .and_then(|preferences| preferences.remote().map(|computer| computer.name.clone()))
-        .unwrap_or_else(|| "The other computer".to_string());
     let handle = app.clone();
     app.dialog()
-        .message(message(failure, &name))
+        .message(message(failure, name))
         .title("OpenAIDE")
         .buttons(MessageDialogButtons::OkCancelCustom(
             "Use this computer".to_string(),
             "Keep trying".to_string(),
         ))
         .show(move |use_local| {
-            if use_local && use_this_computer(&handle.state::<DesktopState>()).is_ok() {
-                crate::restart_desktop(&handle);
+            if !use_local {
+                return;
             }
+            tauri::async_runtime::spawn(async move {
+                let operation_id = operation_id_or_new(None);
+                if switch(&handle, None, &operation_id).await == Ok(SwitchOutcome::Switched) {
+                    reload_window(&handle);
+                }
+            });
         });
 }
 

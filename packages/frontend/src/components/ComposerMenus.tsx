@@ -1,6 +1,7 @@
 import { Camera, FileUp, Image, Plus } from "lucide-react";
 import type { ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { reportUnsentInput } from "../services/unsentInput";
 import {
   agentOptions,
   type AgentOption,
@@ -87,6 +88,7 @@ export function ComposerControls({
   const [fileUploads, setFileUploads] = useState<ComposerFileUpload[]>([]);
   const uploadsActive = fileUploads.some((upload) => upload.state !== "error");
   useEffect(() => onFileUploadsChange(fileUploads), [fileUploads, onFileUploadsChange]);
+  useEffect(() => uploadsActive ? reportUnsentInput(() => true) : undefined, [uploadsActive]);
   useEffect(() => () => {
     fileAcquisitionActive.current = false;
     for (const controller of uploadControllers.current) controller.abort();

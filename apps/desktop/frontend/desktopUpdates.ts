@@ -1,6 +1,6 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
 import type { Event, UnlistenFn } from "@tauri-apps/api/event";
-import type { AppServerSession } from "@openaide/app-server-client";
+import type { AppServerSession, UpdateShutdownPrepareResult } from "@openaide/app-server-client";
 import {
   CLIENT_DETACH,
   CLIENT_UPDATE_SHUTDOWN_ABORT,
@@ -52,7 +52,7 @@ export function createDesktopUpdates({
   invoke: Invoke;
   listen: Listen;
   openReleaseNotes(version: string): Promise<void>;
-  /** False while a paired computer's App Server is in use; an update then replaces only this shell. */
+  /** False while a paired computer's App Server is in use; this computer's own then stops through the native side. */
   ownsAppServer?: boolean;
   reload(): void;
   session: AppServerSession;
@@ -67,6 +67,7 @@ export function createDesktopUpdates({
   const run = async (command: string) => {
     publish(await invoke(command));
   };
+  const invokeLocal = (command: string, args: InvokeArgs) => invoke(command, args) as unknown as Promise<UpdateShutdownPrepareResult>;
 
   let disposed = false;
   let stop: UnlistenFn | undefined;
@@ -94,8 +95,20 @@ export function createDesktopUpdates({
       let prepared = false;
       let detached = false;
       if (!ownsAppServer) {
-        // The App Server belongs to another computer and keeps running there.
-        // Asking it to prepare for shutdown would stop that computer's work.
+        // The window uses another computer's App Server, which keeps running
+        // there. This computer's own App Server still runs behind the window, so
+        // its native client asks it to stop as this window would.
+        const readiness = await invokeLocal("desktop_update_prepare_local", {
+          attemptId,
+          stopActiveWork: options?.stopActiveWork ?? false,
+        });
+        if (readiness.kind === "blocked") return readiness.reason;
+        try {
+          await invokeLocal("desktop_update_finish_local", { attemptId, commit: true });
+        } catch (error) {
+          await invokeLocal("desktop_update_finish_local", { attemptId, commit: false }).catch(() => undefined);
+          throw error;
+        }
         console.info(`desktop_update_detach_started operation_id=${attemptId} app_server=remote`);
         const detachOutcome = await waitForFinalDetach(session.request(CLIENT_DETACH, {}));
         console.info(`desktop_update_detach_completed operation_id=${attemptId} outcome=${detachOutcome} app_server=remote`);
@@ -104,6 +117,7 @@ export function createDesktopUpdates({
           await run("desktop_install_update");
           return "started";
         } catch (error) {
+          // The window's own App Server is stopping; reload restarts it and reconnects.
           reload();
           throw error;
         }

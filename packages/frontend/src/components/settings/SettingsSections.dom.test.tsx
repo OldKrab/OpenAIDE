@@ -328,18 +328,20 @@ it("adds a device from its code only after showing what the code names", async (
 
 const studio = { id: "a".repeat(64), name: "Studio", current: false };
 
-function remoteComputers(computers = [studio]) {
+function desktopComputers(computers = [studio]) {
+  const snapshot = { device: "computer" as const, computers };
   return {
-    list: vi.fn().mockResolvedValue(computers),
+    snapshot: () => snapshot,
+    subscribe: () => () => undefined,
     pair: vi.fn().mockResolvedValue(undefined),
-    use: vi.fn().mockResolvedValue(undefined),
+    use: vi.fn().mockResolvedValue("switched"),
     forget: vi.fn().mockResolvedValue(undefined),
   };
 }
 
 it("shows which computer the Desktop is connected to and switches to another", async () => {
-  const computers = remoteComputers();
-  useShell({ remoteComputers: computers });
+  const computers = desktopComputers();
+  useShell({ computers });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -347,18 +349,18 @@ it("shows which computer the Desktop is connected to and switches to another", a
   await click("Use Studio");
   await settle();
 
-  expect(computers.use).toHaveBeenCalledWith(studio.id);
+  expect(computers.use).toHaveBeenCalledWith(studio.id, expect.stringMatching(/^computer-switch-/));
 });
 
 it("forgets a paired computer only after saying what happens", async () => {
-  const computers = remoteComputers([{ ...studio, current: true }]);
-  useShell({ remoteComputers: computers });
+  const computers = desktopComputers([{ ...studio, current: true }]);
+  useShell({ computers });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
   await click("Forget Studio");
   expect(computers.forget).not.toHaveBeenCalled();
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("works on this computer");
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Work moves to this computer");
   await click("Forget");
   await settle();
 
@@ -366,9 +368,9 @@ it("forgets a paired computer only after saying what happens", async () => {
 });
 
 it("pairs with a pasted code and shows the shell's reason when it is refused", async () => {
-  const computers = remoteComputers([]);
+  const computers = desktopComputers([]);
   computers.pair.mockRejectedValue("This code has expired or was already used.");
-  useShell({ remoteComputers: computers });
+  useShell({ computers });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -399,7 +401,7 @@ it("switches where Agents run and leaves the environment in use alone", async ()
 it("hides the runtime choice while a paired computer does the work", async () => {
   useShell({
     desktopRuntime: { snapshot: () => ({ active: { kind: "native" }, wslDistros: ["Ubuntu"] }), select: vi.fn() },
-    remoteComputers: { ...remoteComputers(), current: "Studio" },
+    computers: desktopComputers([{ ...studio, current: true }]),
   });
   await mountSettings();
 

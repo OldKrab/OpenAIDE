@@ -167,18 +167,20 @@ export function SettingsStatus({ children, tone }: { children: ReactNode; tone: 
 export function SettingsChoice({
   active,
   busy = false,
+  busyLabel = "Restarting…",
   disabled = false,
   label,
   onUse,
 }: {
   active: boolean;
   busy?: boolean;
+  busyLabel?: string;
   disabled?: boolean;
   label: string;
   onUse: () => void;
 }) {
   if (active) return <span className="settings-in-use"><Check aria-hidden="true" size={14} />In use</span>;
-  return <SettingsButton ariaLabel={`Use ${label}`} busy={busy} disabled={disabled} onClick={onUse}>{busy ? "Restarting…" : "Use"}</SettingsButton>;
+  return <SettingsButton ariaLabel={`Use ${label}`} busy={busy} disabled={disabled} onClick={onUse}>{busy ? busyLabel : "Use"}</SettingsButton>;
 }
 
 export function SettingsKeys({ keys }: { keys: string[] }) {

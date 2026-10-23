@@ -18,7 +18,9 @@ import { useScrollOverflow } from "./useScrollOverflow";
 import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
 import { AgentDisableDialog } from "./AgentDisableDialog";
 import { useAgentDisableConfirmation } from "./useAgentDisableConfirmation";
-import { SidebarComputer, type ComputerLink } from "./SidebarComputer";
+import { ComputerSwitcher, type ComputerLink } from "./ComputerSwitcher";
+import type { ComputersSnapshot } from "../services/computers";
+import type { ComputerSwitch } from "../services/computerSwitch";
 import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
 
@@ -73,10 +75,14 @@ type SidebarProps = {
   searchQuery: string;
   settingsStatus?: string;
   settingsActive?: boolean;
-  /** The other computer in use; absent while this device does the work or the window strip names it. */
-  computerName?: string;
+  /** The shell's computers; the switcher appears once one other than this device exists. */
+  computers?: ComputersSnapshot;
   computerLink?: ComputerLink;
-  onComputer?: () => void;
+  /** Increments when a shell command asks to open the computer list. */
+  computerSwitcherRequest?: number;
+  /** Present when the shell can switch computers. */
+  computerSwitch?: ComputerSwitch;
+  onManageComputers?: () => void;
   showArchived: boolean;
   taskListError?: string;
   tasks: TaskSummary[];
@@ -130,9 +136,11 @@ export const Sidebar = memo(function Sidebar({
   onToggleArchived,
   searchQuery,
   settingsStatus,
-  computerName,
+  computers,
   computerLink,
-  onComputer,
+  computerSwitcherRequest,
+  computerSwitch,
+  onManageComputers,
   settingsActive = false,
   showArchived,
   taskListError,
@@ -222,9 +230,6 @@ export const Sidebar = memo(function Sidebar({
         </div>
       ) : null}
       <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
-        {computerName && onComputer && !showArchived ? (
-          <SidebarComputer link={computerLink ?? "connecting"} name={computerName} onOpen={onComputer} />
-        ) : null}
         {!showArchived ? <button disabled={noProjects} type="button" onClick={() => onNewTask()}>
           <Plus size={15} />
           New task
@@ -467,18 +472,29 @@ export const Sidebar = memo(function Sidebar({
             Add project
           </button>
         ) : null}
-        <button
-          aria-current={settingsActive ? "page" : undefined}
-          className={`settings-button ${settingsActive ? "selected" : ""}`}
-          type="button"
-          onClick={onSettings}
-        >
-          <Settings size={15} />
-          <span className="settings-button-copy">
-            <span>Settings</span>
-            {settingsStatus ? <small>{settingsStatus}</small> : null}
-          </span>
-        </button>
+        <div className="sidebar-settings-row">
+          <button
+            aria-current={settingsActive ? "page" : undefined}
+            className={`settings-button ${settingsActive ? "selected" : ""}`}
+            type="button"
+            onClick={onSettings}
+          >
+            <Settings size={15} />
+            <span className="settings-button-copy">
+              <span>Settings</span>
+              {settingsStatus ? <small>{settingsStatus}</small> : null}
+            </span>
+          </button>
+          {computerSwitch && onManageComputers ? (
+            <ComputerSwitcher
+              link={computerLink ?? "connecting"}
+              onManage={onManageComputers}
+              openRequest={computerSwitcherRequest}
+              snapshot={computers}
+              switcher={computerSwitch}
+            />
+          ) : null}
+        </div>
       </div>
       {pendingDisable ? (
         <AgentDisableDialog
@@ -505,8 +521,10 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
     prev.settingsStatus === next.settingsStatus &&
-    prev.computerName === next.computerName &&
+    prev.computers === next.computers &&
     prev.computerLink === next.computerLink &&
+    prev.computerSwitcherRequest === next.computerSwitcherRequest &&
+    prev.computerSwitch === next.computerSwitch &&
     prev.settingsActive === next.settingsActive &&
     prev.showArchived === next.showArchived &&
     prev.taskListError === next.taskListError &&

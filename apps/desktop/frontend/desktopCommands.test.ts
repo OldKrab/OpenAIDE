@@ -10,6 +10,11 @@ describe("Desktop keyboard commands", () => {
     expect(desktopCommandForKeyboardEvent({ altKey: false, ctrlKey: true, key, metaKey: false, shiftKey: false })).toBe(command);
   });
 
+  it("opens the computer switcher with Ctrl+Shift+S", () => {
+    expect(desktopCommandForKeyboardEvent({ altKey: false, ctrlKey: true, key: "S", metaKey: false, shiftKey: true })).toBe("switch-computer");
+    expect(desktopCommandForKeyboardEvent({ altKey: false, ctrlKey: true, key: "s", metaKey: false, shiftKey: false })).toBeUndefined();
+  });
+
   it("leaves modified and unrelated keys to the focused control", () => {
     expect(desktopCommandForKeyboardEvent({ altKey: false, ctrlKey: true, key: "n", metaKey: false, shiftKey: true })).toBeUndefined();
     expect(desktopCommandForKeyboardEvent({ altKey: false, ctrlKey: false, key: "n", metaKey: false, shiftKey: false })).toBeUndefined();

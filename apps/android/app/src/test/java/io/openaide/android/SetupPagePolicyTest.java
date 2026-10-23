@@ -15,6 +15,19 @@ public class SetupPagePolicyTest {
             assertFalse(SetupPagePolicy.isConnectionRoute(profile, address));
     }
 
+    @Test public void onlySwitchingComputersWorksFromEveryPage() {
+        assertTrue(SetupPagePolicy.allowedOnEveryPage("use_computer"));
+        assertTrue(SetupPagePolicy.allowedOnEveryPage("local"));
+        assertTrue(SetupPagePolicy.allowedOnEveryPage("cancel_switch"));
+        for (String action : new String[]{"state", "forget_computer", "pair_setup", "install", "grant", "background", "diagnostics", ""})
+            assertFalse(SetupPagePolicy.allowedOnEveryPage(action));
+    }
+
+    @Test public void onlySwitchCommandsAreAnsweredWhenTheSwitchEnds() {
+        for (String action : new String[]{"use_computer", "local", "cancel_switch", "forget_computer"}) assertTrue(SetupPagePolicy.switchesComputer(action));
+        for (String action : new String[]{"state", "pair_setup", "update_check", ""}) assertFalse(SetupPagePolicy.switchesComputer(action));
+    }
+
     @Test public void servesOnlyBundledSetupAssets() {
         assertEquals("setup/index.html", SetupPagePolicy.asset("https://app.openaide.invalid/index.html"));
         assertEquals("setup/app.js", SetupPagePolicy.asset("https://app.openaide.invalid/app.js"));

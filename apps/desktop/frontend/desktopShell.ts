@@ -12,14 +12,16 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CLIENT_DETACH, type AppServerSession } from "@openaide/app-server-client";
-import type { HostToWebviewMessage, SettingsIntent, SettingsTabId } from "@openaide/app-shell-contracts";
-import type { FrontendShell, RemoteComputer } from "../../../packages/frontend/src/services/frontendShell";
+import type { HostToWebviewMessage, SettingsIntent, SettingsTabId, TaskSummary } from "@openaide/app-shell-contracts";
+import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
+import { computerSwitch } from "../../../packages/frontend/src/services/computerSwitch";
 import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import type { PostHostMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
 import { quitDesktop } from "./desktopQuitLifecycle";
 import { createDesktopProjectPicker } from "./desktopProjectPicker";
 import { createDesktopServerRecovery } from "./desktopServerRecovery";
+import { createDesktopComputers } from "./desktopComputers";
 import { createDesktopUpdates } from "./desktopUpdates";
 import type { DesktopBootstrap, LocalHttpConnection } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
@@ -27,7 +29,13 @@ import { createDesktopSupportExports } from "./desktopSupportExports";
 import { createDesktopFileViewerContent, desktopPdfRendererDocumentUrl } from "./desktopFileViewer";
 import { createDesktopFileUploads } from "./desktopFileUploads";
 import { createDesktopSecretMessageHandler } from "./desktopSecrets";
-import { createDesktopTaskNotifications } from "./desktopTaskNotifications";
+import { createDesktopTaskNotifications, type DesktopNotificationHost } from "./desktopTaskNotifications";
+import {
+  takeThisComputerTask,
+  THIS_COMPUTER_ATTENTION_EVENT,
+  THIS_COMPUTER_ATTENTION_SNAPSHOT,
+  watchThisComputerAttention,
+} from "./desktopThisComputerAttention";
 
 type DesktopRoute =
   | { surface: "nativeSession"; agentId: string; nativeSessionId: string; projectId?: string }
@@ -44,14 +52,13 @@ export function createDesktopShell(
   document.body.dataset.platform = host.platform;
   const nativeWindow = getCurrentWindow();
   const nativeWebview = getCurrentWebview();
-  // Desktop owns the App Server process, so return-to-app restores it here. The
+  // Desktop always runs this computer's App Server, even while the window uses a
+  // paired computer's (ADR-0070), so return-to-app restores it here. The
   // subscription lives as long as the WebView. Native focus is the reliable
   // machine-resume signal on macOS, and re-broadcasting it as `openaide:resume`
   // also wakes the shared transport and restarts suspended animations.
-  // With a paired computer in use there is no process here to restore; the
-  // session's own retries reopen the connection.
   const remote = Boolean(host.remoteComputer);
-  if (!remote) createDesktopServerRecovery({ invoke });
+  createDesktopServerRecovery({ invoke });
   void nativeWindow.onFocusChanged(({ payload: focused }) => {
     if (focused) window.dispatchEvent(new Event("openaide:resume"));
   });
@@ -112,7 +119,9 @@ export function createDesktopShell(
     reload: () => window.location.reload(),
     session,
   });
-  let route: DesktopRoute = { surface: "task" };
+  // A click on this computer's notification switched here to open its Task.
+  const arrivedTaskId = remote ? undefined : takeThisComputerTask(window.sessionStorage, Date.now());
+  let route: DesktopRoute = arrivedTaskId ? { surface: "task", taskId: arrivedTaskId } : { surface: "task" };
   const routeListeners = new Set<(bootstrap: WebviewBootstrap) => void>();
   const messageListeners = new Set<(message: HostToWebviewMessage) => void>();
   const handleSecretMessage = createDesktopSecretMessageHandler(invoke);
@@ -237,6 +246,48 @@ export function createDesktopShell(
     }
   };
 
+  const notificationHost: DesktopNotificationHost = {
+    storage: window.localStorage,
+    isPermissionGranted,
+    requestPermission,
+    sendNotification,
+    removeActive,
+    onAction,
+    initiallyFocused: () => document.hasFocus(),
+    isFocused: () => nativeWindow.isFocused(),
+    onFocusChanged: (listener) => nativeWindow.onFocusChanged(({ payload }) => listener(payload)),
+    focusedTaskId: () => route.surface === "task" ? route.taskId : undefined,
+    async focusWindow() {
+      await nativeWindow.unminimize();
+      await nativeWindow.show();
+      await nativeWindow.setFocus();
+    },
+    openTask: (taskId) => navigate({ surface: "task", taskId }),
+    now: () => Date.now(),
+    record: (event, fields) => {
+      void invoke("record_desktop_webview_log", { event, fields }).catch(() => undefined);
+    },
+  };
+  const computers = createDesktopComputers(invoke, () => leaveForAnotherComputer(session));
+  if (remote) {
+    watchThisComputerAttention({
+      notifications: (storage, openTask) => createDesktopTaskNotifications({
+        ...notificationHost,
+        storage,
+        openTask,
+        // None of this computer's Tasks is in the window, so none is in sight.
+        focusedTaskId: () => undefined,
+        source: "thisComputer",
+        idBase: THIS_COMPUTER_NOTIFICATION_ID_BASE,
+      }),
+      storage: window.localStorage,
+      session: window.sessionStorage,
+      snapshot: () => invoke<TaskSummary[] | null>(THIS_COMPUTER_ATTENTION_SNAPSHOT),
+      listen: (handler) => listen<{ tasks: TaskSummary[] }>(THIS_COMPUTER_ATTENTION_EVENT, ({ payload }) => handler(payload.tasks)),
+      switcher: computerSwitch(computers),
+      now: () => Date.now(),
+    });
+  }
   return {
     appearance,
     backendConnection: () => session,
@@ -255,13 +306,7 @@ export function createDesktopShell(
       }),
       select: (environment) => invoke("set_desktop_runtime_environment", { environment }),
     } : undefined,
-    remoteComputers: {
-      current: host.remoteComputer,
-      list: () => invoke<RemoteComputer[]>("desktop_remote_snapshot"),
-      pair: (code) => invoke("desktop_remote_pair", { code }),
-      use: (id) => invoke("desktop_remote_use", { id: id ?? null }),
-      forget: (id) => invoke("desktop_remote_forget", { id }),
-    },
+    computers,
     desktopUpdates,
     desktopCommands: {
       subscribe(listener) {
@@ -328,29 +373,42 @@ export function createDesktopShell(
     fileViewer: true,
     fileViewerContent: createDesktopFileViewerContent(connection, host.clientInstanceId),
     pdfRendererDocumentUrl: desktopPdfRendererDocumentUrl(host.platform),
-    taskNotifications: createDesktopTaskNotifications({
-      storage: window.localStorage,
-      isPermissionGranted,
-      requestPermission,
-      sendNotification,
-      removeActive,
-      onAction,
-      initiallyFocused: () => document.hasFocus(),
-      isFocused: () => nativeWindow.isFocused(),
-      onFocusChanged: (listener) => nativeWindow.onFocusChanged(({ payload }) => listener(payload)),
-      focusedTaskId: () => route.surface === "task" ? route.taskId : undefined,
-      async focusWindow() {
-        await nativeWindow.unminimize();
-        await nativeWindow.show();
-        await nativeWindow.setFocus();
-      },
-      openTask: (taskId) => navigate({ surface: "task", taskId }),
-      now: () => Date.now(),
-      record: (event, fields) => {
-        void invoke("record_desktop_webview_log", { event, fields }).catch(() => undefined);
-      },
-    }),
+    taskNotifications: createDesktopTaskNotifications(notificationHost),
   };
+}
+
+/** Clear of the window manager's ids, which count up from 1 for the life of the page. */
+const THIS_COMPUTER_NOTIFICATION_ID_BASE = 1_000_000;
+const SWITCH_DETACH_TIMEOUT_MS = 1_000;
+const SWITCH_DETACH_ATTEMPTS = 2;
+
+/**
+ * Detaches from the App Server the window leaves, so this computer's App Server
+ * does not keep a client for a window that moved on (a lingering one would also
+ * refuse a Desktop Update until it expires), then reloads onto the one now in
+ * use. A detach that did not answer is tried once more. A paired computer's link
+ * is already closed, so its detach fails at once and changes nothing.
+ */
+async function leaveForAnotherComputer(session: AppServerSession) {
+  const startedAt = performance.now();
+  let outcome = "detachFailed";
+  let attempt = 0;
+  while (attempt < SWITCH_DETACH_ATTEMPTS && outcome !== "detached") {
+    attempt += 1;
+    outcome = await detachWithin(session, SWITCH_DETACH_TIMEOUT_MS);
+  }
+  console.info(`desktop_computer_switch_window_reload outcome=${outcome} attempt_count=${attempt} duration_ms=${Math.round(performance.now() - startedAt)}`);
+  window.location.reload();
+}
+
+async function detachWithin(session: AppServerSession, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await Promise.race([
+    session.request(CLIENT_DETACH, {}).then(() => "detached", () => "detachFailed"),
+    new Promise<string>((resolve) => { timer = setTimeout(() => resolve("detachTimeout"), timeoutMs); }),
+  ]);
+  clearTimeout(timer);
+  return outcome;
 }
 
 function nextAnimationFrame() {

@@ -1,16 +1,16 @@
 # Desktop Can Use Another Computer's App Server
 
-Status: accepted
+Status: accepted; restart and App Server choices superseded by ADR-0070
 
 The Desktop App on one computer can work with the App Server of another computer, the same way the Mobile App does ([ADR-0062](0062-remote-devices-are-app-server-clients.md)). It pairs by Pairing Code, is trusted by its own key pair, and reaches the other App Server over iroh. No account, address, or password is involved.
 
 ## Choice
 
-A Desktop keeps its own App Server. The user chooses one place where agents work: this computer, or one of the computers it is paired with. Exactly one is in use at a time, and the choice is a Desktop bootstrap preference next to the runtime environment, so changing it restarts the Desktop like an environment change does. Pairing with a computer selects it.
+A Desktop keeps its own App Server. The user chooses one place where agents work: this computer, or one of the computers it is paired with. Exactly one is in use at a time, and the choice is a Desktop bootstrap preference next to the runtime environment. Pairing with a computer selects it. Changing the choice no longer restarts the Desktop, and leaving this computer no longer stops its App Server ([ADR-0070](0070-switching-computers-is-in-place-and-keeps-work-running.md)).
 
 A Desktop pairs only in the invite direction: the other computer shows a code and this Desktop spends it. Between two computers either direction costs the user the same copy and paste, so the join-request direction and its listening endpoint are left out.
 
-When a paired computer is in use the Desktop starts no App Server. Startup first reaches the paired computer, so an unreachable computer is named on the startup screen together with the way back to this computer. A removal or an incompatible version found later is reported once, with the same way back.
+Startup with a paired computer in use first reaches the paired computer, so an unreachable computer is named on the startup screen together with the way back to this computer. A removal or an incompatible version found later is reported once, with the same way back.
 
 ## Mechanism
 
@@ -29,7 +29,7 @@ While a paired computer is in use, the parts of the Desktop that assume a same-m
 
 - **A Desktop that is only a remote client.** Rejected: a computer that can run agents should keep doing so, and switching back must not need a reinstall.
 - **Using several computers at once.** Rejected for now: the Frontend renders one App Server's state, and merging Projects and Tasks of several is a product change of its own.
-- **Applying the choice without a restart.** Rejected for now: the Frontend's session, caches, and shell capabilities are created once for one App Server. The restart is the mechanism the runtime environment already uses.
+- **Applying the choice without a restart.** Rejected at first because the Frontend's session, caches, and shell capabilities are created once for one App Server; later adopted by reloading the WebView in a kept process ([ADR-0070](0070-switching-computers-is-in-place-and-keeps-work-running.md)).
 - **A second copy of the client in TypeScript inside the WebView.** Rejected: iroh has no WebView binding here, and the key must not live in web storage.
 
 ## Consequences
