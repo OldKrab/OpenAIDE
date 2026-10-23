@@ -39,9 +39,8 @@ Status: agreed design ([ADR-0070](../adr/0070-switching-computers-is-in-place-an
 
 ## Slice 4: notifications for this device
 
-- Depends on `taskAttention/wait` from `shushakov/paired-task-notifications`; rebase after it merges.
 - Mobile App: the background service watches the phone's App Server as well as the selected computer, and keeps the wake lock while local Tasks run. A tap on a local notification switches to this phone and opens the Task.
-- Desktop: while another computer is in use, the Desktop shell keeps a held `taskAttention/wait` on this computer's App Server and notifies through the existing Desktop notification manager; activation switches back and opens the Task.
+- Desktop: while another computer is in use, a native watcher keeps a held `taskAttention/wait` on this computer's App Server as a shell-hold client, so it never blocks a Desktop Update, and hands each changed list to the window. A second notification manager with its own receipts and notification ids applies the usual rules; activation switches back through the shared switch, so unsent input is still asked about, and the reloaded page opens the Task.
 - Tests: the watch's baseline, in-sight, and one-per-Task rules for the second source; activation routing.
 
 ## Diagnostics
@@ -50,4 +49,5 @@ Each switch emits `computer_switch` start and terminal events under one correlat
 
 ## Open questions
 
+- Drafts are dropped with the page on a confirmed switch. Keeping them per computer and Task in device storage would let a switch lose nothing; until then the Frontend asks first.
 - SSH Computers join the list once ADR-0069 lands, adding a `kind` to each computer and merged routes (ADR-0070).

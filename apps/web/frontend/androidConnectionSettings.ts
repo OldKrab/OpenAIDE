@@ -20,7 +20,8 @@ type SwitchCommand =
   | { action: "local"; operationId?: string }
   | { action: "cancel_switch" };
 
-const SWITCH_ACTIONS = new Set(["use_computer", "local", "cancel_switch"]);
+/** Forgetting the computer in use moves to this phone first, so it is answered like a switch. */
+const SWITCH_ACTIONS = new Set(["use_computer", "local", "cancel_switch", "forget_computer"]);
 /** Bounds a switch the phone never answers; the user can Cancel well before it. */
 const SWITCH_TIMEOUT_MS = 180_000;
 
@@ -112,7 +113,8 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
       subscribe,
       use: switchTo,
       cancel: async () => { await request({ action: "cancel_switch" }); },
-      forget: id => execute({ action: "forget_computer", id }),
+      // Resolves once forgotten, or once a Cancel kept the computer; forgetting the one in use replaces the page.
+      forget: async id => { await request({ action: "forget_computer", id }); },
       openPairing: () => execute({ action: "pair_setup" }),
     },
   };

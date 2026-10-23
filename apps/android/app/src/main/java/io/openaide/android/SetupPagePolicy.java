@@ -24,8 +24,11 @@ final class SetupPagePolicy {
      */
     private static final java.util.Set<String> EVERY_PAGE_ACTIONS = java.util.Set.of("use_computer", "local", "cancel_switch");
 
-    /** Switch commands are answered when the switch ends, not when they are accepted. */
-    private static final java.util.Set<String> SWITCH_ACTIONS = java.util.Set.of("use_computer", "local", "cancel_switch");
+    /**
+     * Switch commands are answered when the switch ends, not when they are accepted.
+     * Forgetting is one: forgetting the computer in use moves to this phone first.
+     */
+    private static final java.util.Set<String> SWITCH_ACTIONS = java.util.Set.of("use_computer", "local", "cancel_switch", "forget_computer");
 
     static boolean switchesComputer(String action) { return SWITCH_ACTIONS.contains(action); }
 

@@ -51,7 +51,7 @@ final class ConnectionController extends ContextWrapper {
     void receive(JSONObject message) {
         if (disposed) return;
         String command = message.optString("action");
-        if (!localTools && !java.util.Arrays.asList("state", "close", "forget_computer", "pair_setup", "app_settings", "diagnostics").contains(command)) {
+        if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
@@ -72,7 +72,22 @@ final class ConnectionController extends ContextWrapper {
         ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
         String target = action.equals("use_computer") ? message.optString("id") : null;
         String operationId = message.has("operationId") ? message.optString("operationId") : null;
+        if (action.equals("forget_computer")) { forget(message.optString("id"), operationId, reply); return; }
         switcher.request(selected == null ? null : selected.id, target, operationId, reply);
+    }
+
+    /** Forgets a paired computer; the one in use is left through the switch first, and forgotten only once it took effect. */
+    private void forget(String id, String operationId, ComputerSwitch.Reply reply) {
+        ComputerForget.Pairings pairings = new ComputerForget.Pairings() {
+            @Override public String inUse() {
+                ConnectionStore store = new ConnectionStore(ConnectionController.this);
+                ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
+                return selected == null ? null : selected.id;
+            }
+            @Override public void forget(String forgotten) { new ConnectionStore(ConnectionController.this).forgetPaired(forgotten); }
+        };
+        ComputerForget.INSTANCE.forget(id, operationId, pairings, switcher,
+            (outcome, fields) -> diagnostics.record("connection_computer_forgotten", outcome, 0, 0, fields), this::emit, reply);
     }
 
     private void action(JSONObject message) throws Exception {
@@ -89,17 +104,6 @@ final class ConnectionController extends ContextWrapper {
             case "pair": pair(message.optString("code")); break;
             case "join": join(); break;
             case "join_stop": RemotePairing.stopJoin(); joinCode = null; emit(); break;
-            case "forget_computer": {
-                ConnectionStore store = new ConnectionStore(this);
-                String id = message.optString("id");
-                ConnectionStore.PairedServer selected = store.pairedServer();
-                boolean current = store.usesPaired() && selected != null && selected.id.equals(id);
-                store.forgetPaired(id);
-                diagnostics.record("connection_computer_forgotten", current ? "current" : "other", 0, 0);
-                // Only leaving the computer in use changes the workspace; the list alone redraws.
-                if (current) { RemoteNode.INSTANCE.disconnect(); changed(); } else emit();
-                break;
-            }
             case "install": install(); break;
             case "termux": launchTermux(); break;
             case "get_termux": open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/termux/termux-app/releases"))); break;

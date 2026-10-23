@@ -24,8 +24,8 @@ public class SetupPagePolicyTest {
     }
 
     @Test public void onlySwitchCommandsAreAnsweredWhenTheSwitchEnds() {
-        for (String action : new String[]{"use_computer", "local", "cancel_switch"}) assertTrue(SetupPagePolicy.switchesComputer(action));
-        for (String action : new String[]{"state", "forget_computer", "update_check", ""}) assertFalse(SetupPagePolicy.switchesComputer(action));
+        for (String action : new String[]{"use_computer", "local", "cancel_switch", "forget_computer"}) assertTrue(SetupPagePolicy.switchesComputer(action));
+        for (String action : new String[]{"state", "pair_setup", "update_check", ""}) assertFalse(SetupPagePolicy.switchesComputer(action));
     }
 
     @Test public void servesOnlyBundledSetupAssets() {

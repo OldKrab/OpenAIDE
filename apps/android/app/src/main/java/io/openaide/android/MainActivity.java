@@ -33,6 +33,7 @@ import android.view.ViewGroup;
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -73,6 +74,8 @@ public final class MainActivity extends Activity {
     /** Set by a Task notification; the workspace routes to it once its page is loaded. */
     static final String EXTRA_TASK_ID = "task_id";
     private String pendingTask;
+    /** The source of [pendingTask]'s notification; a phone Task opens once the phone is in use. */
+    private String pendingTaskSource;
     private BackNavigation backNavigation;
 
     @Override public void onCreate(Bundle savedState) {
@@ -87,6 +90,7 @@ public final class MainActivity extends Activity {
         AppUpdateJob.schedule(this);
         AppUpdates.get(this).checkIfDue();
         pendingTask = getIntent().getStringExtra(EXTRA_TASK_ID);
+        pendingTaskSource = getIntent().getStringExtra(BackgroundSources.EXTRA_TASK_SOURCE);
         if (credentialsUnavailable) openSetup("welcome");
         else if (getIntent().getBooleanExtra("show_settings", false)) showSettings("remote");
         else if (getIntent().getBooleanExtra(AppUpdates.EXTRA_SHOW, false)) showSettings("general");
@@ -182,10 +186,38 @@ public final class MainActivity extends Activity {
 
     private void navigateToTask() {
         if (browser == null || pendingTask == null) return;
+        if (BackgroundSources.tap(pendingTaskSource, !profile.local) == BackgroundSources.Tap.SWITCH_THEN_OPEN) {
+            switchToOpenTask();
+            return;
+        }
         String path = "/task/" + Uri.encode(pendingTask);
         pendingTask = null;
         diagnostics.record("task_notification", "opened", 0, 0);
         browser.evaluateJavascript("history.pushState(null, '', " + org.json.JSONObject.quote(path) + "); window.dispatchEvent(new PopStateEvent('popstate'))", null);
+    }
+
+    /**
+     * A phone Task tapped while the paired computer is in use: the phone becomes the
+     * workspace in use through the connect-first switch, as the switcher does, and the
+     * Task opens on the page that replaces this one. A switch that fails changes nothing.
+     */
+    private void switchToOpenTask() {
+        if (connectionBridge == null) return;
+        String operationId = ComputerSwitch.Companion.operationId(null);
+        Map<String, String> fields = Map.of("operation_id", operationId, "source", BackgroundSources.Source.THIS_DEVICE.wire);
+        long started = SystemClock.elapsedRealtime();
+        int attempt = generation;
+        String task = pendingTask;
+        // The page that replaces this one opens the Task; the source is not needed any longer.
+        pendingTaskSource = null;
+        diagnostics.record("task_notification", "switch_requested", 0, 0, fields);
+        connectionBridge.useThisPhone(operationId, (outcome, problem) -> {
+            diagnostics.record("task_notification", problem != null ? "switch_failed" : "switch_" + outcome, 0, SystemClock.elapsedRealtime() - started, fields);
+            if (problem != null || "cancelled".equals(outcome)) {
+                if (task.equals(pendingTask)) pendingTask = null;
+                if (problem != null && !isDestroyed()) Toast.makeText(this, problem, Toast.LENGTH_LONG).show();
+            } else if ("unchanged".equals(outcome) && attempt == generation) navigateToTask();
+        });
     }
 
     private void openSetup(String screen) {
@@ -232,6 +264,7 @@ public final class MainActivity extends Activity {
         else if (intent.getBooleanExtra(AppUpdates.EXTRA_SHOW, false)) showSettings("general");
         else if (intent.getStringExtra(EXTRA_TASK_ID) != null) {
             pendingTask = intent.getStringExtra(EXTRA_TASK_ID);
+            pendingTaskSource = intent.getStringExtra(BackgroundSources.EXTRA_TASK_SOURCE);
             // A shown page routes now; otherwise the page's load or the reconnect below routes it.
             if (browser != null && profile.owns(browser.getUrl())) navigateToTask();
         }

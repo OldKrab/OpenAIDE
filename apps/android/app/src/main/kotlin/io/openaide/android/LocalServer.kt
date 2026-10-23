@@ -107,6 +107,18 @@ internal object LocalServer {
     @JvmStatic @Throws(IOException::class)
     fun status(context: Context): ServerStatus {
         val server = try { endpoint(context) } catch (error: Unavailable) { throw IOException("Local App Server unavailable") }
+        return status(server)
+    }
+
+    /**
+     * [status] of a server this process already reaches, or null when there is none.
+     * Never starts one: watching this phone's Tasks while a paired computer is in
+     * use must not launch Termux (ADR-0070).
+     */
+    @JvmStatic @Throws(IOException::class)
+    fun statusIfRunning(): ServerStatus? = endpoint?.let(::status)
+
+    private fun status(server: Endpoint): ServerStatus {
         var active = 0
         var waiting = 0
         var cursor: Any? = null

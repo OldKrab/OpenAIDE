@@ -232,6 +232,11 @@ internal object RemoteNode {
                 // A hidden app usually has no network to retry on; its return starts over anyway.
                 val more = hiddenAt == 0L && ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started) > 0
                 if (error.failure != Failure.UNREACHABLE || !more) throw error
+                // TODO: a dial for a switch shares the one endpoint with the live connection, so the
+                // live connection's own reconnect (a return to the screen, a stalled receive) retires
+                // that endpoint and ends the switch's dial mid-attempt, which the user sees as a failed
+                // switch to a reachable computer. Give the switch's dial its own endpoint, or have that
+                // reconnect stand down while a switch is pending.
                 if (ReconnectPolicy.retireAfterFailedDial(live() != null)) stale = "dial_failed"
             }
         }

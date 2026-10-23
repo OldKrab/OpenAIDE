@@ -146,4 +146,22 @@ describe("Android connection controls", () => {
     test.receive({ type: "result", id: switching.id, accepted: true, outcome: "cancelled" });
     await expect(toStudio).resolves.toBe("cancelled");
   });
+  it("waits for forgetting the computer in use as for a switch, and keeps the phone's sentence", async () => {
+    vi.useFakeTimers();
+    const test = harness();
+    test.attach();
+    let settled = false;
+    const forgotten = test.capability!.computers.forget("studio").finally(() => { settled = true; });
+    const request = JSON.parse(test.port.postMessage.mock.calls[0][0]);
+    expect(request.command).toEqual({ action: "forget_computer", id: "studio" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(settled).toBe(false);
+    test.receive({ type: "result", id: request.id, accepted: true, outcome: "switched" });
+    await expect(forgotten).resolves.toBeUndefined();
+
+    const failed = test.capability!.computers.forget("studio");
+    const retried = JSON.parse(test.port.postMessage.mock.calls[1][0]);
+    test.receive({ type: "result", id: retried.id, accepted: false, error: "Your local workspace could not start." });
+    await expect(failed).rejects.toThrow("Your local workspace could not start.");
+  });
 });

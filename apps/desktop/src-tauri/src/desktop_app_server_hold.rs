@@ -51,7 +51,7 @@ pub(crate) enum HoldError {
 
 impl HoldError {
     /// Stable, content-free name for diagnostics.
-    fn class(&self) -> &'static str {
+    pub(crate) fn class(&self) -> &'static str {
         match self {
             Self::Unreachable => "unreachable",
             Self::Refused => "refused",
@@ -319,35 +319,53 @@ impl AppServerHold {
         method: &str,
         params: Value,
     ) -> Result<Value, HoldError> {
-        let (address, path) =
-            loopback_endpoint(&target.endpoint_url).ok_or(HoldError::Malformed)?;
         state.next_request += 1;
         let id = format!("desktop-native-{}", state.next_request);
-        let body =
-            json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string();
-        let wire = format!(
-            "POST {path} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {}\r\nX-OpenAIDE-Connection-Id: {}\r\nX-OpenAIDE-Client-Instance-Id: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            target.auth_token,
-            self.client_instance_id,
-            self.client_instance_id,
-            body.len(),
-        );
-        let mut stream = TcpStream::connect_timeout(&address, REQUEST_TIMEOUT)
-            .map_err(|_| HoldError::Unreachable)?;
-        stream
-            .set_read_timeout(Some(REQUEST_TIMEOUT))
-            .and_then(|()| stream.set_write_timeout(Some(REQUEST_TIMEOUT)))
-            .map_err(|_| HoldError::Unreachable)?;
-        stream
-            .write_all(wire.as_bytes())
-            .map_err(|_| HoldError::Unreachable)?;
-        let mut response = Vec::new();
-        stream
-            .take(MAX_RESPONSE_BYTES)
-            .read_to_end(&mut response)
-            .map_err(|_| HoldError::Unreachable)?;
-        read_reply(&response, &id)
+        post_loopback(
+            target,
+            &self.client_instance_id,
+            &id,
+            method,
+            params,
+            REQUEST_TIMEOUT,
+        )
     }
+}
+
+/// One JSON-RPC request to a same-machine App Server over plain HTTP, as the
+/// windowless client `client_instance_id`; returns the reply's result. `timeout`
+/// bounds connecting, writing, and reading, so a held request needs a longer one.
+pub(crate) fn post_loopback(
+    target: &HoldTarget,
+    client_instance_id: &str,
+    request_id: &str,
+    method: &str,
+    params: Value,
+    timeout: Duration,
+) -> Result<Value, HoldError> {
+    let (address, path) = loopback_endpoint(&target.endpoint_url).ok_or(HoldError::Malformed)?;
+    let body = json!({ "jsonrpc": "2.0", "id": request_id, "method": method, "params": params })
+        .to_string();
+    let wire = format!(
+        "POST {path} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {}\r\nX-OpenAIDE-Connection-Id: {client_instance_id}\r\nX-OpenAIDE-Client-Instance-Id: {client_instance_id}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        target.auth_token,
+        body.len(),
+    );
+    let mut stream = TcpStream::connect_timeout(&address, REQUEST_TIMEOUT.min(timeout))
+        .map_err(|_| HoldError::Unreachable)?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
+        .map_err(|_| HoldError::Unreachable)?;
+    stream
+        .write_all(wire.as_bytes())
+        .map_err(|_| HoldError::Unreachable)?;
+    let mut response = Vec::new();
+    stream
+        .take(MAX_RESPONSE_BYTES)
+        .read_to_end(&mut response)
+        .map_err(|_| HoldError::Unreachable)?;
+    read_reply(&response, request_id)
 }
 
 /// The App Server's published address. Any host but loopback is refused: the token must not leave this machine.
@@ -389,7 +407,14 @@ fn read_reply(response: &[u8], id: &str) -> Result<Value, HoldError> {
     if reply.get("error").is_some() {
         return Err(HoldError::Refused);
     }
-    Ok(reply.get("result").cloned().unwrap_or(Value::Null))
+    // The App Server wraps every result in a response envelope (`{ result, meta? }`).
+    let envelope = reply.get("result").cloned().unwrap_or(Value::Null);
+    match envelope {
+        Value::Object(mut fields) if fields.contains_key("result") => {
+            Ok(fields.remove("result").unwrap_or(Value::Null))
+        }
+        bare => Ok(bare),
+    }
 }
 
 #[cfg(test)]

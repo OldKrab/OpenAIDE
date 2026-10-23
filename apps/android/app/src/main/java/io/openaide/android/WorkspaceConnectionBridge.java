@@ -114,6 +114,15 @@ final class WorkspaceConnectionBridge {
         } catch (Exception ignored) { }
     }
 
+    /**
+     * Makes this phone the workspace in use through the connect-first switch, as the
+     * switcher does, for a tap on one of its Task notifications; [reply] answers once.
+     */
+    void useThisPhone(String operationId, ComputerSwitch.Reply reply) {
+        try { controller.switchComputer(new JSONObject().put("action", "local").put("operationId", operationId), reply); }
+        catch (org.json.JSONException impossible) { reply.done(null, "OpenAIDE could not switch. Try again."); }
+    }
+
     void resume() {
         if (settingsRoute()) controller.resume();
         else controller.refresh();

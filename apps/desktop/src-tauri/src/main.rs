@@ -19,6 +19,7 @@ mod desktop_log;
 mod desktop_app_server_hold;
 mod desktop_app_server_launch;
 mod desktop_connection;
+mod desktop_local_attention;
 mod desktop_remote;
 mod desktop_renderer_protocol;
 mod desktop_runtime;
@@ -121,6 +122,7 @@ fn main() {
             ));
             app.manage(DesktopQuitState::default());
             desktop_app_server_hold::install(app);
+            desktop_local_attention::install(app);
             #[cfg(target_os = "macos")]
             macos_menu::install(app)?;
             #[cfg(target_os = "macos")]
@@ -171,6 +173,7 @@ fn main() {
             desktop_take_pending_quit,
             desktop_app_server_hold::complete_desktop_quit,
             desktop_app_server_hold::desktop_update_prepare_local,
+            desktop_local_attention::desktop_local_attention_snapshot,
             desktop_app_server_hold::desktop_update_finish_local,
             desktop_webview_log::record_desktop_telemetry,
             desktop_webview_log::record_desktop_webview_log,

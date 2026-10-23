@@ -218,7 +218,7 @@ fn asks_the_held_app_server_as_its_own_client() {
         .call("client/updateShutdownPrepare", params.clone())
         .expect("answer");
     let asked = server.received.try_recv().expect("prepare request");
-    assert_eq!(answer, serde_json::json!({ "result": {} }));
+    assert_eq!(answer, serde_json::json!({}));
     assert_eq!(asked.method, "client/updateShutdownPrepare");
     assert_eq!(asked.params, params);
     assert_eq!(asked.client_instance_id, initialize.client_instance_id);
