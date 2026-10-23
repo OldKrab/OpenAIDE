@@ -42,6 +42,7 @@ fn initialize_params_use_typed_method_shape() {
             path: "/workspace/app".to_string(),
         }],
         protocol_version: None,
+        role: ClientRole::Interactive,
     };
 
     let value = serde_json::to_value(params).unwrap();
@@ -55,6 +56,27 @@ fn initialize_params_use_typed_method_shape() {
         json!(["stableClientRequestIds"])
     );
     assert_eq!(value["workspaceRoots"][0]["path"], json!("/workspace/app"));
+    // An ordinary client says nothing about its role, as clients before it did.
+    assert!(value.get("role").is_none());
+}
+
+#[test]
+fn initialize_params_carry_a_shell_hold_role_and_default_to_interactive() {
+    let mut value = json!({
+        "clientInstanceId": "desktop-native-1",
+        "shell": { "kind": "desktop" },
+        "requestedSurface": { "kind": "home" },
+    });
+    let ordinary: InitializeParams = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(ordinary.role, ClientRole::Interactive);
+
+    value["role"] = json!("shellHold");
+    let hold: InitializeParams = serde_json::from_value(value).unwrap();
+    assert_eq!(hold.role, ClientRole::ShellHold);
+    assert_eq!(
+        serde_json::to_value(hold).unwrap()["role"],
+        json!("shellHold")
+    );
 }
 
 #[test]
