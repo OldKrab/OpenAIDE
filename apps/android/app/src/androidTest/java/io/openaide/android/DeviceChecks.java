@@ -250,7 +250,7 @@ public final class DeviceChecks extends InstrumentationTestCase {
     public void testGatewayRefusesRequestsWithoutTheShellsCookie() throws Exception {
         var context = getInstrumentation().getTargetContext();
         LocalServer.status(context);
-        assertTrue(WorkspaceGateway.INSTANCE.start(context, true));
+        assertTrue(WorkspaceGateway.INSTANCE.start(context, ConnectionProfile.Kind.LOCAL));
         java.net.HttpURLConnection connection = (java.net.HttpURLConnection)
             new java.net.URL(ConnectionProfile.local().endpoint + "__openaide-app-server/probe").openConnection();
         try { assertEquals(403, connection.getResponseCode()); }

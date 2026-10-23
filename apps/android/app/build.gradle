@@ -26,6 +26,20 @@ def bundledRuntime = project.hasProperty('openaideBundledRuntime') ? file(projec
 if (bundledRuntime != null && !bundledRuntime.isFile()) throw new GradleException('Bundled runtime archive not found')
 def bundledRuntimeDigest = bundledRuntime == null ? '' : java.security.MessageDigest.getInstance('SHA-256').digest(bundledRuntime.bytes).encodeHex().toString()
 def runtimeAssets = layout.buildDirectory.dir('generated/runtime-assets')
+// SSH Computers (ADR-0069) upload the Linux App Server only if its SHA-256 is the one built in.
+// Releases pin the published binary: -PopenaideSshAppServerSha256=HEX. A test build may instead
+// carry an archive and the version its binary reports:
+// gradle -PopenaideSshAppServerArchive=/path/to/openaide-app-server-linux-x64.tar.gz -PopenaideSshAppServerVersion=0.0.0 assembleDebug
+def sshArchive = project.hasProperty('openaideSshAppServerArchive') ? file(project.property('openaideSshAppServerArchive')) : null
+if (sshArchive != null && !sshArchive.isFile()) throw new GradleException('SSH App Server archive not found')
+def sshBinaryDigest = { File archive ->
+    def binary = tarTree(resources.gzip(archive)).matching { include 'openaide-app-server/openaide-app-server' }.singleFile
+    java.security.MessageDigest.getInstance('SHA-256').digest(binary.bytes).encodeHex().toString()
+}
+def sshAppServerSha256 = sshArchive != null ? sshBinaryDigest(sshArchive) : (project.findProperty('openaideSshAppServerSha256') ?: '') as String
+if (!(sshAppServerSha256 ==~ /([0-9a-f]{64})?/)) throw new GradleException('Invalid SSH App Server SHA-256')
+def sshAppServerVersion = (project.findProperty('openaideSshAppServerVersion') ?: appVersion) as String
+def sshAssets = layout.buildDirectory.dir('generated/ssh-assets')
 if (versionParts[1] > 999 || versionParts[2] > 999 || appVersionCode < 1 || appVersionCode > 2100000000) throw new GradleException('Android version is out of range')
 
 android {
@@ -54,10 +68,15 @@ android {
         buildConfigField 'int', 'PROTOCOL_MAJOR', "${protocolMajor}"
         buildConfigField 'String', 'CLAUDE_ACP_VERSION', "\"${claudeAcpVersion}\""
         buildConfigField 'String', 'BUNDLED_RUNTIME_SHA256', "\"${bundledRuntimeDigest}\""
+        buildConfigField 'String', 'SSH_APP_SERVER_SHA256', "\"${sshAppServerSha256}\""
+        buildConfigField 'String', 'SSH_APP_SERVER_VERSION', "\"${sshAppServerVersion}\""
+        buildConfigField 'boolean', 'SSH_APP_SERVER_BUNDLED', "${sshArchive != null}"
         // The iroh library is about 14 MB per architecture; phones are ARM64.
         ndk { abiFilters 'arm64-v8a' }
     }
-    sourceSets { main { assets.srcDirs frontendAssets, runtimeAssets } }
+    // The SSH library is built with this NDK; the Termux runtime uses the same one.
+    ndkVersion '27.2.12479018'
+    sourceSets { main { assets.srcDirs frontendAssets, runtimeAssets, sshAssets } }
     kotlinOptions { jvmTarget = '17' }
     packaging {
         resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'darwin-aarch64/**', 'win32-x86-64/**', 'linux-*/**'] }
@@ -102,12 +121,78 @@ def copyBundledRuntime = tasks.register('copyBundledRuntime') {
         if (bundledRuntime != null) copy { from bundledRuntime; into target; rename { 'openaide-app-server-android-arm64.bin' } }
     }
 }
+// Always runs, like copyBundledRuntime; named .bin so packaging keeps the archive as it is.
+def copySshAppServer = tasks.register('copySshAppServer') {
+    def target = sshAssets.map { it.dir('ssh') }
+    inputs.property('digest', sshAppServerSha256)
+    outputs.dir(target)
+    doLast {
+        delete target
+        mkdir target
+        if (sshArchive != null) copy { from sshArchive; into target; rename { 'openaide-app-server-linux-x64.bin' } }
+    }
+}
+
+/**
+ * Builds the SSH client library (openaide-rs/android-ssh) for phones and generates its
+ * Kotlin bindings from that same library, so the two cannot disagree.
+ */
+abstract class BuildSshLibrary extends DefaultTask {
+    @javax.inject.Inject abstract ExecOperations getExec()
+    @InputFiles @PathSensitive(PathSensitivity.RELATIVE) abstract ConfigurableFileCollection getSources()
+    @Input abstract Property<String> getNdkDirectory()
+    @Internal abstract DirectoryProperty getWorkspace()
+    @OutputDirectory abstract DirectoryProperty getJniLibs()
+    @OutputDirectory abstract DirectoryProperty getBindings()
+
+    @TaskAction void build() {
+        def root = workspace.get().asFile
+        def os = System.getProperty('os.name').toLowerCase()
+        def host = os.contains('linux') ? 'linux-x86_64' : os.contains('mac') ? 'darwin-x86_64' : null
+        if (host == null) throw new GradleException('Build the Android SSH library on Linux or macOS')
+        def toolchain = new File(ndkDirectory.get(), "toolchains/llvm/prebuilt/${host}/bin")
+        if (!toolchain.isDirectory()) throw new GradleException('Install the Android NDK named by ndkVersion')
+        def clang = new File(toolchain, 'aarch64-linux-android26-clang').absolutePath
+        exec.exec {
+            workingDir root
+            environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER', clang
+            environment 'CC_aarch64_linux_android', clang
+            environment 'AR_aarch64_linux_android', new File(toolchain, 'llvm-ar').absolutePath
+            commandLine 'cargo', 'build', '--locked', '--release', '-p', 'openaide-android-ssh', '--lib', '--target', 'aarch64-linux-android'
+        }
+        def targetDirectory = System.getenv('CARGO_TARGET_DIR') ? new File(System.getenv('CARGO_TARGET_DIR')) : new File(root, 'target')
+        def library = new File(targetDirectory, 'aarch64-linux-android/release/libopenaide_android_ssh.so')
+        def abi = jniLibs.get().dir('arm64-v8a').asFile
+        jniLibs.get().asFile.deleteDir()
+        bindings.get().asFile.deleteDir()
+        abi.mkdirs()
+        java.nio.file.Files.copy(library.toPath(), new File(abi, library.name).toPath())
+        exec.exec {
+            workingDir root
+            commandLine 'cargo', 'run', '--locked', '-q', '-p', 'openaide-android-ssh', '--bin', 'uniffi-bindgen', '--',
+                'generate', '--library', library.absolutePath, '--language', 'kotlin', '--no-format', '--out-dir', bindings.get().asFile.absolutePath
+        }
+    }
+}
+def repository = rootProject.file('../..')
+def buildSshLibrary = tasks.register('buildSshLibrary', BuildSshLibrary) {
+    workspace.set(repository)
+    sources.from(new File(repository, 'Cargo.lock'), new File(repository, 'Cargo.toml'))
+    sources.from(fileTree(new File(repository, 'openaide-rs/android-ssh')) { exclude 'target/**' })
+    sources.from(fileTree(new File(repository, 'openaide-rs/remote-client')) { exclude 'target/**' })
+    ndkDirectory.set(androidComponents.sdkComponents.ndkDirectory.map { it.asFile.absolutePath })
+    jniLibs.set(layout.buildDirectory.dir('generated/ssh/jniLibs'))
+    bindings.set(layout.buildDirectory.dir('generated/ssh/kotlin'))
+}
 androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    variant.sources.jniLibs.addGeneratedSourceDirectory(buildSshLibrary) { it.jniLibs }
+    // Kotlin compiles the .kt files of Java source directories too.
+    variant.sources.java.addGeneratedSourceDirectory(buildSshLibrary) { it.bindings }
     afterEvaluate {
-        tasks.named("merge${variant.name.capitalize()}Assets") { dependsOn copyFrontend, copyBundledRuntime }
+        tasks.named("merge${variant.name.capitalize()}Assets") { dependsOn copyFrontend, copyBundledRuntime, copySshAppServer }
         // Release builds run the "vital" lint tasks, which read the same assets.
         def lintTasks = ['generate%sLintReportModel', 'lintAnalyze%s', 'generate%sLintVitalReportModel', 'lintVitalAnalyze%s'].collect { String.format(it, variant.name.capitalize()) }
-        tasks.matching { it.name in lintTasks }.configureEach { dependsOn copyFrontend, copyBundledRuntime }
+        tasks.matching { it.name in lintTasks }.configureEach { dependsOn copyFrontend, copyBundledRuntime, copySshAppServer }
     }
 }
 dependencies {

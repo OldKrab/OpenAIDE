@@ -30,4 +30,15 @@ public class ConnectionProfileTest {
         // The Web Shell that Termux used to serve is no longer an origin of the app.
         assertFalse(profile.owns("http://127.0.0.1:5474/"));
     }
+
+    @Test public void anSshComputerHasItsOwnOriginAndIsWatchedInTheBackground() {
+        ConnectionProfile profile = ConnectionProfile.ssh();
+        assertFalse(profile.local);
+        assertTrue(profile.held());
+        assertTrue(profile.owns("http://127.0.0.1:5477/"));
+        assertFalse(profile.owns("http://127.0.0.1:5476/"));
+        assertFalse(profile.owns("http://127.0.0.1:5475/"));
+        assertTrue(ConnectionProfile.local().held());
+        assertFalse(ConnectionProfile.paired().held());
+    }
 }

@@ -40,7 +40,7 @@ public final class BackgroundService extends Service {
         manager.createNotificationChannel(new NotificationChannel("background", "Background work", NotificationManager.IMPORTANCE_LOW));
         manager.createNotificationChannel(new NotificationChannel("completion", "Work updates", NotificationManager.IMPORTANCE_DEFAULT));
         protection = new WorkProtection(getSystemService(PowerManager.class), "OpenAIDE:active-work");
-        startForeground(1, notification("Checking local work…", "background"));
+        startForeground(1, notification("Checking work…", "background"));
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -70,7 +70,8 @@ public final class BackgroundService extends Service {
         polling = true;
         worker.execute(() -> {
             ServerStatus status = null;
-            try { status = LocalServer.status(this); }
+            // The App Server this shell holds: in Termux, or on the SSH Computer in use.
+            try { status = new ConnectionStore(this).usesSsh() ? SshServer.status(this) : LocalServer.status(this); }
             catch (Exception ignored) { }
             ServerStatus result = status;
             handler.post(() -> {

@@ -63,7 +63,8 @@ jobs:
       enable_windows_updates: true
 
   android-artifacts:
-    needs: validate
+    # The APK pins the Linux App Server that SSH Computers run, built by artifacts.
+    needs: [validate, artifacts]
     uses: ./.github/workflows/android.yml
     secrets: inherit
     with:

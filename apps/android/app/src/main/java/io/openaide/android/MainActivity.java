@@ -189,7 +189,7 @@ public final class MainActivity extends Activity {
     }
 
     private void changeConnection() {
-        if (profile.local && browser != null) {
+        if (profile.held() && browser != null) {
             try { startService(new Intent(this, BackgroundService.class).putExtra("visible", false)); }
             catch (RuntimeException ignored) { }
         }
@@ -202,7 +202,7 @@ public final class MainActivity extends Activity {
     }
 
     private void startBackgroundWork() {
-        if (!profile.local) return;
+        if (!profile.held()) return;
         if (!getSharedPreferences("connection", MODE_PRIVATE).getBoolean("background", true)) return;
         try { startForegroundService(new Intent(this, BackgroundService.class).putExtra("visible", visible)); }
         catch (RuntimeException error) {
@@ -248,7 +248,7 @@ public final class MainActivity extends Activity {
         pausedAt = android.os.SystemClock.elapsedRealtime();
         diagnostics.record("app_foreground", "paused", 0, 0);
         RemoteNode.INSTANCE.hidden();
-        if (browser != null && profile.local) startBackgroundWork();
+        if (browser != null && profile.held()) startBackgroundWork();
         if (browser != null) { browser.onPause(); browser.pauseTimers(); }
         super.onPause();
     }
@@ -303,7 +303,8 @@ public final class MainActivity extends Activity {
         connect.setVisibility(View.GONE);
         status.setText("Opening your workspace…");
         Log.i("OpenAIDE", "connection_start attempt=" + attempt);
-        if (!profile.local) { connectPaired(attempt, started); return; }
+        if (profile.kind == ConnectionProfile.Kind.PAIRED) { connectPaired(attempt, started); return; }
+        if (profile.kind == ConnectionProfile.Kind.SSH) { connectSsh(attempt, started); return; }
         status.setText("Starting your local workspace…");
         LocalServer.connect(this, problem -> {
             if (attempt != generation || isDestroyed()) return;
@@ -347,10 +348,53 @@ public final class MainActivity extends Activity {
         });
     }
 
+    /** The SSH library starts or attaches to the App Server there; its stages explain a slow first start. */
+    private void connectSsh(int attempt, long started) {
+        SshComputers.Computer computer = connections.sshComputer();
+        String name = computer == null ? "the computer" : computer.name;
+        status.setText("Connecting to " + name + "…");
+        SshServer.connect(this, stage -> {
+            if (attempt == generation && !isDestroyed()) status.setText(sshStage(stage, name));
+            return kotlin.Unit.INSTANCE;
+        }, (problem, reason) -> {
+            if (attempt != generation || isDestroyed()) return;
+            if (problem == null) { opened(attempt, started); return; }
+            fail(attempt, problem);
+            if ("update_required".equals(reason)) offerSshUpdate(name);
+        });
+    }
+
+    private static String sshStage(String stage, String name) {
+        switch (stage) {
+            case "fetch": return "Downloading OpenAIDE for " + name + "…";
+            case "upload": return "Installing OpenAIDE on " + name + "…";
+            case "start": return "Starting OpenAIDE on " + name + "…";
+            default: return "Connecting to " + name + "…";
+        }
+    }
+
+    /**
+     * An App Server too old for this app runs there. Replacing it interrupts whoever
+     * else uses it, so it happens only after this warning (ADR-0069).
+     */
+    private void offerSshUpdate(String name) {
+        String running = SshServer.requiredUpdate();
+        new android.app.AlertDialog.Builder(this).setTitle("Update OpenAIDE on " + name + "?")
+            .setMessage(name + " runs OpenAIDE " + (running == null ? "" : running + " ") + "which this app cannot use. Updating restarts it there: "
+                + "agents working there stop, and other apps connected to it disconnect until they update too.")
+            .setPositiveButton("Update and restart", (dialog, which) -> {
+                diagnostics.record("connection_ssh_update", "confirmed", 0, 0);
+                SshServer.update();
+                connect();
+            })
+            .setNegativeButton("Not now", (dialog, which) -> diagnostics.record("connection_ssh_update", "declined", 0, 0))
+            .show();
+    }
+
     /** The computer refused this phone while the workspace was open; only the user can repair that. */
     private void pairedConnectionRefused(RemoteNode.Failure failure) {
         runOnUiThread(() -> {
-            if (isDestroyed() || profile.local || browser == null) return;
+            if (isDestroyed() || profile.kind != ConnectionProfile.Kind.PAIRED || browser == null) return;
             connected = false;
             diagnostics.record("connection", "refused", 0, 0);
             showConnection();
@@ -481,7 +525,7 @@ public final class MainActivity extends Activity {
         // The gateway serves only this WebView: the cookie is its proof on every request.
         android.webkit.CookieManager.getInstance().setCookie(profile.endpoint,
             GatewayHttp.COOKIE + "=" + WorkspaceGateway.INSTANCE.getToken() + "; Path=/; HttpOnly; SameSite=Strict");
-        if (!profile.local) WorkspaceGateway.INSTANCE.onFailure(failure -> { pairedConnectionRefused(failure); return kotlin.Unit.INSTANCE; });
+        if (profile.kind == ConnectionProfile.Kind.PAIRED) WorkspaceGateway.INSTANCE.onFailure(failure -> { pairedConnectionRefused(failure); return kotlin.Unit.INSTANCE; });
         browser.loadUrl(profile.endpoint);
     }
 
