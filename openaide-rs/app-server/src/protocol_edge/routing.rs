@@ -289,6 +289,15 @@ impl RpcGateway {
             openaide_app_server_protocol::methods::DEVICES_REMOVE => {
                 self.handle_devices_remove(connection_id, id, params, meta, now)
             }
+            openaide_app_server_protocol::methods::TERMINALS_OPEN => {
+                self.handle_terminals_open(connection_id, id, params, meta, now)
+            }
+            openaide_app_server_protocol::methods::TERMINALS_ATTACH => {
+                self.handle_terminals_attach(connection_id, id, params, meta)
+            }
+            openaide_app_server_protocol::methods::TERMINALS_CLOSE => {
+                self.handle_terminals_close(connection_id, id, params, meta, now)
+            }
             ATTACHMENT_LIST_ROOTS => {
                 self.handle_attachment_list_roots(connection_id, id, params, meta)
             }

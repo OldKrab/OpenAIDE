@@ -130,6 +130,7 @@ fn publish_local_http_probe_listener(
         shutdown,
     };
     start_remote_device_edge(&gateway, address, endpoint.auth_token.clone());
+    publish_terminal_changes(&gateway);
     start_local_http_listener(
         listener,
         LocalHttpAppHandler::new(
@@ -175,6 +176,15 @@ fn start_local_http_listener(listener: LocalHttpProbeListener, handler: LocalHtt
                 }
             }
         });
+    });
+}
+
+/// A shell's own status changes (a command starting or ending, the shell exiting) reach clients
+/// as a background publication. Terminal sockets exist only on this listener.
+fn publish_terminal_changes(gateway: &SharedRpcGateway) {
+    let publisher = gateway.clone();
+    gateway.terminals().on_changed(move || {
+        publisher.publish_terminal_collection_update(AppServerTime::now());
     });
 }
 

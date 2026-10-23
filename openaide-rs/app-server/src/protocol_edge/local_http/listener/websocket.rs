@@ -1,5 +1,6 @@
-//! Server half of RFC 6455, limited to what the session socket uses: text
-//! messages, ping/pong, and close. No extensions are negotiated.
+//! Server half of RFC 6455, limited to what the session and Terminal sockets
+//! use: text and binary messages, ping/pong, and close. No extensions are
+//! negotiated.
 
 use std::io::{self, ErrorKind, Read, Write};
 
@@ -7,6 +8,7 @@ const HANDSHAKE_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 const OPCODE_CONTINUATION: u8 = 0x0;
 const OPCODE_TEXT: u8 = 0x1;
+const OPCODE_BINARY: u8 = 0x2;
 const OPCODE_CLOSE: u8 = 0x8;
 const OPCODE_PING: u8 = 0x9;
 const OPCODE_PONG: u8 = 0xA;
@@ -15,6 +17,7 @@ const MAX_CONTROL_PAYLOAD_BYTES: usize = 125;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Incoming {
     Text(String),
+    Binary(Vec<u8>),
     Ping(Vec<u8>),
     Pong,
     Close,
@@ -37,6 +40,10 @@ pub(super) fn write_handshake(writer: &mut impl Write, key: &str) -> io::Result<
 
 pub(super) fn write_text(writer: &mut impl Write, text: &str) -> io::Result<()> {
     write_frame(writer, OPCODE_TEXT, text.as_bytes())
+}
+
+pub(super) fn write_binary(writer: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
+    write_frame(writer, OPCODE_BINARY, bytes)
 }
 
 pub(super) fn write_pong(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
@@ -76,8 +83,10 @@ fn write_frame(writer: &mut impl Write, opcode: u8, payload: &[u8]) -> io::Resul
 pub(super) struct MessageReader<R> {
     reader: R,
     max_message_bytes: usize,
-    /// Fragments received so far; control frames may arrive between them.
+    /// Fragments received so far and whether they form a binary message;
+    /// control frames may arrive between them.
     partial: Option<Vec<u8>>,
+    binary: bool,
 }
 
 impl<R: Read> MessageReader<R> {
@@ -86,6 +95,7 @@ impl<R: Read> MessageReader<R> {
             reader,
             max_message_bytes,
             partial: None,
+            binary: false,
         }
     }
 
@@ -125,7 +135,10 @@ impl<R: Read> MessageReader<R> {
                 OPCODE_PING => return Ok(Incoming::Ping(payload)),
                 OPCODE_PONG => return Ok(Incoming::Pong),
                 OPCODE_CLOSE => return Ok(Incoming::Close),
-                OPCODE_TEXT if self.partial.is_none() => self.partial = Some(payload),
+                OPCODE_TEXT | OPCODE_BINARY if self.partial.is_none() => {
+                    self.binary = opcode == OPCODE_BINARY;
+                    self.partial = Some(payload);
+                }
                 OPCODE_CONTINUATION => match self.partial.as_mut() {
                     Some(message) => message.extend_from_slice(&payload),
                     None => return Err(violation("continuation without a message")),
@@ -137,6 +150,9 @@ impl<R: Read> MessageReader<R> {
                     .partial
                     .take()
                     .expect("a data frame started the message");
+                if self.binary {
+                    return Ok(Incoming::Binary(bytes));
+                }
                 return String::from_utf8(bytes)
                     .map(Incoming::Text)
                     .map_err(|_| violation("text is not UTF-8"));

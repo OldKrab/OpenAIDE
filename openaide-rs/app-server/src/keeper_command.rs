@@ -494,6 +494,7 @@ fn observe(client: &mut LocalClient) -> Result<Observation, ClientError> {
     Ok(observation_from(&impact))
 }
 
+/// Open Terminals are deliberately not observed: they never keep App Server alive (ADR-0071).
 pub(crate) fn observation_from(impact: &ClientReplacementImpactResult) -> Observation {
     Observation {
         active_turns: impact.active_turns,

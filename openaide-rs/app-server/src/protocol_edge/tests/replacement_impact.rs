@@ -62,7 +62,8 @@ fn reports_other_clients_and_active_work_without_starting_a_replacement() {
                 { "kind": "terminal", "appVersion": "0.10.0", "reconnecting": true }
             ],
             "activeTurns": 2,
-            "pendingTaskRequests": 1
+            "pendingTaskRequests": 1,
+            "openTerminals": 0
         })
     );
     response_value(gateway.handle_inbound(
@@ -94,7 +95,7 @@ fn a_lone_idle_client_sees_no_impact() {
 
     assert_eq!(
         impact["result"],
-        json!({ "activeTurns": 0, "pendingTaskRequests": 0 })
+        json!({ "activeTurns": 0, "pendingTaskRequests": 0, "openTerminals": 0 })
     );
 }
 

@@ -43,6 +43,7 @@ fn only_app_shells_count_as_attached() {
         ],
         active_turns: 1,
         pending_task_requests: 2,
+        open_terminals: 3,
     };
 
     assert_eq!(

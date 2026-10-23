@@ -152,6 +152,11 @@ impl LocalHttpAppHandler {
         self.protocol.drain_push_messages(lease)
     }
 
+    /// The Terminal socket redeems attach tokens here without taking the protocol lock per frame.
+    pub(crate) fn terminals(&self) -> crate::terminals::Terminals {
+        self.probe.gateway.terminals()
+    }
+
     pub(crate) fn authorize_upload(
         &self,
         authorization: Option<&str>,
