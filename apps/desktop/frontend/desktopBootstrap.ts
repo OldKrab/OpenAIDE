@@ -8,7 +8,7 @@ export type LocalHttpConnection = {
  * Addresses another App Server HTTP route beside the RPC endpoint, which ends in `/probe`.
  * A paired computer's gateway keeps the same layout under its own base path.
  */
-export function localHttpRouteUrl(endpointUrl: string, route: "download" | "upload") {
+export function localHttpRouteUrl(endpointUrl: string, route: "download" | "upload" | "terminal") {
   let url: URL;
   try {
     url = new URL(endpointUrl);

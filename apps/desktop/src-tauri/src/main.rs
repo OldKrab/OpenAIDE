@@ -5,10 +5,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{
-    Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,6 +18,7 @@ use tauri::{Emitter, Manager};
 #[macro_use]
 mod desktop_log;
 mod desktop_app_server_hold;
+mod desktop_quit;
 mod desktop_remote;
 mod desktop_renderer_protocol;
 mod desktop_runtime;
@@ -195,7 +193,7 @@ fn main() {
             app.manage(DesktopUpdateState::for_build(
                 app_local_data.join("desktop-update-receipt.json"),
             ));
-            app.manage(DesktopQuitState::default());
+            app.manage(desktop_quit::DesktopQuitState::default());
             desktop_app_server_hold::install(app);
             #[cfg(target_os = "macos")]
             install_macos_menu(app)?;
@@ -206,9 +204,9 @@ fn main() {
             Ok(())
         })
         .on_menu_event(|app, event| {
-            #[cfg(target_os = "macos")]
             if event.id().as_ref() == "quit" {
-                arm_macos_quit_watchdog(app);
+                desktop_quit::request_quit(app);
+                return;
             }
             let _ = app.emit("desktop-command", event.id().as_ref());
         })
@@ -218,33 +216,17 @@ fn main() {
                 && let tauri::WindowEvent::CloseRequested { api, .. } = event
             {
                 // Native close and the custom caption button must cross the same
-                // detach boundary as explicit Quit before this process disappears.
+                // detach boundary, and the same Terminal warning, as explicit Quit.
                 api.prevent_close();
-                window
-                    .state::<DesktopQuitState>()
-                    .pending
-                    .store(true, Ordering::Release);
-                let app = window.app_handle().clone();
-                let _ = app.emit("desktop-command", "quit");
-                thread::spawn(move || {
-                    thread::sleep(Duration::from_secs(5));
-                    if app
-                        .state::<DesktopQuitState>()
-                        .pending
-                        .swap(false, Ordering::AcqRel)
-                    {
-                        // Startup may not have produced a frontend session that can
-                        // detach. Never leave an unclosable native window behind.
-                        app.exit(0);
-                    }
-                });
+                desktop_quit::request_quit(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
             desktop_bootstrap,
             desktop_bootstrap_context,
             desktop_ensure_app_server,
-            desktop_take_pending_quit,
+            desktop_quit::desktop_take_pending_quit,
+            desktop_quit::desktop_set_open_terminals,
             desktop_app_server_hold::complete_desktop_quit,
             desktop_webview_log::record_desktop_telemetry,
             desktop_webview_log::record_desktop_webview_log,
@@ -280,18 +262,6 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run OpenAIDE Desktop App");
-}
-
-#[derive(Default)]
-struct DesktopQuitState {
-    // Native close can arrive before the WebView has registered its command
-    // listener. The WebView consumes this latch after crossing that boundary.
-    pending: AtomicBool,
-}
-
-#[tauri::command]
-fn desktop_take_pending_quit(state: tauri::State<'_, DesktopQuitState>) -> bool {
-    state.pending.swap(false, Ordering::AcqRel)
 }
 
 #[tauri::command]
@@ -360,30 +330,6 @@ fn watch_development_runner(app: &tauri::App) {
             desktop_log!("desktop_development_runner_watch_completed outcome=parent_ended");
             app_handle.exit(0);
             break;
-        }
-    });
-}
-
-/// Guarantees explicit Quit on macOS even when the WebView cannot run its
-/// graceful detach. The frontend owns the normal path; this watchdog uses the
-/// same budget as the Windows close fallback and then terminates natively.
-#[cfg(target_os = "macos")]
-fn arm_macos_quit_watchdog(app: &tauri::AppHandle) {
-    {
-        let state = app.state::<DesktopQuitState>();
-        if state.pending.swap(true, Ordering::AcqRel) {
-            return;
-        }
-    }
-    let app = app.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_secs(5));
-        if app
-            .state::<DesktopQuitState>()
-            .pending
-            .swap(false, Ordering::AcqRel)
-        {
-            app.exit(0);
         }
     });
 }
