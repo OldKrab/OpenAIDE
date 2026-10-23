@@ -68,6 +68,7 @@ describe("this computer's attention while a paired computer is in use", () => {
     watchThisComputerAttention(host);
     host.click("t7");
 
+    // timing: data — a click's age compared as a value, never waited on.
     expect(takeThisComputerTask(host.session, host.now() + 11 * 60_000)).toBeUndefined();
   });
 });

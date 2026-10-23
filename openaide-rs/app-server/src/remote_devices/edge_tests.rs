@@ -416,10 +416,9 @@ fn a_stopped_gateway_refuses_its_port_and_leaves_the_app_server() {
     let _kept = endpoint.clone();
 
     let (address, served) = fixture.run(async move {
-        let paired =
-            openaide_remote_client::redeem(&endpoint, &invite, "Laptop", None, &quiet())
-                .await
-                .unwrap();
+        let paired = openaide_remote_client::redeem(&endpoint, &invite, "Laptop", None, &quiet())
+            .await
+            .unwrap();
         let client = std::sync::Arc::new(RemoteClient::new(endpoint, paired.id, quiet()));
         let gateway = Gateway::start(client, quiet(), |_| {}).await.unwrap();
         let served = through_gateway(

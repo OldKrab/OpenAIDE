@@ -98,10 +98,12 @@ fn starts_over_when_the_app_server_forgot_it_and_backs_off_on_failures() {
     let mut post = server.post();
     assert_eq!(
         watch.step(Some(this_computer()), &mut post),
+        // timing: data — the backoff is compared as a value, never waited on.
         Step::Retry(Duration::from_secs(1))
     );
     assert_eq!(
         watch.step(Some(this_computer()), &mut post),
+        // timing: data — the backoff is compared as a value, never waited on.
         Step::Retry(Duration::from_secs(2))
     );
     assert_eq!(
