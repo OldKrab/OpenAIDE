@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import {
   createWebTaskNotificationManager,
+  formatTaskNotificationDecision,
+  type TaskNotificationDecision,
   type WebTaskNotificationEnvironment,
 } from "./webTaskNotifications";
 
@@ -179,6 +181,33 @@ describe("Web Task notifications", () => {
     await manager.setEnabled(false);
     expect(manager.getSettings()).toEqual({ status: "off" });
   });
+
+  it("logs why each new event did or did not notify, without the Task title", async () => {
+    const environment = testEnvironment({ focused: false, permission: "granted", enabled: true });
+    const manager = createWebTaskNotificationManager(environment);
+    manager.reconcile("root-1", [task("attention-backlog")]);
+
+    manager.reconcile("root-1", [task("attention-shown", "needsAnswer")]);
+    manager.reconcile("root-1", [task(undefined)]);
+    environment.setFocused(true);
+    manager.reconcile("root-1", [task("attention-focused")]);
+    environment.setFocused(false);
+    const early = task("attention-early");
+    early.attention!.occurred_at = "2026-07-15T08:00:00.000Z";
+    manager.reconcile("root-1", [early]);
+    await manager.setEnabled(false);
+    manager.reconcile("root-1", [task("attention-off")]);
+
+    expect(environment.decisions.map(formatTaskNotificationDecision)).toEqual([
+      "task_attention_notification outcome=baseline count=1",
+      "task_attention_notification outcome=shown event_id=attention-shown reason=needsAnswer",
+      "task_attention_notification outcome=withdrawn count=1 cause=superseded",
+      "task_attention_notification outcome=suppressed event_id=attention-focused reason=finished cause=attended",
+      "task_attention_notification outcome=suppressed event_id=attention-early reason=finished cause=beforeEnabled",
+      "task_attention_notification outcome=suppressed event_id=attention-off reason=finished cause=off",
+    ]);
+    expect(JSON.stringify(environment.decisions)).not.toContain("Implement notifications");
+  });
 });
 
 function task(
@@ -251,13 +280,17 @@ function testEnvironment({
     shared.values.set("openaide.desktopNotifications.enabled", "true");
     shared.values.set("openaide.desktopNotifications.enabledAt", "2026-07-15T09:00:00.000Z");
   }
+  const decisions: TaskNotificationDecision[] = [];
   const environment: WebTaskNotificationEnvironment & {
+    decisions: TaskNotificationDecision[];
     notifications: TestNotification[];
     permissionRequestResult: NotificationPermission;
     requestPermission: ReturnType<typeof vi.fn>;
     setFocused(focused: boolean): void;
     setNow(timestamp: string): void;
   } = {
+    decisions,
+    log: (decision) => { decisions.push(decision); },
     notifications,
     permissionRequestResult: permission,
     requestPermission,

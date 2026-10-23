@@ -111,6 +111,25 @@ fn task_set_pinned_carries_authoritative_boolean_intent() {
 }
 
 #[test]
+fn task_attention_wait_first_request_omits_the_cursor() {
+    assert_eq!(
+        serde_json::to_value(TaskAttentionWaitParams::default()).unwrap(),
+        json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(TaskAttentionWaitParams {
+            cursor: Some("3f2a".to_string()),
+        })
+        .unwrap(),
+        json!({ "cursor": "3f2a" })
+    );
+    let result: TaskAttentionWaitResult =
+        serde_json::from_value(json!({ "cursor": "3f2a", "tasks": [] })).unwrap();
+    assert_eq!(result.cursor, "3f2a");
+    assert!(result.tasks.is_empty());
+}
+
+#[test]
 fn tool_image_preview_request_uses_only_task_and_artifact_identity() {
     assert_eq!(
         serde_json::to_value(TaskToolImagePreviewParams {

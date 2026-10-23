@@ -222,7 +222,7 @@ async fn reconcile(
                 serde_json::json!({
                     "outcome": "failed",
                     "duration_ms": elapsed_ms(started),
-                    "error_class": class,
+                    "error_kind": class,
                 }),
             );
             devices.set_access(RemoteAccessState::Failed);
@@ -265,7 +265,7 @@ async fn handle_incoming(
         Err(_error) => {
             logging::info(
                 "remote_device_handshake_failed",
-                serde_json::json!({ "error_class": "handshake" }),
+                serde_json::json!({ "error_kind": "handshake" }),
             );
             return;
         }
@@ -322,13 +322,17 @@ async fn serve_device(
         let devices = devices.clone();
         let target = target.clone();
         let device_label = device_label.clone();
+        let stalled_connection = connection.clone();
+        let stream = streams;
         tokio::spawn(async move {
-            let result = bridge::forward(recv, send, &target, |head| {
+            let on_head = |head: &bridge::TrustedHead| {
                 if let Some(connection_id) = &head.connection_id {
                     devices.note_protocol_connection(&device, connection_id);
                 }
-            })
-            .await;
+            };
+            let on_stall =
+                |stall| log_write_stall(&stalled_connection, &device_label, stream, stall);
+            let result = bridge::forward(recv, send, &target, on_head, on_stall).await;
             if let Err(error) = result {
                 // A closed stream is how a device abandons a request; only the
                 // other classes point at a fault.
@@ -337,7 +341,7 @@ async fn serve_device(
                         "remote_device_stream_failed",
                         serde_json::json!({
                             "device": device_label,
-                            "error_class": error.class(),
+                            "error_kind": error.class(),
                         }),
                     );
                 }
@@ -397,6 +401,41 @@ fn describe(connection: &Connection) -> RemoteDeviceConnection {
             path: RemoteDevicePath::Relayed,
             address: None,
         },
+    }
+}
+
+/// Logs a response write that waits on the device, with the QUIC figures that
+/// tell a dead path (nothing received, losses climbing) from a device that is
+/// connected but not reading. Comparing the start and end records shows which.
+fn log_write_stall(
+    connection: &Connection,
+    device_label: &str,
+    stream: u64,
+    stall: bridge::WriteStall,
+) {
+    let stats = connection.stats();
+    let paths = connection.paths();
+    let selected = paths.iter().find(|path| path.is_selected());
+    let mut fields = serde_json::json!({
+        "device": device_label,
+        "stream": stream,
+        "route": path_name(&describe(connection)),
+        "rtt_ms": selected.as_ref().map(|path| u64::try_from(path.rtt().as_millis()).unwrap_or(u64::MAX)),
+        "cwnd": selected.as_ref().map(|path| path.stats().cwnd),
+        "lost_packets": stats.lost_packets,
+        "rx_datagrams": stats.udp_rx.datagrams,
+        "tx_datagrams": stats.udp_tx.datagrams,
+    });
+    match stall {
+        bridge::WriteStall::Started => {
+            logging::warn("remote_device_stream_write_stalled", fields);
+        }
+        bridge::WriteStall::Ended { waited, delivered } => {
+            fields["outcome"] = serde_json::json!(if delivered { "delivered" } else { "failed" });
+            fields["duration_ms"] =
+                serde_json::json!(u64::try_from(waited.as_millis()).unwrap_or(u64::MAX));
+            logging::warn("remote_device_stream_write_resumed", fields);
+        }
     }
 }
 
@@ -468,7 +507,7 @@ async fn accept_invite(connection: Connection, devices: RemoteDevices) {
         "duration_ms": elapsed_ms(started),
     });
     if let Err(class) = outcome {
-        fields["error_class"] = serde_json::json!(class);
+        fields["error_kind"] = serde_json::json!(class);
         connection.close(CLOSE_UNTRUSTED.into(), b"refused");
         logging::warn("remote_device_invite_redeemed", fields);
     } else {
@@ -530,7 +569,7 @@ async fn announce_trust(endpoint: Endpoint, device: PublicKey, server_name: Stri
                         "device": device_label,
                         "outcome": "failed",
                         "attempt": attempt,
-                        "error_class": class,
+                        "error_kind": class,
                         "duration_ms": elapsed_ms(started),
                     }),
                 );
@@ -541,7 +580,7 @@ async fn announce_trust(endpoint: Endpoint, device: PublicKey, server_name: Stri
                     serde_json::json!({
                         "device": device_label,
                         "attempt": attempt,
-                        "error_class": class,
+                        "error_kind": class,
                     }),
                 );
                 tokio::time::sleep(ANNOUNCE_RETRY_DELAY).await;

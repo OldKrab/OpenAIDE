@@ -46,7 +46,7 @@
             android:windowSoftInputMode="adjustResize" />
         <service android:name=".BackgroundService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-enabled continuous local coding-agent execution through Termux while the screen is locked" />
+                android:value="User-enabled continuous local coding-agent execution through Termux while the screen is locked, or a user-enabled connection to the user's own paired computer that delivers its coding-task notifications without a push service" />
         </service>
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
             android:enableOnBackInvokedCallback="true"

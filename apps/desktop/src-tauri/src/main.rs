@@ -35,6 +35,7 @@ mod desktop_update_security;
 mod desktop_update_shutdown;
 #[cfg(test)]
 mod desktop_update_tests;
+mod desktop_webview_log;
 #[cfg(target_os = "macos")]
 mod macos_shell_path;
 #[cfg(target_os = "macos")]
@@ -229,7 +230,8 @@ fn main() {
             desktop_ensure_app_server,
             desktop_take_pending_quit,
             desktop_app_server_hold::complete_desktop_quit,
-            record_desktop_telemetry,
+            desktop_webview_log::record_desktop_telemetry,
+            desktop_webview_log::record_desktop_webview_log,
             prepare_desktop_native_zoom,
             perform_desktop_native_zoom,
             set_desktop_runtime_environment,
@@ -841,19 +843,6 @@ fn failure(stage: &'static str, user_message: &str) -> HandoffFailure {
         stage,
         user_message: user_message.to_string(),
     }
-}
-
-#[tauri::command]
-fn record_desktop_telemetry(payload: serde_json::Value) {
-    let event = payload
-        .get("event")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
-    let surface = payload
-        .get("surface")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
-    desktop_log!("desktop_webview_event event={event} surface={surface}");
 }
 
 #[tauri::command]

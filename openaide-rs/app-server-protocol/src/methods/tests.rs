@@ -107,6 +107,8 @@ fn task_methods_use_task_namespace() {
     assert_eq!(TaskRelease::METHOD, "task/release");
     assert_eq!(TaskArchive::METHOD, "task/archive");
     assert_eq!(TaskRestore::METHOD, "task/restore");
+    assert_eq!(TaskAttentionWait::METHOD, "taskAttention/wait");
+    assert!(CLIENT_METHODS.contains(&TaskAttentionWait::METHOD));
 }
 
 #[test]

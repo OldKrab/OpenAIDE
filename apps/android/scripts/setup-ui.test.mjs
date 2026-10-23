@@ -146,3 +146,25 @@ test('remote screens say what the connection uses, and the local one does not', 
   const local = setup({ initial: 'settings' });
   try { assert.equal(local.document.getElementById('about'), null); } finally { local.close(); }
 });
+
+test('a paired computer offers Task notifications where this phone offers background work', () => {
+  const computers = [{ id: 'a'.repeat(64), name: 'Desk', current: true }];
+  const view = setup({ initial: 'settings', remote: true, paired: true, computer: 'Desk', computers, background: false, appBattery: true, termuxBattery: false });
+  try {
+    const row = view.document.querySelector('[data-action="background_screen"]');
+    assert.match(row.textContent, /Task notifications/);
+    row.click();
+    assert.equal(view.document.querySelector('h1').textContent, 'Stay notified');
+    // Termux has no part in a paired computer's notifications.
+    assert.match(view.document.querySelector('[data-action="battery"]').textContent, /Allowed/);
+    view.document.getElementById('background').click();
+    assert.deepEqual(view.actions.at(-1), { action: 'background', enabled: true });
+    view.document.getElementById('about').click();
+    assert.match(view.document.querySelector('.sheet-body').textContent, /not kept awake/);
+  } finally { view.close(); }
+  const local = setup({ initial: 'settings', background: true });
+  try {
+    local.document.querySelector('[data-action="background_screen"]').click();
+    assert.equal(local.document.querySelector('h1').textContent, 'Keep work going');
+  } finally { local.close(); }
+});

@@ -20,13 +20,20 @@ final class AndroidDiagnostics {
     }
 
     void record(String event, String outcome, int count, long durationMs) {
+        record(event, outcome, count, durationMs, java.util.Collections.emptyMap());
+    }
+
+    /** Adds metadata-only fields: numbers and fixed words, never user text, addresses or keys. */
+    void record(String event, String outcome, int count, long durationMs, java.util.Map<String, ?> fields) {
         try {
-            String entry = new JSONObject()
+            JSONObject json = new JSONObject()
                 .put("timestamp", System.currentTimeMillis())
                 .put("event", event)
                 .put("outcome", outcome)
                 .put("count", count)
-                .put("duration_ms", durationMs).toString();
+                .put("duration_ms", durationMs);
+            for (java.util.Map.Entry<String, ?> field : fields.entrySet()) json.put(field.getKey(), field.getValue());
+            String entry = json.toString();
             LOG.append(entry);
             Log.i("OpenAIDE", entry);
         } catch (JSONException error) {

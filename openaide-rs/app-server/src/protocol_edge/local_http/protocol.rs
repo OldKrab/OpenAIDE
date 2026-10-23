@@ -1,4 +1,6 @@
-use openaide_app_server_protocol::methods::{AGENT_AUTHENTICATE, CLIENT_HEARTBEAT};
+use openaide_app_server_protocol::methods::{
+    AGENT_AUTHENTICATE, CLIENT_HEARTBEAT, TASK_ATTENTION_WAIT,
+};
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -12,6 +14,7 @@ use crate::protocol_edge::{
     GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGateway,
 };
 
+use super::attention_wait::{self, AttentionWaitTiming, HoldEnd};
 use super::event_streams::{EventStreamLease, EventStreamRegistry};
 use super::reliable_upload_chunks::{
     AppendOutcome as ReliableChunkOutcome, ReliableUploadChunkRegistry,
@@ -42,6 +45,7 @@ pub struct LocalHttpProtocolHandler {
     event_streams: EventStreamRegistry,
     pub(super) sessions: ReliableSessionRegistry,
     upload_chunks: ReliableUploadChunkRegistry,
+    attention_wait: AttentionWaitTiming,
 }
 
 impl Clone for LocalHttpProtocolHandler {
@@ -52,6 +56,7 @@ impl Clone for LocalHttpProtocolHandler {
             event_streams: self.event_streams.clone(),
             sessions: self.sessions.clone(),
             upload_chunks: self.upload_chunks.clone(),
+            attention_wait: self.attention_wait,
         }
     }
 }
@@ -72,7 +77,14 @@ impl LocalHttpProtocolHandler {
             ),
             gateway,
             upload_chunks: ReliableUploadChunkRegistry::default(),
+            attention_wait: AttentionWaitTiming::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_attention_wait(mut self, timing: AttentionWaitTiming) -> Self {
+        self.attention_wait = timing;
+        self
     }
 
     pub fn handle(
@@ -92,8 +104,11 @@ impl LocalHttpProtocolHandler {
             .and_then(|value| value.get("method"))
             .and_then(Value::as_str);
         let should_log = method != Some(CLIENT_HEARTBEAT);
+        // A watching App Shell holds this request all day; only a failure gets a line.
+        let quiet_unless_failed = method == Some(TASK_ATTENTION_WAIT);
         let started_at = std::time::Instant::now();
-        if should_log {
+        let mut hold_end = None;
+        if should_log && !quiet_unless_failed {
             logging::info(
                 "local_http_request_started",
                 serde_json::json!({
@@ -116,6 +131,7 @@ impl LocalHttpProtocolHandler {
         } else if transport_kind == "send" {
             self.handle_reliable_session_upload(authorization, connection_id, body)
         } else {
+            hold_end = self.hold_attention_wait(authorization, connection_id, parsed.as_ref());
             let now = AppServerTime::now();
             let gateway = self.gateway.clone();
             handle_local_http_protocol(
@@ -134,7 +150,7 @@ impl LocalHttpProtocolHandler {
                 },
             )
         };
-        if should_log {
+        if should_log && (!quiet_unless_failed || response.status != 200) {
             logging::info(
                 "local_http_request_completed",
                 serde_json::json!({
@@ -142,11 +158,36 @@ impl LocalHttpProtocolHandler {
                     "transport": transport_kind,
                     "method": method,
                     "http_status": response.status,
+                    "hold_end": hold_end.map(HoldEnd::as_str),
                     "duration_ms": started_at.elapsed().as_millis(),
                 }),
             );
         }
         response
+    }
+
+    /// Holds an authenticated `taskAttention/wait` that carries a cursor until its
+    /// set changes; any request that would be rejected is dispatched at once instead.
+    fn hold_attention_wait(
+        &self,
+        authorization: Option<&str>,
+        connection_id: Option<&str>,
+        request: Option<&Value>,
+    ) -> Option<HoldEnd> {
+        let cursor = attention_wait::held_cursor(request)?;
+        if !matches!(
+            auth_status(authorization, &self.auth_token),
+            AuthStatus::Authorized
+        ) {
+            return None;
+        }
+        let connection_id = valid_connection_id(connection_id)?;
+        Some(attention_wait::hold_while_current(
+            &self.gateway,
+            &connection_id,
+            cursor,
+            self.attention_wait,
+        ))
     }
 
     fn handle_reliable_session_upload(

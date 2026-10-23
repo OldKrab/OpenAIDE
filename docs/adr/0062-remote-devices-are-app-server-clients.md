@@ -47,4 +47,4 @@ The Mobile App working on the phone itself is not a Remote Device: its App Serve
 
 The App Server still exits when its last same-machine client leaves, so a Remote Device can reach it only while an App Shell on the computer keeps it running. A terminal command can be that client on a computer with no window ([ADR-0064](0064-a-terminal-command-keeps-the-app-server-reachable.md)).
 
-Because a Remote Device ships its own Frontend, the protocol's compatibility rules become a release obligation: a breaking change now strands every device that has not updated. Notifications while the Mobile App is closed need either a long-lived connection held by a foreground service or a push service, and are not decided here.
+Because a Remote Device ships its own Frontend, the protocol's compatibility rules become a release obligation: a breaking change now strands every device that has not updated. Task notifications while the Mobile App is hidden come from a long-lived watch held by its foreground service over this connection (ADR 0027), not from a push service. Notifications after the app process is gone remain undecided.

@@ -1,9 +1,13 @@
 import type { ActionPerformed, Options } from "@tauri-apps/plugin-notification";
 import {
   createWebTaskNotificationManager,
+  taskNotificationDecisionFields,
   type WebTaskNotificationEnvironment,
   type WebTaskNotificationManager,
 } from "../../../packages/frontend/src/shells/webTaskNotifications";
+
+/** Metadata-only diagnostic fields: generated identifiers, counts, and fixed words. */
+export type DesktopNotificationLogFields = Record<string, string | number>;
 
 /** The native seams Desktop notifications use; injected so tests need no Tauri runtime. */
 export type DesktopNotificationHost = {
@@ -20,6 +24,8 @@ export type DesktopNotificationHost = {
   focusWindow(): Promise<void>;
   openTask(taskId: string): void;
   now(): number;
+  /** Persists one event in the Desktop log, which outlives the renderer console. */
+  record(event: string, fields: DesktopNotificationLogFields): void;
 };
 
 /**
@@ -32,8 +38,15 @@ export type DesktopNotificationHost = {
  * A click arrives through the plugin's `onAction` with the shown notification's
  * payload: its identifier finds the live click handler, and its Task identifier
  * still routes a click whose handler is gone.
+ * Every event goes to the Desktop log as well as the console: a notification that never
+ * appeared must be explainable from a log the user can attach.
  */
 export function createDesktopTaskNotifications(host: DesktopNotificationHost): WebTaskNotificationManager {
+  const diagnose = (level: "info" | "warn", event: string, fields: DesktopNotificationLogFields = {}) => {
+    const line = [event, ...Object.entries(fields).map(([key, value]) => `${key}=${value}`)].join(" ");
+    console[level](line);
+    host.record(event, fields);
+  };
   const focusListeners = new Set<() => void>();
   const clickHandlers = new Map<number, () => void>();
   let focused = host.initiallyFocused();
@@ -45,8 +58,12 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
   void host.isPermissionGranted()
     .then((granted) => granted ? "granted" : host.requestPermission())
     .then(
-      (state) => { permission = state; changed(); },
-      () => { console.warn("desktop_notification_permission_read_failed error_kind=plugin"); },
+      (state) => {
+        permission = state;
+        diagnose(state === "granted" ? "info" : "warn", "desktop_notification_permission", { outcome: state });
+        changed();
+      },
+      () => { diagnose("warn", "desktop_notification_permission_read_failed", { error_kind: "plugin" }); },
     );
   void host.isFocused().then((value) => { focused = value; changed(); }, () => undefined);
   void host.onFocusChanged((value) => { focused = value; changed(); });
@@ -55,14 +72,14 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
     if (event.actionId !== "tap") return;
     const id = event.notification?.id;
     const handler = id === undefined ? undefined : clickHandlers.get(id);
-    console.info(`desktop_notification_activated notification_id=${id ?? "unknown"} handler=${handler ? "live" : "missing"}`);
+    diagnose("info", "desktop_notification_activated", { notification_id: id ?? "unknown", handler: handler ? "live" : "missing" });
     if (handler) { handler(); return; }
     const taskId = event.notification?.extra?.taskId;
     if (typeof taskId === "string") {
       host.openTask(taskId);
-      void host.focusWindow().catch(() => console.warn("desktop_notification_focus_failed error_kind=window"));
+      void host.focusWindow().catch(() => diagnose("warn", "desktop_notification_focus_failed", { error_kind: "window" }));
     }
-  }).catch(() => console.warn("desktop_notification_action_listener_failed error_kind=plugin"));
+  }).catch(() => diagnose("warn", "desktop_notification_action_listener_failed", { error_kind: "plugin" }));
 
   return createWebTaskNotificationManager({
     storage: host.storage,
@@ -78,7 +95,7 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
       try {
         permission = await host.requestPermission();
       } catch {
-        console.warn("desktop_notification_permission_request_failed error_kind=plugin");
+        diagnose("warn", "desktop_notification_permission_request_failed", { error_kind: "plugin" });
         permission = "denied";
       }
       return permission;
@@ -88,9 +105,9 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
       const taskId = options.tag?.replace(/^openaide-task-/, "");
       try {
         host.sendNotification({ id, title, body: options.body, extra: taskId ? { taskId } : undefined });
-        console.info(`desktop_notification_shown notification_id=${id}`);
+        diagnose("info", "desktop_notification_shown", { notification_id: id });
       } catch {
-        console.warn(`desktop_notification_failed notification_id=${id} error_kind=plugin`);
+        diagnose("warn", "desktop_notification_failed", { notification_id: id, error_kind: "plugin" });
         return { close: () => undefined };
       }
       clickHandlers.set(id, onClick);
@@ -103,7 +120,7 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
       };
     },
     focusWindow: () => {
-      void host.focusWindow().catch(() => console.warn("desktop_notification_focus_failed error_kind=window"));
+      void host.focusWindow().catch(() => diagnose("warn", "desktop_notification_focus_failed", { error_kind: "window" }));
     },
     openTask: (taskId) => host.openTask(taskId),
     subscribeFocus(listener) {
@@ -112,5 +129,6 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
     },
     publish: () => undefined,
     subscribeMessages: () => () => undefined,
+    log: (decision) => diagnose("info", "task_attention_notification", taskNotificationDecisionFields(decision)),
   });
 }

@@ -41,6 +41,7 @@ public final class MainActivity extends Activity {
     private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
     private static final int FILE_REQUEST = 2;
     private static final int CAMERA_PERMISSION_REQUEST = 6;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 3;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private volatile int generation;
     private ConnectionProfile profile;
@@ -199,6 +200,8 @@ public final class MainActivity extends Activity {
             try { startService(new Intent(this, BackgroundService.class).putExtra("visible", false)); }
             catch (RuntimeException ignored) { }
         }
+        // The watch of a computer that is no longer selected would report it as lost.
+        if (!profile.local) stopService(new Intent(this, BackgroundService.class));
         profile = connections.load();
         credentialsUnavailable = false;
         showConnection();
@@ -207,8 +210,8 @@ public final class MainActivity extends Activity {
         else openSetup("welcome");
     }
 
+    /** Keeps local work running, or a paired computer's Task notifications arriving, while the app is hidden. */
     private void startBackgroundWork() {
-        if (!profile.local) return;
         if (!getSharedPreferences("connection", MODE_PRIVATE).getBoolean("background", true)) return;
         try { startForegroundService(new Intent(this, BackgroundService.class).putExtra("visible", visible)); }
         catch (RuntimeException error) {
@@ -218,7 +221,7 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
             && !getSharedPreferences("connection", MODE_PRIVATE).getBoolean("notification_requested", false)) {
             getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("notification_requested", true).apply();
-            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 3);
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, NOTIFICATION_PERMISSION_REQUEST);
         }
     }
 
@@ -256,7 +259,7 @@ public final class MainActivity extends Activity {
         pausedAt = android.os.SystemClock.elapsedRealtime();
         diagnostics.record("app_foreground", "paused", 0, 0);
         RemoteNode.INSTANCE.hidden();
-        if (browser != null && profile.local) startBackgroundWork();
+        if (browser != null) startBackgroundWork();
         if (browser != null) { browser.onPause(); browser.pauseTimers(); }
         super.onPause();
     }
@@ -290,6 +293,12 @@ public final class MainActivity extends Activity {
                 fileCallback = null;
                 Toast.makeText(this, "Allow camera access for OpenAIDE in Android settings to take a photo.", Toast.LENGTH_LONG).show();
             }
+            return;
+        }
+        if (request == NOTIFICATION_PERMISSION_REQUEST) {
+            // Asked once; a denial silences every Task notification until changed in Android settings.
+            boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+            diagnostics.record("task_notification", granted ? "permission_granted" : "permission_denied", 0, 0);
             return;
         }
         if (connectionBridge != null && SetupPagePolicy.isConnectionRoute(profile, browser.getUrl())) {

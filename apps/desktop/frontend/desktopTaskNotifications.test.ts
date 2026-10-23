@@ -77,6 +77,28 @@ describe("Desktop Task notifications", () => {
     expect(host.sent).toHaveLength(1);
   });
 
+  it("records each decision in the Desktop log without the Task title", async () => {
+    const host = fakeHost({ focused: true, focusedTaskId: "task-1" });
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const manager = createDesktopTaskNotifications(host);
+    await settled();
+    manager.reconcile("root-1", [task("attention-backlog")]);
+
+    manager.reconcile("root-1", [task("attention-seen"), task("attention-unseen", undefined, "task-2")]);
+    manager.reconcile("root-1", [task("attention-seen")]);
+
+    expect(host.recorded).toEqual([
+      "desktop_notification_permission outcome=granted",
+      "task_attention_notification outcome=baseline count=1",
+      "task_attention_notification outcome=suppressed event_id=attention-seen reason=needsAnswer cause=attended",
+      "desktop_notification_shown notification_id=1",
+      "task_attention_notification outcome=shown event_id=attention-unseen reason=needsAnswer",
+      "task_attention_notification outcome=withdrawn count=1 cause=superseded",
+    ]);
+    expect(host.recorded.join("\n")).not.toContain("Fix the build");
+    vi.restoreAllMocks();
+  });
+
   it("routes a click on a notification shown before the window reloaded", async () => {
     const host = fakeHost();
     createDesktopTaskNotifications(host);
@@ -97,13 +119,16 @@ function fakeHost({ focused = false, focusedTaskId }: { focused?: boolean; focus
   const sent: Options[] = [];
   const openTask = vi.fn<(taskId: string) => void>();
   const focusWindow = vi.fn<() => Promise<void>>(async () => undefined);
+  const recorded: string[] = [];
   const host: DesktopNotificationHost & {
     sent: Options[];
+    recorded: string[];
     openTask: typeof openTask;
     focusWindow: typeof focusWindow;
     tap(options: Options): void;
   } = {
     sent,
+    recorded,
     storage: {
       getItem: (key) => values.get(key) ?? null,
       setItem: (key, value) => { values.set(key, value); },
@@ -121,6 +146,9 @@ function fakeHost({ focused = false, focusedTaskId }: { focused?: boolean; focus
     focusWindow,
     openTask,
     now: () => now,
+    record: (event, fields) => {
+      recorded.push([event, ...Object.entries(fields).map(([key, value]) => `${key}=${value}`)].join(" "));
+    },
     tap(options) {
       actionListener?.({
         actionId: "tap",
@@ -132,9 +160,9 @@ function fakeHost({ focused = false, focusedTaskId }: { focused?: boolean; focus
   return host;
 }
 
-function task(eventId: string, occurredAt = "2026-10-16T09:00:30.000Z"): TaskSummary {
+function task(eventId: string, occurredAt = "2026-10-16T09:00:30.000Z", taskId = "task-1"): TaskSummary {
   return {
-    task_id: "task-1",
+    task_id: taskId,
     title: "Fix the build",
     attention: { event_id: eventId, reason: "needsAnswer", occurred_at: occurredAt },
   } as TaskSummary;
