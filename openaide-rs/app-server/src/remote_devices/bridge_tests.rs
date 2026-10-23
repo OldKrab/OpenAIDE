@@ -125,6 +125,7 @@ async fn a_device_that_stops_taking_data_is_reported_while_the_write_waits() {
         .await
     });
 
+    // timing: mocked — the paused tokio clock advances past the write-stall threshold.
     tokio::time::sleep(WRITE_STALL + Duration::from_secs(1)).await;
     assert_eq!(*stalls.lock().unwrap(), vec![WriteStall::Started]);
 
@@ -151,6 +152,7 @@ async fn a_write_that_fails_after_a_stall_is_reported_as_undelivered() {
         .await
     });
 
+    // timing: mocked — the paused tokio clock advances past the write-stall threshold.
     tokio::time::sleep(WRITE_STALL + Duration::from_secs(1)).await;
     drop(device);
 
