@@ -1,5 +1,5 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
-import { Check, Folder, FolderOpen, GitBranch, Monitor, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Folder, FolderOpen, GitBranch, Monitor, MoreHorizontal, Pencil, Plus, SquareTerminal, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
@@ -14,6 +14,8 @@ import {
 import { useSidebarTaskPreview } from "./SidebarTaskPreview";
 import { useRef } from "react";
 import { taskForkMutationKey } from "../state/store";
+import { useTerminalSurface } from "./terminals/terminalSurface";
+import { currentFrontendShell } from "../services/frontendShell";
 import type { ArchiveOlderTasksAction } from "./SidebarArchiveOlderMenu";
 
 type SidebarProjectTaskGroupProps = {
@@ -108,6 +110,9 @@ export function SidebarProjectTaskGroup({
   showArchived,
 }: SidebarProjectTaskGroupProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const terminalSurface = useTerminalSurface();
+  // VS Code opens its own terminal at the Project root instead of the in-app page.
+  const nativeTerminal = terminalSurface ? undefined : currentFrontendShell()?.nativeTerminal;
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState(group.label);
   const [renameSaving, setRenameSaving] = useState(false);
@@ -234,6 +239,19 @@ export function SidebarProjectTaskGroup({
               </div>
             ) : null}
             <button onClick={() => { setMenuOpen(false); onNewTask(); }} role="menuitem" type="button"><Plus size={13} />New task</button>
+            {(terminalSurface || nativeTerminal) && group.workspaceRoot ? (
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (terminalSurface) terminalSurface.openPage({ projectId: group.key });
+                  else nativeTerminal?.open(group.workspaceRoot!);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <SquareTerminal size={13} />Open terminal
+              </button>
+            ) : null}
             {canManageWorktrees && onManageWorktrees ? <button onClick={() => { setMenuOpen(false); onManageWorktrees(); }} role="menuitem" type="button"><GitBranch size={13} />Manage worktrees</button> : null}
             {onRenameProject ? <button onClick={() => { setMenuOpen(false); setRenameDraft(group.label); setRenameError(undefined); setRenaming(true); }} role="menuitem" type="button"><Pencil size={13} />Rename Project</button> : null}
             {onRemoveProject ? <button className="danger" onClick={() => { setMenuOpen(false); onRemoveProject(); }} role="menuitem" type="button"><Trash2 size={13} />Remove Project</button> : null}

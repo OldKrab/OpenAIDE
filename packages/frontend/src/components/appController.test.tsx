@@ -4489,6 +4489,13 @@ function nonTaskSubscriptionSnapshot(
       },
     };
   }
+  if (scope?.kind === "terminals") {
+    return {
+      cursor: cursor as never,
+      scope,
+      snapshot: { kind: "terminals" as const, terminals: { terminals: [] } },
+    };
+  }
   throw new Error(`unexpected subscription scope: ${scope?.kind ?? "missing"}`);
 }
 

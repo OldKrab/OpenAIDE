@@ -94,6 +94,7 @@ type AppActionPayload =
   | { type: "newTask:error:clear" }
   | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
   | { type: "worktreeRepository"; repository: import("@openaide/app-server-client").WorktreeRepositorySnapshot }
+  | { type: "terminals"; terminals: import("@openaide/app-server-client").TerminalCollectionSnapshot }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
   | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[] }
   | { type: "submit:cancel" }
@@ -239,6 +240,7 @@ type GlobalAction = Extract<
   | { type: "taskChat:liveText" }
   | { type: "projects" }
   | { type: "worktreeRepository" }
+  | { type: "terminals" }
   | { type: "workspace:roots" }
   | { type: "search:set" }
   | { type: "archive:set" }
@@ -294,6 +296,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "taskChat:liveText":
     case "projects":
     case "worktreeRepository":
+    case "terminals":
     case "workspace:roots":
     case "search:set":
     case "archive:set":
@@ -564,6 +567,8 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           [action.repository.repositoryId]: action.repository,
         },
       };
+    case "terminals":
+      return { ...state, terminals: action.terminals };
     case "workspace:roots": {
       const firstRoot = action.roots[0];
       const firstRootProjectId = firstRoot?.projectId

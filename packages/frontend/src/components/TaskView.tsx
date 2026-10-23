@@ -39,6 +39,7 @@ import { useTaskHistoryView } from "./useTaskHistoryView";
 import { AgentFileOpenContext } from "./agentFileOpen";
 import { ProjectFileWorkspace } from "./ProjectFileWorkspace";
 import { ProjectFilesButton } from "./ProjectFilesButton";
+import { TerminalButton } from "./terminals/TerminalButton";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
@@ -539,6 +540,12 @@ export function TaskView({
               <small>{completedPlanSteps}/{visiblePlan.entries.length}</small>
             </button>
           ) : null}
+          <TerminalButton
+            projectId={snapshot.task.project_id}
+            target={headerActionsTarget}
+            taskId={snapshot.task.task_id}
+            workspaceRoot={snapshot.task.workspace_root}
+          />
           {fileViewerEnabled && <ProjectFilesButton open={projectFilesOpen} onOpen={() => setProjectFilesOpen(true)} target={headerActionsTarget} />}
         </div>
       </div>

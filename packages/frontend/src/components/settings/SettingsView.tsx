@@ -138,6 +138,7 @@ export function SettingsView({
     onSetDesktopNotifications,
     phone,
     preferences,
+    replacementImpact: deviceIntents?.replacementImpact,
   });
   const agents = useAgentsSection({
     agents: state.loading && !state.agentDetails ? undefined : state.agentDetails ?? [],

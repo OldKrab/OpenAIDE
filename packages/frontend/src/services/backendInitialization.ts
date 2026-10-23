@@ -96,7 +96,6 @@ export function initializeParamsForBootstrap(
         ...(shellKind === "vscodeExtension"
           ? ["pickLocalFile"] as ShellCapability[]
           : []),
-        "openTerminal",
         ...(shellKind === "vscodeExtension"
           ? ["readSecret", "writeSecret"] as ShellCapability[]
           : []),

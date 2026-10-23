@@ -129,6 +129,7 @@ export function describeImpact(impact: ClientReplacementImpactResult): string[] 
     });
   if (impact.activeTurns > 0) lines.push(`Agents working in ${count(impact.activeTurns, "Task")}`);
   if (impact.pendingTaskRequests > 0) lines.push(`${count(impact.pendingTaskRequests, "question")} waiting for an answer`);
+  if (impact.openTerminals > 0) lines.push(`${count(impact.openTerminals, "terminal")} will close`);
   return lines.length ? lines : ["Nothing else is using it."];
 }
 

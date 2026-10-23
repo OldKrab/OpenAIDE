@@ -1,5 +1,6 @@
 import { Download, RotateCw } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
+import type { ClientReplacementImpactResult } from "@openaide/app-server-client";
 import Markdown from "react-markdown";
 import type {
   DesktopUpdateCapability,
@@ -16,7 +17,11 @@ const noSnapshot = () => undefined;
  * The installed version as one row whose status and action follow the native
  * updater's state. The shell owns the update lifecycle; this only renders it.
  */
-export function useUpdateGroup(capability: DesktopUpdateCapability | undefined): SettingsGroup | undefined {
+export function useUpdateGroup(
+  capability: DesktopUpdateCapability | undefined,
+  /** Names what a forced update ends, such as open Terminals, which only App Server can count. */
+  replacementImpact?: () => Promise<ClientReplacementImpactResult>,
+): SettingsGroup | undefined {
   const snapshot = useSyncExternalStore(
     capability?.subscribe ?? noSubscription,
     capability?.snapshot ?? noSnapshot,
@@ -25,6 +30,7 @@ export function useUpdateGroup(capability: DesktopUpdateCapability | undefined):
   const [actionError, setActionError] = useState(false);
   const [deferred, setDeferred] = useState(false);
   const [restartBlocker, setRestartBlocker] = useState<Exclude<DesktopUpdateRestartResult, "started">>();
+  const [openTerminals, setOpenTerminals] = useState(0);
   if (!capability || !snapshot) return undefined;
 
   const run = async (action: () => Promise<void>) => {
@@ -40,6 +46,10 @@ export function useUpdateGroup(capability: DesktopUpdateCapability | undefined):
     try {
       const result = await capability.restartAndUpdate({ stopActiveWork });
       setRestartBlocker(result === "started" ? undefined : result);
+      if (result === "activeWork" && replacementImpact) {
+        // Best effort: without the count the note still says that work will stop.
+        setOpenTerminals((await replacementImpact().catch(() => undefined))?.openTerminals ?? 0);
+      }
     } catch {
       setActionError(true);
     }
@@ -82,7 +92,7 @@ export function useUpdateGroup(capability: DesktopUpdateCapability | undefined):
         {ready && restartBlocker ? (
           <p className="settings-row-note" role="status">
             {restartBlocker === "activeWork"
-              ? "OpenAIDE is still working. Updating now will stop active work before restarting."
+              ? `OpenAIDE is still working. Updating now will stop active work before restarting.${openTerminals > 0 ? ` ${openTerminals} terminal${openTerminals === 1 ? "" : "s"} will close.` : ""}`
               : "Another OpenAIDE client is using this App Server. Close it before updating."}
           </p>
         ) : null}
