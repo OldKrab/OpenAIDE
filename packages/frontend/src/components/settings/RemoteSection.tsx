@@ -3,7 +3,7 @@ import { Laptop, Monitor, Plus, QrCode, Server, Smartphone, Wifi } from "lucide-
 import { useEffect, useRef, useState } from "react";
 import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
 import { currentFrontendShell, type RemoteComputer, type RemoteComputersCapability, type SshComputerStatus } from "../../services/frontendShell";
-import type { ConnectionComputer } from "../../services/connectionSettings";
+import type { ConnectionComputer, PhoneSshComputer } from "../../services/connectionSettings";
 import { PopupDialog } from "../Popup";
 import { InviteDialog, JoinDialog } from "./devicePairingDialogs";
 import type { PhoneConnection } from "./phoneConnection";
@@ -25,6 +25,9 @@ type Dialog =
   | { kind: "stop-ssh"; computer: RemoteComputer }
   | { kind: "forget"; computer: RemoteComputer }
   | { kind: "forget-phone"; computer: ConnectionComputer }
+  | { kind: "stop-phone-ssh"; computer: PhoneSshComputer }
+  | { kind: "forget-phone-ssh"; computer: PhoneSshComputer }
+  | { kind: "update-phone-ssh" }
   | { kind: "invite" }
   | { kind: "join" }
   | { kind: "remove"; device: RemoteDeviceSummary };
@@ -53,7 +56,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
       canAddSsh: Boolean(ssh),
     }));
   }
-  else if (phone) groups.push(phoneComputersGroup(phone, (computer) => setDialog({ kind: "forget-phone", computer })));
+  else if (phone) groups.push(phoneComputersGroup(phone, setDialog));
   if (deviceIntents) {
     const here = phone ? "this phone" : "this computer";
     // The App Server names itself; a browser tab on another machine is not "this computer".
@@ -75,7 +78,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             computer={capability?.current ?? "The SSH computer"}
             impact={deviceIntents?.replacementImpact}
             onClose={close}
-            ssh={ssh}
+            onUpdate={() => ssh.update()}
             status={sshStatus}
           />
         ) : null}
@@ -117,6 +120,37 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             onConfirm={() => phone.execute({ action: "forget_computer", id: dialog.computer.id })}
             pendingLabel="Forgetting…"
             title={`Forget ${dialog.computer.name || "this computer"}?`}
+          />
+        ) : null}
+        {dialog.kind === "stop-phone-ssh" && phone ? (
+          <SettingsConfirm
+            confirmLabel="Stop"
+            detail={`OpenAIDE on ${dialog.computer.name} stops once no app is connected to it, ending work in progress there.${dialog.computer.current ? " This phone stays connected until you switch away." : ""}`}
+            label={`Stop OpenAIDE on ${dialog.computer.name}?`}
+            onClose={close}
+            onConfirm={() => phone.execute({ action: "stop_ssh", id: dialog.computer.id })}
+            pendingLabel="Stopping…"
+            title={`Stop OpenAIDE on ${dialog.computer.name}?`}
+          />
+        ) : null}
+        {dialog.kind === "forget-phone-ssh" && phone ? (
+          <SettingsConfirm
+            confirmLabel="Forget"
+            detail={`This phone forgets it and its host key.${dialog.computer.current ? " Work moves to this phone." : ""} OpenAIDE keeps running there until you stop it or no app uses it.`}
+            label={`Forget ${dialog.computer.name}?`}
+            onClose={close}
+            onConfirm={() => phone.execute({ action: "forget_ssh", id: dialog.computer.id })}
+            pendingLabel="Forgetting…"
+            title={`Forget ${dialog.computer.name}?`}
+          />
+        ) : null}
+        {dialog.kind === "update-phone-ssh" && phone?.state?.ssh ? (
+          <UpdateSshComputerDialog
+            computer={phone.state.computer || "The SSH computer"}
+            impact={deviceIntents?.replacementImpact}
+            onClose={close}
+            onUpdate={() => phone.execute({ action: "update_ssh" })}
+            status={phone.state.ssh}
           />
         ) : null}
         {dialog.kind === "invite" && deviceIntents ? <InviteDialog devices={devices?.devices ?? []} intents={deviceIntents} onClose={close} /> : null}
@@ -296,8 +330,10 @@ function desktopComputersGroup(desktop: DesktopComputers, view: DesktopComputers
   };
 }
 
-function phoneComputersGroup(phone: PhoneConnection, onForget: (computer: ConnectionComputer) => void): SettingsGroup {
+function phoneComputersGroup(phone: PhoneConnection, open: (dialog: Dialog) => void): SettingsGroup {
   const state = phone.state;
+  const currentSsh = state?.sshComputers?.find((computer) => computer.current);
+  const sshStatus = currentSsh ? state?.ssh : undefined;
   const rows: SettingsRow[] = [];
   if (state) {
     rows.push({
@@ -322,10 +358,29 @@ function phoneComputersGroup(phone: PhoneConnection, onForget: (computer: Connec
         selected: computer.current,
         control: (
           <>
-            <SettingsButton ariaLabel={`Forget ${computer.name || "this computer"}`} disabled={phone.busy} onClick={() => onForget(computer)} variant="quiet">Forget</SettingsButton>
+            <SettingsButton ariaLabel={`Forget ${computer.name || "this computer"}`} disabled={phone.busy} onClick={() => open({ kind: "forget-phone", computer })} variant="quiet">Forget</SettingsButton>
             {computer.current
               ? <SettingsChoice active label={name} onUse={() => undefined} />
               : <SettingsButton ariaLabel={`Use ${name}`} disabled={phone.busy} onClick={() => void phone.execute({ action: "use_computer", id: computer.id })}>Use</SettingsButton>}
+          </>
+        ),
+      });
+    }
+    for (const computer of state.sshComputers ?? []) {
+      rows.push({
+        id: `ssh-${computer.id}`,
+        label: computer.name,
+        description: `SSH · ${computer.destination}`,
+        keywords: "computer remote connect switch ssh server linux",
+        leading: <Server aria-hidden="true" size={18} strokeWidth={1.6} />,
+        selected: computer.current,
+        control: (
+          <>
+            <SettingsButton ariaLabel={`Stop OpenAIDE on ${computer.name}`} disabled={phone.busy} onClick={() => open({ kind: "stop-phone-ssh", computer })} variant="quiet">Stop</SettingsButton>
+            <SettingsButton ariaLabel={`Forget ${computer.name}`} disabled={phone.busy} onClick={() => open({ kind: "forget-phone-ssh", computer })} variant="quiet">Forget</SettingsButton>
+            {computer.current
+              ? <SettingsChoice active label={computer.name} onUse={() => undefined} />
+              : <SettingsButton ariaLabel={`Use ${computer.name}`} disabled={phone.busy} onClick={() => void phone.execute({ action: "use_ssh", id: computer.id })}>Use</SettingsButton>}
           </>
         ),
       });
@@ -336,13 +391,30 @@ function phoneComputersGroup(phone: PhoneConnection, onForget: (computer: Connec
     title: "Connected to",
     info: settingsInfo.connectedTo,
     actions: (
-      <SettingsButton disabled={phone.busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => void phone.execute({ action: "pair_setup" })}>
-        Pair a computer
-      </SettingsButton>
+      <>
+        {state?.sshAvailable ? (
+          <SettingsButton disabled={phone.busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => void phone.execute({ action: "ssh_add" })}>Add SSH computer</SettingsButton>
+        ) : null}
+        <SettingsButton disabled={phone.busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => void phone.execute({ action: "pair_setup" })}>
+          Pair a computer
+        </SettingsButton>
+      </>
     ),
     notice: (
       <>
         {state?.remote && state.notice ? <SettingsNotice>{state.notice}</SettingsNotice> : null}
+        {state?.sshNotice ? <SettingsNotice>{state.sshNotice}</SettingsNotice> : null}
+        {sshStatus?.updateAvailable && currentSsh ? (
+          <SettingsNotice>
+            {currentSsh.name} runs OpenAIDE {sshStatus.runningVersion}, older than this app.{" "}
+            <SettingsButton disabled={phone.busy} onClick={() => open({ kind: "update-phone-ssh" })} variant="quiet">Update…</SettingsButton>
+          </SettingsNotice>
+        ) : null}
+        {sshStatus?.suggestLinger && currentSsh ? (
+          <SettingsNotice>
+            OpenAIDE on {currentSsh.name} stops when you log out there. Run <code>loginctl enable-linger</code> on {currentSsh.name} to keep it running.
+          </SettingsNotice>
+        ) : null}
         {phone.error ? <SettingsInlineError>{phone.error}</SettingsInlineError> : null}
       </>
     ),

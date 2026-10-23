@@ -460,6 +460,59 @@ it("offers to update an older App Server on the SSH computer and lists what the 
   expect(ssh.update).toHaveBeenCalled();
 });
 
+function phoneShell(snapshot: object) {
+  const execute = vi.fn(async () => undefined);
+  useShell({ connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute } } as unknown as Partial<FrontendShell>);
+  return execute;
+}
+
+const phoneDevbox = { id: "c".repeat(32), name: "devbox", destination: "me@devbox:2222", current: true };
+const phoneLab = { id: "d".repeat(32), name: "lab", destination: "me@lab", current: false };
+
+it("lists the phone's SSH computers beside paired ones and adds one through the phone", async () => {
+  const execute = phoneShell({ remote: true, computer: "devbox", computers: [], sshComputers: [phoneDevbox, phoneLab], sshAvailable: true, ssh: null });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(row("devbox").textContent).toContain("SSH · me@devbox:2222");
+  await click("Use lab");
+  expect(execute).toHaveBeenCalledWith({ action: "use_ssh", id: phoneLab.id });
+  await click("Add SSH computer");
+  expect(execute).toHaveBeenCalledWith({ action: "ssh_add" });
+});
+
+it("offers no SSH computers on a phone build that cannot install on them", async () => {
+  phoneShell({ remote: false, computer: "", computers: [], sshComputers: [], sshAvailable: false });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(buttons("Add SSH computer")).toHaveLength(0);
+});
+
+it("stops and updates the phone's SSH computer only after their warnings", async () => {
+  const execute = phoneShell({
+    remote: true, computer: "devbox", computers: [], sshComputers: [phoneDevbox], sshAvailable: true,
+    ssh: { runningVersion: "0.9.0", updateAvailable: true, suggestLinger: false }, sshNotice: "",
+  });
+  const intents = { ...deviceIntents(), replacementImpact: vi.fn().mockResolvedValue({ otherClients: [], activeTurns: 1, pendingTaskRequests: 0 }) };
+  await mountSettings({ deviceIntents: intents, state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  await click("Stop OpenAIDE on devbox");
+  expect(execute).not.toHaveBeenCalledWith({ action: "stop_ssh", id: phoneDevbox.id });
+  await click("Stop");
+  await settle();
+  expect(execute).toHaveBeenCalledWith({ action: "stop_ssh", id: phoneDevbox.id });
+
+  expect(pageText()).toContain("devbox runs OpenAIDE 0.9.0, older than this app.");
+  await click("Update…");
+  await settle();
+  expect(dialog("Update OpenAIDE on devbox?")?.textContent).toContain("Agents working in 1 Task");
+  await click("Update and restart");
+  await settle();
+  expect(execute).toHaveBeenCalledWith({ action: "update_ssh" });
+});
+
 // General: Desktop runtime and updates
 
 it("switches where Agents run and leaves the environment in use alone", async () => {

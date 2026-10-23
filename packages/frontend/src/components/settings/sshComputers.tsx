@@ -77,13 +77,14 @@ export function UpdateSshComputerDialog({
   computer,
   impact,
   onClose,
-  ssh,
+  onUpdate,
   status,
 }: {
   computer: string;
   impact?: () => Promise<ClientReplacementImpactResult>;
   onClose: () => void;
-  ssh: SshComputersCapability;
+  /** Replaces the App Server there; the Desktop and phone shells each own how. */
+  onUpdate: () => Promise<void>;
   status: SshComputerStatus;
 }) {
   const [lines, setLines] = useState<string[]>();
@@ -100,7 +101,7 @@ export function UpdateSshComputerDialog({
       detail={`${computer} runs OpenAIDE ${status.runningVersion}. Updating restarts it there and interrupts:`}
       label={`Update OpenAIDE on ${computer}?`}
       onClose={onClose}
-      onConfirm={() => ssh.update()}
+      onConfirm={onUpdate}
       pendingLabel="Updating…"
       title={`Update OpenAIDE on ${computer}?`}
     >
