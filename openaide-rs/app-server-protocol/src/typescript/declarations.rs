@@ -173,6 +173,11 @@ use crate::task::{
     TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
     TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
+use crate::terminals::{
+    TerminalAttach, TerminalCollectionSnapshot, TerminalStatus, TerminalSummary, TerminalTarget,
+    TerminalsAttachParams, TerminalsAttachResult, TerminalsCloseParams, TerminalsCloseResult,
+    TerminalsOpenParams, TerminalsOpenResult,
+};
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -381,6 +386,17 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<DevicesRemoveResult>(output, config);
     push_decl::<TaskAttentionWaitParams>(output, config);
     push_decl::<TaskAttentionWaitResult>(output, config);
+    push_decl::<TerminalTarget>(output, config);
+    push_decl::<TerminalStatus>(output, config);
+    push_decl::<TerminalSummary>(output, config);
+    push_decl::<TerminalCollectionSnapshot>(output, config);
+    push_decl::<TerminalAttach>(output, config);
+    push_decl::<TerminalsOpenParams>(output, config);
+    push_decl::<TerminalsOpenResult>(output, config);
+    push_decl::<TerminalsAttachParams>(output, config);
+    push_decl::<TerminalsAttachResult>(output, config);
+    push_decl::<TerminalsCloseParams>(output, config);
+    push_decl::<TerminalsCloseResult>(output, config);
     push_decl::<RuntimeDeveloperSettings>(output, config);
     push_decl::<RuntimeAcpTraceSettings>(output, config);
 

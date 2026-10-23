@@ -468,6 +468,7 @@ function scopeKey(scope: SubscriptionScope) {
     case "projects":
     case "agents":
     case "devices":
+    case "terminals":
       return scope.kind;
     case "settings":
       return `settings:${scope.section ?? ""}`;

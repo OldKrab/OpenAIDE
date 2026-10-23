@@ -75,6 +75,8 @@ pub enum SubscriptionScope {
     },
     /// The Remote Devices this App Server trusts. Every client may subscribe.
     Devices,
+    /// Every open Terminal on this App Server. Every client may subscribe.
+    Terminals,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -118,6 +120,9 @@ pub enum SubscriptionSnapshot {
     },
     Devices {
         devices: crate::devices::DeviceCollectionSnapshot,
+    },
+    Terminals {
+        terminals: crate::terminals::TerminalCollectionSnapshot,
     },
 }
 

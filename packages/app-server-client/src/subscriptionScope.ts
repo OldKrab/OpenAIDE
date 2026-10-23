@@ -22,6 +22,7 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
     case "projects":
     case "agents":
     case "devices":
+    case "terminals":
       return right.kind === left.kind;
     case "settings":
       return right.kind === "settings" && normalizeOptional(left.section) === normalizeOptional(right.section);
@@ -100,6 +101,8 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
       return payload.kind === "snapshotReplaced" || payload.kind === "agentCollectionUpdated";
     case "devices":
       return payload.kind === "snapshotReplaced" || payload.kind === "deviceCollectionUpdated";
+    case "terminals":
+      return payload.kind === "snapshotReplaced" || payload.kind === "terminalCollectionUpdated";
     case "settings":
       return payload.kind === "snapshotReplaced";
     case "taskNavigation":

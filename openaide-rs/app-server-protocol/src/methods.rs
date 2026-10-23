@@ -143,9 +143,11 @@ macro_rules! protocol_method {
 // Declared after the macro so the modules can use it.
 mod devices;
 mod task_attention;
+mod terminals;
 
 pub use devices::*;
 pub use task_attention::*;
+pub use terminals::*;
 
 protocol_method!(
     ClientProbe,

@@ -49,6 +49,9 @@ pub const DEVICES_CANCEL_INVITE: &str = "devices/cancelInvite";
 pub const DEVICES_PREVIEW_JOIN_REQUEST: &str = "devices/previewJoinRequest";
 pub const DEVICES_APPROVE_JOIN_REQUEST: &str = "devices/approveJoinRequest";
 pub const DEVICES_REMOVE: &str = "devices/remove";
+pub const TERMINALS_OPEN: &str = "terminals/open";
+pub const TERMINALS_ATTACH: &str = "terminals/attach";
+pub const TERMINALS_CLOSE: &str = "terminals/close";
 pub const ATTACHMENT_LIST_ROOTS: &str = "attachment/listRoots";
 pub const ATTACHMENT_LIST_DIRECTORY: &str = "attachment/listDirectory";
 pub const ATTACHMENT_CREATE_FILE_REFERENCE: &str = "attachment/createFileReference";
@@ -167,6 +170,9 @@ pub const CLIENT_METHODS: &[&str] = &[
     DEVICES_PREVIEW_JOIN_REQUEST,
     DEVICES_APPROVE_JOIN_REQUEST,
     DEVICES_REMOVE,
+    TERMINALS_OPEN,
+    TERMINALS_ATTACH,
+    TERMINALS_CLOSE,
     ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_CREATE_FILE_REFERENCE,
