@@ -38,7 +38,7 @@ final class ConnectionController extends ContextWrapper {
     private int operationSequence;
     private String operationName;
     private JSONObject joinCode;
-    private final ComputerSwitch<computer.iroh.Connection> switcher;
+    private final ComputerSwitch<?> switcher;
 
     ConnectionController(Activity activity, View view, boolean localTools) {
         super(activity);

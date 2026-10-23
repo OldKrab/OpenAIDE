@@ -88,9 +88,10 @@ internal object RemotePairing {
     /**
      * The phone's steps for one page's [ComputerSwitch]: reach this phone's own App
      * Server or a paired computer's while the one in use stays live, then save the
-     * choice and move the connection to it.
+     * choice and move the connection to it. The star keeps the iroh type out of the
+     * Java signature: CI's Java 17 compiler cannot read iroh's newer class files.
      */
-    @JvmStatic fun computerSwitch(context: Context, replacePage: Runnable): ComputerSwitch<Connection?> {
+    @JvmStatic fun computerSwitch(context: Context, replacePage: Runnable): ComputerSwitch<*> {
         val application = context.applicationContext
         val diagnostics = AndroidDiagnostics()
         return ComputerSwitch(RemoteNode.scope, { main.post(it) }, SystemClock::elapsedRealtime,
