@@ -8,8 +8,9 @@ const dependencies = Object.freeze({
   "vsix-linux-x64": ["server-linux-x64-musl"],
   "vsix-win32-x64": ["server-win32-x64"],
   "vsix-darwin-arm64": ["server-darwin-arm64"],
+  // Every Desktop pins the Linux App Server it installs on SSH Computers (ADR-0069).
   "desktop-win32-x64": ["server-win32-x64", "server-linux-x64-musl"],
-  "desktop-darwin-arm64": ["server-darwin-arm64"],
+  "desktop-darwin-arm64": ["server-darwin-arm64", "server-linux-x64-musl"],
 });
 
 const nodeOrder = [

@@ -18,12 +18,16 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use crate::desktop_runtime::{DesktopBootstrapPreferences, write_bootstrap_preferences};
 use crate::{DesktopState, LocalHttpConnection};
 
-/// A computer whose App Server trusts this Desktop: its public key and the name
-/// it gave itself. Neither is a credential; the device key is stored apart.
+/// A computer whose App Server this Desktop may use instead of its own. A
+/// paired computer is known by its public key and the name it gave itself; an
+/// SSH Computer (ADR-0069) by its `ssh` destination. None is a credential; the
+/// device key is stored apart.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct RemoteComputer {
     pub(crate) id: String,
     pub(crate) name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ssh: Option<String>,
 }
 
 impl DesktopBootstrapPreferences {
@@ -60,6 +64,8 @@ pub(crate) struct RemoteComputerSummary {
     id: String,
     name: String,
     current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ssh: Option<String>,
 }
 
 /// This Desktop's endpoint, bound on first use and kept for the process: a
@@ -144,6 +150,7 @@ pub(crate) fn desktop_remote_snapshot(
             id: computer.id.clone(),
             name: computer.name.clone(),
             current: preferences.remote_computer.as_ref() == Some(&computer.id),
+            ssh: computer.ssh.clone(),
         })
         .collect())
 }
@@ -193,6 +200,7 @@ pub(crate) async fn desktop_remote_pair(
         } else {
             paired.name
         },
+        ssh: None,
     });
     write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     drop(preferences);
@@ -321,7 +329,7 @@ fn message(failure: remote::Failure, name: &str) -> String {
 }
 
 /// Prints the client's metadata-only events in this shell's log format.
-fn logger() -> remote::Logger {
+pub(crate) fn logger() -> remote::Logger {
     Arc::new(|event, fields| {
         let fields = fields
             .as_object()

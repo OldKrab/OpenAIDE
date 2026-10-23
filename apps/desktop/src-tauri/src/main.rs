@@ -28,6 +28,11 @@ mod desktop_secrets;
 #[cfg(test)]
 #[path = "desktop_server_recovery_tests.rs"]
 mod desktop_server_recovery_tests;
+mod desktop_ssh;
+mod desktop_ssh_askpass;
+mod desktop_ssh_config;
+mod desktop_ssh_release;
+mod desktop_ssh_transport;
 mod desktop_support_export;
 mod desktop_update;
 mod desktop_update_receipt;
@@ -76,6 +81,10 @@ struct DesktopBootstrap {
     /// Names the paired computer whose App Server this Desktop uses instead of its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_computer: Option<String>,
+    /// The computer in use is an SSH Computer, whose App Server this shell
+    /// restores after sleep like its own.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    ssh_computer: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -147,6 +156,10 @@ impl DesktopState {
 }
 
 fn main() {
+    // `ssh` starts this executable to ask the user something; it opens no window.
+    if let Some(code) = desktop_ssh_askpass::run_helper_if_requested() {
+        std::process::exit(code);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -175,6 +188,9 @@ fn main() {
                 resource_dir.join("wsl").join("openaide-app-server"),
             ));
             app.manage(desktop_remote::DesktopRemoteState::new(&app_local_data));
+            app.manage(desktop_ssh::DesktopSshState::new(
+                app.path().app_cache_dir()?,
+            ));
             app.manage(DesktopUpdateState::for_build(
                 app_local_data.join("desktop-update-receipt.json"),
             ));
@@ -244,6 +260,14 @@ fn main() {
             desktop_remote::desktop_remote_pair,
             desktop_remote::desktop_remote_use,
             desktop_remote::desktop_remote_forget,
+            desktop_ssh::desktop_ssh_hosts,
+            desktop_ssh::desktop_ssh_add,
+            desktop_ssh::desktop_ssh_status,
+            desktop_ssh::desktop_ssh_failure,
+            desktop_ssh::desktop_ssh_update,
+            desktop_ssh::desktop_ssh_stop,
+            desktop_ssh::desktop_ssh_prompts,
+            desktop_ssh::desktop_ssh_prompt_answer,
             desktop_update::desktop_update_snapshot,
             desktop_update::desktop_check_for_update,
             desktop_update::desktop_auto_check_for_update,
@@ -424,6 +448,9 @@ async fn desktop_bootstrap(
         )
     };
     let remote_computer = remote.as_ref().map(|computer| computer.name.clone());
+    let ssh_computer = remote
+        .as_ref()
+        .is_some_and(|computer| computer.ssh.is_some());
     let runtime_options = DesktopRuntimeOptions {
         wsl_distros: discover_wsl_distros(),
     };
@@ -440,15 +467,19 @@ async fn desktop_bootstrap(
             runtime_environment: environment,
             runtime_options,
             remote_computer,
+            ssh_computer,
         });
     }
 
     let operation_id = format!("desktop-bootstrap-{}", uuid::Uuid::new_v4());
     let connection = match &remote {
-        Some(computer) => {
-            emit_bootstrap_progress(&app, "remote", format!("Connecting to {}", computer.name));
-            desktop_remote::connect(&app, computer).await?
-        }
+        Some(computer) => match &computer.ssh {
+            Some(destination) => desktop_ssh::connect(&app, computer, destination, true).await?,
+            None => {
+                emit_bootstrap_progress(&app, "remote", format!("Connecting to {}", computer.name));
+                desktop_remote::connect(&app, computer).await?
+            }
+        },
         None => {
             launch_app_server_for_desktop(
                 state.runtime_paths.clone(),
@@ -479,6 +510,7 @@ async fn desktop_bootstrap(
         runtime_environment: environment,
         runtime_options,
         remote_computer,
+        ssh_computer,
     })
 }
 
@@ -569,6 +601,9 @@ async fn desktop_ensure_app_server(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
 ) -> Result<Option<LocalHttpConnection>, String> {
+    if let Some(ensured) = desktop_ssh::ensure(&app).await {
+        return ensured;
+    }
     // The gateway to a paired computer lives as long as this process, and the
     // session's own retries reopen its connection.
     if !state.owns_app_server() {

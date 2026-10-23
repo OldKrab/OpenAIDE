@@ -3722,6 +3722,7 @@ dependencies = [
 name = "openaide-desktop"
 version = "0.0.0"
 dependencies = [
+ "flate2",
  "fs2",
  "futures-util",
  "keyring",
@@ -3734,12 +3735,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "url",
  "uuid",

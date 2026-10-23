@@ -148,6 +148,15 @@ fn installs_a_missing_release_then_forwards_the_kept_app_server() {
     assert_eq!(*name, "ssh_launch_completed");
     assert_eq!(completed["outcome"], "ready");
     assert_eq!(completed["operationId"], "op-1");
+    let started = events
+        .iter()
+        .filter(|(name, _)| *name == "ssh_launch_stage_started")
+        .count();
+    let finished = events
+        .iter()
+        .filter(|(name, _)| *name == "ssh_launch_stage_completed")
+        .count();
+    assert_eq!((started, finished), (5, 5));
     assert!(!format!("{events:?}").contains("secret-token"));
 }
 

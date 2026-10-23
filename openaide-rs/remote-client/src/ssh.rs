@@ -370,6 +370,10 @@ impl SshLauncher {
         body: impl FnOnce() -> Result<R, LaunchError>,
     ) -> Result<R, LaunchError> {
         (self.progress)(stage);
+        (self.logger)(
+            "ssh_launch_stage_started",
+            json!({ "operationId": operation_id, "stage": stage.as_str() }),
+        );
         let started = Instant::now();
         let result = body();
         (self.logger)(

@@ -102,6 +102,10 @@ pub(crate) struct DesktopBootstrapPreferences {
     /// The paired computer in use instead of this one, by id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) remote_computer: Option<String>,
+    /// The SSH Computer whose older App Server the user agreed to replace on
+    /// the next start (ADR-0069). Cleared by that start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ssh_replace: Option<String>,
 }
 
 pub(crate) fn read_bootstrap_preferences(path: &Path) -> DesktopBootstrapPreferences {
