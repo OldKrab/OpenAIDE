@@ -6,19 +6,17 @@
 //! SHA-256 matches the one the release build compiled in.
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use openaide_remote_client::ServerRelease;
-use sha2::{Digest, Sha256};
+use openaide_remote_client::archive::{self, extract_verified, sha256_file};
 
 /// Set by the release build from the Linux binary it publishes.
 const BUILT_IN_SHA256: Option<&str> = option_env!("OPENAIDE_SSH_APP_SERVER_SHA256");
 const RELEASES: &str = "https://github.com/OldKrab/OpenAIDE/releases/download";
-const ARCHIVE_ENTRY: &str = "openaide-app-server/openaide-app-server";
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_BINARY_BYTES: u64 = 512 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub(crate) struct ReleaseSource {
@@ -54,7 +52,8 @@ pub(crate) fn resolve(
         release,
         origin: Origin::Download {
             url: format!(
-                "{RELEASES}/v{app_version}/openaide-app-server-linux-x64-{app_version}.tar.gz"
+                "{RELEASES}/v{app_version}/{}",
+                archive::asset_name(app_version)
             ),
             cache: cache_root
                 .join("ssh-app-server")
@@ -110,7 +109,7 @@ fn download(url: &str, cache: &Path, sha256: &str) -> Result<(), &'static str> {
     let started = Instant::now();
     desktop_log!("desktop_ssh_release_download_started attempt_count=1");
     let result = tauri::async_runtime::block_on(fetch_archive(url))
-        .and_then(|archive| extract_verified(&archive, cache, sha256));
+        .and_then(|archive| extract_verified(archive.as_slice(), cache, sha256));
     desktop_log!(
         "desktop_ssh_release_download_completed outcome={} error_class={} duration_ms={} attempt_count=1",
         if result.is_ok() { "success" } else { "failure" },
@@ -146,61 +145,6 @@ async fn fetch_archive(url: &str) -> Result<Vec<u8>, &'static str> {
         archive.extend_from_slice(&chunk);
     }
     Ok(archive)
-}
-
-/// Unpacks the one binary into the cache and keeps it only if it is the release.
-fn extract_verified(archive: &[u8], cache: &Path, sha256: &str) -> Result<(), &'static str> {
-    let directory = cache.parent().ok_or("cache_unwritable")?;
-    std::fs::create_dir_all(directory).map_err(|_| "cache_unwritable")?;
-    let temporary = directory.join(format!(".download-{}", uuid::Uuid::new_v4().simple()));
-    let result = (|| {
-        let mut entries = tar::Archive::new(flate2::read::GzDecoder::new(archive));
-        for entry in entries.entries().map_err(|_| "archive_invalid")? {
-            let entry = entry.map_err(|_| "archive_invalid")?;
-            let is_binary = entry
-                .path()
-                .map(|path| path == Path::new(ARCHIVE_ENTRY))
-                .unwrap_or(false);
-            if !is_binary {
-                continue;
-            }
-            let mut file = File::create(&temporary).map_err(|_| "cache_unwritable")?;
-            let digest = copy_hashing(entry.take(MAX_BINARY_BYTES), &mut file)
-                .map_err(|_| "archive_invalid")?;
-            file.sync_all().map_err(|_| "cache_unwritable")?;
-            if digest != sha256 {
-                return Err("checksum_mismatch");
-            }
-            return std::fs::rename(&temporary, cache).map_err(|_| "cache_unwritable");
-        }
-        Err("archive_invalid")
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
-}
-
-fn sha256_file(path: &Path) -> std::io::Result<String> {
-    copy_hashing(File::open(path)?, &mut std::io::sink())
-}
-
-fn copy_hashing(mut source: impl Read, target: &mut impl Write) -> std::io::Result<String> {
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0; 64 * 1024];
-    loop {
-        let read = source.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-        target.write_all(&buffer[..read])?;
-    }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
 }
 
 #[cfg(test)]

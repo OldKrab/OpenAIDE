@@ -1,7 +1,6 @@
 //! This device's endpoint and its one connection to a paired App Server.
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use iroh::endpoint::{
@@ -26,8 +25,7 @@ const CLOSE_UNTRUSTED: u32 = 1;
 const CLOSE_REMOVED: u32 = 2;
 const CLOSE_UNKNOWN_PROTOCOL: u32 = 3;
 
-/// Receives metadata-only lifecycle events: a stable name and safe fields.
-pub type Logger = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
+pub use crate::Logger;
 
 /// Why the paired computer cannot be used right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

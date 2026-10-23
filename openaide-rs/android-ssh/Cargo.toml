@@ -1,0 +1,27 @@
+[package]
+name = "openaide-android-ssh"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The Mobile App's SSH Computers (ADR-0069): the shared launcher over an
+# embedded SSH client, exposed to Kotlin through UniFFI.
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+# Generates the Kotlin bindings from the built library.
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+openaide-remote-client = { workspace = true, default-features = false, features = ["release-archive"] }
+russh = { version = "0.64", default-features = false, features = ["ring", "rsa"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uniffi = { version = "0.32", features = ["cli"] }
+
+[dev-dependencies]
+tempfile.workspace = true

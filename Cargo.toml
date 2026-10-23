@@ -1,5 +1,5 @@
 [workspace]
-members = ["openaide-rs/app-server", "openaide-rs/app-server-protocol", "openaide-rs/remote-client"]
+members = ["openaide-rs/android-ssh", "openaide-rs/app-server", "openaide-rs/app-server-protocol", "openaide-rs/remote-client"]
 resolver = "2"
 
 [workspace.package]
@@ -9,6 +9,7 @@ publish = false
 
 [workspace.dependencies]
 openaide-app-server-protocol = { path = "openaide-rs/app-server-protocol" }
+openaide-remote-client = { path = "openaide-rs/remote-client", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"

@@ -10,6 +10,8 @@
 //!
 //! Every call blocks; App Shells run it off their UI thread.
 
+#[cfg(feature = "release-archive")]
+pub mod archive;
 mod remote;
 mod version;
 
@@ -75,6 +77,11 @@ impl ServerRelease {
 
     pub fn version(&self) -> &str {
         &self.version
+    }
+
+    /// The SHA-256 of the Linux x64 binary, as lowercase hex.
+    pub fn sha256(&self) -> &str {
+        &self.sha256
     }
 }
 
