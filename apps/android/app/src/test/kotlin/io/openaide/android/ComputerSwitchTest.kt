@@ -45,6 +45,9 @@ class ComputerSwitchTest {
             steps,
         )
 
+        /** A copy taken under the list's lock: the connect appends from another thread. */
+        fun seen(): List<String> = synchronized(events) { events.toList() }
+
         fun reply(): ComputerSwitch.Reply = ComputerSwitch.Reply { outcome, problem -> events += "reply ${outcome ?: problem}" }
 
         /** Runs what the switch posted to the main thread, waiting for the connect's result to arrive. */
@@ -127,7 +130,7 @@ class ComputerSwitchTest {
         val phone = Phone()
         phone.switch.request(null, "studio", null, phone.reply())
         phone.switch.request(null, "laptop", null, phone.reply())
-        assertEquals("reply Another computer is still connecting. Wait for it, or cancel it first.", phone.events.last { it.startsWith("reply") })
+        assertEquals("reply Another computer is still connecting. Wait for it, or cancel it first.", phone.seen().last { it.startsWith("reply") })
         phone.switch.cancel()
     }
 
