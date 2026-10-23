@@ -1610,6 +1610,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
           createInvite: vi.fn(),
           previewJoinRequest: vi.fn(),
           remove: vi.fn(),
+          replacementImpact: vi.fn(),
         },
         getMcpServerDetails: vi.fn(),
         getSkillDetails: vi.fn(),

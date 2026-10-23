@@ -13,7 +13,7 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CLIENT_DETACH, type AppServerSession } from "@openaide/app-server-client";
 import type { HostToWebviewMessage, SettingsIntent, SettingsTabId } from "@openaide/app-shell-contracts";
-import type { FrontendShell, RemoteComputer } from "../../../packages/frontend/src/services/frontendShell";
+import type { FrontendShell, RemoteComputer, SshComputerStatus } from "../../../packages/frontend/src/services/frontendShell";
 import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import type { PostHostMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
@@ -49,9 +49,10 @@ export function createDesktopShell(
   // machine-resume signal on macOS, and re-broadcasting it as `openaide:resume`
   // also wakes the shared transport and restarts suspended animations.
   // With a paired computer in use there is no process here to restore; the
-  // session's own retries reopen the connection.
+  // session's own retries reopen the connection. An SSH Computer's forward and
+  // App Server are this shell's to restore, as its own are.
   const remote = Boolean(host.remoteComputer);
-  if (!remote) createDesktopServerRecovery({ invoke });
+  if (!remote || host.sshComputer) createDesktopServerRecovery({ invoke });
   void nativeWindow.onFocusChanged(({ payload: focused }) => {
     if (focused) window.dispatchEvent(new Event("openaide:resume"));
   });
@@ -261,6 +262,13 @@ export function createDesktopShell(
       pair: (code) => invoke("desktop_remote_pair", { code }),
       use: (id) => invoke("desktop_remote_use", { id: id ?? null }),
       forget: (id) => invoke("desktop_remote_forget", { id }),
+      ssh: {
+        hosts: () => invoke<string[]>("desktop_ssh_hosts"),
+        add: (destination, name) => invoke("desktop_ssh_add", { destination, name: name ?? null }),
+        status: async () => (await invoke<SshComputerStatus | null>("desktop_ssh_status")) ?? undefined,
+        update: () => invoke("desktop_ssh_update"),
+        stop: (id) => invoke<"stopped" | "notRunning" | "stillRunning">("desktop_ssh_stop", { id }),
+      },
     },
     desktopUpdates,
     desktopCommands: {

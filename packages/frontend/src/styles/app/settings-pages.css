@@ -527,6 +527,12 @@
   margin-top: 12px;
 }
 
+.settings-confirm .settings-impact {
+  margin: 0;
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+
 .settings-confirm .settings-facts {
   border: 1px solid var(--oa-border-subtle);
   border-radius: 10px;

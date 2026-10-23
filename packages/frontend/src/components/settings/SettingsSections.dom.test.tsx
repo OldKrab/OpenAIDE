@@ -268,6 +268,7 @@ function deviceIntents() {
     createInvite: vi.fn(async () => ({ code: "OAI1ABCDEFGH", expiresAtMs: Date.now() + 600_000 })),
     previewJoinRequest: vi.fn(async () => ({ deviceId: "device_1", name: "Phone", model: "Example 9", serverName: "workstation", alreadyTrusted: false })),
     remove: vi.fn(async () => undefined),
+    replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0 })),
   };
 }
 
@@ -380,6 +381,83 @@ it("pairs with a pasted code and shows the shell's reason when it is refused", a
 
   expect(computers.pair).toHaveBeenCalledWith("OAI1 ABCD");
   expect(dialog("Pair with another computer")?.textContent).toContain("already used");
+});
+
+const devbox = { id: "b".repeat(64), name: "devbox", current: true, ssh: "me@devbox" };
+
+function sshComputers(status = { computerId: devbox.id, runningVersion: "0.9.0", updateAvailable: false, suggestLinger: false }) {
+  return {
+    hosts: vi.fn().mockResolvedValue(["devbox", "build-1"]),
+    add: vi.fn().mockResolvedValue(undefined),
+    status: vi.fn().mockResolvedValue(status),
+    update: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue("stopped"),
+  };
+}
+
+it("adds an SSH computer by host and offers the hosts from the SSH configuration", async () => {
+  const ssh = sshComputers();
+  useShell({ remoteComputers: { ...remoteComputers([]), ssh } });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  await click("Add SSH computer");
+  await settle();
+  expect([...document.querySelectorAll("#settings-ssh-hosts option")].map((option) => option.getAttribute("value"))).toEqual(["devbox", "build-1"]);
+  expect((button("Add and connect") as HTMLButtonElement).disabled).toBe(true);
+  await type("Host", " devbox ");
+  await click("Add and connect");
+  await settle();
+
+  expect(ssh.add).toHaveBeenCalledWith("devbox", undefined);
+});
+
+it("names an SSH computer by its destination and stops OpenAIDE there only after confirmation", async () => {
+  const ssh = sshComputers();
+  useShell({ remoteComputers: { ...remoteComputers([devbox]), current: "devbox", ssh } });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(row("devbox").textContent).toContain("SSH · me@devbox");
+  await click("Stop OpenAIDE on devbox");
+  expect(ssh.stop).not.toHaveBeenCalled();
+  expect(dialog("Stop OpenAIDE on devbox?")?.textContent).toContain("ending work in progress");
+  await click("Stop");
+  await settle();
+
+  expect(ssh.stop).toHaveBeenCalledWith(devbox.id);
+  expect(pageText()).toContain("OpenAIDE on devbox stops once no app is connected to it.");
+});
+
+it("offers to update an older App Server on the SSH computer and lists what the update interrupts", async () => {
+  const ssh = sshComputers({ computerId: devbox.id, runningVersion: "0.9.0", updateAvailable: true, suggestLinger: true });
+  useShell({ remoteComputers: { ...remoteComputers([devbox]), current: "devbox", ssh } });
+  const intents = {
+    ...deviceIntents(),
+    replacementImpact: vi.fn().mockResolvedValue({
+      otherClients: [{ kind: "web", appVersion: "0.9.0", reconnecting: false }, { kind: "keeper", reconnecting: false }],
+      activeTurns: 2,
+      pendingTaskRequests: 1,
+    }),
+  };
+  await mountSettings({ deviceIntents: intents, state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(pageText()).toContain("devbox runs OpenAIDE 0.9.0, older than this app.");
+  expect(pageText()).toContain("loginctl enable-linger");
+  await click("Update…");
+  await settle();
+  const update = dialog("Update OpenAIDE on devbox?")!;
+  expect([...update.querySelectorAll("li")].map((item) => item.textContent)).toEqual([
+    "OpenAIDE in a browser 0.9.0",
+    "Agents working in 2 Tasks",
+    "1 question waiting for an answer",
+  ]);
+  expect(ssh.update).not.toHaveBeenCalled();
+  await click("Update and restart");
+  await settle();
+
+  expect(ssh.update).toHaveBeenCalled();
 });
 
 // General: Desktop runtime and updates

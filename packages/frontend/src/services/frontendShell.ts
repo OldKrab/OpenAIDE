@@ -36,8 +36,40 @@ export type DesktopRuntimeCapability = {
   select(environment: DesktopRuntimeEnvironment): Promise<void>;
 };
 
-/** A computer whose App Server trusts this shell (ADR-0063). */
-export type RemoteComputer = { id: string; name: string; current: boolean };
+/** A computer whose App Server this shell may use: paired (ADR-0063) or reached over SSH (ADR-0069). */
+export type RemoteComputer = {
+  id: string;
+  name: string;
+  current: boolean;
+  /** The `ssh` destination of an SSH Computer; absent for a paired computer. */
+  ssh?: string;
+};
+
+/** What the shell learned starting the App Server on the SSH Computer in use. */
+export type SshComputerStatus = {
+  runningVersion: string;
+  /** The App Server there is older than this app but compatible with it. */
+  updateAvailable: boolean;
+  /** Logind ends the App Server there when the user's last session closes. */
+  suggestLinger: boolean;
+};
+
+/**
+ * SSH Computers (ADR-0069): the shell installs, starts and keeps the App Server
+ * on a Linux computer over SSH. Adding or updating restarts the shell.
+ */
+export type SshComputersCapability = {
+  /** Host aliases from the user's SSH configuration. */
+  hosts(): Promise<string[]>;
+  /** Remembers an SSH Computer by `ssh` destination and uses it. */
+  add(destination: string, name?: string): Promise<void>;
+  /** Present while an SSH Computer is in use and its App Server was reached. */
+  status(): Promise<SshComputerStatus | undefined>;
+  /** Replaces the older App Server on the SSH Computer in use. */
+  update(): Promise<void>;
+  /** Ends the keeper there; the App Server stops once no app uses it. */
+  stop(id: string): Promise<"stopped" | "notRunning" | "stillRunning">;
+};
 
 /**
  * Shell-owned choice of whose App Server is in use. A change that takes effect
@@ -53,6 +85,8 @@ export type RemoteComputersCapability = {
   /** Uses a paired computer, or this one when no id is given. */
   use(id?: string): Promise<void>;
   forget(id: string): Promise<void>;
+  /** Present in shells that can start the App Server on SSH Computers. */
+  ssh?: SshComputersCapability;
 };
 
 export type DesktopUpdateKind =

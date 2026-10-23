@@ -1,10 +1,12 @@
 import {
+  CLIENT_REPLACEMENT_IMPACT,
   DEVICES_APPROVE_JOIN_REQUEST,
   DEVICES_CANCEL_INVITE,
   DEVICES_CREATE_INVITE,
   DEVICES_PREVIEW_JOIN_REQUEST,
   DEVICES_REMOVE,
   type BackendConnection,
+  type ClientReplacementImpactResult,
   type DevicesCreateInviteResult,
   type DevicesPreviewJoinRequestResult,
 } from "@openaide/app-server-client";
@@ -23,6 +25,8 @@ export type RemoteDeviceIntents = {
   previewJoinRequest(code: string): Promise<DevicesPreviewJoinRequestResult>;
   approveJoinRequest(code: string): Promise<void>;
   remove(deviceId: string): Promise<void>;
+  /** What replacing this App Server would interrupt, other than this client. */
+  replacementImpact(): Promise<ClientReplacementImpactResult>;
 };
 
 export function createRemoteDeviceIntents(connection?: RemoteDeviceConnection): RemoteDeviceIntents {
@@ -42,5 +46,6 @@ export function createRemoteDeviceIntents(connection?: RemoteDeviceConnection): 
     remove: async (deviceId) => {
       await required().request(DEVICES_REMOVE, { deviceId });
     },
+    replacementImpact: async () => required().request(CLIENT_REPLACEMENT_IMPACT, {}),
   };
 }
