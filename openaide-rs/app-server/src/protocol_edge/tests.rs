@@ -1,5 +1,5 @@
 use openaide_app_server_protocol::client::{
-    ClientCapabilities, ClientCapabilitiesChangedParams, ClientProtocolCapability,
+    ClientCapabilities, ClientCapabilitiesChangedParams, ClientProtocolCapability, ClientRole,
     ClientWorkspaceRoot, InitializeParams, RequestedSurface, ShellCapability, ShellDescriptor,
     ShellKind, UpdateShutdownAbortParams, UpdateShutdownCommitParams, UpdateShutdownPrepareParams,
 };
@@ -154,6 +154,78 @@ fn update_shutdown_prepare_blocks_while_another_client_owns_the_server() {
         prepared["result"],
         json!({ "kind": "blocked", "reason": "otherClients" })
     );
+}
+
+#[test]
+fn update_shutdown_prepare_is_not_blocked_by_a_shell_hold() {
+    let mut gateway = gateway_with_window_and_hold();
+
+    assert_eq!(
+        prepare_update_from_window(&mut gateway)["result"],
+        json!({ "kind": "ready" })
+    );
+}
+
+#[test]
+fn update_shutdown_prepare_says_which_clients_still_own_the_server() {
+    let logs = crate::logging::capture_test_logs();
+    let mut gateway = gateway_with_window_and_hold();
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-3"),
+        request("3", CLIENT_INITIALIZE, init_params("client-3")),
+        AppServerTime(3),
+    ));
+
+    assert_eq!(
+        prepare_update_from_window(&mut gateway)["result"],
+        json!({ "kind": "blocked", "reason": "otherClients" })
+    );
+    let blocked = logs
+        .snapshot()
+        .into_iter()
+        .find(|line| line["event"] == "update_shutdown_prepare_blocked")
+        .expect("a refused update says what held the App Server");
+    assert_eq!(blocked["fields"]["other_clients"], json!(1));
+    assert_eq!(blocked["fields"]["other_shell_kinds"], json!(["web"]));
+}
+
+/// A Desktop window on conn-1 beside the Desktop's own shell-hold client on conn-2.
+fn gateway_with_window_and_hold() -> RpcGateway {
+    let mut gateway = gateway();
+    initialize_client(&mut gateway, ConnectionId::new("conn-1"));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request(
+            "2",
+            CLIENT_INITIALIZE,
+            InitializeParams {
+                shell: ShellDescriptor {
+                    kind: ShellKind::Desktop,
+                    name: None,
+                    version: None,
+                },
+                role: ClientRole::ShellHold,
+                ..init_params("desktop-native-1")
+            },
+        ),
+        AppServerTime(2),
+    ));
+    gateway
+}
+
+fn prepare_update_from_window(gateway: &mut RpcGateway) -> serde_json::Value {
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "4",
+            CLIENT_UPDATE_SHUTDOWN_PREPARE,
+            UpdateShutdownPrepareParams {
+                attempt_id: "update-1".to_string(),
+                stop_active_work: true,
+            },
+        ),
+        AppServerTime(4),
+    ))
 }
 
 #[test]
@@ -4913,6 +4985,7 @@ pub(super) fn init_params(client_id: &str) -> InitializeParams {
         },
         workspace_roots: Vec::new(),
         protocol_version: None,
+        role: Default::default(),
     }
 }
 

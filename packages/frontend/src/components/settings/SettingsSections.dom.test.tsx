@@ -329,18 +329,20 @@ it("adds a device from its code only after showing what the code names", async (
 
 const studio = { id: "a".repeat(64), name: "Studio", current: false };
 
-function remoteComputers(computers = [studio]) {
+function desktopComputers(computers = [studio]) {
+  const snapshot = { device: "computer" as const, computers };
   return {
-    list: vi.fn().mockResolvedValue(computers),
+    snapshot: () => snapshot,
+    subscribe: () => () => undefined,
     pair: vi.fn().mockResolvedValue(undefined),
-    use: vi.fn().mockResolvedValue(undefined),
+    use: vi.fn().mockResolvedValue("switched"),
     forget: vi.fn().mockResolvedValue(undefined),
   };
 }
 
 it("shows which computer the Desktop is connected to and switches to another", async () => {
-  const computers = remoteComputers();
-  useShell({ remoteComputers: computers });
+  const computers = desktopComputers();
+  useShell({ computers });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -348,18 +350,18 @@ it("shows which computer the Desktop is connected to and switches to another", a
   await click("Use Studio");
   await settle();
 
-  expect(computers.use).toHaveBeenCalledWith(studio.id);
+  expect(computers.use).toHaveBeenCalledWith(studio.id, expect.stringMatching(/^computer-switch-/));
 });
 
 it("forgets a paired computer only after saying what happens", async () => {
-  const computers = remoteComputers([{ ...studio, current: true }]);
-  useShell({ remoteComputers: computers });
+  const computers = desktopComputers([{ ...studio, current: true }]);
+  useShell({ computers });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
   await click("Forget Studio");
   expect(computers.forget).not.toHaveBeenCalled();
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("works on this computer");
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Work moves to this computer");
   await click("Forget");
   await settle();
 
@@ -367,9 +369,9 @@ it("forgets a paired computer only after saying what happens", async () => {
 });
 
 it("pairs with a pasted code and shows the shell's reason when it is refused", async () => {
-  const computers = remoteComputers([]);
+  const computers = desktopComputers([]);
   computers.pair.mockRejectedValue("This code has expired or was already used.");
-  useShell({ remoteComputers: computers });
+  useShell({ computers });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -388,7 +390,7 @@ const devbox = { id: "b".repeat(64), name: "devbox", current: true, ssh: "me@dev
 function sshComputers(status = { computerId: devbox.id, runningVersion: "0.9.0", updateAvailable: false, suggestLinger: false }) {
   return {
     hosts: vi.fn().mockResolvedValue(["devbox", "build-1"]),
-    add: vi.fn().mockResolvedValue(undefined),
+    add: vi.fn().mockResolvedValue("switched"),
     status: vi.fn().mockResolvedValue(status),
     update: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue("stopped"),
@@ -397,7 +399,7 @@ function sshComputers(status = { computerId: devbox.id, runningVersion: "0.9.0",
 
 it("adds an SSH computer by host and offers the hosts from the SSH configuration", async () => {
   const ssh = sshComputers();
-  useShell({ remoteComputers: { ...remoteComputers([]), ssh } });
+  useShell({ computers: { ...desktopComputers([]), ssh } });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -414,7 +416,7 @@ it("adds an SSH computer by host and offers the hosts from the SSH configuration
 
 it("names an SSH computer by its destination and stops OpenAIDE there only after confirmation", async () => {
   const ssh = sshComputers();
-  useShell({ remoteComputers: { ...remoteComputers([devbox]), current: "devbox", ssh } });
+  useShell({ computers: { ...desktopComputers([devbox]), ssh } });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -431,7 +433,7 @@ it("names an SSH computer by its destination and stops OpenAIDE there only after
 
 it("offers to update an older App Server on the SSH computer and lists what the update interrupts", async () => {
   const ssh = sshComputers({ computerId: devbox.id, runningVersion: "0.9.0", updateAvailable: true, suggestLinger: true });
-  useShell({ remoteComputers: { ...remoteComputers([devbox]), current: "devbox", ssh } });
+  useShell({ computers: { ...desktopComputers([devbox]), ssh } });
   const intents = {
     ...deviceIntents(),
     replacementImpact: vi.fn().mockResolvedValue({
@@ -464,7 +466,9 @@ it("offers to update an older App Server on the SSH computer and lists what the 
 
 function phoneShell(snapshot: object) {
   const execute = vi.fn(async () => undefined);
-  useShell({ connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute } } as unknown as Partial<FrontendShell>);
+  const list = { device: "phone" as const, computers: [] };
+  const computers = { snapshot: () => list, subscribe: () => () => undefined, use: vi.fn(), forget: vi.fn() };
+  useShell({ connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute }, computers } as unknown as Partial<FrontendShell>);
   return execute;
 }
 
@@ -472,7 +476,7 @@ const phoneDevbox = { id: "c".repeat(32), name: "devbox", destination: "me@devbo
 const phoneLab = { id: "d".repeat(32), name: "lab", destination: "me@lab", current: false };
 
 it("lists the phone's SSH computers beside paired ones and adds one through the phone", async () => {
-  const execute = phoneShell({ remote: true, computer: "devbox", computers: [], sshComputers: [phoneDevbox, phoneLab], sshAvailable: true, ssh: null });
+  const execute = phoneShell({ remote: true, computer: "devbox", sshComputers: [phoneDevbox, phoneLab], sshAvailable: true, ssh: null });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -484,7 +488,7 @@ it("lists the phone's SSH computers beside paired ones and adds one through the 
 });
 
 it("offers no SSH computers on a phone build that cannot install on them", async () => {
-  phoneShell({ remote: false, computer: "", computers: [], sshComputers: [], sshAvailable: false });
+  phoneShell({ remote: false, computer: "", sshComputers: [], sshAvailable: false });
   await mountSettings({ state: { activeTab: "remote", loading: false } });
   await settle();
 
@@ -493,7 +497,7 @@ it("offers no SSH computers on a phone build that cannot install on them", async
 
 it("stops and updates the phone's SSH computer only after their warnings", async () => {
   const execute = phoneShell({
-    remote: true, computer: "devbox", computers: [], sshComputers: [phoneDevbox], sshAvailable: true,
+    remote: true, computer: "devbox", sshComputers: [phoneDevbox], sshAvailable: true,
     ssh: { runningVersion: "0.9.0", updateAvailable: true, suggestLinger: false }, sshNotice: "",
   });
   const intents = { ...deviceIntents(), replacementImpact: vi.fn().mockResolvedValue({ otherClients: [], activeTurns: 1, pendingTaskRequests: 0 }) };
@@ -532,7 +536,7 @@ it("switches where Agents run and leaves the environment in use alone", async ()
 it("hides the runtime choice while a paired computer does the work", async () => {
   useShell({
     desktopRuntime: { snapshot: () => ({ active: { kind: "native" }, wslDistros: ["Ubuntu"] }), select: vi.fn() },
-    remoteComputers: { ...remoteComputers(), current: "Studio" },
+    computers: desktopComputers([{ ...studio, current: true }]),
   });
   await mountSettings();
 

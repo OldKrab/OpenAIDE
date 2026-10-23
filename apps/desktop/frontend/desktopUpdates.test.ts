@@ -70,9 +70,11 @@ describe("Desktop update shell adapter", () => {
     );
   });
 
-  it("updates without asking a paired computer's App Server to shut down", async () => {
+  it("stops this computer's App Server, not a paired computer's, while the paired one is in use", async () => {
     const session = fakeSession();
-    const invoke = vi.fn(async () => snapshot(2, "applying"));
+    const invoke = vi.fn(async (command: string, _args?: unknown) => (
+      command === "desktop_update_prepare_local" ? { kind: "ready" } : snapshot(2, "applying")
+    ) as DesktopUpdateSnapshot);
     const updates = createDesktopUpdates({
       invoke,
       listen: vi.fn(async () => () => undefined),
@@ -82,11 +84,57 @@ describe("Desktop update shell adapter", () => {
       session,
     });
 
-    await expect(updates.restartAndUpdate()).resolves.toBe("started");
+    await expect(updates.restartAndUpdate({ stopActiveWork: true })).resolves.toBe("started");
 
     expect(session.request.mock.calls.map(([method]) => method)).toEqual(["client/detach"]);
     expect(session.close).toHaveBeenCalledOnce();
-    expect(invoke).toHaveBeenLastCalledWith("desktop_install_update");
+    expect(invoke.mock.calls.slice(1)).toEqual([
+      ["desktop_update_prepare_local", { attemptId: expect.any(String), stopActiveWork: true }],
+      ["desktop_update_finish_local", { attemptId: expect.any(String), commit: true }],
+      ["desktop_install_update"],
+    ]);
+  });
+
+  it("leaves everything running when this computer's App Server has work to confirm", async () => {
+    const session = fakeSession();
+    const invoke = vi.fn(async (command: string, _args?: unknown) => (
+      command === "desktop_update_prepare_local" ? { kind: "blocked", reason: "activeWork" } : snapshot(2, "idle")
+    ) as DesktopUpdateSnapshot);
+    const updates = createDesktopUpdates({
+      invoke,
+      listen: vi.fn(async () => () => undefined),
+      openReleaseNotes: vi.fn(),
+      ownsAppServer: false,
+      reload: vi.fn(),
+      session,
+    });
+
+    await expect(updates.restartAndUpdate()).resolves.toBe("activeWork");
+
+    expect(session.request).not.toHaveBeenCalled();
+    expect(invoke.mock.calls.map(([command]) => command)).not.toContain("desktop_update_finish_local");
+  });
+
+  it("aborts this computer's App Server shutdown when it could not be committed", async () => {
+    const session = fakeSession();
+    const invoke = vi.fn(async (command: string, args?: unknown) => {
+      if (command === "desktop_update_prepare_local") return { kind: "ready" } as never;
+      if (command === "desktop_update_finish_local" && (args as { commit?: boolean }).commit) throw new Error("unreachable");
+      return snapshot(2, "idle");
+    });
+    const updates = createDesktopUpdates({
+      invoke,
+      listen: vi.fn(async () => () => undefined),
+      openReleaseNotes: vi.fn(),
+      ownsAppServer: false,
+      reload: vi.fn(),
+      session,
+    });
+
+    await expect(updates.restartAndUpdate()).rejects.toThrow("unreachable");
+
+    expect(invoke).toHaveBeenLastCalledWith("desktop_update_finish_local", { attemptId: expect.any(String), commit: false });
+    expect(session.request).not.toHaveBeenCalled();
   });
 
   it("continues installer handoff when the final detach response is lost during shutdown", async () => {

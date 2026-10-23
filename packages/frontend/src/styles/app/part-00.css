@@ -311,74 +311,155 @@ body[data-shell="web"] .sidebar {
   color: var(--oa-text);
 }
 
-.sidebar-computer {
-  width: 100%;
+/* Settings keeps the row; the computer switcher takes only what its name needs. */
+.sidebar-settings-row {
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-settings-row .settings-button {
+  min-width: 96px;
+  flex: 1 1 auto;
+}
+
+.computer-switcher-trigger {
+  min-width: 0;
+  max-width: calc(100% - 98px);
   min-height: 28px;
+  flex: 0 1 auto;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.computer-switcher-trigger:hover,
+.computer-switcher-trigger[aria-expanded="true"] {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.computer-switcher-trigger[aria-busy="true"] {
+  cursor: progress;
+}
+
+.computer-switcher-trigger > svg {
+  flex: 0 0 auto;
+}
+
+.computer-switcher-name {
+  min-width: 2.5em;
+  overflow: hidden;
+  color: var(--oa-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.computer-switcher-link {
+  flex: 0 0 auto;
+  color: var(--oa-warning);
+  font-size: 11px;
+  font-weight: 580;
+}
+
+.computer-switcher-trigger[data-link="notConnected"] .computer-switcher-link {
+  color: var(--oa-danger);
+}
+
+.computer-switcher-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--oa-success);
+}
+
+.computer-switcher-menu {
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px;
+}
+
+.computer-switcher-option,
+.computer-switcher-manage {
+  width: 100%;
+  min-height: 30px;
   border: 0;
   border-radius: var(--oa-radius-sm);
   background: transparent;
   color: var(--oa-text);
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 4px 6px;
-  font-weight: 560;
+  gap: 8px;
+  padding: 5px 7px;
   text-align: left;
 }
 
-.sidebar-computer:hover {
+.computer-switcher-option:hover,
+.computer-switcher-manage:hover {
   background: var(--oa-raised);
 }
 
-.sidebar-computer > svg {
-  flex: 0 0 auto;
+.computer-switcher-option:focus-visible,
+.computer-switcher-manage:focus-visible {
+  outline: 2px solid var(--oa-focus);
+  outline-offset: -2px;
 }
 
-.sidebar-computer-name {
+.computer-switcher-option[aria-checked="true"] {
+  font-weight: 600;
+}
+
+.computer-switcher-option[aria-disabled="true"] {
+  cursor: progress;
+}
+
+.computer-switcher-option kbd {
+  min-width: 16px;
+  color: var(--oa-muted);
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+.computer-switcher-option-name {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sidebar-computer-link {
+.computer-switcher-option small {
   flex: 0 0 auto;
   color: var(--oa-muted);
   font-size: 11px;
-  font-weight: 580;
 }
 
-.sidebar-computer-dot {
+.computer-switcher-check {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--oa-warning);
+  color: var(--oa-focus);
 }
 
-.sidebar-computer[data-link="connected"] .sidebar-computer-dot {
-  background: var(--oa-success);
-}
-
-.sidebar-computer[data-link="notConnected"] .sidebar-computer-dot {
-  background: var(--oa-danger);
-}
-
-/* In the Desktop window strip the name sits beside the native window buttons. */
-.desktop-title-bar-sidebar .sidebar-computer {
-  width: auto;
-  max-width: 100%;
-  min-height: 22px;
-  gap: 7px;
-  padding: 2px 6px;
-  color: var(--oa-muted);
+.computer-switcher-error {
+  margin: 4px 7px;
+  color: var(--oa-danger);
   font-size: 12px;
 }
 
-.desktop-title-bar-sidebar .sidebar-computer > svg,
-.app-sidebar-frame.sidebar-collapsed .desktop-title-bar-sidebar .sidebar-computer {
-  display: none;
+.computer-switcher-manage {
+  border-top: 1px solid var(--oa-border);
+  border-radius: 0 0 var(--oa-radius-sm) var(--oa-radius-sm);
+  margin-top: 4px;
+  color: var(--oa-muted);
 }
 
 .project-folder-backdrop {

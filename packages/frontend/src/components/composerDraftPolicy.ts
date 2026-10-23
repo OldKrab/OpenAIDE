@@ -1,5 +1,17 @@
+import type { AppState } from "../state/store";
+
 export function hasComposerContent(value: string, attachmentCount: number) {
   return value.trim().length > 0 || attachmentCount > 0;
+}
+
+/**
+ * Whether any composer holds text, attachments, or a send not yet accepted.
+ * These live only in this page, so replacing the page loses them.
+ */
+export function hasUnsentComposerInput(state: Pick<AppState, "newTask" | "taskInputs">) {
+  const unsent = (input: { prompt: string; context: unknown[]; pending?: unknown }) =>
+    hasComposerContent(input.prompt, input.context.length) || Boolean(input.pending);
+  return unsent(state.newTask) || Object.values(state.taskInputs).some(unsent);
 }
 
 export function hasComposerText(value: string) {

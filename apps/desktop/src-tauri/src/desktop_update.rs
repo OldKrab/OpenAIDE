@@ -513,7 +513,6 @@ pub(crate) fn desktop_cancel_update_download(
 pub(crate) async fn desktop_install_update(
     app: AppHandle,
     state: tauri::State<'_, DesktopUpdateState>,
-    desktop_state: tauri::State<'_, crate::DesktopState>,
 ) -> Result<DesktopUpdateSnapshot, String> {
     let (candidate, bytes) = {
         let runtime = state
@@ -551,15 +550,16 @@ pub(crate) async fn desktop_install_update(
         runtime.snapshot.kind = DesktopUpdateKind::Applying;
         runtime.snapshot.error = None;
     })?;
-    // A paired computer's App Server is not this Desktop's to stop: the update
-    // replaces only the shell, and the gateway ends with this process.
-    if desktop_state.owns_app_server() {
-        let endpoint_url = desktop_state.app_server_endpoint_url().map_err(|error| {
-            let _ = state.fail(&app, DesktopUpdateError::ShutdownFailed);
-            error
-        })?;
-        // The window's client detached before this command; ending the native
-        // hold is what lets the App Server stop.
+    // This computer's App Server runs whichever computer the window uses, and
+    // the update replaces it. A paired computer's App Server is not this
+    // Desktop's to stop; its gateway ends with this process.
+    if let Some(local) = app
+        .state::<crate::desktop_connection::DesktopConnections>()
+        .local()
+    {
+        let endpoint_url = local.endpoint_url;
+        // The window's client detached before this command, or never used this
+        // App Server; ending the native hold is what lets it stop.
         let hold = app
             .state::<crate::desktop_app_server_hold::AppServerHold>()
             .inner()

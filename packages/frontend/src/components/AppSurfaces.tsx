@@ -8,7 +8,7 @@ import { SettingsView } from "./settings/SettingsView";
 import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
-import { useMobileNavigation } from "./useMobileNavigation";
+import { isMobileWebViewport, mobileNavigationFocusableElements, useMobileNavigation } from "./useMobileNavigation";
 import { useBackNavigation } from "./useBackNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
@@ -16,9 +16,13 @@ import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
-import { SidebarComputer, computerLink, useComputerInUse } from "./SidebarComputer";
 import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
+import { computerLink } from "./ComputerSwitcher";
+import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
+import { useComputerPlace } from "./useComputerPlace";
+import { currentComputer, useComputers } from "../services/computers";
+import { computerSwitch } from "../services/computerSwitch";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -37,8 +41,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const { appServerError, navigation, settings } = view;
   const frontendShell = currentFrontendShell();
   const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
-  const computerInUse = useComputerInUse(frontendShell);
+  const computers = useComputers(frontendShell?.computers);
   const computerLinkState = computerLink(controller.backendConnectionState);
+  const [computerSwitcherRequest, setComputerSwitcherRequest] = useState(0);
   const updateAvailable = desktopUpdate?.kind === "available"
     || desktopUpdate?.kind === "downloading"
     || desktopUpdate?.kind === "readyToUpdate";
@@ -253,20 +258,25 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     } else if (command === "new-task") callbacks.navigation.openNewTask();
     else if (command === "settings") callbacks.navigation.openSettings();
     else if (command === "open-project") addProject?.();
+    else if (command === "switch-computer") setComputerSwitcherRequest((request) => request + 1);
   }), [addProject, callbacks.navigation, frontendShell]);
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
-  const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, computerInUse?.settingsTab);
-  // A Desktop window names the computer in its own strip, beside the window
-  // buttons; other shells give it the first row of the navigation.
-  const desktopComputer = desktopWindow && computerInUse
-    ? <SidebarComputer link={computerLinkState} name={computerInUse.name} onOpen={openComputerSettings} />
-    : undefined;
-  const sidebarComputerName = desktopWindow ? undefined : computerInUse?.name;
+  const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, "remote");
+  const switchComputer = frontendShell?.computers ? computerSwitch(frontendShell.computers) : undefined;
+  useComputerPlace({
+    backendReady,
+    bootstrap,
+    hasProject: (projectId) => navigation.projects.some((project) => project.projectId === projectId),
+    openNewTask: callbacks.navigation.openNewTask,
+    openTask: callbacks.navigation.openTask,
+    snapshot: computers,
+  });
+  const computerSwitchConfirm = switchComputer ? <ComputerSwitchConfirm snapshot={computers} switcher={switchComputer} /> : null;
   const desktopTitleBar = desktopWindow
-    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} sidebarLead={desktopComputer} window={desktopWindow} />
+    ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
     : undefined;
   const desktopSettingsTitleBar = desktopWindow ? (
-    <DesktopTitleBar sidebarLead={desktopComputer} window={desktopWindow} />
+    <DesktopTitleBar window={desktopWindow} />
   ) : undefined;
   // Desktop chrome overlays product content so native controls never consume a
   // separate blank row. Active Tasks provide the draggable product header.
@@ -452,14 +462,17 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           searchQuery={navigation.searchQuery}
           settingsStatus={updateAvailable ? "Update available" : undefined}
           computerLink={computerLinkState}
-          computerName={sidebarComputerName}
-          onComputer={openComputerSettings}
+          computers={computers}
+          computerSwitcherRequest={computerSwitcherRequest}
+          onManageComputers={openComputerSettings}
+          computerSwitch={switchComputer}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
         />
         {projectFolderDialog}
         {projectRemoveDialog}
+        {computerSwitchConfirm}
       </main>
     );
   }
@@ -591,8 +604,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         searchQuery={navigation.searchQuery}
         settingsStatus={updateAvailable ? "Update available" : undefined}
         computerLink={computerLinkState}
-        computerName={sidebarComputerName}
-        onComputer={closeAfter(openComputerSettings)}
+        computers={computers}
+        computerSwitcherRequest={computerSwitcherRequest}
+        onManageComputers={closeAfter(openComputerSettings)}
+        computerSwitch={switchComputer}
         showArchived={navigation.showArchived}
         taskListError={navigation.taskListError}
         tasks={visibleTasks}
@@ -622,6 +637,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       >
          {projectFolderDialog}
          {projectRemoveDialog}
+         {computerSwitchConfirm}
+        {computerSwitchConfirm}
         <header
           className="mobile-workbench-bar"
           data-has-permission-policy={hasMobilePermissionPolicy || undefined}
@@ -687,7 +704,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           ref={webMainSurfaceRef}
         >
           <TerminalPageHost
-            computerName={computerInUse?.name ?? settings.devices?.serverName}
+            computerName={currentComputer(computers)?.name ?? settings.devices?.serverName}
             desktopWindow={desktopWindow}
             intents={controller.intents.terminals}
             onBack={terminalPage.closePage}
@@ -766,22 +783,6 @@ function useDesktopUpdateSnapshot(
     capability?.snapshot ?? noDesktopUpdateSnapshot,
     capability?.snapshot ?? noDesktopUpdateSnapshot,
   );
-}
-
-function isMobileWebViewport() {
-  if (typeof window === "undefined") return false;
-  if (typeof window.matchMedia === "function") {
-    return window.matchMedia("(max-width: 760px)").matches;
-  }
-  return window.innerWidth <= 760;
-}
-
-function mobileNavigationFocusableElements(root: HTMLElement) {
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      ".mobile-workbench-bar button, .sidebar button:not(:disabled), .sidebar input:not(:disabled)",
-    ),
-  ).filter((element) => element.offsetParent !== null);
 }
 
 function AppServerErrorView({ message }: { message: string }) {

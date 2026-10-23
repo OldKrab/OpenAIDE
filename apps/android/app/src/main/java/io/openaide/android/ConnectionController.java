@@ -40,18 +40,20 @@ final class ConnectionController extends ContextWrapper {
     private int operationSequence;
     private String operationName;
     private JSONObject joinCode;
+    private final ComputerSwitch<?> switcher;
 
     ConnectionController(Activity activity, View view, boolean localTools) {
         super(activity);
         this.activity = activity;
         this.view = view;
         this.localTools = localTools;
+        switcher = RemotePairing.computerSwitch(activity, () -> { if (!isDestroyed()) changed(); });
     }
 
     void receive(JSONObject message) {
         if (disposed) return;
         String command = message.optString("action");
-        if (!localTools && !java.util.Arrays.asList("state", "close", "local", "use_computer", "forget_computer", "pair_setup", "app_settings", "diagnostics",
+        if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics",
             "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
@@ -59,6 +61,41 @@ final class ConnectionController extends ContextWrapper {
         }
         try { action(message); }
         catch (Exception error) { notice = "That action could not finish. Please try again."; emit(); }
+    }
+
+    /**
+     * Switches the computer in use, connecting first (ADR-0070); [reply] answers
+     * the page once, before a switch that took effect replaces it.
+     */
+    void switchComputer(JSONObject message, ComputerSwitch.Reply reply) {
+        if (disposed) { reply.done(null, "Phone settings are unavailable. Reopen Settings and try again."); return; }
+        String action = message.optString("action");
+        if (action.equals("cancel_switch")) { reply.done(switcher.cancel() ? "cancelled" : "unchanged", null); return; }
+        ConnectionStore store = new ConnectionStore(this);
+        ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
+        String target = action.equals("use_computer") ? message.optString("id") : null;
+        String operationId = message.has("operationId") ? message.optString("operationId") : null;
+        if (action.equals("forget_computer")) { forget(message.optString("id"), operationId, reply); return; }
+        // An SSH Computer in use is a source of its own, so returning to this phone is a switch.
+        // TODO(ssh-computers): switch to SSH Computers through this switch too (ADR-0070), so
+        // "use_ssh" connects before it replaces the page and the switcher lists them.
+        SshComputers.Computer ssh = store.usesSsh() ? store.sshComputer() : null;
+        String source = selected != null ? selected.id : ssh != null ? "ssh:" + ssh.id : null;
+        switcher.request(source, target, operationId, reply);
+    }
+
+    /** Forgets a paired computer; the one in use is left through the switch first, and forgotten only once it took effect. */
+    private void forget(String id, String operationId, ComputerSwitch.Reply reply) {
+        ComputerForget.Pairings pairings = new ComputerForget.Pairings() {
+            @Override public String inUse() {
+                ConnectionStore store = new ConnectionStore(ConnectionController.this);
+                ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
+                return selected == null ? null : selected.id;
+            }
+            @Override public void forget(String forgotten) { new ConnectionStore(ConnectionController.this).forgetPaired(forgotten); }
+        };
+        ComputerForget.INSTANCE.forget(id, operationId, pairings, switcher,
+            (outcome, fields) -> diagnostics.record("connection_computer_forgotten", outcome, 0, 0, fields), this::emit, reply);
     }
 
     private void action(JSONObject message) throws Exception {
@@ -71,31 +108,11 @@ final class ConnectionController extends ContextWrapper {
             case "close": view.close(); break;
             case "state": emit(); break;
             case "check": check(); break;
-            case "local": new ConnectionStore(this).selectLocal(); SshServer.reset(); changed(); break;
-            case "use_computer":
-                if (!new ConnectionStore(this).selectPaired(message.optString("id"))) { emit(); break; }
-                // A connection to the computer used until now must not outlive the choice.
-                RemoteNode.INSTANCE.disconnect();
-                SshServer.reset();
-                diagnostics.record("connection_computer_selected", "selected", 0, 0);
-                changed();
-                break;
             case "pair_setup": view.setup("remote"); break;
             case "scan": scan(); break;
             case "pair": pair(message.optString("code")); break;
             case "join": join(); break;
             case "join_stop": RemotePairing.stopJoin(); joinCode = null; emit(); break;
-            case "forget_computer": {
-                ConnectionStore store = new ConnectionStore(this);
-                String id = message.optString("id");
-                ConnectionStore.PairedServer selected = store.pairedServer();
-                boolean current = store.usesPaired() && selected != null && selected.id.equals(id);
-                store.forgetPaired(id);
-                diagnostics.record("connection_computer_forgotten", current ? "current" : "other", 0, 0);
-                // Only leaving the computer in use changes the workspace; the list alone redraws.
-                if (current) { RemoteNode.INSTANCE.disconnect(); changed(); } else emit();
-                break;
-            }
             case "ssh_add": SshSetup.start(activity, this::changed); break;
             case "use_ssh":
                 if (!new ConnectionStore(this).selectSsh(message.optString("id"))) { emit(); break; }
@@ -352,6 +369,9 @@ final class ConnectionController extends ContextWrapper {
         if (code != null) pair(code);
     }
 
+    /** Sends the current state without rechecking this phone's setup. */
+    void refresh() { emit(); }
+
     void resume() {
         if (recheckOnReturn && !busy) { recheckOnReturn = false; check(); }
         else emit();
@@ -359,6 +379,8 @@ final class ConnectionController extends ContextWrapper {
     void dispose() {
         if (busy) diagnostics.record(operationName, "view_closed", operationSequence, SystemClock.elapsedRealtime() - operationStarted);
         disposed = true;
+        // A page that goes away mid-switch cannot be answered; the switch ends with it.
+        switcher.cancel();
         RemotePairing.stopJoin();
         worker.shutdownNow();
     }

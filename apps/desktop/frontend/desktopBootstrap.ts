@@ -39,8 +39,6 @@ export type DesktopBootstrap = {
   runtimeOptions: DesktopRuntimeOptions;
   /** Names the paired computer whose App Server is in use instead of this one's. */
   remoteComputer?: string;
-  /** The computer in use is an SSH Computer, whose App Server this shell restores (ADR-0069). */
-  sshComputer?: boolean;
 };
 
 export type DesktopBootstrapProgress = {

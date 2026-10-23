@@ -40,8 +40,8 @@ use crate::client::{
     ClientCapabilitiesChangedResult, ClientDetachParams, ClientDetachResult, ClientHeartbeatParams,
     ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams, ClientProbeResult,
     ClientProtocolCapability, ClientReplacementImpactParams, ClientReplacementImpactResult,
-    ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface, SettingsSection,
-    ShellCapability, ShellDescriptor, ShellKind, UpdateShutdownAbortParams,
+    ClientRole, ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface,
+    SettingsSection, ShellCapability, ShellDescriptor, ShellKind, UpdateShutdownAbortParams,
     UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
     UpdateShutdownCommitResult, UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
 };
@@ -249,6 +249,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AttachedClientSummary>(output, config);
     push_decl::<ClientProbeLifecycle>(output, config);
     push_decl::<InitializeParams>(output, config);
+    push_decl::<ClientRole>(output, config);
     push_decl::<InitializeResult>(output, config);
     push_decl::<ClientCapabilitiesChangedParams>(output, config);
     push_decl::<ClientCapabilitiesChangedResult>(output, config);

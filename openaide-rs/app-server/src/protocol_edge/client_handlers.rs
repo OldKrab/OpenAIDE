@@ -214,10 +214,21 @@ impl RpcGateway {
             return responses::result(connection_id, id, meta, result);
         }
 
-        if self
+        let other_kinds: Vec<_> = self
             .client_hub
-            .has_other_initialized_client(&context.client_instance_id)
-        {
+            .other_owners(&context.client_instance_id)
+            .map(|other| other.shell.kind)
+            .collect();
+        if !other_kinds.is_empty() {
+            // Which kinds of clients hold the App Server open explains a refused update.
+            crate::logging::info(
+                "update_shutdown_prepare_blocked",
+                serde_json::json!({
+                    "reason": "other_clients",
+                    "other_clients": other_kinds.len(),
+                    "other_shell_kinds": other_kinds,
+                }),
+            );
             return responses::result(
                 connection_id,
                 id,

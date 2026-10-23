@@ -118,6 +118,14 @@ internal class HeldServer(
     @Throws(IOException::class)
     fun status(context: Context): ServerStatus {
         val server = try { endpoint(context) } catch (error: Unavailable) { throw IOException("App Server unavailable") }
+        return status(server)
+    }
+
+    /** [status] of the server already reached, or null when there is none; never starts one. */
+    @Throws(IOException::class)
+    fun statusIfRunning(): ServerStatus? = endpoint?.let(::status)
+
+    private fun status(server: Endpoint): ServerStatus {
         var active = 0
         var waiting = 0
         var cursor: Any? = null

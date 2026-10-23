@@ -102,6 +102,7 @@ export function createWebAppShell(): FrontendShell {
   return {
     appearance,
     connectionSettings,
+    computers: connectionSettings?.computers,
     bootstrap,
     clipboard: { writeText: writeBrowserClipboardText },
     // The Android App opens its camera for a capture input; browsers vary, and Chrome already offers one.

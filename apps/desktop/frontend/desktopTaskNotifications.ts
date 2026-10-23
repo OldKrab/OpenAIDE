@@ -26,6 +26,12 @@ export type DesktopNotificationHost = {
   now(): number;
   /** Persists one event in the Desktop log, which outlives the renderer console. */
   record(event: string, fields: DesktopNotificationLogFields): void;
+  /**
+   * Names a second manager's notifications, which start from `idBase`. Every
+   * manager hears every click, so each acts only on its own source's.
+   */
+  source?: string;
+  idBase?: number;
 };
 
 /**
@@ -51,7 +57,7 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
   const clickHandlers = new Map<number, () => void>();
   let focused = host.initiallyFocused();
   let permission: NotificationPermission = "default";
-  let nextId = 1;
+  let nextId = host.idBase ?? 1;
   const changed = () => { for (const listener of focusListeners) listener(); };
 
   // Desktop permission needs no prompt, so a default-on choice obtains it right away.
@@ -69,7 +75,7 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
   void host.onFocusChanged((value) => { focused = value; changed(); });
   // Without a listener the plugin reports no clicks, so it must exist before the first notification.
   void host.onAction((event) => {
-    if (event.actionId !== "tap") return;
+    if (event.actionId !== "tap" || event.notification?.extra?.source !== host.source) return;
     const id = event.notification?.id;
     const handler = id === undefined ? undefined : clickHandlers.get(id);
     diagnose("info", "desktop_notification_activated", { notification_id: id ?? "unknown", handler: handler ? "live" : "missing" });
@@ -104,8 +110,9 @@ export function createDesktopTaskNotifications(host: DesktopNotificationHost): W
       const id = nextId++;
       const taskId = options.tag?.replace(/^openaide-task-/, "");
       try {
-        host.sendNotification({ id, title, body: options.body, extra: taskId ? { taskId } : undefined });
-        diagnose("info", "desktop_notification_shown", { notification_id: id });
+        const extra = { ...(taskId ? { taskId } : {}), ...(host.source ? { source: host.source } : {}) };
+        host.sendNotification({ id, title, body: options.body, extra: Object.keys(extra).length ? extra : undefined });
+        diagnose("info", "desktop_notification_shown", { notification_id: id, ...(host.source ? { source: host.source } : {}) });
       } catch {
         diagnose("warn", "desktop_notification_failed", { notification_id: id, error_kind: "plugin" });
         return { close: () => undefined };

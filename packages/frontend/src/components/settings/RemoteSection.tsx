@@ -2,8 +2,10 @@ import type { DeviceCollectionSnapshot, RemoteDeviceSummary } from "@openaide/ap
 import { Laptop, Monitor, Plus, QrCode, Server, Smartphone, Wifi } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
-import { currentFrontendShell, type RemoteComputer, type RemoteComputersCapability, type SshComputerStatus } from "../../services/frontendShell";
-import type { ConnectionComputer, PhoneSshComputer } from "../../services/connectionSettings";
+import { computerName, currentComputer, useComputers, type ComputersCapability, type ComputersSnapshot, type ShellComputer, type SshComputerStatus } from "../../services/computers";
+import { computerSwitch, useComputerSwitch } from "../../services/computerSwitch";
+import type { PhoneSshComputer } from "../../services/connectionSettings";
+import { currentFrontendShell } from "../../services/frontendShell";
 import { PopupDialog } from "../Popup";
 import { InviteDialog, JoinDialog } from "./devicePairingDialogs";
 import type { PhoneConnection } from "./phoneConnection";
@@ -20,11 +22,10 @@ export type RemoteSectionProps = {
 
 type Dialog =
   | { kind: "pair" }
+  | { kind: "forget"; computer: ShellComputer }
   | { kind: "add-ssh" }
   | { kind: "update-ssh" }
-  | { kind: "stop-ssh"; computer: RemoteComputer }
-  | { kind: "forget"; computer: RemoteComputer }
-  | { kind: "forget-phone"; computer: ConnectionComputer }
+  | { kind: "stop-ssh"; computer: ShellComputer }
   | { kind: "stop-phone-ssh"; computer: PhoneSshComputer }
   | { kind: "forget-phone-ssh"; computer: PhoneSshComputer }
   | { kind: "update-phone-ssh" }
@@ -37,28 +38,34 @@ type Dialog =
  * connected to, and which devices may connect to that computer.
  */
 export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectionProps): SettingsSection | undefined {
-  const capability = currentFrontendShell()?.remoteComputers;
-  const desktop = useRemoteComputers(capability);
-  const sshStatus = useSshStatus(capability?.ssh);
+  const capability = currentFrontendShell()?.computers;
+  const computers = useSettingsComputers(capability);
+  const ssh = capability?.ssh;
+  const sshStatus = useSshStatus(ssh);
   const [sshNotice, setSshNotice] = useState<string>();
   const [dialog, setDialog] = useState<Dialog>();
   const close = () => setDialog(undefined);
-  if (!capability && !phone && !deviceIntents) return undefined;
-  const ssh = capability?.ssh;
+  if (!capability && !deviceIntents) return undefined;
 
-  const remoteName = capability?.current ?? (phone?.state?.remote ? phone.state.computer || "Remote computer" : undefined);
+  const inUse = currentComputer(computers.snapshot);
+  const phoneSsh = phone?.state?.sshComputers?.find((computer) => computer.current);
+  const remoteName = inUse ? computerName(inUse) : phoneSsh?.name;
+  const device = computers.snapshot?.device === "phone" || phone ? "phone" : "computer";
+  const here = `this ${device}`;
   const groups: SettingsGroup[] = [];
   if (capability) {
-    groups.push(desktopComputersGroup(desktop, {
-      sshStatus,
-      sshNotice,
+    groups.push(computersGroup(computers, phone, {
+      onPair: () => {
+        if (capability.pair) setDialog({ kind: "pair" });
+        else void computers.openPairing();
+      },
       open: setDialog,
       canAddSsh: Boolean(ssh),
+      sshStatus,
+      sshNotice,
     }));
   }
-  else if (phone) groups.push(phoneComputersGroup(phone, setDialog));
   if (deviceIntents) {
-    const here = phone ? "this phone" : "this computer";
     // The App Server names itself; a browser tab on another machine is not "this computer".
     groups.push(devicesGroup(devices, devices?.serverName || remoteName || here, (next) => setDialog(next)));
   }
@@ -71,11 +78,24 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
     groups,
     overlay: dialog ? (
       <>
-        {dialog.kind === "pair" && capability ? <PairComputerDialog capability={capability} onClose={close} /> : null}
+        {dialog.kind === "pair" && capability?.pair ? <PairComputerDialog pair={capability.pair} onClose={close} /> : null}
+        {dialog.kind === "forget" ? (
+          <SettingsConfirm
+            confirmLabel="Forget"
+            detail={dialog.computer.ssh
+              ? `This ${device} forgets it.${dialog.computer.current ? ` Work moves to ${here}.` : ""} OpenAIDE keeps running there until you stop it or no app uses it.`
+              : `This ${device} stops connecting to it.${dialog.computer.current ? ` Work moves to ${here}.` : ""} It stays in that computer's device list until you remove it there.`}
+            label={`Forget ${computerName(dialog.computer)}?`}
+            onClose={close}
+            onConfirm={() => computers.forget(dialog.computer.id)}
+            pendingLabel="Forgetting…"
+            title={`Forget ${computerName(dialog.computer)}?`}
+          />
+        ) : null}
         {dialog.kind === "add-ssh" && ssh ? <AddSshComputerDialog onClose={close} ssh={ssh} /> : null}
         {dialog.kind === "update-ssh" && ssh && sshStatus ? (
           <UpdateSshComputerDialog
-            computer={capability?.current ?? "The SSH computer"}
+            computer={remoteName ?? "The SSH computer"}
             impact={deviceIntents?.replacementImpact}
             onClose={close}
             onUpdate={() => ssh.update()}
@@ -98,28 +118,6 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             }}
             pendingLabel="Stopping…"
             title={`Stop OpenAIDE on ${dialog.computer.name}?`}
-          />
-        ) : null}
-        {dialog.kind === "forget" && capability ? (
-          <SettingsConfirm
-            confirmLabel="Forget"
-            detail={`This computer stops connecting to it.${dialog.computer.current ? " OpenAIDE restarts and works on this computer." : ""} It stays in that computer's device list until you remove it there.`}
-            label={`Forget ${dialog.computer.name}?`}
-            onClose={close}
-            onConfirm={() => desktop.forget(dialog.computer.id)}
-            pendingLabel="Forgetting…"
-            title={`Forget ${dialog.computer.name}?`}
-          />
-        ) : null}
-        {dialog.kind === "forget-phone" && phone ? (
-          <SettingsConfirm
-            confirmLabel="Forget"
-            detail={`This phone stops connecting to it.${dialog.computer.current ? " Work moves to this phone." : ""} Pair again to return.`}
-            label={`Forget ${dialog.computer.name || "this computer"}?`}
-            onClose={close}
-            onConfirm={() => phone.execute({ action: "forget_computer", id: dialog.computer.id })}
-            pendingLabel="Forgetting…"
-            title={`Forget ${dialog.computer.name || "this computer"}?`}
           />
         ) : null}
         {dialog.kind === "stop-phone-ssh" && phone ? (
@@ -146,7 +144,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
         ) : null}
         {dialog.kind === "update-phone-ssh" && phone?.state?.ssh ? (
           <UpdateSshComputerDialog
-            computer={phone.state.computer || "The SSH computer"}
+            computer={phoneSsh?.name || "The SSH computer"}
             impact={deviceIntents?.replacementImpact}
             onClose={close}
             onUpdate={() => phone.execute({ action: "update_ssh" })}
@@ -171,61 +169,43 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
   };
 }
 
-type DesktopComputers = {
-  computers: RemoteComputer[] | undefined;
-  /** Id of the computer being switched to; "" stands for this computer. */
+type SettingsComputers = {
+  snapshot: ComputersSnapshot | undefined;
+  /** Id of the computer being switched to; "" stands for this device. */
   switching: string | undefined;
+  /** The pending switch can still be ended. */
+  cancellable: boolean;
   failed: { id: string; message: string } | undefined;
-  loadError: string;
-  use(id?: string): Promise<void>;
+  use(id?: string): void;
+  cancel(): void;
   forget(id: string): Promise<void>;
+  openPairing(): Promise<void>;
 };
 
 /**
- * The shell owns the paired computers and restarts to apply a switch, so a
- * settled promise means nothing changed or the shell refused with a sentence.
+ * The shell owns the computers and applies a switch; the switch itself is the
+ * one the Task navigation shows too, so both agree on what is connecting.
  */
-function useRemoteComputers(capability: RemoteComputersCapability | undefined): DesktopComputers {
-  const [computers, setComputers] = useState<RemoteComputer[]>();
-  const [switching, setSwitching] = useState<string>();
-  const [failed, setFailed] = useState<{ id: string; message: string }>();
-  const [loadError, setLoadError] = useState("");
+function useSettingsComputers(capability: ComputersCapability | undefined): SettingsComputers {
+  const snapshot = useComputers(capability);
+  const switcher = capability ? computerSwitch(capability) : undefined;
+  const switched = useComputerSwitch(switcher);
+  const [pairFailed, setPairFailed] = useState<string>();
   const mounted = useRef(true);
-  const refresh = async () => {
-    if (!capability) return;
-    try {
-      const next = await capability.list();
-      if (mounted.current) {
-        setComputers(next);
-        setLoadError("");
-      }
-    } catch {
-      if (mounted.current) setLoadError("OpenAIDE could not read its paired computers. Reopen Settings to try again.");
-    }
-  };
   useEffect(() => {
     mounted.current = true;
-    void refresh();
     return () => { mounted.current = false; };
-  }, [capability]);
+  }, []);
   return {
-    computers,
-    switching,
-    failed,
-    loadError,
-    use: async (id) => {
-      if (!capability || switching !== undefined) return;
-      setFailed(undefined);
-      setSwitching(id ?? "");
-      try {
-        await capability.use(id);
-        await refresh();
-      } catch (cause) {
-        if (mounted.current) setFailed({ id: id ?? "", message: errorSentence(cause, "OpenAIDE could not switch. Try again.") });
-      } finally {
-        if (mounted.current) setSwitching(undefined);
-      }
+    snapshot,
+    switching: switched.pending,
+    cancellable: switched.cancellable,
+    failed: pairFailed ? { id: "pair", message: pairFailed } : switched.failed,
+    use: (id) => {
+      setPairFailed(undefined);
+      void switcher?.request(id);
     },
+    cancel: () => switcher?.cancel(),
     forget: async (id) => {
       if (!capability) return;
       try {
@@ -233,192 +213,167 @@ function useRemoteComputers(capability: RemoteComputersCapability | undefined): 
       } catch (cause) {
         throw new Error(errorSentence(cause, "OpenAIDE could not forget that computer. Try again."));
       }
-      await refresh();
+    },
+    openPairing: async () => {
+      setPairFailed(undefined);
+      try {
+        await capability?.openPairing?.();
+      } catch (cause) {
+        if (mounted.current) setPairFailed(errorSentence(cause, "Pairing could not open. Try again."));
+      }
     },
   };
 }
 
-type DesktopComputersView = {
-  sshStatus: SshComputerStatus | undefined;
-  sshNotice: string | undefined;
+type ComputersView = {
+  onPair(): void;
   open(dialog: Dialog): void;
+  /** The shell can start the App Server on SSH Computers. */
   canAddSsh: boolean;
+  /** The shell's report on the SSH Computer in use. */
+  sshStatus: SshComputerStatus | undefined;
+  /** The outcome of the last Stop. */
+  sshNotice: string | undefined;
 };
 
-function desktopComputersGroup(desktop: DesktopComputers, view: DesktopComputersView): SettingsGroup {
-  const computers = desktop.computers ?? [];
-  const remote = computers.some((computer) => computer.current);
-  const busy = desktop.switching !== undefined;
-  const rows: SettingsRow[] = [{
-    id: "this-computer",
-    label: "This computer",
-    description: "Projects, tools and Agents here",
-    keywords: "computer remote connect switch pc local",
-    leading: <Monitor aria-hidden="true" size={18} strokeWidth={1.6} />,
-    selected: !remote,
-    error: desktop.failed?.id === "" ? desktop.failed.message : undefined,
-    control: (
-      <SettingsChoice
-        active={!remote}
-        busy={desktop.switching === ""}
-        disabled={busy}
-        label="This computer"
-        onUse={() => void desktop.use()}
-      />
-    ),
-  }];
-  for (const computer of computers) {
+function computersGroup(computers: SettingsComputers, phone: PhoneConnection | undefined, view: ComputersView): SettingsGroup {
+  const snapshot = computers.snapshot;
+  const list = snapshot?.computers ?? [];
+  // TODO(ssh-computers): the phone keeps its SSH Computers in its Settings state and
+  // switches to them outside the computer switch (ADR-0070); list them with the
+  // other computers, so the Task navigation offers them too, once the phone does.
+  const phoneSsh = phone?.state?.sshComputers ?? [];
+  const remote = list.some((computer) => computer.current) || phoneSsh.some((computer) => computer.current);
+  const busy = computers.switching !== undefined || Boolean(phone?.busy);
+  const onPhone = snapshot?.device === "phone";
+  const here = onPhone ? "This phone" : "This computer";
+  const rows: SettingsRow[] = [];
+  const cancelButton = (id: string) => computers.switching === id && computers.cancellable
+    ? <SettingsButton onClick={() => computers.cancel()} variant="quiet">Cancel</SettingsButton>
+    : undefined;
+  if (snapshot) {
+    rows.push({
+      id: onPhone ? "this-phone" : "this-computer",
+      label: here,
+      description: onPhone ? "Runs in Termux" : "Projects, tools and Agents here",
+      keywords: onPhone ? "phone local termux connect switch" : "computer remote connect switch pc local",
+      leading: onPhone ? <Smartphone aria-hidden="true" size={18} strokeWidth={1.6} /> : <Monitor aria-hidden="true" size={18} strokeWidth={1.6} />,
+      selected: !remote,
+      error: computers.failed?.id === "" ? computers.failed.message : undefined,
+      control: (
+        <>
+          {cancelButton("")}
+          <SettingsChoice
+            active={!remote}
+            busy={computers.switching === ""}
+            busyLabel="Switching…"
+            disabled={busy}
+            label={here}
+            onUse={() => computers.use()}
+          />
+        </>
+      ),
+    });
+  }
+  for (const computer of list) {
+    const name = computerName(computer);
     rows.push({
       id: `computer-${computer.id}`,
-      label: computer.name,
+      label: name,
       description: computer.ssh ? `SSH · ${computer.ssh}` : "Paired computer",
       keywords: computer.ssh ? "computer remote connect switch ssh server linux" : "computer remote connect switch pc",
       leading: computer.ssh
         ? <Server aria-hidden="true" size={18} strokeWidth={1.6} />
         : <Laptop aria-hidden="true" size={18} strokeWidth={1.6} />,
       selected: computer.current,
-      error: desktop.failed?.id === computer.id ? desktop.failed.message : undefined,
+      error: computers.failed?.id === computer.id ? computers.failed.message : undefined,
       control: (
         <>
-          {computer.ssh ? (
-            <SettingsButton ariaLabel={`Stop OpenAIDE on ${computer.name}`} disabled={busy} onClick={() => view.open({ kind: "stop-ssh", computer })} variant="quiet">Stop</SettingsButton>
-          ) : null}
-          <SettingsButton ariaLabel={`Forget ${computer.name}`} disabled={busy} onClick={() => view.open({ kind: "forget", computer })} variant="quiet">Forget</SettingsButton>
+          {cancelButton(computer.id) ?? (
+            <>
+              {computer.ssh ? (
+                <SettingsButton ariaLabel={`Stop OpenAIDE on ${name}`} disabled={busy} onClick={() => view.open({ kind: "stop-ssh", computer })} variant="quiet">Stop</SettingsButton>
+              ) : null}
+              <SettingsButton ariaLabel={`Forget ${name}`} disabled={busy} onClick={() => view.open({ kind: "forget", computer })} variant="quiet">Forget</SettingsButton>
+            </>
+          )}
           <SettingsChoice
             active={computer.current}
-            busy={desktop.switching === computer.id}
+            busy={computers.switching === computer.id}
+            busyLabel="Switching…"
             disabled={busy}
-            label={computer.name}
-            onUse={() => void desktop.use(computer.id)}
+            label={name}
+            onUse={() => computers.use(computer.id)}
           />
         </>
       ),
     });
   }
-  const current = computers.find((computer) => computer.current);
-  const status = current?.ssh ? view.sshStatus : undefined;
+  for (const computer of phoneSsh) {
+    rows.push({
+      id: `ssh-${computer.id}`,
+      label: computer.name,
+      description: `SSH · ${computer.destination}`,
+      keywords: "computer remote connect switch ssh server linux",
+      leading: <Server aria-hidden="true" size={18} strokeWidth={1.6} />,
+      selected: computer.current,
+      control: (
+        <>
+          <SettingsButton ariaLabel={`Stop OpenAIDE on ${computer.name}`} disabled={busy} onClick={() => view.open({ kind: "stop-phone-ssh", computer })} variant="quiet">Stop</SettingsButton>
+          <SettingsButton ariaLabel={`Forget ${computer.name}`} disabled={busy} onClick={() => view.open({ kind: "forget-phone-ssh", computer })} variant="quiet">Forget</SettingsButton>
+          {computer.current
+            ? <SettingsChoice active label={computer.name} onUse={() => undefined} />
+            : <SettingsButton ariaLabel={`Use ${computer.name}`} disabled={busy} onClick={() => void phone?.execute({ action: "use_ssh", id: computer.id })}>Use</SettingsButton>}
+        </>
+      ),
+    });
+  }
+  const state = phone?.state;
+  const pairFailed = computers.failed?.id === "pair" ? computers.failed.message : undefined;
+  const loadError = snapshot?.error;
+  const current = list.find((computer) => computer.current && computer.ssh) ?? phoneSsh.find((computer) => computer.current);
+  const sshStatus = current ? (phone ? state?.ssh ?? undefined : view.sshStatus) : undefined;
+  const canAddSsh = phone ? Boolean(state?.sshAvailable) : view.canAddSsh;
   return {
     id: "connected-to",
     title: "Connected to",
     info: settingsInfo.connectedTo,
     actions: (
       <>
-        {view.canAddSsh ? (
-          <SettingsButton disabled={busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => view.open({ kind: "add-ssh" })}>Add SSH computer</SettingsButton>
+        {canAddSsh ? (
+          <SettingsButton
+            disabled={busy}
+            icon={<Plus aria-hidden="true" size={14} />}
+            onClick={() => phone ? void phone.execute({ action: "ssh_add" }) : view.open({ kind: "add-ssh" })}
+          >
+            Add SSH computer
+          </SettingsButton>
         ) : null}
-        <SettingsButton disabled={busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => view.open({ kind: "pair" })}>Pair a computer</SettingsButton>
+        <SettingsButton disabled={busy} icon={<Plus aria-hidden="true" size={14} />} onClick={view.onPair}>Pair a computer</SettingsButton>
       </>
     ),
     notice: (
       <>
-        {desktop.loadError ? <SettingsInlineError>{desktop.loadError}</SettingsInlineError> : null}
-        {status?.updateAvailable && current ? (
+        {loadError ? <SettingsInlineError>{loadError}</SettingsInlineError> : null}
+        {pairFailed ? <SettingsInlineError>{pairFailed}</SettingsInlineError> : null}
+        {state?.remote && state.notice ? <SettingsNotice>{state.notice}</SettingsNotice> : null}
+        {state?.sshNotice ? <SettingsNotice>{state.sshNotice}</SettingsNotice> : null}
+        {view.sshNotice ? <SettingsNotice>{view.sshNotice}</SettingsNotice> : null}
+        {sshStatus?.updateAvailable && current ? (
           <SettingsNotice>
-            {current.name} runs OpenAIDE {status.runningVersion}, older than this app.{" "}
-            <SettingsButton disabled={busy} onClick={() => view.open({ kind: "update-ssh" })} variant="quiet">Update…</SettingsButton>
+            {current.name} runs OpenAIDE {sshStatus.runningVersion}, older than this app.{" "}
+            <SettingsButton disabled={busy} onClick={() => view.open({ kind: phone ? "update-phone-ssh" : "update-ssh" })} variant="quiet">Update…</SettingsButton>
           </SettingsNotice>
         ) : null}
-        {status?.suggestLinger && current ? (
+        {sshStatus?.suggestLinger && current ? (
           <SettingsNotice>
             OpenAIDE on {current.name} stops when you log out there. Run <code>loginctl enable-linger</code> on {current.name} to keep it running.
           </SettingsNotice>
         ) : null}
-        {view.sshNotice ? <SettingsNotice>{view.sshNotice}</SettingsNotice> : null}
+        {phone?.error ? <SettingsInlineError>{phone.error}</SettingsInlineError> : null}
       </>
     ),
-    rows,
-  };
-}
-
-function phoneComputersGroup(phone: PhoneConnection, open: (dialog: Dialog) => void): SettingsGroup {
-  const state = phone.state;
-  const currentSsh = state?.sshComputers?.find((computer) => computer.current);
-  const sshStatus = currentSsh ? state?.ssh : undefined;
-  const rows: SettingsRow[] = [];
-  if (state) {
-    rows.push({
-      id: "this-phone",
-      label: "This phone",
-      description: "Runs in Termux",
-      keywords: "phone local termux connect switch",
-      leading: <Smartphone aria-hidden="true" size={18} strokeWidth={1.6} />,
-      selected: !state.remote,
-      control: state.remote
-        ? <SettingsButton ariaLabel="Use This phone" disabled={phone.busy} onClick={() => void phone.execute({ action: "local" })}>Use</SettingsButton>
-        : <SettingsChoice active label="This phone" onUse={() => undefined} />,
-    });
-    for (const computer of state.computers ?? []) {
-      const name = computer.name || "Remote computer";
-      rows.push({
-        id: `computer-${computer.id}`,
-        label: name,
-        description: "Paired computer",
-        keywords: "computer remote connect switch pc",
-        leading: <Laptop aria-hidden="true" size={18} strokeWidth={1.6} />,
-        selected: computer.current,
-        control: (
-          <>
-            <SettingsButton ariaLabel={`Forget ${computer.name || "this computer"}`} disabled={phone.busy} onClick={() => open({ kind: "forget-phone", computer })} variant="quiet">Forget</SettingsButton>
-            {computer.current
-              ? <SettingsChoice active label={name} onUse={() => undefined} />
-              : <SettingsButton ariaLabel={`Use ${name}`} disabled={phone.busy} onClick={() => void phone.execute({ action: "use_computer", id: computer.id })}>Use</SettingsButton>}
-          </>
-        ),
-      });
-    }
-    for (const computer of state.sshComputers ?? []) {
-      rows.push({
-        id: `ssh-${computer.id}`,
-        label: computer.name,
-        description: `SSH · ${computer.destination}`,
-        keywords: "computer remote connect switch ssh server linux",
-        leading: <Server aria-hidden="true" size={18} strokeWidth={1.6} />,
-        selected: computer.current,
-        control: (
-          <>
-            <SettingsButton ariaLabel={`Stop OpenAIDE on ${computer.name}`} disabled={phone.busy} onClick={() => open({ kind: "stop-phone-ssh", computer })} variant="quiet">Stop</SettingsButton>
-            <SettingsButton ariaLabel={`Forget ${computer.name}`} disabled={phone.busy} onClick={() => open({ kind: "forget-phone-ssh", computer })} variant="quiet">Forget</SettingsButton>
-            {computer.current
-              ? <SettingsChoice active label={computer.name} onUse={() => undefined} />
-              : <SettingsButton ariaLabel={`Use ${computer.name}`} disabled={phone.busy} onClick={() => void phone.execute({ action: "use_ssh", id: computer.id })}>Use</SettingsButton>}
-          </>
-        ),
-      });
-    }
-  }
-  return {
-    id: "connected-to",
-    title: "Connected to",
-    info: settingsInfo.connectedTo,
-    actions: (
-      <>
-        {state?.sshAvailable ? (
-          <SettingsButton disabled={phone.busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => void phone.execute({ action: "ssh_add" })}>Add SSH computer</SettingsButton>
-        ) : null}
-        <SettingsButton disabled={phone.busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => void phone.execute({ action: "pair_setup" })}>
-          Pair a computer
-        </SettingsButton>
-      </>
-    ),
-    notice: (
-      <>
-        {state?.remote && state.notice ? <SettingsNotice>{state.notice}</SettingsNotice> : null}
-        {state?.sshNotice ? <SettingsNotice>{state.sshNotice}</SettingsNotice> : null}
-        {sshStatus?.updateAvailable && currentSsh ? (
-          <SettingsNotice>
-            {currentSsh.name} runs OpenAIDE {sshStatus.runningVersion}, older than this app.{" "}
-            <SettingsButton disabled={phone.busy} onClick={() => open({ kind: "update-phone-ssh" })} variant="quiet">Update…</SettingsButton>
-          </SettingsNotice>
-        ) : null}
-        {sshStatus?.suggestLinger && currentSsh ? (
-          <SettingsNotice>
-            OpenAIDE on {currentSsh.name} stops when you log out there. Run <code>loginctl enable-linger</code> on {currentSsh.name} to keep it running.
-          </SettingsNotice>
-        ) : null}
-        {phone.error ? <SettingsInlineError>{phone.error}</SettingsInlineError> : null}
-      </>
-    ),
-    empty: phone.error ? undefined : "Loading…",
+    empty: loadError || phone?.error ? undefined : "Loading…",
     rows,
   };
 }
@@ -464,8 +419,8 @@ function devicesGroup(
   };
 }
 
-/** Spends a code another computer shows; success restarts the shell on that computer's work. */
-function PairComputerDialog({ capability, onClose }: { capability: RemoteComputersCapability; onClose: () => void }) {
+/** Spends a code another computer shows; success moves the shell to that computer's work. */
+function PairComputerDialog({ pair: spend, onClose }: { pair: (code: string) => Promise<void>; onClose: () => void }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -473,7 +428,7 @@ function PairComputerDialog({ capability, onClose }: { capability: RemoteCompute
     setBusy(true);
     setError(undefined);
     try {
-      await capability.pair(code);
+      await spend(code);
       onClose();
     } catch (cause) {
       setError(errorSentence(cause, "Pairing failed. Try again."));
@@ -483,7 +438,7 @@ function PairComputerDialog({ capability, onClose }: { capability: RemoteCompute
   return (
     <PopupDialog className="settings-confirm" label="Pair with another computer" onOpenChange={(open) => { if (!open && !busy) onClose(); }} open>
       <strong>Pair a computer</strong>
-      <p>On the other computer, open Settings, Remote, choose Show code, then copy it here. OpenAIDE restarts and opens that computer's projects.</p>
+      <p>On the other computer, open Settings, Remote, choose Show code, then copy it here. OpenAIDE then opens that computer's projects.</p>
       <textarea
         aria-label="Pairing code"
         autoFocus

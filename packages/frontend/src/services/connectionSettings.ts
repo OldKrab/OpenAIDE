@@ -5,8 +5,6 @@ export type ConnectionSnapshot = {
   paired: boolean;
   /** The name of the selected computer; empty when a paired one gave none. */
   computer: string;
-  /** Every computer this phone is paired with; `current` marks the one in use. */
-  computers: ConnectionComputer[];
   /** SSH Computers this phone starts the App Server on (ADR-0069); absent in older shells. */
   sshComputers?: PhoneSshComputer[];
   /** What the phone learned starting the App Server on the SSH Computer in use. */
@@ -26,8 +24,6 @@ export type ConnectionSnapshot = {
   notifications: boolean;
   checks: Record<string, boolean | string> | null;
 };
-
-export type ConnectionComputer = { id: string; name: string; current: boolean };
 
 /** `destination` is `user@host`, with a port when it is not 22. */
 export type PhoneSshComputer = { id: string; name: string; destination: string; current: boolean };

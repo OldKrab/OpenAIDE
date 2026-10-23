@@ -21,13 +21,19 @@ const HEAD_TIMEOUT: Duration = Duration::from_secs(30);
 const HEAD_END: &[u8] = b"\r\n\r\n";
 
 /// A running gateway: where it listens and the token its Frontend must send.
+///
+/// It serves while this value lives. A shell that switches to another computer
+/// calls [`Gateway::stop`]; dropping the value stops it the same way without
+/// waiting.
 pub struct Gateway {
     pub address: SocketAddr,
     pub token: String,
+    stop: tokio::sync::oneshot::Sender<()>,
+    stopped: tokio::task::JoinHandle<()>,
 }
 
 impl Gateway {
-    /// Listens on a free loopback port for the rest of the process.
+    /// Listens on a free loopback port until stopped.
     ///
     /// `on_failure` hears the failures a retry cannot fix: this device was
     /// removed, or the two sides run incompatible versions.
@@ -50,20 +56,49 @@ impl Gateway {
             requests: AtomicU64::new(0),
         });
         (shared.log)("remote_gateway_listening", serde_json::json!({}));
-        tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((socket, _)) => {
-                        tokio::spawn(serve(socket, shared.clone()));
-                    }
-                    Err(_) => {
-                        (shared.log)("remote_gateway_stopped", serde_json::json!({}));
-                        break;
-                    }
+        let (stop, mut stop_requested) = tokio::sync::oneshot::channel();
+        let stopped = tokio::spawn(async move {
+            let mut serving = tokio::task::JoinSet::new();
+            let reason = loop {
+                tokio::select! {
+                    // A send and a dropped sender both mean the shell is done with it.
+                    _ = &mut stop_requested => break "stopped",
+                    accepted = listener.accept() => match accepted {
+                        Ok((socket, _)) => {
+                            serving.spawn(serve(socket, shared.clone()));
+                        }
+                        Err(_) => break "accept_failed",
+                    },
+                    Some(_) = serving.join_next(), if !serving.is_empty() => {}
                 }
-            }
+            };
+            drop(listener);
+            let in_flight = serving.len();
+            // Requests in flight belong to the page that is going away.
+            serving.shutdown().await;
+            shared.client.disconnect().await;
+            (shared.log)(
+                "remote_gateway_stopped",
+                serde_json::json!({
+                    "reason": reason,
+                    "in_flight": in_flight,
+                    "requests": shared.requests.load(Ordering::Relaxed),
+                }),
+            );
         });
-        Ok(Self { address, token })
+        Ok(Self {
+            address,
+            token,
+            stop,
+            stopped,
+        })
+    }
+
+    /// Stops listening, ends the requests in flight, and closes the connection
+    /// to the App Server; returns once the port refuses connections.
+    pub async fn stop(self) {
+        let _ = self.stop.send(());
+        let _ = self.stopped.await;
     }
 }
 

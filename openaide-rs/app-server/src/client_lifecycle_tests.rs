@@ -249,5 +249,6 @@ fn init_params(client_instance_id: ClientInstanceId) -> InitializeParams {
         capabilities: ClientCapabilities::default(),
         workspace_roots: Vec::new(),
         protocol_version: None,
+        role: Default::default(),
     }
 }

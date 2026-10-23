@@ -16,12 +16,14 @@ use openaide_remote_client::{LaunchError, Launched, SshLauncher, Stage, StartMod
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
+use crate::DesktopState;
+use crate::desktop_app_server_launch::{LocalHttpConnection, app_server_endpoint_reachable};
+use crate::desktop_connection::DesktopConnections;
 use crate::desktop_remote::RemoteComputer;
 use crate::desktop_runtime::write_bootstrap_preferences;
 use crate::desktop_ssh_askpass::{AskpassBroker, SshPrompt};
 use crate::desktop_ssh_release::ReleaseSource;
 use crate::desktop_ssh_transport::{SshForward, SystemSsh, is_destination};
-use crate::{DesktopState, LocalHttpConnection};
 
 pub(crate) struct DesktopSshState {
     askpass: Mutex<Option<Arc<AskpassBroker>>>,
@@ -102,7 +104,11 @@ pub(crate) async fn connect(
         crate::desktop_remote::logger(),
         Box::new(move |stage| {
             if show_progress {
-                crate::emit_bootstrap_progress(&progress_app, "ssh", stage_message(stage, &name));
+                crate::desktop_connection::emit_bootstrap_progress(
+                    &progress_app,
+                    "ssh",
+                    stage_message(stage, &name),
+                );
             }
         }),
     );
@@ -192,29 +198,48 @@ pub(crate) async fn connect(
 pub(crate) async fn ensure(
     app: &tauri::AppHandle,
 ) -> Option<Result<Option<LocalHttpConnection>, String>> {
-    let state = app.state::<DesktopState>();
-    let computer = state.preferences.lock().ok()?.remote().cloned()?;
+    let connections = app.state::<DesktopConnections>();
+    let id = connections.computer_in_use()??;
+    let computer = app
+        .state::<DesktopState>()
+        .preferences
+        .lock()
+        .ok()?
+        .remote_computers
+        .iter()
+        .find(|computer| computer.id == id)
+        .cloned()?;
     let destination = computer.ssh.clone()?;
     Some(
         async {
-            let cached = state
-                .connection
-                .lock()
-                .map_err(|_| "desktop connection state unavailable")?
-                .clone();
-            if let Some(connection) = &cached
-                && crate::app_server_endpoint_reachable(connection).await
+            if let Some((connection, _)) = connections.in_use()
+                && app_server_endpoint_reachable(&connection).await
             {
                 return Ok(None);
             }
+            let started = Instant::now();
             desktop_log!("desktop_ssh_ensure_started reason_code=endpoint_unreachable");
-            let connection = connect(app, &computer, &destination, false).await?;
-            *state
-                .connection
-                .lock()
-                .map_err(|_| "desktop connection state unavailable")? = Some(connection.clone());
-            let _ = app.emit("desktop-app-server-replaced", &connection);
-            Ok(Some(connection))
+            let connected = connect(app, &computer, &destination, false).await;
+            let connection = match connected {
+                Ok(connection) => connection,
+                Err(message) => {
+                    desktop_log!(
+                        "desktop_ssh_ensure_completed outcome=failure duration_ms={}",
+                        started.elapsed().as_millis()
+                    );
+                    return Err(message);
+                }
+            };
+            // A switch away while connecting leaves the window where it went.
+            let window_follows = connections.replace_ssh(&computer.id, connection.clone());
+            if window_follows {
+                let _ = app.emit("desktop-app-server-replaced", &connection);
+            }
+            desktop_log!(
+                "desktop_ssh_ensure_completed outcome=success window_follows={window_follows} duration_ms={}",
+                started.elapsed().as_millis()
+            );
+            Ok(window_follows.then_some(connection))
         }
         .await,
     )
@@ -258,14 +283,17 @@ pub(crate) fn desktop_ssh_hosts(app: tauri::AppHandle) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Remembers an SSH Computer by its `ssh` destination and restarts into it.
+/// Remembers an SSH Computer by its `ssh` destination, then switches to it like
+/// to a paired computer: `switched` (the window reloads), `alreadyInUse`, or
+/// `cancelled`. A computer that cannot be reached stays saved and unused.
 #[tauri::command]
-pub(crate) fn desktop_ssh_add(
+pub(crate) async fn desktop_ssh_add(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
     destination: String,
     name: Option<String>,
-) -> Result<(), String> {
+    operation_id: Option<String>,
+) -> Result<&'static str, String> {
     let destination = destination.trim().to_string();
     if !is_destination(&destination) {
         return Err("Enter an SSH host alias or user@host.".to_string());
@@ -274,28 +302,27 @@ pub(crate) fn desktop_ssh_add(
         .map(|name| openaide_remote_client::clamp_label(&name))
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| openaide_remote_client::clamp_label(&destination));
-    let mut preferences = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?;
-    let existing = preferences
-        .remote_computers
-        .iter()
-        .find(|computer| computer.ssh.as_deref() == Some(destination.as_str()))
-        .map(|computer| computer.id.clone());
-    let id = existing.unwrap_or_else(|| format!("ssh-{}", uuid::Uuid::new_v4().simple()));
-    preferences.remote_computers.retain(|known| known.id != id);
-    preferences.remote_computers.push(RemoteComputer {
-        id: id.clone(),
-        name,
-        ssh: Some(destination),
-    });
-    preferences.remote_computer = Some(id);
-    write_bootstrap_preferences(&state.preferences_path, &preferences)?;
-    drop(preferences);
-    desktop_log!("desktop_remote_computer_selected reason=ssh_added");
-    crate::restart_desktop(&app);
-    Ok(())
+    let id = {
+        let mut preferences = state
+            .preferences
+            .lock()
+            .map_err(|_| "desktop bootstrap preferences unavailable")?;
+        let id = preferences
+            .remote_computers
+            .iter()
+            .find(|computer| computer.ssh.as_deref() == Some(destination.as_str()))
+            .map(|computer| computer.id.clone())
+            .unwrap_or_else(|| format!("ssh-{}", uuid::Uuid::new_v4().simple()));
+        preferences.remember(RemoteComputer {
+            id: id.clone(),
+            name,
+            ssh: Some(destination),
+        });
+        write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+        id
+    };
+    desktop_log!("desktop_ssh_computer_added");
+    crate::desktop_remote::use_computer(&app, Some(id), operation_id).await
 }
 
 #[tauri::command]
@@ -310,6 +337,8 @@ pub(crate) fn desktop_ssh_failure(state: tauri::State<'_, DesktopSshState>) -> O
 
 /// Replaces the App Server on the SSH Computer in use on the next start. The
 /// WebView asks only after showing what the replacement interrupts.
+// TODO(ssh-computers): reconnect in place through `DesktopConnections::switch`
+// instead of restarting Desktop, once a switch can target the computer in use.
 #[tauri::command]
 pub(crate) fn desktop_ssh_update(
     app: tauri::AppHandle,

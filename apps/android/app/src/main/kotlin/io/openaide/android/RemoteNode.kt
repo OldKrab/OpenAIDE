@@ -11,6 +11,7 @@ import computer.iroh.EndpointOptions
 import computer.iroh.IrohAndroid
 import computer.iroh.SecretKey
 import computer.iroh.presetN0
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -182,8 +183,37 @@ internal object RemoteNode {
             live()?.let { return it }
             val store = ConnectionStore(context.applicationContext)
             val server = store.pairedServer() ?: throw Unavailable(Failure.NOT_TRUSTED)
-            reach(context, store, server)
+            reach(context, store, server).also { use(it) }
         }
+    }
+
+    /**
+     * Reaches [server] for a switch while the connection in use stays live: the
+     * result is not used until [adopt] takes it, and a failed attempt keeps the
+     * endpoint that connection rides on.
+     */
+    suspend fun reachForSwitch(context: Context, server: ConnectionStore.PairedServer): Connection =
+        reach(context, ConnectionStore(context.applicationContext), server)
+
+    /** Makes a connection reached for a switch the one in use, ending the previous one. */
+    fun adopt(next: Connection) {
+        val previous = connection
+        use(next)
+        if (previous != null && previous !== next) runCatching { previous.close(0L, "switched".toByteArray()) }
+        diagnostics.record("remote_connect", "adopted", attempts, 0)
+    }
+
+    /** Makes [opened] the live connection; its receive watch lasts while it stays live. */
+    private fun use(opened: Connection) {
+        connection = opened
+        watchReceive(opened, attempts)
+    }
+
+    /** Ends a connection reached for a switch that was cancelled or could not be saved. */
+    fun abandon(unused: Connection) {
+        if (connection === unused) return
+        runCatching { unused.close(0L, "cancelled".toByteArray()) }
+        diagnostics.record("remote_connect", "abandoned", attempts, 0)
     }
 
     /**
@@ -202,7 +232,12 @@ internal object RemoteNode {
                 // A hidden app usually has no network to retry on; its return starts over anyway.
                 val more = hiddenAt == 0L && ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started) > 0
                 if (error.failure != Failure.UNREACHABLE || !more) throw error
-                stale = "dial_failed"
+                // TODO: a dial for a switch shares the one endpoint with the live connection, so the
+                // live connection's own reconnect (a return to the screen, a stalled receive) retires
+                // that endpoint and ends the switch's dial mid-attempt, which the user sees as a failed
+                // switch to a reachable computer. Give the switch's dial its own endpoint, or have that
+                // reconnect stand down while a switch is pending.
+                if (ReconnectPolicy.retireAfterFailedDial(live() != null)) stale = "dial_failed"
             }
         }
     }
@@ -229,13 +264,15 @@ internal object RemoteNode {
             // so a removed phone learns it from the close that follows.
             val refusal = withTimeoutOrNull(REFUSAL_WAIT_MS) { opened.closed() }
             if (refusal != null) throw Unavailable(failure(refusal))
-            connection = opened
-            watchReceive(opened, attempt)
             outcome = if (opened.paths().any { it.isSelected && it.isRelay }) "relay" else "direct"
             rememberRelay(node, store, id, server.id, relay, attempt)
             return opened
         } catch (error: Unavailable) {
             if (outcome != "timeout") outcome = error.failure.name.lowercase()
+            throw error
+        } catch (error: CancellationException) {
+            // A cancelled switch, not an unreachable computer.
+            outcome = "cancelled"
             throw error
         } catch (error: Throwable) {
             // An App Server of another protocol major does not offer this ALPN.

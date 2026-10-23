@@ -103,6 +103,7 @@ fn becomes_a_desktop_client_and_then_keeps_renewing_it() {
     assert_eq!(initialize.method, "client/initialize");
     assert_eq!(initialize.authorization, "Bearer token-one");
     assert_eq!(initialize.params["shell"]["kind"], "desktop");
+    assert_eq!(initialize.params["role"], "shellHold");
     assert_eq!(
         initialize.params["clientInstanceId"],
         initialize.client_instance_id
@@ -197,4 +198,28 @@ fn sends_the_token_only_to_loopback() {
     assert!(loopback_endpoint("http://192.0.2.1:43123/rpc").is_none());
     assert!(loopback_endpoint("https://127.0.0.1:43123/rpc").is_none());
     assert!(loopback_endpoint("http://localhost:43123/rpc").is_none());
+}
+
+#[test]
+fn asks_the_held_app_server_as_its_own_client() {
+    let server = FakeAppServer::start("token-one");
+    let hold = AppServerHold::new();
+    let params = serde_json::json!({ "attemptId": "update-1", "stopActiveWork": false });
+
+    // Before this computer's App Server started there is nothing to ask.
+    assert_eq!(
+        hold.call("client/updateShutdownPrepare", params.clone()),
+        Err(super::HoldError::NotHeld)
+    );
+    hold.sync(Some(server.target.clone()));
+    let initialize = server.received.try_recv().expect("initialize request");
+
+    let answer = hold
+        .call("client/updateShutdownPrepare", params.clone())
+        .expect("answer");
+    let asked = server.received.try_recv().expect("prepare request");
+    assert_eq!(answer, serde_json::json!({}));
+    assert_eq!(asked.method, "client/updateShutdownPrepare");
+    assert_eq!(asked.params, params);
+    assert_eq!(asked.client_instance_id, initialize.client_instance_id);
 }

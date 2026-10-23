@@ -7,9 +7,16 @@
 //! to the native process instead, so the App Server's lifetime follows Desktop's
 //! and not the window's timers. It subscribes to nothing and answers nothing.
 //!
-//! Quit and Desktop Update end the hold explicitly, after the window's client has
-//! detached, so the App Server still receives its last-client signal at once. A
-//! Desktop that dies without that stops heartbeating and expires like any client.
+//! It initializes in the shell-hold role, so the App Server does not count it as
+//! another owner when the window prepares a Desktop Update; an ordinary client
+//! here would refuse every update with `otherClients`.
+//!
+//! The hold stays on this computer's App Server while the window uses a paired
+//! computer's (ADR-0070), so this computer's work keeps running; a Desktop Update
+//! then asks it to stop through this client. Quit and Desktop Update end the hold
+//! explicitly, after the window's client has detached, so the App Server still
+//! receives its last-client signal at once. A Desktop that dies without that
+//! stops heartbeating and expires like any client.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -38,32 +45,33 @@ pub(crate) enum HoldError {
     Refused,
     /// The endpoint or the answer could not be read as the protocol.
     Malformed,
+    /// No App Server is held yet, so there is nobody to ask.
+    NotHeld,
 }
 
 impl HoldError {
     /// Stable, content-free name for diagnostics.
-    fn class(&self) -> &'static str {
+    pub(crate) fn class(&self) -> &'static str {
         match self {
             Self::Unreachable => "unreachable",
             Self::Refused => "refused",
             Self::Malformed => "malformed",
+            Self::NotHeld => "not_held",
         }
     }
 }
 
-/// Starts the hold for the App Server this Desktop owns, following every replacement.
+/// Starts the hold for this computer's App Server, following every replacement.
 pub(crate) fn install(app: &tauri::App) {
     use tauri::Manager;
     let hold = AppServerHold::new();
     app.manage(hold.clone());
     let app = app.handle().clone();
     hold.start(move || {
-        let desktop = app.state::<crate::DesktopState>();
-        // A paired computer's App Server is kept running by a shell on that computer.
-        if !desktop.owns_app_server() {
-            return None;
-        }
-        let connection = desktop.connection.lock().ok()?.clone()?;
+        // This computer's App Server, whichever computer the window uses (ADR-0070).
+        let connection = app
+            .state::<crate::desktop_connection::DesktopConnections>()
+            .local()?;
         Some(HoldTarget {
             endpoint_url: connection.endpoint_url,
             auth_token: connection.auth_token,
@@ -79,6 +87,65 @@ pub(crate) async fn complete_desktop_quit(app: tauri::AppHandle) {
     let hold = app.state::<AppServerHold>().inner().clone();
     let _ = tauri::async_runtime::spawn_blocking(move || hold.end("quit")).await;
     app.exit(0);
+}
+
+/// Desktop Update's readiness check for this computer's App Server while the
+/// window uses another computer. The update replaces this App Server too, so its
+/// work and other clients decide as they do while it is in use. Nothing held
+/// means nothing runs here that an update could stop.
+#[tauri::command]
+pub(crate) async fn desktop_update_prepare_local(
+    app: tauri::AppHandle,
+    attempt_id: String,
+    stop_active_work: bool,
+) -> Result<Value, String> {
+    let result = call_local(
+        &app,
+        "client/updateShutdownPrepare",
+        json!({ "attemptId": attempt_id, "stopActiveWork": stop_active_work }),
+    )
+    .await;
+    match result {
+        Ok(answer) => Ok(answer),
+        Err(HoldError::NotHeld) => Ok(json!({ "kind": "ready" })),
+        Err(_) => Err("OpenAIDE could not check this computer's work before the update.".to_string()),
+    }
+}
+
+/// Commits or withdraws the readiness `desktop_update_prepare_local` obtained.
+#[tauri::command]
+pub(crate) async fn desktop_update_finish_local(
+    app: tauri::AppHandle,
+    attempt_id: String,
+    commit: bool,
+) -> Result<(), String> {
+    let method = if commit {
+        "client/updateShutdownCommit"
+    } else {
+        "client/updateShutdownAbort"
+    };
+    match call_local(&app, method, json!({ "attemptId": attempt_id })).await {
+        Ok(_) | Err(HoldError::NotHeld) => Ok(()),
+        Err(_) => Err("OpenAIDE could not prepare this computer for the update.".to_string()),
+    }
+}
+
+async fn call_local(app: &tauri::AppHandle, method: &'static str, params: Value) -> Result<Value, HoldError> {
+    use tauri::Manager;
+    let hold = app.state::<AppServerHold>().inner().clone();
+    let started_at = Instant::now();
+    let result = tauri::async_runtime::spawn_blocking(move || hold.call(method, params))
+        .await
+        .unwrap_or(Err(HoldError::Unreachable));
+    desktop_log!(
+        "desktop_update_local_request_completed method={method} outcome={} duration_ms={}",
+        match &result {
+            Ok(_) => "success",
+            Err(error) => error.class(),
+        },
+        started_at.elapsed().as_millis()
+    );
+    result
 }
 
 #[derive(Default)]
@@ -126,8 +193,8 @@ impl AppServerHold {
         }
         if state.held != target {
             if let Some(previous) = state.held.take() {
-                // A replaced App Server is gone and refuses nothing; one Desktop no
-                // longer owns (a paired computer is in use) is told so it may stop.
+                // A replaced App Server is gone and refuses nothing; a live one is
+                // told, so a hold that moves never leaves a client behind.
                 let _ = self.request(&mut state, &previous, "client/detach", json!({}));
             }
             state.failures = 0;
@@ -157,7 +224,7 @@ impl AppServerHold {
             return;
         };
         match self.request(&mut state, &target, "client/heartbeat", json!({})) {
-            Ok(()) => {
+            Ok(_) => {
                 if state.failures > 0 {
                     desktop_log!(
                         "desktop_app_server_hold_heartbeat_recovered attempt_count={}",
@@ -200,16 +267,26 @@ impl AppServerHold {
         };
         let started_at = Instant::now();
         let outcome = match self.request(&mut state, &target, "client/detach", json!({})) {
-            Ok(()) => "detached",
+            Ok(_) => "detached",
             // The App Server may exit on its final detach before the answer is readable.
             Err(HoldError::Unreachable) => "unreachable",
             Err(HoldError::Refused) => "refused",
             Err(HoldError::Malformed) => "malformed",
+            Err(HoldError::NotHeld) => "not_held",
         };
         desktop_log!(
             "desktop_app_server_hold_ended reason_code={reason_code} outcome={outcome} duration_ms={}",
             started_at.elapsed().as_millis()
         );
+    }
+
+    /// One request to the held App Server as this native client, answered with
+    /// its result. Desktop Update asks through it while the window uses another
+    /// computer and so has no client here.
+    pub(crate) fn call(&self, method: &str, params: Value) -> Result<Value, HoldError> {
+        let mut state = self.state.lock().map_err(|_| HoldError::Unreachable)?;
+        let target = state.held.clone().ok_or(HoldError::NotHeld)?;
+        self.request(&mut state, &target, method, params)
     }
 
     fn initialize(&self, state: &mut HoldState, target: &HoldTarget) -> Result<(), HoldError> {
@@ -226,8 +303,12 @@ impl AppServerHold {
                 },
                 "requestedSurface": { "kind": "home" },
                 "workspaceRoots": [],
+                // Keeps the App Server alive without counting as another owner
+                // when this Desktop's window prepares an update.
+                "role": "shellHold",
             }),
         )
+        .map(|_| ())
     }
 
     /// One plain HTTP request to the loopback endpoint, as a same-machine client with no window.
@@ -237,36 +318,54 @@ impl AppServerHold {
         target: &HoldTarget,
         method: &str,
         params: Value,
-    ) -> Result<(), HoldError> {
-        let (address, path) =
-            loopback_endpoint(&target.endpoint_url).ok_or(HoldError::Malformed)?;
+    ) -> Result<Value, HoldError> {
         state.next_request += 1;
         let id = format!("desktop-native-{}", state.next_request);
-        let body =
-            json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string();
-        let wire = format!(
-            "POST {path} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {}\r\nX-OpenAIDE-Connection-Id: {}\r\nX-OpenAIDE-Client-Instance-Id: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            target.auth_token,
-            self.client_instance_id,
-            self.client_instance_id,
-            body.len(),
-        );
-        let mut stream = TcpStream::connect_timeout(&address, REQUEST_TIMEOUT)
-            .map_err(|_| HoldError::Unreachable)?;
-        stream
-            .set_read_timeout(Some(REQUEST_TIMEOUT))
-            .and_then(|()| stream.set_write_timeout(Some(REQUEST_TIMEOUT)))
-            .map_err(|_| HoldError::Unreachable)?;
-        stream
-            .write_all(wire.as_bytes())
-            .map_err(|_| HoldError::Unreachable)?;
-        let mut response = Vec::new();
-        stream
-            .take(MAX_RESPONSE_BYTES)
-            .read_to_end(&mut response)
-            .map_err(|_| HoldError::Unreachable)?;
-        read_reply(&response, &id)
+        post_loopback(
+            target,
+            &self.client_instance_id,
+            &id,
+            method,
+            params,
+            REQUEST_TIMEOUT,
+        )
     }
+}
+
+/// One JSON-RPC request to a same-machine App Server over plain HTTP, as the
+/// windowless client `client_instance_id`; returns the reply's result. `timeout`
+/// bounds connecting, writing, and reading, so a held request needs a longer one.
+pub(crate) fn post_loopback(
+    target: &HoldTarget,
+    client_instance_id: &str,
+    request_id: &str,
+    method: &str,
+    params: Value,
+    timeout: Duration,
+) -> Result<Value, HoldError> {
+    let (address, path) = loopback_endpoint(&target.endpoint_url).ok_or(HoldError::Malformed)?;
+    let body = json!({ "jsonrpc": "2.0", "id": request_id, "method": method, "params": params })
+        .to_string();
+    let wire = format!(
+        "POST {path} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {}\r\nX-OpenAIDE-Connection-Id: {client_instance_id}\r\nX-OpenAIDE-Client-Instance-Id: {client_instance_id}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        target.auth_token,
+        body.len(),
+    );
+    let mut stream = TcpStream::connect_timeout(&address, REQUEST_TIMEOUT.min(timeout))
+        .map_err(|_| HoldError::Unreachable)?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
+        .map_err(|_| HoldError::Unreachable)?;
+    stream
+        .write_all(wire.as_bytes())
+        .map_err(|_| HoldError::Unreachable)?;
+    let mut response = Vec::new();
+    stream
+        .take(MAX_RESPONSE_BYTES)
+        .read_to_end(&mut response)
+        .map_err(|_| HoldError::Unreachable)?;
+    read_reply(&response, request_id)
 }
 
 /// The App Server's published address. Any host but loopback is refused: the token must not leave this machine.
@@ -283,8 +382,9 @@ fn loopback_endpoint(endpoint_url: &str) -> Option<(SocketAddr, String)> {
         .then(|| (address, path.to_string()))
 }
 
-/// The App Server answers with one message or a list: the reply, then whatever was queued for this client.
-fn read_reply(response: &[u8], id: &str) -> Result<(), HoldError> {
+/// The App Server answers with one message or a list: the reply, then whatever
+/// was queued for this client. Returns the reply's result.
+fn read_reply(response: &[u8], id: &str) -> Result<Value, HoldError> {
     let text = std::str::from_utf8(response).map_err(|_| HoldError::Malformed)?;
     let (head, body) = text.split_once("\r\n\r\n").ok_or(HoldError::Unreachable)?;
     let status = head
@@ -307,7 +407,14 @@ fn read_reply(response: &[u8], id: &str) -> Result<(), HoldError> {
     if reply.get("error").is_some() {
         return Err(HoldError::Refused);
     }
-    Ok(())
+    // The App Server wraps every result in a response envelope (`{ result, meta? }`).
+    let envelope = reply.get("result").cloned().unwrap_or(Value::Null);
+    match envelope {
+        Value::Object(mut fields) if fields.contains_key("result") => {
+            Ok(fields.remove("result").unwrap_or(Value::Null))
+        }
+        bare => Ok(bare),
+    }
 }
 
 #[cfg(test)]

@@ -294,7 +294,13 @@ workspaceRoots?: Array<ClientWorkspaceRoot>,
  * The protocol version the client was built against. A client that ships
  * separately from its App Server must send it; an omitted version is not checked.
  */
-protocolVersion?: ProtocolVersion | null, };
+protocolVersion?: ProtocolVersion | null,
+/**
+ * What the client is to the App Server; omitted for an ordinary client.
+ */
+role?: ClientRole, };
+
+export type ClientRole = "interactive" | "shellHold";
 
 export type InitializeResult = { snapshot: ClientSnapshot, };
 

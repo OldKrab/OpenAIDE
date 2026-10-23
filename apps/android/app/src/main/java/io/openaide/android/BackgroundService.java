@@ -23,13 +23,14 @@ import java.util.concurrent.Executors;
  * The ongoing notification that keeps OpenAIDE working while it is off the screen.
  *
  * For the workspace on this phone or on an SSH Computer it keeps the phone awake while
- * a Task works and reads Task state from the App Server this shell holds. For a paired computer it holds no wake
- * lock and does not stop when idle: it keeps a {@link RemoteAttention} watch, so Task
- * notifications still arrive while the WebView is paused. The selected workspace
- * decides the mode on every start, so a restart by the system resumes the same one.
+ * a Task works and reads Task state from the App Server this shell holds. For a paired
+ * computer it does not stop when idle: it keeps a {@link RemoteAttention} watch, so Task
+ * notifications still arrive while the WebView is paused, and it also watches this phone's
+ * App Server if that is already running, so the phone's own Tasks keep it awake and notify
+ * too ({@link BackgroundSources}). The selected workspace decides the mode on every start,
+ * so a restart by the system resumes the same one.
  */
 public final class BackgroundService extends Service {
-    private static final String TASK_TAG = "task:";
     private static final int TASK_NOTIFICATION = 3;
     private WorkProtection protection;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -40,7 +41,9 @@ public final class BackgroundService extends Service {
     private boolean polling;
     private final Runnable pollTask = this::poll;
     private long settlingUntil;
-    private final AttentionNotifications attention = new AttentionNotifications();
+    /** Each source has its own baseline: the first list read from it stays silent. */
+    private final AttentionNotifications localAttention = new AttentionNotifications();
+    private final AttentionNotifications pairedAttention = new AttentionNotifications();
     private long hiddenSince;
     private String notificationText = "";
     private final AndroidDiagnostics diagnostics = new AndroidDiagnostics();
@@ -48,6 +51,10 @@ public final class BackgroundService extends Service {
     private String stopReason = "system";
     /** The paired computer's watch, or null while the service serves the workspace on this phone. */
     private RemoteAttention remote;
+    /** Whether this phone's own App Server is watched while the paired computer is in use. */
+    private boolean watchingLocal;
+    /** Failed reads in a row of the phone's App Server while paired; only the transitions are logged. */
+    private int localFailures;
     private boolean modeChosen;
     /** An outdated computer is reported once per process, not on every return to the app. */
     private static boolean outdatedReported;
@@ -110,13 +117,20 @@ public final class BackgroundService extends Service {
             remote = new RemoteAttention(this, new RemoteAttention.Events() {
                 @Override public void state(RemoteAttention.State state) { handler.post(() -> remoteState(state)); }
                 @Override public void attention(List<AttentionNotifications.Attention> current) {
-                    handler.post(() -> { if (!destroyed && remote != null) presentAttention(current); });
+                    handler.post(() -> { if (!destroyed && remote != null) presentAttention(BackgroundSources.Source.PAIRED, current); });
                 }
             });
             remote.start();
+            // The first read tells whether this phone's App Server runs; the watch never starts it.
+            watchingLocal = true;
+            localFailures = 0;
+            diagnostics.record("local_watch", "started", 0, 0, Map.of("source", BackgroundSources.Source.THIS_DEVICE.wire));
         } else if (remote != null) {
             remote.stop();
             remote = null;
+            endLocalWatch("mode_changed");
+            // The phone's reads start over, so a long paired stretch is not taken for a lost server.
+            policy.observe(0, SystemClock.elapsedRealtime());
         }
         diagnostics.record("background_work", paired ? "paired" : sshWorkspace() ? "ssh" : "local", 0, 0, Map.of("switched", switched));
         return true;
@@ -141,62 +155,102 @@ public final class BackgroundService extends Service {
         stop("remote_" + state.name().toLowerCase(Locale.ROOT));
     }
 
+    /** Reads this phone's App Server: the workspace in use, or alongside the paired computer while it is running. */
     private void poll() {
-        if (polling || destroyed || remote != null) return;
+        boolean paired = remote != null;
+        if (polling || destroyed || (paired && !watchingLocal)) return;
         handler.removeCallbacks(pollTask);
         polling = true;
         worker.execute(() -> {
             ServerStatus status = null;
-            // The App Server this shell holds: in Termux, or on the SSH Computer in use.
-            try { status = new ConnectionStore(this).usesSsh() ? SshServer.status(this) : LocalServer.status(this); }
+            boolean running = true;
+            // The phone's App Server is started only while it is the workspace in use; while an
+            // SSH Computer is in use, the App Server this shell holds is the one there.
+            try {
+                status = paired ? LocalServer.statusIfRunning()
+                    : new ConnectionStore(this).usesSsh() ? SshServer.status(this) : LocalServer.status(this);
+                running = status != null;
+            }
             catch (Exception ignored) { }
             ServerStatus result = status;
+            boolean serverRunning = running;
             handler.post(() -> {
                 polling = false;
-                // A switch to the paired computer while this read ran ends the local schedule.
-                if (destroyed || remote != null) return;
+                if (destroyed) return;
+                // A switch of the workspace while this read ran starts the schedule of the new mode.
+                if ((remote != null) != paired) { poll(); return; }
                 long now = SystemClock.elapsedRealtime();
                 if (result != null) {
                     policy.observe(result.active, now);
-                    presentAttention(result.attention);
-                    updateNotification(result.active > 0 ? "Working · safe to lock the screen"
+                    presentAttention(BackgroundSources.Source.THIS_DEVICE, result.attention);
+                    // While paired, the ongoing notification tells about the paired computer.
+                    if (!paired) updateNotification(result.active > 0 ? "Working · safe to lock the screen"
                         : result.waiting > 0 ? "Waiting for your response · battery saving" : "Ready · battery saving");
-                } else updateNotification("Connection interrupted · checking again");
+                } else if (!paired) updateNotification("Connection interrupted · checking again");
+                if (paired) recordLocalRead(result != null, serverRunning);
+                BackgroundSources.Next next = BackgroundSources.afterLocalRead(paired, serverRunning, result, policy.expired(now), visible, now, settlingUntil);
+                if (next == BackgroundSources.Next.END_WATCH) {
+                    endLocalWatch("not_running");
+                    policy.observe(0, now);
+                }
                 updateLock();
-                if (policy.expired(now)) {
-                    getSystemService(NotificationManager.class).notify(2, notification("Connection lost. Open OpenAIDE to recover.", "completion"));
-                    stop("connection_lost");
-                } else if (!visible && result != null && result.active == 0 && now >= settlingUntil) stop("idle");
-                else handler.postDelayed(pollTask, result == null ? 10_000 : result.active > 0 || !visible ? 5_000 : 15_000);
+                switch (next) {
+                    case STOP_LOST:
+                        getSystemService(NotificationManager.class).notify(2, notification("Connection lost. Open OpenAIDE to recover.", "completion"));
+                        stop("connection_lost");
+                        break;
+                    case STOP_IDLE: stop("idle"); break;
+                    case END_WATCH: break;
+                    default: handler.postDelayed(pollTask, BackgroundSources.delay(paired, result, visible));
+                }
             });
         });
     }
 
-    /** Shows each new Task Attention Event that occurred out of sight and withdraws superseded ones. */
-    private void presentAttention(List<AttentionNotifications.Attention> current) {
+    /** Logs the phone's reads while paired by transition only: a healthy schedule stays quiet. */
+    private void recordLocalRead(boolean read, boolean running) {
+        if (!running) return;
+        if (!read && ++localFailures == 1) diagnostics.record("local_watch", "retrying", localFailures, 0, Map.of("source", BackgroundSources.Source.THIS_DEVICE.wire));
+        if (read && localFailures > 0) {
+            diagnostics.record("local_watch", "recovered", localFailures, 0, Map.of("source", BackgroundSources.Source.THIS_DEVICE.wire));
+            localFailures = 0;
+        }
+    }
+
+    private void endLocalWatch(String reason) {
+        if (!watchingLocal) return;
+        watchingLocal = false;
+        diagnostics.record("local_watch", "ended", localFailures, 0, Map.of("source", BackgroundSources.Source.THIS_DEVICE.wire, "reason", reason));
+    }
+
+    /** Shows each new Task Attention Event of [source] that occurred out of sight and withdraws its superseded ones. */
+    private void presentAttention(BackgroundSources.Source source, List<AttentionNotifications.Attention> current) {
         NotificationManager manager = getSystemService(NotificationManager.class);
         Map<String, String> shown = new HashMap<>();
         for (StatusBarNotification active : manager.getActiveNotifications()) {
             String tag = active.getTag();
             String eventId = active.getNotification().extras.getString("event_id");
-            if (tag != null && tag.startsWith(TASK_TAG) && eventId != null) shown.put(tag.substring(TASK_TAG.length()), eventId);
+            if (tag != null && tag.startsWith(source.tag) && eventId != null) shown.put(tag.substring(source.tag.length()), eventId);
         }
         List<String> stale = AttentionNotifications.stale(shown, current);
-        for (String taskId : stale) manager.cancel(TASK_TAG + taskId, TASK_NOTIFICATION);
-        AttentionNotifications.Decision decision = attention.observe(current, visible, hiddenSince);
+        for (String taskId : stale) manager.cancel(source.tag + taskId, TASK_NOTIFICATION);
+        // The workspace not in use is never on the screen, so none of its events occurred in sight.
+        boolean inUse = BackgroundSources.inUse(source, remote != null);
+        AttentionNotifications attention = source == BackgroundSources.Source.PAIRED ? pairedAttention : localAttention;
+        AttentionNotifications.Decision decision = attention.observe(current, inUse && visible, inUse ? hiddenSince : 0);
         // Android drops a post the user blocked without telling the app, so the block is recorded instead.
         NotificationChannel channel = manager.getNotificationChannel("completion");
         String blocked = !manager.areNotificationsEnabled() ? "app"
             : channel != null && channel.getImportance() == NotificationManager.IMPORTANCE_NONE ? "channel" : null;
         for (AttentionNotifications.Attention event : decision.show) {
-            manager.notify(TASK_TAG + event.taskId, TASK_NOTIFICATION, taskNotification(event));
+            manager.notify(source.tag + event.taskId, TASK_NOTIFICATION, taskNotification(source, event));
             diagnostics.record("task_attention_notification", blocked == null ? "shown" : "blocked", 1, 0,
-                blocked == null ? Map.of("reason", event.reason, "event_id", event.eventId)
-                    : Map.of("reason", event.reason, "event_id", event.eventId, "blocked_by", blocked));
+                blocked == null ? Map.of("reason", event.reason, "event_id", event.eventId, "source", source.wire)
+                    : Map.of("reason", event.reason, "event_id", event.eventId, "blocked_by", blocked, "source", source.wire));
         }
-        if (decision.baseline > 0) diagnostics.record("task_attention_notification", "suppressed", decision.baseline, 0, Map.of("cause", "baseline"));
-        if (decision.inSight > 0) diagnostics.record("task_attention_notification", "suppressed", decision.inSight, 0, Map.of("cause", "in_sight"));
-        if (!stale.isEmpty()) diagnostics.record("task_attention_notification", "withdrawn", stale.size(), 0);
+        if (decision.baseline > 0) diagnostics.record("task_attention_notification", "suppressed", decision.baseline, 0, Map.of("cause", "baseline", "source", source.wire));
+        if (decision.inSight > 0) diagnostics.record("task_attention_notification", "suppressed", decision.inSight, 0, Map.of("cause", "in_sight", "source", source.wire));
+        if (!stale.isEmpty()) diagnostics.record("task_attention_notification", "withdrawn", stale.size(), 0, Map.of("source", source.wire));
     }
 
     private void stop(String reason) {
@@ -204,10 +258,11 @@ public final class BackgroundService extends Service {
         stopSelf();
     }
 
-    private Notification taskNotification(AttentionNotifications.Attention event) {
-        // A distinct request code per Task keeps each notification's target Task.
-        PendingIntent open = PendingIntent.getActivity(this, event.taskId.hashCode(),
-            new Intent(this, MainActivity.class).putExtra(MainActivity.EXTRA_TASK_ID, event.taskId),
+    private Notification taskNotification(BackgroundSources.Source source, AttentionNotifications.Attention event) {
+        // The source tells the tap whether the phone must become the workspace in use first.
+        PendingIntent open = PendingIntent.getActivity(this, source.requestCode(event.taskId),
+            new Intent(this, MainActivity.class).putExtra(MainActivity.EXTRA_TASK_ID, event.taskId)
+                .putExtra(BackgroundSources.EXTRA_TASK_SOURCE, source.wire),
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         android.os.Bundle extras = new android.os.Bundle();
         extras.putString("event_id", event.eventId);
@@ -217,8 +272,8 @@ public final class BackgroundService extends Service {
     }
 
     private void updateLock() {
-        // A paired computer does the work; the phone may sleep while it waits for an answer.
-        protection.apply(remote == null && policy.protect(SystemClock.elapsedRealtime(), settlingUntil));
+        // A paired computer does its own work; only this phone's working Tasks keep it awake.
+        protection.apply(BackgroundSources.protect(remote != null, watchingLocal, policy, SystemClock.elapsedRealtime(), settlingUntil));
     }
 
     private void updateNotification(String text) {
@@ -245,6 +300,7 @@ public final class BackgroundService extends Service {
         handler.removeCallbacksAndMessages(null);
         worker.shutdownNow();
         if (remote != null) remote.stop();
+        endLocalWatch(stopReason);
         if (protection != null) protection.close();
         stopForeground(STOP_FOREGROUND_REMOVE);
         // Task notifications end with the service, so its stop explains a later missing one.

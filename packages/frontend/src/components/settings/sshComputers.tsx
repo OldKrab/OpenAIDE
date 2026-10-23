@@ -1,6 +1,6 @@
 import type { ClientReplacementImpactResult, ShellKind } from "@openaide/app-server-client";
 import { useEffect, useState } from "react";
-import type { SshComputerStatus, SshComputersCapability } from "../../services/frontendShell";
+import type { SshComputerStatus, SshComputersCapability } from "../../services/computers";
 import { PopupDialog } from "../Popup";
 import { errorSentence, SettingsButton, SettingsConfirm, SettingsField, SettingsInlineError } from "./settingsKit";
 
@@ -15,7 +15,7 @@ export function useSshStatus(ssh: SshComputersCapability | undefined): SshComput
   return status;
 }
 
-/** Adds an SSH Computer by host alias or `user@host`; success restarts the shell on it. */
+/** Adds an SSH Computer by host alias or `user@host`; success switches the shell to it. */
 export function AddSshComputerDialog({ ssh, onClose }: { ssh: SshComputersCapability; onClose: () => void }) {
   const [destination, setDestination] = useState("");
   const [name, setName] = useState("");
@@ -41,7 +41,7 @@ export function AddSshComputerDialog({ ssh, onClose }: { ssh: SshComputersCapabi
   return (
     <PopupDialog className="settings-confirm" label="Add an SSH computer" onOpenChange={(open) => { if (!open && !busy) onClose(); }} open>
       <strong>Add an SSH computer</strong>
-      <p>OpenAIDE installs itself on the Linux computer over SSH and keeps running there while agents work. It uses your SSH configuration and keys, and asks here for anything else. OpenAIDE restarts and opens that computer's projects.</p>
+      <p>OpenAIDE installs itself on the Linux computer over SSH and keeps running there while agents work. It uses your SSH configuration and keys, and asks here for anything else. OpenAIDE then switches to that computer.</p>
       <SettingsField hint={hosts.length ? "Choose a host from your SSH configuration or type one." : undefined} label="Host">
         <input
           aria-label="Host"

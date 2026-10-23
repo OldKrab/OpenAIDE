@@ -110,9 +110,44 @@ describe("Desktop Task notifications", () => {
     expect(host.openTask).toHaveBeenCalledWith("task-9");
     expect(host.focusWindow).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps a second source's notifications and clicks apart from the window's", async () => {
+    const host = fakeHost({ source: "thisComputer", idBase: 1_000_000 });
+    const manager = createDesktopTaskNotifications(host);
+    await settled();
+    manager.reconcile("root-1", []);
+
+    manager.reconcile("root-1", [task("attention-1")]);
+    host.tap({ id: 7, title: "Task finished", extra: { taskId: "task-9" } });
+    await settled();
+
+    expect(host.sent).toEqual([expect.objectContaining({
+      id: 1_000_000,
+      extra: { taskId: "task-1", source: "thisComputer" },
+    })]);
+    expect(host.openTask).not.toHaveBeenCalled();
+    host.tap(host.sent[0]);
+    expect(host.openTask).toHaveBeenCalledWith("task-1");
+  });
+
+  it("leaves a second source's clicks to that source", async () => {
+    const host = fakeHost();
+    createDesktopTaskNotifications(host);
+    await settled();
+
+    host.tap({ id: 1_000_000, title: "Task finished", extra: { taskId: "task-9", source: "thisComputer" } });
+    await settled();
+
+    expect(host.openTask).not.toHaveBeenCalled();
+  });
 });
 
-function fakeHost({ focused = false, focusedTaskId }: { focused?: boolean; focusedTaskId?: string } = {}) {
+function fakeHost({ focused = false, focusedTaskId, source, idBase }: {
+  focused?: boolean;
+  focusedTaskId?: string;
+  source?: string;
+  idBase?: number;
+} = {}) {
   const values = new Map<string, string>();
   let actionListener: ((event: ActionPerformed) => void) | undefined;
   const now = Date.parse("2026-10-16T09:00:00.000Z");
@@ -129,6 +164,8 @@ function fakeHost({ focused = false, focusedTaskId }: { focused?: boolean; focus
   } = {
     sent,
     recorded,
+    source,
+    idBase,
     storage: {
       getItem: (key) => values.get(key) ?? null,
       setItem: (key, value) => { values.set(key, value); },

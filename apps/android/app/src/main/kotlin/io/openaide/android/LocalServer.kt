@@ -51,6 +51,14 @@ internal object LocalServer {
     @JvmStatic @Throws(IOException::class)
     fun status(context: Context): ServerStatus = held.status(context)
 
+    /**
+     * [status] of the App Server this process already reaches, or null when there
+     * is none. Never starts one: watching this phone's Tasks while a paired
+     * computer is in use must not launch Termux (ADR-0070).
+     */
+    @JvmStatic @Throws(IOException::class)
+    fun statusIfRunning(): ServerStatus? = held.statusIfRunning()
+
     /** The handoff line the App Server prints: where it listens and the token it accepts. */
     internal fun parse(output: String): HeldServer.Endpoint? = try {
         val line = JSONObject(output.trim().lineSequence().firstOrNull() ?: "")

@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use url::Url;
 
@@ -85,15 +86,14 @@ pub(crate) async fn desktop_save_support_export(
         .map_err(|_| "Desktop preferences are unavailable.".to_string())?
         .support_export_directory
         .clone();
-    let connection = state
-        .connection
-        .lock()
-        .map_err(|_| "Desktop runtime state is unavailable.".to_string())?
-        .clone()
+    // The export belongs to the App Server the window uses, and to its client.
+    let (connection, client_instance_id) = app
+        .state::<crate::desktop_connection::DesktopConnections>()
+        .in_use()
         .ok_or_else(|| "Desktop runtime is not connected.".to_string())?;
     let url = support_export_download_url(
         &connection.endpoint_url,
-        &state.client_instance_id,
+        &client_instance_id,
         &file_handle_id,
     )?;
     let operation_id = format!("desktop-support-export-{}", uuid::Uuid::new_v4());

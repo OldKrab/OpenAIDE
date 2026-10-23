@@ -11,6 +11,7 @@ import {
 } from "../../services/frontendShell";
 import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
 import type { PhoneConnection } from "./phoneConnection";
+import { currentComputer } from "../../services/computers";
 import { settingsInfo } from "./settingsInfo";
 import { SettingsButton, SettingsChoice, SettingsInlineError, SettingsKeys, SettingsNotice, SettingsSelect, SettingsSwitch } from "./settingsKit";
 import type { SettingsGroup, SettingsRow, SettingsSection } from "./settingsModel";
@@ -38,7 +39,7 @@ export function useGeneralSection({
 }: GeneralSectionProps): SettingsSection {
   const shell = currentFrontendShell();
   // While a paired computer is in use, its own runtime applies and this choice has no effect.
-  const runtime = useRuntimeGroup(shell?.remoteComputers?.current ? undefined : shell?.desktopRuntime);
+  const runtime = useRuntimeGroup(currentComputer(shell?.computers?.snapshot()) ? undefined : shell?.desktopRuntime);
   const updates = useUpdateGroup(shell?.desktopUpdates, replacementImpact);
   const enterSends = preferences.composer_submit_shortcut === "enter";
   const everyday: SettingsRow[] = [];

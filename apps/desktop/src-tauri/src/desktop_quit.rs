@@ -61,7 +61,12 @@ pub(crate) fn request_quit(app: &tauri::AppHandle) {
     }
     let warning = quit_warning(
         state.open_terminals.load(Ordering::Acquire),
-        app.state::<crate::DesktopState>().owns_app_server(),
+        // This computer's App Server is in use unless the window moved to another.
+        !matches!(
+            app.state::<crate::desktop_connection::DesktopConnections>()
+                .computer_in_use(),
+            Some(Some(_))
+        ),
     );
     let Some(warning) = warning else {
         start_quit(app);
