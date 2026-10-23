@@ -31,7 +31,11 @@ final class WorkspaceConnectionBridge {
         this.visible = visible;
         appearance = new SystemBarAppearance(activity, browser);
         controller = new ConnectionController(activity, new ConnectionController.View() {
-            @Override public void render(JSONObject state) { if (settingsRoute()) send("state", "state", state); }
+            @Override public void render(JSONObject state) {
+                // Every page gets the computers for the switcher; only Settings gets the setup state.
+                send("computers", "computers", state.optJSONArray("computers"));
+                if (settingsRoute()) send("state", "state", state);
+            }
             @Override public void changed() { changed.run(); }
             @Override public void close() { }
             @Override public void setup(String screen) { setup.accept(screen); }
@@ -53,14 +57,14 @@ final class WorkspaceConnectionBridge {
                         return;
                     }
                     int id = request.getInt("id");
+                    JSONObject command = request.getJSONObject("command");
                     long started = android.os.SystemClock.elapsedRealtime();
                     diagnostics.record("connection_controls", "started", id, 0);
-                    if (!visible.getAsBoolean() || !settingsRoute()) {
+                    if (!visible.getAsBoolean() || (!settingsRoute() && !SetupPagePolicy.allowedOnEveryPage(command.optString("action")))) {
                         diagnostics.record("connection_controls", "denied", id, android.os.SystemClock.elapsedRealtime() - started);
                         reply(id, false);
                         return;
                     }
-                    JSONObject command = request.getJSONObject("command");
                     if (command.optString("action").startsWith("update_")) updates.command(activity, command);
                     else controller.receive(command);
                     diagnostics.record("connection_controls", "accepted", id, android.os.SystemClock.elapsedRealtime() - started);
@@ -71,6 +75,7 @@ final class WorkspaceConnectionBridge {
         browser.postWebMessage(new WebMessage("openaide:connection-controls:1", new WebMessagePort[]{channel[1]}),
             Uri.parse(profile.endpoint.substring(0, profile.endpoint.length() - 1)));
         if (settingsRoute()) controller.resume();
+        else controller.refresh();
         // Every workspace page gets the update state, so navigation can mark an available update.
         updatesSubscription = updates.subscribe(state -> send("update", "update", state));
     }
@@ -89,7 +94,10 @@ final class WorkspaceConnectionBridge {
         catch (Exception ignored) { }
     }
 
-    void resume() { if (settingsRoute()) controller.resume(); }
+    void resume() {
+        if (settingsRoute()) controller.resume();
+        else controller.refresh();
+    }
     void onRequestPermissionsResult(int request, String[] permissions, int[] results) { controller.onRequestPermissionsResult(request, permissions, results); }
     void onActivityResult(int request, int result, Intent data) { controller.onActivityResult(request, result, data); }
     void detach() {

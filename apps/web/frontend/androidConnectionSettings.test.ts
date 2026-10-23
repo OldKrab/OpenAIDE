@@ -94,4 +94,30 @@ describe("Android connection controls", () => {
     test.receive({ type: "result", id: request.id, accepted: false });
     await expect(result).rejects.toThrow("unavailable");
   });
+  it("follows the phone's computers on every page, apart from the Settings state", () => {
+    const test = harness();
+    test.attach();
+    const computers = test.capability!.computers;
+    const changed = vi.fn();
+    computers.subscribe(changed);
+    expect(computers.snapshot()).toBeUndefined();
+    test.receive({ type: "computers", computers: [{ id: "studio", name: "Studio", current: true }] });
+    expect(computers.snapshot()).toEqual({ device: "phone", computers: [{ id: "studio", name: "Studio", current: true }] });
+    expect(computers.snapshot()).toBe(computers.snapshot());
+    expect(test.capability!.snapshot()).toBeUndefined();
+    expect(changed).toHaveBeenCalledOnce();
+  });
+  it("switches through the phone's own commands", async () => {
+    const test = harness();
+    test.attach();
+    const sent = () => test.port.postMessage.mock.calls.map(([message]) => JSON.parse(message));
+    const answer = () => { for (const request of sent()) test.receive({ type: "result", id: request.id, accepted: true }); };
+    const toStudio = test.capability!.computers.use("studio");
+    answer();
+    await toStudio;
+    const toPhone = test.capability!.computers.use();
+    answer();
+    await toPhone;
+    expect(sent().map((request) => request.command)).toEqual([{ action: "use_computer", id: "studio" }, { action: "local" }]);
+  });
 });

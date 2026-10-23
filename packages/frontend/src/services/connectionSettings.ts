@@ -5,8 +5,6 @@ export type ConnectionSnapshot = {
   paired: boolean;
   /** The name the selected computer reported; empty when it gave none. */
   computer: string;
-  /** Every computer this phone is paired with; `current` marks the one in use. */
-  computers: ConnectionComputer[];
   busy: boolean;
   notice: string;
   termux: boolean;
@@ -18,8 +16,6 @@ export type ConnectionSnapshot = {
   notifications: boolean;
   checks: Record<string, boolean | string> | null;
 };
-
-export type ConnectionComputer = { id: string; name: string; current: boolean };
 
 export type ConnectionCommand =
   | { action: "state" | "check" | "local" | "install" | "termux" | "get_termux" | "access" | "grant" | "signin" | "battery" | "termux_settings" | "app_settings" | "pair_setup" | "diagnostics" }

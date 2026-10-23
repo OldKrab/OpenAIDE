@@ -1,16 +1,13 @@
-import { type MouseEvent, type ReactNode } from "react";
+import { type MouseEvent } from "react";
 import { Minus, Square, X } from "lucide-react";
 import type { DesktopWindowCapability } from "../services/frontendShell";
 
 /** Renders product content inside shell-owned native window chrome. */
 export function DesktopTitleBar({
   integrated = false,
-  sidebarLead,
   window: desktopWindow,
 }: {
   integrated?: boolean;
-  /** Shown in the strip above the navigation, beside the native window buttons. */
-  sidebarLead?: ReactNode;
   window: DesktopWindowCapability;
 }) {
   const windowsChrome = desktopWindow.platform === "windows";
@@ -25,7 +22,7 @@ export function DesktopTitleBar({
         integrated ? "desktop-title-bar-integrated" : undefined,
       ].filter(Boolean).join(" ")}
     >
-      <div className="desktop-title-bar-sidebar" {...dragRegionProps}>{sidebarLead}</div>
+      <div className="desktop-title-bar-sidebar" {...dragRegionProps} />
       <div className="desktop-title-bar-content" {...dragRegionProps}>
         {windowsChrome && !integrated ? <span className="desktop-title-bar-label">OpenAIDE</span> : null}
       </div>

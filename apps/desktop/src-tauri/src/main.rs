@@ -13,8 +13,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-#[cfg(target_os = "macos")]
-use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 
 // First, so every module below can use `desktop_log!`.
@@ -36,6 +34,8 @@ mod desktop_update_shutdown;
 #[cfg(test)]
 mod desktop_update_tests;
 mod desktop_webview_log;
+#[cfg(target_os = "macos")]
+mod macos_menu;
 #[cfg(target_os = "macos")]
 mod macos_shell_path;
 #[cfg(target_os = "macos")]
@@ -182,7 +182,7 @@ fn main() {
             app.manage(DesktopQuitState::default());
             desktop_app_server_hold::install(app);
             #[cfg(target_os = "macos")]
-            install_macos_menu(app)?;
+            macos_menu::install(app)?;
             #[cfg(target_os = "macos")]
             configure_macos_webview_resize(app)?;
             #[cfg(all(target_os = "macos", debug_assertions))]
@@ -362,52 +362,6 @@ fn arm_macos_quit_watchdog(app: &tauri::AppHandle) {
             app.exit(0);
         }
     });
-}
-
-#[cfg(target_os = "macos")]
-fn install_macos_menu(app: &mut tauri::App) -> tauri::Result<()> {
-    let new_task = MenuItemBuilder::with_id("new-task", "New Task")
-        .accelerator("CmdOrCtrl+N")
-        .build(app)?;
-    let open_project = MenuItemBuilder::with_id("open-project", "Add Project Folder…")
-        .accelerator("CmdOrCtrl+O")
-        .build(app)?;
-    let settings = MenuItemBuilder::with_id("settings", "Settings…")
-        .accelerator("CmdOrCtrl+,")
-        .build(app)?;
-    let check_for_updates =
-        MenuItemBuilder::with_id("check-for-updates", "Check for Updates…").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit OpenAIDE")
-        .accelerator("CmdOrCtrl+Q")
-        .build(app)?;
-    let application = SubmenuBuilder::new(app, "OpenAIDE")
-        .items(&[
-            &settings,
-            &check_for_updates,
-            &PredefinedMenuItem::separator(app)?,
-            &quit,
-        ])
-        .build()?;
-    let file = SubmenuBuilder::new(app, "File")
-        .items(&[&new_task, &open_project])
-        .build()?;
-    let edit = SubmenuBuilder::new(app, "Edit")
-        .items(&[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, None)?,
-            &PredefinedMenuItem::copy(app, None)?,
-            &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?,
-        ])
-        .build()?;
-    app.set_menu(
-        MenuBuilder::new(app)
-            .items(&[&application, &file, &edit])
-            .build()?,
-    )?;
-    Ok(())
 }
 
 #[tauri::command]

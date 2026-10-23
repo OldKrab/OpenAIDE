@@ -2,8 +2,8 @@ import type { DeviceCollectionSnapshot, RemoteDeviceSummary } from "@openaide/ap
 import { Laptop, Monitor, Plus, QrCode, Smartphone, Wifi } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
-import { currentFrontendShell, type RemoteComputer, type RemoteComputersCapability } from "../../services/frontendShell";
-import type { ConnectionComputer } from "../../services/connectionSettings";
+import { computerName, currentComputer, useComputers, type ComputersCapability, type ComputersSnapshot, type ShellComputer } from "../../services/computers";
+import { currentFrontendShell } from "../../services/frontendShell";
 import { PopupDialog } from "../Popup";
 import { InviteDialog, JoinDialog } from "./devicePairingDialogs";
 import type { PhoneConnection } from "./phoneConnection";
@@ -19,8 +19,7 @@ export type RemoteSectionProps = {
 
 type Dialog =
   | { kind: "pair" }
-  | { kind: "forget"; computer: RemoteComputer }
-  | { kind: "forget-phone"; computer: ConnectionComputer }
+  | { kind: "forget"; computer: ShellComputer }
   | { kind: "invite" }
   | { kind: "join" }
   | { kind: "remove"; device: RemoteDeviceSummary };
@@ -30,18 +29,24 @@ type Dialog =
  * connected to, and which devices may connect to that computer.
  */
 export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectionProps): SettingsSection | undefined {
-  const capability = currentFrontendShell()?.remoteComputers;
-  const desktop = useRemoteComputers(capability);
+  const capability = currentFrontendShell()?.computers;
+  const computers = useSettingsComputers(capability);
   const [dialog, setDialog] = useState<Dialog>();
   const close = () => setDialog(undefined);
-  if (!capability && !phone && !deviceIntents) return undefined;
+  if (!capability && !deviceIntents) return undefined;
 
-  const remoteName = capability?.current ?? (phone?.state?.remote ? phone.state.computer || "Remote computer" : undefined);
+  const inUse = currentComputer(computers.snapshot);
+  const remoteName = inUse ? computerName(inUse) : undefined;
+  const device = computers.snapshot?.device === "phone" || phone ? "phone" : "computer";
+  const here = `this ${device}`;
   const groups: SettingsGroup[] = [];
-  if (capability) groups.push(desktopComputersGroup(desktop, () => setDialog({ kind: "pair" }), (computer) => setDialog({ kind: "forget", computer })));
-  else if (phone) groups.push(phoneComputersGroup(phone, (computer) => setDialog({ kind: "forget-phone", computer })));
+  if (capability) {
+    groups.push(computersGroup(computers, phone, () => {
+      if (capability.pair) setDialog({ kind: "pair" });
+      else void computers.openPairing();
+    }, (computer) => setDialog({ kind: "forget", computer })));
+  }
   if (deviceIntents) {
-    const here = phone ? "this phone" : "this computer";
     // The App Server names itself; a browser tab on another machine is not "this computer".
     groups.push(devicesGroup(devices, devices?.serverName || remoteName || here, (next) => setDialog(next)));
   }
@@ -54,27 +59,16 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
     groups,
     overlay: dialog ? (
       <>
-        {dialog.kind === "pair" && capability ? <PairComputerDialog capability={capability} onClose={close} /> : null}
-        {dialog.kind === "forget" && capability ? (
+        {dialog.kind === "pair" && capability?.pair ? <PairComputerDialog pair={capability.pair} onClose={close} /> : null}
+        {dialog.kind === "forget" ? (
           <SettingsConfirm
             confirmLabel="Forget"
-            detail={`This computer stops connecting to it.${dialog.computer.current ? " OpenAIDE restarts and works on this computer." : ""} It stays in that computer's device list until you remove it there.`}
-            label={`Forget ${dialog.computer.name}?`}
+            detail={`This ${device} stops connecting to it.${dialog.computer.current ? ` Work moves to ${here}.` : ""} It stays in that computer's device list until you remove it there.`}
+            label={`Forget ${computerName(dialog.computer)}?`}
             onClose={close}
-            onConfirm={() => desktop.forget(dialog.computer.id)}
+            onConfirm={() => computers.forget(dialog.computer.id)}
             pendingLabel="Forgetting…"
-            title={`Forget ${dialog.computer.name}?`}
-          />
-        ) : null}
-        {dialog.kind === "forget-phone" && phone ? (
-          <SettingsConfirm
-            confirmLabel="Forget"
-            detail={`This phone stops connecting to it.${dialog.computer.current ? " Work moves to this phone." : ""} Pair again to return.`}
-            label={`Forget ${dialog.computer.name || "this computer"}?`}
-            onClose={close}
-            onConfirm={() => phone.execute({ action: "forget_computer", id: dialog.computer.id })}
-            pendingLabel="Forgetting…"
-            title={`Forget ${dialog.computer.name || "this computer"}?`}
+            title={`Forget ${computerName(dialog.computer)}?`}
           />
         ) : null}
         {dialog.kind === "invite" && deviceIntents ? <InviteDialog devices={devices?.devices ?? []} intents={deviceIntents} onClose={close} /> : null}
@@ -95,59 +89,44 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
   };
 }
 
-type DesktopComputers = {
-  computers: RemoteComputer[] | undefined;
-  /** Id of the computer being switched to; "" stands for this computer. */
+type SettingsComputers = {
+  snapshot: ComputersSnapshot | undefined;
+  /** Id of the computer being switched to; "" stands for this device. */
   switching: string | undefined;
   failed: { id: string; message: string } | undefined;
-  loadError: string;
   use(id?: string): Promise<void>;
   forget(id: string): Promise<void>;
+  openPairing(): Promise<void>;
 };
 
 /**
- * The shell owns the paired computers and restarts to apply a switch, so a
- * settled promise means nothing changed or the shell refused with a sentence.
+ * The shell owns the computers and replaces the page to apply a switch, so a
+ * settled `use` means the shell accepted it or refused with a sentence.
  */
-function useRemoteComputers(capability: RemoteComputersCapability | undefined): DesktopComputers {
-  const [computers, setComputers] = useState<RemoteComputer[]>();
+function useSettingsComputers(capability: ComputersCapability | undefined): SettingsComputers {
+  const snapshot = useComputers(capability);
   const [switching, setSwitching] = useState<string>();
   const [failed, setFailed] = useState<{ id: string; message: string }>();
-  const [loadError, setLoadError] = useState("");
   const mounted = useRef(true);
-  const refresh = async () => {
-    if (!capability) return;
-    try {
-      const next = await capability.list();
-      if (mounted.current) {
-        setComputers(next);
-        setLoadError("");
-      }
-    } catch {
-      if (mounted.current) setLoadError("OpenAIDE could not read its paired computers. Reopen Settings to try again.");
-    }
-  };
   useEffect(() => {
     mounted.current = true;
-    void refresh();
     return () => { mounted.current = false; };
-  }, [capability]);
+  }, []);
   return {
-    computers,
+    snapshot,
     switching,
     failed,
-    loadError,
     use: async (id) => {
       if (!capability || switching !== undefined) return;
       setFailed(undefined);
       setSwitching(id ?? "");
       try {
         await capability.use(id);
-        await refresh();
       } catch (cause) {
-        if (mounted.current) setFailed({ id: id ?? "", message: errorSentence(cause, "OpenAIDE could not switch. Try again.") });
-      } finally {
-        if (mounted.current) setSwitching(undefined);
+        if (mounted.current) {
+          setSwitching(undefined);
+          setFailed({ id: id ?? "", message: errorSentence(cause, "OpenAIDE could not switch. Try again.") });
+        }
       }
     },
     forget: async (id) => {
@@ -157,121 +136,93 @@ function useRemoteComputers(capability: RemoteComputersCapability | undefined): 
       } catch (cause) {
         throw new Error(errorSentence(cause, "OpenAIDE could not forget that computer. Try again."));
       }
-      await refresh();
+    },
+    openPairing: async () => {
+      try {
+        await capability?.openPairing?.();
+      } catch (cause) {
+        if (mounted.current) setFailed({ id: "pair", message: errorSentence(cause, "Pairing could not open. Try again.") });
+      }
     },
   };
 }
 
-function desktopComputersGroup(
-  desktop: DesktopComputers,
+function computersGroup(
+  computers: SettingsComputers,
+  phone: PhoneConnection | undefined,
   onPair: () => void,
-  onForget: (computer: RemoteComputer) => void,
+  onForget: (computer: ShellComputer) => void,
 ): SettingsGroup {
-  const computers = desktop.computers ?? [];
-  const remote = computers.some((computer) => computer.current);
-  const busy = desktop.switching !== undefined;
-  const rows: SettingsRow[] = [{
-    id: "this-computer",
-    label: "This computer",
-    description: "Projects, tools and Agents here",
-    keywords: "computer remote connect switch pc local",
-    leading: <Monitor aria-hidden="true" size={18} strokeWidth={1.6} />,
-    selected: !remote,
-    error: desktop.failed?.id === "" ? desktop.failed.message : undefined,
-    control: (
-      <SettingsChoice
-        active={!remote}
-        busy={desktop.switching === ""}
-        disabled={busy}
-        label="This computer"
-        onUse={() => void desktop.use()}
-      />
-    ),
-  }];
-  for (const computer of computers) {
+  const snapshot = computers.snapshot;
+  const list = snapshot?.computers ?? [];
+  const remote = list.some((computer) => computer.current);
+  const busy = computers.switching !== undefined || Boolean(phone?.busy);
+  const onPhone = snapshot?.device === "phone";
+  const here = onPhone ? "This phone" : "This computer";
+  const rows: SettingsRow[] = [];
+  if (snapshot) {
+    rows.push({
+      id: onPhone ? "this-phone" : "this-computer",
+      label: here,
+      description: onPhone ? "Runs in Termux" : "Projects, tools and Agents here",
+      keywords: onPhone ? "phone local termux connect switch" : "computer remote connect switch pc local",
+      leading: onPhone ? <Smartphone aria-hidden="true" size={18} strokeWidth={1.6} /> : <Monitor aria-hidden="true" size={18} strokeWidth={1.6} />,
+      selected: !remote,
+      error: computers.failed?.id === "" ? computers.failed.message : undefined,
+      control: (
+        <SettingsChoice
+          active={!remote}
+          busy={computers.switching === ""}
+          busyLabel="Switching…"
+          disabled={busy}
+          label={here}
+          onUse={() => void computers.use()}
+        />
+      ),
+    });
+  }
+  for (const computer of list) {
+    const name = computerName(computer);
     rows.push({
       id: `computer-${computer.id}`,
-      label: computer.name,
+      label: name,
       description: "Paired computer",
       keywords: "computer remote connect switch pc",
       leading: <Laptop aria-hidden="true" size={18} strokeWidth={1.6} />,
       selected: computer.current,
-      error: desktop.failed?.id === computer.id ? desktop.failed.message : undefined,
+      error: computers.failed?.id === computer.id ? computers.failed.message : undefined,
       control: (
         <>
-          <SettingsButton ariaLabel={`Forget ${computer.name}`} disabled={busy} onClick={() => onForget(computer)} variant="quiet">Forget</SettingsButton>
+          <SettingsButton ariaLabel={`Forget ${name}`} disabled={busy} onClick={() => onForget(computer)} variant="quiet">Forget</SettingsButton>
           <SettingsChoice
             active={computer.current}
-            busy={desktop.switching === computer.id}
+            busy={computers.switching === computer.id}
+            busyLabel="Switching…"
             disabled={busy}
-            label={computer.name}
-            onUse={() => void desktop.use(computer.id)}
+            label={name}
+            onUse={() => void computers.use(computer.id)}
           />
         </>
       ),
     });
   }
+  const state = phone?.state;
+  const pairFailed = computers.failed?.id === "pair" ? computers.failed.message : undefined;
+  const loadError = snapshot?.error;
   return {
     id: "connected-to",
     title: "Connected to",
     info: settingsInfo.connectedTo,
     actions: <SettingsButton disabled={busy} icon={<Plus aria-hidden="true" size={14} />} onClick={onPair}>Pair a computer</SettingsButton>,
-    notice: desktop.loadError ? <SettingsInlineError>{desktop.loadError}</SettingsInlineError> : undefined,
-    rows,
-  };
-}
-
-function phoneComputersGroup(phone: PhoneConnection, onForget: (computer: ConnectionComputer) => void): SettingsGroup {
-  const state = phone.state;
-  const rows: SettingsRow[] = [];
-  if (state) {
-    rows.push({
-      id: "this-phone",
-      label: "This phone",
-      description: "Runs in Termux",
-      keywords: "phone local termux connect switch",
-      leading: <Smartphone aria-hidden="true" size={18} strokeWidth={1.6} />,
-      selected: !state.remote,
-      control: state.remote
-        ? <SettingsButton ariaLabel="Use This phone" disabled={phone.busy} onClick={() => void phone.execute({ action: "local" })}>Use</SettingsButton>
-        : <SettingsChoice active label="This phone" onUse={() => undefined} />,
-    });
-    for (const computer of state.computers ?? []) {
-      const name = computer.name || "Remote computer";
-      rows.push({
-        id: `computer-${computer.id}`,
-        label: name,
-        description: "Paired computer",
-        keywords: "computer remote connect switch pc",
-        leading: <Laptop aria-hidden="true" size={18} strokeWidth={1.6} />,
-        selected: computer.current,
-        control: (
-          <>
-            <SettingsButton ariaLabel={`Forget ${computer.name || "this computer"}`} disabled={phone.busy} onClick={() => onForget(computer)} variant="quiet">Forget</SettingsButton>
-            {computer.current
-              ? <SettingsChoice active label={name} onUse={() => undefined} />
-              : <SettingsButton ariaLabel={`Use ${name}`} disabled={phone.busy} onClick={() => void phone.execute({ action: "use_computer", id: computer.id })}>Use</SettingsButton>}
-          </>
-        ),
-      });
-    }
-  }
-  return {
-    id: "connected-to",
-    title: "Connected to",
-    info: settingsInfo.connectedTo,
-    actions: (
-      <SettingsButton disabled={phone.busy} icon={<Plus aria-hidden="true" size={14} />} onClick={() => void phone.execute({ action: "pair_setup" })}>
-        Pair a computer
-      </SettingsButton>
-    ),
     notice: (
       <>
+        {loadError ? <SettingsInlineError>{loadError}</SettingsInlineError> : null}
+        {pairFailed ? <SettingsInlineError>{pairFailed}</SettingsInlineError> : null}
         {state?.remote && state.notice ? <SettingsNotice>{state.notice}</SettingsNotice> : null}
-        {phone.error ? <SettingsInlineError>{phone.error}</SettingsInlineError> : null}
+        {phone?.error ? <SettingsInlineError>{phone.error}</SettingsInlineError> : null}
       </>
     ),
-    empty: phone.error ? undefined : "Loading…",
+    empty: loadError || phone?.error ? undefined : "Loading…",
     rows,
   };
 }
@@ -317,8 +268,8 @@ function devicesGroup(
   };
 }
 
-/** Spends a code another computer shows; success restarts the shell on that computer's work. */
-function PairComputerDialog({ capability, onClose }: { capability: RemoteComputersCapability; onClose: () => void }) {
+/** Spends a code another computer shows; success moves the shell to that computer's work. */
+function PairComputerDialog({ pair: spend, onClose }: { pair: (code: string) => Promise<void>; onClose: () => void }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -326,7 +277,7 @@ function PairComputerDialog({ capability, onClose }: { capability: RemoteCompute
     setBusy(true);
     setError(undefined);
     try {
-      await capability.pair(code);
+      await spend(code);
       onClose();
     } catch (cause) {
       setError(errorSentence(cause, "Pairing failed. Try again."));

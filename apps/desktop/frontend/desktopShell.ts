@@ -13,13 +13,14 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { CLIENT_DETACH, type AppServerSession } from "@openaide/app-server-client";
 import type { HostToWebviewMessage, SettingsIntent, SettingsTabId } from "@openaide/app-shell-contracts";
-import type { FrontendShell, RemoteComputer } from "../../../packages/frontend/src/services/frontendShell";
+import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
 import { createShellAppearance } from "../../../packages/frontend/src/services/shellAppearance";
 import type { PostHostMessage } from "../../../packages/frontend/src/state/postHostMessage";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
 import { quitDesktop } from "./desktopQuitLifecycle";
 import { createDesktopProjectPicker } from "./desktopProjectPicker";
 import { createDesktopServerRecovery } from "./desktopServerRecovery";
+import { createDesktopComputers } from "./desktopComputers";
 import { createDesktopUpdates } from "./desktopUpdates";
 import type { DesktopBootstrap, LocalHttpConnection } from "./desktopBootstrap";
 import { desktopCommandForKeyboardEvent, type DesktopCommand, type DesktopSurfaceCommand } from "./desktopCommands";
@@ -255,13 +256,7 @@ export function createDesktopShell(
       }),
       select: (environment) => invoke("set_desktop_runtime_environment", { environment }),
     } : undefined,
-    remoteComputers: {
-      current: host.remoteComputer,
-      list: () => invoke<RemoteComputer[]>("desktop_remote_snapshot"),
-      pair: (code) => invoke("desktop_remote_pair", { code }),
-      use: (id) => invoke("desktop_remote_use", { id: id ?? null }),
-      forget: (id) => invoke("desktop_remote_forget", { id }),
-    },
+    computers: createDesktopComputers(invoke),
     desktopUpdates,
     desktopCommands: {
       subscribe(listener) {

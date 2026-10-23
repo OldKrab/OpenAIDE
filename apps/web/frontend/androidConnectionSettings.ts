@@ -1,10 +1,18 @@
+import type { ComputersCapability, ComputersSnapshot } from "../../../packages/frontend/src/services/computers";
 import type { ConnectionCommand, ConnectionSettings, ConnectionSnapshot } from "../../../packages/frontend/src/services/connectionSettings";
 import type { DesktopUpdateCapability } from "../../../packages/frontend/src/services/frontendShell";
 import { androidAppUpdates, type AndroidUpdateCommand } from "./androidAppUpdates";
 import { androidSystemAppearance } from "./androidSystemAppearance";
 
-/** Phone controls the Android App serves over one native channel: connection settings and its own updates. */
-export type AndroidConnectionSettings = ConnectionSettings & { appUpdates: DesktopUpdateCapability };
+/**
+ * The phone's controls over one native channel: Settings state, which the phone
+ * sends only to its Settings sections; its own updates; and the computers, which
+ * it sends to every page so the switcher works anywhere (ADR-0070).
+ */
+export type AndroidConnectionSettings = ConnectionSettings & {
+  appUpdates: DesktopUpdateCapability;
+  computers: ComputersCapability;
+};
 
 export function androidConnectionSettings(host: Window): AndroidConnectionSettings | undefined {
   if (!/(?:^| )OpenAIDE-Android\/1(?: |$)/.test(host.navigator.userAgent)) return undefined;
@@ -14,6 +22,7 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
     catch { }
   });
   let state: ConnectionSnapshot | undefined;
+  let computers: ComputersSnapshot | undefined;
   let sequence = 0;
   const listeners = new Set<() => void>();
   const pending = new Map<number, { send(): void; finish(error?: Error): void }>();
@@ -37,6 +46,9 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
           notify();
         } else if (message.type === "update") {
           updates.receive(message.update);
+        } else if (message.type === "computers" && Array.isArray(message.computers)) {
+          computers = { device: "phone", computers: message.computers };
+          notify();
         }
       } catch { }
     };
@@ -69,10 +81,18 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
     request.send();
   });
   const updates = androidAppUpdates(execute);
+  const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
   return {
     snapshot: () => state,
-    subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    subscribe,
     execute,
     appUpdates: updates.capability,
+    computers: {
+      snapshot: () => computers,
+      subscribe,
+      use: id => execute(id ? { action: "use_computer", id } : { action: "local" }),
+      forget: id => execute({ action: "forget_computer", id }),
+      openPairing: () => execute({ action: "pair_setup" }),
+    },
   };
 }

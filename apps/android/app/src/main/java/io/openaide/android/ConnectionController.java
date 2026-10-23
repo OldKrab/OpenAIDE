@@ -282,6 +282,9 @@ final class ConnectionController extends ContextWrapper {
         if (code != null) pair(code);
     }
 
+    /** Sends the current state without rechecking this phone's setup. */
+    void refresh() { emit(); }
+
     void resume() {
         if (recheckOnReturn && !busy) { recheckOnReturn = false; check(); }
         else emit();

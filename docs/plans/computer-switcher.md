@@ -16,10 +16,10 @@ Status: agreed design ([ADR-0070](../adr/0070-switching-computers-is-in-place-an
 
 ## Slice 1: shared switcher and Mobile App state on every page
 
-- Replace `connectionSettings`' computer fields and `remoteComputers` with one `computers` shell capability: snapshot (this device, computers with id, name, kind, current, link), subscribe, `use(id)`, `cancel()`. Each shell adapts its native side to it. The Settings, Remote page reads the same capability.
+- Replace `connectionSettings`' computer fields and `remoteComputers` with one `computers` shell capability: snapshot (this device, computers with id, name, current), subscribe, `use(id)`, `forget(id)`, and the shell's pairing entry. Each shell adapts its native side to it. The Settings, Remote page reads the same capability. The link state comes from the Frontend's own session; `cancel()` arrives with connect-first in slice 3 and `kind` with SSH Computers.
 - `ComputerSwitcher` in the sidebar footer's Settings row, shown once any computer exists: name and dot on another computer, icon on this device, words only for an unhealthy link. An upward listbox: this device, then computers in the order added, current checked, last item "Pair or manage computers…". Remove `SidebarComputer` and the Desktop title-bar lead.
 - Ctrl/Cmd+Shift+S opens it (`desktopCommands` gains `switch-computer`, and macOS File ▸ Switch Computer…); arrows, Enter, and 1 to 9 inside.
-- Mobile App: push computer state to every page; accept `state`, `use_computer`, and `local` from any route; all other commands stay Settings-only.
+- Mobile App: push the computer list (not the full connection state) to every page and on attach or resume; accept `use_computer` and `local` from any route; all other commands stay Settings-only.
 - Tests: switcher unit and DOM tests (unpaired shows nothing, local icon, remote name, keyboard, narrow truncation); Android bridge policy test for the widened commands; one wide and one narrow viewport check.
 
 ## Slice 2: Desktop switches in place and keeps its App Server
@@ -50,4 +50,4 @@ Each switch emits `computer_switch` start and terminal events under one correlat
 
 ## Open questions
 
-- SSH Computers join the list once ADR-0069 lands; the capability's `kind` and route fields are shaped for them now.
+- SSH Computers join the list once ADR-0069 lands, adding a `kind` to each computer and merged routes (ADR-0070).
