@@ -155,22 +155,22 @@ use crate::task::{
     TaskAdoptNativeSessionResult, TaskArchiveOlderCutoff, TaskArchiveOlderParams,
     TaskArchiveOlderProtectedNativeSession, TaskArchiveOlderProtectedReason,
     TaskArchiveOlderProtectedTask, TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult,
-    TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
-    TaskClosePlanParams, TaskClosePlanResult, TaskLifecycleChanged, TaskListLifecycle,
-    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
-    TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
-    TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueSendSelection, TaskQueueTakeParams,
-    TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
-    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
-    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult, TaskStopSubagentParams,
-    TaskStopSubagentResult, TaskTitleSelection, TaskToolImagePreviewParams,
-    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
-    WorkspaceFileSearchState,
+    TaskAttentionWaitParams, TaskAttentionWaitResult, TaskCancelParams, TaskCancelResult,
+    TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams, TaskClosePlanResult,
+    TaskLifecycleChanged, TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams,
+    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
+    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskNavigationSection,
+    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
+    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
+    TaskQueueSendSelection, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
+    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
+    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskStopBackgroundCommandParams,
+    TaskStopBackgroundCommandResult, TaskStopSubagentParams, TaskStopSubagentResult,
+    TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -375,6 +375,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<DevicesApproveJoinRequestResult>(output, config);
     push_decl::<DevicesRemoveParams>(output, config);
     push_decl::<DevicesRemoveResult>(output, config);
+    push_decl::<TaskAttentionWaitParams>(output, config);
+    push_decl::<TaskAttentionWaitResult>(output, config);
     push_decl::<RuntimeDeveloperSettings>(output, config);
     push_decl::<RuntimeAcpTraceSettings>(output, config);
 

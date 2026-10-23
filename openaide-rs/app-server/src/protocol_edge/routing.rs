@@ -21,14 +21,15 @@ use openaide_app_server_protocol::methods::{
     SETTINGS_RESET_TASK_HISTORY, SETTINGS_UPDATE_NEW_TASK_DEFAULTS, SETTINGS_UPDATE_PREFERENCES,
     SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
     SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE, TASK_ACQUIRE_IN_WORKTREE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_ARCHIVE_OLDER, TASK_CANCEL, TASK_CHAT_PAGE,
-    TASK_CLOSE_PLAN, TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE,
-    TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND, TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE,
-    TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION, TASK_RESTORE, TASK_SEARCH_FILES,
-    TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PERMISSION_POLICY, TASK_SET_PINNED, TASK_SET_TITLE,
-    TASK_TOOL_IMAGE_PREVIEW, WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE,
-    WORKTREE_LINKED_TASKS, WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT,
-    WORKTREE_REMOVE, WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
+    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_ARCHIVE_OLDER, TASK_ATTENTION_WAIT, TASK_CANCEL,
+    TASK_CHAT_PAGE, TASK_CLOSE_PLAN, TASK_COMPOSER_HISTORY, TASK_LIST, TASK_MARK_READ,
+    TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND,
+    TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE, TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION,
+    TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PERMISSION_POLICY,
+    TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW, WORKSPACE_LIST_DIRECTORY,
+    WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS, WORKTREE_RECREATE,
+    WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE, WORKTREE_RENAME,
+    WORKTREE_RESOLVE_FOLDER,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -48,8 +49,10 @@ impl RpcGateway {
         let (message_kind, method, request_id, client_request_id) =
             inbound_diagnostic_fields(&message);
         let should_log = method.as_deref() != Some(CLIENT_HEARTBEAT);
+        // A watching App Shell repeats this read all day; only failures are worth a line.
+        let quiet_unless_failed = method.as_deref() == Some(TASK_ATTENTION_WAIT);
         let connection_id_value = connection_id.as_str().to_string();
-        if should_log {
+        if should_log && !quiet_unless_failed {
             logging::info(
                 "rpc_request_started",
                 json!({
@@ -70,7 +73,7 @@ impl RpcGateway {
             event_count,
             server_request_count,
         ) = gateway_outcome_diagnostic_fields(&outcome);
-        if should_log {
+        if should_log && (!quiet_unless_failed || error_code.is_some()) {
             logging::info(
                 "rpc_request_completed",
                 json!({
@@ -414,6 +417,7 @@ impl RpcGateway {
             }
             TASK_RESTORE => self.handle_task_restore(connection_id, id, params, meta),
             TASK_LIST => self.handle_task_list(connection_id, id, params, meta),
+            TASK_ATTENTION_WAIT => self.handle_task_attention_wait(connection_id, id, params, meta),
             TASK_OPEN => self.handle_task_open(connection_id, id, params, meta),
             TASK_RELOAD_NATIVE_SESSION => {
                 self.handle_task_reload_native_session(connection_id, id, params, meta)

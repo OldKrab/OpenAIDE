@@ -123,21 +123,12 @@ internal object LocalServer {
                     1 -> active++
                     0 -> waiting++
                 }
-                attention(task)?.let(attention::add)
+                AttentionWire.attention(task)?.let(attention::add)
             }
             cursor = tasks.opt("nextCursor")?.takeIf { it != JSONObject.NULL } ?: return ServerStatus(active, waiting, attention)
             if (!seen.add(cursor.toString())) throw IOException("Invalid task cursor")
         }
         throw IOException("Too many task pages")
-    }
-
-    private fun attention(task: JSONObject): AttentionNotifications.Attention? {
-        val event = task.optJSONObject("attention") ?: return null
-        val taskId = task.optString("taskId").ifEmpty { return null }
-        val eventId = event.optString("eventId").ifEmpty { return null }
-        val title = task.optJSONObject("title")?.optString("value")?.ifEmpty { null } ?: "Untitled task"
-        return AttentionNotifications.Attention(taskId, title, eventId, event.optString("reason"),
-            AttentionNotifications.timestamp(event.optString("occurredAt")))
     }
 
     private fun start(context: Context, result: CompletableFuture<Endpoint>) {
@@ -163,13 +154,7 @@ internal object LocalServer {
                     val server = parse(output)
                     if (server == null) { finish("invalid_handoff", null); return@execute }
                     try {
-                        request(server, "client/initialize", JSONObject()
-                            .put("clientInstanceId", CLIENT_ID)
-                            .put("shell", JSONObject().put("kind", "mobile"))
-                            .put("requestedSurface", JSONObject().put("kind", "home"))
-                            .put("capabilities", JSONObject()
-                                .put("protocol", JSONArray(listOf("requestResponses", "stableClientRequestIds", "resync")))
-                                .put("shell", JSONArray())), INITIALIZE_TIMEOUT_MS)
+                        request(server, "client/initialize", AttentionWire.initializeParams(CLIENT_ID), INITIALIZE_TIMEOUT_MS)
                         finish("ready", server)
                     } catch (error: IOException) {
                         finish("initialize_failed", null)

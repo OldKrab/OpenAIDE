@@ -105,6 +105,7 @@ pub const TASK_CHAT_PAGE: &str = "task/chatPage";
 pub const TASK_COMPOSER_HISTORY: &str = "task/composerHistory";
 pub const TASK_LIST: &str = "task/list";
 pub const TASK_NAVIGATION_REFRESH: &str = "taskNavigation/refresh";
+pub const TASK_ATTENTION_WAIT: &str = "taskAttention/wait";
 pub const TASK_NAVIGATION_LOAD_MORE: &str = "taskNavigation/loadMore";
 pub const NATIVE_SESSION_ARCHIVE: &str = "nativeSession/archive";
 pub const NATIVE_SESSION_SET_TITLE: &str = "nativeSession/setTitle";
@@ -225,6 +226,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_LIST,
     TASK_NAVIGATION_REFRESH,
     TASK_NAVIGATION_LOAD_MORE,
+    TASK_ATTENTION_WAIT,
     NATIVE_SESSION_ARCHIVE,
     NATIVE_SESSION_SET_TITLE,
     NATIVE_SESSION_SET_PINNED,

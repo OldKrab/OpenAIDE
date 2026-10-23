@@ -32,7 +32,7 @@ use crate::methods::{
 };
 use crate::methods::{
     DEVICES_APPROVE_JOIN_REQUEST, DEVICES_CANCEL_INVITE, DEVICES_CREATE_INVITE,
-    DEVICES_PREVIEW_JOIN_REQUEST, DEVICES_REMOVE,
+    DEVICES_PREVIEW_JOIN_REQUEST, DEVICES_REMOVE, TASK_ATTENTION_WAIT,
 };
 use crate::methods::{
     FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_SEARCH,
@@ -242,6 +242,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const DEVICES_REMOVE = {:?} as const;\n",
         DEVICES_REMOVE
+    ));
+    output.push_str(&format!(
+        "export const TASK_ATTENTION_WAIT = {:?} as const;\n",
+        TASK_ATTENTION_WAIT
     ));
     output.push_str(&format!(
         "export const ATTACHMENT_LIST_ROOTS = {:?} as const;\n",
