@@ -189,6 +189,15 @@ pub fn update_shutdown_readiness_failed() -> ProtocolError {
     }
 }
 
+pub fn replacement_impact_failed() -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::Internal,
+        message: "Could not determine what replacing the App Server would interrupt".to_string(),
+        recoverable: true,
+        target: None,
+    }
+}
+
 pub fn unsupported_method(method: &str) -> ProtocolError {
     ProtocolError {
         code: ProtocolErrorCode::InvalidRequest,

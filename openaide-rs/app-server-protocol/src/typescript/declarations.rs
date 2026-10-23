@@ -36,9 +36,10 @@ use crate::attachment::{
     PreSendAttachment,
 };
 use crate::client::{
-    ClientCapabilities, ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult,
-    ClientDetachParams, ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult,
-    ClientProbeLifecycle, ClientProbeParams, ClientProbeResult, ClientProtocolCapability,
+    AttachedClientSummary, ClientCapabilities, ClientCapabilitiesChangedParams,
+    ClientCapabilitiesChangedResult, ClientDetachParams, ClientDetachResult, ClientHeartbeatParams,
+    ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams, ClientProbeResult,
+    ClientProtocolCapability, ClientReplacementImpactParams, ClientReplacementImpactResult,
     ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface, SettingsSection,
     ShellCapability, ShellDescriptor, ShellKind, UpdateShutdownAbortParams,
     UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
@@ -238,6 +239,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<UpdateShutdownCommitResult>(output, config);
     push_decl::<UpdateShutdownAbortParams>(output, config);
     push_decl::<UpdateShutdownAbortResult>(output, config);
+    push_decl::<ClientReplacementImpactParams>(output, config);
+    push_decl::<ClientReplacementImpactResult>(output, config);
+    push_decl::<AttachedClientSummary>(output, config);
     push_decl::<ClientProbeLifecycle>(output, config);
     push_decl::<InitializeParams>(output, config);
     push_decl::<InitializeResult>(output, config);

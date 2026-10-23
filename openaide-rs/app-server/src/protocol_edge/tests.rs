@@ -73,6 +73,7 @@ use super::*;
 mod client_probe;
 mod devices;
 mod gateway_lock_wait;
+mod replacement_impact;
 
 #[test]
 fn rejects_product_request_before_initialize() {

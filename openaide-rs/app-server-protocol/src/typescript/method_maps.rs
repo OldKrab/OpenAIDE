@@ -11,6 +11,10 @@ pub(super) fn push_method_maps(output: &mut String) {
         output.len() - ";\n".len(),
         " | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE",
     );
+    output.insert_str(
+        output.len() - ";\n".len(),
+        " | typeof CLIENT_REPLACEMENT_IMPACT",
+    );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;\n");
     output.push_str("  [FILE_VIEWER_SEARCH]: ProjectFilesParams;\n");
@@ -25,6 +29,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [CLIENT_UPDATE_SHUTDOWN_PREPARE]: UpdateShutdownPrepareParams;\n");
     output.push_str("  [CLIENT_UPDATE_SHUTDOWN_COMMIT]: UpdateShutdownCommitParams;\n");
     output.push_str("  [CLIENT_UPDATE_SHUTDOWN_ABORT]: UpdateShutdownAbortParams;\n");
+    output.push_str("  [CLIENT_REPLACEMENT_IMPACT]: ClientReplacementImpactParams;\n");
     output.push_str("  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveParams;\n");
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeParams;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;\n");
@@ -148,6 +153,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [CLIENT_UPDATE_SHUTDOWN_PREPARE]: UpdateShutdownPrepareResult;\n");
     output.push_str("  [CLIENT_UPDATE_SHUTDOWN_COMMIT]: UpdateShutdownCommitResult;\n");
     output.push_str("  [CLIENT_UPDATE_SHUTDOWN_ABORT]: UpdateShutdownAbortResult;\n");
+    output.push_str("  [CLIENT_REPLACEMENT_IMPACT]: ClientReplacementImpactResult;\n");
     output.push_str("  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveResult;\n");
     output.push_str("  [STATE_SUBSCRIBE]: StateSubscribeResult;\n");
     output.push_str("  [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;\n");
@@ -274,6 +280,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("export type ClientUpdateShutdownPrepareRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_PREPARE>;\n");
     output.push_str("export type ClientUpdateShutdownCommitRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_COMMIT>;\n");
     output.push_str("export type ClientUpdateShutdownAbortRequest = TypedClientRequest<typeof CLIENT_UPDATE_SHUTDOWN_ABORT>;\n");
+    output.push_str("export type ClientReplacementImpactRequest = TypedClientRequest<typeof CLIENT_REPLACEMENT_IMPACT>;\n");
     output.push_str(
         "export type ClientCapabilitiesChangedRequest = TypedClientRequest<typeof CLIENT_CAPABILITIES_CHANGED>;\n",
     );
@@ -288,6 +295,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("export type ClientUpdateShutdownPrepareResponse = ResponseEnvelope<UpdateShutdownPrepareResult>;\n");
     output.push_str("export type ClientUpdateShutdownCommitResponse = ResponseEnvelope<UpdateShutdownCommitResult>;\n");
     output.push_str("export type ClientUpdateShutdownAbortResponse = ResponseEnvelope<UpdateShutdownAbortResult>;\n");
+    output.push_str("export type ClientReplacementImpactResponse = ResponseEnvelope<ClientReplacementImpactResult>;\n");
     output
         .push_str("export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;\n");
     output.push_str(
