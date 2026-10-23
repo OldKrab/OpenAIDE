@@ -81,6 +81,11 @@ fn probe(installed: &str) -> (&'static str, Result<String, TransportError>) {
     )
 }
 
+/// The protocol this shell speaks, so an older App Server on it still accepts the shell.
+fn current() -> String {
+    APP_SERVER_PROTOCOL_VERSION.to_string()
+}
+
 fn report(outcome: &str, app_version: &str, protocol: &str) -> Result<String, TransportError> {
     Ok(json!({
         "outcome": outcome,
@@ -115,7 +120,7 @@ fn installs_a_missing_release_then_forwards_the_kept_app_server() {
         ("openaide-app-server.upload", Ok("installed\n".into())),
         (
             "keep \"$@\"' openaide '0.11.0' 'start'",
-            report("started", VERSION, "2.2"),
+            report("started", VERSION, &current()),
         ),
     ]);
     let mut fetched = 0;
@@ -165,7 +170,7 @@ fn an_installed_release_is_not_fetched_again() {
     let (launcher, _, stages) = launcher();
     let mut ssh = FakeSsh::new(vec![
         probe(SHA),
-        ("keep", report("attached", VERSION, "2.2")),
+        ("keep", report("attached", VERSION, &current())),
     ]);
 
     ready(launcher.launch(&mut ssh, StartMode::Keep, &mut no_fetch, "op-1"));
@@ -181,8 +186,8 @@ fn an_older_app_server_that_speaks_the_protocol_is_joined_and_offered_an_update(
     let (launcher, _, _) = launcher();
     let mut ssh = FakeSsh::new(vec![
         probe(SHA),
-        ("'start'", report("mismatch", "0.10.1", "2.2")),
-        ("'start' '--join'", report("joined", "0.10.1", "2.2")),
+        ("'start'", report("mismatch", "0.10.1", &current())),
+        ("'start' '--join'", report("joined", "0.10.1", &current())),
     ]);
 
     let ready = ready(launcher.launch(&mut ssh, StartMode::Keep, &mut no_fetch, "op-1"));
@@ -209,7 +214,10 @@ fn an_older_app_server_this_shell_cannot_use_needs_a_confirmed_update() {
 
     let mut ssh = FakeSsh::new(vec![
         probe(SHA),
-        ("'start' '--replace'", report("started", VERSION, "2.2")),
+        (
+            "'start' '--replace'",
+            report("started", VERSION, &current()),
+        ),
     ]);
     ready(launcher.launch(&mut ssh, StartMode::Replace, &mut no_fetch, "op-2"));
 }
