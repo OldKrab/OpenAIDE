@@ -18,6 +18,7 @@ pub mod snapshot;
 pub mod state;
 pub mod support;
 pub mod task;
+pub mod terminals;
 pub mod typescript;
 pub mod workspace;
 pub mod worktree;

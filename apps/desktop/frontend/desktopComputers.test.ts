@@ -86,4 +86,23 @@ describe("Desktop computers", () => {
     expect(reload).toHaveBeenCalledOnce();
     expect(invoke.mock.calls.filter(([command]) => command === "desktop_remote_snapshot")).toHaveLength(2);
   });
+
+  it("adds an SSH computer as a switch, rereading the list when the window stayed", async () => {
+    const reload = vi.fn(async () => undefined);
+    const outcomes = ["alreadyInUse", "switched"];
+    const invoke = invoker({
+      desktop_remote_snapshot: async () => [studio],
+      desktop_ssh_add: async () => outcomes.shift(),
+    });
+    const computers = createDesktopComputers(invoke, reload);
+    await vi.waitFor(() => expect(computers.snapshot()).toBeDefined());
+
+    await expect(computers.ssh!.add("devbox")).resolves.toBe("unchanged");
+    expect(reload).not.toHaveBeenCalled();
+    await expect(computers.ssh!.add("me@lab", "Lab")).resolves.toBe("switched");
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("desktop_ssh_add", { destination: "me@lab", name: "Lab", operationId: null });
+    expect((invoke as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(([command]) => command === "desktop_remote_snapshot")).toHaveLength(2);
+  });
 });

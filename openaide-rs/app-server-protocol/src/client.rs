@@ -8,7 +8,7 @@ use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot, ProtocolVersion
 ///
 /// Bump `minor` when adding methods, fields, or events. Bump `major` and reset
 /// `minor` for any change an older client cannot ignore.
-pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 2 };
+pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 3 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +84,46 @@ pub struct UpdateShutdownAbortParams {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateShutdownAbortResult {}
+
+/// Asks what replacing this App Server with another version would affect now. A client
+/// that installed a different version shows the answer before the user confirms the
+/// replacement (ADR-0069).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientReplacementImpactParams {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientReplacementImpactResult {
+    /// Initialized clients other than the caller, including those inside their reconnect
+    /// grace, which a replacement would also disconnect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub other_clients: Vec<AttachedClientSummary>,
+    pub active_turns: u32,
+    pub pending_task_requests: u32,
+    /// Terminals whose shells a replacement would end (ADR-0071). Absent from App Servers
+    /// before protocol 2.3.
+    #[serde(default)]
+    pub open_terminals: u32,
+}
+
+/// What a client reported about itself in `client/initialize`. Labels for the user, not
+/// evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachedClientSummary {
+    pub kind: ShellKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The product version the client reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    /// Omitted by clients installed together with their App Server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<ProtocolVersion>,
+    /// The client stopped responding and is inside its reconnect grace.
+    pub reconnecting: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -183,6 +223,10 @@ pub enum ShellKind {
     /// The App Server's own `remote` command: a same-machine client with no
     /// window that keeps the App Server running for Remote Devices.
     Terminal,
+    /// The App Server's own keeper on an SSH Computer: a same-machine client
+    /// with no window that holds the App Server while it has work or a recent
+    /// App Shell, then leaves (ADR-0069).
+    Keeper,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -250,6 +294,10 @@ pub enum ShellCapability {
     RevealFile,
     ResolveFileReveal,
     PickLocalFile,
+    /// Read nowhere and no longer advertised; Terminals are an App Server feature (ADR-0071)
+    /// and VS Code opens its own through an App Shell capability. Clients up to protocol 2.2
+    /// still send it, so it must keep deserializing.
+    // TODO(protocol-3): remove with the next major protocol version, which drops 2.x clients.
     OpenTerminal,
     ReadSecret,
     WriteSecret,

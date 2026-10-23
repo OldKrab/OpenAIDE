@@ -11,7 +11,7 @@
   },
   "app": {
     "security": {
-      "csp": "default-src 'self'; frame-src 'self' openaide-renderer: http://openaide-renderer.localhost; connect-src http://127.0.0.1:* http://localhost:* ipc: http://ipc.localhost; font-src 'self' asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; frame-src 'self' openaide-renderer: http://openaide-renderer.localhost; connect-src http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* ipc: http://ipc.localhost; font-src 'self' asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'"
     },
     "windows": [
       {

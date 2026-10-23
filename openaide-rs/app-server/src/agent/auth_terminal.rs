@@ -9,12 +9,13 @@ use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::server_requests::{
     ShellAuthTerminalParams, ShellAuthTerminalResponse, SHELL_AUTH_TERMINAL,
 };
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder};
 
 use super::{acp_agent_config::AcpAgentConfig, TurnCancellation};
 use crate::client_lifecycle::{AppServerTime, Delivery};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
+use crate::pty_child::{pty_size as size, PtyChild};
 use crate::server_requests::ServerRequestRuntime;
 
 pub trait AuthTerminalRunner: Send + Sync {
@@ -102,13 +103,13 @@ impl ClientAuthTerminal {
         for (key, value) in &config.env {
             command.env(key, value);
         }
-        let mut child = LoginChild {
-            child: pair
-                .slave
+        // Cancellation, disconnect, malformed responses and setup failures drop this child, which
+        // never leaves a credential-taking process waiting unattended.
+        let mut child = PtyChild::new(
+            pair.slave
                 .spawn_command(command)
                 .map_err(|_| terminal_error())?,
-            running: true,
-        };
+        );
         drop(pair.slave);
         let mut reader = pair
             .master
@@ -145,13 +146,9 @@ impl ClientAuthTerminal {
             if cancellation.is_cancelled() {
                 return Err(terminal_error());
             }
-            let exited = child.child.try_wait().map_err(|_| terminal_error())?;
-            if exited.is_some() {
-                child.kill_group();
-                // Never signal this PID after awaiting another browser exchange: it has
-                // been reaped and the OS may reuse it while the browser is disconnected.
-                child.running = false;
-            }
+            // Once exited, the child is never signalled again, even after awaiting another
+            // browser exchange: its PID has been reaped and the OS may reuse it.
+            let exited = child.try_exit().map_err(|_| terminal_error())?;
             let mut output = Vec::new();
             while output.len() < 32768 {
                 let Ok(bytes) = receive.try_recv() else { break };
@@ -229,44 +226,6 @@ impl AuthTerminalRunner for ClientAuthTerminal {
 
 fn terminal_error() -> RuntimeError {
     RuntimeError::NotReady("Agent authentication terminal ended without successful sign-in".into())
-}
-
-fn size(cols: u16, rows: u16) -> PtySize {
-    PtySize {
-        cols,
-        rows,
-        pixel_width: 0,
-        pixel_height: 0,
-    }
-}
-
-/// Teardown is unconditional: cancellation, disconnect, malformed responses and spawn/setup
-/// failures must never leave a credential-taking process waiting unattended.
-struct LoginChild {
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    running: bool,
-}
-impl LoginChild {
-    fn kill_group(&self) {
-        #[cfg(unix)]
-        if let Some(pid) = self.child.process_id() {
-            let _ = nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(pid as i32),
-                nix::sys::signal::Signal::SIGKILL,
-            );
-        }
-    }
-}
-impl Drop for LoginChild {
-    fn drop(&mut self) {
-        // PTY launch creates a fresh session/process group. Kill that owned group too:
-        // package launchers can exit while their credential-taking child stays alive.
-        if self.running {
-            self.kill_group();
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-    }
 }
 
 #[cfg(all(test, unix))]

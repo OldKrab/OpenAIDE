@@ -15,6 +15,12 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) })
 vi.mock("../../../packages/frontend/src/startFrontend", () => ({ startFrontend: vi.fn() }));
 vi.mock("./desktopShell", () => ({ createDesktopShell: vi.fn() }));
 
+/** Fails the startup handshake while other shell commands stay pending. */
+async function rejectStartup(reason: unknown) {
+  const { invoke } = await import("@tauri-apps/api/core");
+  vi.mocked(invoke).mockImplementation((command) => (command === "desktop_bootstrap_context" ? Promise.reject(reason) : new Promise(() => {})));
+}
+
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); vi.resetModules(); });
 
 it("can drag and use caption buttons while backend startup is pending", async () => {
@@ -50,8 +56,7 @@ it("keeps native window controls on decorated platforms", async () => {
 
 it("keeps close available after startup fails", async () => {
   vi.useFakeTimers();
-  const { invoke } = await import("@tauri-apps/api/core");
-  vi.mocked(invoke).mockRejectedValueOnce(new Error("Startup unavailable"));
+  await rejectStartup(new Error("Startup unavailable"));
   document.documentElement.innerHTML = startupHtml;
   await import("./main");
   await vi.waitFor(() => expect(document.querySelector(".desktop-startup-label")!.textContent).toContain("could not start"));
@@ -63,8 +68,7 @@ it("keeps close available after startup fails", async () => {
 
 it("shows the reason a rejected startup command reports", async () => {
   vi.useFakeTimers();
-  const { invoke } = await import("@tauri-apps/api/core");
-  vi.mocked(invoke).mockRejectedValueOnce("The App Server did not become ready in time.");
+  await rejectStartup("The App Server did not become ready in time.");
   document.documentElement.innerHTML = startupHtml;
   await import("./main");
   await vi.waitFor(() => expect(document.querySelector(".desktop-startup-label")!.textContent)

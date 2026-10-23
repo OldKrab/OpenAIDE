@@ -29,3 +29,25 @@ fn a_preflight_passes_without_credentials() {
     let head = b"OPTIONS /probe HTTP/1.1\r\nOrigin: tauri://localhost";
     assert!(forwarded_head(head, "secret").is_ok());
 }
+
+#[test]
+fn a_terminal_socket_passes_on_its_attach_token_alone() {
+    let head = b"GET /terminal HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade";
+    assert!(forwarded_head(head, "secret").is_ok());
+    // Only the upgrade on that exact path; every other route still needs the token.
+    assert_eq!(
+        forwarded_head(b"GET /terminal HTTP/1.1\r\nX-A: b", "secret"),
+        Err(401)
+    );
+    assert_eq!(
+        forwarded_head(
+            b"GET /probe/terminal HTTP/1.1\r\nUpgrade: websocket",
+            "secret"
+        ),
+        Err(401)
+    );
+    assert_eq!(
+        forwarded_head(b"GET /probe HTTP/1.1\r\nUpgrade: websocket", "secret"),
+        Err(401)
+    );
+}

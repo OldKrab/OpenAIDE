@@ -34,10 +34,58 @@ final class ConnectionStore {
         if (preferences.contains("password")) preferences.edit().remove("password").apply();
     }
 
-    ConnectionProfile load() { return usesPaired() ? ConnectionProfile.paired() : ConnectionProfile.local(); }
+    ConnectionProfile load() {
+        if (usesSsh()) return ConnectionProfile.ssh();
+        return usesPaired() ? ConnectionProfile.paired() : ConnectionProfile.local();
+    }
 
     /** Whether the paired computer, rather than this phone, is the selected workspace. */
-    boolean usesPaired() { return preferences.getBoolean("paired", false) && pairedServer() != null; }
+    boolean usesPaired() { return !usesSsh() && preferences.getBoolean("paired", false) && pairedServer() != null; }
+
+    /** Whether an SSH Computer is the selected workspace. */
+    boolean usesSsh() { return sshComputer() != null; }
+
+    /** The SSH Computer selected for work, or null. */
+    SshComputers.Computer sshComputer() {
+        String id = preferences.getString("ssh_id", "");
+        return id.isEmpty() ? null : SshComputers.find(sshComputers(), id);
+    }
+
+    /** Every SSH Computer this phone knows, in the order they were added. */
+    java.util.List<SshComputers.Computer> sshComputers() { return SshComputers.parse(preferences.getString("ssh_computers", "")); }
+
+    /** Adding an SSH Computer remembers its accepted host key and selects it. */
+    void saveSsh(SshComputers.Computer computer) {
+        preferences.edit().putString("ssh_computers", SshComputers.format(SshComputers.with(sshComputers(), computer)))
+            .putString("ssh_id", computer.id).putBoolean("paired", false).putBoolean("configured", true).apply();
+    }
+
+    /** Selects one of the SSH Computers; returns false for one this phone does not know. */
+    boolean selectSsh(String id) {
+        if (SshComputers.find(sshComputers(), id) == null) return false;
+        preferences.edit().putString("ssh_id", id).putBoolean("paired", false).putBoolean("configured", true).apply();
+        return true;
+    }
+
+    /** Stops knowing an SSH Computer; forgetting the selected one leaves this phone as the place to work. */
+    void forgetSsh(String id) {
+        SharedPreferences.Editor edit = preferences.edit().putString("ssh_computers", SshComputers.format(SshComputers.without(sshComputers(), id)));
+        if (id.equals(preferences.getString("ssh_id", ""))) edit.remove("ssh_id").putBoolean("paired", false);
+        edit.apply();
+    }
+
+    /**
+     * This phone's own SSH key: an ed25519 seed, made on first use and kept encrypted
+     * like the pairing key. Every SSH Computer is given the same public key.
+     */
+    byte[] sshKey() {
+        String stored = preferences.getString("ssh_key", "");
+        if (!stored.isEmpty()) return Base64.decode(decrypt(stored), Base64.NO_WRAP);
+        byte[] seed = new byte[32];
+        new java.security.SecureRandom().nextBytes(seed);
+        preferences.edit().putString("ssh_key", encrypt(Base64.encodeToString(seed, Base64.NO_WRAP))).apply();
+        return seed;
+    }
 
     /** The computer selected for remote work, or null. */
     PairedServer pairedServer() {
@@ -57,7 +105,7 @@ final class ConnectionStore {
 
     /** Pairing adds the computer, or renames it, and selects it. */
     void savePaired(PairedServer server) {
-        preferences.edit().putString("servers", PairedServers.format(PairedServers.with(pairedServers(), server)))
+        preferences.edit().remove("ssh_id").putString("servers", PairedServers.format(PairedServers.with(pairedServers(), server)))
             .putString("server_id", server.id).putString("server_name", server.name)
             .putBoolean("paired", true).putBoolean("configured", true).apply();
     }
@@ -82,13 +130,13 @@ final class ConnectionStore {
     boolean selectPaired(String id) {
         PairedServer server = PairedServers.find(pairedServers(), id);
         if (server == null) return false;
-        preferences.edit().putString("server_id", server.id).putString("server_name", server.name)
+        preferences.edit().remove("ssh_id").putString("server_id", server.id).putString("server_name", server.name)
             .putBoolean("paired", true).putBoolean("configured", true).apply();
         return true;
     }
 
     /** Keeps the selected computer remembered while work moves to this phone. */
-    void selectLocal() { preferences.edit().putBoolean("paired", false).putBoolean("configured", true).apply(); }
+    void selectLocal() { preferences.edit().remove("ssh_id").putBoolean("paired", false).putBoolean("configured", true).apply(); }
 
     /** This phone's private key as a Remote Device, or null before the first pairing. */
     byte[] deviceKey() {

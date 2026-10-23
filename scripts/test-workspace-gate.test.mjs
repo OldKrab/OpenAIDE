@@ -282,6 +282,18 @@ test("artifact builds select only the requested package targets and required ser
   ]);
   assert.deepEqual(fullRelease.dependencies["vsix-linux-x64"], ["server-linux-x64-musl"]);
 
+  const macos = resolveReleaseArtifactGraph({
+    artifacts: "desktop",
+    vsixTarget: "all",
+    desktopTarget: "darwin-arm64",
+  });
+  // The macOS Desktop compiles in the checksum of the Linux App Server it installs over SSH.
+  assert.deepEqual(macos.enabledNodes, [
+    "server-linux-x64-musl",
+    "server-darwin-arm64",
+    "desktop-darwin-arm64",
+  ]);
+
   assert.throws(
     () => resolveReleaseArtifactGraph({
       artifacts: "desktop",

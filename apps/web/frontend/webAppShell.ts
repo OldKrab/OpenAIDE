@@ -195,6 +195,13 @@ export function createWebAppShell(): FrontendShell {
       openExternal: openWebExternal,
       reload: () => window.location.reload(),
     },
+    terminals: {
+      socketUrl() {
+        const url = new URL("/__openaide-app-server/terminal", window.location.href);
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        return url.toString();
+      },
+    },
     fileViewer: true,
     fileViewerDownloads: {
       async save({ handle, label, operationId }, signal) {

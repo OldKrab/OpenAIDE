@@ -1,7 +1,13 @@
 import { useSyncExternalStore } from "react";
 
-/** A computer other than this device whose App Server the shell can use (ADR-0063). */
-export type ShellComputer = { id: string; name: string; current: boolean };
+/** A computer other than this device whose App Server the shell can use: paired (ADR-0063) or reached over SSH (ADR-0069). */
+export type ShellComputer = {
+  id: string;
+  name: string;
+  current: boolean;
+  /** The `ssh` destination of an SSH Computer; absent for a paired computer. */
+  ssh?: string;
+};
 
 export type ComputersSnapshot = {
   /** Names the row for the device the shell runs on. */
@@ -41,6 +47,34 @@ export type ComputersCapability = {
   pair?(code: string): Promise<void>;
   /** Opens the shell's own pairing screen; absent where pairing takes a code in place. */
   openPairing?(): Promise<void>;
+  /** Present in shells that can start the App Server on SSH Computers. */
+  ssh?: SshComputersCapability;
+};
+
+/** What the shell learned starting the App Server on the SSH Computer in use. */
+export type SshComputerStatus = {
+  runningVersion: string;
+  /** The App Server there is older than this app but compatible with it. */
+  updateAvailable: boolean;
+  /** Logind ends the App Server there when the user's last session closes. */
+  suggestLinger: boolean;
+};
+
+/**
+ * SSH Computers (ADR-0069): the shell installs, starts and keeps the App Server
+ * on a Linux computer over SSH. Its rows join the computers list with `ssh` set.
+ */
+export type SshComputersCapability = {
+  /** Host aliases from the user's SSH configuration. */
+  hosts(): Promise<string[]>;
+  /** Remembers an SSH Computer by `ssh` destination, then switches to it like `use`. */
+  add(destination: string, name?: string): Promise<ComputerSwitchResult>;
+  /** Present while an SSH Computer is in use and its App Server was reached. */
+  status(): Promise<SshComputerStatus | undefined>;
+  /** Replaces the older App Server on the SSH Computer in use; the shell restarts. */
+  update(): Promise<void>;
+  /** Ends the keeper there; the App Server stops once no app uses it. */
+  stop(id: string): Promise<"stopped" | "notRunning" | "stillRunning">;
 };
 
 const noSubscription = () => () => undefined;

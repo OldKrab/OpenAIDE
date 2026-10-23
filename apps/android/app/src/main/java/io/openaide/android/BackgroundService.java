@@ -22,12 +22,12 @@ import java.util.concurrent.Executors;
 /**
  * The ongoing notification that keeps OpenAIDE working while it is off the screen.
  *
- * For the workspace on this phone it keeps the phone awake while a Task works and
- * reads Task state from the local App Server. For a paired computer it does not stop
- * when idle: it keeps a {@link RemoteAttention} watch, so Task notifications still
- * arrive while the WebView is paused, and it also watches this phone's App Server if
- * that is already running, so the phone's own Tasks keep it awake and notify too
- * ({@link BackgroundSources}). The selected workspace decides the mode on every start,
+ * For the workspace on this phone or on an SSH Computer it keeps the phone awake while
+ * a Task works and reads Task state from the App Server this shell holds. For a paired
+ * computer it does not stop when idle: it keeps a {@link RemoteAttention} watch, so Task
+ * notifications still arrive while the WebView is paused, and it also watches this phone's
+ * App Server if that is already running, so the phone's own Tasks keep it awake and notify
+ * too ({@link BackgroundSources}). The selected workspace decides the mode on every start,
  * so a restart by the system resumes the same one.
  */
 public final class BackgroundService extends Service {
@@ -65,7 +65,9 @@ public final class BackgroundService extends Service {
         manager.createNotificationChannel(new NotificationChannel("background", "Background work", NotificationManager.IMPORTANCE_LOW));
         manager.createNotificationChannel(new NotificationChannel("completion", "Work updates", NotificationManager.IMPORTANCE_DEFAULT));
         protection = new WorkProtection(getSystemService(PowerManager.class), "OpenAIDE:active-work");
-        startForeground(1, notification(Boolean.TRUE.equals(pairedWorkspace()) ? "Connecting to your computer…" : "Checking local work…", "background"));
+        Boolean paired = pairedWorkspace();
+        startForeground(1, notification(Boolean.TRUE.equals(paired) ? "Connecting to your computer…"
+            : Boolean.FALSE.equals(paired) && sshWorkspace() ? "Checking work on your SSH computer…" : "Checking local work…", "background"));
         diagnostics.record("background_work", "started", 0, 0);
     }
 
@@ -97,6 +99,12 @@ public final class BackgroundService extends Service {
         catch (RuntimeException unavailable) { return null; }
     }
 
+    /** Whether the selected workspace is an SSH Computer; false when the choice cannot be read. */
+    private boolean sshWorkspace() {
+        try { return new ConnectionStore(this).usesSsh(); }
+        catch (RuntimeException unavailable) { return false; }
+    }
+
     /** Follows the selected workspace; false when the service stopped instead. */
     private boolean chooseMode() {
         Boolean paired = pairedWorkspace();
@@ -124,7 +132,7 @@ public final class BackgroundService extends Service {
             // The phone's reads start over, so a long paired stretch is not taken for a lost server.
             policy.observe(0, SystemClock.elapsedRealtime());
         }
-        diagnostics.record("background_work", paired ? "paired" : "local", 0, 0, Map.of("switched", switched));
+        diagnostics.record("background_work", paired ? "paired" : sshWorkspace() ? "ssh" : "local", 0, 0, Map.of("switched", switched));
         return true;
     }
 
@@ -156,8 +164,13 @@ public final class BackgroundService extends Service {
         worker.execute(() -> {
             ServerStatus status = null;
             boolean running = true;
-            // The phone's App Server is started only while it is the workspace in use.
-            try { status = paired ? LocalServer.statusIfRunning() : LocalServer.status(this); running = status != null; }
+            // The phone's App Server is started only while it is the workspace in use; while an
+            // SSH Computer is in use, the App Server this shell holds is the one there.
+            try {
+                status = paired ? LocalServer.statusIfRunning()
+                    : new ConnectionStore(this).usesSsh() ? SshServer.status(this) : LocalServer.status(this);
+                running = status != null;
+            }
             catch (Exception ignored) { }
             ServerStatus result = status;
             boolean serverRunning = running;

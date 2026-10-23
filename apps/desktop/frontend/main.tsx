@@ -9,13 +9,19 @@ import {
 } from "./desktopBootstrap";
 
 import { refuseUnclaimedFileDrops } from "./desktopFileUploads";
+import { initializeSshPrompts } from "./desktopSshPrompts";
+import { offerSshUpdateAfterFailure } from "./desktopSshStartup";
 import { initializeStartupWindow } from "./desktopStartupWindow";
 
 refuseUnclaimedFileDrops(window);
 initializeStartupWindow();
+// `ssh` may ask for a password or a host key decision during startup.
+initializeSshPrompts({ invoke, listen });
 
 const startupStartedAt = performance.now();
 const startupElapsedTimer = window.setInterval(updateStartupElapsed, 1_000);
+
+let remoteComputer: string | undefined;
 
 async function start() {
   const bootstrap = await runDesktopBootstrap({
@@ -23,6 +29,7 @@ async function start() {
     listen,
     onProgress: ({ message }) => updateStartupStatus(message),
     onContext: (context) => {
+      remoteComputer = context.remoteComputer;
       const cancel = document.querySelector<HTMLButtonElement>(".desktop-startup-cancel");
       if (cancel) {
         // A paired computer may be off or out of reach; the way back to this
@@ -85,5 +92,6 @@ void start().catch((error) => {
       retry.hidden = false;
       retry.onclick = () => window.location.reload();
     }
+    if (remoteComputer) void offerSshUpdateAfterFailure({ invoke, root, computer: remoteComputer });
   }
 });

@@ -80,11 +80,17 @@ jobs:
         with:
           name: app-server-${{ inputs.target }}
           path: app-server
+      # Windows bundles it for WSL; every Desktop pins its checksum for SSH Computers.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        if: inputs.target == 'win32-x64'
         with:
           name: app-server-linux-x64-musl
           path: wsl-app-server
+      - name: Pin the Linux App Server for SSH Computers
+        shell: bash
+        run: |
+          sha="$(openssl dgst -sha256 -r wsl-app-server/openaide-app-server | cut -d ' ' -f 1)"
+          test "${#sha}" -eq 64
+          echo "OPENAIDE_SSH_APP_SERVER_SHA256=$sha" >> "$GITHUB_ENV"
       - name: Restore App Server executable permission
         if: runner.os != 'Windows'
         run: chmod +x "app-server/${{ steps.target.outputs.binary }}"

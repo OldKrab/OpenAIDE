@@ -106,6 +106,28 @@ test('settings list every place, mark the one in use and switch to the one tappe
   } finally { view.close(); }
 });
 
+test('SSH computers are offered only by builds that can install on them, and switch like the others', () => {
+  assert.equal(setup().document.querySelectorAll('[data-action="ssh_add"]').length, 0);
+  const welcome = setup({ sshAvailable: true });
+  try {
+    welcome.document.querySelector('[data-action="ssh_add"]').click();
+    assert.deepEqual(welcome.actions.at(-1), { action: 'ssh_add' });
+  } finally { welcome.close(); }
+  const sshComputers = [
+    { id: 'c'.repeat(32), name: 'Devbox', destination: 'dev@devbox', current: true },
+    { id: 'd'.repeat(32), name: '<b>Lab</b>', destination: 'dev@lab:2222', current: false },
+  ];
+  const view = setup({ initial: 'settings', remote: true, computer: 'Devbox', sshAvailable: true, sshComputers, computers: [] });
+  try {
+    assert.equal(view.document.querySelector('.row.current strong').textContent, 'Devbox');
+    assert.equal(view.document.querySelectorAll('b').length, 0);
+    view.document.querySelector('[data-action="use_ssh"]').click();
+    assert.deepEqual(view.actions.at(-1), { action: 'use_ssh', id: 'd'.repeat(32) });
+    // Its work is watched from this phone, so background work stays a setting here.
+    assert.ok(view.document.querySelector('[data-action="background_screen"]'));
+  } finally { view.close(); }
+});
+
 test('unsupported phones offer a remote workspace instead of repeated installation', () => {
   const view = setup({ initial: 'local', checks: { ...ready, arm64: false } });
   try {

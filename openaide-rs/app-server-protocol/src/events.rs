@@ -130,6 +130,10 @@ pub enum AppServerEventPayload {
     DeviceCollectionUpdated {
         devices: crate::devices::DeviceCollectionSnapshot,
     },
+    /// Replaces the open Terminal list, including each Terminal's status.
+    TerminalCollectionUpdated {
+        terminals: crate::terminals::TerminalCollectionSnapshot,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

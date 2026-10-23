@@ -3,7 +3,8 @@
 //! This computer's App Server starts with the Desktop and stays held until the
 //! Desktop quits, whichever computer is in use, so switching away never stops
 //! its work or its own Remote Devices. The window uses one App Server at a time:
-//! this computer's, or a paired computer's through a loopback gateway.
+//! this computer's, a paired computer's through a loopback gateway, or an SSH
+//! Computer's through an `ssh` forward (ADR-0069).
 //!
 //! A switch connects the target while the current one stays in use and replaces
 //! it only once connected. The window then reloads into the new one under a new
@@ -143,6 +144,21 @@ impl DesktopConnections {
         previous.and_then(|previous| previous.gateway)
     }
 
+    /// Records a new forward to the SSH Computer `id`; true when the window uses
+    /// it and must follow the replacement. The SSH forward carries no gateway.
+    pub(crate) fn replace_ssh(&self, id: &str, connection: LocalHttpConnection) -> bool {
+        let Ok(mut in_use) = self.in_use.lock() else {
+            return false;
+        };
+        match in_use.as_mut() {
+            Some(in_use) if in_use.computer.as_deref() == Some(id) => {
+                in_use.connection = connection;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Records a new start of this computer's App Server; true when the window
     /// uses it and must follow the replacement.
     fn replace_local(&self, connection: LocalHttpConnection) -> bool {
@@ -242,7 +258,11 @@ impl DesktopConnections {
     }
 }
 
-pub(crate) fn emit_bootstrap_progress(app: &tauri::AppHandle, stage: &'static str, message: String) {
+pub(crate) fn emit_bootstrap_progress(
+    app: &tauri::AppHandle,
+    stage: &'static str,
+    message: String,
+) {
     let _ = app.emit(
         "desktop-bootstrap-progress",
         DesktopBootstrapProgress { message, stage },
@@ -301,11 +321,24 @@ pub(crate) async fn desktop_bootstrap(
                 let operation_id = format!("desktop-local-start-{}", uuid::Uuid::new_v4());
                 let _ = ensure_local(&background, None, operation_id).await;
             });
-            emit_bootstrap_progress(&app, "remote", format!("Connecting to {}", computer.name));
-            let (connection, gateway) = crate::desktop_remote::connect(&app, computer)
-                .await
-                .map_err(|error| error.message)?;
-            connections.start_using(Some(computer.id.clone()), connection, Some(gateway));
+            let (connection, gateway) = match &computer.ssh {
+                Some(destination) => (
+                    crate::desktop_ssh::connect(&app, computer, destination, true).await?,
+                    None,
+                ),
+                None => {
+                    emit_bootstrap_progress(
+                        &app,
+                        "remote",
+                        format!("Connecting to {}", computer.name),
+                    );
+                    let (connection, gateway) = crate::desktop_remote::connect(&app, computer)
+                        .await
+                        .map_err(|error| error.message)?;
+                    (connection, Some(gateway))
+                }
+            };
+            connections.start_using(Some(computer.id.clone()), connection, gateway);
         }
         None => {
             let connection = ensure_local(&app, Some(app.clone()), operation_id).await?;
@@ -401,9 +434,15 @@ pub(crate) async fn ensure_local(
 pub(crate) async fn desktop_ensure_app_server(
     app: tauri::AppHandle,
 ) -> Result<Option<LocalHttpConnection>, String> {
+    // An SSH Computer's forward and App Server are this Desktop's to restore, as
+    // its own are; a paired computer's gateway reopens through its own retries.
+    let ssh = crate::desktop_ssh::ensure(&app).await;
     let before = app.state::<DesktopConnections>().local();
     let operation_id = format!("desktop-ensure-app-server-{}", uuid::Uuid::new_v4());
     let connection = ensure_local(&app, None, operation_id).await?;
+    if let Some(ssh) = ssh {
+        return ssh;
+    }
     Ok((before.as_ref() != Some(&connection)).then_some(connection))
 }
 

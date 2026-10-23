@@ -57,6 +57,13 @@ pub(crate) fn attach_or_start(
     if let Some(connection) = attach(state_root, runtime_root) {
         return Ok(connection);
     }
+    start()
+}
+
+/// Starts an App Server for the default state root in a separate process and reads
+/// the address it prints. If another one won the launch meanwhile, the started
+/// process prints that one's address instead and exits.
+pub(crate) fn start() -> Result<Connection, LaunchError> {
     let executable = std::env::current_exe().map_err(|_| LaunchError::Spawn)?;
     let mut command = Command::new(executable);
     command

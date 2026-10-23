@@ -120,8 +120,18 @@ function resistedProgress(progress: number) {
   return progress;
 }
 
-function isMobileWebViewport() {
+/** True at phone widths, where navigation becomes a drawer. */
+export function isMobileWebViewport() {
   if (typeof window === "undefined") return false;
   if (typeof window.matchMedia === "function") return window.matchMedia("(max-width: 760px)").matches;
   return window.innerWidth <= 760;
+}
+
+/** Visible, enabled controls of the mobile navigation drawer, in focus order. */
+export function mobileNavigationFocusableElements(root: HTMLElement) {
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(
+      ".mobile-workbench-bar button, .sidebar button:not(:disabled), .sidebar input:not(:disabled)",
+    ),
+  ).filter((element) => element.offsetParent !== null);
 }

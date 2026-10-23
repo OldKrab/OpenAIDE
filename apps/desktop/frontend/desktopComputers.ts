@@ -1,11 +1,11 @@
 import type { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import type { ComputerSwitchResult, ComputersCapability, ComputersSnapshot, ShellComputer } from "../../../packages/frontend/src/services/computers";
+import type { ComputerSwitchResult, ComputersCapability, ComputersSnapshot, ShellComputer, SshComputerStatus } from "../../../packages/frontend/src/services/computers";
 
 /** What the native side reports for a switch it was asked for. */
 type NativeSwitchOutcome = "switched" | "alreadyInUse" | "cancelled";
 
 /**
- * The Desktop's paired computers (ADR-0063), kept by the native side in its
+ * The Desktop's paired computers (ADR-0063) and SSH Computers (ADR-0069), kept by the native side in its
  * bootstrap preferences. The native side connects the chosen computer first and
  * keeps this computer's App Server running (ADR-0070); once it switched, the
  * window leaves its App Server and reloads onto the new one.
@@ -54,6 +54,18 @@ export function createDesktopComputers(
     },
     async pair(code) {
       if (await settle(await invoke<NativeSwitchOutcome>("desktop_remote_pair", { code, operationId: null })) !== "switched") await read();
+    },
+    // SSH Computers (ADR-0069) are rows of the same list, marked by their `ssh` destination.
+    ssh: {
+      hosts: () => invoke<string[]>("desktop_ssh_hosts"),
+      async add(destination, name) {
+        const result = await settle(await invoke<NativeSwitchOutcome>("desktop_ssh_add", { destination, name: name ?? null, operationId: null }));
+        if (result !== "switched") await read();
+        return result;
+      },
+      status: async () => (await invoke<SshComputerStatus | null>("desktop_ssh_status")) ?? undefined,
+      update: () => invoke("desktop_ssh_update"),
+      stop: (id) => invoke<"stopped" | "notRunning" | "stillRunning">("desktop_ssh_stop", { id }),
     },
   };
 

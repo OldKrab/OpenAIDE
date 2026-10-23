@@ -3740,6 +3740,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "url",
  "uuid",
@@ -3750,10 +3751,13 @@ name = "openaide-remote-client"
 version = "0.0.0"
 dependencies = [
  "data-encoding",
+ "flate2",
  "iroh",
  "openaide-app-server-protocol",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tar",
  "thiserror 2.0.20",
  "tokio",
 ]

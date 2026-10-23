@@ -8,7 +8,7 @@ import { SettingsView } from "./settings/SettingsView";
 import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
-import { useMobileNavigation } from "./useMobileNavigation";
+import { isMobileWebViewport, mobileNavigationFocusableElements, useMobileNavigation } from "./useMobileNavigation";
 import { useBackNavigation } from "./useBackNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
@@ -16,10 +16,12 @@ import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
+import { TerminalPageHost } from "./terminals/TerminalPageHost";
+import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
 import { computerLink } from "./ComputerSwitcher";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { useComputerPlace } from "./useComputerPlace";
-import { useComputers } from "../services/computers";
+import { currentComputer, useComputers } from "../services/computers";
 import { computerSwitch } from "../services/computerSwitch";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
@@ -111,6 +113,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       ? bootstrap.taskId
       : activeNavigationTaskId;
   const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
+  // The in-app Terminal page needs a socket route; shells without one (VS Code) omit the entries.
+  // The Project menu opens the page from the phone's navigation drawer, which then gets out of the way.
+  const terminalPage = useTerminalPage(`${bootstrap.surface}:${sidebarActiveTaskId ?? ""}`, view.terminals?.terminals, () => mobileNavigation.setOpen(false));
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
   const mobilePermissionTask = isWebWorkbench ? taskSurfaceModel.renderableTaskSnapshot : undefined;
@@ -609,10 +614,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       />
     );
     return (
+      <TerminalSurfaceContext.Provider value={frontendShell?.terminals ? terminalPage.surface : undefined}>
       <AppSidebarFrame
         className={[
           "app-shell web-workbench-shell",
-          desktopTaskHeaderIntegrated ? "desktop-task-title-bar" : undefined,
+          terminalPage.target ? "terminal-page-open" : undefined,
+          desktopTaskHeaderIntegrated && !terminalPage.target ? "desktop-task-title-bar" : undefined,
           mobileNavigationOpen ? "mobile-navigation-open" : undefined,
           mobileNavigation.dragging ? "mobile-navigation-dragging" : undefined,
         ].filter(Boolean).join(" ")}
@@ -696,6 +703,17 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           inert={mobileNavigation.active ? true : undefined}
           ref={webMainSurfaceRef}
         >
+          <TerminalPageHost
+            computerName={currentComputer(computers)?.name ?? settings.devices?.serverName}
+            desktopWindow={desktopWindow}
+            intents={controller.intents.terminals}
+            onBack={terminalPage.closePage}
+            phone={mobileLayoutActive}
+            projects={navigation.projects}
+            socket={frontendShell?.terminals}
+            target={terminalPage.target}
+            terminals={view.terminals?.terminals}
+          />
           {appServerError ? (
             <AppServerErrorView message={appServerError} />
           ) : (
@@ -724,6 +742,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           )}
         </section>
       </AppSidebarFrame>
+      </TerminalSurfaceContext.Provider>
     );
   }
 
@@ -764,22 +783,6 @@ function useDesktopUpdateSnapshot(
     capability?.snapshot ?? noDesktopUpdateSnapshot,
     capability?.snapshot ?? noDesktopUpdateSnapshot,
   );
-}
-
-function isMobileWebViewport() {
-  if (typeof window === "undefined") return false;
-  if (typeof window.matchMedia === "function") {
-    return window.matchMedia("(max-width: 760px)").matches;
-  }
-  return window.innerWidth <= 760;
-}
-
-function mobileNavigationFocusableElements(root: HTMLElement) {
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      ".mobile-workbench-bar button, .sidebar button:not(:disabled), .sidebar input:not(:disabled)",
-    ),
-  ).filter((element) => element.offsetParent !== null);
 }
 
 function AppServerErrorView({ message }: { message: string }) {

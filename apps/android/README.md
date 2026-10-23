@@ -52,6 +52,32 @@ makes up to three attempts within 24 seconds before reporting the computer as
 unreachable. While hidden it makes one attempt per request and no more. The computer must be running OpenAIDE; the phone and the computer
 must speak the same App Server Protocol major version.
 
+## SSH computers
+
+An **SSH computer** is a Linux x64 computer the phone signs in to over SSH and starts
+OpenAIDE on, as Desktop does ([ADR-0069](../../docs/adr/0069-ssh-computers-are-started-like-termux.md)).
+Nothing needs to be installed there first. Add one from **Settings → Remote → Add SSH
+computer** or the first setup screen, as `user@host` or `user@host:port`. The phone
+shows the computer's host key fingerprint once to accept; that key is then pinned,
+and a different one blocks the connection until the computer is forgotten and added
+again. The phone has its own SSH key, an ed25519 key kept encrypted with Android
+Keystore like its pairing key, and shows its public key to add to
+`~/.ssh/authorized_keys` there. Instead, a password may be entered once and the phone
+adds the key itself; the password is not kept. Jump hosts and SSH configuration files
+are not used.
+
+The SSH client is the `openaide-rs/android-ssh` Rust library, which runs the same
+launcher as Desktop. On first use of a version, the phone downloads the canonical
+`openaide-app-server-linux-x64-VERSION.tar.gz` release, keeps the binary only if its
+SHA-256 is the one built into the APK, and uploads it over SSH. The App Server there
+stays running under its keeper while agents work, so work continues with the phone
+locked or the app closed; **Stop** in Settings ends the keeper. When the computer runs
+an App Server too old for this app, the phone asks before replacing it, because
+replacing it interrupts every other app using it. The WebView loads the Frontend from
+`127.0.0.1:5477`; the gateway carries each request through the SSH forward with the
+App Server's token, which never reaches the WebView. The background service watches
+that App Server's Tasks for notifications, as it watches local ones.
+
 Opening the local workspace runs the App Server in Termux in its handoff mode: it
 attaches to the server already serving the state or launches one, and prints its
 loopback address and per-process token. The app keeps that token in memory, never
@@ -161,8 +187,9 @@ the runtime directory so replacing runtime files does not delete task history.
 
 ## Build and validation
 
-Use JDK 17, Gradle 8.13 and Android SDK 35. The APK ships the shared Frontend, so
-build it first:
+Use JDK 17, Gradle 8.13, Android SDK 35 and NDK 27.2.12479018, and Rust with the
+`aarch64-linux-android` target: the build compiles the SSH library and generates its
+Kotlin bindings. The APK ships the shared Frontend, so build it first:
 
 ```sh
 npm run build:typescript-deps && npm run build --workspace openaide-frontend
@@ -170,6 +197,12 @@ gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
 ```
 
 The APK is built for ARM64 only. The iroh library adds about 14 MB.
+
+A release pins the published Linux App Server with `-PopenaideSshAppServerSha256=HEX`;
+a build with neither property leaves SSH computers out. CI test builds carry the
+Linux App Server built from the same commit, about 48 MB more. A local test build can
+carry an archive too, with the version its binary reports:
+`gradle -PopenaideSshAppServerArchive=/path/to/openaide-app-server-linux-x64.tar.gz -PopenaideSshAppServerVersion=0.0.0 assembleDebug`.
 
 CI separately cross-compiles the App Server with the Android NDK, builds the
 shared Frontend, runs existing Web Shell tests and packages the Termux runtime,

@@ -89,9 +89,9 @@ fn rejects_a_continuation_without_a_message() {
 }
 
 #[test]
-fn rejects_unmasked_binary_and_oversized_frames() {
+fn rejects_unmasked_and_oversized_frames() {
     assert!(reader(vec![0x81, 0x02, b'h', b'i']).read().is_err());
-    assert!(reader(client_frame(0x82, b"bin")).read().is_err());
+    assert!(reader(vec![0x82, 0x02, 0xFF, 0x00]).read().is_err());
     let mut small = MessageReader::new(Cursor::new(client_frame(0x81, b"too long")), 4);
     assert!(small.read().is_err());
 }
@@ -119,4 +119,14 @@ fn writes_unmasked_frames_with_the_shortest_length_encoding() {
     write_close(&mut wire, 4410, "session_expired").unwrap();
     assert_eq!(&wire[..4], [0x88, 17, 0x11, 0x3A]);
     assert_eq!(&wire[4..], b"session_expired");
+}
+
+#[test]
+fn reads_binary_messages_without_utf8_validation() {
+    let mut bytes = client_frame(0x02, &[0xFF]);
+    bytes.extend(client_frame(0x80, &[0x00]));
+    assert_eq!(
+        reader(bytes).read().unwrap(),
+        Incoming::Binary(vec![0xFF, 0x00])
+    );
 }

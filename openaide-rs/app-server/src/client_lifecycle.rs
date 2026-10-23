@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
 use openaide_app_server_protocol::client::{
-    ClientCapabilities, ClientRole, RequestedSurface, ShellCapability, ShellDescriptor,
+    AttachedClientSummary, ClientCapabilities, ClientRole, RequestedSurface, ShellCapability,
+    ShellDescriptor,
 };
 use openaide_app_server_protocol::ids::ClientInstanceId;
+use openaide_app_server_protocol::snapshot::ProtocolVersion;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectionId(String);
@@ -134,6 +136,8 @@ impl Delivery {
 #[derive(Debug, Clone)]
 struct ClientRecord {
     context: ClientContext,
+    /// The protocol version the client declared; reported, never used for routing.
+    protocol_version: Option<ProtocolVersion>,
     reconnect_expires_at: Option<AppServerTime>,
     liveness_expires_at: AppServerTime,
 }
@@ -179,6 +183,7 @@ impl ClientHub {
         now: AppServerTime,
     ) -> InitializeClientOutcome {
         self.has_ever_initialized = true;
+        let protocol_version = params.protocol_version;
         let context = ClientContext {
             client_instance_id: params.client_instance_id,
             connection_id: connection_id.clone(),
@@ -196,6 +201,7 @@ impl ClientHub {
             context.client_instance_id.clone(),
             ClientRecord {
                 context: context.clone(),
+                protocol_version,
                 reconnect_expires_at: None,
                 liveness_expires_at: AppServerTime(
                     now.0 + self.liveness_policy.heartbeat_timeout_ms,
@@ -366,6 +372,30 @@ impl ClientHub {
                 *candidate != client_instance_id && record.context.role != ClientRole::ShellHold
             })
             .map(|(_, record)| &record.context)
+    }
+
+    /// Describes every initialized client except `client_instance_id`, reconnecting ones
+    /// included, in a stable order. Replacing the App Server disconnects all of them.
+    pub fn other_client_summaries(
+        &self,
+        client_instance_id: &ClientInstanceId,
+    ) -> Vec<AttachedClientSummary> {
+        let mut others = self
+            .clients
+            .iter()
+            .filter(|(candidate, _)| *candidate != client_instance_id)
+            .collect::<Vec<_>>();
+        others.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
+        others
+            .into_iter()
+            .map(|(_, record)| AttachedClientSummary {
+                kind: record.context.shell.kind,
+                name: record.context.shell.name.clone(),
+                app_version: record.context.shell.version.clone(),
+                protocol_version: record.protocol_version,
+                reconnecting: record.reconnect_expires_at.is_some(),
+            })
+            .collect()
     }
 
     pub fn has_ever_initialized_clients(&self) -> bool {

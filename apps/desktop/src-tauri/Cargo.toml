@@ -16,8 +16,9 @@ futures-util = "0.3"
 fs2 = "0.4"
 # Export builds its own client; the updater's rustls-no-provider feature alone
 # panics here unless another component happened to install a global provider.
-# The client half of Remote Devices, shared with the App Server's workspace (ADR-0063).
-openaide-remote-client = { path = "../../../openaide-rs/remote-client" }
+# The client half of Remote Devices, shared with the App Server's workspace
+# (ADR-0063), and the SSH Computer launcher with its release unpacking (ADR-0069).
+openaide-remote-client = { path = "../../../openaide-rs/remote-client", features = ["release-archive"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -31,6 +32,9 @@ tauri-plugin-updater = "2.10.1"
 tokio = { version = "1", features = ["sync"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }

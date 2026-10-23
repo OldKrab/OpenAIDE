@@ -20,9 +20,10 @@ import kotlinx.coroutines.runBlocking
  * It answers Frontend requests from the APK and carries App Server requests to
  * the App Server, exactly as the Web Shell's proxy does on a computer: over one
  * iroh stream per request to the paired computer, or over loopback with the
- * local token to the App Server in Termux. Recovery after a lost connection
- * stays where it already is: the Frontend's resumable session retries, and each
- * retry asks [RemoteNode] or [LocalServer] for a live connection.
+ * held token to the App Server in Termux or the SSH forward to an SSH Computer.
+ * Recovery after a lost connection stays where it already is: the Frontend's
+ * resumable session retries, and each retry asks [RemoteNode] or the
+ * [HeldServer] for a live connection.
  */
 internal object WorkspaceGateway {
     private const val MAX_HEAD_BYTES = 16 * 1024
@@ -42,8 +43,8 @@ internal object WorkspaceGateway {
     fun onFailure(listener: ((RemoteNode.Failure) -> Unit)?) { failureListener = listener }
 
     /** Owns the workspace's loopback port for the rest of the process; false when another app holds it. */
-    @Synchronized fun start(context: Context, local: Boolean): Boolean {
-        val port = if (local) ConnectionProfile.LOCAL_PORT else ConnectionProfile.PAIRED_PORT
+    @Synchronized fun start(context: Context, kind: ConnectionProfile.Kind): Boolean {
+        val port = kind.port
         if (listeners.containsKey(port)) return true
         val application = context.applicationContext
         val bound = try {
@@ -60,14 +61,15 @@ internal object WorkspaceGateway {
         workers.execute {
             while (true) {
                 val socket = try { bound.accept() } catch (error: java.io.IOException) { break }
-                workers.execute { socket.use { serve(application, it, local, port) } }
+                workers.execute { socket.use { serve(application, it, kind) } }
             }
             diagnostics.record("workspace_gateway", "stopped", port, 0)
         }
         return true
     }
 
-    private fun serve(context: Context, socket: Socket, local: Boolean, port: Int) {
+    private fun serve(context: Context, socket: Socket, kind: ConnectionProfile.Kind) {
+        val port = kind.port
         try {
             socket.tcpNoDelay = true
             socket.soTimeout = HEAD_TIMEOUT_MS
@@ -83,8 +85,11 @@ internal object WorkspaceGateway {
             socket.soTimeout = 0
             val target = GatewayHttp.appServerTarget(head)
             if (target == null) serveFrontend(context, socket, head)
-            else if (local) forwardLocal(context, socket, input, head, target, bodyStart)
-            else forward(context, socket, input, head, target, bodyStart)
+            else when (kind) {
+                ConnectionProfile.Kind.PAIRED -> forward(context, socket, input, head, target, bodyStart)
+                ConnectionProfile.Kind.LOCAL -> forwardHeld(context, LocalServer.held, socket, input, head, target, bodyStart)
+                ConnectionProfile.Kind.SSH -> forwardHeld(context, SshServer.held, socket, input, head, target, bodyStart)
+            }
         } catch (error: java.io.IOException) {
             // The WebView abandoned the request; there is no one left to answer.
         }
@@ -153,11 +158,11 @@ internal object WorkspaceGateway {
         }
     }
 
-    /** Carries one request to the App Server in Termux, adding the token only the shell holds. */
-    private fun forwardLocal(context: Context, socket: Socket, input: InputStream, head: GatewayHttp.Head, target: String, bodyStart: ByteArray) {
+    /** Carries one request to a held App Server, adding the token only the shell holds. */
+    private fun forwardHeld(context: Context, held: HeldServer, socket: Socket, input: InputStream, head: GatewayHttp.Head, target: String, bodyStart: ByteArray) {
         val request = requests.incrementAndGet()
         val started = SystemClock.elapsedRealtime()
-        val (server, upstream) = try { openLocal(context) } catch (error: LocalServer.Unavailable) {
+        val (server, upstream) = try { openHeld(context, held) } catch (error: HeldServer.Unavailable) {
             diagnostics.record("workspace_gateway_request", "local_unavailable", request, SystemClock.elapsedRealtime() - started)
             reply(socket, 502, "Bad Gateway")
             return
@@ -211,17 +216,17 @@ internal object WorkspaceGateway {
         }
     }
 
-    /** Connects to the local App Server, starting it again once when it has stopped since the last request. */
-    private fun openLocal(context: Context): Pair<LocalServer.Endpoint, Socket> {
+    /** Connects to a held App Server, launching it again once when it has stopped since the last request. */
+    private fun openHeld(context: Context, held: HeldServer): Pair<HeldServer.Endpoint, Socket> {
         repeat(2) {
-            val server = LocalServer.endpoint(context)
+            val server = held.endpoint(context)
             try {
                 return server to Socket().apply { connect(java.net.InetSocketAddress(InetAddress.getByName(server.host), server.port), 2_000) }
             } catch (error: java.io.IOException) {
-                LocalServer.invalidate(server)
+                held.invalidate(server)
             }
         }
-        throw LocalServer.Unavailable()
+        throw HeldServer.Unavailable("unreachable")
     }
 
     /** Opens a stream, replacing a connection that died since the last request once. */

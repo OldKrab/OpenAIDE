@@ -306,6 +306,10 @@ fn read(
         };
         let text = match incoming {
             Incoming::Text(text) => text,
+            Incoming::Binary(_) => {
+                socket.end("unsupported_frame", Some(CLOSE_PROTOCOL_VIOLATION));
+                return;
+            }
             Incoming::Ping(payload) => {
                 socket.pong(&payload);
                 continue;

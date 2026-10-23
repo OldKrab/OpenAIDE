@@ -184,13 +184,16 @@ async fn serve(mut socket: TcpStream, shared: Arc<Shared>) {
 /// Checks the Frontend's token and returns the request head without it.
 ///
 /// A preflight carries no credentials by design; the App Server answers it and
-/// nothing else is reachable without the token.
+/// nothing else is reachable without the token. A Terminal socket (ADR-0071) is
+/// the other exception: a browser WebSocket cannot send headers, and the App
+/// Server admits it only with a single-use attach token issued over an
+/// authorized request, so the gateway token would add nothing there.
 fn forwarded_head(head: &[u8], token: &str) -> Result<Vec<u8>, u16> {
     let head = std::str::from_utf8(head).map_err(|_| 400u16)?;
     let mut lines = head.split("\r\n");
     let request_line = lines.next().filter(|line| !line.is_empty()).ok_or(400u16)?;
     let preflight = request_line.starts_with("OPTIONS ");
-    let mut authorized = preflight;
+    let mut authorized = preflight || terminal_socket(request_line, head);
     let mut forwarded = Vec::with_capacity(head.len() + 4);
     forwarded.extend_from_slice(request_line.as_bytes());
     forwarded.extend_from_slice(b"\r\n");
@@ -215,6 +218,20 @@ fn forwarded_head(head: &[u8], token: &str) -> Result<Vec<u8>, u16> {
     }
     forwarded.extend_from_slice(b"\r\n");
     Ok(forwarded)
+}
+
+/// Exactly `GET /terminal` asking for an upgrade; the App Server checks the rest.
+fn terminal_socket(request_line: &str, head: &str) -> bool {
+    let target = request_line
+        .strip_prefix("GET ")
+        .and_then(|rest| rest.strip_suffix(" HTTP/1.1"));
+    target.is_some_and(|target| target.split('?').next() == Some("/terminal"))
+        && head.split("\r\n").skip(1).any(|line| {
+            line.split_once(':').is_some_and(|(name, value)| {
+                name.eq_ignore_ascii_case("upgrade")
+                    && value.trim().eq_ignore_ascii_case("websocket")
+            })
+        })
 }
 
 async fn read_head(socket: &mut TcpStream) -> Option<(Vec<u8>, Vec<u8>)> {

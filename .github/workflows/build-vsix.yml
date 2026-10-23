@@ -184,7 +184,7 @@ jobs:
 
   desktop-darwin-arm64:
     if: needs.prepare.outputs.desktop_darwin_arm64 == 'true'
-    needs: [prepare, server-darwin-arm64]
+    needs: [prepare, server-darwin-arm64, server-linux-x64-musl]
     uses: ./.github/workflows/package-desktop-target.yml
     with:
       target: darwin-arm64

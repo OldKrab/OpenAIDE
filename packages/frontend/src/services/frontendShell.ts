@@ -142,6 +142,16 @@ export type FrontendFileAcquisition =
       pick(taskId: string): Promise<PreSendAttachment[]>;
     };
 
+export type TerminalSocketCapability = {
+  /** A `ws:` or `wss:` URL of the App Server's Terminal route in use now. */
+  socketUrl(): string;
+  /**
+   * Hears the open-Terminal count as it changes, for a native Quit that warns without asking
+   * the App Server. Desktop only.
+   */
+  openCountChanged?(count: number): void;
+};
+
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
   connectionSettings?: import("./connectionSettings").ConnectionSettings;
@@ -206,6 +216,17 @@ export type FrontendShell = {
   };
   /** OS notifications for Task Attention Events, by the Web and Desktop shells; omitted elsewhere. */
   taskNotifications?: WebTaskNotificationManager;
+  /**
+   * Where the Frontend opens a Terminal byte stream (ADR-0071). The attach token in the
+   * stream authenticates it, so the URL carries no credential. Omitted by shells that
+   * open their own native terminal instead (VS Code).
+   */
+  terminals?: TerminalSocketCapability;
+  /**
+   * Opens the host's own terminal at a folder instead of the in-app Terminal page. VS Code only,
+   * where the App Server runs on the extension host's computer.
+   */
+  nativeTerminal?: { open(folder: string): void };
   /** Opens Agent File References in the Task Panel File Viewer. Omitted by VS Code. */
   fileViewer?: true;
   /** Web-only download affordance; omitted shells keep their existing file-link behavior. */

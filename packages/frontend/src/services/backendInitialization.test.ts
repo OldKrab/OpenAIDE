@@ -24,7 +24,6 @@ describe("backend initialization", () => {
           "openExternal",
           "revealFile",
           "pickLocalFile",
-          "openTerminal",
           "readSecret",
           "writeSecret",
           "showNotification",

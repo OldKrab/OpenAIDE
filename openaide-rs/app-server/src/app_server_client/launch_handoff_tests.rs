@@ -65,6 +65,41 @@ fn incompatible_server_with_replacement_endpoint_stops_then_launches_replacement
 }
 
 #[test]
+fn reporting_policy_returns_an_incompatible_server_without_asking_it_to_stop() {
+    let fixture = Fixture::with_policy(LaunchHandoffPolicy {
+        max_wait_attempts: 3,
+        incompatible: IncompatibleServerPolicy::Report,
+    });
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(fixture.state_root.clone());
+    let _published = crate::app_server_process::publish_local_http_probe_endpoint(
+        dispatcher.shared_gateway(),
+        &fixture.state_root,
+        fixture.runtime_dir.path(),
+    )
+    .unwrap();
+    let mut waiter = CountingWaiter::default();
+
+    let result = fixture
+        .run_requiring_app_version("next-release", &mut waiter)
+        .unwrap();
+
+    assert!(matches!(
+        result,
+        LaunchHandoffResult::Incompatible {
+            ref target,
+            reason: AttachOrLaunchFailure::IncompatibleApp,
+        } if target.app_version == env!("CARGO_PKG_VERSION")
+    ));
+    assert_eq!(waiter.calls, 0);
+    let record = fixture
+        .endpoint_records
+        .read(fixture.state_root.fingerprint())
+        .unwrap()
+        .expect("the incompatible App Server keeps its endpoint");
+    assert_eq!(record.status, RuntimeEndpointRecordStatus::Running);
+}
+
+#[test]
 fn legacy_release_without_replacement_endpoint_waits_for_liveness_shutdown() {
     let fixture = Fixture::new();
     let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(fixture.state_root.clone());
@@ -148,6 +183,7 @@ fn unreachable_endpoint_is_preserved_until_launch_owner_publishes_replacement() 
 fn busy_launch_lock_is_bounded_by_policy() {
     let fixture = Fixture::with_policy(LaunchHandoffPolicy {
         max_wait_attempts: 2,
+        ..Default::default()
     });
     let _held_lock = acquire_launch_lock(&fixture);
     let mut waiter = CountingWaiter::default();
@@ -174,6 +210,7 @@ impl Fixture {
     fn new() -> Self {
         Self::with_policy(LaunchHandoffPolicy {
             max_wait_attempts: 3,
+            ..Default::default()
         })
     }
 

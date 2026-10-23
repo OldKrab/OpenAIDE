@@ -14,6 +14,7 @@ pub(crate) mod native_sessions;
 pub mod projects;
 pub mod protocol;
 pub mod protocol_edge;
+pub(crate) mod pty_child;
 pub mod remote_devices;
 pub mod server_requests;
 pub mod settings;
@@ -25,6 +26,7 @@ pub mod storage_runtime;
 pub mod task_events;
 pub(crate) mod task_recovery;
 pub mod tasks;
+pub mod terminals;
 #[cfg(test)]
 pub(crate) mod test_sync;
 pub mod time;

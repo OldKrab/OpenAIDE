@@ -195,6 +195,8 @@ function actionsFromSubscriptionSnapshot(
       return [];
     case "devices":
       return [{ type: "settings:devices", devices: snapshot.devices }];
+    case "terminals":
+      return [{ type: "terminals", terminals: snapshot.terminals }];
     case "toolDetail":
       return [{
         type: "toolDetail:result",

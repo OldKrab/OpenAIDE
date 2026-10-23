@@ -29,6 +29,7 @@ mod task_attention_handlers;
 mod task_config_handlers;
 mod task_handlers;
 mod task_update_publisher;
+mod terminal_handlers;
 mod worktree_handlers;
 
 pub use delivery_signal::DeliverySignal;
@@ -116,6 +117,7 @@ pub struct RpcGateway {
     update_shutdown: Option<UpdateShutdownBarrier>,
     remote_devices: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow>,
     remote_device_service: Option<crate::remote_devices::RemoteDevices>,
+    pub(crate) terminals: crate::terminals::Terminals,
 }
 
 pub(crate) trait AppServerShutdownWorkflow: Send + Sync {
@@ -199,6 +201,7 @@ impl RpcGateway {
         worktrees: Arc<crate::worktrees::WorktreeManager>,
         shutdown: Arc<dyn AppServerShutdownWorkflow>,
     ) -> Self {
+        let terminals = crate::terminals::Terminals::default();
         Self {
             client_hub,
             lifecycle,
@@ -208,7 +211,7 @@ impl RpcGateway {
             ready_catalog_agents: Default::default(),
             shell_file_reveals,
             file_viewer: crate::file_viewer::FileViewerRegistry::new(),
-            snapshots,
+            snapshots: snapshots.with_terminals(terminals.clone()),
             task_snapshots,
             project_roots,
             probe_facts,
@@ -242,6 +245,7 @@ impl RpcGateway {
             update_shutdown: None,
             remote_devices: Arc::new(crate::remote_devices::NoRemoteDevices),
             remote_device_service: None,
+            terminals,
         }
     }
 

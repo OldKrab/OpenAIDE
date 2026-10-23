@@ -10,6 +10,7 @@ pub const CLIENT_DETACH: &str = "client/detach";
 pub const CLIENT_UPDATE_SHUTDOWN_PREPARE: &str = "client/updateShutdownPrepare";
 pub const CLIENT_UPDATE_SHUTDOWN_COMMIT: &str = "client/updateShutdownCommit";
 pub const CLIENT_UPDATE_SHUTDOWN_ABORT: &str = "client/updateShutdownAbort";
+pub const CLIENT_REPLACEMENT_IMPACT: &str = "client/replacementImpact";
 pub const PENDING_REQUEST_RESOLVE: &str = "pendingRequest/resolve";
 pub const STATE_SUBSCRIBE: &str = "state/subscribe";
 pub const STATE_UNSUBSCRIBE: &str = "state/unsubscribe";
@@ -48,6 +49,9 @@ pub const DEVICES_CANCEL_INVITE: &str = "devices/cancelInvite";
 pub const DEVICES_PREVIEW_JOIN_REQUEST: &str = "devices/previewJoinRequest";
 pub const DEVICES_APPROVE_JOIN_REQUEST: &str = "devices/approveJoinRequest";
 pub const DEVICES_REMOVE: &str = "devices/remove";
+pub const TERMINALS_OPEN: &str = "terminals/open";
+pub const TERMINALS_ATTACH: &str = "terminals/attach";
+pub const TERMINALS_CLOSE: &str = "terminals/close";
 pub const ATTACHMENT_LIST_ROOTS: &str = "attachment/listRoots";
 pub const ATTACHMENT_LIST_DIRECTORY: &str = "attachment/listDirectory";
 pub const ATTACHMENT_CREATE_FILE_REFERENCE: &str = "attachment/createFileReference";
@@ -127,6 +131,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     CLIENT_UPDATE_SHUTDOWN_PREPARE,
     CLIENT_UPDATE_SHUTDOWN_COMMIT,
     CLIENT_UPDATE_SHUTDOWN_ABORT,
+    CLIENT_REPLACEMENT_IMPACT,
     PENDING_REQUEST_RESOLVE,
     STATE_SUBSCRIBE,
     STATE_UNSUBSCRIBE,
@@ -165,6 +170,9 @@ pub const CLIENT_METHODS: &[&str] = &[
     DEVICES_PREVIEW_JOIN_REQUEST,
     DEVICES_APPROVE_JOIN_REQUEST,
     DEVICES_REMOVE,
+    TERMINALS_OPEN,
+    TERMINALS_ATTACH,
+    TERMINALS_CLOSE,
     ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_CREATE_FILE_REFERENCE,

@@ -11,6 +11,7 @@ let firstRun = false;
 const icons = {
   phone: '<rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3"/>',
   computer: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
   qr: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2M20 14v.01M14 20h2M18 18v2h2"/>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7 14h10"/>',
   battery: '<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M22 11v2M7 10v4"/>',
@@ -35,11 +36,17 @@ function item(kind, glyph, title, detail, target, value) {
   return `<button class="${kind}" ${attribute}>${icon(glyph)}<span class="copy"><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ''}</span>${trailing}</button>`;
 }
 function choice(glyph, title, detail, destination) { return item('choice', glyph, title, detail, destination); }
+// A choice that starts a native flow, such as adding an SSH computer, instead of opening a screen.
+function choiceAction(glyph, title, detail, action) { return item('row choice', glyph, title, detail, action); }
 function row(glyph, title, action, value = '', detail = '') { return item('row', glyph, title, detail, action, value); }
 // The place in use: named like the others, but not something to tap.
 function place(glyph, title, detail) { return `<div class="row current">${icon(glyph)}<span class="copy"><strong>${title}</strong><small>${detail}</small></span><span class="value">In use</span></div>`; }
 function computerRow(computer) {
   return `<button class="row" data-action="use_computer" data-id="${escape(computer.id)}">${icon('computer')}<span class="copy"><strong>${escape(computer.name || 'Remote computer')}</strong><small>Remote computer</small></span>${icon('chevron', 'chev')}</button>`;
+}
+function sshRow(computer) {
+  if (computer.current) return place('server', escape(computer.name), `SSH · ${escape(computer.destination)}`);
+  return `<button class="row" data-action="use_ssh" data-id="${escape(computer.id)}">${icon('server')}<span class="copy"><strong>${escape(computer.name)}</strong><small>SSH · ${escape(computer.destination)}</small></span>${icon('chevron', 'chev')}</button>`;
 }
 
 // Background information is prose behind a question placed where it comes up, not text on the page.
@@ -130,21 +137,28 @@ function render() {
     page.innerHTML = heading('Where will your<br>agents work?')
       + '<div class="group">'
       + choice('computer', 'Remote computer', 'Pair with a code', 'remote')
+      + (state.sshAvailable ? choiceAction('server', 'SSH computer', 'A Linux computer you sign in to', 'ssh_add') : '')
       + choice('phone', 'This phone', 'Runs in Termux', 'local')
       + '</div>' + hint();
   } else if (screen === 'settings') {
     const remote = state.remote;
     const computers = state.computers || [];
+    const ssh = state.sshComputers || [];
     // One list of places with the one in use marked; adding a computer is a separate act below it.
     page.innerHTML = `<h1>${remote ? escape(state.computer || 'Remote computer') : 'This phone'}</h1>${state.connected ? '<p class="status">Connected</p>' : '<p class="status off">Not connected</p>'}`
       + '<h2 class="label">Where agents work</h2><div class="group">'
       + (remote ? row('phone', 'This phone', 'local_screen', '', 'Runs in Termux') : place('phone', 'This phone', 'Runs in Termux'))
       + computers.map(computer => computer.current ? place('computer', escape(computer.name || 'Remote computer'), 'Remote computer')
         : computerRow(computer)).join('')
+      + ssh.map(sshRow).join('')
       + '</div><div class="group">'
       + row('qr', computers.length ? 'Add another computer' : 'Add a computer', 'remote_screen', '', 'Pair with a code')
+      + (state.sshAvailable ? row('server', 'Add an SSH computer', 'ssh_add', '', 'A Linux computer you sign in to') : '')
       + '</div><div class="group">'
-      + (remote ? row('bell', 'Task notifications', 'background_screen', state.background ? 'On' : 'Off')
+      // A paired computer's Tasks only notify here; work on this phone or an SSH Computer
+      // is also held by this phone in the background.
+      + (remote && !ssh.some(computer => computer.current)
+        ? row('bell', 'Task notifications', 'background_screen', state.background ? 'On' : 'Off')
         : row('battery', 'Background work', 'background_screen', state.background ? 'On' : 'Off'))
       + row('wrench', 'Advanced', 'advanced_screen')
       + '</div>' + (computers.length ? hint() : '');

@@ -268,6 +268,7 @@ function deviceIntents() {
     createInvite: vi.fn(async () => ({ code: "OAI1ABCDEFGH", expiresAtMs: Date.now() + 600_000 })),
     previewJoinRequest: vi.fn(async () => ({ deviceId: "device_1", name: "Phone", model: "Example 9", serverName: "workstation", alreadyTrusted: false })),
     remove: vi.fn(async () => undefined),
+    replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0, openTerminals: 0 })),
   };
 }
 
@@ -384,6 +385,140 @@ it("pairs with a pasted code and shows the shell's reason when it is refused", a
   expect(dialog("Pair with another computer")?.textContent).toContain("already used");
 });
 
+const devbox = { id: "b".repeat(64), name: "devbox", current: true, ssh: "me@devbox" };
+
+function sshComputers(status = { computerId: devbox.id, runningVersion: "0.9.0", updateAvailable: false, suggestLinger: false }) {
+  return {
+    hosts: vi.fn().mockResolvedValue(["devbox", "build-1"]),
+    add: vi.fn().mockResolvedValue("switched"),
+    status: vi.fn().mockResolvedValue(status),
+    update: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue("stopped"),
+  };
+}
+
+it("adds an SSH computer by host and offers the hosts from the SSH configuration", async () => {
+  const ssh = sshComputers();
+  useShell({ computers: { ...desktopComputers([]), ssh } });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  await click("Add SSH computer");
+  await settle();
+  expect([...document.querySelectorAll("#settings-ssh-hosts option")].map((option) => option.getAttribute("value"))).toEqual(["devbox", "build-1"]);
+  expect((button("Add and connect") as HTMLButtonElement).disabled).toBe(true);
+  await type("Host", " devbox ");
+  await click("Add and connect");
+  await settle();
+
+  expect(ssh.add).toHaveBeenCalledWith("devbox", undefined);
+});
+
+it("names an SSH computer by its destination and stops OpenAIDE there only after confirmation", async () => {
+  const ssh = sshComputers();
+  useShell({ computers: { ...desktopComputers([devbox]), ssh } });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(row("devbox").textContent).toContain("SSH · me@devbox");
+  await click("Stop OpenAIDE on devbox");
+  expect(ssh.stop).not.toHaveBeenCalled();
+  expect(dialog("Stop OpenAIDE on devbox?")?.textContent).toContain("ending work in progress");
+  await click("Stop");
+  await settle();
+
+  expect(ssh.stop).toHaveBeenCalledWith(devbox.id);
+  expect(pageText()).toContain("OpenAIDE on devbox stops once no app is connected to it.");
+});
+
+it("offers to update an older App Server on the SSH computer and lists what the update interrupts", async () => {
+  const ssh = sshComputers({ computerId: devbox.id, runningVersion: "0.9.0", updateAvailable: true, suggestLinger: true });
+  useShell({ computers: { ...desktopComputers([devbox]), ssh } });
+  const intents = {
+    ...deviceIntents(),
+    replacementImpact: vi.fn().mockResolvedValue({
+      otherClients: [{ kind: "web", appVersion: "0.9.0", reconnecting: false }, { kind: "keeper", reconnecting: false }],
+      activeTurns: 2,
+      pendingTaskRequests: 1,
+      openTerminals: 3,
+    }),
+  };
+  await mountSettings({ deviceIntents: intents, state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(pageText()).toContain("devbox runs OpenAIDE 0.9.0, older than this app.");
+  expect(pageText()).toContain("loginctl enable-linger");
+  await click("Update…");
+  await settle();
+  const update = dialog("Update OpenAIDE on devbox?")!;
+  expect([...update.querySelectorAll("li")].map((item) => item.textContent)).toEqual([
+    "OpenAIDE in a browser 0.9.0",
+    "Agents working in 2 Tasks",
+    "1 question waiting for an answer",
+    "3 terminals will close",
+  ]);
+  expect(ssh.update).not.toHaveBeenCalled();
+  await click("Update and restart");
+  await settle();
+
+  expect(ssh.update).toHaveBeenCalled();
+});
+
+function phoneShell(snapshot: object) {
+  const execute = vi.fn(async () => undefined);
+  const list = { device: "phone" as const, computers: [] };
+  const computers = { snapshot: () => list, subscribe: () => () => undefined, use: vi.fn(), forget: vi.fn() };
+  useShell({ connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute }, computers } as unknown as Partial<FrontendShell>);
+  return execute;
+}
+
+const phoneDevbox = { id: "c".repeat(32), name: "devbox", destination: "me@devbox:2222", current: true };
+const phoneLab = { id: "d".repeat(32), name: "lab", destination: "me@lab", current: false };
+
+it("lists the phone's SSH computers beside paired ones and adds one through the phone", async () => {
+  const execute = phoneShell({ remote: true, computer: "devbox", sshComputers: [phoneDevbox, phoneLab], sshAvailable: true, ssh: null });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(row("devbox").textContent).toContain("SSH · me@devbox:2222");
+  await click("Use lab");
+  expect(execute).toHaveBeenCalledWith({ action: "use_ssh", id: phoneLab.id });
+  await click("Add SSH computer");
+  expect(execute).toHaveBeenCalledWith({ action: "ssh_add" });
+});
+
+it("offers no SSH computers on a phone build that cannot install on them", async () => {
+  phoneShell({ remote: false, computer: "", sshComputers: [], sshAvailable: false });
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(buttons("Add SSH computer")).toHaveLength(0);
+});
+
+it("stops and updates the phone's SSH computer only after their warnings", async () => {
+  const execute = phoneShell({
+    remote: true, computer: "devbox", sshComputers: [phoneDevbox], sshAvailable: true,
+    ssh: { runningVersion: "0.9.0", updateAvailable: true, suggestLinger: false }, sshNotice: "",
+  });
+  const intents = { ...deviceIntents(), replacementImpact: vi.fn().mockResolvedValue({ otherClients: [], activeTurns: 1, pendingTaskRequests: 0 }) };
+  await mountSettings({ deviceIntents: intents, state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  await click("Stop OpenAIDE on devbox");
+  expect(execute).not.toHaveBeenCalledWith({ action: "stop_ssh", id: phoneDevbox.id });
+  await click("Stop");
+  await settle();
+  expect(execute).toHaveBeenCalledWith({ action: "stop_ssh", id: phoneDevbox.id });
+
+  expect(pageText()).toContain("devbox runs OpenAIDE 0.9.0, older than this app.");
+  await click("Update…");
+  await settle();
+  expect(dialog("Update OpenAIDE on devbox?")?.textContent).toContain("Agents working in 1 Task");
+  await click("Update and restart");
+  await settle();
+  expect(execute).toHaveBeenCalledWith({ action: "update_ssh" });
+});
+
 // General: Desktop runtime and updates
 
 it("switches where Agents run and leaves the environment in use alone", async () => {
@@ -453,11 +588,13 @@ it("asks before an update stops active work", async () => {
   const capability = updates({ revision: 3, installedVersion: "1.0.0", kind: "readyToUpdate", offer: { version: "1.1.0", notes: "Fixes", sizeBytes: 10 } });
   vi.mocked(capability.restartAndUpdate).mockResolvedValueOnce("activeWork").mockResolvedValueOnce("started");
   useShell({ desktopUpdates: capability });
-  await mountSettings();
+  const intents = { ...deviceIntents(), replacementImpact: vi.fn(async () => ({ activeTurns: 1, pendingTaskRequests: 0, openTerminals: 2 })) };
+  await mountSettings({ deviceIntents: intents });
 
   await click("Restart and update");
   await settle();
   expect(pageText()).toContain("OpenAIDE is still working.");
+  expect(pageText()).toContain("2 terminals will close.");
 
   await click("Stop work and update");
   await settle();

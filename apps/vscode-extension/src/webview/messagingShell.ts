@@ -218,6 +218,13 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     await vscode.commands.executeCommand(inWorkspace ? "revealInExplorer" : "revealFileInOS", folder);
     return true;
   }
+  if (message.type === "shell.terminal.open" && isObject(message.payload)) {
+    const folder = typeof message.payload.folder === "string" ? message.payload.folder : "";
+    if (!nodePath.isAbsolute(folder)) throw new Error("folder must be absolute");
+    // ADR-0071: VS Code's own terminal replaces the in-app page; the action log carries only its type.
+    vscode.window.createTerminal({ name: nodePath.basename(folder) || "Terminal", cwd: folder }).show();
+    return true;
+  }
   if (message.type === "tool.openPath" && isObject(message.payload)) {
     const path = typeof message.payload.path === "string" ? message.payload.path : "";
     const line = typeof message.payload.line === "number" && message.payload.line > 0 ? message.payload.line : undefined;

@@ -34,6 +34,8 @@ final class ConnectionController extends ContextWrapper {
     private boolean disposed;
     private boolean recheckOnReturn;
     private String notice = "";
+    /** The outcome of the last Stop of an SSH Computer; the Remote section shows it. */
+    private String sshNotice = "";
     private long operationStarted;
     private int operationSequence;
     private String operationName;
@@ -51,7 +53,8 @@ final class ConnectionController extends ContextWrapper {
     void receive(JSONObject message) {
         if (disposed) return;
         String command = message.optString("action");
-        if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics").contains(command)) {
+        if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics",
+            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
@@ -73,7 +76,12 @@ final class ConnectionController extends ContextWrapper {
         String target = action.equals("use_computer") ? message.optString("id") : null;
         String operationId = message.has("operationId") ? message.optString("operationId") : null;
         if (action.equals("forget_computer")) { forget(message.optString("id"), operationId, reply); return; }
-        switcher.request(selected == null ? null : selected.id, target, operationId, reply);
+        // An SSH Computer in use is a source of its own, so returning to this phone is a switch.
+        // TODO(ssh-computers): switch to SSH Computers through this switch too (ADR-0070), so
+        // "use_ssh" connects before it replaces the page and the switcher lists them.
+        SshComputers.Computer ssh = store.usesSsh() ? store.sshComputer() : null;
+        String source = selected != null ? selected.id : ssh != null ? "ssh:" + ssh.id : null;
+        switcher.request(source, target, operationId, reply);
     }
 
     /** Forgets a paired computer; the one in use is left through the switch first, and forgotten only once it took effect. */
@@ -95,6 +103,7 @@ final class ConnectionController extends ContextWrapper {
         if (action.equals("state")) { emit(); return; }
         if (busy && !action.equals("close")) return;
         notice = "";
+        sshNotice = "";
         switch (action) {
             case "close": view.close(); break;
             case "state": emit(); break;
@@ -104,6 +113,31 @@ final class ConnectionController extends ContextWrapper {
             case "pair": pair(message.optString("code")); break;
             case "join": join(); break;
             case "join_stop": RemotePairing.stopJoin(); joinCode = null; emit(); break;
+            case "ssh_add": SshSetup.start(activity, this::changed); break;
+            case "use_ssh":
+                if (!new ConnectionStore(this).selectSsh(message.optString("id"))) { emit(); break; }
+                RemoteNode.INSTANCE.disconnect();
+                SshServer.reset();
+                diagnostics.record("connection_ssh_selected", "selected", 0, 0);
+                changed();
+                break;
+            case "forget_ssh": {
+                ConnectionStore store = new ConnectionStore(this);
+                SshComputers.Computer selected = store.sshComputer();
+                boolean current = selected != null && selected.id.equals(message.optString("id"));
+                store.forgetSsh(message.optString("id"));
+                diagnostics.record("connection_ssh_forgotten", current ? "current" : "other", 0, 0);
+                if (current) { SshServer.reset(); changed(); } else emit();
+                break;
+            }
+            case "stop_ssh": stopSsh(message.optString("id")); break;
+            case "update_ssh":
+                // The Frontend showed what the replacement interrupts; reconnecting replaces it.
+                if (!new ConnectionStore(this).usesSsh()) { emit(); break; }
+                diagnostics.record("connection_ssh_update", "confirmed", 0, 0);
+                SshServer.update();
+                changed();
+                break;
             case "install": install(); break;
             case "termux": launchTermux(); break;
             case "get_termux": open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/termux/termux-app/releases"))); break;
@@ -213,6 +247,23 @@ final class ConnectionController extends ContextWrapper {
         });
     }
 
+    private void stopSsh(String id) {
+        ConnectionStore store = new ConnectionStore(this);
+        SshComputers.Computer computer = SshComputers.find(store.sshComputers(), id);
+        if (computer == null) { emit(); return; }
+        begin("ssh_stop", "Stopping OpenAIDE on " + computer.name + "…");
+        SshServer.stop(this, computer, store, outcome -> {
+            switch (outcome) {
+                case "stopped": sshNotice = "OpenAIDE on " + computer.name + " stops once no app is connected to it."; break;
+                case "notRunning": sshNotice = "OpenAIDE was not kept running on " + computer.name + "."; break;
+                case "stillRunning": sshNotice = "OpenAIDE on " + computer.name + " did not stop yet. Try again in a moment."; break;
+                default: sshNotice = SshServer.message(outcome);
+            }
+            end(java.util.Arrays.asList("stopped", "notRunning", "stillRunning").contains(outcome), "");
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
     private void begin(String operation, String text) {
         busy = true;
         notice = text;
@@ -237,12 +288,16 @@ final class ConnectionController extends ContextWrapper {
             var preferences = getSharedPreferences("connection", MODE_PRIVATE);
             ConnectionStore store = new ConnectionStore(this);
             ConnectionStore.PairedServer computer = store.pairedServer();
+            SshComputers.Computer ssh = store.sshComputer();
             PowerManager power = getSystemService(PowerManager.class);
             JSONObject state = new JSONObject().put("initial", activity.getIntent().getStringExtra("screen"))
                 .put("connected", activity.getIntent().getBooleanExtra("connected", false))
-                .put("remote", store.usesPaired()).put("paired", !store.pairedServers().isEmpty())
-                .put("computer", computer == null ? "" : computer.name)
+                .put("remote", store.usesPaired() || ssh != null).put("paired", !store.pairedServers().isEmpty())
+                .put("computer", ssh != null ? ssh.name : computer == null ? "" : computer.name)
                 .put("computers", computers(store))
+                .put("sshComputers", sshComputers(store))
+                .put("ssh", sshStatus(ssh))
+                .put("sshAvailable", !BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()).put("sshNotice", sshNotice)
                 .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("notice", notice)
                 .put("termux", installed("com.termux")).put("permission", checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
                 .put("checks", checks == null ? JSONObject.NULL : checks)
@@ -264,6 +319,25 @@ final class ConnectionController extends ContextWrapper {
                 .put("current", selected != null && selected.id.equals(server.id)));
         }
         return computers;
+    }
+
+    /** Every SSH Computer, with the one in use marked. */
+    private static org.json.JSONArray sshComputers(ConnectionStore store) throws org.json.JSONException {
+        SshComputers.Computer selected = store.sshComputer();
+        org.json.JSONArray computers = new org.json.JSONArray();
+        for (SshComputers.Computer computer : store.sshComputers()) {
+            computers.put(new JSONObject().put("id", computer.id).put("name", computer.name)
+                .put("destination", computer.destination()).put("current", selected != null && selected.id.equals(computer.id)));
+        }
+        return computers;
+    }
+
+    /** What the last launch learned about the App Server on the SSH Computer in use, or null. */
+    private static Object sshStatus(SshComputers.Computer selected) throws org.json.JSONException {
+        SshServer.Status status = SshServer.status();
+        if (selected == null || status == null) return JSONObject.NULL;
+        return new JSONObject().put("runningVersion", status.runningVersion)
+            .put("updateAvailable", status.updateAvailable).put("suggestLinger", status.suggestLinger);
     }
 
     private boolean installed(String name) {

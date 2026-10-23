@@ -1,6 +1,7 @@
 use openaide_app_server_protocol::client::{
     ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientDetachParams,
-    ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult, UpdateShutdownAbortParams,
+    ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult,
+    ClientReplacementImpactParams, ClientReplacementImpactResult, UpdateShutdownAbortParams,
     UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
     UpdateShutdownCommitResult, UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
 };
@@ -123,6 +124,50 @@ impl RpcGateway {
         responses::result(connection_id, id, meta, ClientDetachResult {})
     }
 
+    /// Reports who and what a replacement by another version would interrupt, without
+    /// starting one. The caller is excluded: it asked and already knows.
+    pub(super) fn handle_client_replacement_impact(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        if let Err(error) = serde_json::from_value::<ClientReplacementImpactParams>(params) {
+            return self.error(connection_id, id, meta, responses::invalid_params(error));
+        }
+        let Some(context) = self.client_hub.context_for_connection(&connection_id) else {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                responses::not_initialized(
+                    openaide_app_server_protocol::methods::CLIENT_REPLACEMENT_IMPACT.to_string(),
+                ),
+            );
+        };
+        let blockers = match self.shutdown.shutdown_blockers() {
+            Ok(blockers) => blockers,
+            Err(_error) => {
+                return self.error(
+                    connection_id,
+                    id,
+                    meta,
+                    responses::replacement_impact_failed(),
+                )
+            }
+        };
+        let result = ClientReplacementImpactResult {
+            other_clients: self
+                .client_hub
+                .other_client_summaries(&context.client_instance_id),
+            active_turns: saturating_u32(blockers.active_turns),
+            pending_task_requests: saturating_u32(blockers.pending_task_requests),
+            open_terminals: saturating_u32(self.terminals.open_count()),
+        };
+        responses::result(connection_id, id, meta, result)
+    }
+
     pub(super) fn handle_update_shutdown_prepare(
         &mut self,
         connection_id: ConnectionId,
@@ -204,8 +249,12 @@ impl RpcGateway {
                 )
             }
         };
+        // An open Terminal is active work the update would end, so it needs the same
+        // confirmation; the client reads the count from the Terminal list.
         if !params.stop_active_work
-            && (blockers.active_turns > 0 || blockers.pending_task_requests > 0)
+            && (blockers.active_turns > 0
+                || blockers.pending_task_requests > 0
+                || self.terminals.open_count() > 0)
         {
             return responses::result(
                 connection_id,
@@ -308,6 +357,10 @@ impl RpcGateway {
         self.update_shutdown = None;
         responses::result(connection_id, id, meta, UpdateShutdownAbortResult {})
     }
+}
+
+fn saturating_u32(count: usize) -> u32 {
+    count.try_into().unwrap_or(u32::MAX)
 }
 
 fn valid_update_attempt_id(attempt_id: &str) -> bool {

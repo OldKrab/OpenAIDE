@@ -19,6 +19,7 @@ import { useUpdateGroup } from "./updateSettings";
 
 export type GeneralSectionProps = {
   appearance?: FrontendShellAppearance;
+  replacementImpact?: () => Promise<import("@openaide/app-server-client").ClientReplacementImpactResult>;
   desktopNotifications?: DesktopNotificationSettings;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
@@ -34,11 +35,12 @@ export function useGeneralSection({
   onSetDesktopNotifications,
   phone,
   preferences,
+  replacementImpact,
 }: GeneralSectionProps): SettingsSection {
   const shell = currentFrontendShell();
   // While a paired computer is in use, its own runtime applies and this choice has no effect.
   const runtime = useRuntimeGroup(currentComputer(shell?.computers?.snapshot()) ? undefined : shell?.desktopRuntime);
-  const updates = useUpdateGroup(shell?.desktopUpdates);
+  const updates = useUpdateGroup(shell?.desktopUpdates, replacementImpact);
   const enterSends = preferences.composer_submit_shortcut === "enter";
   const everyday: SettingsRow[] = [];
   if (!usesMobileComposerBehavior()) {

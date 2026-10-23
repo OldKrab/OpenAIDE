@@ -172,6 +172,67 @@
         padding: 4px 10px;
       }
 
+      /* `ssh` questions; above the startup screen and the app (desktopSshPrompts.ts). */
+      .desktop-ssh-prompt {
+        position: fixed;
+        z-index: 2147483000;
+        inset: 50% auto auto 50%;
+        transform: translate(-50%, -50%);
+        width: min(440px, calc(100vw - 32px));
+        box-sizing: border-box;
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 18px;
+        border: 1px solid light-dark(oklch(0.84 0.01 255), oklch(0.36 0.012 255));
+        border-radius: 10px;
+        background: light-dark(oklch(0.99 0.004 255), oklch(0.23 0.009 255));
+        color: light-dark(oklch(0.24 0.012 255), oklch(0.91 0.007 255));
+        box-shadow: 0 0 0 100vmax rgb(0 0 0 / 32%), 0 12px 32px rgb(0 0 0 / 24%);
+        font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      }
+
+      .desktop-ssh-prompt pre {
+        max-height: 40vh;
+        overflow: auto;
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .desktop-ssh-prompt input {
+        min-height: 30px;
+        border: 1px solid light-dark(oklch(0.72 0.012 255), oklch(0.43 0.012 255));
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        padding: 4px 8px;
+        font: inherit;
+      }
+
+      .desktop-ssh-prompt footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .desktop-ssh-prompt button {
+        min-height: 30px;
+        border: 1px solid light-dark(oklch(0.72 0.012 255), oklch(0.43 0.012 255));
+        border-radius: 6px;
+        background: light-dark(oklch(0.99 0.004 255), oklch(0.245 0.009 255));
+        color: inherit;
+        padding: 4px 12px;
+        font: inherit;
+      }
+
+      .desktop-ssh-prompt button[data-primary] {
+        border-color: #4d9cff;
+        background: #4d9cff;
+        color: white;
+      }
+
       @keyframes desktop-startup-shine {
         0%, 28% { transform: translateX(-115%); }
         72%, 100% { transform: translateX(115%); }
@@ -228,6 +289,7 @@
           <div class="desktop-startup-actions">
             <button class="desktop-startup-cancel" hidden type="button">Return to previous environment</button>
             <button class="desktop-startup-retry" hidden type="button">Retry</button>
+            <button class="desktop-startup-update" hidden type="button">Update…</button>
           </div>
         </div>
       </main>

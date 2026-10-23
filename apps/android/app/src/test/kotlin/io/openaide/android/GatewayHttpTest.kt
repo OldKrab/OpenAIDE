@@ -31,6 +31,8 @@ class GatewayHttpTest {
         assertEquals("/probe/upload?taskId=1", target("POST /__openaide-app-server/upload?taskId=1 HTTP/1.1"))
         assertEquals("/probe/upload/chunk", target("POST /__openaide-app-server/upload/chunk HTTP/1.1"))
         assertEquals("/probe/download?messageId=m", target("GET /__openaide-app-server/download?messageId=m HTTP/1.1"))
+        assertEquals("/probe/terminal", GatewayHttp.appServerTarget(head("GET /__openaide-app-server/terminal HTTP/1.1", *trusted, "Upgrade: websocket")))
+        assertEquals("/probe", target("GET /__openaide-app-server/terminal HTTP/1.1"))
         assertNull(target("GET /assets/index.js HTTP/1.1"))
         assertNull(target("GET /__openaide-app-server-other HTTP/1.1"))
     }

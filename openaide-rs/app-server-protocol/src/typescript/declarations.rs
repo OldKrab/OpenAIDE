@@ -36,9 +36,10 @@ use crate::attachment::{
     PreSendAttachment,
 };
 use crate::client::{
-    ClientCapabilities, ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult,
-    ClientDetachParams, ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult,
-    ClientProbeLifecycle, ClientProbeParams, ClientProbeResult, ClientProtocolCapability,
+    AttachedClientSummary, ClientCapabilities, ClientCapabilitiesChangedParams,
+    ClientCapabilitiesChangedResult, ClientDetachParams, ClientDetachResult, ClientHeartbeatParams,
+    ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams, ClientProbeResult,
+    ClientProtocolCapability, ClientReplacementImpactParams, ClientReplacementImpactResult,
     ClientRole, ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface,
     SettingsSection, ShellCapability, ShellDescriptor, ShellKind, UpdateShutdownAbortParams,
     UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
@@ -172,6 +173,11 @@ use crate::task::{
     TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
     TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
+use crate::terminals::{
+    TerminalAttach, TerminalCollectionSnapshot, TerminalStatus, TerminalSummary, TerminalTarget,
+    TerminalsAttachParams, TerminalsAttachResult, TerminalsCloseParams, TerminalsCloseResult,
+    TerminalsOpenParams, TerminalsOpenResult,
+};
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -238,6 +244,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<UpdateShutdownCommitResult>(output, config);
     push_decl::<UpdateShutdownAbortParams>(output, config);
     push_decl::<UpdateShutdownAbortResult>(output, config);
+    push_decl::<ClientReplacementImpactParams>(output, config);
+    push_decl::<ClientReplacementImpactResult>(output, config);
+    push_decl::<AttachedClientSummary>(output, config);
     push_decl::<ClientProbeLifecycle>(output, config);
     push_decl::<InitializeParams>(output, config);
     push_decl::<ClientRole>(output, config);
@@ -378,6 +387,17 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<DevicesRemoveResult>(output, config);
     push_decl::<TaskAttentionWaitParams>(output, config);
     push_decl::<TaskAttentionWaitResult>(output, config);
+    push_decl::<TerminalTarget>(output, config);
+    push_decl::<TerminalStatus>(output, config);
+    push_decl::<TerminalSummary>(output, config);
+    push_decl::<TerminalCollectionSnapshot>(output, config);
+    push_decl::<TerminalAttach>(output, config);
+    push_decl::<TerminalsOpenParams>(output, config);
+    push_decl::<TerminalsOpenResult>(output, config);
+    push_decl::<TerminalsAttachParams>(output, config);
+    push_decl::<TerminalsAttachResult>(output, config);
+    push_decl::<TerminalsCloseParams>(output, config);
+    push_decl::<TerminalsCloseResult>(output, config);
     push_decl::<RuntimeDeveloperSettings>(output, config);
     push_decl::<RuntimeAcpTraceSettings>(output, config);
 

@@ -41,6 +41,21 @@ final class AndroidDiagnostics {
         }
     }
 
+    /**
+     * Records an event whose fields another layer chose, such as the SSH library's
+     * stage, outcome, class, and duration. Those fields are metadata only by contract.
+     */
+    void recordFields(String event, String fields) {
+        try {
+            JSONObject entry = new JSONObject(fields);
+            entry.put("timestamp", System.currentTimeMillis()).put("event", event);
+            LOG.append(entry.toString());
+            Log.i("OpenAIDE", entry.toString());
+        } catch (JSONException error) {
+            Log.w("OpenAIDE", "diagnostics_serialization_failed");
+        }
+    }
+
     String snapshot() {
         return LOG.snapshot();
     }

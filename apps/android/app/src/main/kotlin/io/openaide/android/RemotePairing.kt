@@ -75,7 +75,7 @@ internal object RemotePairing {
     @JvmStatic fun connect(context: Context, callback: Connected) {
         val application = context.applicationContext
         RemoteNode.scope.launch {
-            val problem = if (!WorkspaceGateway.start(application, false)) {
+            val problem = if (!WorkspaceGateway.start(application, ConnectionProfile.Kind.PAIRED)) {
                 "OpenAIDE could not start its connection on this phone. Restart the app and try again."
             } else try {
                 RemoteNode.connection(application)
@@ -98,12 +98,12 @@ internal object RemotePairing {
             { event, outcome, durationMs, fields -> diagnostics.record(event, outcome, 0, durationMs, fields) },
             object : ComputerSwitch.Steps<Connection?> {
                 override suspend fun connect(target: String?): Connection? {
-                    if (!WorkspaceGateway.start(application, target == null)) {
+                    if (!WorkspaceGateway.start(application, if (target == null) ConnectionProfile.Kind.LOCAL else ConnectionProfile.Kind.PAIRED)) {
                         throw ComputerSwitch.Failed("gateway", "OpenAIDE could not start its connection on this phone. Restart the app and try again.")
                     }
                     if (target == null) {
                         // Starting the App Server in Termux cannot be interrupted; a Cancel ignores its result.
-                        try { LocalServer.endpoint(application) } catch (error: LocalServer.Unavailable) {
+                        try { LocalServer.held.endpoint(application) } catch (error: HeldServer.Unavailable) {
                             throw ComputerSwitch.Failed("local_unavailable", "Your local workspace could not start. Try again, or check this phone in Connection settings.")
                         }
                         return null
@@ -117,6 +117,8 @@ internal object RemotePairing {
 
                 override fun apply(target: String?, connected: Connection?) {
                     val store = ConnectionStore(application)
+                    // Leaving an SSH Computer ends its forward; its App Server keeps running there.
+                    SshServer.reset()
                     if (target == null) {
                         store.selectLocal()
                         // The computer left behind keeps its work; only this phone's link to it ends.

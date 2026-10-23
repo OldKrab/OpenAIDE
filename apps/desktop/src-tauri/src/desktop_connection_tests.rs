@@ -157,3 +157,17 @@ fn only_this_computers_app_server_replacement_reaches_the_window() {
     assert_eq!(remote.in_use().unwrap().0, connection(2));
     assert_eq!(remote.local(), Some(connection(4)));
 }
+
+#[test]
+fn a_new_ssh_forward_is_followed_only_while_that_computer_is_in_use() {
+    let connections = DesktopConnections::default();
+    connections.start_using(Some("ssh-devbox".to_string()), connection(2), None);
+
+    assert!(!connections.replace_ssh("ssh-other", connection(3)));
+    assert!(connections.replace_ssh("ssh-devbox", connection(4)));
+    assert_eq!(connections.in_use().unwrap().0, connection(4));
+
+    let connections = on_this_computer();
+    assert!(!connections.replace_ssh("ssh-devbox", connection(5)));
+    assert_eq!(connections.in_use().unwrap().0, connection(1));
+}

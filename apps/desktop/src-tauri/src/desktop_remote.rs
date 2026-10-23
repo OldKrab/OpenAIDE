@@ -23,16 +23,20 @@ use crate::desktop_connection::{
 };
 use crate::desktop_runtime::{DesktopBootstrapPreferences, write_bootstrap_preferences};
 
-/// A computer whose App Server trusts this Desktop: its public key and the name
-/// it gave itself. Neither is a credential; the device key is stored apart.
+/// A computer whose App Server this Desktop may use instead of its own. A
+/// paired computer is known by its public key and the name it gave itself; an
+/// SSH Computer (ADR-0069) by its `ssh` destination. None is a credential; the
+/// device key is stored apart.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct RemoteComputer {
     pub(crate) id: String,
     pub(crate) name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ssh: Option<String>,
 }
 
 impl DesktopBootstrapPreferences {
-    /// The paired computer in use instead of this one.
+    /// The paired or SSH Computer in use instead of this one.
     pub(crate) fn remote(&self) -> Option<&RemoteComputer> {
         let id = self.remote_computer.as_ref()?;
         self.remote_computers
@@ -42,7 +46,7 @@ impl DesktopBootstrapPreferences {
 
     /// Remembers a computer, replacing an earlier pairing with it. Using it is a
     /// switch of its own, saved once the computer answers.
-    fn remember(&mut self, computer: RemoteComputer) {
+    pub(crate) fn remember(&mut self, computer: RemoteComputer) {
         self.remote_computers
             .retain(|known| known.id != computer.id);
         self.remote_computers.push(computer);
@@ -71,6 +75,8 @@ pub(crate) struct RemoteComputerSummary {
     id: String,
     name: String,
     current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ssh: Option<String>,
 }
 
 /// This Desktop's endpoint, bound on first use and kept for the process: a
@@ -115,10 +121,13 @@ pub(crate) async fn connect(
     app: &tauri::AppHandle,
     computer: &RemoteComputer,
 ) -> Result<(LocalHttpConnection, remote::Gateway), ConnectError> {
-    let server = computer.id.parse::<remote::PublicKey>().map_err(|_| ConnectError {
-        class: "pairing_damaged",
-        message: "The saved pairing is damaged. Pair with the computer again.".to_string(),
-    })?;
+    let server = computer
+        .id
+        .parse::<remote::PublicKey>()
+        .map_err(|_| ConnectError {
+            class: "pairing_damaged",
+            message: "The saved pairing is damaged. Pair with the computer again.".to_string(),
+        })?;
     let this_computer = |message: String| ConnectError {
         class: "endpoint",
         message,
@@ -129,13 +138,10 @@ pub(crate) async fn connect(
         .await
         .map_err(this_computer)?;
     let client = Arc::new(remote::RemoteClient::new(endpoint, server, logger()));
-    client
-        .connection()
-        .await
-        .map_err(|failure| ConnectError {
-            class: failure.class(),
-            message: message(failure, &computer.name),
-        })?;
+    client.connection().await.map_err(|failure| ConnectError {
+        class: failure.class(),
+        message: message(failure, &computer.name),
+    })?;
     let reporter = app.clone();
     let name = computer.name.clone();
     // Each connection says once that retrying cannot help, so a later switch to
@@ -147,7 +153,9 @@ pub(crate) async fn connect(
         }
     })
     .await
-    .map_err(|_| this_computer("OpenAIDE could not start its connection on this computer.".to_string()))?;
+    .map_err(|_| {
+        this_computer("OpenAIDE could not start its connection on this computer.".to_string())
+    })?;
     let connection = LocalHttpConnection {
         kind: "localHttp".to_string(),
         endpoint_url: format!("http://{}/probe", gateway.address),
@@ -170,10 +178,14 @@ pub(crate) async fn switch(
             state
                 .preferences
                 .lock()
-                .map_err(|_| SwitchError::Failed("Desktop preferences are unavailable.".to_string()))?
+                .map_err(|_| {
+                    SwitchError::Failed("Desktop preferences are unavailable.".to_string())
+                })?
                 .paired(id)
                 .cloned()
-                .ok_or_else(|| SwitchError::Failed("This computer is no longer paired.".to_string()))?,
+                .ok_or_else(|| {
+                    SwitchError::Failed("This computer is no longer paired.".to_string())
+                })?,
         ),
         None => None,
     };
@@ -184,9 +196,20 @@ pub(crate) async fn switch(
             operation_id,
             || async {
                 match &computer {
-                    Some(computer) => connect(app, computer)
-                        .await
-                        .map(|(connection, gateway)| (connection, Some(gateway))),
+                    Some(computer) => match &computer.ssh {
+                        Some(destination) => {
+                            crate::desktop_ssh::connect(app, computer, destination, false)
+                                .await
+                                .map(|connection| (connection, None))
+                                .map_err(|message| ConnectError {
+                                    class: "ssh_connect",
+                                    message,
+                                })
+                        }
+                        None => connect(app, computer)
+                            .await
+                            .map(|(connection, gateway)| (connection, Some(gateway))),
+                    },
                     None => ensure_local(app, None, operation_id.to_string())
                         .await
                         .map(|connection| (connection, None))
@@ -224,7 +247,9 @@ fn operation_id_or_new(candidate: Option<String>) -> String {
         .filter(|id| {
             !id.is_empty()
                 && id.len() <= 80
-                && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         })
         .unwrap_or_else(|| format!("desktop-computer-switch-{}", uuid::Uuid::new_v4()))
 }
@@ -244,6 +269,7 @@ pub(crate) fn desktop_remote_snapshot(
             id: computer.id.clone(),
             name: computer.name.clone(),
             current: preferences.remote_computer.as_ref() == Some(&computer.id),
+            ssh: computer.ssh.clone(),
         })
         .collect())
 }
@@ -296,6 +322,7 @@ pub(crate) async fn desktop_remote_pair(
             } else {
                 paired.name
             },
+            ssh: None,
         });
         write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     }
@@ -312,7 +339,16 @@ pub(crate) async fn desktop_remote_use(
     id: Option<String>,
     operation_id: Option<String>,
 ) -> Result<&'static str, String> {
-    outcome_name(switch(&app, id, &operation_id_or_new(operation_id)).await)
+    use_computer(&app, id, operation_id).await
+}
+
+/// [`desktop_remote_use`] for the other commands that end in a switch.
+pub(crate) async fn use_computer(
+    app: &tauri::AppHandle,
+    id: Option<String>,
+    operation_id: Option<String>,
+) -> Result<&'static str, String> {
+    outcome_name(switch(app, id, &operation_id_or_new(operation_id)).await)
 }
 
 /// Ends the switch attempt in progress; the window stays where it is.
@@ -411,7 +447,7 @@ fn message(failure: remote::Failure, name: &str) -> String {
 }
 
 /// Prints the client's metadata-only events in this shell's log format.
-fn logger() -> remote::Logger {
+pub(crate) fn logger() -> remote::Logger {
     Arc::new(|event, fields| {
         let fields = fields
             .as_object()
