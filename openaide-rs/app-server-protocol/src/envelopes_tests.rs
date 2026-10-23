@@ -21,6 +21,7 @@ fn client_request_envelope_carries_method_params_and_meta() {
             capabilities: ClientCapabilities::default(),
             workspace_roots: Vec::new(),
             protocol_version: None,
+            role: Default::default(),
         },
         RequestMeta {
             client_request_id: Some("request-1".into()),

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use openaide_app_server_protocol::client::{
-    ClientCapabilities, RequestedSurface, ShellCapability, ShellDescriptor,
+    ClientCapabilities, ClientRole, RequestedSurface, ShellCapability, ShellDescriptor,
 };
 use openaide_app_server_protocol::ids::ClientInstanceId;
 
@@ -38,6 +38,7 @@ pub struct ClientContext {
     pub shell: ShellDescriptor,
     pub requested_surface: RequestedSurface,
     pub capabilities: ClientCapabilities,
+    pub role: ClientRole,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,6 +185,7 @@ impl ClientHub {
             shell: params.shell,
             requested_surface: params.requested_surface,
             capabilities: params.capabilities,
+            role: params.role,
         };
         let was_present = self.clients.contains_key(&context.client_instance_id);
         self.connections
@@ -348,9 +350,22 @@ impl ClientHub {
     /// Reconnecting clients still count: their grace period preserves ownership and must
     /// not be bypassed by an update preparing to terminate the shared App Server.
     pub fn has_other_initialized_client(&self, client_instance_id: &ClientInstanceId) -> bool {
+        self.other_owners(client_instance_id).next().is_some()
+    }
+
+    /// The clients besides `client_instance_id` that share ownership of this App Server.
+    /// A shell-hold client is left out: it belongs to an App Shell whose window owns the
+    /// update, and that shell ends it itself once the window has detached.
+    pub fn other_owners<'a>(
+        &'a self,
+        client_instance_id: &'a ClientInstanceId,
+    ) -> impl Iterator<Item = &'a ClientContext> + 'a {
         self.clients
-            .keys()
-            .any(|candidate| candidate != client_instance_id)
+            .iter()
+            .filter(move |(candidate, record)| {
+                *candidate != client_instance_id && record.context.role != ClientRole::ShellHold
+            })
+            .map(|(_, record)| &record.context)
     }
 
     pub fn has_ever_initialized_clients(&self) -> bool {

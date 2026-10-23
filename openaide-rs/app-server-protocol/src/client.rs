@@ -108,6 +108,30 @@ pub struct InitializeParams {
     /// separately from its App Server must send it; an omitted version is not checked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_version: Option<ProtocolVersion>,
+    /// What the client is to the App Server; omitted for an ordinary client.
+    #[serde(default, skip_serializing_if = "ClientRole::is_interactive")]
+    pub role: ClientRole,
+}
+
+/// The part a client plays in the App Server's lifetime.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ClientRole {
+    /// A client someone works in, such as an App Shell window or a Remote Device.
+    #[default]
+    Interactive,
+    /// An App Shell's own windowless client that keeps the App Server alive for
+    /// as long as the shell runs, because a hidden window's timers may stall.
+    /// It counts toward the App Server's lifetime like any client, but it is
+    /// not another owner when that shell's window prepares an update shutdown:
+    /// the shell ends it itself once the window has detached.
+    ShellHold,
+}
+
+impl ClientRole {
+    pub fn is_interactive(&self) -> bool {
+        matches!(self, Self::Interactive)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

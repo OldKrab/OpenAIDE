@@ -103,6 +103,7 @@ fn becomes_a_desktop_client_and_then_keeps_renewing_it() {
     assert_eq!(initialize.method, "client/initialize");
     assert_eq!(initialize.authorization, "Bearer token-one");
     assert_eq!(initialize.params["shell"]["kind"], "desktop");
+    assert_eq!(initialize.params["role"], "shellHold");
     assert_eq!(
         initialize.params["clientInstanceId"],
         initialize.client_instance_id

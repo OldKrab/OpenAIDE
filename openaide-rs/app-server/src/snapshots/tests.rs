@@ -442,5 +442,6 @@ fn ctx() -> ClientContext {
         },
         requested_surface: RequestedSurface::Home,
         capabilities: ClientCapabilities::default(),
+        role: Default::default(),
     }
 }

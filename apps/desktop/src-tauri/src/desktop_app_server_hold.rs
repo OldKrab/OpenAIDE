@@ -7,6 +7,10 @@
 //! to the native process instead, so the App Server's lifetime follows Desktop's
 //! and not the window's timers. It subscribes to nothing and answers nothing.
 //!
+//! It initializes in the shell-hold role, so the App Server does not count it as
+//! another owner when the window prepares a Desktop Update; an ordinary client
+//! here would refuse every update with `otherClients`.
+//!
 //! Quit and Desktop Update end the hold explicitly, after the window's client has
 //! detached, so the App Server still receives its last-client signal at once. A
 //! Desktop that dies without that stops heartbeating and expires like any client.
@@ -226,6 +230,9 @@ impl AppServerHold {
                 },
                 "requestedSurface": { "kind": "home" },
                 "workspaceRoots": [],
+                // Keeps the App Server alive without counting as another owner
+                // when this Desktop's window prepares an update.
+                "role": "shellHold",
             }),
         )
     }

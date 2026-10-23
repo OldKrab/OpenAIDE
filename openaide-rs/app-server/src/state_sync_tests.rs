@@ -297,6 +297,7 @@ fn ctx(client_id: &str, connection_id: &str) -> ClientContext {
         },
         requested_surface: RequestedSurface::Home,
         capabilities: ClientCapabilities::default(),
+        role: Default::default(),
     }
 }
 
