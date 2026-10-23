@@ -9,6 +9,7 @@
 mod client;
 mod gateway;
 mod pairing_code;
+mod ssh;
 
 pub use client::{
     application_alpn, bind, device_key_from_text, device_key_text, new_device_key, redeem, Failure,
@@ -17,3 +18,7 @@ pub use client::{
 pub use gateway::Gateway;
 pub use iroh::{Endpoint, PublicKey, SecretKey};
 pub use pairing_code::{clamp_label, InviteCode, PairingCodeError};
+pub use ssh::{
+    FetchBinary, LaunchError, Launched, Ready, RemoteOutput, ServerRelease, SshLauncher,
+    SshTransport, Stage, StartMode, StopOutcome, TransportError,
+};
