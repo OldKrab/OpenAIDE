@@ -38,11 +38,26 @@ export function classifyConnectionProblem(error: unknown): ConnectionProblem {
     // A refused link is an answer, not an absence; the HTTP carrier reports its status.
     const status = (error as { status?: unknown }).status;
     if (typeof status === "number") return UNAVAILABLE_STATUSES.has(status) ? { kind: "unreachable", detail } : { kind: "failed", detail };
-    return error.kind === "rejected" ? { kind: "failed", detail } : { kind: "unreachable", detail };
+    // Only a link that dropped without the App Server's word means nothing answered; a link
+    // it ended (rejected, or a session it expired) came from a reachable App Server.
+    return error.kind === "interrupted" ? { kind: "unreachable", detail } : { kind: "failed", detail };
   }
   // fetch() rejects with a TypeError when nothing answers at all.
   if (error instanceof TypeError) return { kind: "unreachable", detail };
   return { kind: "failed", detail };
+}
+
+/**
+ * What the page shows after a retry: a retry that only fails again without new facts keeps
+ * what an earlier attempt learned. After a refusal, the App Server ending the next link, or
+ * refusing again before the probe answers, says nothing new, so the versions stay; a link
+ * that drops without an answer still reads as unreachable.
+ */
+export function carryConnectionProblem(previous: ConnectionProblem | undefined, next: ConnectionProblem): ConnectionProblem {
+  if (previous?.kind !== "incompatible") return next;
+  if (next.kind === "failed") return previous;
+  if (next.kind === "incompatible" && !next.server && previous.server) return { ...next, server: previous.server, update: previous.update };
+  return next;
 }
 
 /** Adds what `client/probe` told about the App Server that refused this client. */

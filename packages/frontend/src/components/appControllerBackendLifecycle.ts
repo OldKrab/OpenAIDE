@@ -48,7 +48,7 @@ import {
   type AsyncOperationOwner,
 } from "../state/asyncOperationOwner";
 import { postControllerStarted, postStartupRequests } from "./appControllerEffects";
-import { classifyConnectionProblem, probeRefusingServer } from "../services/connectionProblem";
+import { carryConnectionProblem, classifyConnectionProblem, probeRefusingServer, type ConnectionProblem } from "../services/connectionProblem";
 import { createAppServerInitializeRetry, type AppServerInitializeRetry } from "./appServerInitializeRetry";
 import { dispatchStartupReadError, useRoutedBootstrap } from "./appControllerRouting";
 import {
@@ -328,6 +328,8 @@ export function useAppControllerBackendLifecycle({
     }, () => {
       if (backendConnection) {
         let initializeAttempts = 0;
+        // What the last failed attempt showed, so a retry that learns nothing new keeps it.
+        let lastProblem: ConnectionProblem | undefined;
         const attemptInitialize = () => {
           const initializeStartedAt = Date.now();
           const attempt = ++initializeAttempts;
@@ -341,6 +343,7 @@ export function useAppControllerBackendLifecycle({
             .initialize(initializeParamsForBootstrap(initialBootstrap))
             .then((result) => {
               initializeSucceeded = true;
+              lastProblem = undefined;
               if (!active) return;
               const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
               const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
@@ -492,7 +495,8 @@ export function useAppControllerBackendLifecycle({
               setBackendSessionReady(false);
               setBackendReady(false);
               const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
-              const problem = classifyConnectionProblem(error);
+              const problem = carryConnectionProblem(lastProblem, classifyConnectionProblem(error));
+              lastProblem = problem;
               setBackendConnectionState({ status: "unavailable", message });
               dispatch({
                 type: "appServer:error",
@@ -507,6 +511,7 @@ export function useAppControllerBackendLifecycle({
                 (event, fields) => sendWebviewTelemetry(postHostMessage, event, { surface: initialBootstrap.surface, attempt, ...fields }),
               ).then((probed) => {
                 if (probed && active && attempt === initializeAttempts && !backendInitialized.current) {
+                  lastProblem = probed;
                   dispatch({ type: "appServer:error", message, problem: probed });
                 }
               });

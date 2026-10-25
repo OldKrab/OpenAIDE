@@ -1,6 +1,6 @@
 import { APP_SERVER_PROTOCOL_VERSION, AppServerProtocolError, TransportLinkError } from "@openaide/app-server-client";
 import { describe, expect, it, vi } from "vitest";
-import { classifyConnectionProblem, probeRefusingServer, sideToUpdate } from "./connectionProblem";
+import { carryConnectionProblem, classifyConnectionProblem, probeRefusingServer, sideToUpdate, type ConnectionProblem } from "./connectionProblem";
 
 const client = `${APP_SERVER_PROTOCOL_VERSION.major}.${APP_SERVER_PROTOCOL_VERSION.minor}`;
 const refused = () => new AppServerProtocolError({
@@ -14,6 +14,8 @@ describe("classifyConnectionProblem", () => {
       .toEqual({ kind: "unreachable", detail: "App Server WebSocket link ended: open_timeout" });
     expect(classifyConnectionProblem(new TypeError("Failed to fetch")).kind).toBe("unreachable");
     expect(classifyConnectionProblem(new TransportLinkError("rejected", "closed 4403")).kind).toBe("failed");
+    // The App Server expiring the session answered; it is not an absence.
+    expect(classifyConnectionProblem(new TransportLinkError("sessionExpired", "App Server WebSocket link ended: server_closed")).kind).toBe("failed");
     expect(classifyConnectionProblem(new Error("App Server request timed out.")).kind).toBe("failed");
     expect(classifyConnectionProblem(refused())).toEqual({
       kind: "incompatible",
@@ -70,5 +72,21 @@ describe("probeRefusingServer", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("carryConnectionProblem", () => {
+  const known: ConnectionProblem = { kind: "incompatible", detail: "refused", clientProtocol: client, server: { protocol: "2.1", appVersion: "0.10.0" }, update: "computer" };
+
+  it("keeps a refusal and its versions while retries learn nothing new", () => {
+    expect(carryConnectionProblem(known, { kind: "incompatible", detail: "refused", clientProtocol: client, update: "unknown" })).toEqual(known);
+    expect(carryConnectionProblem(known, { kind: "failed", detail: "App Server WebSocket link ended: server_closed" })).toBe(known);
+  });
+
+  it("lets a dropped link, or a first failure, speak for itself", () => {
+    const dropped: ConnectionProblem = { kind: "unreachable", detail: "open_timeout" };
+    expect(carryConnectionProblem(known, dropped)).toBe(dropped);
+    expect(carryConnectionProblem(undefined, dropped)).toBe(dropped);
+    expect(carryConnectionProblem(dropped, { kind: "failed", detail: "x" })).toEqual({ kind: "failed", detail: "x" });
   });
 });
