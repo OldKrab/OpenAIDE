@@ -91,6 +91,7 @@ function fakeHost({ snapshot }: { snapshot: TaskSummary[] | null | Promise<TaskS
     confirm: async () => undefined,
     decline: () => undefined,
     cancel: () => undefined,
+    dismiss: () => undefined,
     publish(next: ComputerSwitchState) {
       state = next;
       for (const listener of [...listeners]) listener();
