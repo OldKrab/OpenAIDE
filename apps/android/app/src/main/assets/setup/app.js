@@ -39,8 +39,12 @@ function choice(glyph, title, detail, destination) { return item('choice', glyph
 // A choice that starts a native flow, such as adding an SSH computer, instead of opening a screen.
 function choiceAction(glyph, title, detail, action) { return item('row choice', glyph, title, detail, action); }
 function row(glyph, title, action, value = '', detail = '') { return item('row', glyph, title, detail, action, value); }
-// The place in use: named like the others, but not something to tap.
-function place(glyph, title, detail) { return `<div class="row current">${icon(glyph)}<span class="copy"><strong>${title}</strong><small>${detail}</small></span><span class="value">In use</span></div>`; }
+// The place in use: named like the others, but not something to tap. Its row, not the
+// page title, says whether the phone reaches it.
+function place(glyph, title, detail) {
+  if (!state.connected) detail += ' · Not connected';
+  return `<div class="row current">${icon(glyph)}<span class="copy"><strong>${title}</strong><small>${detail}</small></span><span class="value">In use</span></div>`;
+}
 function computerRow(computer) {
   return `<button class="row" data-action="use_computer" data-id="${escape(computer.id)}">${icon('computer')}<span class="copy"><strong>${escape(computer.name || 'Remote computer')}</strong><small>Remote computer</small></span>${icon('chevron', 'chev')}</button>`;
 }
@@ -145,7 +149,8 @@ function render() {
     const computers = state.computers || [];
     const ssh = state.sshComputers || [];
     // One list of places with the one in use marked; adding a computer is a separate act below it.
-    page.innerHTML = `<h1>${remote ? escape(state.computer || 'Remote computer') : 'This phone'}</h1>${state.connected ? '<p class="status">Connected</p>' : '<p class="status off">Not connected</p>'}`
+    // The page lists every place agents can work; it is not a page about the one in use.
+    page.innerHTML = '<h1>Connection</h1>'
       + '<h2 class="label">Where agents work</h2><div class="group">'
       + (remote ? row('phone', 'This phone', 'local_screen', '', 'Runs in Termux') : place('phone', 'This phone', 'Runs in Termux'))
       + computers.map(computer => computer.current ? place('computer', escape(computer.name || 'Remote computer'), 'Remote computer')
@@ -221,6 +226,14 @@ function render() {
   notice.textContent = state.notice || '';
   if (state.busy) { const spinner = document.createElement('span'); spinner.className = 'spinner'; spinner.setAttribute('aria-hidden', 'true'); notice.prepend(spinner); }
   for (const control of page.querySelectorAll('button, input, textarea')) control.disabled = Boolean(state.busy);
+  // A computer that is connecting can take a while to answer; leaving it is always possible.
+  if (state.switching) {
+    const cancel = document.createElement('button');
+    cancel.className = 'link';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => send('cancel_switch'));
+    notice.append(' ', cancel);
+  }
   document.getElementById('back').disabled = Boolean(state.busy);
   for (const control of page.querySelectorAll('[data-screen]')) control.addEventListener('click', () => go(control.dataset.screen));
   for (const control of page.querySelectorAll('[data-action]')) control.addEventListener('click', () => {

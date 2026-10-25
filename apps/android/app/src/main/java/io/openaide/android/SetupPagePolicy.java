@@ -34,6 +34,11 @@ final class SetupPagePolicy {
 
     static boolean allowedOnEveryPage(String action) { return EVERY_PAGE_ACTIONS.contains(action); }
 
+    /** A command name as it may be logged: fixed command words pass, anything else is "other". */
+    static String safeAction(String action) {
+        return action != null && action.matches("[a-z_]{1,40}") ? action : "other";
+    }
+
     static boolean isConnectionRoute(ConnectionProfile profile, String address) {
         if (!profile.owns(address)) return false;
         try {
