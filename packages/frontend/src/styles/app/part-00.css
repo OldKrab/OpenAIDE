@@ -320,6 +320,8 @@ body[data-shell="web"] .sidebar {
 }
 
 .sidebar-settings-row .settings-button {
+  /* A content-sized basis: at width 100% both buttons shrink and the name truncates beside empty space. */
+  width: auto;
   min-width: 96px;
   flex: 1 1 auto;
 }
