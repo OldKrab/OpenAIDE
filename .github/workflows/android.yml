@@ -1,7 +1,12 @@
 name: Android
 
-# A test APK is built without the App Servers it can carry, so it is ready in minutes; it says
-# so where one would be needed. A run can include them, and a release always does.
+# A pull request only checks: the Android script tests, unit tests, lint, and compiling the
+# instrumentation tests. It builds no APK and uploads nothing but failure reports. The Frontend,
+# client, and browser tests it ships run in ci.yml on every pull request.
+#
+# A push or manual run also builds the APK. It is built without the App Servers it can carry,
+# so it is ready in minutes, and says so where one would be needed. A run can include them, and
+# a release always does.
 on:
   workflow_dispatch:
     inputs:
@@ -40,39 +45,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  browser:
-    name: Phone web pages (browser test)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-        with:
-          toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-        with:
-          shared-key: android-browser
-      - run: npm ci
-      - run: cargo build --locked -p openaide-app-server
-      - run: google-chrome --version
-      - run: npx playwright install ffmpeg
-      - run: npx playwright test task-chat.spec.mjs --grep 'keeps selected images after picker menu dismissal'
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        # Diagnostics only: a green run leaves just the installable artifacts.
-        if: failure()
-        with:
-          name: android-browser-diagnostics
-          path: test-results/
   clients:
-    # The setup page and the shared clients the APK ships, checked on every run whether or
-    # not the App Servers are built.
-    name: Phone setup and client tests
+    # The setup page and the Termux installer; nothing else runs them.
+    name: Phone setup tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -80,17 +57,10 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      - name: Test the setup page and shared clients
+      - name: Test the setup page and the Termux installer
         run: |
-          npm run build:typescript-deps
           node --test apps/android/scripts/install-termux.test.mjs
           node --test apps/android/scripts/setup-ui.test.mjs
-          npm exec --workspace openaide-frontend -- vitest run src/components/settings/ConnectionSettings.test.tsx src/components/ContextUsageMobile.test.tsx src/components/UserMessagePicker.test.tsx src/components/useBackNavigation.test.ts
-          npm exec -- vitest run packages/app-server-client/src/reliableHttpChannel.test.ts packages/app-server-client/src/reliableBackendConnection.test.ts
-          npm exec --workspace openaide-frontend -- vitest run src/services/hostBridge.test.ts
-          npm exec --workspace openaide-frontend -- vitest run src/components/ComposerView.test.tsx
-          npm run build --workspace openaide-frontend
-          npm run test --workspace openaide-web
   version:
     # The version the APK reports, stamped into the Linux App Server test builds carry.
     name: App version
@@ -116,7 +86,7 @@ jobs:
     # A test build that includes the App Servers carries the ones built from the same commit,
     # so local work can be tried before the version is published. Releases download the
     # published ones. Without them the APK does not wait for those jobs.
-    name: Android APK
+    name: ${{ github.event_name == 'pull_request' && 'Android unit tests and lint' || 'Android APK' }}
     needs: [runtime, linux-app-server]
     # Skipped App Server jobs would skip this job too; a failed included one still stops it.
     if: ${{ !cancelled() && (!(inputs.release || inputs.app_servers) || (needs.runtime.result == 'success' && (inputs.release || needs.linux-app-server.result == 'success'))) }}
@@ -185,8 +155,8 @@ jobs:
           npm run build --workspace openaide-frontend
       - name: Stage the signing key
         id: key
-        # Fork pull requests get no secrets and so build no installable APK.
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        # A pull request builds no APK, so it never needs the key.
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE }}
           KEYSTORE_PASSWORD: ${{ secrets.OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD }}
@@ -211,7 +181,11 @@ jobs:
           echo 'staged=true' >> "$GITHUB_OUTPUT"
       # The APKs are named after the release asset openaide-android-VERSION.apk; only the
       # Release workflow adds the version.
+      - name: Test, lint, and compile the instrumentation tests
+        if: github.event_name == 'pull_request'
+        run: gradle -p apps/android --no-daemon testDebugUnitTest lintDebug compileDebugAndroidTestSources
       - name: Check and build APKs
+        if: github.event_name != 'pull_request'
         run: |
           gradle -p apps/android --no-daemon $BUNDLED_RUNTIME $SSH_APP_SERVER testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
           cp apps/android/app/build/outputs/apk/debug/app-debug.apk apps/android/build/openaide-android-debug.apk
