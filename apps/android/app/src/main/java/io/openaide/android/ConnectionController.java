@@ -113,7 +113,10 @@ final class ConnectionController extends ContextWrapper {
             case "pair": pair(message.optString("code")); break;
             case "join": join(); break;
             case "join_stop": RemotePairing.stopJoin(); joinCode = null; emit(); break;
-            case "ssh_add": SshSetup.start(activity, this::changed); break;
+            case "ssh_add":
+                if (BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()) { unavailableInBuild("ssh"); break; }
+                SshSetup.start(activity, this::changed);
+                break;
             case "use_ssh":
                 if (!new ConnectionStore(this).selectSsh(message.optString("id"))) { emit(); break; }
                 RemoteNode.INSTANCE.disconnect();
@@ -189,6 +192,7 @@ final class ConnectionController extends ContextWrapper {
     private void install() {
         if (checks == null) { check(); return; }
         boolean needsRuntime = !checks.optBoolean("runtime");
+        if (needsRuntime && !BundledRuntime.installable()) { unavailableInBuild("phone"); return; }
         begin("setup_install", "Preparing your workspace download…");
         worker.execute(() -> {
             String environment;
@@ -211,6 +215,18 @@ final class ConnectionController extends ContextWrapper {
                 });
             });
         });
+    }
+
+    /**
+     * A test build may leave out an App Server (see build.gradle). The page already marks it;
+     * an action that needs it explains the missing part instead of failing later.
+     */
+    private void unavailableInBuild(String server) {
+        diagnostics.record("setup_unavailable_in_build", server, 0, 0);
+        notice = server.equals("ssh")
+            ? "This build of OpenAIDE does not include the App Server for SSH computers. Install a release build to add one."
+            : "This build of OpenAIDE does not include the App Server for this phone. Install a release build, or connect to a computer instead.";
+        emit();
     }
 
     private void scan() {
@@ -297,7 +313,7 @@ final class ConnectionController extends ContextWrapper {
                 .put("computers", computers(store))
                 .put("sshComputers", sshComputers(store))
                 .put("ssh", sshStatus(ssh))
-                .put("sshAvailable", !BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()).put("sshNotice", sshNotice)
+                .put("sshAvailable", !BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()).put("phoneAvailable", BundledRuntime.installable()).put("sshNotice", sshNotice)
                 .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("notice", notice)
                 .put("termux", installed("com.termux")).put("permission", checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
                 .put("checks", checks == null ? JSONObject.NULL : checks)

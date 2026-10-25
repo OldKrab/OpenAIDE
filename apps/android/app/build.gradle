@@ -21,7 +21,9 @@ def frontendDist = rootProject.file('../../packages/frontend/dist')
 def frontendAssets = layout.buildDirectory.dir('generated/frontend-assets')
 // A test build may carry the App Server archive so it can be tried before its version is published:
 // gradle -PopenaideBundledRuntime=/path/to/openaide-app-server-android-arm64.tar.gz assembleDebug
-// Release builds leave it out and download the published archive.
+// Release builds leave it out and download the published archive: -PopenaidePublishedRuntime=true.
+// A build with neither cannot set up this phone and says so instead of trying an unpublished version.
+def publishedRuntime = (project.findProperty('openaidePublishedRuntime') ?: 'false') == 'true'
 def bundledRuntime = project.hasProperty('openaideBundledRuntime') ? file(project.property('openaideBundledRuntime')) : null
 if (bundledRuntime != null && !bundledRuntime.isFile()) throw new GradleException('Bundled runtime archive not found')
 def bundledRuntimeDigest = bundledRuntime == null ? '' : java.security.MessageDigest.getInstance('SHA-256').digest(bundledRuntime.bytes).encodeHex().toString()
@@ -68,6 +70,7 @@ android {
         buildConfigField 'int', 'PROTOCOL_MAJOR', "${protocolMajor}"
         buildConfigField 'String', 'CLAUDE_ACP_VERSION', "\"${claudeAcpVersion}\""
         buildConfigField 'String', 'BUNDLED_RUNTIME_SHA256', "\"${bundledRuntimeDigest}\""
+        buildConfigField 'boolean', 'PUBLISHED_RUNTIME', "${publishedRuntime}"
         buildConfigField 'String', 'SSH_APP_SERVER_SHA256', "\"${sshAppServerSha256}\""
         buildConfigField 'String', 'SSH_APP_SERVER_VERSION', "\"${sshAppServerVersion}\""
         buildConfigField 'boolean', 'SSH_APP_SERVER_BUNDLED', "${sshArchive != null}"

@@ -32,6 +32,12 @@ final class BundledRuntime {
     static boolean available() { return !BuildConfig.BUNDLED_RUNTIME_SHA256.isEmpty(); }
 
     /**
+     * Whether this build can set up this phone: it carries the runtime, or it is a release
+     * whose version has a published one. Test builds may have neither.
+     */
+    static boolean installable() { return available() || BuildConfig.PUBLISHED_RUNTIME; }
+
+    /**
      * What the installed runtime's VERSION must say. Test builds of one version
      * differ, so theirs also names the archive and a newer APK replaces the runtime.
      */

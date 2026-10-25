@@ -152,7 +152,7 @@ keeps working with Codex; the step that failed is in
 `~/.local/share/openaide-android/install.log`. Authenticate the agent in Termux.
 The runtime artifact currently targets ARM64 phones only.
 
-1. Build the **Android APK and Termux runtime** GitHub Actions workflow.
+1. Run the **Android** GitHub Actions workflow with **Include the App Servers** checked.
 2. Download and unzip the `app-server-android-arm64` and `android` artifacts, and
    install `openaide-android.apk`.
 3. Transfer `openaide-app-server-android-arm64.tar.gz` into Termux and extract it:

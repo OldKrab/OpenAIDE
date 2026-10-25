@@ -197,3 +197,6 @@ jobs:
     # installed app signed by pushes to main.
     uses: ./.github/workflows/android.yml
     secrets: inherit
+    # A full build carries the App Servers too, so the APK works on this phone and SSH computers.
+    with:
+      app_servers: true
