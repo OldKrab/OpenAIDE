@@ -390,7 +390,8 @@ public final class MainActivity extends Activity {
 
     /** A paired computer needs no probe: reaching its App Server over the trusted connection is the check. */
     private void connectPaired(int attempt, long started) {
-        status.setText("Connecting to your computer…");
+        String name = RemotePairing.selectedName(this);
+        status.setText("Connecting to " + (name == null || name.isEmpty() ? "your computer" : name) + "…");
         RemotePairing.connect(this, problem -> {
             if (attempt != generation || isDestroyed()) return;
             if (problem != null) { fail(attempt, problem); return; }
@@ -449,7 +450,7 @@ public final class MainActivity extends Activity {
             diagnostics.record("connection", "refused", 0, 0);
             showConnection();
             connect.setText("Try again");
-            status.setText(RemotePairing.message(failure));
+            status.setText(RemotePairing.message(failure, RemotePairing.selectedName(this)));
         });
     }
 

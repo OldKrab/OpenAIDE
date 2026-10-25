@@ -74,6 +74,7 @@ export function createAppServerSession(
 
   const session: AppServerSession = {
     ...(connection.retryRecovery ? { retryRecovery: () => connection.retryRecovery!() } : {}),
+    ...(connection.probe ? { probe: () => connection.probe!() } : {}),
     async initialize(params, meta) {
       const startedAt = Date.now();
       const initialGeneration = generation;

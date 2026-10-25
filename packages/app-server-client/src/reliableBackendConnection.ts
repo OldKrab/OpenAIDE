@@ -187,6 +187,13 @@ function createReliableHttpBackendConnection(
       );
       return initialization;
     },
+    probe() {
+      if (closed) return Promise.reject(new Error("Backend connection is closed"));
+      // A failed first initialize has already replaced the generation, so the probe
+      // opens a fresh transport instead of reusing the one that was refused.
+      const probe = active.connection.probe;
+      return probe ? probe() : Promise.reject(new Error("Backend connection cannot probe"));
+    },
     async request(method, params, meta) {
       if (closed) throw new Error("Backend connection is closed");
       if (terminalError) throw terminalError;

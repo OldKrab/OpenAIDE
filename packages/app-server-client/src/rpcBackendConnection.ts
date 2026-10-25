@@ -10,6 +10,7 @@ import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.j
 import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
+  CLIENT_PROBE,
   type AppServerEvent,
   type InitializeParams,
   type InitializeResult,
@@ -122,6 +123,9 @@ export function createInternalReliableBackendConnection(
         return result;
       });
       return initializePromise;
+    },
+    probe() {
+      return sendRequest(CLIENT_PROBE, {});
     },
     request(method, params, meta) {
       if (!initialized) return Promise.reject(new Error("Backend connection is not initialized"));

@@ -1517,7 +1517,7 @@ describe("AppSurfaces callback wiring", () => {
 
     const tree = render(controller).toJSON();
 
-    expect(JSON.stringify(tree)).toContain("App Server connection unavailable.");
+    expect(JSON.stringify(tree)).toContain("Can’t connect to the App Server");
     expect(JSON.stringify(tree)).toContain("App Server request timed out.");
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
   });
@@ -1528,7 +1528,7 @@ describe("AppSurfaces callback wiring", () => {
 
     const rendered = JSON.stringify(render(controller).toJSON());
 
-    expect(rendered).toContain("App Server connection unavailable.");
+    expect(rendered).toContain("Can’t connect to the App Server");
     expect(rendered).toContain("App Server request timed out.");
     expect(rendered).not.toContain("Retry");
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();

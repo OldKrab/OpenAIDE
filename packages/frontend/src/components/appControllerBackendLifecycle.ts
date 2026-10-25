@@ -48,6 +48,7 @@ import {
   type AsyncOperationOwner,
 } from "../state/asyncOperationOwner";
 import { postControllerStarted, postStartupRequests } from "./appControllerEffects";
+import { classifyConnectionProblem, probeRefusingServer } from "../services/connectionProblem";
 import { createAppServerInitializeRetry, type AppServerInitializeRetry } from "./appServerInitializeRetry";
 import { dispatchStartupReadError, useRoutedBootstrap } from "./appControllerRouting";
 import {
@@ -64,6 +65,7 @@ export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 export type AppControllerBackendConnection = Pick<
   AppServerSession,
   | "initialize"
+  | "probe"
   | "retryRecovery"
   | "request"
   | "handleNotification"
@@ -483,16 +485,30 @@ export function useAppControllerBackendLifecycle({
                 attempt,
                 error_name: errorName(error),
                 ...(error instanceof AppServerProtocolError ? { error_code: error.protocolError.code } : {}),
+                problem_kind: classifyConnectionProblem(error).kind,
               });
               backendInitialized.current = false;
               setBackendInitializationReady(false);
               setBackendSessionReady(false);
               setBackendReady(false);
               const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
+              const problem = classifyConnectionProblem(error);
               setBackendConnectionState({ status: "unavailable", message });
               dispatch({
                 type: "appServer:error",
                 message,
+                problem,
+              });
+              // A refusal names versions only once the App Server says which it runs. A later
+              // attempt, or a success, makes this answer stale.
+              void probeRefusingServer(
+                backendConnection.probe ? () => backendConnection.probe!() : undefined,
+                problem,
+                (event, fields) => sendWebviewTelemetry(postHostMessage, event, { surface: initialBootstrap.surface, attempt, ...fields }),
+              ).then((probed) => {
+                if (probed && active && attempt === initializeAttempts && !backendInitialized.current) {
+                  dispatch({ type: "appServer:error", message, problem: probed });
+                }
               });
               dispatchStartupReadError(bootstrap, dispatch, message);
               // A failure while applying a successful initialize is not retried:

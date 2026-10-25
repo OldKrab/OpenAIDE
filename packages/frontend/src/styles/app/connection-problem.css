@@ -1,0 +1,56 @@
+/* The page shown when the App Server cannot be used: one headline, one line saying what
+   to do, the actions, and the raw facts behind Details. It sits on the loading surface. */
+.connection-problem {
+  gap: 10px;
+}
+
+.connection-problem h2 {
+  margin: 0;
+  color: var(--oa-text);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.connection-problem p {
+  max-width: min(440px, 90vw);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.connection-problem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.connection-problem-details {
+  max-width: min(480px, 90vw);
+  font-size: 13px;
+}
+
+.connection-problem-details summary {
+  width: fit-content;
+  margin-inline: auto;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.connection-problem-details dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 8px 0 0;
+  text-align: start;
+}
+
+.connection-problem-details dt {
+  color: var(--oa-muted);
+}
+
+.connection-problem-details dd {
+  margin: 0;
+  color: var(--oa-text);
+  overflow-wrap: anywhere;
+}

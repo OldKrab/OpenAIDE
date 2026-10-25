@@ -227,12 +227,6 @@ body[data-input-modality="pointer"] button:focus-visible {
     padding-block: 18px;
   }
 
-  body[data-shell="web"] .app-server-error small {
-    max-width: min(480px, 90vw);
-    color: var(--oa-muted);
-    overflow-wrap: anywhere;
-  }
-
   body[data-shell="web"] .web-main-surface .task-surface:not(.task-loading) {
     grid-template-rows: minmax(0, 1fr);
   }

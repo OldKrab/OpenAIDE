@@ -19,6 +19,7 @@ import { currentFrontendShell, type DesktopUpdateCapability } from "../services/
 import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
 import { computerLink } from "./ComputerSwitcher";
+import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { useComputerPlace } from "./useComputerPlace";
 import { currentComputer, useComputers } from "../services/computers";
@@ -38,11 +39,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     view,
     visibleTasks,
   } = controller;
-  const { appServerError, navigation, settings } = view;
+  const { appServerError, appServerProblem, navigation, settings } = view;
   const frontendShell = currentFrontendShell();
   const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
   const computers = useComputers(frontendShell?.computers);
   const computerLinkState = computerLink(controller.backendConnectionState);
+  const connectionPlace = connectionPlaceFor(computers, settings.devices?.serverName);
   const [computerSwitcherRequest, setComputerSwitcherRequest] = useState(0);
   const updateAvailable = desktopUpdate?.kind === "available"
     || desktopUpdate?.kind === "downloading"
@@ -481,7 +483,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return (
       <main className={`app-shell editor-shell ${desktopTitleBar ? "desktop-error-shell" : ""}`}>
         {desktopTitleBar}
-        <AppServerErrorView message={appServerError} />
+        <ConnectionProblemView
+          message={appServerError}
+          onRetry={controller.retryTaskOpen}
+          place={connectionPlace}
+          problem={appServerProblem}
+        />
       </main>
     );
   }
@@ -715,7 +722,17 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             terminals={view.terminals?.terminals}
           />
           {appServerError ? (
-            <AppServerErrorView message={appServerError} />
+            <ConnectionProblemView
+              message={appServerError}
+              onRetry={controller.retryTaskOpen}
+              // The switcher lives in the navigation, which a phone keeps in its drawer.
+              onSwitch={computers?.computers.length ? () => {
+                if (mobileLayoutActive) mobileNavigation.setOpen(true);
+                setComputerSwitcherRequest((request) => request + 1);
+              } : undefined}
+              place={connectionPlace}
+              problem={appServerProblem}
+            />
           ) : (
             <AppPrimaryTaskSurface
               agentIcons={agentIcons}
@@ -782,18 +799,5 @@ function useDesktopUpdateSnapshot(
     capability?.subscribe ?? subscribeToNothing,
     capability?.snapshot ?? noDesktopUpdateSnapshot,
     capability?.snapshot ?? noDesktopUpdateSnapshot,
-  );
-}
-
-function AppServerErrorView({ message }: { message: string }) {
-  return (
-    <section
-      aria-label="App Server connection error"
-      aria-live="polite"
-      className="task-surface task-loading app-server-error"
-    >
-      <p>App Server connection unavailable.</p>
-      <small>{message}</small>
-    </section>
   );
 }

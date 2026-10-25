@@ -1,3 +1,4 @@
+import type { ConnectionProblem } from "../services/connectionProblem";
 import type {
   AgentListedSession,
   AgentSettingsRecord,
@@ -181,6 +182,8 @@ export type TaskOpenError = {
 
 export type AppState = {
   appServerError?: string;
+  /** Why `appServerError` happened, when the failure was classified; see connectionProblem.ts. */
+  appServerProblem?: ConnectionProblem;
   appServerReplicaEpoch: number;
   appServerStateRootId?: string;
   tasks: TaskSummary[];

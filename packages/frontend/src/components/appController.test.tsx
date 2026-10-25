@@ -463,6 +463,34 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.backendReady).toBe(false);
   });
 
+  it("names the versions of an App Server that refused this client", async () => {
+    backendConnection = {
+      initialize: vi.fn(async () => {
+        throw new AppServerProtocolError({
+          error: { code: "incompatibleProtocol", message: "Update OpenAIDE on your computer", recoverable: false },
+        });
+      }),
+      probe: vi.fn(async () => ({ stateRootFingerprint: "root", protocolVersion: "2.0", appVersion: "0.40.0", lifecycle: "running" as const })),
+      request: vi.fn() as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.appServerError).toBe("Update OpenAIDE on your computer");
+    expect(latestController?.state.appServerProblem).toMatchObject({
+      kind: "incompatible",
+      server: { protocol: "2.0", appVersion: "0.40.0" },
+      update: "computer",
+    });
+  });
+
   it("retries a failed initialization when the app returns and from Retry", async () => {
     const windowEvents = new EventTarget();
     vi.stubGlobal("window", Object.assign(windowEvents, {
@@ -4164,6 +4192,7 @@ type TestBackendConnection = {
   handleRecoveryBaseline?: BackendConnection["handleRecoveryBaseline"];
   handleRecoveryFailed?: BackendConnection["handleRecoveryFailed"];
   retryRecovery?: BackendConnection["retryRecovery"];
+  probe?: BackendConnection["probe"];
   close: () => void;
 };
 

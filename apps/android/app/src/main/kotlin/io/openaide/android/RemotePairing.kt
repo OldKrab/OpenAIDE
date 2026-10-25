@@ -80,7 +80,7 @@ internal object RemotePairing {
             } else try {
                 RemoteNode.connection(application)
                 null
-            } catch (error: RemoteNode.Unavailable) { message(error.failure) }
+            } catch (error: RemoteNode.Unavailable) { message(error.failure, selectedName(application)) }
             main.post { callback.done(problem) }
         }
     }
@@ -111,7 +111,7 @@ internal object RemotePairing {
                     val server = PairedServers.find(ConnectionStore(application).pairedServers(), target)
                         ?: throw ComputerSwitch.Failed("not_paired", "This phone is no longer paired with that computer.")
                     return try { RemoteNode.reachForSwitch(application, server) } catch (error: RemoteNode.Unavailable) {
-                        throw ComputerSwitch.Failed(error.failure.name.lowercase(), message(error.failure))
+                        throw ComputerSwitch.Failed(error.failure.name.lowercase(), message(error.failure, server.name))
                     }
                 }
 
@@ -135,12 +135,20 @@ internal object RemotePairing {
             })
     }
 
-    @JvmStatic fun message(failure: RemoteNode.Failure): String = when (failure) {
-        RemoteNode.Failure.UNREACHABLE -> "Your computer is unreachable. Make sure OpenAIDE is open on it and both devices are online."
-        RemoteNode.Failure.NOT_TRUSTED -> "This phone was removed from your computer. Pair it again in Connection settings."
-        RemoteNode.Failure.INCOMPATIBLE -> "OpenAIDE on this phone and on your computer are different versions. Update both, then try again."
-        RemoteNode.Failure.STORAGE -> "Secure storage is unavailable. Restart OpenAIDE and try again."
+    /** A failure in words, naming the computer when it is known ("your computer" otherwise). */
+    @JvmStatic @JvmOverloads fun message(failure: RemoteNode.Failure, name: String? = null): String {
+        val computer = name?.takeIf { it.isNotBlank() }
+        val subject = computer ?: "your computer"
+        return when (failure) {
+            RemoteNode.Failure.UNREACHABLE -> "Can’t reach $subject. Make sure it is on, OpenAIDE is open there, and both devices are online."
+            RemoteNode.Failure.NOT_TRUSTED -> "${computer ?: "Your computer"} removed this phone. Pair it again in Connection settings."
+            RemoteNode.Failure.INCOMPATIBLE -> "This phone and $subject run different versions of OpenAIDE. Update both, then try again."
+            RemoteNode.Failure.STORAGE -> "Secure storage is unavailable. Restart OpenAIDE and try again."
+        }
     }
+
+    /** The name of the computer in use, for messages about it. */
+    @JvmStatic fun selectedName(context: Context): String? = ConnectionStore(context).pairedServer()?.name
 
     /** The name the user gave this phone, as the computer will list it. */
     private fun deviceName(context: Context): String {

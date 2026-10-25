@@ -1,3 +1,4 @@
+import type { ConnectionProblem } from "../services/connectionProblem";
 import type {
   AgentListedSession,
   AgentListSessionsResult,
@@ -39,7 +40,7 @@ import type { AppState, NativeSessionsState, TaskChatScrollState, TaskOpenError 
 export type SnapshotIntent = "open" | "refresh";
 
 type AppActionPayload =
-  | { type: "appServer:error"; message: string }
+  | { type: "appServer:error"; message: string; problem?: ConnectionProblem }
   | { type: "appServer:ready" }
   | { type: "appServer:replica"; epoch: number; stateRootId: string }
   | { type: "tasks"; archived: boolean; tasks: TaskSummary[] }
@@ -311,9 +312,9 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
 function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
   switch (action.type) {
     case "appServer:error":
-      return { ...state, appServerError: action.message, taskListError: action.message };
+      return { ...state, appServerError: action.message, appServerProblem: action.problem, taskListError: action.message };
     case "appServer:ready":
-      return { ...state, appServerError: undefined };
+      return { ...state, appServerError: undefined, appServerProblem: undefined };
     case "appServer:replica":
       return applyAppServerReplica(state, action.epoch, action.stateRootId);
     case "tasks": {
