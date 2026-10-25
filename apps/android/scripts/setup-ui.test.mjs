@@ -168,13 +168,28 @@ test('an incompatible existing agent gets an explicit recovery, not an install l
   } finally { view.close(); }
 });
 
-test('settings report the connection as it is, not as configured', () => {
-  for (const [connected, text] of [[true, 'Connected'], [false, 'Not connected']]) {
-    const view = setup({ initial: 'settings', remote: true, paired: true, computer: 'studio', connected });
+test('settings report the connection as it is on the row in use, under a title for the whole page', () => {
+  const computers = [{ id: 'a'.repeat(64), name: 'Studio', current: true }];
+  for (const [connected, detail] of [[true, 'Remote computer'], [false, 'Remote computer · Not connected']]) {
+    const view = setup({ initial: 'settings', remote: true, paired: true, computer: 'Studio', computers, connected });
     try {
-      assert.equal(view.document.querySelector('.status').textContent, text);
+      assert.equal(view.document.querySelector('h1').textContent, 'Connection');
+      assert.equal(view.document.querySelector('.row.current small').textContent, detail);
     } finally { view.close(); }
   }
+});
+
+test('a switch that is connecting can be cancelled while every other control waits', () => {
+  const computers = [{ id: 'a'.repeat(64), name: 'Studio', current: true }, { id: 'b'.repeat(64), name: 'Laptop', current: false }];
+  const view = setup({ initial: 'settings', remote: true, paired: true, computers, busy: true, switching: true, notice: 'Connecting to Laptop…' });
+  try {
+    assert.match(view.document.getElementById('notice').textContent, /Connecting to Laptop…/);
+    assert.equal(view.document.querySelector('[data-action="use_computer"]').disabled, true);
+    const cancel = [...view.document.querySelectorAll('#notice button')].find(button => button.textContent === 'Cancel');
+    assert.equal(cancel.disabled, false);
+    cancel.click();
+    assert.deepEqual(view.actions.at(-1), { action: 'cancel_switch' });
+  } finally { view.close(); }
 });
 
 test('remote screens say what the connection uses, and the local one does not', () => {

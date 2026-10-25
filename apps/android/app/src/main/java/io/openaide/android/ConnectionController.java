@@ -41,6 +41,8 @@ final class ConnectionController extends ContextWrapper {
     private String operationName;
     private JSONObject joinCode;
     private final ComputerSwitch<?> switcher;
+    /** A switch this page started is connecting; the page offers Cancel while every other control waits. */
+    private boolean switching;
 
     ConnectionController(Activity activity, View view, boolean localTools) {
         super(activity);
@@ -101,9 +103,13 @@ final class ConnectionController extends ContextWrapper {
     private void action(JSONObject message) throws Exception {
         String action = message.optString("action");
         if (action.equals("state")) { emit(); return; }
+        if (action.equals("cancel_switch")) { switcher.cancel(); return; }
         if (busy && !action.equals("close")) return;
         notice = "";
         sshNotice = "";
+        // The setup page is where the phone lands when the computer in use cannot be reached,
+        // so it switches through the same connect-first switch as the workspace (ADR-0070).
+        if (SetupPagePolicy.switchesComputer(action)) { switchFromPage(message); return; }
         switch (action) {
             case "close": view.close(); break;
             case "state": emit(); break;
@@ -171,7 +177,12 @@ final class ConnectionController extends ContextWrapper {
                 open(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
                     diagnostics.snapshot()), "Share diagnostics"));
                 break;
-            default: break;
+            default:
+                // A command this page cannot run is a bug between the page and this controller; say so.
+                diagnostics.record("setup_command_unknown", SetupPagePolicy.safeAction(action), 0, 0);
+                notice = "That action is not available here. Share diagnostics if this keeps happening.";
+                emit();
+                break;
         }
     }
 
@@ -280,6 +291,31 @@ final class ConnectionController extends ContextWrapper {
         });
     }
 
+    /**
+     * Runs a switch the setup page asked for: the page shows what is connecting and offers
+     * Cancel, a failure shows why, and a switch that took effect replaces the page.
+     */
+    private void switchFromPage(JSONObject message) {
+        String action = message.optString("action");
+        begin("setup_computer_switch", switchNotice(action, message.optString("id")));
+        switching = true;
+        emit();
+        switchComputer(message, (outcome, problem) -> {
+            switching = false;
+            end(problem == null, problem == null ? "" : problem);
+        });
+    }
+
+    private String switchNotice(String action, String id) {
+        if (action.equals("local")) return "Switching to this phone…";
+        String name = "";
+        for (ConnectionStore.PairedServer server : new ConnectionStore(this).pairedServers()) {
+            if (server.id.equals(id)) name = server.name;
+        }
+        if (action.equals("forget_computer")) return "Forgetting " + (name.isEmpty() ? "that computer" : name) + "…";
+        return "Connecting to " + (name.isEmpty() ? "that computer" : name) + "…";
+    }
+
     private void begin(String operation, String text) {
         busy = true;
         notice = text;
@@ -314,7 +350,7 @@ final class ConnectionController extends ContextWrapper {
                 .put("sshComputers", sshComputers(store))
                 .put("ssh", sshStatus(ssh))
                 .put("sshAvailable", !BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()).put("phoneAvailable", BundledRuntime.installable()).put("sshNotice", sshNotice)
-                .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("notice", notice)
+                .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("switching", switching).put("notice", notice)
                 .put("termux", installed("com.termux")).put("permission", checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
                 .put("checks", checks == null ? JSONObject.NULL : checks)
                 .put("background", preferences.getBoolean("background", true))

@@ -23,6 +23,12 @@ public class SetupPagePolicyTest {
             assertFalse(SetupPagePolicy.allowedOnEveryPage(action));
     }
 
+    @Test public void onlyFixedCommandWordsAreLogged() {
+        assertEquals("use_computer", SetupPagePolicy.safeAction("use_computer"));
+        for (String action : new String[]{null, "", "Use computer", "use-computer", "x".repeat(41), "id=secret"})
+            assertEquals("other", SetupPagePolicy.safeAction(action));
+    }
+
     @Test public void onlySwitchCommandsAreAnsweredWhenTheSwitchEnds() {
         for (String action : new String[]{"use_computer", "local", "cancel_switch", "forget_computer"}) assertTrue(SetupPagePolicy.switchesComputer(action));
         for (String action : new String[]{"state", "pair_setup", "update_check", ""}) assertFalse(SetupPagePolicy.switchesComputer(action));
