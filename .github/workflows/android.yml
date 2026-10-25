@@ -1,10 +1,20 @@
-name: Android APK and Termux runtime
+name: Android
 
+# A test APK is built without the App Servers it can carry, so it is ready in minutes; it says
+# so where one would be needed. A run can include them, and a release always does.
 on:
   workflow_dispatch:
+    inputs:
+      app_servers:
+        description: Include the App Servers for this phone and for SSH computers (slower)
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       release:
+        type: boolean
+        default: false
+      app_servers:
         type: boolean
         default: false
     secrets:
@@ -31,6 +41,7 @@ concurrency:
 
 jobs:
   browser:
+    name: Phone web pages (browser test)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -56,9 +67,34 @@ jobs:
         with:
           name: android-browser-diagnostics
           path: test-results/
+  clients:
+    # The setup page and the shared clients the APK ships, checked on every run whether or
+    # not the App Servers are built.
+    name: Phone setup and client tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Test the setup page and shared clients
+        run: |
+          npm run build:typescript-deps
+          node --test apps/android/scripts/install-termux.test.mjs
+          node --test apps/android/scripts/setup-ui.test.mjs
+          npm exec --workspace openaide-frontend -- vitest run src/components/settings/ConnectionSettings.test.tsx src/components/ContextUsageMobile.test.tsx src/components/UserMessagePicker.test.tsx src/components/useBackNavigation.test.ts
+          npm exec -- vitest run packages/app-server-client/src/reliableHttpChannel.test.ts packages/app-server-client/src/reliableBackendConnection.test.ts
+          npm exec --workspace openaide-frontend -- vitest run src/services/hostBridge.test.ts
+          npm exec --workspace openaide-frontend -- vitest run src/components/ComposerView.test.tsx
+          npm run build --workspace openaide-frontend
+          npm run test --workspace openaide-web
   version:
     # The version the APK reports, stamped into the Linux App Server test builds carry.
-    if: ${{ !inputs.release }}
+    name: App version
+    if: ${{ !inputs.release && inputs.app_servers }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -69,34 +105,41 @@ jobs:
         run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
   linux-app-server:
     # A release has already built this artifact in the calling workflow.
-    if: ${{ !inputs.release }}
+    name: App Server for SSH computers (Linux x64)
+    if: ${{ !inputs.release && inputs.app_servers }}
     needs: version
     uses: ./.github/workflows/build-app-server-target.yml
     with:
       target: linux-x64-musl
       version: ${{ needs.version.outputs.version }}
   apk:
-    # Test builds carry the App Server built from the same commit, so local work
-    # can be tried before the version is published. Releases download the published one.
+    # A test build that includes the App Servers carries the ones built from the same commit,
+    # so local work can be tried before the version is published. Releases download the
+    # published ones. Without them the APK does not wait for those jobs.
+    name: Android APK
     needs: [runtime, linux-app-server]
-    # The Linux App Server job is skipped in releases, which would skip this job too.
-    if: ${{ !cancelled() && needs.runtime.result == 'success' && (inputs.release || needs.linux-app-server.result == 'success') }}
+    # Skipped App Server jobs would skip this job too; a failed included one still stops it.
+    if: ${{ !cancelled() && (!(inputs.release || inputs.app_servers) || (needs.runtime.result == 'success' && (inputs.release || needs.linux-app-server.result == 'success'))) }}
     runs-on: ubuntu-24.04
     # Includes building the SSH client library and its bindings.
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        if: ${{ !inputs.release }}
+        if: ${{ !inputs.release && inputs.app_servers }}
         with:
           name: ${{ env.RUNTIME_ARTIFACT }}
           path: ${{ runner.temp }}/runtime
       - name: Carry the runtime in test builds
-        if: ${{ !inputs.release }}
+        if: ${{ !inputs.release && inputs.app_servers }}
         run: echo "BUNDLED_RUNTIME=-PopenaideBundledRuntime=$RUNNER_TEMP/runtime/openaide-app-server-android-arm64.tar.gz" >> "$GITHUB_ENV"
+      - name: Download the published runtime in releases
+        if: ${{ inputs.release }}
+        run: echo "BUNDLED_RUNTIME=-PopenaidePublishedRuntime=true" >> "$GITHUB_ENV"
       # SSH Computers upload the Linux App Server only if its SHA-256 is built in. The release
       # pins the binary published beside this APK; test builds carry the one from this commit.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        if: ${{ inputs.release || inputs.app_servers }}
         with:
           name: app-server-linux-x64-musl
           path: ${{ runner.temp }}/linux-app-server
@@ -130,7 +173,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - name: Carry the Linux App Server in test builds
-        if: ${{ !inputs.release }}
+        if: ${{ !inputs.release && inputs.app_servers }}
         run: |
           version="$(node -p 'require("./package.json").version')"
           node scripts/package-app-server-archive.mjs "$RUNNER_TEMP/linux-app-server/openaide-app-server" "$version" "$RUNNER_TEMP/ssh-archive"
@@ -203,6 +246,8 @@ jobs:
           archive: false
           if-no-files-found: error
   runtime:
+    name: App Server for this phone (Termux, arm64)
+    if: ${{ inputs.release || inputs.app_servers }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -235,17 +280,6 @@ jobs:
           export CC_aarch64_linux_android="$toolchain/aarch64-linux-android26-clang"
           export AR_aarch64_linux_android="$toolchain/llvm-ar"
           cargo build --locked --release -p openaide-app-server --target aarch64-linux-android
-      - name: Build shared frontend and runtime clients
-        run: |
-          npm run build:typescript-deps
-          node --test apps/android/scripts/install-termux.test.mjs
-          node --test apps/android/scripts/setup-ui.test.mjs
-          npm exec --workspace openaide-frontend -- vitest run src/components/settings/ConnectionSettings.test.tsx src/components/ContextUsageMobile.test.tsx src/components/UserMessagePicker.test.tsx src/components/useBackNavigation.test.ts
-          npm exec -- vitest run packages/app-server-client/src/reliableHttpChannel.test.ts packages/app-server-client/src/reliableBackendConnection.test.ts
-          npm exec --workspace openaide-frontend -- vitest run src/services/hostBridge.test.ts
-          npm exec --workspace openaide-frontend -- vitest run src/components/ComposerView.test.tsx
-          npm run build --workspace openaide-frontend
-          npm run test --workspace openaide-web
       - name: Package Termux runtime
         run: |
           node apps/android/scripts/package-runtime.mjs

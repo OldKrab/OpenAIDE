@@ -166,7 +166,7 @@ internal object SshServer {
         "auth_failed", "auth_prompt_unsupported" -> "The computer did not accept this phone’s key. Add the phone’s public key to ~/.ssh/authorized_keys there, then try again."
         "host_unknown" -> "OpenAIDE could not find that computer. Check its address and your network."
         "unreachable", "connection_refused", "connection_lost", "timeout" -> "OpenAIDE could not reach the computer. Check that it is on and reachable from this phone."
-        "unavailable_in_build" -> "This build of OpenAIDE cannot install itself on SSH computers."
+        "unavailable_in_build" -> "This build of OpenAIDE does not include the App Server for SSH computers. Install a release build to use this computer."
         "download_failed", "checksum_mismatch", "archive_invalid" -> "OpenAIDE could not download itself for the computer. Check your internet connection and try again."
         "unsupported_platform" -> "OpenAIDE runs only on 64-bit x86 Linux computers."
         "update_required" -> "The computer runs an older OpenAIDE that this app cannot use."

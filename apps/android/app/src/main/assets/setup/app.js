@@ -38,6 +38,8 @@ function item(kind, glyph, title, detail, target, value) {
 function choice(glyph, title, detail, destination) { return item('choice', glyph, title, detail, destination); }
 // A choice that starts a native flow, such as adding an SSH computer, instead of opening a screen.
 function choiceAction(glyph, title, detail, action) { return item('row choice', glyph, title, detail, action); }
+// A test build may leave out the App Server for SSH computers; the option stays and says so.
+function sshDetail() { return state.sshAvailable ? 'A Linux computer you sign in to' : 'Not included in this build'; }
 function row(glyph, title, action, value = '', detail = '') { return item('row', glyph, title, detail, action, value); }
 // The place in use: named like the others, but not something to tap.
 function place(glyph, title, detail) { return `<div class="row current">${icon(glyph)}<span class="copy"><strong>${title}</strong><small>${detail}</small></span><span class="value">In use</span></div>`; }
@@ -128,6 +130,8 @@ function localStep() {
   if (!checks.arm64) return { index: 2, title: 'Use a remote computer', detail: 'Local work needs an ARM64 phone. A remote computer works on this device.', action: 'remote_screen', label: 'Connect to a computer' };
   if (!checks.storage || !checks.space) return { index: 2, title: 'Your phone needs more room', detail: 'Free at least 512 MB in Termux’s storage. Your projects are not removed.', action: 'check', label: 'Check again' };
   if (checks.agent && !checks.agentVersion) return { index: 2, title: 'Your agent needs an update', detail: 'Install the Android-compatible Codex 0.153.3 in Termux, then check again.', action: 'termux', label: 'Open Termux' };
+  // A test build may leave out the App Server for this phone; installing would fail later.
+  if (!checks.runtime && !state.phoneAvailable) return { index: 2, title: 'This build can’t set up this phone', detail: 'This build of OpenAIDE does not include the App Server for this phone. Install a release build, or connect to a computer instead.', action: 'remote_screen', label: 'Connect to a computer' };
   if (['node', 'nodeVersion', 'npm', 'git', 'agent', 'agentVersion', 'runtime'].some(key => !checks[key])) return { index: 2, title: 'Prepare your workspace', detail: 'OpenAIDE installs the tools it needs in Termux. Your projects and history stay in place.', action: 'install', label: 'Install & continue' };
   if (!checks.authenticated) return { index: 3, title: 'Sign in to your agent', detail: 'Paste the copied sign-in command in Termux, finish signing in, then come back.', action: 'signin', label: 'Copy sign-in & open Termux' };
   return { index: 4, title: 'Your phone is ready', detail: '', action: 'local', label: state.remote ? 'Use this phone' : 'Open workspace' };
@@ -137,7 +141,7 @@ function render() {
     page.innerHTML = heading('Where will your<br>agents work?')
       + '<div class="group">'
       + choice('computer', 'Remote computer', 'Pair with a code', 'remote')
-      + (state.sshAvailable ? choiceAction('server', 'SSH computer', 'A Linux computer you sign in to', 'ssh_add') : '')
+      + choiceAction('server', 'SSH computer', sshDetail(), 'ssh_add')
       + choice('phone', 'This phone', 'Runs in Termux', 'local')
       + '</div>' + hint();
   } else if (screen === 'settings') {
@@ -153,7 +157,7 @@ function render() {
       + ssh.map(sshRow).join('')
       + '</div><div class="group">'
       + row('qr', computers.length ? 'Add another computer' : 'Add a computer', 'remote_screen', '', 'Pair with a code')
-      + (state.sshAvailable ? row('server', 'Add an SSH computer', 'ssh_add', '', 'A Linux computer you sign in to') : '')
+      + row('server', 'Add an SSH computer', 'ssh_add', '', sshDetail())
       + '</div><div class="group">'
       // A paired computer's Tasks only notify here; work on this phone or an SSH Computer
       // is also held by this phone in the background.
