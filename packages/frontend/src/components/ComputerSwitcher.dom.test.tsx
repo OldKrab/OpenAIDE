@@ -105,6 +105,8 @@ describe("ComputerSwitcher", () => {
     open();
     act(() => menuItems()[1].click());
     expect(onUse).toHaveBeenCalledWith("studio-key", expect.any(String));
+    // The wait is a page (ComputerSwitchPage), so the popup gets out of the way.
+    expect(isOpen()).toBe(false);
     expect(trigger()!.getAttribute("aria-busy")).toBe("true");
     open();
     expect(menuItems()[1].textContent).toContain("Connecting…");
@@ -127,13 +129,14 @@ describe("ComputerSwitcher", () => {
     expect(isOpen()).toBe(false);
   });
 
-  it("keeps the user in place with the shell's sentence when the switch is refused", async () => {
+  it("keeps the user in place when the switch is refused; the page says why", async () => {
     const onUse = vi.fn(async (): Promise<ComputerSwitchResult> => { throw new Error("Studio could not be reached."); });
     render({ device: "computer", computers: [studio] }, { onUse });
     open();
     await act(async () => menuItems()[1].click());
-    expect(document.querySelector('[role="menu"] [role="alert"]')!.textContent).toBe("Studio could not be reached.");
+    expect(isOpen()).toBe(false);
     expect(trigger()!.getAttribute("aria-busy")).toBeNull();
+    open();
     await act(async () => menuItems()[1].click());
     expect(onUse).toHaveBeenCalledTimes(2);
   });
@@ -174,22 +177,6 @@ describe("ComputerSwitcher", () => {
     expect(computerLink({ status: "connecting" })).toBe("connecting");
     expect(computerLink({ status: "reconnecting", message: "" })).toBe("reconnecting");
     expect(computerLink({ status: "unavailable", message: "" })).toBe("notConnected");
-  });
-
-  it("offers Cancel while the shell is still connecting", async () => {
-    let answer!: (result: ComputerSwitchResult) => void;
-    const onUse = vi.fn(() => new Promise<ComputerSwitchResult>((resolve) => { answer = resolve; }));
-    const cancel = vi.fn(async () => answer("cancelled"));
-    render({ device: "computer", computers: [studio] }, { onUse, cancel });
-    open();
-    act(() => menuItems()[1].click());
-    open();
-    const cancelItem = menuItems().find((item) => item.textContent === "Cancel switching")!;
-    await act(async () => cancelItem.click());
-    expect(cancel).toHaveBeenCalledOnce();
-    open();
-    expect(menuItems().some((item) => item.textContent === "Cancel switching")).toBe(false);
-    expect(trigger()!.getAttribute("aria-busy")).toBeNull();
   });
 
   it("asks before dropping unsent input and switches only once the user agrees", async () => {

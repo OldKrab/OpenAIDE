@@ -54,3 +54,31 @@
   color: var(--oa-text);
   overflow-wrap: anywhere;
 }
+
+.connection-problem-places {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.computer-switch-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--oa-border, currentColor);
+  border-top-color: var(--oa-text);
+  border-radius: 50%;
+  animation: computer-switch-spin 0.9s linear infinite;
+}
+
+@keyframes computer-switch-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .computer-switch-spinner {
+    animation: none;
+  }
+}

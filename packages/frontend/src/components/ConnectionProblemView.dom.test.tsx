@@ -48,16 +48,17 @@ describe("ConnectionProblemView", () => {
     expect(container.querySelector("dl")?.textContent).toContain("OpenAIDE 0.40.0, protocol 2.2");
   });
 
-  it("offers trying again and switching when the shell can switch", () => {
+  it("offers trying again and the other places right on the page", () => {
     const retry = vi.fn();
-    const switchComputer = vi.fn();
-    act(() => root.render(<ConnectionProblemView message="x" onRetry={retry} onSwitch={switchComputer} place={oldPc} problem={{ kind: "unreachable", detail: "x" }} />));
+    const use = vi.fn();
+    const places = [{ id: "", label: "This phone" }, { id: "linux-key", label: "old-linux" }];
+    act(() => root.render(<ConnectionProblemView message="x" onRetry={retry} onUse={use} place={oldPc} places={places} problem={{ kind: "unreachable", detail: "x" }} />));
     const buttons = [...container.querySelectorAll("button")];
-    expect(buttons.map((button) => button.textContent)).toEqual(["Try again", "Switch computer"]);
+    expect(buttons.map((button) => button.textContent)).toEqual(["Try again", "This phone", "old-linux"]);
     act(() => buttons[0]!.click());
-    act(() => buttons[1]!.click());
+    act(() => buttons[2]!.click());
     expect(retry).toHaveBeenCalledOnce();
-    expect(switchComputer).toHaveBeenCalledOnce();
+    expect(use).toHaveBeenCalledWith("linux-key");
     act(() => root.render(<ConnectionProblemView message="x" place={oldPc} />));
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });

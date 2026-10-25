@@ -1,5 +1,5 @@
 import { ListTodo, Menu, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
 import { DesktopTitleBar } from "./DesktopTitleBar";
@@ -20,6 +20,7 @@ import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
 import { computerLink } from "./ComputerSwitcher";
 import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
+import { WorkbenchConnectionSurface } from "./ComputerSwitchPage";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { useComputerPlace } from "./useComputerPlace";
 import { currentComputer, useComputers } from "../services/computers";
@@ -265,6 +266,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
   const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, "remote");
   const switchComputer = frontendShell?.computers ? computerSwitch(frontendShell.computers) : undefined;
+  const closeSwitchNavigation = useCallback(() => mobileNavigation.setOpen(false), [mobileNavigation.setOpen]);
   useComputerPlace({
     backendReady,
     bootstrap,
@@ -721,19 +723,15 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             target={terminalPage.target}
             terminals={view.terminals?.terminals}
           />
-          {appServerError ? (
-            <ConnectionProblemView
-              message={appServerError}
-              onRetry={controller.retryTaskOpen}
-              // The switcher lives in the navigation, which a phone keeps in its drawer.
-              onSwitch={computers?.computers.length ? () => {
-                if (mobileLayoutActive) mobileNavigation.setOpen(true);
-                setComputerSwitcherRequest((request) => request + 1);
-              } : undefined}
-              place={connectionPlace}
-              problem={appServerProblem}
-            />
-          ) : (
+          <WorkbenchConnectionSurface
+            appServerError={appServerError}
+            appServerProblem={appServerProblem}
+            closeNavigation={closeSwitchNavigation}
+            onRetry={controller.retryTaskOpen}
+            serverName={settings.devices?.serverName}
+            snapshot={computers}
+            switcher={switchComputer}
+          >
             <AppPrimaryTaskSurface
               agentIcons={agentIcons}
               controller={controller}
@@ -756,7 +754,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               planDrawerOpen={planDrawerOpen}
               workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
             />
-          )}
+          </WorkbenchConnectionSurface>
         </section>
       </AppSidebarFrame>
       </TerminalSurfaceContext.Provider>

@@ -26,6 +26,8 @@ export type ComputerSwitch = {
   /** Keeps the unsent input and stays on the computer in use. */
   decline(): void;
   cancel(): void;
+  /** Leaves a refused switch: the user stays on the computer in use. */
+  dismiss(): void;
 };
 
 /** Survives the shell's page replacement so the reloaded page can close the switch's diagnostics. */
@@ -102,6 +104,11 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
       if (!attempt) return;
       waiting = undefined;
       console.info(`computer_switch_completed operation_id=${attempt.operationId} target=${attempt.target} outcome=declined duration_ms=${elapsed(attempt)}`);
+      publish(idle);
+    },
+    dismiss() {
+      if (!state.failed) return;
+      console.info(`computer_switch_dismissed target=${state.failed.id ? "computer" : "this_device"}`);
       publish(idle);
     },
     cancel() {

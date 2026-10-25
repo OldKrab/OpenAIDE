@@ -20,13 +20,16 @@ type Copy = { title: string; line: string };
 /**
  * Says which place cannot be used, why in plain words, and what to do next. The raw error
  * and versions sit behind Details (DESIGN.md: troubleshooting behind an explicit affordance).
- * Shared by every shell; the shell decides only whether switching is offered.
+ * Shared by every shell; switching is offered only where the shell has other places.
  */
-export function ConnectionProblemView({ message, onRetry, onSwitch, place, problem }: {
+export function ConnectionProblemView({ message, onRetry, onUse, place, places = [], problem }: {
   message: string;
   onRetry?: () => void;
-  onSwitch?: () => void;
+  /** Switches to one of `places`; "" is this device. */
+  onUse?: (id: string) => void;
   place?: ConnectionPlace;
+  /** The other places agents can work, offered right here instead of in the navigation. */
+  places?: { id: string; label: string }[];
   problem?: ConnectionProblem;
 }) {
   const copy = problemCopy(problem, place);
@@ -39,10 +42,17 @@ export function ConnectionProblemView({ message, onRetry, onSwitch, place, probl
     >
       <h2>{copy.title}</h2>
       <p>{copy.line}</p>
-      {onRetry || onSwitch ? (
+      {onRetry ? (
         <div className="connection-problem-actions">
-          {onRetry ? <button className="primary" onClick={onRetry} type="button">Try again</button> : null}
-          {onSwitch ? <button onClick={onSwitch} type="button">Switch computer</button> : null}
+          <button className="primary" onClick={onRetry} type="button">Try again</button>
+        </div>
+      ) : null}
+      {onUse && places.length ? (
+        <div aria-label="Use another place" className="connection-problem-places" role="group">
+          <small>Or use</small>
+          {places.map((other) => (
+            <button key={other.id || "this-device"} onClick={() => onUse(other.id)} type="button">{other.label}</button>
+          ))}
         </div>
       ) : null}
       <details className="connection-problem-details">
