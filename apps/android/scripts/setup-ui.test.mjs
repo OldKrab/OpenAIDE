@@ -14,15 +14,15 @@ function setup(state = {}) {
   dom.window.OpenAIDESetup = { send: message => actions.push(JSON.parse(message)) };
   dom.window.scrollTo = () => {};
   dom.window.eval(script);
-  dom.window.receive({ initial: 'welcome', termux: true, permission: true, checks: ready, ...state });
+  dom.window.receive({ initial: 'welcome', termux: true, permission: true, phoneAvailable: true, checks: ready, ...state });
   return { window: dom.window, document: dom.window.document, actions, close: () => dom.window.close() };
 }
 
-test('onboarding offers two understandable choices, not developer controls', () => {
+test('onboarding offers three understandable choices, not developer controls', () => {
   const view = setup();
   try {
     assert.match(view.document.querySelector('h1').textContent, /Where will youragents work/);
-    assert.equal(view.document.querySelectorAll('.choice').length, 2);
+    assert.equal(view.document.querySelectorAll('.choice').length, 3);
     assert.doesNotMatch(view.document.querySelector('main').textContent, /checksum|supervisor|diagnostics/i);
     view.document.querySelector('[data-screen="local"]').click();
     assert.equal(view.actions.at(-1).action, 'check');
@@ -106,10 +106,10 @@ test('settings list every place, mark the one in use and switch to the one tappe
   } finally { view.close(); }
 });
 
-test('SSH computers are offered only by builds that can install on them, and switch like the others', () => {
-  assert.equal(setup().document.querySelectorAll('[data-action="ssh_add"]').length, 0);
+test('SSH computers are offered by every build, and switch like the others', () => {
   const welcome = setup({ sshAvailable: true });
   try {
+    assert.match(welcome.document.querySelector('[data-action="ssh_add"]').textContent, /A Linux computer you sign in to/);
     welcome.document.querySelector('[data-action="ssh_add"]').click();
     assert.deepEqual(welcome.actions.at(-1), { action: 'ssh_add' });
   } finally { welcome.close(); }
@@ -126,6 +126,27 @@ test('SSH computers are offered only by builds that can install on them, and swi
     // Its work is watched from this phone, so background work stays a setting here.
     assert.ok(view.document.querySelector('[data-action="background_screen"]'));
   } finally { view.close(); }
+});
+
+test('a build without an App Server says so where it would be needed, not after a failed install', () => {
+  // The native side answers ssh_add with the reason; the page only marks the option.
+  const welcome = setup({ sshAvailable: false });
+  try {
+    const option = welcome.document.querySelector('[data-action="ssh_add"]');
+    assert.match(option.textContent, /Not included in this build/);
+    option.click();
+    assert.deepEqual(welcome.actions.at(-1), { action: 'ssh_add' });
+  } finally { welcome.close(); }
+  const local = setup({ initial: 'local', phoneAvailable: false, checks: { ...ready, runtime: false } });
+  try {
+    assert.match(local.document.querySelector('h1').textContent, /This build can’t set up this phone/);
+    assert.equal(local.document.querySelectorAll('[data-action="install"]').length, 0);
+    local.document.querySelector('[data-action="remote_screen"]').click();
+    assert.equal(local.document.querySelector('h1').textContent, 'Pair with your computer');
+  } finally { local.close(); }
+  // A runtime already in Termux keeps working: only a missing one needs this build's copy.
+  const installed = setup({ initial: 'local', phoneAvailable: false });
+  try { assert.match(installed.document.querySelector('h1').textContent, /Your phone is ready/); } finally { installed.close(); }
 });
 
 test('unsupported phones offer a remote workspace instead of repeated installation', () => {
