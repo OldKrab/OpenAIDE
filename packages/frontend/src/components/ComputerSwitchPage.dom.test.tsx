@@ -49,8 +49,9 @@ describe("WorkbenchConnectionSurface", () => {
     const { switcher, closeNavigation } = render(() => new Promise((resolve) => { answer = resolve; }), { cancel });
     expect(container.textContent).toBe("Task");
     act(() => void switcher.request("pc-key"));
-    expect(heading()).toBe("Connecting to OLD-PC…");
-    expect(container.querySelector("p")?.textContent).toBe("You stay on old-linux until OLD-PC answers.");
+    expect(heading()).toBe("Connecting to OLD-PC");
+    expect(container.querySelector("p")?.textContent).toBe("You stay on old-linux until it answers.");
+    expect(container.querySelector("[aria-busy='true']")).toBeTruthy();
     expect(closeNavigation).toHaveBeenCalled();
     await act(async () => button("Cancel").click());
     expect(cancel).toHaveBeenCalledOnce();

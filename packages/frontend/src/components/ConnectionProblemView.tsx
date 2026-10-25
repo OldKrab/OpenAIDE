@@ -1,5 +1,7 @@
+import { ChevronDown, ChevronRight, Monitor, MonitorSmartphone, Smartphone } from "lucide-react";
 import { computerName, currentComputer, type ComputersSnapshot } from "../services/computers";
 import type { ConnectionProblem } from "../services/connectionProblem";
+import { ConnectionPage, thisDevice, type ConnectionEnd } from "./ConnectionPage";
 
 /**
  * The place the Frontend tried to use. A named computer comes from the shell's computers
@@ -16,13 +18,16 @@ export function connectionPlaceFor(computers: ComputersSnapshot | undefined, ser
 }
 
 type Copy = { title: string; line: string };
+type Incompatible = Extract<ConnectionProblem, { kind: "incompatible" }>;
 
 /**
- * Says which place cannot be used, why in plain words, and what to do next. The raw error
- * and versions sit behind Details (DESIGN.md: troubleshooting behind an explicit affordance).
- * Shared by every shell; switching is offered only where the shell has other places.
+ * Says which place cannot be used, why in a few words, and what to do next. The raw error
+ * and protocol versions sit behind Details (DESIGN.md: troubleshooting behind an explicit
+ * affordance). Shared by every shell; switching is offered only where the shell has other places.
  */
-export function ConnectionProblemView({ message, onRetry, onUse, place, places = [], problem }: {
+export function ConnectionProblemView({ device, message, onRetry, onUse, place, places = [], problem }: {
+  /** The device this Frontend runs on; a computer when the shell does not say. */
+  device?: "phone" | "computer";
   message: string;
   onRetry?: () => void;
   /** Switches to one of `places`; "" is this device. */
@@ -34,44 +39,66 @@ export function ConnectionProblemView({ message, onRetry, onUse, place, places =
 }) {
   const copy = problemCopy(problem, place);
   const versions = problem?.kind === "incompatible" ? problem : undefined;
+  const [here, there] = linkEnds(device, place, versions);
   return (
-    <section
-      aria-label="App Server connection error"
-      aria-live="polite"
-      className="task-surface task-loading app-server-error connection-problem"
+    <ConnectionPage
+      actions={onRetry ? <button className="connection-primary" onClick={onRetry} type="button">Try again</button> : undefined}
+      here={here}
+      label="App Server connection error"
+      line={copy.line}
+      link={versions ? "mismatch" : "broken"}
+      there={there}
+      title={copy.title}
     >
-      <h2>{copy.title}</h2>
-      <p>{copy.line}</p>
-      {onRetry ? (
-        <div className="connection-problem-actions">
-          <button className="settings-action primary" onClick={onRetry} type="button">Try again</button>
-        </div>
-      ) : null}
       {onUse && places.length ? (
-        <div aria-label="Use another place" className="connection-problem-places" role="group">
-          <small>Or use</small>
-          {places.map((other) => (
-            <button className="settings-action" key={other.id || "this-device"} onClick={() => onUse(other.id)} type="button">{other.label}</button>
-          ))}
+        <div className="connection-places">
+          <span className="connection-places-title">Switch to</span>
+          <div aria-label="Switch to" className="connection-places-list" role="group">
+            {places.map((other) => {
+              const Icon = other.id ? MonitorSmartphone : device === "phone" ? Smartphone : Monitor;
+              return (
+                <button key={other.id || "this-device"} onClick={() => onUse(other.id)} type="button">
+                  <Icon aria-hidden="true" size={16} strokeWidth={1.6} />
+                  <span>{other.label}</span>
+                  <ChevronRight aria-hidden="true" size={16} />
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : null}
-      <details className="connection-problem-details">
-        <summary>Details</summary>
+      <details className="connection-details">
+        <summary>Details <ChevronDown aria-hidden="true" size={14} /></summary>
         <dl>
           {versions ? (
             <>
-              <dt>This app</dt>
-              <dd>Protocol {versions.clientProtocol}</dd>
-              <dt>{placeLabel(place)}</dt>
-              <dd>{versions.server ? `OpenAIDE ${versions.server.appVersion}, protocol ${versions.server.protocol}` : "Version unknown"}</dd>
+              <div><dt>This app</dt><dd>Protocol {versions.clientProtocol}</dd></div>
+              <div>
+                <dt>{placeLabel(place)}</dt>
+                <dd>{versions.server ? `OpenAIDE ${versions.server.appVersion} · protocol ${versions.server.protocol}` : "Version unknown"}</dd>
+              </div>
             </>
           ) : null}
-          <dt>Error</dt>
-          <dd>{message}</dd>
+          <div><dt>Error</dt><dd>{message}</dd></div>
         </dl>
       </details>
-    </section>
+    </ConnectionPage>
   );
+}
+
+/**
+ * The picture's two ends. A version mismatch marks the side to update; the computer's app
+ * version shows when the probe read it.
+ * TODO: show this app's version on the near end too. No shell passes the Frontend its own
+ * app version yet, and setting this app's protocol beside the computer's app version would mislead.
+ */
+function linkEnds(device: "phone" | "computer" | undefined, place: ConnectionPlace | undefined, versions: Incompatible | undefined): [ConnectionEnd, ConnectionEnd] {
+  const here: ConnectionEnd = place?.self ? { label: "This app", kind: "app" } : thisDevice(device);
+  const there: ConnectionEnd = { label: placeLabel(place), kind: place?.self ?? "computer" };
+  if (versions?.update === "app") Object.assign(here, { note: "Update needed", stale: true });
+  if (versions?.server) there.note = versions.server.appVersion;
+  if (versions?.update === "computer") Object.assign(there, { note: there.note ?? "Update needed", stale: true });
+  return [here, there];
 }
 
 function placeLabel(place: ConnectionPlace | undefined) {
@@ -87,20 +114,14 @@ export function problemCopy(problem: ConnectionProblem | undefined, place: Conne
   switch (problem?.kind) {
     case "unreachable":
       return place?.self
-        ? { title: `Can’t reach ${name}`, line: "It is not answering. Restart OpenAIDE, then try again." }
-        : { title: `Can’t reach ${name}`, line: `Make sure ${subject} is on, OpenAIDE is running there, and both devices are online.` };
-    case "incompatible": {
-      const running = problem.server ? ` runs OpenAIDE ${problem.server.appVersion}` : "";
-      if (problem.update === "computer") {
-        return { title: `${capitalize(subject)} needs an update`, line: `${capitalize(subject)}${running || " runs an older OpenAIDE"}, which is older than this app. Update OpenAIDE there, then try again.` };
-      }
-      if (problem.update === "app") {
-        return { title: "This app needs an update", line: `${capitalize(subject)}${running || " runs a newer OpenAIDE"}, which is newer than this app. Update this app, then try again.` };
-      }
-      return { title: `${capitalize(subject)} runs a different version`, line: "This app and OpenAIDE there are different versions. Update both, then try again." };
-    }
+        ? { title: `Can’t reach ${name}`, line: "Restart OpenAIDE, then try again." }
+        : { title: `Can’t reach ${name}`, line: "Check that it’s on and OpenAIDE is running there." };
+    case "incompatible":
+      if (problem.update === "computer") return { title: `${capitalize(subject)} needs an update`, line: `Update OpenAIDE on ${subject}, then try again.` };
+      if (problem.update === "app") return { title: "This app needs an update", line: `${capitalize(subject)} runs a newer OpenAIDE. Update this app, then try again.` };
+      return { title: `${capitalize(subject)} runs a different version`, line: "Update OpenAIDE here and there, then try again." };
     default:
-      return { title: `Can’t connect to ${name}`, line: "Try again. If this keeps happening, the details below say what failed." };
+      return { title: `Can’t connect to ${name}`, line: "Try again. Details say what failed." };
   }
 }
 

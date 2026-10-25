@@ -487,6 +487,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className={`app-shell editor-shell ${desktopTitleBar ? "desktop-error-shell" : ""}`}>
         {desktopTitleBar}
         <ConnectionProblemView
+          device={computers?.device}
           message={appServerError}
           onRetry={controller.retryTaskOpen}
           place={connectionPlace}

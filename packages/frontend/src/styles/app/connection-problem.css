@@ -1,84 +1,303 @@
-/* The page shown when the App Server cannot be used: one headline, one line saying what
-   to do, the actions, and the raw facts behind Details. It sits on the loading surface. */
-.connection-problem {
-  gap: 10px;
+/* The can't-connect and switching pages: a picture of the link, a title, one line, and the
+   actions. Wide windows keep everything in one centered group; a phone moves the actions to the
+   bottom, within thumb reach. */
+.connection-page.task-surface {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px calc(20px + env(safe-area-inset-bottom));
+  color: var(--oa-text);
+  text-align: center;
 }
 
-.connection-problem h2 {
+.connection-page > * {
+  width: min(340px, 100%);
+  flex: 0 0 auto;
+}
+
+.connection-page h2 {
   margin: 0;
-  color: var(--oa-text);
-  font-size: 17px;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.connection-page > p {
+  margin: 6px 0 0;
+  color: var(--oa-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* The link: the device in hand, the place it uses, and the state of the wire between them. */
+.connection-link {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 28px;
+}
+
+.connection-end {
+  width: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.connection-end-label {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-end-note {
+  font-family: var(--oa-mono-font);
+  font-size: 12px;
+}
+
+.connection-end-note.stale {
+  color: var(--oa-warning);
+}
+
+.connection-wire {
+  position: relative;
+  width: 72px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+}
+
+.connection-wire-line {
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  border-top: 1.5px dashed color-mix(in oklch, var(--oa-muted) 60%, transparent);
+}
+
+.connection-link-mismatch .connection-wire-line {
+  border-top-style: solid;
+}
+
+.connection-wire-mark {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--oa-bg);
+  color: var(--oa-danger);
+  box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--oa-danger) 70%, transparent);
+  font-size: 14px;
   font-weight: 600;
 }
 
-.connection-problem p {
-  max-width: min(440px, 90vw);
-  margin: 0;
-  line-height: 1.45;
+.connection-wire-mark-warning {
+  color: var(--oa-warning);
+  box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--oa-warning) 70%, transparent);
 }
 
-.connection-problem-actions {
+.connection-wire-dots {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 5px;
+  padding: 0 6px;
+  background: var(--oa-bg);
 }
 
-.connection-problem-details {
-  max-width: min(480px, 90vw);
-  font-size: 13px;
-}
-
-.connection-problem-details summary {
-  width: fit-content;
-  margin-inline: auto;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.connection-problem-details dl {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 12px;
-  margin: 8px 0 0;
-  text-align: start;
-}
-
-.connection-problem-details dt {
-  color: var(--oa-muted);
-}
-
-.connection-problem-details dd {
-  margin: 0;
-  color: var(--oa-text);
-  overflow-wrap: anywhere;
-}
-
-.connection-problem-places {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.computer-switch-spinner {
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--oa-border, currentColor);
-  border-top-color: var(--oa-text);
+.connection-wire-dots i {
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  animation: computer-switch-spin 0.9s linear infinite;
+  background: var(--oa-focus);
+  animation: connection-wire-dot 1.2s ease-in-out infinite;
 }
 
-@keyframes computer-switch-spin {
-  to { transform: rotate(360deg); }
+.connection-wire-dots i:nth-child(2) { animation-delay: 0.15s; }
+.connection-wire-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes connection-wire-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .computer-switch-spinner {
-    animation: none;
+  .connection-wire-dots i { animation: none; opacity: 0.8; }
+}
+
+.connection-page-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 24px;
+}
+
+.connection-primary,
+.connection-secondary {
+  width: 100%;
+  max-width: 280px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--oa-radius-lg);
+  font: inherit;
+  font-size: 15px;
+}
+
+.connection-primary {
+  background: var(--oa-text);
+  color: var(--oa-bg);
+  font-weight: 600;
+}
+
+.connection-primary:hover {
+  opacity: 0.88;
+}
+
+.connection-secondary {
+  background: transparent;
+  color: var(--oa-text);
+  font-weight: 500;
+}
+
+.connection-secondary:hover,
+.connection-secondary:active {
+  background: var(--oa-raised);
+}
+
+.connection-places {
+  max-width: 280px;
+  margin-top: 28px;
+  text-align: start;
+}
+
+.connection-places-title {
+  display: block;
+  padding: 0 4px 6px;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.connection-places-list {
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-panel);
+  overflow: hidden;
+}
+
+.connection-places-list button {
+  width: 100%;
+  height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--oa-text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.connection-places-list button + button {
+  box-shadow: inset 0 1px 0 var(--oa-border-subtle, var(--oa-border));
+}
+
+.connection-places-list button span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-places-list button svg:last-child {
+  color: var(--oa-muted);
+}
+
+.connection-places-list button:hover,
+.connection-places-list button:active {
+  background: var(--oa-raised);
+}
+
+.connection-details {
+  max-width: 280px;
+  margin-top: 16px;
+}
+
+.connection-details summary {
+  width: fit-content;
+  margin-inline: auto;
+  border-radius: var(--oa-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  color: var(--oa-muted);
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+}
+
+.connection-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.connection-details summary svg {
+  transition: transform 120ms ease;
+}
+
+.connection-details[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.connection-details dl {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-panel);
+  padding: 10px 12px;
+  text-align: start;
+}
+
+.connection-details dt {
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.connection-details dd {
+  margin: 2px 0 0;
+  font-family: var(--oa-mono-font);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+/* Phone: the picture and message take the middle; the actions move to the bottom edge. */
+@media (max-width: 760px) {
+  .connection-page.task-surface {
+    justify-content: flex-start;
+  }
+
+  .connection-link {
+    margin-top: auto;
+  }
+
+  .connection-page-actions {
+    order: 1;
+    margin-top: auto;
+    padding-top: 24px;
   }
 }

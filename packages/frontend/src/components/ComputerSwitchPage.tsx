@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { computerName, currentComputer, type ComputersSnapshot } from "../services/computers";
 import { useComputerSwitch, type ComputerSwitch, type ComputerSwitchState } from "../services/computerSwitch";
 import type { ConnectionProblem } from "../services/connectionProblem";
+import { ConnectionPage, thisDevice } from "./ConnectionPage";
 import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
 
 /**
@@ -18,29 +19,37 @@ export function ComputerSwitchPage({ snapshot, state, switcher }: {
   const name = targetName(snapshot, target);
   const inUse = snapshot ? currentComputer(snapshot) : undefined;
   const here = inUse ? computerName(inUse) : snapshot?.device === "phone" ? "this phone" : "this computer";
+  const ends = {
+    here: thisDevice(snapshot?.device),
+    there: { label: capitalize(name), kind: target ? "computer" : snapshot?.device ?? "computer" } as const,
+  };
   if (state.failed) {
     return (
-      <section aria-label="Switching computers" aria-live="polite" className="task-surface task-loading connection-problem computer-switch-page">
-        <h2>Can’t switch to {name}</h2>
-        <p>{state.failed.message}</p>
-        <div className="connection-problem-actions">
-          <button className="settings-action primary" onClick={() => void switcher.request(target || undefined).catch(() => undefined)} type="button">Try again</button>
-          <button className="settings-action" onClick={() => switcher.dismiss()} type="button">Back to {here}</button>
-        </div>
-      </section>
+      <ConnectionPage
+        {...ends}
+        actions={(
+          <>
+            <button className="connection-primary" onClick={() => void switcher.request(target || undefined).catch(() => undefined)} type="button">Try again</button>
+            <button className="connection-secondary" onClick={() => switcher.dismiss()} type="button">Back to {here}</button>
+          </>
+        )}
+        label="Switching computers"
+        line={state.failed.message}
+        link="broken"
+        title={`Can’t switch to ${name}`}
+      />
     );
   }
   return (
-    <section aria-busy="true" aria-label="Switching computers" aria-live="polite" className="task-surface task-loading connection-problem computer-switch-page">
-      <span aria-hidden="true" className="computer-switch-spinner" />
-      <h2>Connecting to {name}…</h2>
-      <p>You stay on {here} until {name} answers.</p>
-      {state.cancellable ? (
-        <div className="connection-problem-actions">
-          <button className="settings-action" onClick={() => switcher.cancel()} type="button">Cancel</button>
-        </div>
-      ) : null}
-    </section>
+    <ConnectionPage
+      {...ends}
+      actions={state.cancellable ? <button className="connection-secondary" onClick={() => switcher.cancel()} type="button">Cancel</button> : undefined}
+      busy
+      label="Switching computers"
+      line={`You stay on ${here} until it answers.`}
+      link="waiting"
+      title={`Connecting to ${name}`}
+    />
   );
 }
 
@@ -69,6 +78,7 @@ export function WorkbenchConnectionSurface({ appServerError, appServerProblem, c
   const others = switcher && snapshot ? otherPlaces(snapshot) : [];
   return (
     <ConnectionProblemView
+      device={snapshot?.device}
       message={appServerError}
       onRetry={onRetry}
       onUse={others.length && switcher ? (id) => void switcher.request(id || undefined).catch(() => undefined) : undefined}
@@ -102,4 +112,8 @@ function targetName(snapshot: ComputersSnapshot | undefined, id: string) {
   if (!id) return snapshot?.device === "phone" ? "this phone" : "this computer";
   const computer = snapshot?.computers.find((candidate) => candidate.id === id);
   return computer ? computerName(computer) : "the computer";
+}
+
+function capitalize(text: string) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
