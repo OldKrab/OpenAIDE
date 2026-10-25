@@ -20,11 +20,11 @@ import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
 import { computerLink } from "./ComputerSwitcher";
 import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
-import { WorkbenchConnectionSurface } from "./ComputerSwitchPage";
+import { WorkbenchConnectionSurface, connectionSurfaceTitle } from "./ComputerSwitchPage";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { useComputerPlace } from "./useComputerPlace";
 import { currentComputer, useComputers } from "../services/computers";
-import { computerSwitch } from "../services/computerSwitch";
+import { computerSwitch, useComputerSwitch } from "../services/computerSwitch";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -266,6 +266,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
   const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, "remote");
   const switchComputer = frontendShell?.computers ? computerSwitch(frontendShell.computers) : undefined;
+  const coverTitle = connectionSurfaceTitle(useComputerSwitch(switchComputer), appServerError);
   const closeSwitchNavigation = useCallback(() => mobileNavigation.setOpen(false), [mobileNavigation.setOpen]);
   useComputerPlace({
     backendReady,
@@ -650,8 +651,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         {computerSwitchConfirm}
         <header
           className="mobile-workbench-bar"
-          data-has-permission-policy={hasMobilePermissionPolicy || undefined}
-          data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}
+          data-has-permission-policy={(hasMobilePermissionPolicy && !coverTitle) || undefined}
+          data-has-plan={renderableTaskSnapshot?.current_plan && !coverTitle ? true : undefined}
         >
           <button
             aria-expanded={mobileNavigationOpen}
@@ -670,11 +671,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             {mobileNavigationOpen ? <X size={17} /> : <Menu size={17} />}
           </button>
           <span>
-            <strong>{mobileTitle}</strong>
-            <small>{mobileSubtitle}</small>
+            <strong>{coverTitle ?? mobileTitle}</strong>
+            {coverTitle ? null : <small>{mobileSubtitle}</small>}
           </span>
           <div className="mobile-task-file-action" ref={setMobileTaskActionsTarget} />
-          {mobilePermissionTask ? (
+          {mobilePermissionTask && !coverTitle ? (
             <TaskPermissionPolicyControl
               disabled={renderableTaskArchived || !taskMutationReady}
               disabledReason={renderableTaskArchived
@@ -686,7 +687,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               policy={mobilePermissionTask.permission_policy}
             />
           ) : null}
-          {renderableTaskSnapshot?.current_plan ? (
+          {renderableTaskSnapshot?.current_plan && !coverTitle ? (
             <button
               aria-expanded={planDrawerOpen}
               aria-label={planDrawerOpen ? "Hide Plan" : "Open Plan"}

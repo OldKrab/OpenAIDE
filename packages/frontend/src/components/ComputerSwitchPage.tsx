@@ -24,8 +24,8 @@ export function ComputerSwitchPage({ snapshot, state, switcher }: {
         <h2>Can’t switch to {name}</h2>
         <p>{state.failed.message}</p>
         <div className="connection-problem-actions">
-          <button className="primary" onClick={() => void switcher.request(target || undefined).catch(() => undefined)} type="button">Try again</button>
-          <button onClick={() => switcher.dismiss()} type="button">Back to {here}</button>
+          <button className="settings-action primary" onClick={() => void switcher.request(target || undefined).catch(() => undefined)} type="button">Try again</button>
+          <button className="settings-action" onClick={() => switcher.dismiss()} type="button">Back to {here}</button>
         </div>
       </section>
     );
@@ -37,7 +37,7 @@ export function ComputerSwitchPage({ snapshot, state, switcher }: {
       <p>You stay on {here} until {name} answers.</p>
       {state.cancellable ? (
         <div className="connection-problem-actions">
-          <button onClick={() => switcher.cancel()} type="button">Cancel</button>
+          <button className="settings-action" onClick={() => switcher.cancel()} type="button">Cancel</button>
         </div>
       ) : null}
     </section>
@@ -77,6 +77,15 @@ export function WorkbenchConnectionSurface({ appServerError, appServerProblem, c
       problem={appServerProblem}
     />
   );
+}
+
+/**
+ * The phone header's title while this surface covers the Task, so the bar does not name a
+ * Task that is not on screen; undefined while the Task shows.
+ */
+export function connectionSurfaceTitle(state: ComputerSwitchState, appServerError: string | undefined) {
+  if (state.pending !== undefined || state.failed !== undefined) return "Switching computers";
+  return appServerError ? "Not connected" : undefined;
 }
 
 /** Every place except the one in use; "" is this device. */

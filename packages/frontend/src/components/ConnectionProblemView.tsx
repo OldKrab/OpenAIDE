@@ -44,14 +44,14 @@ export function ConnectionProblemView({ message, onRetry, onUse, place, places =
       <p>{copy.line}</p>
       {onRetry ? (
         <div className="connection-problem-actions">
-          <button className="primary" onClick={onRetry} type="button">Try again</button>
+          <button className="settings-action primary" onClick={onRetry} type="button">Try again</button>
         </div>
       ) : null}
       {onUse && places.length ? (
         <div aria-label="Use another place" className="connection-problem-places" role="group">
           <small>Or use</small>
           {places.map((other) => (
-            <button key={other.id || "this-device"} onClick={() => onUse(other.id)} type="button">{other.label}</button>
+            <button className="settings-action" key={other.id || "this-device"} onClick={() => onUse(other.id)} type="button">{other.label}</button>
           ))}
         </div>
       ) : null}

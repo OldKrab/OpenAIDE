@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComputerSwitchResult, ComputersSnapshot } from "../services/computers";
 import { computerSwitch } from "../services/computerSwitch";
-import { WorkbenchConnectionSurface } from "./ComputerSwitchPage";
+import { WorkbenchConnectionSurface, connectionSurfaceTitle } from "./ComputerSwitchPage";
 
 const linux = { id: "linux-key", name: "old-linux", current: true };
 const oldPc = { id: "pc-key", name: "OLD-PC", current: false };
@@ -77,5 +77,14 @@ describe("WorkbenchConnectionSurface", () => {
     await act(async () => button("OLD-PC").click());
     expect(use).toHaveBeenCalledWith("pc-key", expect.any(String));
     expect(button("This phone")).toBeTruthy();
+  });
+});
+
+describe("connectionSurfaceTitle", () => {
+  it("names the cover instead of the Task it hides", () => {
+    expect(connectionSurfaceTitle({ cancellable: true, pending: "pc-key" }, undefined)).toBe("Switching computers");
+    expect(connectionSurfaceTitle({ cancellable: false, failed: { id: "pc-key", message: "Can’t reach OLD-PC." } }, "refused")).toBe("Switching computers");
+    expect(connectionSurfaceTitle({ cancellable: false }, "refused")).toBe("Not connected");
+    expect(connectionSurfaceTitle({ cancellable: false }, undefined)).toBeUndefined();
   });
 });
