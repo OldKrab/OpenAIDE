@@ -79,11 +79,12 @@ describe("ComputerSwitcher", () => {
     expect(trigger()!.textContent).toBe("");
   });
 
-  it("names the computer in use, with words only for an unhealthy link", () => {
+  it("names the computer in use and leaves the link state to the dot and the label", () => {
     render({ device: "computer", computers: [{ ...studio, current: true }] });
     expect(trigger()!.textContent).toBe("Studio");
     render({ device: "computer", computers: [{ ...studio, current: true }] }, { link: "reconnecting" });
-    expect(trigger()!.textContent).toBe("StudioReconnecting…");
+    expect(trigger()!.textContent).toBe("Studio");
+    expect(trigger()!.dataset.link).toBe("reconnecting");
     expect(trigger()!.getAttribute("aria-label")).toBe("Working on Studio. Reconnecting…. Change computer");
   });
 

@@ -101,9 +101,9 @@ export function ComputerSwitcher({ link, onManage, openRequest = 0, snapshot, sw
         >
           <MonitorSmartphone aria-hidden="true" size={15} />
           {inUse ? <span className="computer-switcher-name">{computerName(inUse)}</span> : null}
-          {/* The dot alone says the link is healthy; otherwise its words replace it. */}
-          {inUse && link === "connected" ? <span aria-hidden="true" className="computer-switcher-dot" /> : null}
-          {inUse && link !== "connected" ? <span className="computer-switcher-link">{label}</span> : null}
+          {/* The dot's colour carries the link state so the name keeps the room; the words are
+              in the button's label and tooltip, and the page itself says when nothing answers. */}
+          {inUse ? <span aria-hidden="true" className="computer-switcher-dot" /> : null}
         </button>
       )}
     >
