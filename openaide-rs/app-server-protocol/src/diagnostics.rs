@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -131,4 +133,41 @@ pub struct SupportExportCreateResult {
     pub label: String,
     pub size_bytes: u64,
     pub contains_sensitive_data: bool,
+}
+
+/**
+ * Lifecycle events the Frontend records about its own waits, such as a Task switch from the
+ * route change to the first rendered state, so one App Server log follows a delay across
+ * both sides. Metadata only: the App Server drops any event or field outside its limits.
+ */
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDiagnosticEventsParams {
+    pub events: Vec<ClientDiagnosticEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDiagnosticEvent {
+    /// A stable snake_case operation name, such as `task_route_open_completed`.
+    pub event: String,
+    /// Milliseconds since the Unix epoch on the client, for ordering against server events.
+    pub at_ms: i64,
+    #[serde(default)]
+    pub fields: BTreeMap<String, ClientDiagnosticValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(untagged)]
+pub enum ClientDiagnosticValue {
+    Flag(bool),
+    Count(i64),
+    Word(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDiagnosticEventsResult {
+    /// How many events were written; the rest were outside the limits.
+    pub recorded: u32,
 }

@@ -22,6 +22,8 @@ export const STATE_UNSUBSCRIBE = "state/unsubscribe" as const;
 
 export const DIAGNOSTICS_GET_RUNTIME = "diagnostics/getRuntime" as const;
 
+export const DIAGNOSTICS_RECORD_CLIENT_EVENTS = "diagnostics/recordClientEvents" as const;
+
 export const DIAGNOSTICS_LIST_SUPPORT_EXPORT = "diagnostics/listSupportExport" as const;
 export const DIAGNOSTICS_CREATE_SUPPORT_EXPORT = "diagnostics/createSupportExport" as const;
 
@@ -363,6 +365,26 @@ export type SubagentHistorySnapshot = { taskId: TaskId, subagentId: SubagentId, 
 export type RuntimeDiagnosticsParams = Record<symbol, never>;
 
 export type RuntimeDiagnosticsResult = { status: RuntimeDiagnosticsStatus, version?: string | null, methodCount: number, tasks: TaskDiagnosticsResult, redaction: DiagnosticsRedaction, };
+
+export type ClientDiagnosticValue = boolean | number | string;
+
+export type ClientDiagnosticEvent = {
+/**
+ * A stable snake_case operation name, such as `task_route_open_completed`.
+ */
+event: string,
+/**
+ * Milliseconds since the Unix epoch on the client, for ordering against server events.
+ */
+atMs: number, fields: { [key in string]: ClientDiagnosticValue }, };
+
+export type ClientDiagnosticEventsParams = { events: Array<ClientDiagnosticEvent>, };
+
+export type ClientDiagnosticEventsResult = {
+/**
+ * How many events were written; the rest were outside the limits.
+ */
+recorded: number, };
 
 export type RuntimeDiagnosticsStatus = "ready" | "degraded";
 
@@ -1632,7 +1654,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE;
 export type RequestParamsByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;
   [FILE_VIEWER_SEARCH]: ProjectFilesParams;
@@ -1651,6 +1673,7 @@ export type RequestParamsByMethod = {
   [STATE_SUBSCRIBE]: StateSubscribeParams;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;
   [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsParams;
+  [DIAGNOSTICS_RECORD_CLIENT_EVENTS]: ClientDiagnosticEventsParams;
   [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListParams;
   [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateParams;
   [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsParams;
@@ -1777,6 +1800,7 @@ export type ResponseResultByMethod = {
   [STATE_SUBSCRIBE]: StateSubscribeResult;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;
   [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsResult;
+  [DIAGNOSTICS_RECORD_CLIENT_EVENTS]: ClientDiagnosticEventsResult;
   [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListResult;
   [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateResult;
   [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsResult;
@@ -1912,6 +1936,7 @@ export type ClientReplacementImpactResponse = ResponseEnvelope<ClientReplacement
 export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;
 export type StateUnsubscribeResponse = ResponseEnvelope<StateUnsubscribeResult>;
 export type DiagnosticsGetRuntimeResponse = ResponseEnvelope<RuntimeDiagnosticsResult>;
+export type DiagnosticsRecordClientEventsResponse = ResponseEnvelope<ClientDiagnosticEventsResult>;
 export type SupportRecoverStuckSessionsResponse = ResponseEnvelope<SupportRecoverStuckSessionsResult>;
 export type AgentProbeResponse = ResponseEnvelope<AgentProbeResult>;
 export type AgentAuthenticateResponse = ResponseEnvelope<AgentAuthenticateResult>;
@@ -2008,4 +2033,4 @@ export type TypedServerRequest<M extends ServerRequestMethod> = ServerRequestEnv
   method: M;
 };
 
-export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 2, minor: 4 };
+export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 2, minor: 5 };

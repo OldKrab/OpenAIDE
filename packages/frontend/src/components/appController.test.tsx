@@ -1,6 +1,7 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DIAGNOSTICS_RECORD_CLIENT_EVENTS,
   AGENT_LIST_SESSIONS,
   AGENT_PROBE,
   ATTACHMENT_CREATE_PASTED_IMAGE,
@@ -4160,7 +4161,8 @@ describe("app controller mounted lifecycle", () => {
       vi.advanceTimersByTime(1200);
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.snapshot" }));
-    expect(request).not.toHaveBeenCalled();
+    // Forwarded lifecycle diagnostics are not a refresh.
+    expect(request.mock.calls.filter(([method]) => method !== DIAGNOSTICS_RECORD_CLIENT_EVENTS)).toEqual([]);
   });
 });
 

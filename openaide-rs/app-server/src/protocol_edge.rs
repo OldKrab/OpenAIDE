@@ -7,6 +7,7 @@ use openaide_app_server_protocol::client::{
 mod agent_handlers;
 mod attachment_handlers;
 mod background_command_handlers;
+mod client_diagnostics_handlers;
 mod client_handlers;
 mod delivery_signal;
 mod device_handlers;
