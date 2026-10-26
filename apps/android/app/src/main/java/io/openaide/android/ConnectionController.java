@@ -56,7 +56,7 @@ final class ConnectionController extends ContextWrapper {
         if (disposed) return;
         String command = message.optString("action");
         if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics",
-            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background").contains(command)) {
+            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background", "remote_check").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
