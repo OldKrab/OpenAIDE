@@ -353,6 +353,23 @@ it("shows which computer the Desktop is connected to and switches to another", a
   expect(computers.use).toHaveBeenCalledWith(studio.id, expect.stringMatching(/^computer-switch-/));
 });
 
+it("offers to set up a phone that cannot run its own workspace instead of switching to it", async () => {
+  const snapshot = { device: "phone" as const, computers: [{ ...studio, current: true }], thisDeviceReady: false };
+  const computers = { ...desktopComputers(), snapshot: () => snapshot };
+  const execute = vi.fn(async () => undefined);
+  const phoneState = { remote: true, paired: true, termux: false, permission: false, computer: studio.name, computers: [] };
+  useShell({ computers, connectionSettings: { snapshot: () => phoneState, subscribe: () => () => undefined, execute } } as unknown as Partial<FrontendShell>);
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(row("This phone").textContent).toContain("Not set up");
+  await click("Set up this phone");
+  await settle();
+
+  expect(execute).toHaveBeenCalledWith({ action: "phone_setup" });
+  expect(computers.use).not.toHaveBeenCalled();
+});
+
 it("forgets a paired computer only after saying what happens", async () => {
   const computers = desktopComputers([{ ...studio, current: true }]);
   useShell({ computers });

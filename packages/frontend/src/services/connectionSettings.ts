@@ -31,7 +31,8 @@ export type PhoneSshComputer = { id: string; name: string; destination: string; 
 export type PhoneSshStatus = { runningVersion: string; updateAvailable: boolean; suggestLinger: boolean };
 
 export type ConnectionCommand =
-  | { action: "state" | "check" | "local" | "install" | "termux" | "get_termux" | "access" | "grant" | "signin" | "battery" | "termux_settings" | "app_settings" | "pair_setup" | "diagnostics" }
+  /** `phone_setup` opens the phone's own setup for working on this phone. */
+  | { action: "state" | "check" | "local" | "install" | "termux" | "get_termux" | "access" | "grant" | "signin" | "battery" | "termux_settings" | "app_settings" | "pair_setup" | "phone_setup" | "diagnostics" }
   /** `ssh_add` opens the phone's own add flow; `update_ssh` replaces the App Server in use after the Frontend's warning. */
   | { action: "ssh_add" | "update_ssh" }
   | { action: "use_computer" | "forget_computer" | "use_ssh" | "forget_ssh" | "stop_ssh"; id: string }

@@ -26,6 +26,7 @@ internal object LocalServer {
             TermuxCommand.run(context, "start-termux.sh", TermuxCommand.variable("OPENAIDE_VERSION", BundledRuntime.expectedVersion())) { success, output ->
                 if (!success) { done(null, "termux_failed"); return@run }
                 val server = parse(output)
+                if (server != null) ConnectionStore(context).markLocalWorkspaceStarted()
                 done(server, if (server == null) "invalid_handoff" else "ready")
             }
         }

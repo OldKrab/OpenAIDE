@@ -60,7 +60,7 @@ export function androidConnectionSettings(host: Window): AndroidConnectionSettin
         } else if (message.type === "update") {
           updates.receive(message.update);
         } else if (message.type === "computers" && Array.isArray(message.computers)) {
-          computers = { device: "phone", computers: message.computers };
+          computers = { device: "phone", computers: message.computers, thisDeviceReady: message.thisDeviceReady !== false };
           notify();
         }
       } catch { }

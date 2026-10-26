@@ -115,6 +115,7 @@ final class ConnectionController extends ContextWrapper {
             case "state": emit(); break;
             case "check": check(); break;
             case "pair_setup": view.setup("remote"); break;
+            case "phone_setup": view.setup("local"); break;
             case "scan": scan(); break;
             case "pair": pair(message.optString("code")); break;
             case "join": join(); break;
@@ -347,6 +348,7 @@ final class ConnectionController extends ContextWrapper {
                 .put("remote", store.usesPaired() || ssh != null).put("paired", !store.pairedServers().isEmpty())
                 .put("computer", ssh != null ? ssh.name : computer == null ? "" : computer.name)
                 .put("computers", computers(store))
+                .put("thisDeviceReady", thisDeviceReady(store))
                 .put("sshComputers", sshComputers(store))
                 .put("ssh", sshStatus(ssh))
                 .put("sshAvailable", !BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()).put("phoneAvailable", BundledRuntime.installable()).put("sshNotice", sshNotice)
@@ -360,6 +362,15 @@ final class ConnectionController extends ContextWrapper {
                 .put("notifications", getSystemService(android.app.NotificationManager.class).areNotificationsEnabled());
             view.render(state);
         } catch (Exception ignored) { }
+    }
+
+    /**
+     * Whether the switcher may offer this phone: its workspace started here before, and
+     * Termux and the permission to run commands in it are still in place.
+     */
+    private boolean thisDeviceReady(ConnectionStore store) {
+        return store.localWorkspaceStarted() && installed("com.termux")
+            && checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED;
     }
 
     /** Every paired computer, with the one remote work goes to marked. */

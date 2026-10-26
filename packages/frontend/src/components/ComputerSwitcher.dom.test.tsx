@@ -98,6 +98,17 @@ describe("ComputerSwitcher", () => {
     ]);
   });
 
+  it("leaves out a phone not set up for its own workspace, unless it is in use", () => {
+    render({ device: "phone", computers: [{ ...studio, current: true }, laptop], thisDeviceReady: false });
+    open();
+    expect(menuItems().map((item) => item.textContent)).toEqual(["1Studio", "2Remote computer", "Pair or manage computers…"]);
+    act(() => root.unmount());
+    root = createRoot(container);
+    render({ device: "phone", computers: [studio], thisDeviceReady: false });
+    open();
+    expect(menuItems()[0].textContent).toBe("1This phone");
+  });
+
   it("asks the shell to switch and shows the switch in progress", async () => {
     let accept!: (result: ComputerSwitchResult) => void;
     const onUse = vi.fn(() => new Promise<ComputerSwitchResult>((resolve) => { accept = resolve; }));

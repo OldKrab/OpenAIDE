@@ -252,15 +252,19 @@ function computersGroup(computers: SettingsComputers, phone: PhoneConnection | u
     ? <SettingsButton onClick={() => computers.cancel()} variant="quiet">Cancel</SettingsButton>
     : undefined;
   if (snapshot) {
+    const setUpFirst = remote && snapshot.thisDeviceReady === false && Boolean(phone);
     rows.push({
       id: onPhone ? "this-phone" : "this-computer",
       label: here,
-      description: onPhone ? "Runs in Termux" : "Projects, tools and Agents here",
+      description: onPhone ? setUpFirst ? "Not set up · Runs in Termux" : "Runs in Termux" : "Projects, tools and Agents here",
       keywords: onPhone ? "phone local termux connect switch" : "computer remote connect switch pc local",
       leading: onPhone ? <Smartphone aria-hidden="true" size={18} strokeWidth={1.6} /> : <Monitor aria-hidden="true" size={18} strokeWidth={1.6} />,
       selected: !remote,
       error: computers.failed?.id === "" ? computers.failed.message : undefined,
-      control: (
+      // A phone that cannot run its own workspace yet is set up first; switching would only fail.
+      control: setUpFirst ? (
+        <SettingsButton ariaLabel={`Set up ${here.toLowerCase()}`} disabled={busy} onClick={() => void phone?.execute({ action: "phone_setup" })}>Set up</SettingsButton>
+      ) : (
         <>
           {cancelButton("")}
           <SettingsChoice
