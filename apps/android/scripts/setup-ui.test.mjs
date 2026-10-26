@@ -226,3 +226,18 @@ test('a paired computer offers Task notifications where this phone offers backgr
     assert.equal(local.document.querySelector('h1').textContent, 'Keep work going');
   } finally { local.close(); }
 });
+
+test('a paired phone can check its connection step by step from Advanced', () => {
+  const computers = [{ id: 'a'.repeat(64), name: 'Desk', current: true }];
+  const view = setup({ initial: 'settings', remote: true, paired: true, computers });
+  try {
+    view.document.querySelector('[data-action="advanced_screen"]').click();
+    view.document.querySelector('[data-action="remote_check"]').click();
+    assert.deepEqual(view.actions.at(-1), { action: 'remote_check' });
+  } finally { view.close(); }
+  const local = setup({ initial: 'settings' });
+  try {
+    local.document.querySelector('[data-action="advanced_screen"]').click();
+    assert.equal(local.document.querySelector('[data-action="remote_check"]'), null);
+  } finally { local.close(); }
+});

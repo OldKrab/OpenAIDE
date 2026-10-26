@@ -56,7 +56,7 @@ final class ConnectionController extends ContextWrapper {
         if (disposed) return;
         String command = message.optString("action");
         if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics",
-            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background").contains(command)) {
+            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background", "remote_check").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
@@ -114,6 +114,7 @@ final class ConnectionController extends ContextWrapper {
             case "close": view.close(); break;
             case "state": emit(); break;
             case "check": check(); break;
+            case "remote_check": remoteCheck(); break;
             case "pair_setup": view.setup("remote"); break;
             case "phone_setup": view.setup("local"); break;
             case "scan": scan(); break;
@@ -229,6 +230,11 @@ final class ConnectionController extends ContextWrapper {
             ? "This build of OpenAIDE does not include the App Server for SSH computers. Install a release build to add one."
             : "This build of OpenAIDE does not include the App Server for this phone. Install a release build, or connect to a computer instead.";
         emit();
+    }
+
+    private void remoteCheck() {
+        begin("setup_remote_check", "Checking the connection…");
+        RemotePairing.check(this, (ok, message) -> end(ok, message));
     }
 
     private void scan() {

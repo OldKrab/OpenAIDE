@@ -1,6 +1,8 @@
 package io.openaide.android
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.SystemClock
 import computer.iroh.Connection
 import computer.iroh.ConnectionStats
@@ -227,7 +229,7 @@ internal object RemoteNode {
      * endpoint that connection rides on.
      */
     suspend fun reachForSwitch(context: Context, server: ConnectionStore.PairedServer): Connection =
-        reach(context, ConnectionStore(context.applicationContext), server, forSwitch = true)
+        reach(context, ConnectionStore(context.applicationContext), server, DialReport.Purpose.SWITCH)
 
     /** Makes a connection reached for a switch the one in use, ending the previous one. */
     fun adopt(next: Connection) {
@@ -258,14 +260,14 @@ internal object RemoteNode {
         context: Context,
         store: ConnectionStore,
         server: ConnectionStore.PairedServer,
-        forSwitch: Boolean = false,
+        purpose: DialReport.Purpose = DialReport.Purpose.LIVE,
     ): Connection {
         val started = SystemClock.elapsedRealtime()
         var index = 0
         while (true) {
             val timeoutMs = ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started)
             try {
-                return dial(context, store, server, index, timeoutMs, forSwitch)
+                return dial(context, store, server, index, timeoutMs, purpose)
             } catch (error: Unavailable) {
                 index++
                 // A hidden app usually has no network to retry on; its return starts over anyway.
@@ -276,28 +278,35 @@ internal object RemoteNode {
         }
     }
 
-    /** One attempt to reach the computer, on the current endpoint. */
+    /** One attempt to reach the computer, on the current endpoint, ending in one [DialReport] record. */
     private suspend fun dial(
         context: Context,
         store: ConnectionStore,
         server: ConnectionStore.PairedServer,
         index: Int,
         timeoutMs: Long,
-        forSwitch: Boolean,
+        purpose: DialReport.Purpose,
     ): Connection {
         val attempt = ++attempts
         val started = SystemClock.elapsedRealtime()
-        diagnostics.record("remote_connect", "started", attempt, 0, mapOf("purpose" to if (forSwitch) "switch" else "live"))
+        val report = DialReport(purpose, index, server.id, network(context))
+        diagnostics.record("remote_connect", "started", attempt, 0, report.startFields())
         var outcome = "unreachable"
+        var cause: Throwable? = null
         var counted = false
+        var node: Endpoint? = null
+        val id = runCatching { EndpointId.fromString(server.id) }.getOrNull()
         try {
             // The live connection and a switch share the one endpoint (see the class); a
             // switch's dial holds off a retire the live connection's reconnect would make.
-            val node = if (forSwitch) switchDialEndpoint(context).also { counted = true } else endpoint(context)
+            val forSwitch = purpose == DialReport.Purpose.SWITCH
+            node = if (forSwitch) switchDialEndpoint(context).also { counted = true } else endpoint(context)
+            report.stage = DialReport.Stage.ADDRESS
+            report.ownRelay = runCatching { node.addr().relayUrl() != null }.getOrNull()
             val relay = ReconnectPolicy.relayFor(index, runCatching { store.relay(server.id) }.getOrNull())
-            // Says whether this attempt had to look the computer's address up first.
-            diagnostics.record("remote_connect_address", if (relay != null) "remembered_relay" else "lookup", attempt, 0)
-            val id = EndpointId.fromString(server.id)
+            report.address = if (relay != null) "remembered_relay" else "lookup"
+            if (id == null) throw IllegalArgumentException()
+            report.stage = DialReport.Stage.CONNECT
             val opened = try {
                 withTimeout(timeoutMs) { node.connect(EndpointAddr(id, relay, emptyList()), APP_ALPN) }
             } catch (error: TimeoutCancellationException) {
@@ -306,8 +315,10 @@ internal object RemoteNode {
             }
             // The App Server completes the handshake before it checks the key,
             // so a removed phone learns it from the close that follows.
+            report.stage = DialReport.Stage.REFUSAL_CHECK
             val refusal = withTimeoutOrNull(REFUSAL_WAIT_MS) { opened.closed() }
             if (refusal != null) throw Unavailable(failure(refusal))
+            report.stage = DialReport.Stage.DONE
             outcome = if (opened.paths().any { it.isSelected && it.isRelay }) "relay" else "direct"
             rememberRelay(node, store, id, server.id, relay, attempt)
             return opened
@@ -319,15 +330,79 @@ internal object RemoteNode {
             outcome = "cancelled"
             throw error
         } catch (error: Throwable) {
+            cause = error
             // An App Server of another protocol major does not offer this ALPN.
-            val incompatible = (error.message ?: "").contains("alpn", ignoreCase = true)
-            if (incompatible) outcome = "incompatible"
+            val incompatible = DialReport.errorReason(error.message) == "alpn"
+            outcome = if (incompatible) "incompatible" else "failed"
             throw Unavailable(if (incompatible) Failure.INCOMPATIBLE else Failure.UNREACHABLE)
         } finally {
-            if (counted) withContext(NonCancellable) { endSwitchDial(succeeded = outcome == "relay" || outcome == "direct") }
-            diagnostics.record("remote_connect", outcome, attempt, SystemClock.elapsedRealtime() - started)
+            withContext(NonCancellable) {
+                if (counted) endSwitchDial(succeeded = outcome == "relay" || outcome == "direct")
+                // What the endpoint learned of the computer tells a failed lookup from an unanswered dial.
+                if (outcome == "timeout" || outcome == "failed") knownAddress(node, id, report)
+            }
+            diagnostics.record("remote_connect", outcome, attempt, SystemClock.elapsedRealtime() - started, report.fields(cause))
         }
     }
+
+    private suspend fun knownAddress(node: Endpoint?, id: EndpointId?, report: DialReport) {
+        if (node == null || id == null) return
+        val known = withTimeoutOrNull(KNOWN_ADDRESS_WAIT_MS) { runCatching { node.remoteAddr(id) }.getOrNull() } ?: return
+        report.knownRelay = runCatching { known.relayUrl() != null }.getOrNull()
+        report.knownDirect = runCatching { known.directAddresses().size }.getOrNull()
+    }
+
+    /**
+     * Runs the steps of [ConnectionCheck]: this phone's network, a bound endpoint, its home
+     * relay, then the computer. The connection in use answers for the computer; otherwise one
+     * dial is made and its connection closed. Recorded as one `remote_check` record.
+     */
+    suspend fun check(context: Context, server: ConnectionStore.PairedServer): ConnectionCheck.Result {
+        val started = SystemClock.elapsedRealtime()
+        diagnostics.record("remote_check", "started", 0, 0, mapOf("target" to DialReport.shortId(server.id)))
+        val network = network(context)
+        val node = try { endpoint(context) } catch (error: CancellationException) { throw error } catch (error: Throwable) { null }
+        val relay = when {
+            node == null -> ConnectionCheck.Relay.NO_ENDPOINT
+            withTimeoutOrNull(CHECK_RELAY_WAIT_MS) { node.online() } != null -> ConnectionCheck.Relay.REACHED
+            else -> ConnectionCheck.Relay.NOT_REACHED
+        }
+        val computer = when {
+            node == null -> ConnectionCheck.Computer.NOT_CHECKED
+            live() != null -> ConnectionCheck.Computer.CONNECTED
+            else -> try {
+                val store = ConnectionStore(context.applicationContext)
+                val opened = dial(context, store, server, 0, CHECK_DIAL_MS, DialReport.Purpose.CHECK)
+                val relayed = runCatching { opened.paths().any { it.isSelected && it.isRelay } }.getOrDefault(false)
+                abandon(opened)
+                if (relayed) ConnectionCheck.Computer.RELAY else ConnectionCheck.Computer.DIRECT
+            } catch (error: Unavailable) {
+                when (error.failure) {
+                    Failure.NOT_TRUSTED -> ConnectionCheck.Computer.NOT_TRUSTED
+                    Failure.INCOMPATIBLE -> ConnectionCheck.Computer.INCOMPATIBLE
+                    Failure.UNREACHABLE, Failure.STORAGE -> ConnectionCheck.Computer.UNREACHABLE
+                }
+            }
+        }
+        val result = ConnectionCheck.Result(network, relay, computer)
+        diagnostics.record("remote_check", ConnectionCheck.outcome(result), 0, SystemClock.elapsedRealtime() - started,
+            ConnectionCheck.fields(result) + ("target" to DialReport.shortId(server.id)))
+        return result
+    }
+
+    /** The transport this phone dials over; never an address or a network name. */
+    private fun network(context: Context): NetworkKind = runCatching {
+        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return NetworkKind.UNKNOWN
+        val active = manager.activeNetwork ?: return NetworkKind.NONE
+        val capabilities = manager.getNetworkCapabilities(active) ?: return NetworkKind.UNKNOWN
+        NetworkKind.of(
+            wifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+            cellular = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+            ethernet = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+            vpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+            validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+        )
+    }.getOrDefault(NetworkKind.UNKNOWN)
 
     /**
      * Records when the connection in use stops receiving from the computer while
@@ -451,4 +526,7 @@ internal object RemoteNode {
     }
 
     private const val REFUSAL_WAIT_MS = 400L
+    private const val KNOWN_ADDRESS_WAIT_MS = 500L
+    private const val CHECK_RELAY_WAIT_MS = 5_000L
+    private const val CHECK_DIAL_MS = 8_000L
 }
