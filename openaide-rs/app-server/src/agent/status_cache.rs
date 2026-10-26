@@ -567,6 +567,19 @@ impl AgentStatusCache {
         if entries.get(&agent_id) == Some(&snapshot) {
             return;
         }
+        let previous = entries.get(&agent_id).map(|previous| previous.status);
+        if previous.as_ref() != Some(&snapshot.status) {
+            // The Agent states the user sees: one line per change explains a passing
+            // "needs setup" or "sign in" without replaying every observation.
+            logging::info(
+                "agent_status_changed",
+                json!({
+                    "agent_id": agent_id,
+                    "from": previous.map(|status| format!("{status:?}")),
+                    "to": format!("{:?}", snapshot.status),
+                }),
+            );
+        }
         entries.insert(agent_id, snapshot);
         drop(entries);
         self.notify();

@@ -133,9 +133,19 @@ impl AcpRuntimeKernel {
             .active_sessions
             .allows_passive_session_discovery(&request.agent_id)
         {
-            // A skipped probe is not an empty authoritative Agent history.
-            return Err(RuntimeError::SetupRequired(
-                "Agent runtime is not installed; open the Agent to finish setup".to_string(),
+            // A skipped probe is not an empty authoritative Agent history. It is not a
+            // setup problem either: the first real use installs the managed runtime, so
+            // this must not reach Agent Status as SetupRequired.
+            crate::logging::info(
+                "acp_session_list_skipped",
+                serde_json::json!({
+                    "agent_id": request.agent_id,
+                    "operation_id": request.operation_id,
+                    "reason": "managed_runtime_not_installed",
+                }),
+            );
+            return Err(RuntimeError::NotReady(
+                "Agent runtime is installed on first use".to_string(),
             ));
         }
 
