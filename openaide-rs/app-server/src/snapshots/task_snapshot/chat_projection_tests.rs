@@ -79,6 +79,7 @@ fn projects_execute_presentation_without_reclassifying_the_tool() {
         detail_artifact_id: None,
         details: None,
         permission_outcomes: vec![],
+        pending: false,
     });
 
     let ActivityStepSnapshot::Tool {

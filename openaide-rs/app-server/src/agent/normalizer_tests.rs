@@ -61,3 +61,43 @@ fn subagent_tool_preserves_agent_title_and_protocol_details() {
             )
     ));
 }
+
+#[test]
+fn an_announced_tool_stays_running_and_is_marked_pending_until_it_starts() {
+    let tool = |status| {
+        normalize_event(
+            AgentEvent::ToolCall(crate::agent::events::AgentToolCall {
+                tool_call_id: "call_1".to_string(),
+                scope_id: None,
+                title: "Terminal".to_string(),
+                kind: "execute".to_string(),
+                status,
+                presentation: None,
+                description: None,
+                input_summary: None,
+                output_preview: None,
+                details: None,
+            }),
+            "2026-07-07T00:00:00.000Z",
+        )
+    };
+    let step_state = |message: NormalizedMessage| {
+        let NormalizedMessage::Activity { steps, .. } = message else {
+            panic!("a tool call is an Activity");
+        };
+        let Some(ActivityStep::Tool {
+            status, pending, ..
+        }) = steps.into_iter().next()
+        else {
+            panic!("the Activity holds the tool step");
+        };
+        (status, pending)
+    };
+
+    let announced = tool(crate::agent::events::AgentToolCallStatus::Pending);
+    assert!(announced.is_awaiting_start());
+    assert_eq!(step_state(announced), (ActivityStatus::Running, true));
+    let started = tool(crate::agent::events::AgentToolCallStatus::InProgress);
+    assert!(!started.is_awaiting_start());
+    assert_eq!(step_state(started), (ActivityStatus::Running, false));
+}

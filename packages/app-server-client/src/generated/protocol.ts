@@ -1592,7 +1592,13 @@ description?: string | null, inputSummary?: string | null, outputPreview?: strin
  * How the background command this Tool started ended. A command still
  * running is listed in `TaskSnapshot.backgroundCommands` instead.
  */
-backgroundOutcome?: BackgroundCommandOutcome | null, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, } | { "kind": "subagent", subagentId?: SubagentId | null, toolCallId?: string | null, title?: string | null, threadId?: string | null, rawPath?: string | null, activity?: string | null, name: string, path: Array<string>, status: ActivityStatus, events: Array<SubagentActivitySnapshot>, };
+backgroundOutcome?: BackgroundCommandOutcome | null,
+/**
+ * The Agent announced this Tool but has not started it: its input may still
+ * be streaming, or it waits for permission. `status` stays `running`, so a
+ * client that does not know this field shows it as running.
+ */
+pending?: boolean, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, } | { "kind": "subagent", subagentId?: SubagentId | null, toolCallId?: string | null, title?: string | null, threadId?: string | null, rawPath?: string | null, activity?: string | null, name: string, path: Array<string>, status: ActivityStatus, events: Array<SubagentActivitySnapshot>, };
 
 export type SubagentActivitySnapshot = "delegated" | "interacted" | "running" | "completed" | "failed" | "stopped";
 
@@ -2002,4 +2008,4 @@ export type TypedServerRequest<M extends ServerRequestMethod> = ServerRequestEnv
   method: M;
 };
 
-export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 2, minor: 3 };
+export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 2, minor: 4 };

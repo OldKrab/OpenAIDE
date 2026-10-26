@@ -408,6 +408,7 @@ fn persisted_tool_artifacts_keep_a_lightweight_file_summary() {
                 output: None,
             })),
             permission_outcomes: Vec::new(),
+            pending: false,
         }],
     };
 
@@ -533,6 +534,7 @@ fn pages_upgrade_saved_view_image_envelopes_to_view_presentations() {
                     output: None,
                 })),
                 permission_outcomes: Vec::new(),
+                pending: false,
             }],
         },
         timing: Default::default(),
@@ -1027,6 +1029,7 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
                     output: None,
                 })),
                 permission_outcomes: Vec::new(),
+                pending: false,
             }],
         },
         timing: Default::default(),
@@ -1059,6 +1062,7 @@ fn execute_step(tool_call_id: &str, command: &str) -> ActivityStep {
             output: None,
         })),
         permission_outcomes: Vec::new(),
+        pending: false,
     }
 }
 

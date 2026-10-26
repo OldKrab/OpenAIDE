@@ -138,6 +138,11 @@ pub enum ActivityStep {
         /// like `permission_outcomes`: Agent Tool updates never carry it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         background_outcome: Option<super::BackgroundCommandOutcome>,
+        /// The Agent announced this Tool (ACP `pending`) but has not started it: its
+        /// input may still be streaming, or it waits for permission. `status` stays
+        /// `Running` so turn settlement treats it as unsettled work.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pending: bool,
     },
     Command {
         command_label: String,

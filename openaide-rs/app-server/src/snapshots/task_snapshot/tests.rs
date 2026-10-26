@@ -711,6 +711,7 @@ fn persist_tool_detail_with_paths(
                 output: None,
             })),
             permission_outcomes: Vec::new(),
+            pending: false,
         }],
     };
     store
@@ -757,6 +758,7 @@ fn persist_tool_detail_with_input(
                 output: None,
             })),
             permission_outcomes: Vec::new(),
+            pending: false,
         }],
     };
     store
@@ -834,6 +836,7 @@ fn activity_message(id: &str, tool_call_id: &str) -> NormalizedMessage {
             detail_artifact_id: None,
             details: None,
             permission_outcomes: Vec::new(),
+            pending: false,
         }],
     }
 }

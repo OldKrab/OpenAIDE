@@ -310,7 +310,10 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             details,
             permission_outcomes,
             background_outcome,
+            pending,
         } => ActivityStepSnapshot::Tool {
+            // A settled step was started, whatever the Agent last announced.
+            pending: *pending && *status == ActivityStatus::Running,
             background_outcome: background_outcome.map(|outcome| match outcome {
                 crate::protocol::model::BackgroundCommandOutcome::Completed => {
                     openaide_app_server_protocol::snapshot::BackgroundCommandOutcome::Completed

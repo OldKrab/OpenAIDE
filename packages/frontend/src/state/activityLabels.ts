@@ -91,7 +91,7 @@ export function activityStepLabel(step: ActivityStep) {
     );
   }
   const subject = toolSubjectLabel(step);
-  if (isExecuteTool(step)) return executeDescription(step) ?? subject ?? humanizeToolName(step.name);
+  if (isExecuteTool(step)) return executeDescription(step) ?? subject ?? (step.pending ? "Writing command" : humanizeToolName(step.name));
   if (step.name === "think") return step.input_summary?.trim() || "Reasoning tool";
   if (step.name === "switch_mode") return subject ? `Switch mode to ${subject}` : "Switch mode";
   if (step.name === "web_search" && subject) return `Web search: ${subject}`;
@@ -170,7 +170,11 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
   const description = executeDescription(step);
   if (description) return description;
   const subject = toolSubjectLabel(step);
-  if (isExecuteTool(step)) return progressLabel("Running", subject ?? humanizeToolName(step.name));
+  if (isExecuteTool(step)) {
+    // An announced command has not started; without its input the Agent is still writing it.
+    if (step.pending) return subject ? progressLabel("Preparing", subject) : "Writing command";
+    return progressLabel("Running", subject ?? humanizeToolName(step.name));
+  }
   if (step.name === "think") return step.input_summary?.trim() || "Using reasoning tool";
   if (step.name === "web_search") return progressLabel(subject ? "Searching the web for" : "Searching the web", subject ?? "");
   const actions: Record<string, string> = {
@@ -260,7 +264,7 @@ export function activityStepContext(step: ActivityStep) {
 export function activityStepStatus(step: ActivityStep) {
   if (step.kind === "text" || step.kind === "thought") return undefined;
   if (step.kind === "command" && step.exit_code !== undefined) return `exit ${step.exit_code}`;
-  if (step.status === "running") return "Running";
+  if (step.status === "running") return step.kind === "tool" && step.pending ? undefined : "Running";
   if (step.status === "interrupted") return "Interrupted";
   if (step.status === "error") return "Failed";
   if (

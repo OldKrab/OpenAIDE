@@ -284,6 +284,11 @@ pub enum ActivityStepSnapshot {
         /// running is listed in `TaskSnapshot.backgroundCommands` instead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         background_outcome: Option<BackgroundCommandOutcome>,
+        /// The Agent announced this Tool but has not started it: its input may still
+        /// be streaming, or it waits for permission. `status` stays `running`, so a
+        /// client that does not know this field shows it as running.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pending: bool,
     },
     Command {
         command_label: String,

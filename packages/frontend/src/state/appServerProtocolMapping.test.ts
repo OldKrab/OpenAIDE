@@ -519,6 +519,36 @@ describe("App Server Protocol state mapping", () => {
     expect(message.steps[0]).not.toHaveProperty("presentation");
   });
 
+  it("keeps an announced Tool's placeholder title out of its input", () => {
+    const step = (pending: boolean) => {
+      const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+        chat: {
+          hasMoreBefore: false,
+          hasMessages: true,
+          items: [{
+            messageId: "execute-announced" as MessageId,
+            role: "agent",
+            status: "streaming",
+            parts: [{
+              kind: "activity",
+              title: "Terminal",
+              status: "running",
+              steps: [{ kind: "tool", name: "execute", status: "running", permissionOutcomes: [], pending }],
+            }],
+          }],
+        },
+      }), mappingContext());
+      const message = mapping.snapshot.chat.items[0].message;
+      if (message.kind !== "activity") throw new Error("expected activity");
+      return message.steps[0];
+    };
+
+    expect(step(true)).toMatchObject({ pending: true, status: "running" });
+    expect(step(true)).not.toHaveProperty("input_summary", "Terminal");
+    expect(step(false)).toMatchObject({ input_summary: "Terminal" });
+    expect(step(false)).not.toHaveProperty("pending");
+  });
+
   it("warns when a task references a project missing from the project collection", () => {
     const mapping = mapProtocolTaskNavigation({
       section: "tasks",

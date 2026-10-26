@@ -275,6 +275,7 @@ export function ActivityStepRow({
               label={
                 <CommandStepTitle
                   command={commandText}
+                  pending={displayStep.kind === "tool" && displayStep.pending}
                   status={displayStep.kind === "command" || displayStep.kind === "tool" ? displayStep.status : "completed"}
                 />
               }
@@ -406,7 +407,7 @@ function LiveToolDetailDisclosure({
   const commandTitle = semanticTitle
     ? <SemanticStepTitle title={semanticTitle} />
     : commandRow
-      ? <CommandStepTitle command={activityStepLabel(step)} status={step.status} />
+      ? <CommandStepTitle command={activityStepLabel(step)} pending={step.pending} status={step.status} />
       : activityStepLabel(step);
   return (
     <AnimatedDisclosure
@@ -488,8 +489,8 @@ function ActivityStepContent({
   );
 }
 
-function CommandStepTitle({ command, status }: { command: string; status: "running" | "completed" | "error" | "interrupted" }) {
-  const action = status === "running" ? "Running" : status === "interrupted" ? "Interrupted" : "Ran";
+function CommandStepTitle({ command, pending, status }: { command: string; pending?: boolean; status: "running" | "completed" | "error" | "interrupted" }) {
+  const action = status === "running" ? pending ? "Preparing" : "Running" : status === "interrupted" ? "Interrupted" : "Ran";
   return (
     <>
       <span className="activity-step-action">{action}</span>

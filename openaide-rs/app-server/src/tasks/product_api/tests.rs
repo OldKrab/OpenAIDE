@@ -2884,6 +2884,7 @@ fn adopting_native_session_persists_replayed_tool_details_with_the_new_task() {
                     output: None,
                 })),
                 permission_outcomes: Vec::new(),
+                pending: false,
             }],
         }]),
         ..RecordingAgent::default()
