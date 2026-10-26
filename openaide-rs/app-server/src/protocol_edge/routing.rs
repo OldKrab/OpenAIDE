@@ -10,8 +10,8 @@ use openaide_app_server_protocol::methods::{
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
     CLIENT_REPLACEMENT_IMPACT, CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT,
     CLIENT_UPDATE_SHUTDOWN_PREPARE, DIAGNOSTICS_CREATE_SUPPORT_EXPORT, DIAGNOSTICS_GET_RUNTIME,
-    DIAGNOSTICS_LIST_SUPPORT_EXPORT, FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF,
-    FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE,
+    DIAGNOSTICS_LIST_SUPPORT_EXPORT, DIAGNOSTICS_RECORD_CLIENT_EVENTS, FILE_VIEWER_CHANGES,
+    FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE,
     FILE_VIEWER_REFRESH, FILE_VIEWER_RELEASE, FILE_VIEWER_SEARCH, MCP_CREATE_SERVER,
     MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER,
     NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_DELETE, NATIVE_SESSION_FORK, NATIVE_SESSION_RESTORE,
@@ -52,7 +52,11 @@ impl RpcGateway {
         let (scope_kind, scope_task_id) = subscription_diagnostic_fields(&message);
         let should_log = method.as_deref() != Some(CLIENT_HEARTBEAT);
         // A watching App Shell repeats this read all day; only failures are worth a line.
-        let quiet_unless_failed = method.as_deref() == Some(TASK_ATTENTION_WAIT);
+        // Forwarded client events are their own log lines; the request around them adds nothing.
+        let quiet_unless_failed = matches!(
+            method.as_deref(),
+            Some(TASK_ATTENTION_WAIT | DIAGNOSTICS_RECORD_CLIENT_EVENTS)
+        );
         let connection_id_value = connection_id.as_str().to_string();
         if should_log && !quiet_unless_failed {
             logging::info(
@@ -182,6 +186,9 @@ impl RpcGateway {
             STATE_UNSUBSCRIBE => self.handle_unsubscribe(connection_id, id, params, meta, now),
             DIAGNOSTICS_GET_RUNTIME => {
                 self.handle_diagnostics_get_runtime(connection_id, id, params, meta)
+            }
+            DIAGNOSTICS_RECORD_CLIENT_EVENTS => {
+                self.handle_diagnostics_record_client_events(connection_id, id, params, meta)
             }
             DIAGNOSTICS_LIST_SUPPORT_EXPORT => {
                 self.handle_diagnostics_list_support_export(connection_id, id, params, meta)

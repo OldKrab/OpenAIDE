@@ -7,6 +7,7 @@ import {
 } from "../services/appServerStateSubscriptions";
 import { bindAppServerReplicaEpoch, type AppAction, type SnapshotIntent } from "../state/appReducer";
 import { newTaskNavigationTarget, type AsyncOperationOwner } from "../state/asyncOperationOwner";
+import { clientDiagnosticsFor, type ClientDiagnosticFields } from "../intents/clientDiagnosticsIntents";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import { openNewTaskSurface, postHostMessage } from "../services/hostBridge";
@@ -32,6 +33,24 @@ type TaskRouteLifecycleOptions = {
   setBackendConnectionState(state: BackendConnectionState): void;
   stateSubscriptionContext: RefObject<StateSubscriptionMappingContext | undefined>;
 };
+
+/**
+ * A Task switch's lifecycle event, for the App Shell's telemetry and, through the
+ * connection, the App Server log, where it lines up with the requests it waited on.
+ */
+function routeTelemetry(
+  backendConnection: AppControllerBackendConnection | undefined,
+  event: string,
+  fields: ClientDiagnosticFields,
+) {
+  sendWebviewTelemetry(postHostMessage, event, fields);
+  if (!backendConnection) return;
+  clientDiagnosticsFor(backendConnection, (error) => {
+    sendWebviewTelemetry(postHostMessage, "client_diagnostics_forward_failed", {
+      error_name: error instanceof Error ? error.name : typeof error,
+    });
+  }).record(event, fields);
+}
 
 /** Owns the subscription, open request, readiness, and retry policy for the routed Task. */
 export function useTaskRouteLifecycle({
@@ -82,7 +101,7 @@ export function useTaskRouteLifecycle({
     const taskId = bootstrap.taskId;
     const subscriptionKey = `${backendStateGeneration}:${taskId}`;
     const subscriptionStartedAt = Date.now();
-    sendWebviewTelemetry(postHostMessage, "task_state_subscription_started", {
+    routeTelemetry(backendConnection, "task_state_subscription_started", {
       task_id: taskId,
       generation: backendStateGeneration,
     });
@@ -101,7 +120,7 @@ export function useTaskRouteLifecycle({
       onTaskRemoved,
       onBaselineLost: () => {
         if (!active) return;
-        sendWebviewTelemetry(postHostMessage, "task_state_baseline_lost", {
+        routeTelemetry(backendConnection, "task_state_baseline_lost", {
           task_id: taskId,
           generation: backendStateGeneration,
         });
@@ -113,7 +132,7 @@ export function useTaskRouteLifecycle({
       },
       onBaselineError: (error) => {
         if (!active) return;
-        sendWebviewTelemetry(postHostMessage, "task_state_baseline_failed", {
+        routeTelemetry(backendConnection, "task_state_baseline_failed", {
           task_id: taskId,
           generation: backendStateGeneration,
           error_name: error instanceof Error ? error.name : typeof error,
@@ -129,7 +148,7 @@ export function useTaskRouteLifecycle({
       },
       onBaselineReady: () => {
         if (!active) return;
-        sendWebviewTelemetry(postHostMessage, "task_state_baseline_ready", {
+        routeTelemetry(backendConnection, "task_state_baseline_ready", {
           task_id: taskId,
           generation: backendStateGeneration,
           duration_ms: Date.now() - subscriptionStartedAt,
@@ -174,7 +193,7 @@ export function useTaskRouteLifecycle({
     const requestDispatch = bindAppServerReplicaEpoch(dispatch, requestReplicaEpoch);
     let openAccepted = false;
     const openStartedAt = Date.now();
-    sendWebviewTelemetry(postHostMessage, "task_route_open_started", {
+    routeTelemetry(backendConnection, "task_route_open_started", {
       task_id: taskId,
       generation: backendStateGeneration,
     });
@@ -190,7 +209,7 @@ export function useTaskRouteLifecycle({
       dispatch: requestDispatch,
     }, taskId, "open")
       .then(() => {
-        sendWebviewTelemetry(postHostMessage, "task_route_open_completed", {
+        routeTelemetry(backendConnection, "task_route_open_completed", {
           task_id: taskId,
           generation: backendStateGeneration,
           duration_ms: Date.now() - openStartedAt,
@@ -205,7 +224,7 @@ export function useTaskRouteLifecycle({
         const message = error instanceof Error ? error.message : "Unable to open task from App Server.";
         const taskNotFound = error instanceof AppServerProtocolError
           && error.protocolError.code === "notFound";
-        sendWebviewTelemetry(postHostMessage, "task_route_open_failed", {
+        routeTelemetry(backendConnection, "task_route_open_failed", {
           task_id: taskId,
           generation: backendStateGeneration,
           duration_ms: Date.now() - openStartedAt,

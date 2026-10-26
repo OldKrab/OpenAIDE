@@ -53,11 +53,12 @@ use crate::devices::{
     RemoteDevicePath, RemoteDeviceSummary,
 };
 use crate::diagnostics::{
-    ActiveTaskDiagnosticsResult, DiagnosticsRedaction, RuntimeDiagnosticsParams,
-    RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus, SupportArtifactAvailability,
-    SupportExportCreateParams, SupportExportCreateResult, SupportExportListParams,
-    SupportExportListResult, SupportExportSession, SupportExportSessionSelection,
-    SupportExportTrace, TaskDiagnosticsResult,
+    ActiveTaskDiagnosticsResult, ClientDiagnosticEvent, ClientDiagnosticEventsParams,
+    ClientDiagnosticEventsResult, ClientDiagnosticValue, DiagnosticsRedaction,
+    RuntimeDiagnosticsParams, RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus,
+    SupportArtifactAvailability, SupportExportCreateParams, SupportExportCreateResult,
+    SupportExportListParams, SupportExportListResult, SupportExportSession,
+    SupportExportSessionSelection, SupportExportTrace, TaskDiagnosticsResult,
 };
 use crate::envelopes::{
     ClientRequestEnvelope, ErrorEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta,
@@ -279,6 +280,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
 
     push_decl::<RuntimeDiagnosticsParams>(output, config);
     push_decl::<RuntimeDiagnosticsResult>(output, config);
+    push_decl::<ClientDiagnosticValue>(output, config);
+    push_decl::<ClientDiagnosticEvent>(output, config);
+    push_decl::<ClientDiagnosticEventsParams>(output, config);
+    push_decl::<ClientDiagnosticEventsResult>(output, config);
     push_decl::<RuntimeDiagnosticsStatus>(output, config);
     push_decl::<TaskDiagnosticsResult>(output, config);
     push_decl::<ActiveTaskDiagnosticsResult>(output, config);

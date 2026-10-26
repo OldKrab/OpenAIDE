@@ -15,6 +15,7 @@ pub const PENDING_REQUEST_RESOLVE: &str = "pendingRequest/resolve";
 pub const STATE_SUBSCRIBE: &str = "state/subscribe";
 pub const STATE_UNSUBSCRIBE: &str = "state/unsubscribe";
 pub const DIAGNOSTICS_GET_RUNTIME: &str = "diagnostics/getRuntime";
+pub const DIAGNOSTICS_RECORD_CLIENT_EVENTS: &str = "diagnostics/recordClientEvents";
 pub const DIAGNOSTICS_LIST_SUPPORT_EXPORT: &str = "diagnostics/listSupportExport";
 pub const DIAGNOSTICS_CREATE_SUPPORT_EXPORT: &str = "diagnostics/createSupportExport";
 pub const SUPPORT_RECOVER_STUCK_SESSIONS: &str = "support/recoverStuckSessions";
@@ -136,6 +137,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     STATE_SUBSCRIBE,
     STATE_UNSUBSCRIBE,
     DIAGNOSTICS_GET_RUNTIME,
+    DIAGNOSTICS_RECORD_CLIENT_EVENTS,
     DIAGNOSTICS_LIST_SUPPORT_EXPORT,
     DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
     SUPPORT_RECOVER_STUCK_SESSIONS,
