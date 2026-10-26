@@ -102,6 +102,14 @@ export function connectionSurfaceTitle(state: ComputerSwitchState, appServerErro
   return appServerError ? "Not connected" : undefined;
 }
 
+/**
+ * The workbench Tasks list's error while the connection page covers the main surface: the page
+ * says why, so the list only says it is not connected instead of repeating the raw refusal.
+ */
+export function connectionSurfaceTaskListError(appServerError: string | undefined, taskListError: string | undefined) {
+  return appServerError ? "Not connected" : taskListError;
+}
+
 /** Every place except the one in use; "" is this device. */
 function otherPlaces(snapshot: ComputersSnapshot) {
   const inUse = currentComputer(snapshot);

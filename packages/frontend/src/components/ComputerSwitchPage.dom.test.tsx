@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComputerSwitchResult, ComputersSnapshot } from "../services/computers";
 import { computerSwitch } from "../services/computerSwitch";
-import { WorkbenchConnectionSurface, connectionSurfaceTitle } from "./ComputerSwitchPage";
+import { WorkbenchConnectionSurface, connectionSurfaceTaskListError, connectionSurfaceTitle } from "./ComputerSwitchPage";
 
 const linux = { id: "linux-key", name: "old-linux", current: true };
 const oldPc = { id: "pc-key", name: "OLD-PC", current: false };
@@ -99,5 +99,13 @@ describe("connectionSurfaceTitle", () => {
     expect(connectionSurfaceTitle({ cancellable: false, failed: { id: "pc-key", message: "Can’t reach OLD-PC." } }, "refused")).toBe("Switching computers");
     expect(connectionSurfaceTitle({ cancellable: false }, "refused")).toBe("Not connected");
     expect(connectionSurfaceTitle({ cancellable: false }, undefined)).toBeUndefined();
+  });
+});
+
+describe("connectionSurfaceTaskListError", () => {
+  it("leaves the reason to the connection page while it covers the Task", () => {
+    expect(connectionSurfaceTaskListError("Update OpenAIDE on your computer", "Update OpenAIDE on your computer")).toBe("Not connected");
+    expect(connectionSurfaceTaskListError(undefined, "Unable to load tasks from App Server")).toBe("Unable to load tasks from App Server");
+    expect(connectionSurfaceTaskListError(undefined, undefined)).toBeUndefined();
   });
 });
