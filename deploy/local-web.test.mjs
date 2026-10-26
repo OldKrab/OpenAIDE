@@ -346,6 +346,8 @@ exit 0
   assert.doesNotMatch(systemctlCalls, /stop openaide-web-test\.service/);
   assert.match(systemdRunCalls, /--unit openaide-web-test-restart-/);
   assert.match(systemdRunCalls, /OPENAIDE_WEB_RESTART_HELPER=1/);
+  // The helper rebuilds, so it runs with the service PATH rather than this unit's.
+  assert.match(systemdRunCalls, /--setenv OPENAIDE_WEB_SERVICE_PATH=\S/);
 });
 
 test("systemd status reports the current service pid instead of a stale wrapper pid", () => {
@@ -545,6 +547,51 @@ exit 0
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(readFileSync(systemdRunLog, "utf8"), /--setenv TMPDIR=\/var\/tmp\/openaide-test/);
+});
+
+test("systemd service PATH comes from one explicit source, not the caller", (t) => {
+  const fixture = systemdStartFixture(t, "service-path");
+  const systemdRunLog = join(fixture.fixtureRoot, "systemd-run.log");
+  writeFileSync(join(fixture.fakeBin, "systemd-run"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${systemdRunLog}"
+exit 0
+`);
+  writeFileSync(join(fixture.fakeBin, "curl"), "#!/usr/bin/env bash\nexit 0\n");
+  const loginShell = join(fixture.fixtureRoot, "login-shell");
+  // A login shell whose rc files print noise around the PATH line.
+  writeFileSync(loginShell, `#!/usr/bin/env bash
+echo "welcome"
+printf '\\n__openaide_path__/login/bin:%s\\n' "$PATH"
+echo "bye"
+`);
+  for (const file of [join(fixture.fakeBin, "systemd-run"), join(fixture.fakeBin, "curl"), loginShell]) {
+    chmodSync(file, 0o755);
+  }
+  const unitPath = () => /--setenv PATH=(\S+)/.exec(readFileSync(systemdRunLog, "utf8"))[1];
+
+  const fromLogin = runSystemdStartFixture(fixture, { OPENAIDE_WEB_LOGIN_SHELL: loginShell });
+  assert.equal(fromLogin.status, 0, fromLogin.stderr);
+  assert.match(unitPath(), /^\/login\/bin:/);
+  assert.match(fromLogin.stdout, /Service PATH source: login_shell/);
+
+  rmSync(systemdRunLog);
+  const explicitPath = `/explicit/bin:${process.env.PATH}`;
+  const explicit = runSystemdStartFixture(fixture, {
+    OPENAIDE_WEB_LOGIN_SHELL: loginShell,
+    OPENAIDE_WEB_SERVICE_PATH: explicitPath,
+  });
+  assert.equal(explicit.status, 0, explicit.stderr);
+  assert.equal(unitPath(), explicitPath);
+  assert.match(explicit.stdout, /Service PATH source: explicit/);
+
+  rmSync(systemdRunLog);
+  const silent = join(fixture.fixtureRoot, "silent-shell");
+  writeFileSync(silent, "#!/usr/bin/env bash\nexit 0\n");
+  chmodSync(silent, 0o755);
+  const caller = runSystemdStartFixture(fixture, { OPENAIDE_WEB_LOGIN_SHELL: silent });
+  assert.equal(caller.status, 0, caller.stderr);
+  assert.match(caller.stdout, /Service PATH source: caller/);
+  assert.match(caller.stderr, /Agents may not start/);
 });
 
 function systemdStartFixture(t, name) {

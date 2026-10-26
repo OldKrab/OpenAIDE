@@ -5,10 +5,13 @@ current_process_runs_in_systemd_unit() {
 
 delegate_systemd_restart() {
   require_systemd_user
+  # The helper rebuilds before it restarts, so it needs the service PATH, not this unit's.
+  resolve_service_path
   local helper_unit="${systemd_unit}-restart-$(date +%s%N)"
   local helper_env_args=(
     --setenv "HOME=$HOME"
-    --setenv "PATH=$PATH"
+    --setenv "PATH=$service_path"
+    --setenv "OPENAIDE_WEB_SERVICE_PATH=$service_path"
     --setenv "OPENAIDE_WEB_RESTART_HELPER=1"
     --setenv "OPENAIDE_WEB_ROLE=${OPENAIDE_WEB_ROLE:-}"
     --setenv "OPENAIDE_WEB_INSTANCE_LABEL=${OPENAIDE_WEB_INSTANCE_LABEL:-}"
