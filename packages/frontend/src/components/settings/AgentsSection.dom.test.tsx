@@ -56,6 +56,18 @@ it("groups Agents by origin and says how each one is doing", async () => {
   expect(row("Local Agent")).toContain("Off");
 });
 
+it("names Node.js as what an Agent's setup is missing", async () => {
+  await mountSettings({
+    state: agentsState([builtInAgent({ id: "opencode", label: "OpenCode", icon: "opencode", status: "setup_required", setup_reason: "nodeJsRequired" })]),
+  });
+
+  expect(button("Open OpenCode").closest("li")!.textContent).toContain("Needs Node.js");
+  await click("Open OpenCode");
+  const page = document.querySelector('section[aria-label="Agent details"]')!;
+  expect(page.textContent).toContain("Node.js is not available on this computer");
+  expect(page.textContent).not.toContain("Setup is incomplete");
+});
+
 it("shows loading until the first Agent list arrives", async () => {
   await mountSettings({ state: { activeTab: "agents", loading: true } });
 

@@ -96,11 +96,16 @@ export function AgentRecoveryButtons({
 }) {
   const [checking, setChecking] = useState(false);
   const [showReload, setShowReload] = useState(false);
+  // A retry that fails the same way leaves the page unchanged, often within milliseconds;
+  // saying so keeps the button from looking inert.
+  const [stillBlocked, setStillBlocked] = useState(false);
   const retry = async () => {
     setChecking(true);
+    setStillBlocked(false);
     try {
       const ready = await actions.onRetry(agent.id);
       setShowReload(!ready && kind === "nodeJsRequired");
+      setStillBlocked(!ready);
     } finally {
       setChecking(false);
     }
@@ -128,6 +133,7 @@ export function AgentRecoveryButtons({
           ) : null}
         </>
       )}
+      {stillBlocked && !checking ? <span className="agent-recovery-result" role="status">Still not ready</span> : null}
     </div>
   );
 }
