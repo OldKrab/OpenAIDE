@@ -16,6 +16,12 @@ export type ComputersSnapshot = {
   computers: ShellComputer[];
   /** A sentence for the user when the shell could not read its list. */
   error?: string;
+  /**
+   * False while this device cannot run its own workspace yet (a phone not set up): the
+   * switcher then leaves it out unless it is in use, and Settings offers setup instead.
+   * Absent means ready.
+   */
+  thisDeviceReady?: boolean;
 };
 
 /**

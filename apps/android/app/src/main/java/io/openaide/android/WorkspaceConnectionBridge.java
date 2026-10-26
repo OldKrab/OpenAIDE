@@ -33,7 +33,7 @@ final class WorkspaceConnectionBridge {
         controller = new ConnectionController(activity, new ConnectionController.View() {
             @Override public void render(JSONObject state) {
                 // Every page gets the computers for the switcher; only Settings gets the setup state.
-                send("computers", "computers", state.optJSONArray("computers"));
+                sendComputers(state.optJSONArray("computers"), state.optBoolean("thisDeviceReady"));
                 if (settingsRoute()) send("state", "state", state);
             }
             @Override public void changed() { changed.run(); }
@@ -95,6 +95,15 @@ final class WorkspaceConnectionBridge {
         if (port == null) return;
         try { port.postMessage(new WebMessage(new JSONObject().put("type", type).put(key, value).toString())); }
         catch (Exception ignored) { }
+    }
+
+    /** The switcher's list, and whether it may offer this phone (ADR-0070). */
+    private void sendComputers(org.json.JSONArray computers, boolean thisDeviceReady) {
+        if (port == null) return;
+        try {
+            port.postMessage(new WebMessage(new JSONObject().put("type", "computers").put("computers", computers)
+                .put("thisDeviceReady", thisDeviceReady).toString()));
+        } catch (Exception ignored) { }
     }
 
     private void reply(int id, boolean accepted) {
