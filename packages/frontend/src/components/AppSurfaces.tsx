@@ -7,6 +7,7 @@ import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
 import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
 import { taskStatusLabel } from "./TaskHeader";
+import { TaskLoadingView } from "./TaskLoadingView";
 import type { AppController } from "./appController";
 import { isMobileWebViewport, mobileNavigationFocusableElements, useMobileNavigation } from "./useMobileNavigation";
 import { useBackNavigation } from "./useBackNavigation";
@@ -263,7 +264,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
   const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, "remote");
   const switchComputer = frontendShell?.computers ? computerSwitch(frontendShell.computers) : undefined;
-  useComputerPlace({
+  const restoringPlace = useComputerPlace({
+    available: Boolean(frontendShell?.computers),
     backendReady,
     bootstrap,
     hasProject: (projectId) => navigation.projects.some((project) => project.projectId === projectId),
@@ -531,15 +533,19 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   }
 
   if (isProjectWorkbench) {
-    const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
+    // `activeTask` can still be another Task while the routed one opens; only the routed one names the header.
+    const routedActiveTask = bootstrap.taskId && activeTask?.task_id === bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = renderableTaskSnapshot?.task.title
       ?? routedActiveTask?.title
-      ?? (openingNativeSession ? "Opening session" : bootstrap.taskId ? "Opening task" : "New task");
+      ?? (openingNativeSession ? "Opening session" : bootstrap.taskId || restoringPlace ? "Opening task" : "New task");
     // New Task names the Project it will start in; `activeTask` can still be the previously viewed Task.
     const newTaskProject = bootstrap.taskId
       ? undefined
       : navigation.projects.find((project) => project.projectId === navigation.newTaskSelection.projectId)?.label;
-    const mobileProject = newTaskProject ?? activeTask?.project_label ?? navigation.projects[0]?.label ?? "OpenAIDE";
+    // An opening Task names no Project until it is known; the first Project would name the wrong one.
+    const mobileProject = bootstrap.taskId || openingNativeSession || restoringPlace
+      ? renderableTaskSnapshot?.task.project_label ?? routedActiveTask?.project_label
+      : newTaskProject ?? navigation.projects[0]?.label ?? "OpenAIDE";
     const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? routedActiveTask?.status;
     const mobileSubtitle = [
       mobileTaskStatus ? taskStatusLabel(mobileTaskStatus) : undefined,
@@ -716,6 +722,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           />
           {appServerError ? (
             <AppServerErrorView message={appServerError} />
+          ) : restoringPlace ? (
+            <TaskLoadingView />
           ) : (
             <AppPrimaryTaskSurface
               agentIcons={agentIcons}
@@ -748,7 +756,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
 
   return (
     <main className="app-shell editor-shell">
-      <AppPrimaryTaskSurface
+      {restoringPlace ? <TaskLoadingView /> : <AppPrimaryTaskSurface
         agentIcons={agentIcons}
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
@@ -767,7 +775,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onPlanDrawerOpenChange={setPlanDrawerOpen}
         planDrawerOpen={planDrawerOpen}
         workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
-      />
+      />}
     </main>
   );
 }
