@@ -32,7 +32,7 @@
         <receiver android:name=".TermuxCommand" android:exported="false" />
         <receiver android:name=".AppUpdateReceiver" android:exported="false" />
         <service android:name=".AppUpdateJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
-        <!-- Lets the camera write a photo the Web Shell attaches; see CameraCapture. -->
+        <!-- Lets the camera write a photo the Web Shell attaches (CameraCapture) and Share diagnostics attach its file (DiagnosticsShare). -->
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.captures"
             android:exported="false" android:grantUriPermissions="true">

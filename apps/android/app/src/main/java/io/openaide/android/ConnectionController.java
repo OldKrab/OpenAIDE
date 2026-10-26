@@ -174,10 +174,7 @@ final class ConnectionController extends ContextWrapper {
                 else startForegroundService(new Intent(this, BackgroundService.class).putExtra("visible", true));
                 emit();
                 break;
-            case "diagnostics":
-                open(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
-                    diagnostics.snapshot()), "Share diagnostics"));
-                break;
+            case "diagnostics": shareDiagnostics(); break;
             default:
                 // A command this page cannot run is a bug between the page and this controller; say so.
                 diagnostics.record("setup_command_unknown", SetupPagePolicy.safeAction(action), 0, 0);
@@ -413,6 +410,21 @@ final class ConnectionController extends ContextWrapper {
         Intent launch = getPackageManager().getLaunchIntentForPackage("com.termux");
         if (launch != null) open(launch);
     }
+    private void shareDiagnostics() {
+        String snapshot = diagnostics.snapshot();
+        int entries = snapshot.isEmpty() ? 0 : snapshot.split("\n", -1).length;
+        try {
+            Intent chooser = DiagnosticsShare.chooser(this, snapshot);
+            diagnostics.record("diagnostics_share", "opened", entries, 0);
+            open(chooser);
+        } catch (java.io.IOException | IllegalArgumentException error) {
+            diagnostics.record("diagnostics_share", "file_failed", entries, 0,
+                java.util.Collections.singletonMap("class", error.getClass().getSimpleName()));
+            notice = "Diagnostics could not be saved for sharing. Try again.";
+            emit();
+        }
+    }
+
     private void open(Intent intent) {
         try { startActivity(intent); }
         catch (RuntimeException error) { notice = "This option is unavailable on your phone. Open Android Settings to continue."; emit(); }

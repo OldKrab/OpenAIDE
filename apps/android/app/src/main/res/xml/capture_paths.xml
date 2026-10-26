@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Photos taken for an image attachment; nothing else in the app is shared with the camera. -->
+<!-- Photos taken for an image attachment, and the diagnostics file Share diagnostics attaches. -->
 <paths>
     <cache-path name="camera" path="camera/" />
+    <cache-path name="diagnostics" path="diagnostics/" />
 </paths>
