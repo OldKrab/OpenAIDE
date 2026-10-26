@@ -88,6 +88,16 @@ if [[ -n "${OPENAIDE_WEB_ROLE:-}" ]]; then
   fi
 fi
 
+# A caller's build choice also wins over the role files, so a deploy that staged its own
+# artifacts can restart without rebuilding. Other overrides, such as ports, stay role-owned:
+# an Agent inherits the Driver's environment and must not aim a Target restart at the Driver.
+for name in OPENAIDE_WEB_BUILD OPENAIDE_WEB_SKIP_BUILD; do
+  override_name="override_$name"
+  if [[ -v "$override_name" ]]; then
+    declare "$name=${!override_name}"
+  fi
+done
+
 command="${1:-refresh}"
 host="${OPENAIDE_WEB_HOST:-127.0.0.1}"
 port="${OPENAIDE_WEB_PORT:-5474}"

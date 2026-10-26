@@ -160,6 +160,63 @@ test("local web role loads an ignored role-local env after tracked role defaults
   assert.doesNotMatch(result.stdout, /:5580\b/);
 });
 
+test("a caller's build choice wins over the role env", (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-build-override-"));
+  const fixtureDeploy = join(fixtureRoot, "deploy");
+  const fakeBin = join(fixtureRoot, "bin");
+  const npmLog = join(fixtureRoot, "npm.log");
+  const staticRoot = join(fixtureRoot, "static");
+  cpSync(new URL(".", import.meta.url), fixtureDeploy, { recursive: true });
+  mkdirSync(fakeBin);
+  mkdirSync(staticRoot);
+  mkdirSync(join(fixtureRoot, "target", "debug"), { recursive: true });
+  writeFileSync(join(staticRoot, "index.html"), "ready\n");
+  writeFileSync(join(fixtureRoot, "target", "debug", "openaide-app-server"), "");
+  chmodSync(join(fixtureRoot, "target", "debug", "openaide-app-server"), 0o755);
+  writeFileSync(join(fakeBin, "npm"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$OPENAIDE_TEST_NPM_LOG"
+exit 0
+`);
+  chmodSync(join(fakeBin, "npm"), 0o755);
+  // Every instance setting is pinned in the role so the restart can reach no real instance.
+  writeFileSync(join(fixtureDeploy, "local-web.fixture.env"), [
+    "OPENAIDE_WEB_BUILD=1",
+    "OPENAIDE_WEB_DAEMON=background",
+    "OPENAIDE_WEB_ALLOWED_HOSTS=localhost",
+    "OPENAIDE_WEB_PORT=5592",
+    "OPENAIDE_WEB_VITE_PORT=5591",
+    "OPENAIDE_WEB_PROTOTYPE_PORT=",
+    `OPENAIDE_WEB_STATIC_ROOT=${staticRoot}`,
+    `OPENAIDE_WEB_STATE_ROOT=${join(fixtureRoot, "state")}`,
+    `OPENAIDE_WEB_RUNTIME_ROOT=${join(fixtureRoot, "runtime")}`,
+    `OPENAIDE_WEB_PID_FILE=${join(fixtureRoot, "web.pid")}`,
+    `OPENAIDE_WEB_LOG_FILE=${join(fixtureRoot, "web.log")}`,
+    "OPENAIDE_WEB_START_TIMEOUT_MS=200",
+    "",
+  ].join("\n"));
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const restart = (build) => {
+    rmSync(npmLog, { force: true });
+    const { OPENAIDE_WEB_BUILD: _inherited, ...env } = process.env;
+    spawnSync("bash", [join(fixtureDeploy, "local-web.sh"), "restart"], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+      env: {
+        ...env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        OPENAIDE_TEST_NPM_LOG: npmLog,
+        OPENAIDE_WEB_ROLE: "fixture",
+        ...(build === undefined ? {} : { OPENAIDE_WEB_BUILD: build }),
+      },
+    });
+    return readFileSync(npmLog, "utf8");
+  };
+
+  assert.doesNotMatch(restart("0"), /app-server:build/);
+  assert.match(restart(undefined), /app-server:build/);
+});
+
 test("linked worktrees reuse the primary worktree role-local env", (t) => {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-linked-role-local-"));
   const primaryRoot = join(fixtureRoot, "primary");
