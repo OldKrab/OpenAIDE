@@ -10,7 +10,7 @@ type SshFailure = {
  * After a failed start, offers the one way past an SSH Computer whose App
  * Server is too old for this app: replacing it. That App Server refuses this
  * client, so the warning cannot list what it runs; it names what may be lost
- * and asks once more before the shell replaces it on the next start.
+ * and asks once more before the shell replaces it on a new start.
  */
 export async function offerSshUpdateAfterFailure({
   invoke,
@@ -44,8 +44,11 @@ export async function offerSshUpdateAfterFailure({
     update.disabled = true;
     update.textContent = "Updating…";
     console.info("desktop_ssh_update_requested source=startup");
-    // Success restarts the app; the shell's own logs carry the outcome.
-    void invoke("desktop_ssh_update").catch((error: unknown) => {
+    // Nothing is connected on this page: the shell asks for a reload, whose start applies the update.
+    // The shell's own logs carry the outcome.
+    void invoke("desktop_ssh_update").then((outcome) => {
+      if (outcome === "reload") window.location.reload();
+    }, (error: unknown) => {
       update.disabled = false;
       update.textContent = "Update and restart";
       label.textContent = typeof error === "string" ? error : "OpenAIDE could not update that computer.";
