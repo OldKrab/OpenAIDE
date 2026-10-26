@@ -467,13 +467,16 @@ test("navigates User messages with a desktop rail and mobile header picker", asy
 
   await page.setViewportSize({ width: 390, height: 760 });
   await expect(rail).toHaveCount(0);
+  // On a phone the picker is a row in the Task bar's More panel, just under the bar.
+  await page.getByRole("button", { name: "More Task actions" }).click();
   const mobilePicker = page.getByRole("button", { name: "Jump to a message", exact: true });
   await expect(mobilePicker).toBeVisible();
   const pickerBounds = await mobilePicker.boundingBox();
-  const chatBounds = await page.locator(".message-list").boundingBox();
+  const barBounds = await page.locator(".mobile-workbench-bar").boundingBox();
   expect(pickerBounds.width).toBeGreaterThanOrEqual(44);
   expect(pickerBounds.height).toBeGreaterThanOrEqual(44);
-  expect(pickerBounds.y + pickerBounds.height).toBeLessThanOrEqual(chatBounds.y);
+  expect(pickerBounds.y).toBeGreaterThanOrEqual(barBounds.y + barBounds.height);
+  expect(pickerBounds.y + pickerBounds.height).toBeLessThanOrEqual(760);
   await mobilePicker.click();
   const dialog = page.getByRole("dialog", { name: "Jump to a message" });
   await expect(dialog).toBeVisible();

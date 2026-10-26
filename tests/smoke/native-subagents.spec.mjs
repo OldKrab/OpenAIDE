@@ -32,6 +32,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.getByLabel("Send message").click();
     const chat = page.getByLabel("Task chat");
     await expect(chat.getByText("Main review result", { exact: true })).toBeVisible();
+    await openMoreOnPhone(page);
     await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Main Agent" })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toHaveCount(0);
 
@@ -48,6 +49,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.keyboard.press("Escape");
     // Rehosting the same selector in compact chrome must preserve inspection.
     await page.setViewportSize(viewport.width > 760 ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+    await openMoreOnPhone(page);
     await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Reviewer" })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toBeVisible();
     await page.setViewportSize(viewport);
@@ -61,6 +63,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(nestedBox.x + nestedBox.width).toBeLessThanOrEqual(viewport.width);
     // A Subagent whose Agent reported no details shows no empty disclosure.
     await expect(page.getByRole("button", { name: /^Subagent details/ })).toHaveCount(0);
+    await openMoreOnPhone(page);
     await page.getByRole("button", { name: /^Switch agent\. Currently viewing/ }).click();
     await expect(page.getByRole("menuitemradio", { name: /^Main Agent/ })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("history-selector.png") });
@@ -71,6 +74,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
     await selectHistory(page, "Reviewer");
     await page.reload();
+    await openMoreOnPhone(page);
     await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Main Agent" })).toBeVisible();
     await expect(chat.getByText("Main review result", { exact: true })).toBeVisible();
     await selectHistory(page, "Reviewer");
@@ -113,7 +117,16 @@ test("follows released-form Subagents and stops a running one", async ({ page })
   await page.keyboard.press("Escape");
 });
 
+/** On a phone the Agent switcher waits in the Task bar's More row. */
+async function openMoreOnPhone(page) {
+  const switcher = page.getByRole("button", { name: /^Switch agent\. Currently viewing/ });
+  const more = page.getByRole("button", { name: "More Task actions" });
+  await expect(switcher.or(more).first()).toBeVisible();
+  if (!(await switcher.isVisible())) await more.click();
+}
+
 async function selectHistory(page, name) {
+  await openMoreOnPhone(page);
   await page.getByRole("button", { name: /^Switch agent\. Currently viewing/ }).click();
   await page.getByRole("menuitemradio", { name: new RegExp(`^${name}\\b`) }).click();
 }
