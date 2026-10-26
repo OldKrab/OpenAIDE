@@ -21,6 +21,7 @@ internal object RemotePairing {
     fun interface Paired { fun done(server: ConnectionStore.PairedServer?, problem: String?) }
     fun interface Connected { fun done(problem: String?) }
     fun interface JoinCode { fun shown(code: JSONObject?, problem: String?) }
+    fun interface Checked { fun done(ok: Boolean, message: String) }
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -82,6 +83,19 @@ internal object RemotePairing {
                 null
             } catch (error: RemoteNode.Unavailable) { message(error.failure, selectedName(application)) }
             main.post { callback.done(problem) }
+        }
+    }
+
+    /** Checks the way to the paired computer step by step and says which step failed (see [ConnectionCheck]). */
+    @JvmStatic fun check(context: Context, callback: Checked) {
+        val application = context.applicationContext
+        RemoteNode.scope.launch {
+            val server = ConnectionStore(application).pairedServer()
+            val (ok, message) = if (server == null) false to "Pair with a computer first, then check again." else {
+                val result = RemoteNode.check(application, server)
+                (ConnectionCheck.outcome(result) == "ok") to ConnectionCheck.message(result, server.name)
+            }
+            main.post { callback.done(ok, message) }
         }
     }
 

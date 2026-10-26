@@ -220,6 +220,7 @@ function render() {
     page.innerHTML = heading('Advanced')
       + '<div class="group">'
       + row('phone', 'Check this phone', 'local_screen')
+      + (state.paired ? row('computer', 'Check the connection', 'remote_check', '', 'Network, relay and computer') : '')
       + row('wrench', 'Termux app settings', 'termux_settings')
       + row('share', 'Share diagnostics', 'diagnostics', '', 'No conversations or credentials')
       + '</div>';
