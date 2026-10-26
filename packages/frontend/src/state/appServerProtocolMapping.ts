@@ -142,18 +142,23 @@ function navigationRecovery(
     };
   }
   if (blocked?.status === "setupRequired") {
+    // The Agent's status names the cause; a failed refresh's message is the raw launch error
+    // ("Agent command not found: npx"), which names neither the Agent nor the fix.
+    const nodeJs = blocked.setupReason === "nodeJsRequired";
     return {
-      refreshError: snapshot.refresh.state === "failed"
-        ? snapshot.refresh.message
-        : `${blocked.label} history unavailable`,
-      recoveryKind: blocked.setupReason === "nodeJsRequired" ? "nodeJsRequired" as const : "setupRequired" as const,
+      refreshError: nodeJs
+        ? `${blocked.label} needs Node.js. Its sessions show here once it is set up.`
+        : `${blocked.label} needs setup. Its sessions show here once it is set up.`,
+      recoveryKind: nodeJs ? "nodeJsRequired" as const : "setupRequired" as const,
       recoveryAgentId: blocked.agentId,
       recoveryAgentLabel: blocked.label,
     };
   }
   if (blocked?.status === "failed" || snapshot.refresh.state === "failed") {
     return {
-      refreshError: snapshot.refresh.state === "failed" ? snapshot.refresh.message : `${blocked?.label ?? "Agent"} history unavailable`,
+      refreshError: snapshot.refresh.state === "failed"
+        ? namedRefreshError(blocked?.label, snapshot.refresh.message)
+        : `${blocked?.label ?? "Agent"} history unavailable`,
       recoveryKind: "launchFailed" as const,
       recoveryAgentId: blocked?.agentId,
       recoveryAgentLabel: blocked?.label,
@@ -165,6 +170,11 @@ function navigationRecovery(
     recoveryAgentId: undefined,
     recoveryAgentLabel: undefined,
   };
+}
+
+/** A failed refresh's message, led by the Agent it concerns when the message does not name it. */
+function namedRefreshError(label: string | undefined, message: string) {
+  return label && !message.includes(label) ? `${label} history unavailable: ${message}` : message;
 }
 
 export function mapProtocolTaskSnapshot(

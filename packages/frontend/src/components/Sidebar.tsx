@@ -308,7 +308,7 @@ export const Sidebar = memo(function Sidebar({
                 <button type="button" onClick={() => onRecoverNativeSessions(nativeSessions.recoveryKind!)}>
                   {nativeSessions.recoveryKind === "authRequired"
                     ? "Sign in"
-                    : nativeSessions.recoveryKind === "launchFailed" ? "Try again" : "Set up Codex"}
+                    : nativeSessions.recoveryKind === "launchFailed" ? "Try again" : `Set up ${nativeSessions.recoveryAgentLabel ?? "the Agent"}`}
                 </button>
                 {nativeSessions.recoveryKind === "authRequired" && nativeSessions.recoveryAgentId && onDisableRecoveredAgent ? (
                   <button
