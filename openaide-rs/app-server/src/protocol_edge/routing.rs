@@ -31,6 +31,7 @@ use openaide_app_server_protocol::methods::{
     WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
     WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
 };
+use openaide_app_server_protocol::state::SubscriptionScope;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::logging;
@@ -48,6 +49,7 @@ impl RpcGateway {
         let started_at = Instant::now();
         let (message_kind, method, request_id, client_request_id) =
             inbound_diagnostic_fields(&message);
+        let (scope_kind, scope_task_id) = subscription_diagnostic_fields(&message);
         let should_log = method.as_deref() != Some(CLIENT_HEARTBEAT);
         // A watching App Shell repeats this read all day; only failures are worth a line.
         let quiet_unless_failed = method.as_deref() == Some(TASK_ATTENTION_WAIT);
@@ -61,6 +63,8 @@ impl RpcGateway {
                     "method": method.clone(),
                     "request_id": request_id.clone(),
                     "client_request_id": client_request_id.clone(),
+                    "scope_kind": scope_kind.clone(),
+                    "scope_task_id": scope_task_id.clone(),
                 }),
             );
         }
@@ -81,6 +85,8 @@ impl RpcGateway {
                     "message_kind": message_kind,
                     "method": method,
                     "request_id": request_id,
+                    "scope_kind": scope_kind,
+                    "scope_task_id": scope_task_id,
                     "outcome_kind": outcome_kind,
                     "response_kind": response_kind,
                     "error_code": error_code,
@@ -468,6 +474,37 @@ fn inbound_diagnostic_fields(
     }
 }
 
+/// The scope of a `state/subscribe` or `state/unsubscribe`, so a client's several
+/// subscriptions can be told apart in the log: its kind and, for Task-scoped
+/// subscriptions, the Task id. Other requests and unparsable params give neither.
+fn subscription_diagnostic_fields(
+    message: &InboundProtocolMessage,
+) -> (Option<String>, Option<String>) {
+    let InboundProtocolMessage::ClientRequest { method, params, .. } = message else {
+        return (None, None);
+    };
+    if method != STATE_SUBSCRIBE && method != STATE_UNSUBSCRIBE {
+        return (None, None);
+    }
+    let Some(scope) = params.get("scope") else {
+        return (None, None);
+    };
+    let Ok(scope) = serde_json::from_value::<SubscriptionScope>(scope.clone()) else {
+        return (None, None);
+    };
+    let kind = serde_json::to_value(&scope)
+        .ok()
+        .and_then(|value| value.get("kind")?.as_str().map(str::to_owned));
+    let task_id = match &scope {
+        SubscriptionScope::Task { task_id }
+        | SubscriptionScope::SubagentCatalog { task_id }
+        | SubscriptionScope::SubagentHistory { task_id, .. }
+        | SubscriptionScope::ToolDetail { task_id, .. } => Some(task_id.as_str().to_owned()),
+        _ => None,
+    };
+    (kind, task_id)
+}
+
 fn gateway_outcome_diagnostic_fields(
     outcome: &GatewayOutcome,
 ) -> (
@@ -505,3 +542,7 @@ fn gateway_outcome_diagnostic_fields(
         },
     }
 }
+
+#[cfg(test)]
+#[path = "routing_tests.rs"]
+mod tests;
