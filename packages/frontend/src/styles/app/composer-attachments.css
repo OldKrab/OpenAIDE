@@ -608,3 +608,30 @@
     top: 50%;
   }
 }
+
+@media (hover: none) {
+  /* Touch reorders by holding the tile, so the grip would only crowd the remove button.
+     Last in the file so it overrides the base sizes above. */
+  .composer-attachment-grip {
+    display: none;
+  }
+
+  .composer-attachment-tile {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  .composer-image-remove {
+    height: 24px;
+    right: 3px;
+    top: 3px;
+    width: 24px;
+  }
+
+  /* A 44px touch target without covering more of the thumbnail. */
+  .composer-image-remove::before {
+    content: "";
+    inset: -10px;
+    position: absolute;
+  }
+}
