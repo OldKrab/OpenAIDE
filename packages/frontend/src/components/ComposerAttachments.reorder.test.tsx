@@ -4,6 +4,8 @@ import type { ComposerAttachment } from "../state/composerOptions";
 import { ComposerAttachments } from "./ComposerAttachments";
 
 const TILE = { width: 76, height: 64, gap: 6 };
+/** Native listeners the reorder hook attaches to the list, by event type. */
+const listListeners = new Map<string, (event: unknown) => void>();
 
 describe("Composer attachment reordering", () => {
   beforeEach(() => {
@@ -72,19 +74,59 @@ describe("Composer attachment reordering", () => {
     expect(onMoveAttachment).not.toHaveBeenCalled();
   });
 
-  it("leaves a touch on the tile body to list scrolling and reorders from the grip", () => {
-    const onMoveAttachment = vi.fn();
-    const { root, list } = render({ onMoveAttachment });
+  it("scrolls on a moving touch and lifts a tile held still for reordering", () => {
+    vi.useFakeTimers();
+    try {
+      const onMoveAttachment = vi.fn();
+      const { root, list } = render({ onMoveAttachment });
 
-    pointerDown(tile(root, "a.md"), { pointerType: "touch", pointerId: 1, clientX: 10, clientY: 10 });
-    pointerMove(list(), { pointerId: 1, clientX: slotCenter(1), clientY: 10 });
-    act(() => list().props.onPointerUp({ pointerId: 1 }));
-    expect(onMoveAttachment).not.toHaveBeenCalled();
+      // A touch that moves at once is a scroll, even after the hold time passes.
+      pointerDown(tile(root, "a.md"), { pointerType: "touch", pointerId: 1, clientX: 10, clientY: 10 });
+      pointerMove(list(), { pointerId: 1, clientX: slotCenter(1), clientY: 10 });
+      act(() => { vi.advanceTimersByTime(1_000); });
+      pointerMove(list(), { pointerId: 1, clientX: slotCenter(2), clientY: 10 });
+      act(() => list().props.onPointerUp({ pointerId: 1 }));
+      expect(onMoveAttachment).not.toHaveBeenCalled();
 
-    pointerDown(grip(root, "a.md"), { pointerType: "touch", pointerId: 2, clientX: 10, clientY: 10 });
-    pointerMove(list(), { pointerId: 2, clientX: slotCenter(1), clientY: 10 });
-    act(() => list().props.onPointerUp({ pointerId: 2 }));
-    expect(onMoveAttachment).toHaveBeenCalledWith("a", 1);
+      // Held still, the tile lifts and follows the finger; only then is scrolling held.
+      const touchMove = () => {
+        const event = { cancelable: true, preventDefault: vi.fn() };
+        listListeners.get("touchmove")?.(event);
+        return event.preventDefault;
+      };
+      pointerDown(tile(root, "a.md"), { pointerType: "touch", pointerId: 2, clientX: 10, clientY: 10 });
+      act(() => { vi.advanceTimersByTime(449); });
+      expect(tile(root, "a.md").props["data-dragging"]).toBeUndefined();
+      expect(touchMove()).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(tile(root, "a.md").props["data-dragging"]).toBe(true);
+      expect(touchMove()).toHaveBeenCalled();
+      pointerMove(list(), { pointerId: 2, clientX: slotCenter(1), clientY: 10 });
+      act(() => list().props.onPointerUp({ pointerId: 2 }));
+      expect(onMoveAttachment).toHaveBeenCalledWith("a", 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a held touch released in place without a move or a click", () => {
+    vi.useFakeTimers();
+    try {
+      const onMoveAttachment = vi.fn();
+      const { root, list } = render({ onMoveAttachment });
+
+      pointerDown(tile(root, "b.md"), { pointerType: "touch", pointerId: 1, clientX: slotCenter(1), clientY: 10 });
+      act(() => { vi.advanceTimersByTime(450); });
+      act(() => list().props.onPointerUp({ pointerId: 1 }));
+
+      expect(onMoveAttachment).not.toHaveBeenCalled();
+      expect(labels(root)).toEqual(["a.md", "b.md", "c.md"]);
+      const click = { preventDefault: vi.fn(), stopPropagation: vi.fn() };
+      act(() => list().props.onClickCapture(click));
+      expect(click.stopPropagation).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("offers no reorder control for a single, locked, or externally fixed list", () => {
@@ -114,6 +156,8 @@ function render(overrides: Partial<Parameters<typeof ComposerAttachments>[0]>) {
       // One row of equal tiles: enough layout for hit testing without a browser.
       createNodeMock: (node) => (node.props as { className?: string }).className === "composer-attachment-list"
         ? {
+            addEventListener: (type: string, listener: (event: unknown) => void) => listListeners.set(type, listener),
+            removeEventListener: (type: string) => listListeners.delete(type),
             getBoundingClientRect: () => ({ left: 0, top: 0 }),
             offsetHeight: TILE.height,
             offsetWidth: 3 * (TILE.width + TILE.gap),

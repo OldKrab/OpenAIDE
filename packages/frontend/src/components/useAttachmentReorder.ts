@@ -1,6 +1,8 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 
 const DRAG_THRESHOLD_PX = 6;
+/** How long a touch holds a tile still before it lifts for reordering. */
+const LONG_PRESS_MS = 450;
 const EDGE_SCROLL_ZONE_PX = 12;
 const EDGE_SCROLL_STEP_PX = 8;
 const LAYOUT_ANIMATION_ID = "attachment-layout";
@@ -14,6 +16,10 @@ type Slot = { left: number; top: number };
  *
  * Tiles wrap in two dimensions, so the preview reorders the rendered list while
  * the pointer crosses other tiles instead of projecting a one-axis insertion slot.
+ *
+ * A mouse drags a tile or its grip at once. Touch has no room for a grip next to the remove
+ * button, so a touch lifts the tile after holding still for LONG_PRESS_MS; moving earlier is
+ * a scroll and leaves the tile alone.
  */
 export function useAttachmentReorder({
   enabled,
@@ -37,6 +43,8 @@ export function useAttachmentReorder({
     x: number;
     y: number;
     armed: boolean;
+    /** Pending lift of a touch that has not held still long enough yet. */
+    longPress?: ReturnType<typeof setTimeout>;
   } | undefined>(undefined);
   const previousLayout = useRef<{ order: string; slots: Map<string, Slot> } | undefined>(undefined);
   const suppressClick = useRef(false);
@@ -114,11 +122,38 @@ export function useAttachmentReorder({
     return true;
   };
 
+  const arm = (pointerId: number) => {
+    const current = drag.current;
+    if (!current || current.pointerId !== pointerId || current.armed) return;
+    current.armed = true;
+    current.longPress = undefined;
+    // Capture only once dragging starts so plain clicks still reach the tile's own buttons.
+    listRef.current?.setPointerCapture?.(pointerId);
+  };
+
+  const cancelLongPress = () => {
+    clearTimeout(drag.current?.longPress);
+    if (drag.current) drag.current.longPress = undefined;
+  };
+
+  // React's touch handlers are passive; only a native listener can keep an armed touch drag
+  // from scrolling the Composer. An unarmed touch scrolls as usual.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const holdScroll = (event: TouchEvent) => {
+      if (drag.current?.armed && event.cancelable) event.preventDefault();
+    };
+    list.addEventListener("touchmove", holdScroll, { passive: false });
+    return () => list.removeEventListener("touchmove", holdScroll);
+  }, [reorderable]);
+
+  useEffect(() => () => clearTimeout(drag.current?.longPress), []);
+
   const beginDrag = (event: PointerEvent<HTMLElement>, id: string, fromGrip: boolean) => {
     if (!reorderable || event.button > 0) return;
-    // Touch on the tile body stays with native scrolling; the grip owns touch reordering.
-    if (event.pointerType === "touch" && !fromGrip) return;
     const bounds = tileFor(id)?.getBoundingClientRect();
+    cancelLongPress();
     drag.current = {
       id,
       pointerId: event.pointerId,
@@ -130,6 +165,15 @@ export function useAttachmentReorder({
       y: event.clientY,
       armed: false,
     };
+    if (event.pointerType === "touch" && !fromGrip) {
+      const pointerId = event.pointerId;
+      drag.current.longPress = setTimeout(() => {
+        arm(pointerId);
+        // Show the lift before the first move; the preview holds the tile in place.
+        setPreview({ id, index: ids.indexOf(id) });
+        globalThis.navigator?.vibrate?.(10);
+      }, LONG_PRESS_MS);
+    }
   };
 
   const updateDrag = (event: PointerEvent<HTMLElement>) => {
@@ -137,9 +181,13 @@ export function useAttachmentReorder({
     if (!current || current.pointerId !== event.pointerId) return;
     if (!current.armed) {
       if (Math.hypot(event.clientX - current.startX, event.clientY - current.startY) < DRAG_THRESHOLD_PX) return;
-      current.armed = true;
-      // Capture only once dragging starts so plain clicks still reach the tile's own buttons.
-      listRef.current?.setPointerCapture?.(event.pointerId);
+      if (current.longPress) {
+        // A touch that moves before the lift is a scroll.
+        cancelLongPress();
+        drag.current = undefined;
+        return;
+      }
+      arm(event.pointerId);
     }
     current.x = event.clientX;
     current.y = event.clientY;
@@ -169,6 +217,7 @@ export function useAttachmentReorder({
   const finishDrag = (event: PointerEvent<HTMLElement>, cancelled: boolean) => {
     const current = drag.current;
     if (!current || current.pointerId !== event.pointerId) return;
+    clearTimeout(current.longPress);
     drag.current = undefined;
     if (!current.armed) return;
     // The release that ends a drag must not also open an Image or trigger a tile action.
@@ -217,6 +266,8 @@ export function useAttachmentReorder({
       "data-attachment-id": id,
       "data-dragging": preview?.id === id ? true : undefined,
       onPointerDown: reorderable ? (event: PointerEvent<HTMLElement>) => beginDrag(event, id, false) : undefined,
+      // A held touch on an image would otherwise open the browser's image menu over the lift.
+      onContextMenu: reorderable ? (event: MouseEvent<HTMLElement>) => event.preventDefault() : undefined,
     }),
     gripProps: (id: string) => ({
       "data-attachment-grip": true,
