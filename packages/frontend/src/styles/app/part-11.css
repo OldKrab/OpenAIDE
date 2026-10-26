@@ -65,6 +65,72 @@ body[data-input-modality="pointer"] button:focus-visible {
     gap: inherit;
   }
 
+  /* "More": the less frequent Task controls, as labelled rows in a panel under the bar. */
+  body[data-shell="web"] .mobile-task-more {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    border-top: 1px solid var(--oa-border);
+    border-bottom: 1px solid var(--oa-border);
+    background: var(--oa-panel);
+    box-shadow: 0 12px 32px color-mix(in oklch, var(--oa-text) 16%, transparent);
+    display: grid;
+    gap: 2px;
+    padding: 6px 10px 8px;
+  }
+
+  body[data-shell="web"] .mobile-task-more[hidden] {
+    display: none;
+  }
+
+  body[data-shell="web"] .mobile-task-more-actions {
+    display: grid;
+    gap: 2px;
+  }
+
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more button {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 0 10px;
+    font-size: 14px;
+    font-weight: 400;
+  }
+
+  body[data-shell="web"] .mobile-task-more .subagent-navigator {
+    display: flex;
+  }
+
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-switcher-trigger {
+    max-width: none;
+    color: var(--oa-text);
+  }
+
+  body[data-shell="web"] .mobile-task-more .terminal-entry::after { content: "Terminal"; }
+  body[data-shell="web"] .mobile-task-more .user-message-picker-trigger::after { content: "Jump to a message"; }
+  body[data-shell="web"] .mobile-task-more .task-permission-policy-trigger:not([data-enabled])::after { content: "Ask every time"; }
+
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .task-permission-policy-trigger > span,
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-switcher-value,
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-count {
+    display: inline;
+  }
+
+  body[data-shell="web"] .mobile-task-more .terminal-count {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--oa-success);
+    color: var(--oa-bg);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-grid;
+    place-items: center;
+    order: 1;
+  }
+
   body[data-shell="web"] .mobile-workbench-bar button {
     width: 44px;
     min-height: 44px;

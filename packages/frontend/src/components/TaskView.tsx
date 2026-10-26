@@ -93,6 +93,7 @@ export function TaskView({
   fileBrowser,
   fileViewer: fileViewerConnection,
   headerActionsTarget,
+  headerOverflowTarget,
   onLoadChatPage,
   onLoadComposerHistory,
   onLoadToolImagePreview,
@@ -151,6 +152,8 @@ export function TaskView({
   fileBrowser?: TaskFileBrowserCallbacks;
   fileViewer?: Pick<BackendConnection, "request">;
   headerActionsTarget?: HTMLElement | null;
+  /** Where the less frequent header controls go; the bar itself when absent. */
+  headerOverflowTarget?: HTMLElement | null;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadComposerHistory?: () => Promise<string[]>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
@@ -191,6 +194,7 @@ export function TaskView({
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
   showWorkspaceContext?: boolean;
 }) {
+  const overflowTarget = headerOverflowTarget ?? headerActionsTarget;
   const quoteRequestSequence = useRef(0);
   const [quoteRequest, setQuoteRequest] = useState<{ id: number; taskId: string; text: string }>();
   const [projectFilesOpen, setProjectFilesOpen] = useState(false);
@@ -503,7 +507,7 @@ export function TaskView({
               entries={subagentEntries}
               onSelect={subagents.selectSubagent}
               selectedId={subagents.selectedSubagentId}
-              target={headerActionsTarget}
+              target={overflowTarget}
               unseen={subagents.unseen}
             />
           ) : undefined}
@@ -542,7 +546,7 @@ export function TaskView({
           ) : null}
           <TerminalButton
             projectId={snapshot.task.project_id}
-            target={headerActionsTarget}
+            target={overflowTarget}
             taskId={snapshot.task.task_id}
             workspaceRoot={snapshot.task.workspace_root}
           />
@@ -568,7 +572,7 @@ export function TaskView({
           canRestoreTask={onRestoreTask !== undefined}
           chat={chat}
           chatScroll={chatScroll}
-          headerActionsTarget={projectFilesOpen ? null : headerActionsTarget}
+          headerActionsTarget={projectFilesOpen ? null : overflowTarget}
           commandCatalog={snapshot.agent_commands}
           items={chatItems}
           liveTextPresentation={subagents.selected ? subagents.liveTextPresentation : liveTextPresentation}

@@ -744,7 +744,14 @@ describe("AppSurfaces callback wiring", () => {
     const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
 
     expect(header.findByType("small").children.join("")).toBe("Idle · Codex · Repo");
-    expect(header.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
+    const more = header.findByProps({ className: "mobile-task-more" });
+    // Permission handling is a rare setting: it waits in "More", not in the bar.
+    expect(more.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
+    expect(more.props.hidden).toBe(true);
+
+    act(() => header.findByProps({ "aria-label": "More Task actions" }).props.onClick());
+    expect(header.findByProps({ className: "mobile-task-more" }).props.hidden).toBe(false);
+    expect(header.findByProps({ "aria-label": "Hide more Task actions" }).props["aria-expanded"]).toBe(true);
   });
 
   it("opens the Task Plan from the narrow workbench header", () => {

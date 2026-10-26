@@ -5,7 +5,7 @@ import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceMo
 import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
-import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
+import { MobileWorkbenchBar } from "./MobileWorkbenchBar";
 import { taskStatusLabel } from "./TaskHeader";
 import { TaskLoadingView } from "./TaskLoadingView";
 import type { AppController } from "./appController";
@@ -92,6 +92,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       });
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [mobileTaskActionsTarget, setMobileTaskActionsTarget] = useState<HTMLElement | null>(null);
+  const [mobileTaskOverflowTarget, setMobileTaskOverflowTarget] = useState<HTMLElement | null>(null);
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
   const [planDrawerOpen, setPlanDrawerOpen] = useState(false);
   const [projectFolderDialogOpen, setProjectFolderDialogOpen] = useState(false);
@@ -123,7 +124,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
   const mobilePermissionTask = isWebWorkbench ? taskSurfaceModel.renderableTaskSnapshot : undefined;
-  const hasMobilePermissionPolicy = Boolean(mobilePermissionTask);
   const taskRecoveryActions = createAgentRecoveryActions(controller);
   const settingsRecoveryActions = {
     ...taskRecoveryActions,
@@ -659,61 +659,42 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       >
          {projectFolderDialog}
          {projectRemoveDialog}
-         {computerSwitchConfirm}
         {computerSwitchConfirm}
-        <header
-          className="mobile-workbench-bar"
-          data-has-permission-policy={(hasMobilePermissionPolicy && !coverTitle) || undefined}
-          data-has-plan={renderableTaskSnapshot?.current_plan && !coverTitle ? true : undefined}
-        >
-          <button
-            aria-expanded={mobileNavigationOpen}
-            aria-label={mobileNavigationOpen ? "Close task navigation" : "Open task navigation"}
-            onClick={() => {
-              if (mobileNavigationOpen) {
-                closeMobileNavigation();
-                return;
-              }
-              setPlanDrawerOpen(false);
-              mobileNavigation.setOpen(true);
-            }}
-            ref={mobileNavigationButtonRef}
-            type="button"
-          >
-            {mobileNavigationOpen ? <X size={17} /> : <Menu size={17} />}
-          </button>
-          <span>
-            <strong>{coverTitle ?? mobileTitle}</strong>
-            {coverTitle ? null : <small>{mobileSubtitle}</small>}
-          </span>
-          <div className="mobile-task-file-action" ref={setMobileTaskActionsTarget} />
-          {mobilePermissionTask && !coverTitle ? (
-            <TaskPermissionPolicyControl
-              disabled={renderableTaskArchived || !taskMutationReady}
-              disabledReason={renderableTaskArchived
-                ? "Archived Tasks are read-only."
-                : !taskMutationReady
-                  ? "Permission handling is unavailable until this Task is connected."
-                  : undefined}
-              onChange={callbacks.task.setPermissionPolicy}
-              policy={mobilePermissionTask.permission_policy}
-            />
-          ) : null}
-          {renderableTaskSnapshot?.current_plan && !coverTitle ? (
-            <button
-              aria-expanded={planDrawerOpen}
-              aria-label={planDrawerOpen ? "Hide Plan" : "Open Plan"}
-              className="task-plan-appear-chip"
-              onClick={() => {
-                closeMobileNavigation({ restoreFocus: false });
-                setPlanDrawerOpen((open) => !open);
-              }}
-              type="button"
-            >
-              {planDrawerOpen ? <X size={17} /> : <ListTodo size={17} />}
-            </button>
-          ) : null}
-        </header>
+        <MobileWorkbenchBar
+          coverTitle={coverTitle}
+          navigationButtonRef={mobileNavigationButtonRef}
+          navigationOpen={mobileNavigationOpen}
+          onActionsTarget={setMobileTaskActionsTarget}
+          onOverflowTarget={setMobileTaskOverflowTarget}
+          onToggleNavigation={() => {
+            if (mobileNavigationOpen) {
+              closeMobileNavigation();
+              return;
+            }
+            setPlanDrawerOpen(false);
+            mobileNavigation.setOpen(true);
+          }}
+          permission={mobilePermissionTask ? {
+            disabled: renderableTaskArchived || !taskMutationReady,
+            disabledReason: renderableTaskArchived
+              ? "Archived Tasks are read-only."
+              : !taskMutationReady
+                ? "Permission handling is unavailable until this Task is connected."
+                : undefined,
+            onChange: callbacks.task.setPermissionPolicy,
+            policy: mobilePermissionTask.permission_policy,
+          } : undefined}
+          plan={renderableTaskSnapshot?.current_plan ? {
+            open: planDrawerOpen,
+            onToggle: () => {
+              closeMobileNavigation({ restoreFocus: false });
+              setPlanDrawerOpen((open) => !open);
+            },
+          } : undefined}
+          subtitle={mobileSubtitle}
+          taskKey={renderableTaskSnapshot?.task.task_id}
+          title={mobileTitle}
+        />
         <div
           aria-hidden="true"
           className="mobile-navigation-backdrop"
@@ -753,6 +734,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               desktopWindow={desktopWindow}
               focusRequestKey={newTaskFocusRequestKey}
               headerActionsTarget={mobileLayoutActive ? mobileTaskActionsTarget : null}
+              headerOverflowTarget={mobileLayoutActive ? mobileTaskOverflowTarget : null}
               model={taskSurfaceModel}
               projects={navigationProjects}
               onAddProject={addProject}

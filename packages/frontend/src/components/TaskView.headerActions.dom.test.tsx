@@ -55,6 +55,27 @@ it("opens the Task's Project Terminals from the header, starting new ones in its
   expect(openPage).toHaveBeenCalledWith({ projectId: "project-1", taskId: "task-a" });
 });
 
+it("moves the rarer Task controls from the phone bar to More", () => {
+  Element.prototype.scrollIntoView ??= vi.fn();
+  const bar = document.createElement("div");
+  const more = document.createElement("div");
+  const host = document.createElement("div");
+  document.body.append(bar, more, host);
+  root = createRoot(host);
+  const task = snapshot("task-a");
+  task.task.project_id = "project-1";
+
+  act(() => root!.render(
+    <TerminalSurfaceContext.Provider value={{ terminals: [], openPage: vi.fn() }}>
+      <TaskView {...taskViewProps(task)} headerActionsTarget={bar} headerOverflowTarget={more} />
+    </TerminalSurfaceContext.Provider>,
+  ));
+
+  expect(bar.childElementCount).toBe(0);
+  expect(more.querySelector('[aria-label="Terminal"]')).not.toBeNull();
+  expect(more.querySelector('[aria-label="Jump to a message"]')).not.toBeNull();
+});
+
 function taskViewProps(taskSnapshot: TaskSnapshot) {
   return {
     backendReady: true,
