@@ -133,6 +133,16 @@ internal class ComputerSwitch<C>(
         fun operationId(candidate: String?): String =
             candidate?.takeIf { SAFE_ID.matches(it) } ?: "android-computer-switch-${UUID.randomUUID()}"
 
-        private fun kind(target: String?) = if (target == null) "this_device" else "paired"
+        /** An SSH Computer's target is its id behind this prefix; a paired computer's is its key. */
+        const val SSH_PREFIX = "ssh:"
+
+        /** The SSH Computer's id in [target], or null for this phone or a paired computer. */
+        fun sshId(target: String?): String? = target?.takeIf { it.startsWith(SSH_PREFIX) }?.removePrefix(SSH_PREFIX)
+
+        private fun kind(target: String?) = when {
+            target == null -> "this_device"
+            sshId(target) != null -> "ssh"
+            else -> "paired"
+        }
     }
 }
