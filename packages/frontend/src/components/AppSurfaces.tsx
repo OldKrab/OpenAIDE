@@ -21,7 +21,7 @@ import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
 import { computerLink } from "./ComputerSwitcher";
 import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
-import { WorkbenchConnectionSurface, connectionSurfaceTitle } from "./ComputerSwitchPage";
+import { WorkbenchConnectionSurface, connectionSurfaceTaskListError, connectionSurfaceTitle } from "./ComputerSwitchPage";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { useComputerPlace } from "./useComputerPlace";
 import { currentComputer, useComputers } from "../services/computers";
@@ -631,7 +631,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onManageComputers={closeAfter(openComputerSettings)}
         computerSwitch={switchComputer}
         showArchived={navigation.showArchived}
-        taskListError={navigation.taskListError}
+        taskListError={connectionSurfaceTaskListError(appServerError, navigation.taskListError)}
         tasks={visibleTasks}
       />
     );
