@@ -84,6 +84,8 @@ type AppPrimaryTaskSurfaceProps = {
   desktopWindow?: DesktopWindowCapability;
   focusRequestKey: number;
   headerActionsTarget?: HTMLElement | null;
+  /** The phone bar's "More" row, for Task controls that do not stay in the bar. */
+  headerOverflowTarget?: HTMLElement | null;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
   projects?: AppController["view"]["navigation"]["projects"];
   onPlanDrawerOpenChange?: (open: boolean) => void;
@@ -104,6 +106,7 @@ export function AppPrimaryTaskSurface({
   desktopWindow,
   focusRequestKey,
   headerActionsTarget,
+  headerOverflowTarget,
   model,
   projects,
   onPlanDrawerOpenChange,
@@ -163,6 +166,7 @@ export function AppPrimaryTaskSurface({
         fileBrowser={callbacks.task.fileBrowser}
         fileViewer={callbacks.task.fileViewer}
         headerActionsTarget={headerActionsTarget}
+        headerOverflowTarget={headerOverflowTarget}
         intents={intents.task}
         onCancel={renderableTaskSnapshot.task.has_messages || taskTurnOpen(renderableTaskSnapshot.task.status)
           ? callbacks.task.cancel
