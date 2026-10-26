@@ -135,6 +135,16 @@ final class ConnectionStore {
         return true;
     }
 
+    /**
+     * This phone's own workspace has started at least once, so the switcher may offer it.
+     * Until then the phone is set up from Settings instead (ADR-0070).
+     */
+    boolean localWorkspaceStarted() { return preferences.getBoolean("local_started", false); }
+
+    void markLocalWorkspaceStarted() {
+        if (!localWorkspaceStarted()) preferences.edit().putBoolean("local_started", true).apply();
+    }
+
     /** Keeps the selected computer remembered while work moves to this phone. */
     void selectLocal() { preferences.edit().remove("ssh_id").putBoolean("paired", false).putBoolean("configured", true).apply(); }
 

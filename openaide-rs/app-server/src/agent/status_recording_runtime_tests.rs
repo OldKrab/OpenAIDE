@@ -429,3 +429,60 @@ fn ordinary_prompt_failure_leaves_the_agent_connected() {
         AgentStatus::Connected
     );
 }
+
+#[test]
+fn skipped_listing_of_an_uninstalled_managed_runtime_keeps_agent_status() {
+    let storage = tempfile::tempdir().unwrap();
+    let capture = crate::logging::capture_test_logs();
+    let statuses = AgentStatusCache::default();
+    // Known sign-in choices and a connected Agent: the listing has no reason to probe.
+    statuses.record_for_test(
+        "claude-code".to_string(),
+        crate::agent::status_cache::AgentStatusSnapshot {
+            status: AgentStatus::Connected,
+            auth_methods: vec![AgentAuthMethodSummary {
+                id: "claude-login".to_string(),
+                label: "Claude".to_string(),
+                kind: "agent".to_string(),
+                description: None,
+                variables: Vec::new(),
+                link: None,
+                terminal_args: Vec::new(),
+                terminal_env: Default::default(),
+            }],
+            ..Default::default()
+        },
+    );
+    let runtime = AgentStatusRecordingRuntime::wrap(
+        Arc::new(
+            crate::agent::acp::AcpAgentRuntime::new_with_managed_runtimes(
+                AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
+                crate::protocol::host::HostBridge::default(),
+                storage.path().to_path_buf(),
+                statuses.clone(),
+            ),
+        ),
+        statuses.clone(),
+    );
+
+    let error = runtime
+        .list_sessions(AgentListSessionsRequest {
+            operation_id: "list-1".to_string(),
+            agent_id: "claude-code".to_string(),
+            cwd: None,
+            cursor: None,
+        })
+        .unwrap_err();
+
+    // The first real use installs the runtime, so the skip is not a setup problem.
+    assert!(matches!(error, RuntimeError::NotReady(_)));
+    assert_eq!(
+        statuses.snapshot("claude-code").status,
+        AgentStatus::Connected
+    );
+    let logs = capture.snapshot();
+    assert!(logs.iter().any(|entry| {
+        entry["event"] == "acp_session_list_skipped"
+            && entry["fields"]["reason"] == "managed_runtime_not_installed"
+    }));
+}

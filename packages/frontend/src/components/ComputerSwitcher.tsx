@@ -55,8 +55,10 @@ export function ComputerSwitcher({ link, onManage, openRequest = 0, snapshot, sw
 
   const inUse = currentComputer(snapshot);
   const here = snapshot.device === "phone" ? "This phone" : "This computer";
+  // A phone not set up for its own workspace is set up from Settings, not switched to.
+  const offersHere = !inUse || snapshot.thisDeviceReady !== false;
   const rows: Row[] = [
-    { id: "", label: here, current: !inUse },
+    ...(offersHere ? [{ id: "", label: here, current: !inUse }] : []),
     ...snapshot.computers.map((computer) => ({ id: computer.id, label: computerName(computer), current: computer.current })),
   ];
   const label = linkLabels[link];

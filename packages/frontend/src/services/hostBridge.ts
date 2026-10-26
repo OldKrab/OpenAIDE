@@ -48,7 +48,10 @@ export function openSettingsSurface(
   settingsTab?: SettingsTabId,
   settingsIntent?: SettingsIntent,
 ) {
-  frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId, settingsTab, settingsIntent);
+  // An Agent is shown only on the Agents tab; without it Settings opens its first section,
+  // so every "Open Agent settings" lands on that Agent in every shell.
+  const tab = settingsTab ?? (agentId ? "agents" : undefined);
+  frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId, tab, settingsIntent);
 }
 
 export function openTaskSurface(taskId: string, title?: string, agentId?: string) {

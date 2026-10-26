@@ -61,19 +61,19 @@ function createWorkspaceBrowserCallbacks({
 }: Pick<NewTaskBrowserDependencies, "asyncOperations" | "backendConnection">) {
   const request = backendConnection?.request;
   if (!request) return undefined;
-  const operation = asyncOperations.scope("new-task-workspace-browser", "new-task");
+  // The computer's folders do not depend on the route or the New Task, so a listing
+  // survives navigation (a phone's drawer closing as Add Project opens) and is
+  // dropped only when the App Server replica is replaced.
+  const operation = asyncOperations.scope("new-task-workspace-browser", "new-task", "replica");
+  const settle = <T>(result: T, method: string) => {
+    if (asyncOperations.owns(operation)) return result;
+    console.info(`workspace_browser_result_dropped method=${method} reason=replica_replaced`);
+    throw new ReplacedWorkspaceBrowserReplica();
+  };
   return {
     ownerKey: `new-task-workspace:${operation.id}`,
-    listRoots: async () => {
-      const result = await request(WORKSPACE_LIST_ROOTS, {});
-      if (!asyncOperations.owns(operation)) throw new SupersededNewTaskFileBrowserOperation();
-      return result.roots;
-    },
-    listDirectory: async (path: string) => {
-      const result = await request(WORKSPACE_LIST_DIRECTORY, { path });
-      if (!asyncOperations.owns(operation)) throw new SupersededNewTaskFileBrowserOperation();
-      return result;
-    },
+    listRoots: async () => settle((await request(WORKSPACE_LIST_ROOTS, {})).roots, WORKSPACE_LIST_ROOTS),
+    listDirectory: async (path: string) => settle(await request(WORKSPACE_LIST_DIRECTORY, { path }), WORKSPACE_LIST_DIRECTORY),
   };
 }
 
@@ -336,6 +336,13 @@ class SupersededNewTaskFileBrowserOperation extends Error {
   constructor() {
     super("New Task context changed before the file selection completed.");
     this.name = "SupersededNewTaskFileBrowserOperation";
+  }
+}
+
+class ReplacedWorkspaceBrowserReplica extends Error {
+  constructor() {
+    super("The connection to the computer was renewed while folders loaded. Try again.");
+    this.name = "ReplacedWorkspaceBrowserReplica";
   }
 }
 

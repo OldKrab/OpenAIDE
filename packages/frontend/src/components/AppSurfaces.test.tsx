@@ -738,11 +738,12 @@ describe("AppSurfaces callback wiring", () => {
       },
     };
     controller.state.snapshot = snapshot("task_1");
+    controller.state.snapshot.task.project_label = "Repo";
 
     const tree = render(controller);
     const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
 
-    expect(header.findByType("small").children.join("")).toBe("Idle · Codex · OpenAIDE");
+    expect(header.findByType("small").children.join("")).toBe("Idle · Codex · Repo");
     expect(header.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
   });
 
@@ -1121,6 +1122,22 @@ describe("AppSurfaces callback wiring", () => {
 
     expect(tree.root.findByProps({ className: "mobile-workbench-bar" }).findByType("small").children.join(""))
       .toBe("Selected");
+  });
+
+  it("names no Project, and no other Task, while the routed Task opens", () => {
+    const controller = webControllerFor("task");
+    controller.bootstrap = { ...controller.bootstrap, surface: "task", taskId: "task_opening" } as typeof controller.bootstrap;
+    controller.state.projects = [
+      { projectId: "project-first", label: "First", workspaceRoot: "/first" },
+    ] as typeof controller.state.projects;
+    controller.activeTask = { ...snapshot("task_previous").task, title: "Previous", project_label: "Previous project" };
+    controller.view = viewFor(controller.state);
+
+    const tree = render(controller);
+
+    const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
+    expect(header.findByType("strong").children.join("")).toBe("Opening task");
+    expect(header.findByType("small").children.join("")).toBe("");
   });
 
   it("renders pending empty task snapshots through the task view", () => {

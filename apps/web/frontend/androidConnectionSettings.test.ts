@@ -102,10 +102,13 @@ describe("Android connection controls", () => {
     computers.subscribe(changed);
     expect(computers.snapshot()).toBeUndefined();
     test.receive({ type: "computers", computers: [{ id: "studio", name: "Studio", current: true }] });
-    expect(computers.snapshot()).toEqual({ device: "phone", computers: [{ id: "studio", name: "Studio", current: true }] });
+    // A phone build that does not say counts as ready, so its switcher keeps this phone.
+    expect(computers.snapshot()).toEqual({ device: "phone", computers: [{ id: "studio", name: "Studio", current: true }], thisDeviceReady: true });
     expect(computers.snapshot()).toBe(computers.snapshot());
     expect(test.capability!.snapshot()).toBeUndefined();
     expect(changed).toHaveBeenCalledOnce();
+    test.receive({ type: "computers", computers: [], thisDeviceReady: false });
+    expect(computers.snapshot()).toEqual({ device: "phone", computers: [], thisDeviceReady: false });
   });
   it("switches through the phone's own commands and resolves with what the switch came to", async () => {
     const test = harness();
