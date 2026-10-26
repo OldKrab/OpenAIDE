@@ -2,7 +2,8 @@
 //!
 //! Timing is recorded only for moments this process witnessed: a row first seen
 //! already settled, or rebuilt from a native session, never gains a start, so
-//! Chat shows no duration instead of a misleading one.
+//! Chat shows no duration instead of a misleading one. A Tool the Agent only
+//! announced has not started, so its run starts when it does.
 
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -20,7 +21,7 @@ pub(super) fn first_observation(message: &NormalizedMessage) -> ChatTiming {
     let observed_at = || message.created_at().to_string();
     ChatTiming {
         sent_at: matches!(message, NormalizedMessage::User { .. }).then(observed_at),
-        run: message.is_in_progress().then(|| ObservedSpan {
+        run: (message.is_in_progress() && !message.is_awaiting_start()).then(|| ObservedSpan {
             started_at: observed_at(),
             ended_at: None,
         }),
@@ -30,13 +31,25 @@ pub(super) fn first_observation(message: &NormalizedMessage) -> ChatTiming {
 
 /// Timing for a row whose message an Agent update is replacing. The start is
 /// never invented here: a row without one stays untimed even if it reports
-/// running again.
+/// running again, unless this process saw it announced and now sees it start.
 pub(super) fn carried_over(
     existing: &ChatTiming,
+    existing_message: &NormalizedMessage,
     replacement: &NormalizedMessage,
     now: &str,
 ) -> ChatTiming {
     let mut timing = existing.clone();
+    if timing.run.is_none()
+        && existing_message.is_awaiting_start()
+        && replacement.is_in_progress()
+        && !replacement.is_awaiting_start()
+    {
+        timing.run = Some(ObservedSpan {
+            started_at: now.to_string(),
+            ended_at: None,
+        });
+        return timing;
+    }
     if let Some(run) = &mut timing.run {
         if replacement.is_in_progress() {
             run.ended_at = None;

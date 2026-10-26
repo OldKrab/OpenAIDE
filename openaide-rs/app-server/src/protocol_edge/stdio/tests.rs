@@ -2861,6 +2861,7 @@ fn task_tool_image_preview_returns_validated_artifact_image_through_protocol() {
                     output: None,
                 })),
                 permission_outcomes: Vec::new(),
+                pending: false,
             }],
         };
         store

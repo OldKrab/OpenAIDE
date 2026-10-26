@@ -70,8 +70,21 @@ fn tool(id: &str, status: ActivityStatus, created_at: &str) -> NormalizedMessage
             detail_artifact_id: None,
             details: None,
             permission_outcomes: Vec::new(),
+            pending: false,
         }],
     }
+}
+
+fn announced_tool(id: &str, created_at: &str) -> NormalizedMessage {
+    let mut message = tool(id, ActivityStatus::Running, created_at);
+    if let NormalizedMessage::Activity { steps, .. } = &mut message {
+        for step in steps {
+            if let ActivityStep::Tool { pending, .. } = step {
+                *pending = true;
+            }
+        }
+    }
+    message
 }
 
 fn ended_after(span: &ObservedSpan) -> bool {
@@ -91,6 +104,41 @@ fn a_live_user_message_records_when_it_was_sent() {
     });
 
     assert_eq!(timing_of(&store, "u1").sent_at.as_deref(), Some("40"));
+}
+
+#[test]
+fn an_announced_tool_is_timed_from_when_it_starts_not_from_its_announcement() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    store.write_task(&task_record(TASK)).unwrap();
+
+    commit(&mutations, |ctx| {
+        ctx.upsert_message_with_details(announced_tool("t1", "50"))
+            .unwrap();
+    });
+    assert_eq!(timing_of(&store, "t1").run, None, "nothing runs yet");
+
+    commit(&mutations, |ctx| {
+        ctx.upsert_message_with_details(announced_tool("t1", "60"))
+            .unwrap();
+    });
+    assert_eq!(
+        timing_of(&store, "t1").run,
+        None,
+        "a repeated announcement starts nothing"
+    );
+
+    commit(&mutations, |ctx| {
+        ctx.upsert_message_with_details(tool("t1", ActivityStatus::Running, "70"))
+            .unwrap();
+    });
+    let started = timing_of(&store, "t1")
+        .run
+        .expect("the tool is timed once it starts");
+    assert_ne!(
+        started.started_at, "50",
+        "the announcement is not the start"
+    );
+    assert_eq!(started.ended_at, None);
 }
 
 #[test]

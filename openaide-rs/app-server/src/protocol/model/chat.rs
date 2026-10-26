@@ -188,6 +188,19 @@ impl NormalizedMessage {
         }
     }
 
+    /// Whether the row is an Activity whose every Tool the Agent announced but has
+    /// not started (ACP `pending`). Chat shows no running time for it yet.
+    pub fn is_awaiting_start(&self) -> bool {
+        let NormalizedMessage::Activity { status, steps, .. } = self else {
+            return false;
+        };
+        *status == ActivityStatus::Running
+            && !steps.is_empty()
+            && steps
+                .iter()
+                .all(|step| matches!(step, ActivityStep::Tool { pending: true, .. }))
+    }
+
     pub fn created_at(&self) -> &str {
         match self {
             NormalizedMessage::User { created_at, .. }

@@ -386,7 +386,8 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
     status: activityStatusFromProtocol(step.status),
     ...(presentation ? { presentation } : {}),
     ...(step.description ? { description: step.description } : {}),
-    input_summary: step.inputSummary ?? activityTitle,
+    // An announced Tool's title is a placeholder ("Terminal"), not its input.
+    input_summary: step.inputSummary ?? (step.pending ? undefined : activityTitle),
     output_preview: step.outputPreview ?? undefined,
     detail_artifact_id: step.detailArtifactId ?? undefined,
     details: step.details ? mapProtocolToolDetail(step.details) : undefined,
@@ -398,6 +399,7 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
       resolved_at: outcome.resolvedAt,
     })),
     ...(step.backgroundOutcome ? { background_outcome: step.backgroundOutcome } : {}),
+    ...(step.pending ? { pending: true } : {}),
   };
 }
 

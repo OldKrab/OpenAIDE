@@ -72,6 +72,7 @@ fn main() {
                             option_label: Some("Allow once".to_string()),
                             resolved_at: "2026-05-22T00:00:03Z".to_string(),
                         }],
+                        pending: false,
                     },
                     ActivityStep::Command {
                         command_label: "cargo test".to_string(),

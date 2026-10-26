@@ -425,7 +425,7 @@ Each Task also owns a durable Permission Policy. Its safe default is **Ask every
 
 `task/setConfigOption` returns only the complete confirmed Agent Configuration Option state. It does not return or replace a full Task snapshot, so concurrent transient Task state such as a pending permission or question remains owned by its independent App Server event stream.
 
-The first valid client response closes the request for every client. App Server returns the outcome to the Agent and durably appends it to the exact Tool identified by Native Session plus `toolCallId`; it creates no resolved Permission Chat row. Tool execution status remains Agent-owned and independent of permission outcome. A Tool may receive multiple permission requests, and every decision remains visible in its details.
+The first valid client response closes the request for every client. App Server returns the outcome to the Agent and durably appends it to the exact Tool identified by Native Session plus `toolCallId`; it creates no resolved Permission Chat row. Tool execution status remains Agent-owned and independent of permission outcome. A Tool the Agent announced but has not started (ACP `pending`) stays unsettled work and is marked pending: Chat shows it as being prepared, with no running time and no placeholder title as its input, until the Agent starts it. A Tool may receive multiple permission requests, and every decision remains visible in its details.
 
 Prompt cancellation uses this same resolution path with the ACP `cancelled` outcome and a cancelled decision on the linked Tool.
 

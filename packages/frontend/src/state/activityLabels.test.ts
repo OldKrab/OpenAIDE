@@ -15,6 +15,17 @@ describe("activity labels", () => {
     expect(activityStatusLabel("interrupted")).toBe("Interrupted");
     expect(activityStepStatus({ kind: "tool", name: "edit", status: "interrupted" })).toBe("Interrupted");
   });
+  it("does not call an announced command running", () => {
+    const writing = { kind: "tool" as const, name: "execute", status: "running" as const, pending: true };
+    expect(activityStepLabel(writing)).toBe("Writing command");
+    expect(activityStepProgressLabel(writing)).toBe("Writing command");
+    expect(activityStepStatus(writing)).toBeUndefined();
+    const announced = { ...writing, input_summary: "npm test" };
+    expect(activityStepProgressLabel(announced)).toBe("Preparing npm test");
+    const started = { ...announced, pending: undefined };
+    expect(activityStepProgressLabel(started)).toBe("Running npm test");
+    expect(activityStepStatus(started)).toBe("Running");
+  });
   it("turns old generic exec tool rows into command labels", () => {
     expect(
       activitySummary(

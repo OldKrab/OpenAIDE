@@ -38,6 +38,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                         details: tool_call.details,
                         permission_outcomes: Vec::new(),
                         background_outcome: None,
+                        pending: tool_call.status == AgentToolCallStatus::Pending,
                     }],
                 })
             }
@@ -68,6 +69,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     details: None,
                     permission_outcomes: Vec::new(),
                     background_outcome: None,
+                    pending: false,
                 }],
             }),
             AgentEvent::Subagent(subagent) => {

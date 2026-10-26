@@ -232,6 +232,7 @@ impl TaskMutationContext<'_> {
             chat.message.preserve_created_at_from(&stored.chat.message);
             chat.timing = observed_timing::carried_over(
                 &stored.chat.timing,
+                &stored.chat.message,
                 &chat.message,
                 &crate::time::now_string(),
             );
