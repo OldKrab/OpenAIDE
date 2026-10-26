@@ -30,11 +30,11 @@ describe("WorkbenchConnectionSurface", () => {
     vi.restoreAllMocks();
   });
 
-  function render(use: (id?: string) => Promise<ComputerSwitchResult>, { appServerError, cancel }: { appServerError?: string; cancel?: () => Promise<void> } = {}) {
+  function render(use: (id?: string) => Promise<ComputerSwitchResult>, { appServerError, cancel, onOpenSettings }: { appServerError?: string; cancel?: () => Promise<void>; onOpenSettings?: () => void } = {}) {
     const switcher = computerSwitch({ snapshot: () => snapshot, subscribe: () => () => undefined, use, cancel, forget: async () => undefined });
     const closeNavigation = vi.fn();
     act(() => root.render(
-      <WorkbenchConnectionSurface appServerError={appServerError} closeNavigation={closeNavigation} onRetry={vi.fn()} snapshot={snapshot} switcher={switcher}>
+      <WorkbenchConnectionSurface appServerError={appServerError} closeNavigation={closeNavigation} onOpenSettings={onOpenSettings} onRetry={vi.fn()} snapshot={snapshot} switcher={switcher}>
         <p>Task</p>
       </WorkbenchConnectionSurface>,
     ));
@@ -68,6 +68,18 @@ describe("WorkbenchConnectionSurface", () => {
     expect(use).toHaveBeenCalledTimes(2);
     expect(use).toHaveBeenLastCalledWith("pc-key", expect.any(String));
     act(() => button("Back to old-linux").click());
+    expect(container.textContent).toBe("Task");
+  });
+
+  it("draws a refused switch to this phone as the app and the phone, and leads to Connection settings", async () => {
+    const use = vi.fn(async (): Promise<ComputerSwitchResult> => { throw new Error("Your local workspace could not start. Try again, or check this phone in Connection settings."); });
+    const onOpenSettings = vi.fn();
+    const { switcher } = render(use, { onOpenSettings });
+    await act(async () => switcher.request(undefined));
+    expect(heading()).toBe("Can’t switch to this phone");
+    expect([...container.querySelectorAll(".connection-end-label")].map((end) => end.textContent)).toEqual(["This app", "This phone"]);
+    act(() => button("Connection settings").click());
+    expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(container.textContent).toBe("Task");
   });
 

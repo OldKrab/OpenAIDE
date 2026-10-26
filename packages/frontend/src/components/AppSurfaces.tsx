@@ -740,6 +740,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             appServerError={appServerError}
             appServerProblem={appServerProblem}
             closeNavigation={closeSwitchNavigation}
+            onOpenSettings={openComputerSettings}
             onRetry={controller.retryTaskOpen}
             serverName={settings.devices?.serverName}
             snapshot={computers}

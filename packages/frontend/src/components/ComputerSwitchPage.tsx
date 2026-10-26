@@ -8,9 +8,11 @@ import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemVi
 /**
  * A switch in progress or refused (ADR-0070) takes the main surface, so the wait and its
  * outcome are a page, not a popup row. The computer in use keeps running underneath until
- * the new one answers; Cancel and Back return to it.
+ * the new one answers; Cancel and Back return to it. A refusal's copy can send the user to
+ * Connection settings, so the page offers that too when the shell has it.
  */
-export function ComputerSwitchPage({ snapshot, state, switcher }: {
+export function ComputerSwitchPage({ onOpenSettings, snapshot, state, switcher }: {
+  onOpenSettings?: () => void;
   snapshot: ComputersSnapshot | undefined;
   state: ComputerSwitchState;
   switcher: ComputerSwitch;
@@ -19,10 +21,10 @@ export function ComputerSwitchPage({ snapshot, state, switcher }: {
   const name = targetName(snapshot, target);
   const inUse = snapshot ? currentComputer(snapshot) : undefined;
   const here = inUse ? computerName(inUse) : snapshot?.device === "phone" ? "this phone" : "this computer";
-  const ends = {
-    here: thisDevice(snapshot?.device),
-    there: { label: capitalize(name), kind: target ? "computer" : snapshot?.device ?? "computer" } as const,
-  };
+  // Switching to this device links the app to the device's own workspace, not the device to itself.
+  const ends = target
+    ? { here: thisDevice(snapshot?.device), there: { label: capitalize(name), kind: "computer" } as const }
+    : { here: { label: "This app", kind: "app" } as const, there: thisDevice(snapshot?.device) };
   if (state.failed) {
     return (
       <ConnectionPage
@@ -30,6 +32,7 @@ export function ComputerSwitchPage({ snapshot, state, switcher }: {
         actions={(
           <>
             <button className="connection-primary" onClick={() => void switcher.request(target || undefined).catch(() => undefined)} type="button">Try again</button>
+            {onOpenSettings ? <button className="connection-secondary" onClick={() => { switcher.dismiss(); onOpenSettings(); }} type="button">Connection settings</button> : null}
             <button className="connection-secondary" onClick={() => switcher.dismiss()} type="button">Back to {here}</button>
           </>
         )}
@@ -58,11 +61,12 @@ export function ComputerSwitchPage({ snapshot, state, switcher }: {
  * problem, then the Task surface. It also closes the phone's navigation drawer once a switch
  * starts, so the page is what the user sees.
  */
-export function WorkbenchConnectionSurface({ appServerError, appServerProblem, children, closeNavigation, onRetry, serverName, snapshot, switcher }: {
+export function WorkbenchConnectionSurface({ appServerError, appServerProblem, children, closeNavigation, onOpenSettings, onRetry, serverName, snapshot, switcher }: {
   appServerError?: string;
   appServerProblem?: ConnectionProblem;
   children: ReactNode;
   closeNavigation: () => void;
+  onOpenSettings?: () => void;
   onRetry: () => void;
   serverName?: string;
   snapshot: ComputersSnapshot | undefined;
@@ -73,7 +77,7 @@ export function WorkbenchConnectionSurface({ appServerError, appServerProblem, c
   useEffect(() => {
     if (state.pending !== undefined) closeNavigation();
   }, [state.pending, closeNavigation]);
-  if (switching && switcher) return <ComputerSwitchPage snapshot={snapshot} state={state} switcher={switcher} />;
+  if (switching && switcher) return <ComputerSwitchPage onOpenSettings={onOpenSettings} snapshot={snapshot} state={state} switcher={switcher} />;
   if (!appServerError) return <>{children}</>;
   const others = switcher && snapshot ? otherPlaces(snapshot) : [];
   return (
