@@ -787,6 +787,30 @@ describe("host bridge", () => {
     );
   });
 
+  it("opens an Agent's settings on the Agents tab", async () => {
+    const pushState = vi.fn();
+    vi.stubGlobal("document", {
+      body: { dataset: { shell: "web", navigationMode: "project" } },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      history: { pushState },
+      location: { pathname: "/", search: "" },
+      addEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const { openSettingsSurface } = await installedHostBridge();
+    openSettingsSurface("claude-code", true);
+
+    expect(pushState).toHaveBeenCalledWith(
+      { openaideSettingsReturn: true },
+      "",
+      "/settings?tab=agents&agentId=claude-code&returnToNewTask=true",
+    );
+  });
+
   it("writes the open Agent into the web settings route", async () => {
     const replaceState = vi.fn();
     const dispatchEvent = vi.fn();
