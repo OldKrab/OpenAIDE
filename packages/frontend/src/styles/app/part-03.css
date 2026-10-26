@@ -419,10 +419,12 @@
   white-space: nowrap;
 }
 
+/* The state label and the time mark (an icon beside digits) share one center line;
+   baseline alignment set the label by the icon's edge and lifted it off the title. */
 .activity-step-meta {
   min-width: 0;
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   justify-self: end;
 }

@@ -15,6 +15,11 @@ describe("activity labels", () => {
     expect(activityStatusLabel("interrupted")).toBe("Interrupted");
     expect(activityStepStatus({ kind: "tool", name: "edit", status: "interrupted" })).toBe("Interrupted");
   });
+  it("lets the Agent's title describe a Tool it has no verb for", () => {
+    const question = { kind: "tool" as const, name: "other", status: "running" as const, input_summary: "Asking for your input" };
+    expect(activityStepProgressLabel(question, "Asking for your input")).toBe("Asking for your input");
+    expect(activityStepProgressLabel({ ...question, input_summary: "lint" }, "Asking for your input")).toBe("Using lint");
+  });
   it("does not call an announced command running", () => {
     const writing = { kind: "tool" as const, name: "execute", status: "running" as const, pending: true };
     expect(activityStepLabel(writing)).toBe("Writing command");

@@ -188,7 +188,11 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
     think: "Using reasoning tool",
     switch_mode: "Switching mode to",
   };
-  return progressLabel(actions[step.name] ?? "Using", subject ?? humanizeToolName(step.name));
+  const action = actions[step.name];
+  // A Tool OpenAIDE has no verb for is described only by the Agent's title ("Asking for your
+  // input"); a generic "Using" in front of that title would double the verb.
+  if (!action && subject && subject === activityTitle) return subject;
+  return progressLabel(action ?? "Using", subject ?? humanizeToolName(step.name));
 }
 
 /** Describes the newest finished action for the live footer without repeating its activity-group title. */
