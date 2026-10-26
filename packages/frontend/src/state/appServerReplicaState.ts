@@ -19,6 +19,7 @@ export function applyAppServerReplica(
     const next = {
       ...state,
       appServerError: undefined,
+      appServerProblem: undefined,
       appServerReplicaEpoch: epoch,
       appServerStateRootId: stateRootId,
     };
@@ -31,6 +32,7 @@ export function applyAppServerReplica(
   return {
     ...state,
     appServerError: undefined,
+    appServerProblem: undefined,
     appServerReplicaEpoch: epoch,
     appServerStateRootId: stateRootId,
     tasks: initial.tasks,

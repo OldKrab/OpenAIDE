@@ -1,5 +1,6 @@
 import type {
   AppServerEvent,
+  ClientProbeResult,
   InitializeParams,
   InitializeResult,
   ProtocolMethod,
@@ -54,6 +55,12 @@ export type BackendRequestContext = {
 
 export interface BackendConnection {
   initialize(params: InitializeParams, meta?: RequestMeta): Promise<InitializeResult>;
+  /**
+   * Asks the App Server what it is without initializing: every App Server answers
+   * `client/probe` before `client/initialize`, so a refused client can still learn the
+   * App Server's versions and name them to the user.
+   */
+  probe?(): Promise<ClientProbeResult>;
   retryRecovery?(): boolean;
   request<M extends ProtocolMethod>(
     method: M,

@@ -10,6 +10,7 @@ import { createInternalReliableBackendConnection } from "./rpcBackendConnection"
 import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
+  CLIENT_PROBE,
   PERMISSION_REQUEST,
   STATE_SUBSCRIBE,
   TASK_LIST,
@@ -18,6 +19,41 @@ import {
 } from "./generated/protocol";
 
 describe("ReliableBackendConnection", () => {
+  it("probes an App Server that refused initialize without initializing", async () => {
+    const sent: RpcMessage[] = [];
+    const listeners = new Set<(message: RpcMessage) => void>();
+    const channel: RpcMessageChannel = {
+      send: (message) => sent.push(message),
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const receive = (message: RpcMessage) => { for (const listener of listeners) listener(message); };
+    const connection = createReliableBackendConnection({ channel });
+    const initializing = connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    receive({
+      jsonrpc: "2.0",
+      id: "rpc-1",
+      error: { error: { code: "incompatibleProtocol", message: "Update OpenAIDE on your computer", recoverable: false } },
+    });
+    await expect(initializing).rejects.toMatchObject({ protocolError: { code: "incompatibleProtocol" } });
+
+    const probing = connection.probe!();
+    expect(sent.at(-1)).toEqual(expect.objectContaining({ method: CLIENT_PROBE, params: {} }));
+    const probe = { stateRootFingerprint: "root-1", protocolVersion: "2.2", appVersion: "0.40.0", lifecycle: "running" };
+    receive({ jsonrpc: "2.0", id: (sent.at(-1) as { id: string }).id, result: { result: probe } });
+    await expect(probing).resolves.toEqual(probe);
+    // The probe does not initialize: other requests are still refused.
+    await expect(connection.request(TASK_LIST, {} as never)).rejects.toThrow("not initialized");
+    connection.close();
+  });
+
   it("resolves a typed App Server request from the peer receive channel", async () => {
     const sent: RpcMessage[] = [];
     const listeners = new Set<(message: RpcMessage) => void>();

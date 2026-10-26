@@ -320,6 +320,8 @@ body[data-shell="web"] .sidebar {
 }
 
 .sidebar-settings-row .settings-button {
+  /* A content-sized basis: at width 100% both buttons shrink and the name truncates beside empty space. */
+  width: auto;
   min-width: 96px;
   flex: 1 1 auto;
 }
@@ -363,23 +365,31 @@ body[data-shell="web"] .sidebar {
   white-space: nowrap;
 }
 
-.computer-switcher-link {
-  flex: 0 0 auto;
-  color: var(--oa-warning);
-  font-size: 11px;
-  font-weight: 580;
-}
-
-.computer-switcher-trigger[data-link="notConnected"] .computer-switcher-link {
-  color: var(--oa-danger);
-}
-
 .computer-switcher-dot {
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--oa-success);
+}
+
+.computer-switcher-trigger[data-link="connecting"] .computer-switcher-dot,
+.computer-switcher-trigger[data-link="reconnecting"] .computer-switcher-dot {
+  background: var(--oa-warning);
+  animation: computer-switcher-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.computer-switcher-trigger[data-link="notResponding"] .computer-switcher-dot,
+.computer-switcher-trigger[data-link="notConnected"] .computer-switcher-dot {
+  background: var(--oa-danger);
+}
+
+@keyframes computer-switcher-dot-pulse {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .computer-switcher-trigger[data-link] .computer-switcher-dot { animation: none; }
 }
 
 .computer-switcher-menu {

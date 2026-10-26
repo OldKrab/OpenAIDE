@@ -1,5 +1,5 @@
 import { ListTodo, Menu, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
 import { DesktopTitleBar } from "./DesktopTitleBar";
@@ -20,10 +20,12 @@ import { currentFrontendShell, type DesktopUpdateCapability } from "../services/
 import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
 import { computerLink } from "./ComputerSwitcher";
+import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
+import { WorkbenchConnectionSurface, connectionSurfaceTitle } from "./ComputerSwitchPage";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { useComputerPlace } from "./useComputerPlace";
 import { currentComputer, useComputers } from "../services/computers";
-import { computerSwitch } from "../services/computerSwitch";
+import { computerSwitch, useComputerSwitch } from "../services/computerSwitch";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -39,11 +41,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     view,
     visibleTasks,
   } = controller;
-  const { appServerError, navigation, settings } = view;
+  const { appServerError, appServerProblem, navigation, settings } = view;
   const frontendShell = currentFrontendShell();
   const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
   const computers = useComputers(frontendShell?.computers);
   const computerLinkState = computerLink(controller.backendConnectionState);
+  const connectionPlace = connectionPlaceFor(computers, settings.devices?.serverName);
   const [computerSwitcherRequest, setComputerSwitcherRequest] = useState(0);
   const updateAvailable = desktopUpdate?.kind === "available"
     || desktopUpdate?.kind === "downloading"
@@ -264,6 +267,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopTaskHeaderIntegrated = Boolean(desktopWindow && renderableTaskSnapshot && !openingNativeSession);
   const openComputerSettings = () => callbacks.navigation.openSettings(undefined, undefined, undefined, "remote");
   const switchComputer = frontendShell?.computers ? computerSwitch(frontendShell.computers) : undefined;
+  const coverTitle = connectionSurfaceTitle(useComputerSwitch(switchComputer), appServerError);
+  const closeSwitchNavigation = useCallback(() => mobileNavigation.setOpen(false), [mobileNavigation.setOpen]);
   const restoringPlace = useComputerPlace({
     available: Boolean(frontendShell?.computers),
     backendReady,
@@ -339,6 +344,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       taskCount: visibleTasks.filter((task) => task.project_id === projectId).length
         + nativeSessionCount,
     };
+  };
+  // Task surfaces name only the project id; removal confirms with the navigation label and counts.
+  const removeProjectById = (projectId: string) => {
+    const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
+    if (project) prepareProjectRemoval({ projectId, label: project.label, ...projectRemovalCounts(projectId) });
   };
   useEffect(() => {
     if (!mobileNavigationOpen) return;
@@ -483,7 +493,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return (
       <main className={`app-shell editor-shell ${desktopTitleBar ? "desktop-error-shell" : ""}`}>
         {desktopTitleBar}
-        <AppServerErrorView message={appServerError} />
+        <ConnectionProblemView
+          device={computers?.device}
+          message={appServerError}
+          onRetry={controller.retryTaskOpen}
+          place={connectionPlace}
+          problem={appServerProblem}
+        />
       </main>
     );
   }
@@ -647,8 +663,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         {computerSwitchConfirm}
         <header
           className="mobile-workbench-bar"
-          data-has-permission-policy={hasMobilePermissionPolicy || undefined}
-          data-has-plan={renderableTaskSnapshot?.current_plan ? true : undefined}
+          data-has-permission-policy={(hasMobilePermissionPolicy && !coverTitle) || undefined}
+          data-has-plan={renderableTaskSnapshot?.current_plan && !coverTitle ? true : undefined}
         >
           <button
             aria-expanded={mobileNavigationOpen}
@@ -667,11 +683,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             {mobileNavigationOpen ? <X size={17} /> : <Menu size={17} />}
           </button>
           <span>
-            <strong>{mobileTitle}</strong>
-            <small>{mobileSubtitle}</small>
+            <strong>{coverTitle ?? mobileTitle}</strong>
+            {coverTitle ? null : <small>{mobileSubtitle}</small>}
           </span>
           <div className="mobile-task-file-action" ref={setMobileTaskActionsTarget} />
-          {mobilePermissionTask ? (
+          {mobilePermissionTask && !coverTitle ? (
             <TaskPermissionPolicyControl
               disabled={renderableTaskArchived || !taskMutationReady}
               disabledReason={renderableTaskArchived
@@ -683,7 +699,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               policy={mobilePermissionTask.permission_policy}
             />
           ) : null}
-          {renderableTaskSnapshot?.current_plan ? (
+          {renderableTaskSnapshot?.current_plan && !coverTitle ? (
             <button
               aria-expanded={planDrawerOpen}
               aria-label={planDrawerOpen ? "Hide Plan" : "Open Plan"}
@@ -720,11 +736,16 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             target={terminalPage.target}
             terminals={view.terminals?.terminals}
           />
-          {appServerError ? (
-            <AppServerErrorView message={appServerError} />
-          ) : restoringPlace ? (
-            <TaskLoadingView />
-          ) : (
+          <WorkbenchConnectionSurface
+            appServerError={appServerError}
+            appServerProblem={appServerProblem}
+            closeNavigation={closeSwitchNavigation}
+            onRetry={controller.retryTaskOpen}
+            serverName={settings.devices?.serverName}
+            snapshot={computers}
+            switcher={switchComputer}
+          >
+            {restoringPlace ? <TaskLoadingView /> : (
             <AppPrimaryTaskSurface
               agentIcons={agentIcons}
               controller={controller}
@@ -735,19 +756,13 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               projects={navigationProjects}
               onAddProject={addProject}
               onCheckProject={async (projectId) => { await controller.intents.projects.refresh(projectId); }}
-              onRemoveProject={(projectId) => {
-                const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
-                if (project) prepareProjectRemoval({
-                  projectId,
-                  label: project.label,
-                  ...projectRemovalCounts(projectId),
-                });
-               }}
+              onRemoveProject={removeProjectById}
               onPlanDrawerOpenChange={setPlanDrawerOpen}
               planDrawerOpen={planDrawerOpen}
               workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
             />
-          )}
+            )}
+          </WorkbenchConnectionSurface>
         </section>
       </AppSidebarFrame>
       </TerminalSurfaceContext.Provider>
@@ -764,14 +779,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         projects={navigationProjects}
         onAddProject={addProject}
         onCheckProject={async (projectId) => { await controller.intents.projects.refresh(projectId); }}
-        onRemoveProject={(projectId) => {
-          const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
-          if (project) prepareProjectRemoval({
-            projectId,
-            label: project.label,
-            ...projectRemovalCounts(projectId),
-          });
-         }}
+        onRemoveProject={removeProjectById}
         onPlanDrawerOpenChange={setPlanDrawerOpen}
         planDrawerOpen={planDrawerOpen}
         workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
@@ -790,18 +798,5 @@ function useDesktopUpdateSnapshot(
     capability?.subscribe ?? subscribeToNothing,
     capability?.snapshot ?? noDesktopUpdateSnapshot,
     capability?.snapshot ?? noDesktopUpdateSnapshot,
-  );
-}
-
-function AppServerErrorView({ message }: { message: string }) {
-  return (
-    <section
-      aria-label="App Server connection error"
-      aria-live="polite"
-      className="task-surface task-loading app-server-error"
-    >
-      <p>App Server connection unavailable.</p>
-      <small>{message}</small>
-    </section>
   );
 }

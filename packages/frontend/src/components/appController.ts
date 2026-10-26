@@ -84,6 +84,7 @@ export type AppControllerTestHarness = {
 
 export type AppControllerView = {
   appServerError?: string;
+  appServerProblem?: AppState["appServerProblem"];
   navigation: {
     nativeSessions: AppState["newTask"]["nativeSessions"];
     nativeSessionMutations: AppState["nativeSessionMutations"];
@@ -603,6 +604,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
     },
     view: {
       appServerError: state.appServerError,
+      appServerProblem: state.appServerProblem,
       navigation: {
         nativeSessions: state.showArchived
           ? state.archivedNativeSessions
