@@ -43,6 +43,11 @@ export function agentStatusCopy(agent: AgentSettingsRecord) {
   if (agent.status === "connected" || agent.status === "ready") return "Ready for new tasks.";
   if (agent.status === "auth_required") return "Authentication is required before this agent can start work.";
   if (agent.status === "authenticating") return "Authentication is in progress.";
+  if (agent.status === "setup_required" && agent.setup_reason === "nodeJsRequired") {
+    return "Node.js is not available on this computer, so this agent cannot start. Install Node.js, then check again.";
+  }
+  // TODO: name what is incomplete. The App Server knows the cause (for example a command missing
+  // from PATH) but Agent settings carry only the status, so the page can only say setup is unfinished.
   if (agent.status === "setup_required") return "Setup is incomplete.";
   if (agent.status === "unsupported") return "This process launched, but did not satisfy OpenAIDE's ACP requirements.";
   if (agent.status === "disabled") return "Disabled in settings.";

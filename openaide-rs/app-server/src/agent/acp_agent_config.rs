@@ -6,6 +6,7 @@ use agent_client_protocol::AcpAgent;
 
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::managed_acp_provisioner::ManagedAcpRuntime;
+use crate::agent::registry::{CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, OPENCODE_AGENT_ID};
 use crate::agent::AgentSecretResolver;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -300,10 +301,14 @@ fn command_not_found_error(agent_id: &str, command: &str) -> RuntimeError {
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(command);
-    if matches!(agent_id, "codex" | "claude-code")
-        && ["node", "npm", "npx"]
-            .iter()
-            .any(|candidate| executable.eq_ignore_ascii_case(candidate))
+    // Every built-in Agent launches through npx when its own command is absent, so a missing
+    // npx means Node.js; a Custom Agent's command is the user's, so it stays a generic setup failure.
+    if matches!(
+        agent_id,
+        CODEX_AGENT_ID | CLAUDE_CODE_AGENT_ID | OPENCODE_AGENT_ID
+    ) && ["node", "npm", "npx"]
+        .iter()
+        .any(|candidate| executable.eq_ignore_ascii_case(candidate))
     {
         return RuntimeError::NodeJsRequired(
             "The built-in Agent needs Node.js before it can start.".to_string(),

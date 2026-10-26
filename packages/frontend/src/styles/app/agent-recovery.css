@@ -38,5 +38,6 @@
 }
 
 .agent-recovery-actions button:hover:not(:disabled) { border-color: var(--oa-accent); }
+.agent-recovery-result { align-self: center; color: var(--oa-muted); font-size: 12px; }
 .new-task-center > .agent-recovery-panel { margin-top: 2px; }
 .chat-column > .agent-recovery-panel { margin: 6px 0 0; }

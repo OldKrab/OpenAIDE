@@ -35,6 +35,25 @@ describe("Agent recovery", () => {
     expect(onOpenExternal).toHaveBeenCalledWith(NODE_JS_DOWNLOAD_URL);
   });
 
+  it("says a retry that fails the same way left the Agent not ready", async () => {
+    let ready = false;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<AgentRecoveryPanel
+        actions={{ onOpenAgentSettings: vi.fn(), onOpenExternal: vi.fn(), onRetry: vi.fn(async () => ready) }}
+        agent={{ id: "opencode", label: "OpenCode" }}
+        kind="setupRequired"
+      />);
+    });
+
+    expect(result(tree)).toBeUndefined();
+    await act(async () => button(tree, "Try again").props.onClick());
+    expect(result(tree)).toBe("Still not ready");
+    ready = true;
+    await act(async () => button(tree, "Try again").props.onClick());
+    expect(result(tree)).toBeUndefined();
+  });
+
   it("opens authentication settings with the preserved New Task return intent", () => {
     const onOpenAgentSettings = vi.fn();
     let tree!: ReturnType<typeof create>;
@@ -56,6 +75,10 @@ function textContent(tree: ReturnType<typeof create>) {
   return tree.root.findAllByType("strong").concat(tree.root.findAllByType("small"))
     .map((node) => node.children.join(""))
     .join(" ");
+}
+
+function result(tree: ReturnType<typeof create>) {
+  return tree.root.findAll((node) => node.props.className === "agent-recovery-result")[0]?.children.join("");
 }
 
 function button(tree: ReturnType<typeof create>, label: string) {
