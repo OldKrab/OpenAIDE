@@ -33,6 +33,13 @@ internal object ReconnectPolicy {
      */
     fun retireAfterFailedDial(carriesLiveConnection: Boolean): Boolean = !carriesLiveConnection
 
+    /**
+     * Whether an endpoint marked stale is given up now. Not while a switch is dialling on
+     * it: that would end the switch's attempt, spending its budget on a reachable computer
+     * or failing it outright when the app is hidden. The retire waits for the dial to end.
+     */
+    fun retireNow(switchDialsInFlight: Int): Boolean = switchDialsInFlight == 0
+
     /** How long attempt [index] (from zero) may take after [spentMs] of the budget, or zero for no further attempt. */
     fun attemptTimeoutMs(index: Int, spentMs: Long): Long {
         if (index < 0 || index >= ATTEMPT_TIMEOUTS_MS.size) return 0
