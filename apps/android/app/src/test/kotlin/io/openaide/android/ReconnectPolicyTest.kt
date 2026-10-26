@@ -18,6 +18,11 @@ class ReconnectPolicyTest {
         assertFalse(ReconnectPolicy.retireAfterFailedDial(carriesLiveConnection = true))
     }
 
+    @Test fun aStaleEndpointWaitsForASwitchDialOnIt() {
+        assertTrue(ReconnectPolicy.retireNow(switchDialsInFlight = 0))
+        assertFalse(ReconnectPolicy.retireNow(switchDialsInFlight = 1))
+    }
+
     @Test fun attemptsGrowAndStayWithinTheBudget() {
         assertEquals(4_000L, ReconnectPolicy.attemptTimeoutMs(0, 0))
         assertEquals(8_000L, ReconnectPolicy.attemptTimeoutMs(1, 4_000))

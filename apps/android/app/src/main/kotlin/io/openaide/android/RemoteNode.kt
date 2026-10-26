@@ -13,6 +13,7 @@ import computer.iroh.SecretKey
 import computer.iroh.presetN0
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
@@ -20,6 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -54,6 +56,8 @@ internal object RemoteNode {
     @Volatile private var stale: String? = null
     @Volatile private var hiddenAt = 0L
     private var binds = 0
+    /** Dials for a switch now on the endpoint; a retire waits for them. Changed under [binding]. */
+    private var switchDials = 0
     /** Set by the first bind, for the bind that follows a return while a join is awaited. */
     @Volatile private var application: Context? = null
     @Volatile private var connection: Connection? = null
@@ -65,7 +69,8 @@ internal object RemoteNode {
 
     /**
      * The app is on screen again. After more than a short pause the endpoint is
-     * replaced before the next dial, and a dial already waiting on it is ended.
+     * replaced before the next dial, and a dial already waiting on it is ended;
+     * a switch's dial instead runs out its attempt, and the retire follows it.
      */
     fun shown() {
         val since = hiddenAt
@@ -86,6 +91,11 @@ internal object RemoteNode {
      */
     private fun retire() {
         val reason = stale ?: return
+        if (!ReconnectPolicy.retireNow(switchDials)) {
+            // The switch's dial ends on its own; its next attempt or the next bind retires.
+            diagnostics.record("remote_endpoint_retire", "deferred_for_switch", binds, 0)
+            return
+        }
         val old = endpoint
         endpoint = null
         connection = null
@@ -101,14 +111,38 @@ internal object RemoteNode {
     }
 
     /** Binds the endpoint with this phone's stored key, creating the key on first use. */
-    suspend fun endpoint(context: Context): Endpoint = binding.withLock {
+    suspend fun endpoint(context: Context): Endpoint = binding.withLock { boundEndpoint(context) }
+
+    /**
+     * The endpoint for one dial of a switch, counted until [endSwitchDial] so that a
+     * reconnect of the live connection meanwhile cannot retire it from under the dial.
+     */
+    private suspend fun switchDialEndpoint(context: Context): Endpoint = binding.withLock {
+        boundEndpoint(context).also { switchDials++ }
+    }
+
+    private suspend fun endSwitchDial(succeeded: Boolean) = binding.withLock {
+        switchDials--
+        val reason = stale
+        // The dial just reached a computer on this endpoint, so whatever marked it stale
+        // meanwhile was wrong about its network; retiring it would end the new connection.
+        if (succeeded && reason != null && switchDials == 0) {
+            stale = null
+            diagnostics.record("remote_endpoint_retire", "kept_after_switch", binds, 0)
+        } else if (switchDials == 0) {
+            retire()
+        }
+    }
+
+    /** Must hold [binding]. */
+    private suspend fun boundEndpoint(context: Context): Endpoint {
         retire()
         endpoint?.let { return it }
         val started = SystemClock.elapsedRealtime()
         val bind = ++binds
         diagnostics.record("remote_endpoint_bind", "started", bind, 0)
         val application = context.applicationContext.also { this.application = it }
-        try {
+        return try {
             val store = ConnectionStore(application)
             val key = try {
                 store.deviceKey() ?: SecretKey.generate().toBytes().also(store::saveDeviceKey)
@@ -193,7 +227,7 @@ internal object RemoteNode {
      * endpoint that connection rides on.
      */
     suspend fun reachForSwitch(context: Context, server: ConnectionStore.PairedServer): Connection =
-        reach(context, ConnectionStore(context.applicationContext), server)
+        reach(context, ConnectionStore(context.applicationContext), server, forSwitch = true)
 
     /** Makes a connection reached for a switch the one in use, ending the previous one. */
     fun adopt(next: Connection) {
@@ -220,36 +254,46 @@ internal object RemoteNode {
      * One slow or stalled dial is not yet an unreachable computer: each further
      * attempt starts on a new endpoint, and the caller keeps showing "Connecting…".
      */
-    private suspend fun reach(context: Context, store: ConnectionStore, server: ConnectionStore.PairedServer): Connection {
+    private suspend fun reach(
+        context: Context,
+        store: ConnectionStore,
+        server: ConnectionStore.PairedServer,
+        forSwitch: Boolean = false,
+    ): Connection {
         val started = SystemClock.elapsedRealtime()
         var index = 0
         while (true) {
             val timeoutMs = ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started)
             try {
-                return dial(context, store, server, index, timeoutMs)
+                return dial(context, store, server, index, timeoutMs, forSwitch)
             } catch (error: Unavailable) {
                 index++
                 // A hidden app usually has no network to retry on; its return starts over anyway.
                 val more = hiddenAt == 0L && ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started) > 0
                 if (error.failure != Failure.UNREACHABLE || !more) throw error
-                // TODO: a dial for a switch shares the one endpoint with the live connection, so the
-                // live connection's own reconnect (a return to the screen, a stalled receive) retires
-                // that endpoint and ends the switch's dial mid-attempt, which the user sees as a failed
-                // switch to a reachable computer. Give the switch's dial its own endpoint, or have that
-                // reconnect stand down while a switch is pending.
                 if (ReconnectPolicy.retireAfterFailedDial(live() != null)) stale = "dial_failed"
             }
         }
     }
 
     /** One attempt to reach the computer, on the current endpoint. */
-    private suspend fun dial(context: Context, store: ConnectionStore, server: ConnectionStore.PairedServer, index: Int, timeoutMs: Long): Connection {
+    private suspend fun dial(
+        context: Context,
+        store: ConnectionStore,
+        server: ConnectionStore.PairedServer,
+        index: Int,
+        timeoutMs: Long,
+        forSwitch: Boolean,
+    ): Connection {
         val attempt = ++attempts
         val started = SystemClock.elapsedRealtime()
-        diagnostics.record("remote_connect", "started", attempt, 0)
+        diagnostics.record("remote_connect", "started", attempt, 0, mapOf("purpose" to if (forSwitch) "switch" else "live"))
         var outcome = "unreachable"
+        var counted = false
         try {
-            val node = endpoint(context)
+            // The live connection and a switch share the one endpoint (see the class); a
+            // switch's dial holds off a retire the live connection's reconnect would make.
+            val node = if (forSwitch) switchDialEndpoint(context).also { counted = true } else endpoint(context)
             val relay = ReconnectPolicy.relayFor(index, runCatching { store.relay(server.id) }.getOrNull())
             // Says whether this attempt had to look the computer's address up first.
             diagnostics.record("remote_connect_address", if (relay != null) "remembered_relay" else "lookup", attempt, 0)
@@ -280,6 +324,7 @@ internal object RemoteNode {
             if (incompatible) outcome = "incompatible"
             throw Unavailable(if (incompatible) Failure.INCOMPATIBLE else Failure.UNREACHABLE)
         } finally {
+            if (counted) withContext(NonCancellable) { endSwitchDial(succeeded = outcome == "relay" || outcome == "direct") }
             diagnostics.record("remote_connect", outcome, attempt, SystemClock.elapsedRealtime() - started)
         }
     }
