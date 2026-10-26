@@ -86,6 +86,26 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.recoveryAgentLabel).toBe("Codex");
   });
 
+  it("names the Agent that needs setup instead of its raw launch error", () => {
+    const navigation = (agent: { status: "setupRequired" | "failed"; setupReason?: "nodeJsRequired" }) => mapProtocolTaskNavigation({
+      section: "tasks",
+      refresh: { state: "failed", message: "Agent command not found: npx" },
+      groups: [],
+    }, {
+      ...mappingContext(),
+      agents: [{ agentId: "opencode" as AgentId, label: "OpenCode", icon: "opencode", ...agent }],
+    });
+
+    const nodeJs = navigation({ status: "setupRequired", setupReason: "nodeJsRequired" });
+    expect(nodeJs.refreshError).toBe("OpenCode needs Node.js. Its sessions show here once it is set up.");
+    expect(nodeJs.recoveryKind).toBe("nodeJsRequired");
+    expect(nodeJs.recoveryAgentLabel).toBe("OpenCode");
+    expect(navigation({ status: "setupRequired" }).refreshError)
+      .toBe("OpenCode needs setup. Its sessions show here once it is set up.");
+    expect(navigation({ status: "failed" }).refreshError)
+      .toBe("OpenCode history unavailable: Agent command not found: npx");
+  });
+
   it("maps Project-scoped discovery independently from the global refresh", () => {
     const mapping = mapProtocolTaskNavigation({
       section: "tasks",

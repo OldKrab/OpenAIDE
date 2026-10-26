@@ -1177,8 +1177,9 @@ describe("Sidebar", () => {
     const tree = render(
       <Sidebar
         nativeSessions={nativeSessions({
-          error: "Codex history unavailable",
+          error: "OpenCode needs Node.js. Its sessions show here once it is set up.",
           recoveryKind: "nodeJsRequired",
+          recoveryAgentLabel: "OpenCode",
           items: [nativeSession({ session_id: "session_1", title: "Existing" })],
         })}
         onRecoverNativeSessions={onRecoverNativeSessions}
@@ -1189,7 +1190,8 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findByProps({ className: "native-session-recovery" }).findByType("span").children)
-      .toEqual(["Codex history unavailable"]);
+      .toEqual(["OpenCode needs Node.js. Its sessions show here once it is set up."]);
+    expect(tree.root.findByProps({ className: "native-session-recovery" }).findByType("button").children).toEqual(["Set up OpenCode"]);
     act(() => tree.root.findByProps({ className: "native-session-recovery" }).findByType("button").props.onClick());
     expect(onRecoverNativeSessions).toHaveBeenCalledWith("nodeJsRequired");
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
