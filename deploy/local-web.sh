@@ -22,6 +22,7 @@ env_override_names=(
   OPENAIDE_WEB_SKIP_BUILD
   OPENAIDE_WEB_DAEMON
   OPENAIDE_WEB_SYSTEMD_UNIT
+  OPENAIDE_WEB_SERVICE_PATH
   OPENAIDE_WEB_START_TIMEOUT_MS
   OPENAIDE_WEB_SMOKE
   OPENAIDE_WEB_SMOKE_TIMEOUT_MS
@@ -138,6 +139,7 @@ Optional env:
   OPENAIDE_WEB_STATIC_ROOT=$static_root
   OPENAIDE_WEB_BUILD=1
   OPENAIDE_WEB_DAEMON=systemd
+  OPENAIDE_WEB_SERVICE_PATH=<PATH>  the systemd unit's PATH; defaults to the login shell's
   OPENAIDE_WEB_SMOKE=1
 
 You can also put these values in deploy/local-web.env.
@@ -162,6 +164,8 @@ source "$repo_root/deploy/local-web-liveness.sh"
 source "$repo_root/deploy/local-web-static.sh"
 # shellcheck source=deploy/local-web-systemd-restart.sh
 source "$repo_root/deploy/local-web-systemd-restart.sh"
+# shellcheck source=deploy/local-web-service-path.sh
+source "$repo_root/deploy/local-web-service-path.sh"
 
 require_daemon_mode() {
   case "$daemon_mode" in
@@ -227,6 +231,8 @@ build_static_frontend() {
 }
 
 build_if_requested() {
+  # A systemd instance builds with the PATH it will run with; see local-web-service-path.sh.
+  local PATH="${service_path:-$PATH}"
   if [[ "${OPENAIDE_WEB_BUILD:-0}" == "1" ]]; then
     (cd "$repo_root" && npm run app-server:build)
     build_static_frontend
@@ -362,6 +368,7 @@ start_server() {
 start_systemd_server() {
   require_allowed_hosts
   require_systemd_user
+  resolve_service_path
   validate_static_root
   if [[ "${OPENAIDE_WEB_SKIP_BUILD:-0}" != "1" ]]; then
     build_if_requested
@@ -372,7 +379,7 @@ start_systemd_server() {
   systemctl --user stop "$systemd_unit.service" >/dev/null 2>&1 || true
 
   local npm_bin
-  npm_bin="$(command -v npm)"
+  npm_bin="$(PATH="$service_path" command -v npm || command -v npm)"
   local systemd_trace_env_args=()
   local systemd_tmp_env_args=()
   if [[ -n "${TMPDIR:-}" ]]; then
@@ -397,7 +404,7 @@ start_systemd_server() {
     --property "StandardOutput=append:$log_file" \
     --property "StandardError=append:$log_file" \
     --setenv "HOME=$HOME" \
-    --setenv "PATH=$PATH" \
+    --setenv "PATH=$service_path" \
     --setenv "NODE_OPTIONS=$node_options" \
     "${systemd_tmp_env_args[@]}" \
     --setenv "OPENAIDE_WEB_INSTANCE_LABEL=${OPENAIDE_WEB_INSTANCE_LABEL:-}" \
@@ -441,6 +448,9 @@ restart_server() {
     && current_process_runs_in_systemd_unit; then
     delegate_systemd_restart
     return
+  fi
+  if [[ "$daemon_mode" == "systemd" ]]; then
+    resolve_service_path
   fi
   build_if_requested
   stop_server
