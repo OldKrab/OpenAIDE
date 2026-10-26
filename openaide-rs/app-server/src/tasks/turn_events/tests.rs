@@ -1504,6 +1504,7 @@ fn live_compaction_updates_one_durable_row_and_projects_its_lifecycle() {
         ChatItemStatus, CompactionStatusSnapshot, MessagePart,
     };
 
+    let logs = crate::logging::capture_test_logs();
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
     let sink = TaskSessionEventSink::new(
@@ -1513,7 +1514,7 @@ fn live_compaction_updates_one_durable_row_and_projects_its_lifecycle() {
         server_requests,
     );
     let compaction = |change| AgentEvent::Compaction {
-        compaction_id: "cmp_1".to_string(),
+        compaction_id: "cmp_lifecycle".to_string(),
         change,
     };
     let update = |status, summary| {
@@ -1561,7 +1562,10 @@ fn live_compaction_updates_one_durable_row_and_projects_its_lifecycle() {
 
     let messages = committed();
     assert_eq!(messages.len(), 1, "every update patches the same row");
-    assert_eq!(messages[0].chat.identity, "acp:session_1:compaction:cmp_1");
+    assert_eq!(
+        messages[0].chat.identity,
+        "acp:session_1:compaction:cmp_lifecycle"
+    );
     assert_eq!(messages[0].sequence, in_progress[0].sequence);
     let item = crate::snapshots::task_snapshot::project_chat_item(&messages[0].chat);
     assert_eq!(item.status, ChatItemStatus::Complete);
@@ -1573,6 +1577,31 @@ fn live_compaction_updates_one_durable_row_and_projects_its_lifecycle() {
             error: None,
         }] if summary == "Retained context"
     ));
+    // Each status change is logged with its Task and whether a turn was open; chunks are not.
+    let logged: Vec<(String, bool)> = logs
+        .snapshot()
+        .into_iter()
+        .filter(|line| {
+            line["event"] == "task_compaction_status_changed"
+                && line["fields"]["compaction_id"] == "cmp_lifecycle"
+        })
+        .map(|line| {
+            (
+                line["fields"]["status"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                line["fields"]["turn_open"].as_bool().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        logged,
+        vec![
+            ("InProgress".to_string(), true),
+            ("Completed".to_string(), true)
+        ]
+    );
 }
 
 #[test]
