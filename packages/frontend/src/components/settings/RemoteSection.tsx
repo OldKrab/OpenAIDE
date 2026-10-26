@@ -239,10 +239,12 @@ type ComputersView = {
 function computersGroup(computers: SettingsComputers, phone: PhoneConnection | undefined, view: ComputersView): SettingsGroup {
   const snapshot = computers.snapshot;
   const list = snapshot?.computers ?? [];
-  // TODO(ssh-computers): the phone keeps its SSH Computers in its Settings state and
-  // switches to them outside the computer switch (ADR-0070); list them with the
-  // other computers, so the Task navigation offers them too, once the phone does.
-  const phoneSsh = phone?.state?.sshComputers ?? [];
+  // The phone lists its SSH Computers with the other computers as `ssh:<id>`, so the
+  // switch connects to them first (ADR-0070); their Stop and Forget stay phone commands.
+  // A phone app from before that lists them only in its Settings state; those get rows below.
+  const allPhoneSsh = phone?.state?.sshComputers ?? [];
+  const phoneSshFor = (computer: ShellComputer) => allPhoneSsh.find((ssh) => `ssh:${ssh.id}` === computer.id);
+  const phoneSsh = allPhoneSsh.filter((ssh) => !list.some((computer) => computer.id === `ssh:${ssh.id}`));
   const remote = list.some((computer) => computer.current) || phoneSsh.some((computer) => computer.current);
   const busy = computers.switching !== undefined || Boolean(phone?.busy);
   const onPhone = snapshot?.device === "phone";
@@ -296,9 +298,15 @@ function computersGroup(computers: SettingsComputers, phone: PhoneConnection | u
           {cancelButton(computer.id) ?? (
             <>
               {computer.ssh ? (
-                <SettingsButton ariaLabel={`Stop OpenAIDE on ${name}`} disabled={busy} onClick={() => view.open({ kind: "stop-ssh", computer })} variant="quiet">Stop</SettingsButton>
+                <SettingsButton ariaLabel={`Stop OpenAIDE on ${name}`} disabled={busy} onClick={() => {
+                  const onPhoneSsh = phoneSshFor(computer);
+                  view.open(onPhoneSsh ? { kind: "stop-phone-ssh", computer: onPhoneSsh } : { kind: "stop-ssh", computer });
+                }} variant="quiet">Stop</SettingsButton>
               ) : null}
-              <SettingsButton ariaLabel={`Forget ${name}`} disabled={busy} onClick={() => view.open({ kind: "forget", computer })} variant="quiet">Forget</SettingsButton>
+              <SettingsButton ariaLabel={`Forget ${name}`} disabled={busy} onClick={() => {
+                const onPhoneSsh = phoneSshFor(computer);
+                view.open(onPhoneSsh ? { kind: "forget-phone-ssh", computer: onPhoneSsh } : { kind: "forget", computer });
+              }} variant="quiet">Forget</SettingsButton>
             </>
           )}
           <SettingsChoice

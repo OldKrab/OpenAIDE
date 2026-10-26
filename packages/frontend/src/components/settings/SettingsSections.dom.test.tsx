@@ -481,12 +481,12 @@ it("offers to update an older App Server on the SSH computer and lists what the 
   expect(ssh.update).toHaveBeenCalled();
 });
 
-function phoneShell(snapshot: object) {
+function phoneShell(snapshot: object, listed: object[] = []) {
   const execute = vi.fn(async () => undefined);
-  const list = { device: "phone" as const, computers: [] };
-  const computers = { snapshot: () => list, subscribe: () => () => undefined, use: vi.fn(), forget: vi.fn() };
+  const list = { device: "phone" as const, computers: listed };
+  const computers = { snapshot: () => list, subscribe: () => () => undefined, use: vi.fn(async () => "switched"), forget: vi.fn() };
   useShell({ connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute }, computers } as unknown as Partial<FrontendShell>);
-  return execute;
+  return Object.assign(execute, { computers });
 }
 
 const phoneDevbox = { id: "c".repeat(32), name: "devbox", destination: "me@devbox:2222", current: true };
@@ -502,6 +502,25 @@ it("lists the phone's SSH computers beside paired ones and adds one through the 
   expect(execute).toHaveBeenCalledWith({ action: "use_ssh", id: phoneLab.id });
   await click("Add SSH computer");
   expect(execute).toHaveBeenCalledWith({ action: "ssh_add" });
+});
+
+it("switches to a phone's SSH computer it lists with the others, and stops it through the phone", async () => {
+  const listed = [
+    { id: `ssh:${phoneDevbox.id}`, name: "devbox", ssh: phoneDevbox.destination, current: true },
+    { id: `ssh:${phoneLab.id}`, name: "lab", ssh: phoneLab.destination, current: false },
+  ];
+  const execute = phoneShell({ remote: true, computer: "devbox", sshComputers: [phoneDevbox, phoneLab], sshAvailable: true, ssh: null }, listed);
+  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  await settle();
+
+  expect(buttons("Stop OpenAIDE on lab")).toHaveLength(1);
+  await click("Stop OpenAIDE on lab");
+  await click("Stop");
+  await settle();
+  expect(execute).toHaveBeenCalledWith({ action: "stop_ssh", id: phoneLab.id });
+  await click("Use lab");
+  expect(execute.computers.use).toHaveBeenCalledWith(`ssh:${phoneLab.id}`, expect.any(String));
+  expect(execute).not.toHaveBeenCalledWith({ action: "use_ssh", id: phoneLab.id });
 });
 
 it("offers no SSH computers on a phone build that cannot install on them", async () => {

@@ -74,6 +74,22 @@ class ComputerSwitchTest {
         )
     }
 
+    @Test fun anSshComputerIsATargetOfItsOwnKind() {
+        val phone = Phone()
+        phone.switch.request("studio", "ssh:devbox", "computer-switch-2", phone.reply())
+        phone.answer.complete(Result.success("session-on-devbox"))
+        phone.runMain(2)
+
+        assertEquals(listOf("connect ssh:devbox", "apply ssh:devbox", "reply switched", "replace page"), phone.events)
+        assertEquals(
+            mapOf("operation_id" to "computer-switch-2", "source_kind" to "paired", "target_kind" to "ssh"),
+            phone.logged.last().second,
+        )
+        assertEquals("devbox", ComputerSwitch.sshId("ssh:devbox"))
+        assertEquals(null, ComputerSwitch.sshId("studio"))
+        assertEquals(null, ComputerSwitch.sshId(null))
+    }
+
     @Test fun anUnreachableTargetChangesNothingAndSaysWhy() {
         val phone = Phone()
         phone.switch.request(null, "studio", null, phone.reply())

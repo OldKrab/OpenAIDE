@@ -96,6 +96,75 @@ internal object SshServer {
         if (closing != null) worker.execute { release(closing.second) }
     }
 
+    /**
+     * An SSH Computer a switch reached (ADR-0070): its App Server started or attached on a
+     * session of its own, while the computer in use keeps its session. [adopt] makes it the
+     * one in use; [discard] closes it. [updateRequired] is the version there when it is too
+     * old: the switch still goes ahead, and the page offers the update as a direct use does.
+     */
+    class Prepared internal constructor(
+        val id: String,
+        internal val session: SshComputer,
+        internal val status: Status?,
+        internal val updateRequired: String?,
+    )
+
+    /** Reaches [computer] for a switch; throws [HeldServer.Unavailable] with a failure class for [message]. Blocks. */
+    @JvmStatic fun prepare(context: Context, computer: SshComputers.Computer): Prepared {
+        val application = context.applicationContext
+        val started = SystemClock.elapsedRealtime()
+        diagnostics.record("ssh_server_prepare", "started", 1, 0)
+        var outcome = "failed"
+        var session: SshComputer? = null
+        try {
+            val opened = open(application, computer, ConnectionStore(application)).also { session = it }
+            val prepared = when (val result = opened.launch(false, operation())) {
+                is SshLaunch.Ready -> {
+                    val ready = result.ready
+                    if (HeldServer.Endpoint.of(ready.endpointUrl, ready.authToken) == null) {
+                        outcome = "invalid_handoff"
+                        throw HeldServer.Unavailable(outcome)
+                    }
+                    outcome = "ready"
+                    Prepared(computer.id, opened, Status(ready.appVersion, ready.updateAvailable, ready.suggestLinger), null)
+                }
+                is SshLaunch.UpdateRequired -> {
+                    outcome = "update_required"
+                    Prepared(computer.id, opened, null, result.runningVersion)
+                }
+            }
+            return prepared
+        } catch (error: SshException.Failed) {
+            outcome = error.`class`
+            session?.let(::release)
+            throw HeldServer.Unavailable(outcome)
+        } catch (error: HeldServer.Unavailable) {
+            session?.let(::release)
+            throw error
+        } finally {
+            diagnostics.record("ssh_server_prepare", outcome, 1, SystemClock.elapsedRealtime() - started)
+        }
+    }
+
+    /**
+     * Makes a switch's [prepared] computer the one in use, closing the previous session.
+     * The held server relaunches on the adopted session, which attaches to the App Server
+     * the switch started without signing in again.
+     */
+    // TODO: hand the switch's endpoint to [held] instead of attaching a second time, once
+    // HeldServer can take an endpoint it did not launch (it initializes and heartbeats its own).
+    @JvmStatic fun adopt(prepared: Prepared) {
+        held.reset()
+        val closing = synchronized(lock) { native.also { native = prepared.id to prepared.session } }
+        status = prepared.status
+        requiredUpdate = prepared.updateRequired
+        replaceNext = false
+        if (closing != null && closing.second !== prepared.session) worker.execute { release(closing.second) }
+    }
+
+    /** Closes what a switch reached and no longer uses. */
+    @JvmStatic fun discard(prepared: Prepared) { worker.execute { release(prepared.session) } }
+
     /** Ends the keeper on [computer]; reports `stopped`, `notRunning`, `stillRunning`, or a failure class. */
     @JvmStatic fun stop(context: Context, computer: SshComputers.Computer, store: ConnectionStore, done: (String) -> Unit) {
         val application = context.applicationContext
