@@ -23,6 +23,9 @@ pub(super) fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> Change
         || original.unread != task.unread
         || original.attention != task.attention
         || original.active_turn_started_at != task.active_turn_started_at
+        // The summary carries the Background Work commands and the status they hold; a report
+        // within the same millisecond as the last one must not depend on `updated_at` moving.
+        || original.background_work != task.background_work
         || original.updated_at != task.updated_at
         || original.last_activity != task.last_activity
         || original.agent_id != task.agent_id
@@ -53,5 +56,25 @@ pub(super) fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> Change
         current_plan: original.current_plan != task.current_plan,
         message_queue: original.message_queue != task.message_queue,
         removed: !original.tombstoned && task.tombstoned,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::changed_fields;
+    use crate::protocol::model::TaskBackgroundWork;
+    use crate::tasks::mutation::tests::task_record;
+
+    #[test]
+    fn background_work_alone_changes_the_summary() {
+        let original = task_record("task_1");
+        let mut held = original.clone();
+        held.background_work = Some(TaskBackgroundWork {
+            held: true,
+            commands: Vec::new(),
+        });
+
+        assert!(changed_fields(&original, &held).summary);
+        assert!(changed_fields(&held, &original).summary);
     }
 }

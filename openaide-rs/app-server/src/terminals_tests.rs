@@ -86,7 +86,10 @@ fn an_exited_shell_stays_listed_and_reports_changes() {
     });
     let summary = &terminals.snapshot().terminals[0];
     assert_eq!(summary.exit_code, Some(3));
-    assert!(changed.try_recv().is_ok());
+    // The monitor publishes the exit before it reports the change, so wait for the report.
+    assert!(changed
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .is_ok());
     assert_eq!(terminals.open_count(), 0);
     terminals.close(&terminal_id, false).unwrap();
 }
