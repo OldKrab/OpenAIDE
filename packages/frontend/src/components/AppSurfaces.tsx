@@ -16,6 +16,7 @@ import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
+import { projectFilesRoute } from "./projectFilesRoute";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
 import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
@@ -204,14 +205,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
-  // Project files opened from a Project covers the primary surface until any navigation.
-  const [browsedProjectId, setBrowsedProjectId] = useState<string>();
-  const routeKey = bootstrap.surface === "invalid" ? "invalid" : `${bootstrap.surface}:${bootstrap.taskId ?? ""}:${bootstrap.projectId ?? ""}`;
-  useEffect(() => setBrowsedProjectId(undefined), [routeKey]);
-  const projectFilesPage = browsedProjectId
-    ? { projectId: browsedProjectId, onClose: () => setBrowsedProjectId(undefined) }
-    : undefined;
-  const browseProjectFiles = frontendShell?.fileViewer === true ? setBrowsedProjectId : undefined;
+  const { browse: browseProjectFiles, page: projectFilesPage } = projectFilesRoute(bootstrap, frontendShell);
   useBackNavigation(mobileNavigationOpen, () => closeMobileNavigation(), 60);
   useBackNavigation(planDrawerOpen, () => setPlanDrawerOpen(false), 50);
   useBackNavigation(projectFolderDialogOpen, () => setProjectFolderDialogOpen(false));
@@ -582,13 +576,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const closeAfter = <T extends unknown[]>(callback: (...args: T) => void) => (...args: T) => {
       closeMobileNavigation();
       terminalPage.closePage();
-      setBrowsedProjectId(undefined);
       callback(...args);
     };
     const openNewTaskFromNavigation = (projectId?: string) => {
       closeMobileNavigation({ restoreFocus: false });
       terminalPage.closePage();
-      setBrowsedProjectId(undefined);
       requestNewTaskFocus();
       callbacks.navigation.openNewTask(projectId);
     };

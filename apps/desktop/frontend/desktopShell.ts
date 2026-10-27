@@ -40,7 +40,7 @@ import {
 type DesktopRoute =
   | { surface: "nativeSession"; agentId: string; nativeSessionId: string; projectId?: string }
   | { surface: "settings"; projectId?: string; settingsAgentId?: string; settingsTab?: SettingsTabId; settingsIntent?: SettingsIntent; returnToNewTask?: boolean }
-  | { surface: "task"; projectId?: string; taskId?: string };
+  | { surface: "task"; projectId?: string; taskId?: string; projectFiles?: boolean };
 
 /** Adapts the native Desktop host to the shared Frontend shell seam. */
 export function createDesktopShell(
@@ -135,6 +135,8 @@ export function createDesktopShell(
     route = next;
     publishRoute();
   };
+  // Where closing the Project files page returns; Desktop has no history to go back through.
+  let projectFilesReturn: DesktopRoute | undefined;
 
   const handleDesktopCommand = (payload: DesktopCommand) => {
     if (payload === "quit") {
@@ -345,6 +347,15 @@ export function createDesktopShell(
         settingsIntent,
       }),
       openTask: (taskId) => navigate({ surface: "task", taskId }),
+      openProjectFiles(projectId) {
+        if (!(route.surface === "task" && route.projectFiles)) projectFilesReturn = route;
+        navigate({ surface: "task", projectId, projectFiles: true });
+      },
+      closeProjectFiles(projectId) {
+        if (!(route.surface === "task" && route.projectFiles && route.projectId === projectId)) return;
+        navigate(projectFilesReturn ?? { surface: "task", projectId });
+        projectFilesReturn = undefined;
+      },
       replaceSettingsTab(settingsTab) {
         if (route.surface !== "settings") return;
         navigate({
