@@ -4,9 +4,9 @@ name: Android
 # instrumentation tests. It builds no APK and uploads nothing but failure reports. The Frontend,
 # client, and browser tests it ships run in ci.yml on every pull request.
 #
-# A push or manual run also builds the APK. It is built without the App Servers it can carry,
-# so it is ready in minutes, and says so where one would be needed. A run can include them, and
-# a release always does.
+# Only a manual run or a release builds the APK; a push builds nothing. A manual run builds it
+# without the App Servers it can carry, so it is ready in minutes, and says so where one would
+# be needed. A run can include them, and a release always does.
 on:
   workflow_dispatch:
     inputs:
@@ -27,8 +27,6 @@ on:
         required: false
       OPENAIDE_ANDROID_DEBUG_KEYSTORE_PASSWORD:
         required: false
-  push:
-    branches: [main, 'android/**']
   pull_request:
     paths: ['apps/android/**', 'openaide-rs/android-ssh/**', 'openaide-rs/remote-client/**', '.github/workflows/android.yml']
 

@@ -204,19 +204,20 @@ Linux App Server built from the same commit, about 48 MB more. A local test buil
 carry an archive too, with the version its binary reports:
 `gradle -PopenaideSshAppServerArchive=/path/to/openaide-app-server-linux-x64.tar.gz -PopenaideSshAppServerVersion=0.0.0 assembleDebug`.
 
-CI separately cross-compiles the App Server with the Android NDK, builds the
-shared Frontend, runs existing Web Shell tests and packages the Termux runtime,
-which is the App Server alone.
-It runs on every pull request, pushes to `main` and `android/**`, and manual dispatch,
-so shared Frontend and transport changes cannot bypass Android builds. Each run
-uploads the ARM64 Termux runtime as `app-server-android-arm64`; a failed run also
-uploads its unit/lint reports as `android-apk-diagnostics`. Device tests still require
-a configured phone; CI compilation is not a substitute for executing them via ADB.
-With the persistent signing secrets configured, pushes, manual dispatch and pull
-requests from this repository produce `android/openaide-android.apk`, a
-non-debuggable user build signed with the stable key, and outside releases also the
-unzipped `openaide-android.apk` artifact, which a phone can install from its link. Fork pull requests and runs
-without the secrets upload no APK, since a per-runner debug key cannot update an
+A CI run that includes the App Servers also cross-compiles the App Server with the
+Android NDK and packages it as the Termux runtime.
+A pull request that touches the Android app, `android-ssh` or `remote-client` runs the
+Android unit tests and lint and compiles the instrumentation tests; it builds no APK and
+uploads only its unit/lint reports, as `android-apk-diagnostics`, when it fails. The shared
+Frontend and transport tests run in `ci.yml` on every pull request. Device tests still
+require a configured phone; CI compilation is not a substitute for executing them via ADB.
+A push builds nothing. Only a manual run of the Android workflow (or of Build artifacts
+with Android selected) and a release build the APK. With the persistent signing secrets
+configured, a manual run produces `android/openaide-android.apk`, a non-debuggable user
+build signed with the stable key, and also the unzipped `openaide-android.apk` artifact,
+which a phone can install from its link. A run that includes the App Servers also uploads
+the ARM64 Termux runtime as `app-server-android-arm64`. Runs without the secrets upload no
+APK, since a per-runner debug key cannot update an
 installed app. Store distribution still needs
 its own signing/review process; the current persistent development certificate is
 retained for in-place updates on existing test phones.
