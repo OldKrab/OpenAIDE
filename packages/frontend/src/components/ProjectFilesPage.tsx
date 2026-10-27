@@ -25,10 +25,9 @@ import "../styles/app/project-files-page.css";
 /**
  * Project files opened from a Project rather than a Task: the same panel as a page. There is no
  * Composer here, so comments collect on the page and "Ask in a new Task" starts a Task in that
- * Project with all of them as its message. Unsent comments are page state and end with it.
+ * Project with all of them as its message. Unsent comments are page state and end with it; the
+ * page itself is an App Shell route (`projectFilesRoute`).
  */
-// TODO: give this page a route of its own. It is local presentation state today, so a reload or
-// a shared link returns to the surface underneath; routing needs a shell navigation contract.
 export function ProjectFilesPage({
   connection,
   onAsk,

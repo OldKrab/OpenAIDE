@@ -11,6 +11,12 @@
   flex: 1;
 }
 
+/* Desktop's title bar is a drag region over the top of the main surface; without a Task header
+   to integrate with, the page starts below it so its header controls stay clickable. */
+.app-sidebar-frame-with-overlay-header .project-files-page {
+  padding-top: 32px;
+}
+
 /* Comments collect on the page; this sends them all as one new Task. */
 .project-files-ask {
   display: flex;

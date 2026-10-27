@@ -448,7 +448,18 @@ test("reviews changes and files beside Chat, comments on lines, and browses a Pr
     await expect(reader).toBeVisible();
     await page.screenshot({ path: path.join(shots, "project-desktop-minimum.png") });
     // Native windows enforce 880×600; verify the supported minimum, not a phone-sized native window.
-    if (process.env.OPENAIDE_SMOKE_FRONTEND === "desktop") return;
+    if (process.env.OPENAIDE_SMOKE_FRONTEND === "desktop") {
+      // Desktop routes the Project page in memory, and its Close returns to the Task it was opened from.
+      await page.getByRole("button", { name: "OpenAIDE actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Browse files", exact: true }).click();
+      const projectPage = page.getByRole("region", { name: "Project files", exact: true });
+      await expect(projectPage.getByRole("treeitem", { name: filename })).toBeVisible();
+      await page.screenshot({ path: path.join(shots, "project-desktop-page.png") });
+      await projectPage.getByRole("button", { name: "Close Project files", exact: true }).click();
+      await expect(projectPage).toHaveCount(0);
+      await expect(composer).toBeVisible();
+      return;
+    }
 
     // Phone: the list and the reader are separate screens under Changes and Files.
     await page.setViewportSize({ width: 390, height: 844 });
@@ -468,6 +479,14 @@ test("reviews changes and files beside Chat, comments on lines, and browses a Pr
     await page.getByRole("menuitem", { name: "Browse files", exact: true }).click();
     const viewer = page.getByRole("region", { name: "Project files", exact: true });
     await expect(viewer.getByRole("button", { name: "Files", exact: true })).toHaveAttribute("aria-pressed", "true");
+    // The page is a route: reload keeps it, and Back returns to the Task it was opened from.
+    await expect(page).toHaveURL(/\/new-task\?projectId=[^&]+&view=files$/);
+    await page.reload();
+    await expect(viewer.getByRole("treeitem", { name: filename })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/task\/task_/);
+    await expect(viewer).toHaveCount(0);
+    await page.goForward();
     await viewer.getByRole("treeitem", { name: filename }).click();
     const projectReader = viewer.getByRole("group", { name: "File Viewer" }).locator(".file-code-reader");
     // Comments collect on the page until they are asked about together in one new Task.
@@ -480,7 +499,7 @@ test("reviews changes and files beside Chat, comments on lines, and browses a Pr
     await expect(ask).toHaveText("Ask in a new Task 2");
     await page.screenshot({ path: path.join(shots, "project-viewer.png") });
     await ask.click();
-    await expect(page).toHaveURL(/\/new-task/);
+    await expect(page).toHaveURL(/\/new-task\?projectId=[^&]+$/);
     const draft = page.getByRole("textbox", { name: "Message" });
     await expect(draft).toContainText(`${filename}:1`);
     await expect(draft).toContainText(`${filename}:3`);
@@ -497,6 +516,7 @@ test("reviews changes and files beside Chat, comments on lines, and browses a Pr
     await page.screenshot({ path: path.join(shots, "project-phone-page.png") });
     await viewer.locator(".project-files-back").click();
     await expect(viewer).toHaveCount(0);
+    await expect(page).not.toHaveURL(/view=files/);
     await expect(page.locator(".mobile-workbench-bar")).toBeVisible();
   } finally { await rm(filename, { force: true }); }
 });

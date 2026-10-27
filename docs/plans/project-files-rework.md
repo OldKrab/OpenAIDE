@@ -40,7 +40,7 @@ All four slices are implemented. Where the result differs from the prototype or 
 
 - The panel starts at 58% of the Task Page instead of half, because the list column and a diff do not both fit in half of a 1280-pixel window. The list column narrows with the panel, not with the window.
 - A phone shows one opened file at a time; File Tabs appear from the wide layout up.
-- The Project viewer is presentation state of the App Shell, not a route: a reload returns to the surface underneath. Giving it a route needs a shell navigation contract and is marked in the code.
+- The Project page is an App Shell route over that Project's New Task (`projectFiles` in the bootstrap, `openProjectFiles` and `closeProjectFiles` in shell navigation). Web uses `/new-task?projectId=…&view=files`, a path every Web host already serves, so reload and Back keep it; Close goes back when the page was opened in the app. Desktop routes it in memory and Close returns to the previous route. Shells without a file viewer do not offer Browse files.
 - On the Project page, quotes and comments collect on the page; "Ask in a new Task" in its header starts one Task with all of them. They are page state, so leaving the page drops any not yet asked about.
 - When the Task Page column is narrower than 760 pixels (the Desktop window minimum with the sidebar open), the panel covers Chat instead of sharing the column, and Close is the way back.
 - A file-name search ranks matches: file name equal, prefix, contained, then path, then the query's characters in order; shorter paths first within each.

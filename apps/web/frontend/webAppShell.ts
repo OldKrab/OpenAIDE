@@ -83,11 +83,12 @@ export function createWebAppShell(): FrontendShell {
         return;
     }
   };
-  const navigate = (path: string) => {
+  // `returnState` marks an entry that its close action leaves with Back, as Settings does.
+  const navigate = (path: string, returnState: Record<string, true> | null = null) => {
     if (window.location.pathname + window.location.search === path) return;
     const enteringSettings = path.startsWith("/settings") && window.location.pathname !== "/settings";
     if (path.startsWith("/settings") && isSettingsPath(window.location.pathname)) window.history.replaceState(window.history.state, "", path);
-    else window.history.pushState(enteringSettings ? { openaideSettingsReturn: true } : null, "", path);
+    else window.history.pushState(enteringSettings ? { openaideSettingsReturn: true } : returnState, "", path);
     publishRoute();
   };
   const publishRoute = () => {
@@ -157,6 +158,15 @@ export function createWebAppShell(): FrontendShell {
       openSettings: (agentId, returnToNewTask, projectId, settingsTab, settingsIntent) =>
         navigate(settingsPath(agentId, returnToNewTask, projectId, settingsTab, settingsIntent)),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
+      openProjectFiles: (projectId) => navigate(projectFilesPath(projectId), { openaideProjectFilesReturn: true }),
+      closeProjectFiles(projectId) {
+        if (window.history.state?.openaideProjectFilesReturn) window.history.back();
+        else {
+          // Reached by reload or a link, so there is no entry of ours behind it to go back to.
+          window.history.replaceState(null, "", newTaskPath(projectId));
+          publishRoute();
+        }
+      },
       closeSettings(taskId, projectId) {
         if (window.history.state?.openaideSettingsReturn) window.history.back();
         else {
@@ -392,9 +402,12 @@ function webBootstrapForLocation(): WebviewBootstrap {
     };
   }
   if (pathname === "/new-task" || pathname.startsWith("/new-task/")) {
+    const search = new URLSearchParams(window.location.search);
+    const projectId = search.get("projectId") ?? undefined;
     return {
       surface: "task",
-      projectId: new URLSearchParams(window.location.search).get("projectId") ?? undefined,
+      projectId,
+      ...(projectId && search.get("view") === "files" ? { projectFiles: true } : {}),
       ...shared,
     };
   }
@@ -425,6 +438,11 @@ function settingsTabFromSearch() {
 
 function newTaskPath(projectId?: string) {
   return projectId ? `/new-task?projectId=${encodeURIComponent(projectId)}` : "/new-task";
+}
+
+/** The files page rides on the New Task path, which every Web host already serves. */
+function projectFilesPath(projectId: string) {
+  return `${newTaskPath(projectId)}&view=files`;
 }
 
 function nativeSessionPath(agentId: string, nativeSessionId: string) {

@@ -161,7 +161,7 @@ export function AppPrimaryTaskSurface({
       <ProjectFilesPage
         connection={callbacks.task.fileViewer}
         onAsk={(prompt) => {
-          projectFilesPage.onClose();
+          // Leaves the routed page forward, so Back returns to it rather than racing a close.
           callbacks.navigation.openNewTask(browsedProject.projectId);
           intents.newTask.changePrompt(prompt);
         }}
