@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   File,
@@ -95,6 +95,7 @@ export function ProjectFilesPanel({
   searchRequest,
   splitRatio,
   submitLabel,
+  headerControl,
   suggestion,
   variant,
   viewer,
@@ -126,6 +127,8 @@ export function ProjectFilesPanel({
   searchRequest?: ProjectFileSearchRequest;
   splitRatio?: number;
   submitLabel?: string;
+  /** A control the owner places in the header before search, such as the Project page's Ask. */
+  headerControl?: ReactNode;
   /** Another workspace the Agent is working in. Offered, never selected for the user. */
   suggestion?: FileWorkspace;
   /** `task` sits beside Chat and sends comments to its Composer; `project` is a full page. */
@@ -341,6 +344,7 @@ export function ProjectFilesPanel({
           workspaces={workspaces}
         />
         <span className="project-files-spacer" />
+        {headerControl}
         {narrow && phonePage === "reader" && shown === "changes" && modeSwitch}
         <button
           type="button"

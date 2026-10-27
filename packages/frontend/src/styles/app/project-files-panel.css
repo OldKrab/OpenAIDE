@@ -593,19 +593,6 @@
   white-space: nowrap;
 }
 
-/* Project viewer: the same panel as a page, without Chat. */
-.project-files-page {
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.project-files-page > .project-files-panel {
-  flex: 1;
-}
-
 /* The list gives room back to the reader when the panel itself is narrow, whatever the window. */
 @container project-files (max-width: 640px) {
   .project-files-nav {
