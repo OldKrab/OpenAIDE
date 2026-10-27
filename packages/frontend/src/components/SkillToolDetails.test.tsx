@@ -29,7 +29,7 @@ describe("skill tool details", () => {
 
     expect(html).toContain("<h1>Test-Driven Development</h1>");
     expect(html).toContain("<li>Write one test</li>");
-    expect(html).toContain("<code>npm test</code>");
+    expect(html).toContain(">npm test</code>");
     expect(html).not.toContain("Test-first workflow");
     expect(html).not.toContain("/home/user/.agents/skills/tdd/SKILL.md");
     expect(html).not.toContain("name: tdd");
