@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { markdownFileLocation, pathLikeFileLocation, relativeMarkdownHref, chatMarkdownFileLocation } from "./fileViewerReferences";
+import {
+  chatMarkdownFileLocation,
+  inlineFileReferenceCandidate,
+  markdownFileLocation,
+  pathLikeFileLocation,
+  relativeMarkdownHref,
+} from "./fileViewerReferences";
 
 describe("path-like Agent File References", () => {
   it("opens relative source paths and line suffixes that agents write in inline code", () => {
@@ -41,5 +47,21 @@ describe("markdown file locations", () => {
     expect(chatMarkdownFileLocation("README.md:12")).toEqual({ path: "README.md", line: 12 });
     expect(chatMarkdownFileLocation("#L12")).toBeUndefined();
     expect(chatMarkdownFileLocation("https://example.com")).toBeUndefined();
+  });
+});
+
+describe("inline file reference candidates", () => {
+  it("offers any relative file type for checking and takes absolute paths as written", () => {
+    expect(inlineFileReferenceCandidate("cv/resume_v2.pdf")).toEqual({ location: { path: "cv/resume_v2.pdf" }, needsCheck: true });
+    expect(inlineFileReferenceCandidate("./notes.typ:3")).toEqual({ location: { path: "notes.typ", line: 3 }, needsCheck: true });
+    expect(inlineFileReferenceCandidate("/srv/app/run.log")).toEqual({ location: { path: "/srv/app/run.log" }, needsCheck: false });
+  });
+
+  it("skips words, commands, URLs and directories", () => {
+    expect(inlineFileReferenceCandidate("useState")).toBeUndefined();
+    expect(inlineFileReferenceCandidate("npm run build")).toBeUndefined();
+    expect(inlineFileReferenceCandidate("https://example.com/a.pdf")).toBeUndefined();
+    expect(inlineFileReferenceCandidate("docs/")).toBeUndefined();
+    expect(inlineFileReferenceCandidate("..")).toBeUndefined();
   });
 });

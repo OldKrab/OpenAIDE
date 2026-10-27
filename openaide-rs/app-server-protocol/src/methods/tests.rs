@@ -122,4 +122,5 @@ fn file_viewer_methods_use_file_viewer_namespace() {
     );
     assert_eq!(FileViewerRefresh::METHOD, "fileViewer/refresh");
     assert_eq!(FileViewerRelease::METHOD, "fileViewer/release");
+    assert_eq!(FileViewerExistingFiles::METHOD, "fileViewer/existingFiles");
 }

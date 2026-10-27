@@ -763,6 +763,12 @@ protocol_method!(
     ProjectFilesResult
 );
 protocol_method!(
+    FileViewerExistingFiles,
+    FILE_VIEWER_EXISTING_FILES,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
     FileViewerChanges,
     FILE_VIEWER_CHANGES,
     ProjectFilesParams,

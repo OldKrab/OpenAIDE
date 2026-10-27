@@ -11,8 +11,8 @@ use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LOGOUT, FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF,
-    FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN, FILE_VIEWER_OPEN_FROM_HANDLE,
-    FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH,
+    FILE_VIEWER_EXISTING_FILES, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN,
+    FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH,
 };
 use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
 use serde_json::{json, Value};
@@ -195,7 +195,7 @@ impl SharedRpcGateway {
         completion_clock: impl FnOnce() -> AppServerTime,
     ) -> GatewayOutcome {
         if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. }
-            if matches!(method.as_str(), FILE_VIEWER_LIST_DIRECTORY | FILE_VIEWER_SEARCH | FILE_VIEWER_CHANGES | FILE_VIEWER_DIFF))
+            if matches!(method.as_str(), FILE_VIEWER_LIST_DIRECTORY | FILE_VIEWER_SEARCH | FILE_VIEWER_EXISTING_FILES | FILE_VIEWER_CHANGES | FILE_VIEWER_DIFF))
         {
             return self.handle_project_files_without_protocol_lock(
                 connection_id,

@@ -40,6 +40,27 @@ export function pathLikeFileLocation(value: string): AgentFileLocation | undefin
   return hasKnownFileExtension(path) ? { path, line } : undefined;
 }
 
+/**
+ * Inline code that may name a file. An absolute path is taken as written. A relative one
+ * is only a candidate: Chat links it after App Server confirms it names a file in the Task
+ * Workspace, so any file type qualifies and a name that merely looks like a path does not.
+ */
+export function inlineFileReferenceCandidate(
+  value: string,
+): { location: AgentFileLocation; needsCheck: boolean } | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 1024 || /\s/.test(trimmed)) return undefined;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return undefined;
+  const { path, line } = splitLineSuffix(trimmed);
+  if (!path || path === "." || path === "..") return undefined;
+  if (isAbsoluteFilePath(path)) return { location: { path, line }, needsCheck: false };
+  // A bare word is an identifier far more often than a file.
+  if (!/[./\\]/.test(path)) return undefined;
+  const relative = path.replace(/^(?:\.[/\\])+/, "");
+  if (!relative || /[/\\]$/.test(relative)) return undefined;
+  return { location: { path: relative, line }, needsCheck: true };
+}
+
 export function relativeMarkdownHref(href: string | undefined): string | undefined {
   if (!href || markdownFileLocation(href)) return undefined;
   if (/^[a-z][a-z0-9+-]*:/i.test(href)) return undefined;

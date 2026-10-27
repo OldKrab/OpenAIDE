@@ -13,6 +13,8 @@ mod tests;
 const PAGE: usize = 200;
 const SCAN: usize = 20_000;
 const FILE_BYTES: u64 = 1024 * 1024;
+/// Chat asks about the paths of the messages it renders; this bounds one request.
+const EXISTING_PATHS: usize = 100;
 
 pub fn run(root: &Path, operation: &str, params: &ProjectFilesParams) -> ProjectFilesResult {
     let mut result = empty();
@@ -26,6 +28,10 @@ pub fn run(root: &Path, operation: &str, params: &ProjectFilesParams) -> Project
     let outcome = match operation {
         "fileViewer/listDirectory" => directory(&root, params, &mut result),
         "fileViewer/search" => search(&root, params, &mut result),
+        "fileViewer/existingFiles" => {
+            existing(&root, params, &mut result);
+            Ok(())
+        }
         "fileViewer/changes" => git::changes(&root, params, &mut result),
         "fileViewer/diff" => git::diff(&root, params, &mut result),
         _ => Err("unavailable"),
@@ -77,6 +83,21 @@ fn resolve(root: &Path, relative: &str, missing: bool) -> Result<PathBuf, &'stat
         return Err("outsideWorkspace");
     }
     Ok(joined)
+}
+/// Keeps the requested paths that name a regular file inside the workspace, as given.
+/// Missing paths, directories, parent components and symlinks leaving the workspace are
+/// dropped alike, so the answer reveals nothing outside it.
+fn existing(root: &Path, params: &ProjectFilesParams, result: &mut ProjectFilesResult) {
+    let paths = params.paths.as_deref().unwrap_or_default();
+    result.truncated = paths.len() > EXISTING_PATHS;
+    for path in paths.iter().take(EXISTING_PATHS) {
+        let is_file = resolve(root, path, false)
+            .and_then(|resolved| fs::metadata(resolved).map_err(|_| "unavailable"))
+            .is_ok_and(|metadata| metadata.is_file());
+        if is_file {
+            result.entries.push(entry(path.clone(), false));
+        }
+    }
 }
 fn relative(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root)

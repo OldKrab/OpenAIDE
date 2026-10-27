@@ -37,6 +37,7 @@ import type { AgentIconLookup } from "./AgentIcon";
 import { useReturnToMainHistory } from "./useReturnToMainHistory";
 import { useTaskHistoryView } from "./useTaskHistoryView";
 import { AgentFileOpenContext } from "./agentFileOpen";
+import { ExistingFileReferencesContext, existingFileReferencesFor } from "./existingFileReferences";
 import { ProjectFileWorkspace } from "./ProjectFileWorkspace";
 import { ProjectFilesButton } from "./ProjectFilesButton";
 import { TerminalButton } from "./terminals/TerminalButton";
@@ -220,6 +221,9 @@ export function TaskView({
     window.addEventListener("keydown", openFiles);
     return () => window.removeEventListener("keydown", openFiles);
   }, [fileViewerEnabled, projectFilesOpen]);
+  const fileReferences = useMemo(() => fileViewerEnabled && fileViewerConnection
+    ? existingFileReferencesFor(fileViewerConnection, snapshot.task.task_id)
+    : undefined, [fileViewerConnection, fileViewerEnabled, snapshot.task.task_id]);
   const openAgentFile = useCallback((path: string, line?: number) => {
     setProjectFilesOpen(true);
     setProjectFileRequest(previous => ({ taskId: snapshot.task.task_id, path, line, sequence: (previous?.sequence ?? 0) + 1 }));
@@ -754,7 +758,7 @@ export function TaskView({
   if (!fileViewerEnabled) return taskSurface;
   return (
     <AgentFileOpenContext.Provider value={openAgentFile}>
-      {taskSurface}
+      <ExistingFileReferencesContext.Provider value={fileReferences}>{taskSurface}</ExistingFileReferencesContext.Provider>
     </AgentFileOpenContext.Provider>
   );
 }

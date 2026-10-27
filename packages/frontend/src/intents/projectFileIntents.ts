@@ -3,13 +3,15 @@ import {
   FILE_VIEWER_SEARCH,
   FILE_VIEWER_CHANGES,
   FILE_VIEWER_DIFF,
+  FILE_VIEWER_EXISTING_FILES,
   type BackendConnection,
   type ClientRequestId,
   type ProjectFilesParams,
   type ProjectFilesResult,
 } from "@openaide/app-server-client";
-export type ProjectFileOperation = "files" | "search" | "changes" | "diff";
+export type ProjectFileOperation = "files" | "search" | "changes" | "diff" | "existing";
 const methods = {
+  existing: FILE_VIEWER_EXISTING_FILES,
   files: FILE_VIEWER_LIST_DIRECTORY,
   search: FILE_VIEWER_SEARCH,
   changes: FILE_VIEWER_CHANGES,
