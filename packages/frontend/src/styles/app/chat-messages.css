@@ -397,6 +397,62 @@
   overflow-wrap: anywhere;
 }
 
+/* Tapping inline code copies it; the bubble confirms the copy and then fades. */
+.agent-inline-code-copy {
+  position: relative;
+  cursor: copy;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 120ms ease-out;
+}
+
+.agent-inline-code-copy:hover {
+  background: var(--oa-raised);
+}
+
+.agent-inline-code-copy:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+
+.agent-inline-code-copy[data-copy-state="copied"] {
+  background: color-mix(in oklch, var(--oa-success) 18%, var(--oa-panel));
+}
+
+.agent-inline-code-copy[data-copy-state="failed"] {
+  background: color-mix(in oklch, var(--oa-danger) 18%, var(--oa-panel));
+}
+
+.agent-inline-code-copy:is([data-copy-state="copied"], [data-copy-state="failed"])::after {
+  content: "Copied";
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-text);
+  box-shadow: 0 5px 16px color-mix(in oklch, var(--oa-text) 18%, transparent);
+  color: var(--oa-bg);
+  font-family: var(--oa-ui-font, inherit);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  padding: 4px 7px;
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  animation: agent-inline-code-copied 1400ms ease-out forwards;
+}
+
+.agent-inline-code-copy[data-copy-state="failed"]::after {
+  content: "Copy failed";
+}
+
+@keyframes agent-inline-code-copied {
+  0% { opacity: 0; transform: translate(-50%, 3px); }
+  10%, 75% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 0); }
+}
+
 :is(.chat-agent, .file-viewer-markdown) pre {
   max-width: 100%;
   overflow: auto;
@@ -693,6 +749,10 @@
 @media (prefers-reduced-motion: reduce) {
   .agent-markdown-copy {
     transition-duration: 0.01ms;
+  }
+
+  .agent-inline-code-copy::after {
+    animation: none;
   }
 
   .agent-mermaid-toolbar {
