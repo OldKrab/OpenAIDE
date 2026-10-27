@@ -21,20 +21,20 @@ use crate::agent::acp_response_boundary::take_preceding_session_updates;
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_with_catalog_snapshot, deliver_session_commands_catalog,
     deliver_session_config_catalog, deliver_session_metadata_update,
-    keep_unprojected_context_usage, session_catalogs_from_update, session_with_catalog_snapshots,
-    DispatchSessionCatalogs, PendingSessionCatalogs,
+    keep_unprojected_context_usage, session_catalogs_from_update, DispatchSessionCatalogs,
+    PendingSessionCatalogs,
 };
 use crate::agent::acp_session_termination::close_active_session;
 use crate::agent::acp_session_termination::SessionDeleteRequest;
 use crate::agent::acp_steering::{SteeringAction, SteeringDelivery, SteeringRequests};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
-use crate::agent::attached_native_session::{AcpSessionCommand, AcpSessionConfigCommand};
+use crate::agent::attached_native_session::{
+    AcpSessionCommand, AcpSessionConfigCommand, SessionSnapshotPublisher,
+};
 use crate::agent::events::{AgentBackgroundWork, AgentEvent};
 use crate::agent::prompt_content::PromptContentPolicy;
-use crate::agent::{
-    AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionEventSink,
-};
+use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentCommandsCatalog, ConfigOptionsCatalog};
@@ -46,6 +46,7 @@ pub(super) struct PromptRunContext<'a> {
     pub(super) current_prompts: &'a AcpSessionPromptMap,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) content_policy: PromptContentPolicy,
+    pub(super) snapshot: &'a SessionSnapshotPublisher,
 }
 
 // The runner coordinates independent ACP channels owned by its caller. Keep
@@ -65,7 +66,6 @@ pub(super) async fn run_prompt(
     config_requests: &mut SessionConfigRequests,
     config_catalog: &mut ConfigOptionsCatalog,
     commands_catalog: &mut Option<AgentCommandsCatalog>,
-    session_snapshot: &AgentSession,
     session_event_sink: &mut Option<Arc<dyn AgentSessionEventSink>>,
     session_projection: &mut Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
@@ -274,13 +274,6 @@ pub(super) async fn run_prompt(
                     break Err(RuntimeError::NotReady("ACP command channel stopped".to_string()));
                 };
                 match command {
-                    AcpSessionCommand::Snapshot { reply_tx } => {
-                        let _ = reply_tx.send(Ok(session_with_catalog_snapshots(
-                            session_snapshot,
-                            config_catalog,
-                            commands_catalog,
-                        )));
-                    }
                     AcpSessionCommand::SetEventSink { sink } => {
                         let config_snapshot = (config_catalog.status
                             != crate::protocol::model::ConfigOptionsStatus::Empty
@@ -516,6 +509,10 @@ pub(super) async fn run_prompt(
                 }
             }
         }
+        // Arms that end the prompt skip this; the idle loop publishes once it resumes.
+        context
+            .snapshot
+            .publish_catalogs(config_catalog, commands_catalog);
     };
 
     // A session cancel requested during this prompt targets this prompt. Consume it

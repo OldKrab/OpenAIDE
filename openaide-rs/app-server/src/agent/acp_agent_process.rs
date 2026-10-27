@@ -111,6 +111,8 @@ pub(super) struct AcpAgentProcessOpen {
     /// Releases inactive Agent resources without coupling lifetime to Task pages.
     pub(super) session_idle:
         tokio::sync::watch::Receiver<crate::agent::attached_native_session::SessionIdleTimeouts>,
+    /// Receives the started session before startup is reported, then moves to the event loop.
+    pub(super) snapshot: crate::agent::attached_native_session::SessionSnapshotPublisher,
 }
 
 pub(super) struct AcpAgentProcessInput {
@@ -649,6 +651,7 @@ async fn open_on_shared_process(
         trace,
         terminal_owner_id,
         session_idle,
+        snapshot,
     } = open;
     terminal_registry.begin_open(terminal_owner_id);
     let terminal_owner = terminal_registry.owner(terminal_owner_id);
@@ -676,6 +679,7 @@ async fn open_on_shared_process(
         }
     };
     let started_session = opened.started_session.clone();
+    snapshot.publish(&started_session);
     early_open.finish(&started_session.session_id);
     let replayed_messages = opened.replayed_messages.clone();
     let session_id = started_session.session_id.clone();
@@ -742,6 +746,7 @@ async fn open_on_shared_process(
             session_event_sinks: session_event_sinks_for_task,
             session_idle,
             process_lifetime,
+            snapshot,
         })
         .await;
         let _ = tokio::task::spawn_blocking(move || terminal_owner.close()).await;

@@ -150,6 +150,8 @@ impl NativeSessionService {
                         "turn_id": turn_id.as_str(),
                         "elapsed_ms": acquire_started.elapsed().as_millis(),
                         "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                        "error_code": error.code(),
+                        "error_kind": error.reason(),
                         "error": error.to_string(),
                     }),
                 );

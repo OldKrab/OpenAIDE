@@ -4,8 +4,8 @@ use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
 use crate::agent::{
-    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSession,
-    AgentSessionEventSink, AgentSessionLoad,
+    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink,
+    AgentSessionLoad,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
@@ -13,9 +13,6 @@ use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 use super::PromptRequestGuard;
 
 pub(in crate::agent) enum AcpSessionCommand {
-    Snapshot {
-        reply_tx: mpsc::Sender<Result<AgentSession, RuntimeError>>,
-    },
     SetEventSink {
         sink: Arc<dyn AgentSessionEventSink>,
     },
