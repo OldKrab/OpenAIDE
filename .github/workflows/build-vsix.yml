@@ -194,7 +194,7 @@ jobs:
   android:
     if: inputs.android
     # The stable signing key must reach the APK build, or the APK cannot update an
-    # installed app signed by pushes to main.
+    # installed app signed by earlier builds.
     uses: ./.github/workflows/android.yml
     secrets: inherit
     # A full build carries the App Servers too, so the APK works on this phone and SSH computers.
