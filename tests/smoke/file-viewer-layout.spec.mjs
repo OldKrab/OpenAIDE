@@ -439,14 +439,16 @@ test("reviews changes and files beside Chat, comments on lines, and browses a Pr
     await page.emulateMedia({ colorScheme: "dark" });
     await page.screenshot({ path: path.join(shots, "project-dark.png") });
     await page.emulateMedia({ colorScheme: "light" });
-    if (process.env.OPENAIDE_SMOKE_FRONTEND === "desktop") {
-      // Native windows enforce 880×600; verify the supported minimum, not a phone-sized native window.
-      await page.setViewportSize({ width: 880, height: 600 });
-      await expect(panel.getByRole("button", { name: "Close Project files", exact: true })).toBeVisible();
-      await expect(reader).toBeVisible();
-      await page.screenshot({ path: path.join(shots, "project-desktop-minimum.png") });
-      return;
-    }
+    // At the Desktop window minimum with the sidebar open, the column is too narrow to share:
+    // the panel covers Chat, and Close is the way back.
+    await page.setViewportSize({ width: 880, height: 600 });
+    await expect(page.locator(".task-work-stack")).toHaveAttribute("data-file-viewer-maximized", "true");
+    await expect(panel.getByRole("button", { name: "Maximize", exact: true })).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Show Chat", exact: true })).toHaveCount(0);
+    await expect(reader).toBeVisible();
+    await page.screenshot({ path: path.join(shots, "project-desktop-minimum.png") });
+    // Native windows enforce 880×600; verify the supported minimum, not a phone-sized native window.
+    if (process.env.OPENAIDE_SMOKE_FRONTEND === "desktop") return;
 
     // Phone: the list and the reader are separate screens under Changes and Files.
     await page.setViewportSize({ width: 390, height: 844 });
@@ -468,12 +470,34 @@ test("reviews changes and files beside Chat, comments on lines, and browses a Pr
     await expect(viewer.getByRole("button", { name: "Files", exact: true })).toHaveAttribute("aria-pressed", "true");
     await viewer.getByRole("treeitem", { name: filename }).click();
     const projectReader = viewer.getByRole("group", { name: "File Viewer" }).locator(".file-code-reader");
+    // Comments collect on the page until they are asked about together in one new Task.
+    await projectReader.locator(".file-viewer-line").nth(0).click();
+    await viewer.getByRole("button", { name: "Quote only", exact: true }).click();
     await projectReader.locator(".file-viewer-line").nth(2).click();
+    await viewer.getByRole("textbox", { name: "Comment" }).fill("Is this exported on purpose?");
+    await viewer.getByRole("button", { name: "Add comment", exact: true }).click();
+    const ask = viewer.getByRole("button", { name: /^Ask in a new Task/ });
+    await expect(ask).toHaveText("Ask in a new Task 2");
     await page.screenshot({ path: path.join(shots, "project-viewer.png") });
-    await viewer.getByRole("button", { name: "Ask in a new Task", exact: true }).click();
+    await ask.click();
     await expect(page).toHaveURL(/\/new-task/);
-    await expect(page.getByRole("textbox", { name: "Message" })).toContainText(`${filename}:3`);
+    const draft = page.getByRole("textbox", { name: "Message" });
+    await expect(draft).toContainText(`${filename}:1`);
+    await expect(draft).toContainText(`${filename}:3`);
+    await expect(draft).toContainText("Is this exported on purpose?");
     await expect(viewer).toHaveCount(0);
+
+    // A phone reaches the same page from the Project's menu in the navigation drawer.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Open task navigation", exact: true }).click();
+    await page.getByRole("button", { name: "OpenAIDE actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Browse files", exact: true }).click();
+    await expect(viewer.getByRole("treeitem", { name: filename })).toBeVisible();
+    await expect(page.locator(".mobile-workbench-bar")).toBeHidden();
+    await page.screenshot({ path: path.join(shots, "project-phone-page.png") });
+    await viewer.locator(".project-files-back").click();
+    await expect(viewer).toHaveCount(0);
+    await expect(page.locator(".mobile-workbench-bar")).toBeVisible();
   } finally { await rm(filename, { force: true }); }
 });
 
