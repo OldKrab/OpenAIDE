@@ -1,5 +1,6 @@
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
+use crate::storage::agent_config_preferences::AgentConfigPreference;
 use crate::storage::records::{PendingTaskConfigChange, TaskRecord};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,12 +65,14 @@ pub(crate) fn apply_task_config_catalog(
     if !changed {
         return false;
     }
+    if resolves_pending {
+        // The Agent's event confirmed the user's change before its direct reply did.
+        task.config_mutation.chosen = AgentConfigPreference::all_from(&catalog);
+        task.config_mutation.pending = None;
+    }
     task.config_options_catalog = Some(catalog);
     task.native_session_data_freshness.mark_config_fresh();
     task.model_id = model_id;
-    if resolves_pending {
-        task.config_mutation.pending = None;
-    }
     task.updated_at = now.to_string();
     true
 }
@@ -83,12 +86,19 @@ pub(crate) fn apply_task_config_mutation_result(
     if !token.is_current_for(task) {
         return false;
     }
-    let catalog_changed = apply_task_config_catalog(task, catalog, now);
-    if task.config_mutation.pending.take().is_some() {
-        task.updated_at = now.to_string();
-        return true;
+    let chosen = AgentConfigPreference::all_from(&catalog);
+    let mut changed = apply_task_config_catalog(task, catalog, now);
+    if task.config_mutation.chosen != chosen {
+        task.config_mutation.chosen = chosen;
+        changed = true;
     }
-    catalog_changed
+    if task.config_mutation.pending.take().is_some() {
+        changed = true;
+    }
+    if changed {
+        task.updated_at = now.to_string();
+    }
+    changed
 }
 
 pub(crate) fn clear_task_config_mutation(

@@ -27,6 +27,20 @@ pub(crate) struct AgentConfigPreference {
     pub(crate) value: ConfigOptionCurrentValue,
 }
 
+impl AgentConfigPreference {
+    /// The typed current value of every option in a complete catalog.
+    pub(crate) fn all_from(catalog: &ConfigOptionsCatalog) -> Vec<Self> {
+        catalog
+            .options
+            .iter()
+            .map(|option| Self {
+                id: option.id.clone(),
+                value: option.current_value.clone(),
+            })
+            .collect()
+    }
+}
+
 impl Store {
     pub(crate) fn read_agent_config_preferences(
         &self,
@@ -47,14 +61,7 @@ impl Store {
         let _guard = self.lock_settings_write();
         let mut stored = self.read_all_agent_config_preferences()?;
         let preferences = AgentConfigPreferences {
-            options: catalog
-                .options
-                .iter()
-                .map(|option| AgentConfigPreference {
-                    id: option.id.clone(),
-                    value: option.current_value.clone(),
-                })
-                .collect(),
+            options: AgentConfigPreference::all_from(catalog),
         };
         if stored.agents.get(&catalog.agent_id) == Some(&preferences) {
             return Ok(false);

@@ -987,6 +987,12 @@ fn new_task_reuses_the_last_confirmed_agent_config_options() {
                 first.task.task_id.as_str().to_string(),
                 "agent-full-access".to_string()
             ),
+            // The Send resumes the first session, which this Agent restores with its
+            // default mode; the Task's chosen value is reapplied.
+            (
+                first.task.task_id.as_str().to_string(),
+                "agent-full-access".to_string()
+            ),
             (
                 second.task.task_id.as_str().to_string(),
                 "agent-full-access".to_string()
@@ -10597,3 +10603,6 @@ fn wait_until(condition: impl Fn() -> bool) {
 
 #[path = "config_preferences_tests.rs"]
 mod config_preferences_tests;
+
+#[path = "config_restore_tests.rs"]
+mod config_restore_tests;
