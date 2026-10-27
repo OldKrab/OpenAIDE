@@ -1,4 +1,5 @@
 use crate::protocol::model::ConfigOptionCurrentValue;
+use crate::storage::agent_config_preferences::AgentConfigPreference;
 use serde::{Deserialize, Serialize};
 
 /// App Server ordering state for one Task's Agent-owned configuration changes.
@@ -11,14 +12,22 @@ pub struct TaskConfigMutationState {
     pub sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending: Option<PendingTaskConfigChange>,
-    /// Process-owned initialization; a restarted session is restored with its own settings.
+    /// Process-owned initialization of a new session from the Agent's preferences.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferences: Option<openaide_app_server_protocol::snapshot::AgentConfigPreferencesSnapshot>,
+    /// Every value of the session's catalog as of the last user-initiated change it
+    /// confirmed, including preferences applied to a new session. An Agent may restore a
+    /// session with its defaults instead, so these are reapplied after it is restored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) chosen: Vec<AgentConfigPreference>,
 }
 
 impl TaskConfigMutationState {
     pub(super) fn is_empty(&self) -> bool {
-        self.sequence == 0 && self.pending.is_none() && self.preferences.is_none()
+        self.sequence == 0
+            && self.pending.is_none()
+            && self.preferences.is_none()
+            && self.chosen.is_empty()
     }
 }
 
