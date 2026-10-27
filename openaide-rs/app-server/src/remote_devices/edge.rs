@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use super::bridge::{self, BridgeTarget};
+use super::relay_check::{self, CheckOutcome, RelayCheck, RelayHealth};
 use super::{EdgeCommand, RemoteDevices};
 use crate::client_lifecycle::AppServerTime;
 use crate::logging;
@@ -51,6 +52,25 @@ pub(crate) enum EdgeNetwork {
     /// Direct addresses shared in memory, so a test needs no network service.
     #[cfg(test)]
     Local(iroh::address_lookup::MemoryLookup),
+    /// A relay run by the test and trusted without verifying its certificate.
+    #[cfg(test)]
+    Relay(iroh::RelayMap),
+}
+
+impl EdgeNetwork {
+    /// How the edge's relay is checked, or `None` where it has no relay.
+    pub(crate) fn relay_check(&self) -> Option<RelayCheck> {
+        match self {
+            Self::Public => Some(RelayCheck::new(iroh::endpoint::default_relay_mode(), None)),
+            #[cfg(test)]
+            Self::Local(_) => None,
+            #[cfg(test)]
+            Self::Relay(map) => Some(RelayCheck::new(
+                iroh::RelayMode::Custom(map.clone()),
+                Some(iroh::tls::CaTlsConfig::insecure_skip_verify()),
+            )),
+        }
+    }
 }
 
 /// Starts the edge on its own runtime thread. It binds nothing until remote access is in use.
@@ -109,12 +129,27 @@ async fn run(
     let connections = Connections::default();
     // Removals still owed their close; the endpoint must not stop under them.
     let mut closing: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let relay_check = network.relay_check();
+    let mut check_timer = tokio::time::interval_at(
+        tokio::time::Instant::now() + relay_check::CHECK_INTERVAL,
+        relay_check::CHECK_INTERVAL,
+    );
+    check_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // At most one check at a time, against the endpoint bound when it started.
+    let mut check: Option<RunningCheck> = None;
+    let mut health = RelayHealth::default();
     loop {
         tokio::select! {
             command = commands.recv() => match command {
                 None => break,
                 Some(EdgeCommand::Reconcile) => {
-                    reconcile(&devices, &network, &mut endpoint, &mut closing).await;
+                    if reconcile(&devices, &network, &mut endpoint, &mut closing).await {
+                        // A check of the endpoint just replaced says nothing about this one.
+                        if let Some(running) = check.take() {
+                            running.task.abort();
+                        }
+                        health = RelayHealth::default();
+                    }
                 }
                 Some(EdgeCommand::AnnounceTrust(device)) => {
                     if let Some(endpoint) = &endpoint {
@@ -159,10 +194,94 @@ async fn run(
                     devices.set_access(RemoteAccessState::Failed);
                 }
             },
+            _ = check_timer.tick(), if check.is_none() => {
+                if let (Some(relay_check), Some(bound)) = (&relay_check, &endpoint) {
+                    let (relay_check, address) = (relay_check.clone(), bound.addr());
+                    check = Some(RunningCheck {
+                        started: Instant::now(),
+                        task: tokio::spawn(async move { relay_check.check(&address).await }),
+                    });
+                }
+            }
+            finished = finish(&mut check) => {
+                let started = check.take().map(|running| running.started);
+                let outcome = finished.unwrap_or(CheckOutcome::Skipped("task"));
+                let failures_before = health.failures();
+                let rebind = health.record(outcome);
+                log_check(outcome, failures_before, health.failures(), started, rebind);
+                if rebind {
+                    rebind_edge(&devices, &network, &mut endpoint, &mut closing).await;
+                }
+            }
         }
     }
     if let Some(endpoint) = endpoint {
         endpoint.close().await;
+    }
+}
+
+struct RunningCheck {
+    started: Instant,
+    task: tokio::task::JoinHandle<CheckOutcome>,
+}
+
+/// The outcome of the running check; never ready while none runs.
+async fn finish(check: &mut Option<RunningCheck>) -> Result<CheckOutcome, tokio::task::JoinError> {
+    match check {
+        Some(running) => (&mut running.task).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Healthy checks stay quiet: a check is logged when it does not reach the edge, and
+/// when the first one after a failure does.
+fn log_check(
+    outcome: CheckOutcome,
+    failures_before: u32,
+    failures: u32,
+    started: Option<Instant>,
+    rebind: bool,
+) {
+    if outcome == CheckOutcome::Reached && failures_before == 0 {
+        return;
+    }
+    let fields = serde_json::json!({
+        "outcome": outcome.name(),
+        "stage": outcome.stage(),
+        "failures": failures,
+        "rebind": rebind,
+        "duration_ms": started.map(elapsed_ms),
+    });
+    match outcome {
+        CheckOutcome::Reached => logging::info("remote_devices_relay_check", fields),
+        _ => logging::warn("remote_devices_relay_check", fields),
+    }
+}
+
+/// Binds the edge again with the same identity, ending its connections; devices
+/// reconnect. A wedged relay is left behind with the old endpoint.
+async fn rebind_edge(
+    devices: &RemoteDevices,
+    network: &EdgeNetwork,
+    endpoint: &mut Option<Endpoint>,
+    closing: &mut Vec<tokio::task::JoinHandle<()>>,
+) {
+    let Some(old) = endpoint.take() else { return };
+    let started = Instant::now();
+    logging::warn("remote_devices_endpoint_rebinding", serde_json::json!({}));
+    let closed = tokio::time::timeout(relay_check::CLOSE_TIMEOUT, old.close())
+        .await
+        .is_ok();
+    reconcile(devices, network, endpoint, closing).await;
+    let fields = serde_json::json!({
+        "outcome": if endpoint.is_some() { "ok" } else { "failed" },
+        "old_closed": closed,
+        "duration_ms": elapsed_ms(started),
+    });
+    if endpoint.is_some() {
+        logging::info("remote_devices_endpoint_rebound", fields);
+    } else {
+        logging::error("remote_devices_endpoint_rebound", fields);
     }
 }
 
@@ -174,17 +293,17 @@ async fn accept(endpoint: &Option<Endpoint>) -> Option<Incoming> {
 }
 
 /// Makes the endpoint match the trust state: bound with the current identity
-/// while remote access is in use, and absent otherwise.
+/// while remote access is in use, and absent otherwise. Returns whether it changed.
 async fn reconcile(
     devices: &RemoteDevices,
     network: &EdgeNetwork,
     endpoint: &mut Option<Endpoint>,
     closing: &mut Vec<tokio::task::JoinHandle<()>>,
-) {
+) -> bool {
     let wanted = devices.endpoint_secret_key();
     let current = endpoint.as_ref().map(Endpoint::id);
     if current == wanted.as_ref().map(SecretKey::public) {
-        return;
+        return false;
     }
     if let Some(endpoint) = endpoint.take() {
         // Removing the last device stops the endpoint. Stopping first would end
@@ -198,7 +317,7 @@ async fn reconcile(
     }
     let Some(secret_key) = wanted else {
         devices.set_access(RemoteAccessState::Off);
-        return;
+        return true;
     };
     devices.set_access(RemoteAccessState::Starting);
     let started = Instant::now();
@@ -213,6 +332,7 @@ async fn reconcile(
                     "endpoint": bound.id().fmt_short().to_string(),
                 }),
             );
+            relay_check::watch_home_relay(&bound);
             *endpoint = Some(bound);
             devices.set_access(RemoteAccessState::On);
         }
@@ -228,10 +348,18 @@ async fn reconcile(
             devices.set_access(RemoteAccessState::Failed);
         }
     }
+    true
 }
 
-async fn bind(secret_key: SecretKey, network: &EdgeNetwork) -> Result<Endpoint, &'static str> {
-    let alpns = vec![application_alpn(), PAIRING_ALPN.to_vec()];
+pub(crate) async fn bind(
+    secret_key: SecretKey,
+    network: &EdgeNetwork,
+) -> Result<Endpoint, &'static str> {
+    let alpns = vec![
+        application_alpn(),
+        PAIRING_ALPN.to_vec(),
+        relay_check::RELAY_CHECK_ALPN.to_vec(),
+    ];
     match network {
         EdgeNetwork::Public => Endpoint::builder(presets::N0)
             .secret_key(secret_key)
@@ -251,6 +379,15 @@ async fn bind(secret_key: SecretKey, network: &EdgeNetwork) -> Result<Endpoint, 
             lookup.add_endpoint_info(endpoint.addr());
             Ok(endpoint)
         }
+        #[cfg(test)]
+        EdgeNetwork::Relay(map) => Endpoint::builder(presets::Minimal)
+            .secret_key(secret_key)
+            .alpns(alpns)
+            .relay_mode(iroh::RelayMode::Custom(map.clone()))
+            .ca_tls_config(iroh::tls::CaTlsConfig::insecure_skip_verify())
+            .bind()
+            .await
+            .map_err(|_| "bind"),
     }
 }
 
@@ -274,6 +411,8 @@ async fn handle_incoming(
         accept_invite(connection, devices).await;
     } else if connection.alpn() == application_alpn() {
         serve_device(connection, devices, target, connections).await;
+    } else if connection.alpn() == relay_check::RELAY_CHECK_ALPN {
+        relay_check::answer(connection);
     } else {
         connection.close(CLOSE_UNKNOWN_PROTOCOL.into(), b"unknown protocol");
     }

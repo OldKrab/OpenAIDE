@@ -51,6 +51,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 tauri-winres = "=0.3.6"
 
 [dev-dependencies]
+# A relay run in the test, for the edge's relay check.
+iroh = { workspace = true, features = ["test-utils"] }
 # The Rust client of Remote Devices is proven against the real edge.
 openaide-remote-client = { path = "../remote-client" }
 # Paused time lets deadline contracts run on a controlled clock.
