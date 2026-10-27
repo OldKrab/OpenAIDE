@@ -30,8 +30,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     await openPreparedNewTask(page);
     for (let index = 0; index < 16; index += 1) {
-      await send(page, index === 12 ? "smoke:navigation-long-message" : `Scroll restoration message ${index}`);
-      await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+      const text = index === 12 ? "smoke:navigation-long-message" : `Scroll restoration message ${index}`;
+      await send(page, text);
+      await waitForReply(page, text);
     }
     const taskPath = new URL(page.url()).pathname;
     const list = page.locator(".message-list");
@@ -56,12 +57,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
     await expect(page.getByLabel("New task")).toBeVisible();
     await send(page, "Another Task");
-    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    await waitForReply(page, "Another Task");
     const otherClient = await page.context().newPage();
     try {
       await otherClient.goto(`${harness.baseUrl}${taskPath}`);
       await send(otherClient, "Message received while the Task was away");
-      await expect(otherClient.getByLabel("Task status: Idle")).toHaveCount(1);
+      await waitForReply(otherClient, "Message received while the Task was away");
     } finally {
       await otherClient.close();
     }
@@ -87,8 +88,9 @@ test("keeps a reader's position when they scroll during a follow", async ({ page
   await page.setViewportSize({ width: 1440, height: 900 });
   await openPreparedNewTask(page);
   for (let index = 0; index < 8; index += 1) {
-    await send(page, index === 4 ? "smoke:navigation-long-message" : `Follow interruption message ${index}`);
-    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    const text = index === 4 ? "smoke:navigation-long-message" : `Follow interruption message ${index}`;
+    await send(page, text);
+    await waitForReply(page, text);
   }
   const list = page.locator(".message-list");
   const distanceFromEnd = () => list.evaluate((element) => (
@@ -133,7 +135,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     await openPreparedNewTask(page);
     await send(page, "Start scheduling test");
-    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    await waitForReply(page, "Start scheduling test");
     const editor = page.getByRole("textbox", { name: "Message" });
     await editor.fill("Review the results tomorrow");
     await page.getByRole("button", { name: "Send later", exact: true }).click();
@@ -1515,6 +1517,21 @@ async function send(page, text) {
   const editor = page.getByRole("textbox", { name: "Message" });
   await editor.fill(text);
   await page.getByLabel("Send message").click();
+}
+
+/**
+ * Waits for the turn that sending `text` started to finish. "Idle" alone can still be the
+ * previous turn's status, so a finished reply (it carries its working time) must follow the
+ * sent message as the newest Chat row.
+ */
+async function waitForReply(page, text) {
+  await expect.poll(() => page.locator(".message-list-virtual-row").evaluateAll((rows, sent) => {
+    const index = (row) => Number(row.dataset.index);
+    const message = rows.find((row) => row.querySelector(".chat-user")?.textContent === sent);
+    const newest = rows.reduce((last, row) => (!last || index(row) > index(last) ? row : last), undefined);
+    return Boolean(message && newest && index(newest) > index(message) && newest.querySelector(".chat-action-time"));
+  }, text)).toBe(true);
+  await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
 }
 
 async function selectRenderedText(locator) {
