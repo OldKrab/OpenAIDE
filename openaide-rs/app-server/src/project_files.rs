@@ -183,6 +183,9 @@ fn search(
     let started = Instant::now();
     let mut bytes = 0u64;
     let mut found = 0usize;
+    // A name search ranks every match in the bounded scan before paging, so the best match is
+    // first whatever its place in the walk.
+    let mut ranked: Vec<(NameRank, String)> = vec![];
     let walker = ignore::WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(!params.include_ignored)
@@ -213,13 +216,9 @@ fn search(
             continue;
         }
         if !params.content {
-            if !matches(&path) {
-                continue;
+            if let Some(rank) = name_rank(&path, &query, params.case_sensitive) {
+                ranked.push((rank, path));
             }
-            if found >= params.cursor as usize {
-                result.entries.push(entry(path, false));
-            }
-            found += 1;
         } else {
             let Ok(file) = fs::File::open(item.path()) else {
                 result.truncated = true;
@@ -261,9 +260,60 @@ fn search(
             break;
         }
     }
+    if !params.content {
+        ranked.sort();
+        let start = (params.cursor as usize).min(ranked.len());
+        result.entries = ranked
+            .drain(start..)
+            .take(PAGE + 1)
+            .map(|(_, path)| entry(path, false))
+            .collect();
+    }
     if result.entries.len() > PAGE {
         result.entries.truncate(PAGE);
         result.next_cursor = Some(params.cursor + PAGE as u32);
     }
     Ok(())
+}
+
+/// How well a path matches a file-name query, best first: the file name equals the query,
+/// starts with it, or contains it; then the path contains it; then the query's characters
+/// appear in order in the file name, then in the path. Shorter paths win within a tier, then
+/// path order, so the result is stable.
+type NameRank = (u8, usize);
+
+fn name_rank(path: &str, query: &str, case_sensitive: bool) -> Option<NameRank> {
+    let folded;
+    let text = if case_sensitive {
+        path
+    } else {
+        folded = path.to_lowercase();
+        &folded
+    };
+    let name = text.rsplit('/').next().unwrap_or(text);
+    let tier = if name == query {
+        0
+    } else if name.starts_with(query) {
+        1
+    } else if name.contains(query) {
+        2
+    } else if text.contains(query) {
+        3
+    } else if in_order(name, query) {
+        4
+    } else if in_order(text, query) {
+        5
+    } else {
+        return None;
+    };
+    Some((tier, path.len()))
+}
+
+/// Whether every character of `query` appears in `text` in the same order.
+fn in_order(text: &str, query: &str) -> bool {
+    let mut rest = text.chars();
+    query
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .all(|c| rest.any(|t| t == c))
 }

@@ -6,6 +6,9 @@
 //! content search reads at most 1 MiB per UTF-8 text file and 64 MiB total. Symlinks are
 //! not followed by search. The tree includes ignored files, excluding .git and escaping
 //! symlinks; search respects Git and .ignore rules by default, including hidden files.
+//! A file-name search matches the query, or its characters in order, against each path and
+//! returns matches best first (file name equal, prefix, contained, then path), shorter paths
+//! first within a tier. Content search returns matching lines in walk order.
 //! Git operations require the workspace to be a repository root, cap each subprocess
 //! at 5 seconds / 2 MiB output, and disable external diff drivers and text conversion.
 //! Changes compare the working tree with HEAD, or with the merge base of HEAD and the

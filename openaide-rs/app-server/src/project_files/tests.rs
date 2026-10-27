@@ -529,3 +529,41 @@ fn default_branch_base_prefers_the_remote_tracking_branch_and_reports_absence() 
         Some("noDefaultBranch")
     );
 }
+
+#[test]
+fn name_search_ranks_the_closest_file_name_first() {
+    let root = tempfile::tempdir().unwrap();
+    for path in [
+        "a/panel-notes.md",
+        "a/ProjectFilesPanel.test.tsx",
+        "b/src/components/ProjectFilesPanel.tsx",
+        "panel/readme.md",
+        "zz/panel.ts",
+    ] {
+        let file = root.path().join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, "").unwrap();
+    }
+    let paths = |query: &str| {
+        let mut p = params("");
+        p.query = query.into();
+        run(root.path(), "fileViewer/search", &p)
+            .entries
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        paths("panel"),
+        [
+            "zz/panel.ts",
+            "a/panel-notes.md",
+            "a/ProjectFilesPanel.test.tsx",
+            "b/src/components/ProjectFilesPanel.tsx",
+            "panel/readme.md",
+        ]
+    );
+    // Characters in order find a file without typing its whole name.
+    assert_eq!(paths("pfpanel")[0], "a/ProjectFilesPanel.test.tsx");
+    assert!(paths("zzz").is_empty());
+}
