@@ -1958,7 +1958,7 @@ impl AgentSessionEventSink for BlockedOpenReportSink {
                 .release_rx
                 .lock()
                 .expect("release lock poisoned")
-                .recv_timeout(Duration::from_secs(5));
+                .recv_timeout(crate::test_sync::WATCHDOG);
         }
         Ok(())
     }
@@ -1992,7 +1992,7 @@ fn resume_of_an_attached_session_does_not_wait_for_its_busy_event_loop() {
         )
         .expect("attach session sink");
     entered_rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(crate::test_sync::WATCHDOG)
         .expect("event loop reports the open to the sink");
 
     // The event loop is still inside the sink, so a snapshot request it had to
