@@ -496,6 +496,7 @@ export function TaskView({
       data-desktop-window={desktopWindow?.platform}
       data-file-viewer={files.opened ? (files.open ? "open" : "collapsed") : undefined}
       data-file-viewer-maximized={files.open && files.maximized ? true : undefined}
+      ref={files.stackRef}
       style={files.opened ? { "--task-panel-ratio": files.splitRatio } as CSSProperties : undefined}
     >
       <div className="task-work-stack-header">

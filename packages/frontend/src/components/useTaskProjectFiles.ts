@@ -63,6 +63,7 @@ export function useTaskProjectFiles({
   const [open, setOpen] = useState(false);
   const [opened, setOpened] = useState(false);
   const [maximized, setMaximized] = useState(false);
+  const { cramped, stackRef } = useCrampedStack(taskId);
   const [splitRatio, setSplitRatio] = useState(DEFAULT_SPLIT);
   const [refresh, setRefresh] = useState(0);
   const [notes, setNotes] = useState<FileNote[]>([]);
@@ -175,7 +176,10 @@ export function useTaskProjectFiles({
     open,
     /** True once the panel has been shown for this Task; it then stays mounted to keep its state. */
     opened,
-    maximized,
+    /** Covers Chat: the user maximized the panel, or the Task Page is too narrow to share. */
+    maximized: maximized || cramped,
+    /** Attach to the Task Page column the panel shares with Chat. */
+    stackRef,
     splitRatio,
     show,
     count: changes.total,
@@ -199,11 +203,12 @@ export function useTaskProjectFiles({
       changes,
       commentCount: notes.length,
       fileRequest: fileRequest?.taskId === taskId ? fileRequest : undefined,
-      maximized,
+      maximized: maximized || cramped,
       notes,
       onClose: () => show(false),
       onDismissSuggestion: () => setDismissed(suggested?.id),
-      onMaximized: setMaximized,
+      // Too narrow to share, the panel always covers Chat and Close is the way back.
+      onMaximized: cramped ? undefined : setMaximized,
       onRefresh: () => bump("request", true),
       onRemoveNote: canComment ? removeNote : undefined,
       onSaveNote: canComment ? saveNote : undefined,
@@ -218,6 +223,36 @@ export function useTaskProjectFiles({
       workspaces,
     },
   };
+}
+
+/** Narrower than this, Chat and the panel would each be too cramped to read side by side. */
+const SHARED_MIN_WIDTH = 760;
+
+/**
+ * Whether the Task Page column is too narrow to show the panel beside Chat, as at the Desktop
+ * window minimum with the sidebar open. Measured on the column, not the window, because the
+ * sidebar and window size both decide it.
+ */
+function useCrampedStack(taskId: string) {
+  const [cramped, setCramped] = useState(false);
+  const observer = useRef<ResizeObserver | undefined>(undefined);
+  const stackRef = useCallback(
+    (element: HTMLElement | null) => {
+      observer.current?.disconnect();
+      observer.current = undefined;
+      if (!element || typeof ResizeObserver === "undefined") return;
+      observer.current = new ResizeObserver(([entry]) => {
+        const next = entry.contentRect.width > 0 && entry.contentRect.width < SHARED_MIN_WIDTH;
+        setCramped((previous) => {
+          if (previous !== next) console.info(`project_files_layout task_id=${taskId} shared=${!next}`);
+          return next;
+        });
+      });
+      observer.current.observe(element);
+    },
+    [taskId],
+  );
+  return { cramped, stackRef };
 }
 
 function rememberedWorkspace(taskId: string) {
