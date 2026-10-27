@@ -569,12 +569,16 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       renderableTaskSnapshot?.task.agent_name ?? routedActiveTask?.agent_name,
       mobileProject,
     ].filter(Boolean).join(" · ");
+    // Navigating from Task Navigation leaves the Terminal page even when it lands on the
+    // route the page opened from, such as New Task while New Task is already routed.
     const closeAfter = <T extends unknown[]>(callback: (...args: T) => void) => (...args: T) => {
       closeMobileNavigation();
+      terminalPage.closePage();
       callback(...args);
     };
     const openNewTaskFromNavigation = (projectId?: string) => {
       closeMobileNavigation({ restoreFocus: false });
+      terminalPage.closePage();
       requestNewTaskFocus();
       callbacks.navigation.openNewTask(projectId);
     };
