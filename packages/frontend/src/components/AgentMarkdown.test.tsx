@@ -10,6 +10,7 @@ import * as shell from "../services/frontendShell";
 
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AgentFileOpenContext } from "./agentFileOpen";
+import { ExistingFileReferences, ExistingFileReferencesContext } from "./existingFileReferences";
 
 describe("AgentMarkdown", () => {
   afterEach(() => {
@@ -146,6 +147,33 @@ describe("AgentMarkdown", () => {
       type: "tool.openPath",
       payload: { path: "deploy/local-web.sh", line: undefined },
     });
+  });
+
+  it("links inline code of any file type once the Task workspace confirms the file", async () => {
+    const check = vi.fn(async (paths: string[]) => paths.filter((path) => path === "cv/resume.pdf"));
+    const references = new ExistingFileReferences(check);
+    const openFile = vi.fn();
+    let tree: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <AgentFileOpenContext.Provider value={openFile}>
+          <ExistingFileReferencesContext.Provider value={references}>
+            <AgentMarkdown text={"See `cv/resume.pdf`, `src/missing.ts` and `/srv/app/run.log`."} />
+          </ExistingFileReferencesContext.Provider>
+        </AgentFileOpenContext.Provider>,
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(check).toHaveBeenCalledWith(["cv/resume.pdf", "src/missing.ts"]);
+    const links = tree!.root.findAllByProps({ role: "link" });
+    expect(links.map((link) => plainCodeText(link.props.children))).toEqual(["cv/resume.pdf", "/srv/app/run.log"]);
+    act(() => links[0]!.props.onClick({ preventDefault: vi.fn() }));
+    expect(openFile).toHaveBeenCalledWith("cv/resume.pdf", undefined);
+    expect(tree!.root.findAllByProps({ role: "button", title: "Copy" }).map((code) => plainCodeText(code.props.children)))
+      .toEqual(["src/missing.ts"]);
   });
 
   it("leaves dotted identifiers that are not file paths as ordinary inline code", () => {
@@ -356,4 +384,8 @@ function inlineCodeTap({ inLink = false, selected }: { inLink?: boolean; selecte
     ownerDocument: { getSelection: () => ({ isCollapsed: !selected, containsNode: () => selected }) },
   };
   return { currentTarget: code };
+}
+
+function plainCodeText(children: unknown): string {
+  return Array.isArray(children) ? children.join("") : String(children);
 }

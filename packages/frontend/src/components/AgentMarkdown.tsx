@@ -16,10 +16,12 @@ import remarkGfm from "remark-gfm";
 import { postHostMessage } from "../services/hostBridge";
 import {
   chatMarkdownFileLocation,
+  inlineFileReferenceCandidate,
   markdownFileLocation,
   pathLikeFileLocation,
   relativeMarkdownHref,
 } from "../state/fileViewerReferences";
+import { useFileReferenceState } from "./existingFileReferences";
 import { useAgentFileOpen, type OpenAgentFileReference } from "./agentFileOpen";
 import { copyText } from "./clipboard";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -159,11 +161,16 @@ function AgentMarkdownCode({ children, className, node: _node, ...props }: Compo
   const { openFile } = useContext(MarkdownLinkBehaviorContext);
   const fenced = useContext(MarkdownPreContext)
     || className?.split(/\s+/).some((token) => token.startsWith("language-"));
+  const text = plainText(children);
+  const candidate = fenced ? undefined : inlineFileReferenceCandidate(text);
+  const checked = useFileReferenceState(candidate?.needsCheck ? candidate.location.path : undefined);
   if (fenced) {
     return <code {...props} className={className}>{children}</code>;
   }
-  const text = plainText(children);
-  const location = pathLikeFileLocation(text);
+  // Without a Task workspace to ask, fall back to guessing from the extension.
+  const location = checked === "unchecked" && candidate?.needsCheck
+    ? pathLikeFileLocation(text)
+    : candidate && (!candidate.needsCheck || checked === "file") ? candidate.location : undefined;
   if (!location) {
     return <CopyableInlineCode {...props} className={className} text={text}>{children}</CopyableInlineCode>;
   }

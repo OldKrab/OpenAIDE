@@ -1,5 +1,6 @@
 pub const FILE_VIEWER_LIST_DIRECTORY: &str = "fileViewer/listDirectory";
 pub const FILE_VIEWER_SEARCH: &str = "fileViewer/search";
+pub const FILE_VIEWER_EXISTING_FILES: &str = "fileViewer/existingFiles";
 pub const FILE_VIEWER_CHANGES: &str = "fileViewer/changes";
 pub const FILE_VIEWER_DIFF: &str = "fileViewer/diff";
 pub const CLIENT_PROBE: &str = "client/probe";
@@ -220,6 +221,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_TOOL_IMAGE_PREVIEW,
     FILE_VIEWER_LIST_DIRECTORY,
     FILE_VIEWER_SEARCH,
+    FILE_VIEWER_EXISTING_FILES,
     FILE_VIEWER_CHANGES,
     FILE_VIEWER_DIFF,
     FILE_VIEWER_OPEN,

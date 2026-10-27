@@ -57,7 +57,7 @@ A general file explicitly linked to one unsent message through **Attach files**.
 _Avoid_: Upload when the App Shell references an original local path, treating `@file` text as attached content
 
 **Agent File Reference**:
-A user-activated path-like location in Agent output — a markdown file link, path-like inline code, or an expanded tool path — that Web and Desktop may open in the File Viewer. Relative paths resolve on App Server against the Task Workspace; an absolute path the user clicked may be outside the current Project. The reference does not open or disclose file contents by itself.
+A user-activated path-like location in Agent output — a markdown file link, inline code naming a file App Server confirmed in the Task Workspace or an absolute path, or an expanded tool path — that Web and Desktop may open in the File Viewer. Relative paths resolve on App Server against the Task Workspace; an absolute path the user clicked may be outside the current Project. The reference does not open or disclose file contents by itself.
 _Avoid_: Treating Agent output as an automatic file read, markdown-link-only Chat open, workspace-only path
 
 **Chat**:

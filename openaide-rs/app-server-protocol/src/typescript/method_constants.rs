@@ -36,7 +36,8 @@ use crate::methods::{
     TERMINALS_CLOSE, TERMINALS_OPEN,
 };
 use crate::methods::{
-    FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_SEARCH,
+    FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_EXISTING_FILES, FILE_VIEWER_LIST_DIRECTORY,
+    FILE_VIEWER_SEARCH,
 };
 use crate::server_requests::{
     PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_AUTH_TERMINAL, SHELL_OPEN_EXTERNAL,
@@ -51,6 +52,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const FILE_VIEWER_SEARCH = {:?} as const;\n",
         FILE_VIEWER_SEARCH
+    ));
+    output.push_str(&format!(
+        "export const FILE_VIEWER_EXISTING_FILES = {:?} as const;\n",
+        FILE_VIEWER_EXISTING_FILES
     ));
     output.push_str(&format!(
         "export const FILE_VIEWER_CHANGES = {:?} as const;\n",

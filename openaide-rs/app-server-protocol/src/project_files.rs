@@ -7,6 +7,8 @@
 //! Git operations require the workspace to be a repository root, cap each subprocess
 //! at 5 seconds / 2 MiB output, and disable external diff drivers and text conversion.
 //! Superseded requests may finish their bounded work; clients discard obsolete results.
+//! `fileViewer/existingFiles` answers which of up to 100 workspace-relative paths name a
+//! regular file inside the workspace, in request order, so Chat links only real files.
 use crate::ids::TaskId;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -28,6 +30,10 @@ pub struct ProjectFilesParams {
     pub include_ignored: bool,
     #[serde(default)]
     pub cursor: u32,
+    /// `fileViewer/existingFiles` only: workspace-relative paths to check, at most 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub paths: Option<Vec<String>>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

@@ -8,7 +8,59 @@ fn params(path: &str) -> ProjectFilesParams {
         case_sensitive: false,
         include_ignored: false,
         cursor: 0,
+        paths: None,
     }
+}
+#[test]
+fn existing_files_keeps_only_files_inside_the_workspace() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join("cv")).unwrap();
+    fs::write(root.path().join("cv/resume.pdf"), "pdf").unwrap();
+    fs::write(root.path().join("Makefile"), "all:").unwrap();
+    fs::write(outside.path().join("secret.txt"), "x").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        outside.path().join("secret.txt"),
+        root.path().join("escape.txt"),
+    )
+    .unwrap();
+    let mut request = params("");
+    request.paths = Some(
+        [
+            "cv/resume.pdf",
+            "Makefile",
+            "cv",
+            "missing.ts",
+            "../secret.txt",
+            "escape.txt",
+        ]
+        .map(String::from)
+        .to_vec(),
+    );
+
+    let result = run(root.path(), "fileViewer/existingFiles", &request);
+
+    let found: Vec<_> = result
+        .entries
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect();
+    assert_eq!(found, ["cv/resume.pdf", "Makefile"]);
+    assert!(!result.truncated);
+    assert_eq!(result.error, None);
+}
+#[test]
+fn existing_files_answers_a_bounded_number_of_paths() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "a").unwrap();
+    let mut request = params("");
+    request.paths = Some(vec!["a.txt".to_string(); EXISTING_PATHS + 1]);
+
+    let result = run(root.path(), "fileViewer/existingFiles", &request);
+
+    assert_eq!(result.entries.len(), EXISTING_PATHS);
+    assert!(result.truncated);
 }
 #[test]
 fn directory_stays_in_workspace_and_pages_files() {
