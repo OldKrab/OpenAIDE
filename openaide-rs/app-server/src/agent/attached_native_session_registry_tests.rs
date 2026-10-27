@@ -1,5 +1,8 @@
 use super::*;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
+use crate::agent::attached_native_session::{
+    session_snapshot_channel, AttachedNativeSessionChannels,
+};
 use std::sync::mpsc;
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -15,10 +18,13 @@ fn stopped_attachment() -> AttachedNativeSession {
     terminals.begin_open(owner_id);
 
     AttachedNativeSession::new(
-        command_tx,
-        config_tx,
-        cancel_tx,
-        close_tx,
+        AttachedNativeSessionChannels {
+            command_tx,
+            config_tx,
+            cancel_tx,
+            close_tx,
+            snapshot: session_snapshot_channel().1,
+        },
         terminal_error,
         terminals.owner(owner_id),
         crate::agent::acp_process_lifetime::AcpProcessLifetime::new(Default::default()),
@@ -37,10 +43,13 @@ fn disconnected_attachment() -> AttachedNativeSession {
     terminals.begin_open(owner_id);
 
     AttachedNativeSession::new(
-        command_tx,
-        config_tx,
-        cancel_tx,
-        close_tx,
+        AttachedNativeSessionChannels {
+            command_tx,
+            config_tx,
+            cancel_tx,
+            close_tx,
+            snapshot: session_snapshot_channel().1,
+        },
         Arc::new(Mutex::new(None)),
         terminals.owner(owner_id),
         crate::agent::acp_process_lifetime::AcpProcessLifetime::new(Default::default()),

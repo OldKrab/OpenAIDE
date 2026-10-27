@@ -1,10 +1,8 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc as tokio_mpsc;
 
-use crate::agent::acp_active_prompt::PromptSettlementState;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwner;
 use crate::agent::acp_process_lifetime::{AcpProcessLifetime, ProcessOperation};
 use crate::agent::acp_schema::InitializeResponse;
@@ -14,17 +12,24 @@ use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::{
     AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSession,
-    AgentSessionEventSink, AgentSessionLoad, TurnCancellation,
+    AgentSessionEventSink, AgentSessionLoad,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 
 mod commands;
 mod idle_policy;
+mod prompt_lifecycle;
 mod runtime;
+mod snapshot;
 
 pub(super) use commands::{AcpSessionCommand, AcpSessionConfigCommand};
 pub(super) use idle_policy::SessionIdleTimeouts;
+use prompt_lifecycle::PromptLifecycle;
+pub(super) use prompt_lifecycle::PromptRequestGuard;
+pub(super) use snapshot::{
+    session_snapshot_channel, SessionSnapshotPublisher, SessionSnapshotReader,
+};
 
 /// Inputs consumed by the attachment's private event loop.
 ///
@@ -45,39 +50,56 @@ pub(super) struct AttachedNativeSessionRunInput {
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
     pub(super) session_idle: tokio::sync::watch::Receiver<SessionIdleTimeouts>,
     pub(super) process_lifetime: AcpProcessLifetime,
+    pub(super) snapshot: SessionSnapshotPublisher,
 }
 
 /// Process-local handle to one live Native Session attachment.
 ///
 /// It is not an ACP connection client. The Agent process owns the shared ACP connection;
-/// this handle serializes commands and snapshot reads for one session on that connection.
+/// this handle serializes commands for one session on that connection and reads its
+/// published snapshot.
 #[derive(Clone)]
 pub(super) struct AttachedNativeSession {
     command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
     config_tx: tokio_mpsc::UnboundedSender<AcpSessionConfigCommand>,
     cancel_tx: tokio_mpsc::UnboundedSender<()>,
     close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
+    snapshot: SessionSnapshotReader,
     terminal_error: Arc<Mutex<Option<String>>>,
     terminal_owner: AcpTerminalOwner,
     process_lifetime: AcpProcessLifetime,
     prompt_lifecycle: Arc<PromptLifecycle>,
 }
 
+/// The handle's ends of the channels its event loop reads from or publishes to.
+pub(super) struct AttachedNativeSessionChannels {
+    pub(super) command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
+    pub(super) config_tx: tokio_mpsc::UnboundedSender<AcpSessionConfigCommand>,
+    pub(super) cancel_tx: tokio_mpsc::UnboundedSender<()>,
+    pub(super) close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
+    pub(super) snapshot: SessionSnapshotReader,
+}
+
 impl AttachedNativeSession {
     pub(super) fn new(
-        command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
-        config_tx: tokio_mpsc::UnboundedSender<AcpSessionConfigCommand>,
-        cancel_tx: tokio_mpsc::UnboundedSender<()>,
-        close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
+        channels: AttachedNativeSessionChannels,
         terminal_error: Arc<Mutex<Option<String>>>,
         terminal_owner: AcpTerminalOwner,
         process_lifetime: AcpProcessLifetime,
     ) -> Self {
+        let AttachedNativeSessionChannels {
+            command_tx,
+            config_tx,
+            cancel_tx,
+            close_tx,
+            snapshot,
+        } = channels;
         Self {
             command_tx,
             config_tx,
             cancel_tx,
             close_tx,
+            snapshot,
             terminal_error,
             terminal_owner,
             process_lifetime,
@@ -106,20 +128,17 @@ impl AttachedNativeSession {
 
     /// Returns the last complete session snapshot observed by the attachment.
     ///
-    /// This does not contact the Agent. The session event loop owns the snapshot
-    /// and serializes it with updates from the shared ACP connection.
+    /// This contacts neither the Agent nor the event loop. The loop publishes the
+    /// snapshot after each update it applies, so a busy loop, such as one waiting on
+    /// a slow sink, delays the snapshot's freshness instead of failing the caller.
     pub(super) fn snapshot(&self) -> Result<AgentSession, RuntimeError> {
         let _process_operation = self.acquire_process()?;
         if self.has_terminal_error() {
             return Err(self.attachment_stopped_error());
         }
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.command_tx
-            .send(AcpSessionCommand::Snapshot { reply_tx })
-            .map_err(|_| self.attachment_stopped_error())?;
-        reply_rx
-            .recv_timeout(Duration::from_secs(2))
-            .map_err(|error| RuntimeError::NotReady(format!("ACP snapshot timed out: {error}")))?
+        self.snapshot
+            .read()
+            .ok_or_else(|| self.attachment_stopped_error())
     }
 
     /// Replays history through the binding that already owns this Native Session.
@@ -589,188 +608,6 @@ impl AttachedNativeSession {
             .lock()
             .expect("ACP terminal error lock poisoned")
             .is_some()
-    }
-}
-
-#[derive(Default)]
-struct PromptLifecycle {
-    active: Mutex<Option<PromptGeneration>>,
-    settled: Condvar,
-    next_generation_id: AtomicU64,
-}
-
-struct PromptGeneration {
-    id: u64,
-    cancellation: TurnCancellation,
-    settlement: Arc<PromptSettlementState>,
-    accepting_steering: bool,
-    outstanding_requests: usize,
-}
-
-impl PromptLifecycle {
-    fn admit(
-        self: &Arc<Self>,
-        cancellation: &TurnCancellation,
-    ) -> Result<Option<PromptAdmission>, RuntimeError> {
-        let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
-        loop {
-            match active.as_ref() {
-                None => {
-                    let generation_id = self.next_generation_id.fetch_add(1, Ordering::Relaxed) + 1;
-                    let settlement = Arc::new(PromptSettlementState::default());
-                    *active = Some(PromptGeneration {
-                        id: generation_id,
-                        cancellation: cancellation.clone(),
-                        settlement: settlement.clone(),
-                        accepting_steering: true,
-                        outstanding_requests: 1,
-                    });
-                    return Ok(Some(PromptAdmission {
-                        _settlement: PromptSettlementGuard {
-                            lifecycle: self.clone(),
-                            generation_id,
-                        },
-                        request: PromptRequestGuard {
-                            lifecycle: self.clone(),
-                            generation_id,
-                            settlement,
-                            process_operation: None,
-                            steering_pending: false,
-                        },
-                    }));
-                }
-                Some(current)
-                    if !current.accepting_steering
-                        || current.cancellation.is_cancelled()
-                        || current.settlement.kind().is_some() =>
-                {
-                    let (next_active, _) = self
-                        .settled
-                        .wait_timeout(active, Duration::from_millis(100))
-                        .expect("ACP prompt lifecycle poisoned");
-                    active = next_active;
-                    if cancellation.is_cancelled() {
-                        return Ok(None);
-                    }
-                }
-                Some(_) => {
-                    return Err(RuntimeError::NotReady(
-                        "ACP session already has an active prompt".to_string(),
-                    ));
-                }
-            }
-        }
-    }
-
-    fn register_steering_request(self: &Arc<Self>) -> Result<PromptRequestGuard, RuntimeError> {
-        let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
-        let Some(generation) = active.as_mut().filter(|generation| {
-            generation.accepting_steering && generation.settlement.kind().is_none()
-        }) else {
-            return Err(RuntimeError::NotReady(
-                "ACP session has no active prompt to steer".to_string(),
-            ));
-        };
-        // Record admission before enqueueing the command: the primary response
-        // can race with steering dispatch on the shared ACP connection.
-        if !generation.settlement.admit_steering() {
-            return Err(RuntimeError::NotReady("ACP prompt already settled".into()));
-        }
-        generation.outstanding_requests += 1;
-        Ok(PromptRequestGuard {
-            lifecycle: self.clone(),
-            generation_id: generation.id,
-            settlement: generation.settlement.clone(),
-            process_operation: None,
-            steering_pending: true,
-        })
-    }
-
-    fn finish_request(&self, generation_id: u64) {
-        let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
-        let Some(generation) = active
-            .as_mut()
-            .filter(|generation| generation.id == generation_id)
-        else {
-            return;
-        };
-        generation.outstanding_requests = generation
-            .outstanding_requests
-            .checked_sub(1)
-            .expect("ACP prompt request count underflow");
-    }
-}
-
-struct PromptAdmission {
-    _settlement: PromptSettlementGuard,
-    request: PromptRequestGuard,
-}
-
-struct PromptSettlementGuard {
-    lifecycle: Arc<PromptLifecycle>,
-    generation_id: u64,
-}
-
-impl Drop for PromptSettlementGuard {
-    fn drop(&mut self) {
-        let mut active = self
-            .lifecycle
-            .active
-            .lock()
-            .expect("ACP prompt lifecycle poisoned");
-        let Some(generation) = active
-            .as_mut()
-            .filter(|generation| generation.id == self.generation_id)
-        else {
-            return;
-        };
-        generation.accepting_steering = false;
-        let outstanding_requests = generation.outstanding_requests;
-        active.take();
-        self.lifecycle.settled.notify_all();
-        crate::logging::info(
-            "acp_prompt_generation_retired",
-            serde_json::json!({
-                "generation_id": self.generation_id,
-                "outstanding_requests": outstanding_requests,
-            }),
-        );
-    }
-}
-
-/// Tags an ACP response waiter so a late response cannot mutate a newer prompt generation.
-pub(super) struct PromptRequestGuard {
-    process_operation: Option<ProcessOperation>,
-    lifecycle: Arc<PromptLifecycle>,
-    generation_id: u64,
-    settlement: Arc<PromptSettlementState>,
-    steering_pending: bool,
-}
-
-impl PromptRequestGuard {
-    fn with_process_operation(mut self, operation: ProcessOperation) -> Self {
-        self.process_operation = Some(operation);
-        self
-    }
-
-    pub(super) fn settlement_state(&self) -> Arc<PromptSettlementState> {
-        self.settlement.clone()
-    }
-
-    /// Delivery has been resolved or transferred to a tracked prompt. Until
-    /// then extension-capable turns cannot retire ahead of an admitted Send.
-    pub(super) fn finish_steering_admission(&mut self) {
-        if self.steering_pending {
-            self.steering_pending = false;
-            self.settlement.finish_steering();
-        }
-    }
-}
-
-impl Drop for PromptRequestGuard {
-    fn drop(&mut self) {
-        self.finish_steering_admission();
-        self.lifecycle.finish_request(self.generation_id);
     }
 }
 

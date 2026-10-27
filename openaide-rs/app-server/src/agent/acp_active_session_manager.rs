@@ -10,7 +10,10 @@ use crate::agent::acp_agent_process_pool::{AcpAgentProcessPool, ProcessStopReaso
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwnerId;
 use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
-use crate::agent::attached_native_session::{AttachedNativeSession, SessionIdleTimeouts};
+use crate::agent::attached_native_session::{
+    session_snapshot_channel, AttachedNativeSession, AttachedNativeSessionChannels,
+    SessionIdleTimeouts,
+};
 use crate::agent::attached_native_session_registry::AttachedNativeSessionRegistry;
 use crate::agent::managed_acp_provisioner::ManagedAcpProvisioner;
 use crate::agent::registry_handle::AgentRegistryHandle;
@@ -309,6 +312,7 @@ impl AcpActiveSessionManager {
             let (cancel_tx, cancel_rx) = tokio_mpsc::unbounded_channel();
             let (close_tx, close_rx) = tokio_mpsc::unbounded_channel();
             let (started_tx, started_rx) = mpsc::channel();
+            let (snapshot_publisher, snapshot_reader) = session_snapshot_channel();
             let trace = Some(AcpTraceSession::new(
                 self.trace_state.clone(),
                 request.task_id(),
@@ -327,6 +331,7 @@ impl AcpActiveSessionManager {
                 trace,
                 terminal_owner_id: AcpTerminalOwnerId::next(),
                 session_idle: self.session_idle.subscribe(),
+                snapshot: snapshot_publisher,
             };
             let process_session = self.processes.open_session(&agent_id, process_open)?;
 
@@ -386,10 +391,13 @@ impl AcpActiveSessionManager {
             };
 
             let session_attachment = AttachedNativeSession::new(
-                command_tx,
-                config_tx,
-                cancel_tx,
-                close_tx,
+                AttachedNativeSessionChannels {
+                    command_tx,
+                    config_tx,
+                    cancel_tx,
+                    close_tx,
+                    snapshot: snapshot_reader,
+                },
                 process_session.terminal_error,
                 process_session.terminal_owner,
                 process_session.lifetime,

@@ -64,10 +64,13 @@ fn prompt_returns_terminal_error_while_attachment_reply_is_pending() {
     let (close_tx, _close_rx) = tokio_mpsc::unbounded_channel();
     let terminal_error = Arc::new(Mutex::new(None));
     let attachment = AttachedNativeSession::new(
-        command_tx,
-        config_tx,
-        cancel_tx,
-        close_tx,
+        AttachedNativeSessionChannels {
+            command_tx,
+            config_tx,
+            cancel_tx,
+            close_tx,
+            snapshot: session_snapshot_channel().1,
+        },
         terminal_error.clone(),
         terminal_owner(),
         crate::agent::acp_process_lifetime::AcpProcessLifetime::new(Default::default()),
