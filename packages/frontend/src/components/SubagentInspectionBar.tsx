@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { SubagentCatalogEntrySnapshot, SubagentId } from "@openaide/app-server-client";
 
 import { PopupPanel } from "./Popup";
+import { subagentLabel } from "./SubagentNavigator";
 
 /**
  * Chrome of a selected Subagent History: which history is shown, its Agent-specific
@@ -19,6 +20,7 @@ export function SubagentInspectionBar({
   onStop?: (subagentId: SubagentId) => Promise<boolean>;
   selected: SubagentCatalogEntrySnapshot;
 }) {
+  const label = subagentLabel(selected);
   const stoppable = onStop !== undefined
     && selected.capabilities.cancel
     && (selected.status === "running" || selected.status === "waitingForActivity");
@@ -26,7 +28,7 @@ export function SubagentInspectionBar({
     <div className="subagent-inspection-footer" role="note">
       <span className="subagent-inspection-context">
         <span className="subagent-inspection-name">
-          Viewing <strong>{selected.name}</strong>
+          Viewing <strong title={label}>{label}</strong>
         </span>
         {/* Keyed so an open disclosure never carries over to another Subagent. */}
         <SubagentDetails details={selected.details ?? []} key={selected.subagentId} />
@@ -35,7 +37,7 @@ export function SubagentInspectionBar({
         // Keyed so a pending stop ends when the reported status or the Subagent changes.
         <SubagentStopButton
           key={`${selected.subagentId}:${selected.status}`}
-          name={selected.name}
+          name={label}
           onStop={() => onStop(selected.subagentId)}
         />
       ) : null}
