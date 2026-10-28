@@ -31,6 +31,7 @@ export function SubagentNavigator({
   const [open, setOpen] = useState(false);
   if (entries.length === 0) return null;
   const selected = entries.find((entry) => entry.subagentId === selectedId);
+  const selectedLabel = selected ? subagentLabel(selected) : "Main Agent";
   const depth = hierarchyDepths(entries);
   const choose = (subagentId?: string) => {
     setOpen(false);
@@ -48,9 +49,9 @@ export function SubagentNavigator({
         trigger={(props) => (
           <button
             {...props}
-            aria-label={`Switch agent. Currently viewing ${selected?.name ?? "Main Agent"}`}
+            aria-label={`Switch agent. Currently viewing ${selectedLabel}`}
             className="subagent-switcher-trigger"
-            title={`Switch agent history. Currently viewing ${selected?.name ?? "Main Agent"}`}
+            title={`Switch agent history. Currently viewing ${selectedLabel}`}
             type="button"
           >
             {selected ? (
@@ -60,7 +61,7 @@ export function SubagentNavigator({
               // configured icon rather than a generic one.
               <AgentIcon agentId={agentId} agentName={agentName} icon={agentIcon} size={13} />
             )}
-            <span className="subagent-switcher-value">{selected?.name ?? "Main Agent"}</span>
+            <span className="subagent-switcher-value">{selectedLabel}</span>
             {!selected ? <span className="subagent-count" aria-label={`${entries.length} subagents`}>{entries.length}</span> : null}
             <ChevronDown aria-hidden="true" className="subagent-switcher-chevron" size={13} />
           </button>
@@ -87,7 +88,9 @@ export function SubagentNavigator({
           {!selected ? <Check aria-hidden="true" className="subagent-menu-check" size={14} /> : null}
         </button>
         <div className="subagent-menu-separator" role="separator" />
-        {entries.map((entry) => (
+        {entries.map((entry) => {
+          const label = subagentLabel(entry);
+          return (
           <button
             aria-checked={entry.subagentId === selectedId}
             className="subagent-menu-item"
@@ -102,18 +105,29 @@ export function SubagentNavigator({
             </span>
             <span className="subagent-menu-copy">
               <span className="subagent-menu-name">
-                <strong>{entry.name}</strong>
+                <strong title={label}>{label}</strong>
                 <span>{statusLabel(entry.status)}</span>
                 {unseen.has(entry.subagentId) ? <em>New</em> : null}
               </span>
+              {label === entry.name ? null : <small>{entry.name}</small>}
             </span>
             {entry.subagentId === selectedId ? <Check aria-hidden="true" className="subagent-menu-check" size={14} /> : null}
           </button>
-        ))}
+          );
+        })}
       </PopupMenu>
     </div>
   );
   return target ? createPortal(navigator, target) : navigator;
+}
+
+/**
+ * What a Subagent is called in navigation. An Agent's name is often its Subagent type
+ * ("fork", "general-purpose"), shared by every child of that type, so the delegated task
+ * the Agent gave it leads and the name is the fallback.
+ */
+export function subagentLabel(entry: Pick<SubagentCatalogEntrySnapshot, "delegatedTask" | "name">) {
+  return entry.delegatedTask.trim() || entry.name;
 }
 
 function hierarchyDepths(entries: SubagentCatalogEntrySnapshot[]) {

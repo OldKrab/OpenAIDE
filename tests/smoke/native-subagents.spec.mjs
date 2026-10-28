@@ -36,7 +36,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Main Agent" })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toHaveCount(0);
 
-    await selectHistory(page, "Reviewer");
+    await selectHistory(page, "Review the implementation");
     await expect(chat.getByText("Child review result", { exact: true })).toBeVisible();
     await expect(chat.getByText("Main review result", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
@@ -50,13 +50,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     // Rehosting the same selector in compact chrome must preserve inspection.
     await page.setViewportSize(viewport.width > 760 ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     await openMoreOnPhone(page);
-    await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Reviewer" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Review the implementation" })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toBeVisible();
     await page.setViewportSize(viewport);
-    await selectHistory(page, "Detail reviewer");
+    await selectHistory(page, "Check a nested detail");
     await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toHaveCount(0);
-    // A name longer than the bar truncates; it must not widen Chat past the viewport.
+    // A label longer than the bar truncates; it must not widen Chat past the viewport.
     const returnBox = await page.getByRole("button", { name: "Back to Main Agent" }).boundingBox();
     expect(returnBox.x + returnBox.width).toBeLessThanOrEqual(viewport.width);
     const nestedBox = await chat.getByText("Nested review result", { exact: true }).boundingBox();
@@ -66,20 +66,27 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await openMoreOnPhone(page);
     await page.getByRole("button", { name: /^Switch agent\. Currently viewing/ }).click();
     await expect(page.getByRole("menuitemradio", { name: /^Main Agent/ })).toBeVisible();
+    // A delegated task longer than the menu truncates; its status still fits in the row.
+    const longRow = page.getByRole("menuitemradio", { name: /^Check a nested detail/ });
+    const menuBox = await page.getByRole("menu", { name: "Switch agent" }).boundingBox();
+    const rowBox = await longRow.boundingBox();
+    const statusBox = await longRow.getByText("Completed", { exact: true }).boundingBox();
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(menuBox.x + menuBox.width + 0.5);
+    expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
     await page.screenshot({ path: testInfo.outputPath("history-selector.png") });
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Back to Main Agent" }).click();
     await expect(chat.getByText("Main review result", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-    await selectHistory(page, "Reviewer");
+    await selectHistory(page, "Review the implementation");
     await page.reload();
     await openMoreOnPhone(page);
     await expect(page.getByRole("button", { name: "Switch agent. Currently viewing Main Agent" })).toBeVisible();
     await expect(chat.getByText("Main review result", { exact: true })).toBeVisible();
-    await selectHistory(page, "Reviewer");
+    await selectHistory(page, "Review the implementation");
     await expect(chat.getByText("Child review result", { exact: true })).toBeVisible();
-    await selectHistory(page, "Detail reviewer");
+    await selectHistory(page, "Check a nested detail");
     await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
   });
 }
@@ -102,18 +109,19 @@ test("follows released-form Subagents and stops a running one", async ({ page })
   // The Agent's own Tool rows show the delegation; no lifecycle row is added.
   await expect(chat.getByText(/Delegated to/)).toHaveCount(0);
 
-  await selectHistory(page, "Researcher");
+  await selectHistory(page, "Survey the code");
   await expect(chat.getByText("Survey the code please", { exact: true })).toBeVisible();
   await expect(chat.getByText("Survey result", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Stop Subagent/ })).toHaveCount(0);
 
-  await selectHistory(page, "Explorer");
+  await selectHistory(page, "Explore the history");
   await expect(chat.getByText("Explore the history please", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Stop Subagent: Explorer" }).click();
+  await page.getByRole("button", { name: "Stop Subagent: Explore the history" }).click();
   await expect(page.getByRole("button", { name: /^Stop Subagent/ })).toHaveCount(0);
   await page.getByRole("button", { name: /^Switch agent\. Currently viewing/ }).click();
-  await expect(page.getByRole("menuitemradio", { name: /^Explorer\b.*Cancelled/ })).toBeVisible();
-  await expect(page.getByRole("menuitemradio", { name: /^Researcher\b.*Completed/ })).toBeVisible();
+  // Each row leads with the task the Agent delegated and keeps the Agent's name beneath it.
+  await expect(page.getByRole("menuitemradio", { name: /^Explore the history\b.*Cancelled.*\bExplorer$/ })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: /^Survey the code\b.*Completed.*\bResearcher$/ })).toBeVisible();
   await page.keyboard.press("Escape");
 });
 
