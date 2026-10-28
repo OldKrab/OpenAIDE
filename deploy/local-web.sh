@@ -104,8 +104,10 @@ done
 
 command="${1:-refresh}"
 host="${OPENAIDE_WEB_HOST:-127.0.0.1}"
-port="${OPENAIDE_WEB_PORT:-5474}"
-vite_port="${OPENAIDE_WEB_VITE_PORT:-5473}"
+# Unnamed ports stay off every role's: a restart stops whatever listens on them, and the Driver
+# uses 5474/5473 and the Target 5574/5573.
+port="${OPENAIDE_WEB_PORT:-5374}"
+vite_port="${OPENAIDE_WEB_VITE_PORT:-5373}"
 prototype_port="${OPENAIDE_WEB_PROTOTYPE_PORT:-}"
 # Unnamed roots stay apart from every role's, as in apps/web/src/dev-server.mjs.
 state_root="${OPENAIDE_WEB_STATE_ROOT:-$repo_root/.openaide-web-dev-default/state}"

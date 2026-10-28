@@ -623,7 +623,7 @@ exit 0
   assert.throws(() => readFileSync(systemdRunLog, "utf8"), { code: "ENOENT" });
 });
 
-test("unnamed roots and a role's App Server binary stay apart from the Driver's", (t) => {
+test("unnamed ports and roots and a role's App Server binary stay apart from the Driver's", (t) => {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-defaults-"));
   const fixtureDeploy = join(fixtureRoot, "deploy");
   cpSync(new URL(".", import.meta.url), fixtureDeploy, { recursive: true });
@@ -636,6 +636,8 @@ test("unnamed roots and a role's App Server binary stay apart from the Driver's"
     delete caller.OPENAIDE_WEB_STATE_ROOT;
     delete caller.OPENAIDE_WEB_RUNTIME_ROOT;
     delete caller.OPENAIDE_APP_SERVER_PATH;
+    delete caller.OPENAIDE_WEB_PORT;
+    delete caller.OPENAIDE_WEB_VITE_PORT;
     const result = spawnSync("bash", [join(fixtureDeploy, "local-web.sh"), "usage"], {
       cwd: fixtureRoot,
       encoding: "utf8",
@@ -646,6 +648,8 @@ test("unnamed roots and a role's App Server binary stay apart from the Driver's"
   };
 
   const unnamed = usage({});
+  assert.match(unnamed, /OPENAIDE_WEB_PORT=5374$/m);
+  assert.match(unnamed, /OPENAIDE_WEB_VITE_PORT=5373$/m);
   assert.match(unnamed, new RegExp(`OPENAIDE_WEB_STATE_ROOT=${fixtureRoot}/\\.openaide-web-dev-default/state$`, "m"));
   assert.match(unnamed, new RegExp(`OPENAIDE_WEB_RUNTIME_ROOT=${fixtureRoot}/\\.openaide-web-dev-default/runtime$`, "m"));
   const devServer = readFileSync(new URL("../apps/web/src/dev-server.mjs", import.meta.url), "utf8");

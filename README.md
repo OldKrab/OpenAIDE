@@ -152,7 +152,7 @@ Run the local Web App on loopback:
 OPENAIDE_WEB_ALLOWED_HOSTS=localhost,127.0.0.1 npm run web:local
 ```
 
-The default address is `http://127.0.0.1:5474`. Local deployment configuration
+The default address is `http://127.0.0.1:5374`. Local deployment configuration
 can override it. The Web App reaches App Server over a WebSocket; set
 `OPENAIDE_WEB_TRANSPORT=http` on a network that rejects WebSocket upgrades.
 Without `OPENAIDE_WEB_STATE_ROOT`, Tasks are stored in

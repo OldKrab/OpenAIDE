@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const baseUrl = new URL(process.argv[2] ?? process.env.OPENAIDE_WEB_SMOKE_URL ?? "http://127.0.0.1:5474");
+const baseUrl = new URL(process.argv[2] ?? process.env.OPENAIDE_WEB_SMOKE_URL ?? "http://127.0.0.1:5374");
 const endpoint = new URL("/__openaide-app-server/probe", baseUrl);
 const totalTimeoutMs = numberFromEnv("OPENAIDE_WEB_SMOKE_TIMEOUT_MS", 60_000);
 const sendTimeoutMs = numberFromEnv("OPENAIDE_WEB_SMOKE_SEND_TIMEOUT_MS", 45_000);
