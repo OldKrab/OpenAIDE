@@ -1,7 +1,7 @@
 use crate::time::now_string;
 
-pub(super) const TRACE_ENV: &str = "OPENAIDE_ACP_TRACE";
-pub(super) const TRACE_DIR_ENV: &str = "OPENAIDE_ACP_TRACE_DIR";
+pub(super) const TRACE_ENV: &str = crate::instance_env::ACP_TRACE;
+pub(super) const TRACE_DIR_ENV: &str = crate::instance_env::ACP_TRACE_DIR;
 
 pub(super) fn trace_enabled(value: Option<&str>) -> bool {
     matches!(

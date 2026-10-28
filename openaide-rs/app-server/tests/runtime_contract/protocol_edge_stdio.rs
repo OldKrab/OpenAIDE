@@ -509,6 +509,89 @@ fn app_server_handoff_user_can_send_first_prompt_after_task_preparation() {
     let _ = child.wait();
 }
 
+/// An Agent that tries a build of the App Server must not find this instance's
+/// state root and join or replace it, so the App Server's own settings stop here.
+#[cfg(unix)]
+#[test]
+fn agents_do_not_inherit_the_app_servers_instance_settings() {
+    let storage = TempDir::new().expect("storage root");
+    let runtime = TempDir::new().expect("runtime root");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_openaide-app-server"))
+        .env("OPENAIDE_STORAGE_ROOT", storage.path())
+        .env("OPENAIDE_RUNTIME_ROOT", runtime.path())
+        .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
+        .env("OPENAIDE_PROJECT_ROOTS", storage.path())
+        .env("OPENAIDE_ACP_NATIVE_SUBAGENTS", "1")
+        .env("OPENAIDE_ACP_TRACE_DIR", runtime.path().join("traces"))
+        .env("OPENAIDE_ENV_PROBE_OWNED", "kept")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn handoff runtime");
+    let connection = handoff_connection(child.stdout.take().expect("runtime stdout"));
+    let endpoint_url = connection["endpointUrl"].as_str().expect("endpoint url");
+    let auth_token = connection["authToken"].as_str().expect("auth token");
+    let initialize = post_local_http_initialize(endpoint_url, auth_token, "env-client");
+    let project_id = first_project_id(&initialize);
+
+    // The probe records the OPENAIDE_* names it was started with, then is the fixture Agent.
+    let seen = storage.path().join("agent-env-names");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/smoke/fixtures/test-acp-agent.mjs")
+        .to_string_lossy()
+        .into_owned();
+    let script = r#"env | grep '^OPENAIDE_' | cut -d= -f1 | sort > "$0"; exec node "$1""#;
+    let seen_arg = seen.to_string_lossy().into_owned();
+    let created = post_local_http_json(
+        endpoint_url,
+        auth_token,
+        "env-client",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "create-env-probe-agent",
+            "method": "agent/createCustom",
+            "params": {
+                "agentId": "custom.env-probe",
+                "label": "Env Probe Agent",
+                "icon": "terminal",
+                "commandLine": "sh -c <probe>",
+                "command": "sh",
+                "args": ["-c", script, seen_arg, fixture],
+                "env": {},
+                "secretEnv": [],
+                "enabled": true
+            }
+        }),
+    );
+    assert!(created[0]["result"]["result"].is_object(), "{created:#?}");
+    let acquired = post_local_http_json(
+        endpoint_url,
+        auth_token,
+        "env-client",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "create",
+            "method": "task/acquire",
+            "params": { "projectId": project_id, "agentId": "custom.env-probe" }
+        }),
+    );
+    let task_id = acquired[0]["result"]["result"]["task"]["task"]["taskId"]
+        .as_str()
+        .expect("task id");
+    // Ready to send means the Agent process has started and answered.
+    wait_until_task_send_ready(endpoint_url, auth_token, "env-client", task_id);
+
+    let names = std::fs::read_to_string(&seen).expect("the probe Agent recorded its environment");
+    child.kill().expect("stop handoff runtime");
+    let _ = child.wait();
+    let names: Vec<&str> = names.lines().collect();
+    assert!(names.contains(&"OPENAIDE_ENV_PROBE_OWNED"), "{names:?}");
+    for name in openaide_app_server::instance_env::NAMES {
+        assert!(!names.contains(&name), "{name} reached the Agent: {names:?}");
+    }
+}
+
 fn spawn_handoff_runtime(storage: &TempDir, runtime: &TempDir) -> std::process::Child {
     spawn_handoff_runtime_with_project_roots(storage, runtime, Some(storage.path()))
 }

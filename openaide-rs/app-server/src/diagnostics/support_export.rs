@@ -342,7 +342,7 @@ fn add_unavailable_session_sources(
 }
 
 fn trace_artifacts(root: &Path) -> Result<Vec<TraceArtifact>, RuntimeError> {
-    let trace_root = std::env::var_os("OPENAIDE_ACP_TRACE_DIR")
+    let trace_root = crate::instance_env::var_os(crate::instance_env::ACP_TRACE_DIR)
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("diagnostics/acp-traces"));
     let Ok(read_dir) = fs::read_dir(trace_root) else {
@@ -649,15 +649,12 @@ fn last_complete_jsonl_offset(file: &mut fs::File, file_len: u64) -> std::io::Re
 }
 
 fn acp_trace_enabled(store: &Store) -> bool {
-    std::env::var("OPENAIDE_ACP_TRACE")
-        .ok()
-        .is_some_and(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on" | "full" | "raw"
-            )
-        })
-        || store.read_acp_trace_enabled().unwrap_or(false)
+    crate::instance_env::var(crate::instance_env::ACP_TRACE).is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on" | "full" | "raw"
+        )
+    }) || store.read_acp_trace_enabled().unwrap_or(false)
 }
 
 fn manifest_source(id: &str, status: &str, original_size: Option<u64>) -> Value {

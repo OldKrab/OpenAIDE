@@ -37,11 +37,10 @@ impl AcpTraceState {
     /// Builds trace state from durable settings, with the environment taking
     /// precedence for explicit diagnostics overrides.
     pub fn from_env_with_persisted(storage_root: &Path, persisted_enabled: bool) -> Self {
-        let root = std::env::var_os(TRACE_DIR_ENV)
+        let root = crate::instance_env::var_os(TRACE_DIR_ENV)
             .map(PathBuf::from)
             .unwrap_or_else(|| default_trace_root(storage_root));
-        let enabled = std::env::var(TRACE_ENV)
-            .ok()
+        let enabled = crate::instance_env::var(TRACE_ENV)
             .map(|value| trace_enabled(Some(&value)))
             .unwrap_or(persisted_enabled);
         let state = Self {
