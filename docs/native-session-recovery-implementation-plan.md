@@ -181,7 +181,7 @@ Update Rust declarations, method names/maps, routing, handlers, protocol tests, 
 
 ```text
 task/open
-  -> return stored Task immediately with controls recovering
+  -> acknowledge the open; controls recovering reach the subscription
   -> recovery gate selects resume
   -> session/resume(bound id)
   -> apply returned catalogs and attach the session update consumer
@@ -195,7 +195,7 @@ Remove `refresh_bound_session_for_open` from this path. Listing failure, omissio
 
 ```text
 task/open
-  -> return stored Task immediately with controls recovering
+  -> acknowledge the open; controls recovering reach the subscription
   -> recovery gate selects load
   -> close old process attachment when present and supported
   -> session/load(bound id), including replay
