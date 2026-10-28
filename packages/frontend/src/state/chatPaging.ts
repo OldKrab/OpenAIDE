@@ -14,11 +14,17 @@ export type RenderedChat = {
   error?: string;
 };
 
+/**
+ * The presentation pass every Chat history gets, Main Agent or Subagent: hide placeholder
+ * activity, then fold each uninterrupted run of Tool and Thought rows into one group.
+ */
+export function presentedChatItems(items: ChatMessage[]): ChatMessage[] {
+  return coalesceAdjacentActivities(visibleNormalizedChatItems(items));
+}
+
 export function renderedChat(snapshot: TaskSnapshot, pageState: ChatPageState | undefined): RenderedChat {
   const olderItems = pageState?.olderItems ?? [];
-  const items = coalesceAdjacentActivities(
-    visibleNormalizedChatItems(mergeMessageRowsPreferRight(olderItems, snapshot.chat.items)),
-  );
+  const items = presentedChatItems(mergeMessageRowsPreferRight(olderItems, snapshot.chat.items));
   const hasBefore = pageState ? pageState.hasBefore : snapshot.chat.has_before;
   return {
     items,
