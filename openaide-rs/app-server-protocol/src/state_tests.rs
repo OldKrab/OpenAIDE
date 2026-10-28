@@ -8,6 +8,7 @@ fn task_subscription_scope_uses_typed_kind_and_task_id() {
         scope: SubscriptionScope::Task {
             task_id: "task-1".into(),
         },
+        known_revision: None,
     })
     .unwrap();
 

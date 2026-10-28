@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { startFullStackHarness } from "./full-stack-harness.mjs";
 
@@ -71,6 +73,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       dispatchEvent(new PopStateEvent("popstate"));
     }, taskPath);
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await expect(page.getByText("Message received while the Task was away").first()).toBeVisible();
+    // The returning client resumes its retained copy instead of a complete baseline.
+    await expect.poll(() => taskSubscriptionOutcomes(taskPath.split("/").at(-1))).toContain("missedChanges");
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
     const settledDistances = await list.evaluate(async (element) => {
       const distances = [];
@@ -1737,4 +1742,11 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
     await removeFault();
     throw error;
   }
+}
+
+async function taskSubscriptionOutcomes(taskId) {
+  const log = await readFile(path.join(harness.stateRoot, "diagnostics/logs/openaide-app-server.jsonl"), "utf8");
+  return log.trim().split("\n").map((line) => JSON.parse(line))
+    .filter((line) => line.event === "task_subscription_resolved" && line.fields.task_id === taskId)
+    .map((line) => line.fields.outcome);
 }

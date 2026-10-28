@@ -140,7 +140,7 @@ use crate::snapshot::{
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
-    SubscriptionScope, SubscriptionSnapshot,
+    SubscriptionScope, SubscriptionSnapshot, TaskResumeSnapshot, TaskRevisionChanges,
 };
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
@@ -265,6 +265,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
 
     push_decl::<StateSubscribeParams>(output, config);
     push_decl::<StateSubscribeResult>(output, config);
+    push_decl::<TaskResumeSnapshot>(output, config);
+    push_decl::<TaskRevisionChanges>(output, config);
     push_decl::<StateUnsubscribeParams>(output, config);
     push_decl::<StateUnsubscribeResult>(output, config);
     push_decl::<SubscriptionScope>(output, config);

@@ -6,7 +6,7 @@ import {
   type ProjectSummary,
   type SubscriptionIngestionContext,
   type SubscriptionScope,
-  type SubscriptionSnapshot,
+  type ReplicaSnapshot,
   type TaskNavigationSnapshot,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
@@ -110,7 +110,7 @@ export function startAppServerStateSubscription({
 
 function liveTextPresentationAction(
   event: AppServerEvent,
-  snapshot: SubscriptionSnapshot,
+  snapshot: ReplicaSnapshot,
 ): Extract<AppAction, { type: "taskChat:liveText" }> | undefined {
   if (snapshot.kind !== "task") return undefined;
   const payload = event.payload;
@@ -142,7 +142,7 @@ function textChannel(item: import("@openaide/app-server-client").ChatItem) {
 }
 
 function actionsFromSubscriptionSnapshot(
-  snapshot: SubscriptionSnapshot,
+  snapshot: ReplicaSnapshot,
   context: StateSubscriptionMappingContext,
   agents: {
     currentAgentId?: () => string;

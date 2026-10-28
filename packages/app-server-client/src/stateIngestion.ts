@@ -3,9 +3,10 @@ import type {
   EventCursor,
   StateSubscribeResult,
   SubscriptionScope,
-  SubscriptionSnapshot,
 } from "./generated/protocol.js";
+import type { ReplicaSnapshot } from "./backendConnection.js";
 import { updateSubscriptionSnapshot } from "./stateIngestionSnapshots.js";
+import { resumeTaskSnapshot } from "./stateIngestionTask.js";
 import { matchSubscriptionEvent } from "./subscriptionScope.js";
 import type { SubscriptionIngestionContext } from "./subscriptionScope.js";
 export type { SubscriptionIngestionContext } from "./subscriptionScope.js";
@@ -14,7 +15,7 @@ export type SubscriptionIngestionState = {
   context: SubscriptionIngestionContext;
   scope: SubscriptionScope;
   cursor: EventCursor;
-  snapshot: SubscriptionSnapshot;
+  snapshot: ReplicaSnapshot;
 };
 
 export type SubscriptionEventApplyResult =
@@ -37,15 +38,30 @@ export type SubscriptionEventApplyResult =
       event: AppServerEvent;
     };
 
+/**
+ * Installs a subscribe reply. A Task resume is rebuilt from `retained`, the copy the
+ * client offered as its known revision; `undefined` means it could not be, and the
+ * caller must subscribe again for a baseline.
+ */
 export function createSubscriptionIngestionState(
   result: StateSubscribeResult,
   context: SubscriptionIngestionContext,
-): SubscriptionIngestionState {
+  retained?: ReplicaSnapshot,
+): SubscriptionIngestionState | undefined {
+  let snapshot: ReplicaSnapshot;
+  if (result.snapshot.kind === "taskResume") {
+    if (retained?.kind !== "task") return undefined;
+    const update = resumeTaskSnapshot(retained, result.snapshot.resume);
+    if (update.kind === "resyncRequired") return undefined;
+    snapshot = update.snapshot;
+  } else {
+    snapshot = result.snapshot;
+  }
   return {
     context,
     scope: result.scope,
     cursor: result.cursor,
-    snapshot: result.snapshot,
+    snapshot,
   };
 }
 

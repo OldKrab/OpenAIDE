@@ -37,8 +37,13 @@ export type AppServerSessionStatus =
   | { status: "ready"; generation: number }
   | { status: "recovering"; generation: number; reason: BackendGenerationInvalidation["reason"] }
   | { status: "unavailable"; generation: number; error: unknown };
+/**
+ * A scope replica's installed state. A subscribe reply's `taskResume` is rebuilt into
+ * a complete `task` snapshot before any observer sees it (ADR-0073).
+ */
+export type ReplicaSnapshot = Exclude<SubscriptionSnapshot, { kind: "taskResume" }>;
 export type AppServerStateObserver = {
-  onSnapshot(snapshot: SubscriptionSnapshot, event?: AppServerEvent, snapshotChanged?: boolean): void;
+  onSnapshot(snapshot: ReplicaSnapshot, event?: AppServerEvent, snapshotChanged?: boolean): void;
   onBaselineLost?(): void;
   onBaselineReady?(): void;
   onBaselineError?(error: unknown): void;

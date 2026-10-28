@@ -387,8 +387,15 @@ impl RpcGateway {
         &self,
         snapshot: &mut openaide_app_server_protocol::state::SubscriptionSnapshot,
     ) {
-        if let openaide_app_server_protocol::state::SubscriptionSnapshot::Task { task } = snapshot {
-            *task = self.task_with_pending_requests(task.clone());
+        use openaide_app_server_protocol::state::SubscriptionSnapshot;
+        match snapshot {
+            SubscriptionSnapshot::Task { task } => {
+                *task = self.task_with_pending_requests(task.clone());
+            }
+            SubscriptionSnapshot::TaskResume { resume } => {
+                resume.pending_requests = self.server_requests.pending_for_task(&resume.task_id);
+            }
+            _ => {}
         }
     }
 

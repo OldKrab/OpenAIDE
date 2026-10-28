@@ -39,6 +39,26 @@ pub trait SnapshotProvider {
         scope: &SubscriptionScope,
         token: &SnapshotReadToken,
     ) -> Result<SubscriptionSnapshot, ProtocolError>;
+
+    /// Reads what a Task resume needs without building the Task snapshot, after the
+    /// same access checks as its baseline. `None` means this provider cannot resume.
+    fn task_resume_basis(
+        &self,
+        _ctx: &ClientContext,
+        _task_id: &TaskId,
+    ) -> Result<Option<TaskResumeBasis>, ProtocolError> {
+        Ok(None)
+    }
+}
+
+/// The Task's current revision and the Task state that changes without one
+/// (ADR-0073). Pending requests are added at the protocol edge, as for baselines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskResumeBasis {
+    pub revision: u64,
+    pub history_sync: openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot,
+    pub subagents: openaide_app_server_protocol::snapshot::SubagentOverviewSnapshot,
+    pub workspace_available: bool,
 }
 
 pub trait NewTaskDefaultsSnapshotSource: Send + Sync {
@@ -333,6 +353,15 @@ impl SnapshotProvider for SnapshotBuilder {
                 }
             }
         })
+    }
+
+    fn task_resume_basis(
+        &self,
+        ctx: &ClientContext,
+        task_id: &TaskId,
+    ) -> Result<Option<TaskResumeBasis>, ProtocolError> {
+        self.task_snapshots
+            .resume_basis_for_client(&ctx.client_instance_id, task_id)
     }
 }
 

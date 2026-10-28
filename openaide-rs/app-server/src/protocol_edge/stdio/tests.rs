@@ -221,6 +221,7 @@ fn reset_task_history_removes_local_tasks_without_touching_project_files() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-reset"),
                 },
+                known_revision: None,
             },
         })
         .to_string(),
@@ -702,6 +703,7 @@ fn task_navigation_subscription_returns_the_only_storage_backed_baseline() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         })
         .to_string(),
@@ -755,6 +757,7 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
                 "method": STATE_SUBSCRIBE,
                 "params": StateSubscribeParams {
                     scope: SubscriptionScope::TaskNavigation { section, project_ids: None },
+                    known_revision: None,
                 }
             })
             .to_string(),
@@ -847,6 +850,7 @@ fn native_session_title_override_publishes_and_survives_restart() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         })
         .to_string(),
@@ -928,6 +932,7 @@ fn native_session_title_override_publishes_and_survives_restart() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         })
         .to_string(),
@@ -955,6 +960,7 @@ fn agent_probe_updates_agent_snapshot_and_emits_event() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Agents,
+                known_revision: None,
             }
         })
         .to_string(),
@@ -1012,6 +1018,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
                 "method": STATE_SUBSCRIBE,
                 "params": StateSubscribeParams {
                     scope: SubscriptionScope::Agents,
+                    known_revision: None,
                 }
             })
             .to_string(),
@@ -1327,6 +1334,7 @@ fn rejected_agent_mutations_return_errors_without_agent_events() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Agents,
+                known_revision: None,
             }
         })
         .to_string(),
@@ -1907,7 +1915,7 @@ fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
             "jsonrpc": "2.0",
             "id": "subscribe-projects",
             "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects }
+            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_revision: None }
         })
         .to_string(),
     );
@@ -2043,6 +2051,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2130,6 +2139,7 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2169,6 +2179,7 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Task { task_id: TaskId::from("task-existing") },
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2180,6 +2191,7 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2227,6 +2239,7 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2315,6 +2328,7 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2480,6 +2494,7 @@ fn product_request_before_initialize_is_rejected_by_gateway() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2542,6 +2557,7 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
+                known_revision: None,
             }
         })
         .to_string(),
@@ -2932,7 +2948,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
             "jsonrpc": "2.0",
             "id": "subscribe-projects",
             "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects }
+            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_revision: None }
         })
         .to_string(),
     );

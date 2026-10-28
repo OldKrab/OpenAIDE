@@ -4,12 +4,19 @@ use std::sync::{Arc, Mutex};
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, TaskId};
 use openaide_app_server_protocol::state::{
-    StateSubscribeResult, StateUnsubscribeResult, SubscriptionScope,
+    StateSubscribeResult, StateUnsubscribeResult, SubscriptionScope, SubscriptionSnapshot,
+    TaskResumeSnapshot,
 };
+use serde_json::json;
 
 use crate::client_lifecycle::{AppServerTime, ClientContext, Delivery};
+use crate::logging;
 use crate::snapshots::SnapshotProvider;
 use crate::storage_runtime::{CursorSequencer, SnapshotReadToken};
+
+mod task_change_log;
+
+use task_change_log::{ChangesSince, TaskChangeLog};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscriptionRecord {
@@ -93,6 +100,7 @@ pub struct StateStream {
     scope_cursors: HashMap<SubscriptionScope, CursorSequencer>,
     subscriptions: Vec<SubscriptionRecord>,
     task_subscription_presence: TaskSubscriptionPresence,
+    task_changes: TaskChangeLog,
 }
 
 impl StateStream {
@@ -110,6 +118,7 @@ impl StateStream {
             scope_cursors: HashMap::new(),
             subscriptions: Vec::new(),
             task_subscription_presence,
+            task_changes: TaskChangeLog::default(),
         }
     }
 
@@ -120,7 +129,7 @@ impl StateStream {
         snapshot_provider: &impl SnapshotProvider,
         now: AppServerTime,
     ) -> Result<StateSubscribeResult, openaide_app_server_protocol::errors::ProtocolError> {
-        self.subscribe_with_membership(ctx, scope, snapshot_provider, now)
+        self.subscribe_with_membership(ctx, scope, None, snapshot_provider, now)
             .map(|(result, _)| result)
     }
 
@@ -130,12 +139,18 @@ impl StateStream {
         &mut self,
         ctx: &ClientContext,
         scope: SubscriptionScope,
+        known_revision: Option<u64>,
         snapshot_provider: &impl SnapshotProvider,
         _now: AppServerTime,
     ) -> Result<(StateSubscribeResult, bool), openaide_app_server_protocol::errors::ProtocolError>
     {
         let token = self.read_token_for_scope(&scope);
-        let snapshot = snapshot_provider.snapshot(ctx, &scope, &token)?;
+        let snapshot = match &scope {
+            SubscriptionScope::Task { task_id } => {
+                self.task_snapshot(ctx, task_id, known_revision, snapshot_provider, &token)?
+            }
+            _ => snapshot_provider.snapshot(ctx, &scope, &token)?,
+        };
         let subscription_added =
             self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
         if subscription_added {
@@ -181,6 +196,16 @@ impl StateStream {
         _now: AppServerTime,
     ) -> PublishOutcome {
         self.cursors.advance();
+        if let (
+            EventScope::Task { task_id, .. },
+            AppServerEventPayload::TaskChanged {
+                revision, changes, ..
+            },
+        ) = (&scope, &payload)
+        {
+            // Every Task change passes here, so the log sees the exact published stream.
+            self.task_changes.record(task_id, *revision, changes);
+        }
         let matching = self
             .subscriptions
             .iter()
@@ -304,12 +329,96 @@ impl StateStream {
         false
     }
 
+    /// Answers a Task subscription with a resume when the client's known revision can
+    /// be brought current from retained changes, and with a baseline otherwise.
+    fn task_snapshot(
+        &self,
+        ctx: &ClientContext,
+        task_id: &TaskId,
+        known_revision: Option<u64>,
+        snapshot_provider: &impl SnapshotProvider,
+        token: &SnapshotReadToken,
+    ) -> Result<SubscriptionSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
+        let scope = SubscriptionScope::Task {
+            task_id: task_id.clone(),
+        };
+        let Some(known_revision) = known_revision else {
+            log_task_subscription(task_id, None, None, Err("noKnownRevision"));
+            return snapshot_provider.snapshot(ctx, &scope, token);
+        };
+        let Some(basis) = snapshot_provider.task_resume_basis(ctx, task_id)? else {
+            log_task_subscription(task_id, Some(known_revision), None, Err("unsupported"));
+            return snapshot_provider.snapshot(ctx, &scope, token);
+        };
+        let missed = if known_revision > basis.revision {
+            Err("knownRevisionAhead")
+        } else if known_revision == basis.revision {
+            Ok((Vec::new(), 0))
+        } else {
+            match self.task_changes.changes_since(task_id, known_revision) {
+                ChangesSince::Changes { changes, bytes } => Ok((changes, bytes)),
+                ChangesSince::Unknown => Err("changesNotRetained"),
+                ChangesSince::Evicted => Err("changesEvicted"),
+            }
+        };
+        let resolution = missed
+            .as_ref()
+            .map(|(changes, bytes)| (changes.len(), *bytes))
+            .map_err(|reason| *reason);
+        log_task_subscription(
+            task_id,
+            Some(known_revision),
+            Some(basis.revision),
+            resolution,
+        );
+        let Ok((changes, _)) = missed else {
+            return snapshot_provider.snapshot(ctx, &scope, token);
+        };
+        Ok(SubscriptionSnapshot::TaskResume {
+            resume: TaskResumeSnapshot {
+                task_id: task_id.clone(),
+                known_revision,
+                changes,
+                history_sync: basis.history_sync,
+                pending_requests: Vec::new(),
+                subagents: basis.subagents,
+                workspace_available: basis.workspace_available,
+            },
+        })
+    }
+
     fn read_token_for_scope(&mut self, scope: &SubscriptionScope) -> SnapshotReadToken {
         self.scope_cursors
             .entry(scope.clone())
             .or_default()
             .read_token()
     }
+}
+
+/// One event per Task subscription explains whether a switch paid for a baseline.
+fn log_task_subscription(
+    task_id: &TaskId,
+    known_revision: Option<u64>,
+    current_revision: Option<u64>,
+    resolution: Result<(usize, usize), &'static str>,
+) {
+    let (outcome, baseline_reason, change_count, change_bytes) = match resolution {
+        Ok((0, _)) => ("current", None, 0, 0),
+        Ok((count, bytes)) => ("missedChanges", None, count, bytes),
+        Err(reason) => ("baseline", Some(reason), 0, 0),
+    };
+    logging::info(
+        "task_subscription_resolved",
+        json!({
+            "task_id": task_id.as_str(),
+            "outcome": outcome,
+            "baseline_reason": baseline_reason,
+            "known_revision": known_revision,
+            "current_revision": current_revision,
+            "change_count": change_count,
+            "change_bytes": change_bytes,
+        }),
+    );
 }
 
 fn event_matches_subscription(
