@@ -3,9 +3,10 @@ import type {
   EventCursor,
   StateSubscribeResult,
   SubscriptionScope,
-  SubscriptionSnapshot,
 } from "./generated/protocol.js";
+import type { ReplicaSnapshot } from "./backendConnection.js";
 import { updateSubscriptionSnapshot } from "./stateIngestionSnapshots.js";
+import { resumeTaskSnapshot } from "./stateIngestionTask.js";
 import { matchSubscriptionEvent } from "./subscriptionScope.js";
 import type { SubscriptionIngestionContext } from "./subscriptionScope.js";
 export type { SubscriptionIngestionContext } from "./subscriptionScope.js";
@@ -14,7 +15,7 @@ export type SubscriptionIngestionState = {
   context: SubscriptionIngestionContext;
   scope: SubscriptionScope;
   cursor: EventCursor;
-  snapshot: SubscriptionSnapshot;
+  snapshot: ReplicaSnapshot;
 };
 
 export type SubscriptionEventApplyResult =
@@ -37,8 +38,9 @@ export type SubscriptionEventApplyResult =
       event: AppServerEvent;
     };
 
+/** Installs a subscribe reply that carries a complete baseline. */
 export function createSubscriptionIngestionState(
-  result: StateSubscribeResult,
+  result: StateSubscribeResult & { snapshot: ReplicaSnapshot },
   context: SubscriptionIngestionContext,
 ): SubscriptionIngestionState {
   return {
@@ -47,6 +49,24 @@ export function createSubscriptionIngestionState(
     cursor: result.cursor,
     snapshot: result.snapshot,
   };
+}
+
+/**
+ * Installs any subscribe reply. A Task resume is rebuilt from `retained`, the copy
+ * the client offered as its known revision (ADR-0073); `undefined` means it could
+ * not be, and the caller must subscribe again for a baseline.
+ */
+export function installSubscriptionReply(
+  result: StateSubscribeResult,
+  context: SubscriptionIngestionContext,
+  retained?: ReplicaSnapshot,
+): SubscriptionIngestionState | undefined {
+  const { snapshot } = result;
+  if (snapshot.kind !== "taskResume") return createSubscriptionIngestionState({ ...result, snapshot }, context);
+  if (retained?.kind !== "task") return undefined;
+  const update = resumeTaskSnapshot(retained, snapshot.resume);
+  if (update.kind === "resyncRequired") return undefined;
+  return createSubscriptionIngestionState({ ...result, snapshot: update.snapshot }, context);
 }
 
 export function applySubscriptionEvent(

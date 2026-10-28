@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::client::SettingsSection;
+use crate::events::TaskChanges;
 use crate::ids::{EventCursor, ProjectId, SubagentId, TaskId, WorktreeRepositoryId};
 use crate::snapshot::{
-    AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, SubagentCatalogSnapshot,
-    SubagentHistorySnapshot, TaskNavigationSnapshot, TaskSnapshot,
+    AgentCollectionSnapshot, PendingRequestSnapshot, ProjectCollectionSnapshot, SettingsSnapshot,
+    SubagentCatalogSnapshot, SubagentHistorySnapshot, SubagentOverviewSnapshot,
+    TaskHistorySyncSnapshot, TaskNavigationSnapshot, TaskSnapshot,
 };
 use crate::task::TaskNavigationSection;
 use crate::task::ToolDetailSnapshot;
@@ -15,6 +17,12 @@ use crate::worktree::WorktreeRepositorySnapshot;
 #[serde(rename_all = "camelCase")]
 pub struct StateSubscribeParams {
     pub scope: SubscriptionScope,
+    /// Task revision of a copy this client already holds from the current App Server
+    /// process. Only a Task scope honors it; the reply may then be a `taskResume`
+    /// instead of a complete baseline (ADR-0073).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub known_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -104,6 +112,10 @@ pub enum SubscriptionSnapshot {
     Task {
         task: TaskSnapshot,
     },
+    /// Brings the client's copy at `knownRevision` up to date without a baseline.
+    TaskResume {
+        resume: TaskResumeSnapshot,
+    },
     SubagentCatalog {
         catalog: SubagentCatalogSnapshot,
     },
@@ -124,6 +136,31 @@ pub enum SubscriptionSnapshot {
     Terminals {
         terminals: crate::terminals::TerminalCollectionSnapshot,
     },
+}
+
+/// The client's Task copy at `known_revision`, plus `changes` applied in order, is the
+/// Task at the reply's position in its ordered stream. Later revisions arrive as live
+/// `taskChanged` events. The remaining fields change without a Task revision, so they
+/// always carry their current values and replace the copy's.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskResumeSnapshot {
+    pub task_id: TaskId,
+    pub known_revision: u64,
+    /// Published `taskChanged` changes after `known_revision`; empty when the copy is current.
+    pub changes: Vec<TaskRevisionChanges>,
+    pub history_sync: TaskHistorySyncSnapshot,
+    pub pending_requests: Vec<PendingRequestSnapshot>,
+    pub subagents: SubagentOverviewSnapshot,
+    pub workspace_available: bool,
+}
+
+/// One published `taskChanged` event, kept so a returning client can replay it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRevisionChanges {
+    pub revision: u64,
+    pub changes: TaskChanges,
 }
 
 #[cfg(test)]

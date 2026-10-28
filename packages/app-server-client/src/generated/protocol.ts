@@ -335,9 +335,23 @@ export type ClientProtocolCapability = "resync" | "requestResponses" | "stableCl
 
 export type ShellCapability = "openExternal" | "revealFile" | "resolveFileReveal" | "pickLocalFile" | "openTerminal" | "readSecret" | "writeSecret" | "showNotification";
 
-export type StateSubscribeParams = { scope: SubscriptionScope, };
+export type StateSubscribeParams = { scope: SubscriptionScope,
+/**
+ * Task revision of a copy this client already holds from the current App Server
+ * process. Only a Task scope honors it; the reply may then be a `taskResume`
+ * instead of a complete baseline (ADR-0073).
+ */
+knownRevision?: number, };
 
 export type StateSubscribeResult = { cursor: EventCursor, scope: SubscriptionScope, snapshot: SubscriptionSnapshot, };
+
+export type TaskResumeSnapshot = { taskId: TaskId, knownRevision: number,
+/**
+ * Published `taskChanged` changes after `known_revision`; empty when the copy is current.
+ */
+changes: Array<TaskRevisionChanges>, historySync: TaskHistorySyncSnapshot, pendingRequests: Array<PendingRequestSnapshot>, subagents: SubagentOverviewSnapshot, workspaceAvailable: boolean, };
+
+export type TaskRevisionChanges = { revision: number, changes: TaskChanges, };
 
 export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
@@ -345,7 +359,7 @@ export type StateUnsubscribeResult = { scope: SubscriptionScope, };
 
 export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", section: TaskNavigationSection, projectIds?: Array<ProjectId> | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "subagentCatalog", taskId: TaskId, } | { "kind": "subagentHistory", taskId: TaskId, subagentId: SubagentId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, } | { "kind": "devices" } | { "kind": "terminals" };
 
-export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "subagentCatalog", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistory", history: SubagentHistorySnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, } | { "kind": "devices", devices: DeviceCollectionSnapshot, } | { "kind": "terminals", terminals: TerminalCollectionSnapshot, };
+export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "taskResume", resume: TaskResumeSnapshot, } | { "kind": "subagentCatalog", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistory", history: SubagentHistorySnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, } | { "kind": "devices", devices: DeviceCollectionSnapshot, } | { "kind": "terminals", terminals: TerminalCollectionSnapshot, };
 
 export type SubagentOverviewSnapshot = { totalCount: number, runningCount: number, attentionCount: number, available?: boolean, };
 

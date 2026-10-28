@@ -32,6 +32,7 @@ fn subscribe_to_devices(gateway: &mut RpcGateway, connection_id: &ConnectionId) 
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Devices,
+                known_revision: None,
             },
         ),
         AppServerTime(2),

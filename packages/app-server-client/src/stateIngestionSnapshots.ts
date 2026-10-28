@@ -2,8 +2,8 @@ import type {
   AppServerEventPayload,
   ClientSnapshot,
   SubscriptionScope,
-  SubscriptionSnapshot,
 } from "./generated/protocol.js";
+import type { ReplicaSnapshot } from "./backendConnection.js";
 import {
   filterTaskNavigationForScope,
   replaceNavigationProjectEntries,
@@ -15,7 +15,7 @@ import { changed, unchanged } from "./stateIngestionTypes.js";
 
 export function updateSubscriptionSnapshot(
   scope: SubscriptionScope,
-  snapshot: SubscriptionSnapshot,
+  snapshot: ReplicaSnapshot,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
   if (payload.kind === "snapshotReplaced") {
@@ -105,7 +105,7 @@ export function updateSubscriptionSnapshot(
 
 function updateFromClientSnapshot(
   scope: SubscriptionScope,
-  snapshot: SubscriptionSnapshot,
+  snapshot: ReplicaSnapshot,
   clientSnapshot: ClientSnapshot,
 ): SnapshotUpdate {
   switch (snapshot.kind) {
@@ -136,7 +136,7 @@ function updateFromClientSnapshot(
 
 function updateTaskNavigationSnapshot(
   scope: SubscriptionScope,
-  snapshot: Extract<SubscriptionSnapshot, { kind: "taskNavigation" }>,
+  snapshot: Extract<ReplicaSnapshot, { kind: "taskNavigation" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
   if (payload.kind === "navigationReplaced") {
