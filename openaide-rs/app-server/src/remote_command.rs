@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use openaide_app_server::logging;
 use openaide_app_server::storage_runtime::StateRoot;
+use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
 use openaide_app_server_protocol::devices::{
     DeviceCollectionSnapshot, DevicesCreateInviteResult, RemoteAccessState,
 };
@@ -139,6 +140,12 @@ pub(crate) fn run(arguments: &[String], state_root: &StateRoot, runtime_root: &P
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Failure {
     NotRunning,
+    /// An App Server of another version runs for this state root and is left running.
+    OtherVersion {
+        protocol_version: String,
+    },
+    /// The running App Server could not be looked up; the class says why.
+    Handoff(&'static str),
     Launch(launch::LaunchError),
     Client(ClientError),
     RemoteAccess,
@@ -157,6 +164,8 @@ impl Failure {
     fn class(&self) -> &'static str {
         match self {
             Self::NotRunning => "not_running",
+            Self::OtherVersion { .. } => "other_version_running",
+            Self::Handoff(class) => class,
             Self::Launch(error) => error.class(),
             Self::Client(error) => error.class(),
             Self::RemoteAccess => "remote_access_failed",
@@ -169,6 +178,8 @@ impl Failure {
     fn message(&self) -> String {
         match self {
             Self::NotRunning => "OpenAIDE is not running on this computer. Start it with: openaide-app-server remote".to_string(),
+            Self::OtherVersion { .. } => "Another version of OpenAIDE is running on this computer and was left running. Use the openaide-app-server that started it.".to_string(),
+            Self::Handoff(_) => "OpenAIDE on this computer could not be reached. Its log has the reason.".to_string(),
             Self::Launch(_) => "OpenAIDE could not start. Its log has the reason.".to_string(),
             Self::Client(ClientError::Refused { message, .. }) if !message.is_empty() => {
                 format!("OpenAIDE refused the request: {message}")
@@ -194,7 +205,20 @@ fn with_running(
     runtime_root: &Path,
     work: impl FnOnce(&mut LocalClient) -> Result<(), Failure>,
 ) -> Result<(), Failure> {
-    let connection = launch::attach(state_root, runtime_root).ok_or(Failure::NotRunning)?;
+    let connection = match launch::running(state_root, runtime_root).map_err(Failure::Handoff)? {
+        launch::Found::Joined(connection) => connection,
+        launch::Found::NotRunning => return Err(Failure::NotRunning),
+        launch::Found::OtherVersion { protocol_version } => {
+            logging::warn(
+                "remote_command_other_version_running",
+                json!({
+                    "running_protocol_version": protocol_version,
+                    "required_protocol_version": APP_SERVER_PROTOCOL_VERSION,
+                }),
+            );
+            return Err(Failure::OtherVersion { protocol_version });
+        }
+    };
     let mut client = connect(&connection)?;
     let outcome = work(&mut client);
     // Leaving at once keeps a short command from holding the App Server
