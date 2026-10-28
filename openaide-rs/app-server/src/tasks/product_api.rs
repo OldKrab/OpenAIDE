@@ -459,14 +459,24 @@ impl TaskProductApi {
         )
     }
 
+    /// Opens like `task/open`, then reads the Task the way a subscriber would see it,
+    /// so tests can assert what the open changed.
     pub(crate) fn open_for_test(
         &self,
         params: openaide_app_server_protocol::task::TaskOpenParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
         self.open_task(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
+        )?;
+        let snapshot = crate::tasks::snapshot::build_snapshot(
+            &self.store,
+            &task_id,
+            crate::chat_history::ChatHistoryPolicy::default().task_snapshot_tail_limit(),
         )
+        .map_err(runtime_error)?;
+        self.project_task_snapshot(snapshot)
     }
 
     pub(crate) fn mark_read_for_test(

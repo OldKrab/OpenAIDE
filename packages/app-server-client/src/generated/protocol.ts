@@ -1240,7 +1240,7 @@ export type ActivityToolValue = { "kind": "null" } | { "kind": "boolean", value:
 
 export type TaskOpenParams = { taskId: TaskId, };
 
-export type TaskOpenResult = { task: TaskSnapshot, };
+export type TaskOpenResult = Record<symbol, never>;
 
 export type TaskReloadNativeSessionParams = { taskId: TaskId, clientMutationId: ClientMutationId, };
 
@@ -2087,4 +2087,4 @@ export type TypedServerRequest<M extends ServerRequestMethod> = ServerRequestEnv
   method: M;
 };
 
-export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 2, minor: 6 };
+export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 3, minor: 0 };

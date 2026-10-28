@@ -409,7 +409,7 @@ describe("app controller mounted lifecycle", () => {
   it("opens a task without coupling navigation to Native Session listing", async () => {
     bootstrap = navigationBootstrap({ projectId: "project_1" });
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "Opened Task") };
+      if (method === TASK_OPEN) return {};
       throw new Error(method);
     });
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
@@ -832,7 +832,7 @@ describe("app controller mounted lifecycle", () => {
         return nonTaskSubscriptionSnapshot(params?.scope);
       }
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot(params!.taskId!, "Task") };
+      if (method === TASK_OPEN) return {};
       if (method === TASK_COMPOSER_HISTORY) return { entries: [] };
       throw new Error(method);
     });
@@ -1402,12 +1402,20 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("requests typed task open when initialize omits the active task", async () => {
-    const request = vi.fn(async () => ({
-      task: protocolTaskSnapshot("task_1", "Typed Open"),
-    }));
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (method === TASK_OPEN) return {};
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === STATE_SUBSCRIBE) {
+        return params?.scope?.kind === "task"
+          ? taskSubscriptionSnapshot("cursor-1", protocolTaskSnapshot("task_1", "Typed Open"))
+          : nonTaskSubscriptionSnapshot(params?.scope, "cursor-1");
+      }
+      throw new Error(method);
+    });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = taskBootstrap("task_1");
@@ -1426,7 +1434,7 @@ describe("app controller mounted lifecycle", () => {
   it("returns a reselected Task to New Task when another client removes it", async () => {
     const eventListeners: Array<(event: AppServerEvent) => void> = [];
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "Task") };
+      if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       if (method === STATE_SUBSCRIBE) return params?.scope?.kind === "task"
         ? taskSubscriptionSnapshot("cursor-1")
@@ -1459,11 +1467,11 @@ describe("app controller mounted lifecycle", () => {
     expect(postHostMessage).toHaveBeenCalledWith({ type: "surface.openNewTask" });
   });
 
-  it("keeps terminal history sync when its event wins the race with task open", async () => {
+  it("keeps terminal history sync when its event wins the race with the task open acknowledgement", async () => {
     const initial = clientSnapshot();
     if (!initial.activeTask) throw new Error("expected active task fixture");
     initial.activeTask.historySync = { state: "idle", generation: 6 };
-    const opened = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const opened = deferredValue<Record<string, never>>();
     const eventListeners: Array<(event: AppServerEvent) => void> = [];
     const request = vi.fn((method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return opened.promise;
@@ -1522,33 +1530,36 @@ describe("app controller mounted lifecycle", () => {
     });
     expect(latestController?.state.snapshot?.history_sync).toEqual({ state: "idle", generation: 7 });
 
-    const staleOpen = protocolTaskSnapshot("task_1", "Newer durable title");
-    staleOpen.revision = 2;
-    staleOpen.historySync = { state: "syncing", generation: 7 };
     await act(async () => {
-      opened.resolve({ task: staleOpen });
+      opened.resolve({});
       await opened.promise;
       await Promise.resolve();
     });
 
+    // The acknowledgement carries no Task state, so it cannot regress the replica.
+    expect(latestController?.state.activeTaskId).toBe("task_1");
     expect(latestController?.state.snapshot?.history_sync).toEqual({ state: "idle", generation: 7 });
     expect(latestController?.state.snapshot).toMatchObject({
-      revision: 2,
-      task: { title: "Newer durable title" },
+      task: { task_id: "task_1", title: "Task" },
     });
   });
 
   it("retries a failed task open in place without discarding the draft", async () => {
     let openAttempts = 0;
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === STATE_SUBSCRIBE) return params?.scope?.kind === "task"
+        ? taskSubscriptionSnapshot("cursor-1", protocolTaskSnapshot("task_1", "Recovered Task"))
+        : nonTaskSubscriptionSnapshot(params?.scope, "cursor-1");
       if (method !== TASK_OPEN) throw new Error(method);
       openAttempts += 1;
       if (openAttempts === 1) throw new Error("Connection closed.");
-      return { task: protocolTaskSnapshot("task_1", "Recovered Task") };
+      return {};
     });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = taskBootstrap("task_1");
@@ -1575,6 +1586,8 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(2);
+    expect(latestController?.state.taskOpenError).toBeUndefined();
+    expect(latestController?.state.activeTaskId).toBe("task_1");
     expect(latestController?.state.snapshot?.task.title).toBe("Recovered Task");
     expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
   });
@@ -1584,7 +1597,7 @@ describe("app controller mounted lifecycle", () => {
     let fail: Parameters<BackendConnection["handleRecoveryFailed"]>[0] | undefined;
     let recover: Parameters<BackendConnection["handleRecoveryBaseline"]>[0] | undefined;
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "Recovered Task") };
+      if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       if (method === STATE_SUBSCRIBE) return params?.scope?.kind === "task"
         ? taskSubscriptionSnapshot("cursor_2")
@@ -1680,14 +1693,21 @@ describe("app controller mounted lifecycle", () => {
         values: [{ value: "gpt-5.6-sol", label: "GPT-5.6 Sol" }],
       }],
     };
-    const opened = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
-    const request = vi.fn((method: string) => {
-      if (method === TASK_OPEN) return opened.promise;
+    const baseline = deferredValue<ReturnType<typeof taskSubscriptionSnapshot>>();
+    const request = vi.fn((method: string, params?: { scope?: { kind: string } }) => {
+      if (method === TASK_OPEN) return Promise.resolve({});
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (method === STATE_SUBSCRIBE) {
+        return params?.scope?.kind === "task"
+          ? baseline.promise
+          : Promise.resolve(nonTaskSubscriptionSnapshot(params?.scope, "cursor-1"));
+      }
       throw new Error(method);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: initial })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = taskBootstrap("task_1");
@@ -1707,8 +1727,8 @@ describe("app controller mounted lifecycle", () => {
     });
 
     await act(async () => {
-      opened.resolve({ task: recovered });
-      await opened.promise;
+      baseline.resolve(taskSubscriptionSnapshot("cursor-1", recovered));
+      await baseline.promise;
     });
 
     expect(latestController?.state.snapshot?.agent_config).toMatchObject({
@@ -1723,9 +1743,7 @@ describe("app controller mounted lifecycle", () => {
       method: string,
       params?: { scope?: { kind: string; taskId?: string } },
     ) => {
-      if (method === TASK_OPEN) {
-        return { task: protocolTaskSnapshot("task_1", "Task") };
-      }
+      if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       if (method !== STATE_SUBSCRIBE) throw new Error(method);
       if (params?.scope?.kind !== "task") {
@@ -1797,9 +1815,7 @@ describe("app controller mounted lifecycle", () => {
       method: string,
       params?: { scope?: { kind: string; taskId?: string } },
     ) => {
-      if (method === TASK_OPEN) {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Task") });
-      }
+      if (method === TASK_OPEN) return Promise.resolve({});
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
       if (method !== STATE_SUBSCRIBE) throw new Error(method);
       if (params?.scope?.kind === "task") {
@@ -1864,15 +1880,20 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("opens a task once when navigation changes to its route", async () => {
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_OPEN) {
-        return { task: protocolTaskSnapshot("task_1", "Opened Task") };
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (method === TASK_OPEN) return {};
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === STATE_SUBSCRIBE) {
+        return params?.scope?.kind === "task"
+          ? taskSubscriptionSnapshot("cursor-1", protocolTaskSnapshot("task_1", "Opened Task"))
+          : nonTaskSubscriptionSnapshot(params?.scope, "cursor-1");
       }
       throw new Error(method);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = navigationBootstrap();
@@ -2146,10 +2167,14 @@ describe("app controller mounted lifecycle", () => {
         if (scope?.kind === "task" && scope.taskId === "task_new") {
           return taskBaseline.promise;
         }
+        if (scope?.kind === "task" && scope.taskId === "task_existing") {
+          return taskSubscriptionSnapshot(
+            "cursor_existing",
+            protocolTaskSnapshot("task_existing", "Existing task"),
+          );
+        }
       }
-      if (method === TASK_OPEN) {
-        return { task: protocolTaskSnapshot("task_existing", "Existing task") };
-      }
+      if (method === TASK_OPEN) return {};
       throw new Error(method);
     });
     backendConnection = {
@@ -2261,26 +2286,35 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("reuses the cached New Task with its composer after visiting an existing Task", async () => {
-    const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
+    const preparedTask = {
+      ...protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }),
+      lifecycle: "prepared" as const,
+    };
+    const request = vi.fn(async (
+      method: string,
+      params?: { taskId?: string; scope?: { kind: string; taskId?: string } },
+    ) => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_ACQUIRE) {
-        return {
-          task: {
-            ...protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }),
-            lifecycle: "prepared" as const,
-          },
-        };
-      }
-      if (method === TASK_OPEN && params?.taskId === "task_existing") {
-        return { task: protocolTaskSnapshot("task_existing", "Existing task") };
+      if (method === TASK_ACQUIRE) return { task: preparedTask };
+      if (method === TASK_OPEN && params?.taskId === "task_existing") return {};
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === STATE_SUBSCRIBE) {
+        if (params?.scope?.kind !== "task") return nonTaskSubscriptionSnapshot(params?.scope);
+        return taskSubscriptionSnapshot(
+          `cursor_${params.scope.taskId}`,
+          params.scope.taskId === "task_prepared"
+            ? preparedTask
+            : protocolTaskSnapshot("task_existing", "Existing task"),
+        );
       }
       throw new Error(`${method}:${params?.taskId ?? ""}`);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = webTaskBootstrap(undefined, "project_1");
@@ -2588,9 +2622,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === TASK_ACQUIRE) {
         return { task: protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }) };
       }
-      if (method === TASK_OPEN && params?.taskId === "task_existing") {
-        return { task: protocolTaskSnapshot("task_existing", "Existing task") };
-      }
+      if (method === TASK_OPEN && params?.taskId === "task_existing") return {};
       if (method === TASK_SEND && params?.taskId === "task_prepared") {
         return {
           task: protocolTaskSnapshot("task_prepared", "New task", { userText: "Send this" }),
@@ -3172,7 +3204,7 @@ describe("app controller mounted lifecycle", () => {
   it("opens the created Task route after sending from new-task", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
+      if (method === TASK_OPEN) return {};
       if (method === TASK_SEND) return { task: protocolTaskSnapshot("task_new", "Sent task", { hasMessages: true }) };
       throw new Error(method);
     });
@@ -3296,8 +3328,8 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
-  it("ignores a stale prepared task open response after new-task send commits messages", async () => {
-    const routeOpen = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+  it("keeps the sent Task when a prepared Task open acknowledgement arrives after new-task send commits messages", async () => {
+    const routeOpen = deferredValue<Record<string, never>>();
     const sent = deferredValue<{
       task: ReturnType<typeof protocolTaskSnapshot>;
       turnId: string;
@@ -3361,7 +3393,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.has_messages).toBe(true);
 
     await act(async () => {
-      routeOpen.resolve({ task: protocolTaskSnapshot("task_new", "Stale prepared task", { hasMessages: false }) });
+      routeOpen.resolve({});
       await routeOpen.promise;
       await Promise.resolve();
     });
@@ -3377,15 +3409,28 @@ describe("app controller mounted lifecycle", () => {
       turnId: string;
       userMessageId: string;
     }>();
-    const request = vi.fn((method: string, params?: { taskId?: string }) => {
+    const request = vi.fn((
+      method: string,
+      params?: { taskId?: string; scope?: { kind: string; taskId?: string } },
+    ) => {
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
       if (method === TASK_ACQUIRE) {
         return Promise.resolve({ task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) });
       }
-      if (method === TASK_OPEN && params?.taskId === "task_1") {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Previous task") });
+      if (method === TASK_OPEN && params?.taskId === "task_1") return Promise.resolve({});
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (method === STATE_SUBSCRIBE) {
+        if (params?.scope?.kind !== "task") {
+          return Promise.resolve(nonTaskSubscriptionSnapshot(params?.scope));
+        }
+        return Promise.resolve(params.scope.taskId === "task_1"
+          ? taskSubscriptionSnapshot("cursor_task_1", protocolTaskSnapshot("task_1", "Previous task"))
+          : taskSubscriptionSnapshot(
+              "cursor_task_new",
+              protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
+            ));
       }
       if (method === TASK_SEND) return sent.promise;
       throw new Error(`${method}:${params?.taskId ?? ""}`);
@@ -3393,6 +3438,7 @@ describe("app controller mounted lifecycle", () => {
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = webTaskBootstrap(undefined, "project_1");
@@ -3442,13 +3488,21 @@ describe("app controller mounted lifecycle", () => {
 
   it("retains a late task/acquire result without replacing the visible Task", async () => {
     const created = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
-    const request = vi.fn((method: string, params?: { taskId?: string }) => {
+    const request = vi.fn((
+      method: string,
+      params?: { taskId?: string; scope?: { kind: string; taskId?: string } },
+    ) => {
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
       if (method === TASK_ACQUIRE) return created.promise;
-      if (method === TASK_OPEN && params?.taskId === "task_1") {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Destination task") });
+      if (method === TASK_OPEN && params?.taskId === "task_1") return Promise.resolve({});
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (method === STATE_SUBSCRIBE) {
+        return Promise.resolve(subscriptionReply(params, {
+          task_1: protocolTaskSnapshot("task_1", "Destination task"),
+          task_new: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
+        }));
       }
       if (method === TASK_SEND) {
         return Promise.resolve({
@@ -3462,6 +3516,7 @@ describe("app controller mounted lifecycle", () => {
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = webTaskBootstrap(undefined, "project_1");
@@ -3606,9 +3661,7 @@ describe("app controller mounted lifecycle", () => {
           }),
         };
       }
-      if (method === TASK_OPEN) {
-        return { task: protocolTaskSnapshot("task_1", "First task", { hasMessages: true }) };
-      }
+      if (method === TASK_OPEN) return {};
       throw new Error(method);
     });
     backendConnection = {
@@ -3701,7 +3754,7 @@ describe("app controller mounted lifecycle", () => {
     const created = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_ACQUIRE) return created.promise;
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false, sendReady: false }) };
+      if (method === TASK_OPEN) return {};
       throw new Error(method);
     });
     backendConnection = {
@@ -3788,17 +3841,28 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
-  it("ignores stale task-open responses after switching to another task", async () => {
-    const task1 = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
-    const task2 = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
-    const request = vi.fn((method: string, params: { taskId?: string }) => {
+  it("ignores a late task-open acknowledgement after switching to another task", async () => {
+    const task1 = deferredValue<Record<string, never>>();
+    const task2 = deferredValue<Record<string, never>>();
+    const request = vi.fn((
+      method: string,
+      params: { taskId?: string; scope?: { kind: string; taskId?: string } },
+    ) => {
       if (method === TASK_OPEN && params.taskId === "task_1") return task1.promise;
       if (method === TASK_OPEN && params.taskId === "task_2") return task2.promise;
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params.scope });
+      if (method === STATE_SUBSCRIBE) {
+        return Promise.resolve(subscriptionReply(params, {
+          task_1: protocolTaskSnapshot("task_1", "First task"),
+          task_2: protocolTaskSnapshot("task_2", "Second task"),
+        }));
+      }
       throw new Error(method);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = webTaskBootstrap("task_1");
@@ -3814,40 +3878,49 @@ describe("app controller mounted lifecycle", () => {
       webRouteListeners.forEach((listener) => listener(webTaskBootstrap("task_2")));
       await Promise.resolve();
     });
-    expect(latestController?.state.activeTaskId).toBe("task_2");
-    expect(latestController?.state.snapshot).toBeUndefined();
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_2" });
 
     await act(async () => {
-      task2.resolve({ task: protocolTaskSnapshot("task_2", "Second task") });
+      task2.resolve({});
       await task2.promise;
+      await Promise.resolve();
+      await Promise.resolve();
     });
     expect(latestController?.state.activeTaskId).toBe("task_2");
     expect(latestController?.state.snapshot?.task.title).toBe("Second task");
 
     await act(async () => {
-      task1.resolve({ task: protocolTaskSnapshot("task_1", "Stale first task") });
+      task1.resolve({});
       await task1.promise;
+      await Promise.resolve();
+      await Promise.resolve();
     });
     expect(latestController?.state.activeTaskId).toBe("task_2");
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_2");
     expect(latestController?.state.snapshot?.task.title).toBe("Second task");
   });
 
   it("does not replace the routed task with a recovery baseline for another task", async () => {
     let publishInvalidation: ((event: { reason: "httpSessionExpired" }) => void) | undefined;
     let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
-    const request = vi.fn((method: string, params: { taskId?: string }) => {
-      if (method === TASK_OPEN && params.taskId === "task_1") {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "First task") });
-      }
-      if (method === TASK_OPEN && params.taskId === "task_2") {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_2", "Second task") });
+    const request = vi.fn((
+      method: string,
+      params: { taskId?: string; scope?: { kind: string; taskId?: string } },
+    ) => {
+      if (method === TASK_OPEN) return Promise.resolve({});
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params.scope });
+      if (method === STATE_SUBSCRIBE) {
+        return Promise.resolve(subscriptionReply(params, {
+          task_1: protocolTaskSnapshot("task_1", "First task"),
+          task_2: protocolTaskSnapshot("task_2", "Second task"),
+        }));
       }
       throw new Error(method);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       handleGenerationInvalidated(handler) {
         publishInvalidation = handler;
         return () => {
@@ -3893,17 +3966,38 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("shows a cached task snapshot immediately when switching back while refreshing it", async () => {
-    const task2 = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
-    const request = vi.fn((method: string, params: { taskId?: string }) => {
+    const reopenTask1 = deferredValue<Record<string, never>>();
+    const refreshTask1 = deferredValue<ReturnType<typeof taskSubscriptionSnapshot>>();
+    let task1Opens = 0;
+    let task1Subscriptions = 0;
+    const request = vi.fn((
+      method: string,
+      params: { taskId?: string; scope?: { kind: string; taskId?: string } },
+    ) => {
       if (method === TASK_OPEN && params.taskId === "task_1") {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Cached first task") });
+        task1Opens += 1;
+        return task1Opens === 1 ? Promise.resolve({}) : reopenTask1.promise;
       }
-      if (method === TASK_OPEN && params.taskId === "task_2") return task2.promise;
+      if (method === TASK_OPEN && params.taskId === "task_2") return new Promise(() => undefined);
+      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params.scope });
+      if (method === STATE_SUBSCRIBE) {
+        if (params.scope?.kind === "task" && params.scope.taskId === "task_2") {
+          return new Promise(() => undefined);
+        }
+        if (params.scope?.kind === "task" && params.scope.taskId === "task_1") {
+          task1Subscriptions += 1;
+          if (task1Subscriptions > 1) return refreshTask1.promise;
+        }
+        return Promise.resolve(subscriptionReply(params, {
+          task_1: protocolTaskSnapshot("task_1", "Cached first task"),
+        }));
+      }
       throw new Error(method);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
       close: vi.fn(),
     };
     bootstrap = webTaskBootstrap("task_1");
@@ -3927,17 +4021,27 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
+    // Neither the reopen acknowledgement nor the refreshed baseline has arrived yet.
     expect(latestController?.state.activeTaskId).toBe("task_1");
     expect(latestController?.state.snapshot?.task.title).toBe("Cached first task");
-    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
     expect(request.mock.calls.filter(([method, params]) =>
       method === TASK_OPEN && (params as { taskId?: string }).taskId === "task_1"
     )).toHaveLength(2);
+
+    await act(async () => {
+      refreshTask1.resolve(taskSubscriptionSnapshot(
+        "cursor_refreshed",
+        protocolTaskSnapshot("task_1", "Refreshed first task"),
+      ));
+      await refreshTask1.promise;
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.task.title).toBe("Refreshed first task");
   });
 
   it("waits for typed task open while backend initialize is pending", async () => {
     const initialize = deferredInitialize();
-    const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task_1", "Typed Open") }));
+    const request = vi.fn(async () => ({}));
     backendConnection = {
       initialize: vi.fn(() => initialize.promise),
       request: request as unknown as BackendConnection["request"],
@@ -4441,7 +4545,7 @@ function taskSubscriptionSnapshot(
   cursor: string,
   task = protocolTaskSnapshot("task_1", "Task"),
 ) {
-  const scope = { kind: "task" as const, taskId: "task_1" as never };
+  const scope = { kind: "task" as const, taskId: task.task.taskId };
   return {
     cursor: cursor as never,
     scope,
@@ -4450,6 +4554,18 @@ function taskSubscriptionSnapshot(
       task,
     },
   };
+}
+
+/** Answers a `state/subscribe` request: task scopes from `tasks`, every other scope with an empty baseline. */
+function subscriptionReply(
+  params: { scope?: { kind: string; taskId?: string; section?: "tasks" | "archive" } } | undefined,
+  tasks: Record<string, ProtocolTaskSnapshot>,
+  cursor = "cursor_subscription",
+) {
+  if (params?.scope?.kind !== "task") return nonTaskSubscriptionSnapshot(params?.scope, cursor);
+  const task = tasks[params.scope.taskId ?? ""];
+  if (!task) throw new Error(`unexpected task subscription: ${params.scope.taskId}`);
+  return taskSubscriptionSnapshot(`${cursor}_${params.scope.taskId}`, task);
 }
 
 function nonTaskSubscriptionSnapshot(

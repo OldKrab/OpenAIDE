@@ -405,7 +405,8 @@ fn app_server_handoff_task_created_in_one_tab_is_visible_to_another_tab() {
     );
     assert_eq!(sent["task"]["task"]["hasMessages"], true);
 
-    let opened_in_reader = open_task(endpoint_url, auth_token, "reader-tab", task_id);
+    open_task(endpoint_url, auth_token, "reader-tab", task_id);
+    let opened_in_reader = read_task(endpoint_url, auth_token, "reader-tab", task_id);
     assert_eq!(opened_in_reader["task"]["taskId"], task_id);
     assert_eq!(opened_in_reader["task"]["hasMessages"], true);
 
@@ -759,7 +760,7 @@ fn post_local_http_json(
     serde_json::from_str(&response).expect("local http json response")
 }
 
-fn open_task(endpoint_url: &str, auth_token: &str, connection_id: &str, task_id: &str) -> Value {
+fn open_task(endpoint_url: &str, auth_token: &str, connection_id: &str, task_id: &str) {
     let opened = post_local_http_json(
         endpoint_url,
         auth_token,
@@ -771,7 +772,37 @@ fn open_task(endpoint_url: &str, auth_token: &str, connection_id: &str, task_id:
             "params": { "taskId": task_id }
         }),
     );
-    opened[0]["result"]["result"]["task"].clone()
+    assert_eq!(opened[0]["result"]["result"], json!({}), "task/open failed: {opened:#?}");
+}
+
+/// Reads the Task the way Frontend does: a Task subscription baseline, released at once.
+fn read_task(endpoint_url: &str, auth_token: &str, connection_id: &str, task_id: &str) -> Value {
+    let scope = json!({ "kind": "task", "taskId": task_id });
+    let subscribed = post_local_http_json(
+        endpoint_url,
+        auth_token,
+        connection_id,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe-task",
+            "method": "state/subscribe",
+            "params": { "scope": scope }
+        }),
+    );
+    let task = subscribed[0]["result"]["result"]["snapshot"]["task"].clone();
+    assert!(task.is_object(), "task subscribe failed: {subscribed:#?}");
+    post_local_http_json(
+        endpoint_url,
+        auth_token,
+        connection_id,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "unsubscribe-task",
+            "method": "state/unsubscribe",
+            "params": { "scope": scope }
+        }),
+    );
+    task
 }
 
 fn create_task(
@@ -833,7 +864,7 @@ fn wait_until_task_send_ready(
     task_id: &str,
 ) -> Value {
     crate::test_sync::wait_for("task send readiness", || {
-        let task = open_task(endpoint_url, auth_token, connection_id, task_id);
+        let task = read_task(endpoint_url, auth_token, connection_id, task_id);
         (task["sendCapability"]["state"] == "ready").then_some(task)
     })
 }

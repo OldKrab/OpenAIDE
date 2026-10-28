@@ -207,7 +207,7 @@ export function useTaskRouteLifecycle({
       backendConnection,
       createTaskOpenRequestId: createSnapshotRequestId,
       dispatch: requestDispatch,
-    }, taskId, "open")
+    }, taskId)
       .then(() => {
         routeTelemetry(backendConnection, "task_route_open_completed", {
           task_id: taskId,

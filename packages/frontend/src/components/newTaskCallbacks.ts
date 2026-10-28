@@ -16,7 +16,6 @@ import type { AppCallbacksDependencies, NewTaskCallbacks } from "./appController
 import { createNewTaskBrowserCallbacks } from "./newTaskBrowserCallbacks";
 import { createNewTaskStartCallbacks } from "./newTaskStartCallbacks";
 import type { NewTaskController } from "./newTaskController";
-import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
 import { requestComposerHistory } from "../intents/taskReadIntents";
 
 type NewTaskDependencies = Pick<
@@ -106,17 +105,9 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
           });
         }).catch(() => {
           if (!asyncOperations.owns(operation)) return;
+          // Any durable change the failed mutation made arrives through the
+          // Prepared Task's subscription, so nothing is re-read here.
           dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });
-          void refreshTaskSnapshotAfterMutationFailure({
-            dispatch,
-            request,
-            taskId,
-          }).then(() => {
-            if (!asyncOperations.owns(operation)) return;
-            // Snapshot ingestion clears transient new-task errors. Reassert only
-            // the failure that still owns this exact preparation context.
-            dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });
-          });
         });
         return;
       }

@@ -411,9 +411,9 @@ pub struct TaskOpenParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskOpenResult {
-    pub task: TaskSnapshot,
-}
+/// Acknowledges a committed open. Task state arrives only through the Task
+/// subscription (ADR-0074).
+pub struct TaskOpenResult {}
 
 /// Explicitly replaces a live Task attachment with an authoritative Agent replay.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

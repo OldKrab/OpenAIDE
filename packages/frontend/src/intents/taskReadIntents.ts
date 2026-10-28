@@ -6,10 +6,8 @@ import {
   type BackendConnection,
   type ComposerHistoryScope,
   type TaskId,
-  type TaskOpenResult,
 } from "@openaide/app-server-client";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
-import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 
 type TaskReadConnection = Pick<BackendConnection, "request">;
 
@@ -44,28 +42,16 @@ export async function requestComposerHistory(
   return result.entries.map((entry) => entry.text);
 }
 
+/**
+ * Opens a Task and selects it once the App Server acknowledges the open. The reply
+ * carries no Task state (ADR-0074): the Task subscription supplies the snapshot.
+ */
 export async function requestTaskOpen(
   { acceptTaskOpen, backendConnection, createTaskOpenRequestId, dispatch }: TaskReadIntentDependencies,
   taskId: string,
-  intent: SnapshotIntent = "open",
 ) {
-  const requestId = createTaskOpenRequestId?.(taskId, intent);
-  const result = await backendConnection.request(TASK_OPEN, { taskId: taskId as TaskId });
-  dispatchTaskOpenResult(dispatch, result, intent, requestId, acceptTaskOpen);
-}
-
-function dispatchTaskOpenResult(
-  dispatch: (action: AppAction) => void,
-  result: TaskOpenResult,
-  intent: SnapshotIntent,
-  requestId: number | undefined,
-  acceptTaskOpen: TaskReadIntentDependencies["acceptTaskOpen"],
-) {
-  const mapped = mapProtocolTaskSnapshot(result.task).snapshot;
-  if (acceptTaskOpen && !acceptTaskOpen(mapped.task.task_id, requestId, intent)) return;
-  dispatch({
-    type: "snapshot",
-    snapshot: mapped,
-    intent,
-  });
+  const requestId = createTaskOpenRequestId?.(taskId, "open");
+  await backendConnection.request(TASK_OPEN, { taskId: taskId as TaskId });
+  if (acceptTaskOpen && !acceptTaskOpen(taskId, requestId, "open")) return;
+  dispatch({ type: "taskOpen:accepted", taskId });
 }
