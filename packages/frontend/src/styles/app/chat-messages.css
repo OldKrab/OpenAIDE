@@ -405,8 +405,10 @@
   transition: background 120ms ease-out;
 }
 
-.agent-inline-code-copy:hover {
-  background: var(--oa-raised);
+@media (hover: hover) {
+  .agent-inline-code-copy:hover {
+    background: var(--oa-raised);
+  }
 }
 
 .agent-inline-code-copy:focus-visible {
@@ -414,8 +416,10 @@
   outline-offset: 1px;
 }
 
+/* The tint flashes once at the click; the bubble alone carries the confirmation after it.
+   Mixed in oklab, since oklch would turn the green toward the panel's blue hue. */
 .agent-inline-code-copy[data-copy-state="copied"] {
-  background: color-mix(in oklch, var(--oa-success) 18%, var(--oa-panel));
+  animation: agent-inline-code-flash 300ms ease-out;
 }
 
 .agent-inline-code-copy[data-copy-state="failed"] {
@@ -445,6 +449,10 @@
 
 .agent-inline-code-copy[data-copy-state="failed"]::after {
   content: "Copy failed";
+}
+
+@keyframes agent-inline-code-flash {
+  from { background: color-mix(in oklab, var(--oa-success) 22%, var(--oa-panel)); }
 }
 
 @keyframes agent-inline-code-copied {
@@ -759,6 +767,7 @@
     transition-duration: 0.01ms;
   }
 
+  .agent-inline-code-copy,
   .agent-inline-code-copy::after {
     animation: none;
   }

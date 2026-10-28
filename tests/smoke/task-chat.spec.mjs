@@ -804,6 +804,27 @@ test("copies fenced Markdown code independently at desktop and constrained width
   expect(geometry.buttonInsidePre).toBe(true);
 });
 
+test("flashes copied inline code only at the click and leaves the bubble to confirm", async ({ context, page }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:code-block-copy");
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+
+  const chip = page.locator("code.agent-inline-code-copy", { hasText: "inline" });
+  await chip.hover();
+  const hoverBackground = await chip.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    return getComputedStyle(element).backgroundColor;
+  });
+  await chip.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("inline");
+  // The tint settles back to the hover look while the "Copied" bubble is still showing.
+  await expect.poll(() => chip.evaluate((element) =>
+    `${element.dataset.copyState}|${getComputedStyle(element).backgroundColor}`,
+  )).toBe(`copied|${hoverBackground}`);
+});
+
 test("keeps a reply's duration below an ending that has no line to share", async ({ page }) => {
   await page.setViewportSize({ width: 1_200, height: 800 });
   await openPreparedNewTask(page);
