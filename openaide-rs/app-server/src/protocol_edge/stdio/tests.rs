@@ -1580,7 +1580,7 @@ fn task_list_returns_storage_backed_tasks_after_initialize() {
 }
 
 #[test]
-fn task_open_returns_storage_backed_task_snapshot_after_initialize() {
+fn task_open_acknowledges_and_clears_unread_after_initialize() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1621,18 +1621,8 @@ fn task_open_returns_storage_backed_task_snapshot_after_initialize() {
     );
 
     let response = response(&responses[0]);
-    assert_eq!(
-        response["result"]["result"]["task"]["task"]["taskId"],
-        "task-1"
-    );
-    assert_eq!(
-        response["result"]["result"]["task"]["task"]["unread"],
-        false
-    );
-    assert_eq!(
-        response["result"]["result"]["task"]["chat"]["items"][0]["parts"][0]["text"],
-        "hello"
-    );
+    // ADR-0074: the open carries no Task state; subscribers see its changes.
+    assert_eq!(response["result"]["result"], json!({}));
     drop(dispatcher);
     assert!(
         !Store::open(temp.path().to_path_buf())

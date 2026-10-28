@@ -557,15 +557,13 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for task open");
-        let task = match self
+        if let Err(error) = self
             .task_open
             .open_for_client(&client.client_instance_id, params)
         {
-            Ok(task) => task,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        let task = self.task_with_pending_requests(task);
-        self.result::<TaskOpenResult>(connection_id, id, meta, TaskOpenResult { task })
+            return self.error(connection_id, id, meta, error);
+        }
+        self.result::<TaskOpenResult>(connection_id, id, meta, TaskOpenResult {})
     }
 
     pub(super) fn handle_task_reload_native_session(

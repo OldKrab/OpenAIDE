@@ -71,9 +71,17 @@ async function waitUntilTaskSendReady(initialSnapshot) {
       throw new Error(`task/acquire did not become send-ready within ${sendTimeoutMs}ms`);
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const opened = await request("task/open", { taskId }, Math.min(5_000, deadline - Date.now()));
-    snapshot = opened.task;
+    snapshot = await readTask(Math.min(5_000, deadline - Date.now()));
   }
+}
+
+// task/open carries no Task state (ADR-0074); read it the way Frontend does,
+// from a Task subscription baseline that is released at once.
+async function readTask(timeoutMs) {
+  const scope = { kind: "task", taskId };
+  const subscribed = await request("state/subscribe", { scope }, timeoutMs);
+  await request("state/unsubscribe", { scope }, timeoutMs).catch(() => {});
+  return subscribed.snapshot?.task;
 }
 
 async function cleanupTask() {

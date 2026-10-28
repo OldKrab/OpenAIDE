@@ -4513,10 +4513,7 @@ impl TaskOpenWorkflow for RejectingTaskOpen {
         &self,
         _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskOpenParams,
-    ) -> Result<
-        openaide_app_server_protocol::snapshot::TaskSnapshot,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task open unavailable in test gateway".to_string(),

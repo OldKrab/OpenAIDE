@@ -47,7 +47,6 @@ import { mapProtocolConfigOptions } from "../state/appServerProtocolMapping";
 import { configOptionsMutable } from "../state/configOptionState";
 import { mapProtocolChatPage } from "../state/taskReadMapping";
 import type { AppCallbacksDependencies, TaskCallbacks } from "./appControllerCallbackTypes";
-import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
 import { currentFrontendShell } from "../services/frontendShell";
 
 type TaskDependencies = Pick<
@@ -401,14 +400,11 @@ export function createTaskCallbacks({
             message: safeErrorMessage(error),
             catalog,
           });
+          // Any durable change the failed mutation made arrives through the
+          // Task subscription, so nothing is re-read here.
           globalThis.setTimeout(() => {
             dispatch({ type: "taskInput:configError:clear", taskId, mutationId });
           }, 10_000);
-          void refreshTaskSnapshotAfterMutationFailure({
-            dispatch,
-            request,
-            taskId,
-          });
         });
     },
   };

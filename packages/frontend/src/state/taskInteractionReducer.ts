@@ -45,6 +45,7 @@ type TaskInteractionAction =
   | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
   | { type: "taskOpen:start"; taskId: string }
+  | { type: "taskOpen:accepted"; taskId: string }
   | { type: "taskOpen:error"; taskId: string; kind?: TaskOpenError["kind"]; message: string }
   | { type: "chatPage:start"; taskId: string; requestGeneration: number }
   | { type: "chatPage:result"; taskId: string; requestGeneration: number; page: MessagePage }
@@ -396,6 +397,26 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     case "taskOpen:start":
       if (state.taskOpenError?.taskId !== action.taskId) return state;
       return { ...state, taskOpenError: undefined };
+    case "taskOpen:accepted": {
+      // The open selects the Task; its subscription owns the snapshot (ADR-0074).
+      // A copy cached by that subscription in this replica epoch shows at once;
+      // otherwise the Task's baseline fills `snapshot` when it arrives.
+      const cached = state.taskSnapshotReplicaEpochs[action.taskId] === state.appServerReplicaEpoch
+        ? state.taskSnapshots[action.taskId]
+        : undefined;
+      return {
+        ...state,
+        activeTaskId: action.taskId,
+        snapshot: state.snapshot?.task.task_id === action.taskId ? state.snapshot : cached,
+        searchQuery: "",
+        taskOpenError: undefined,
+        newTask: {
+          ...state.newTask,
+          configOptionsLoading: false,
+          configOptionsError: undefined,
+        },
+      };
+    }
     case "taskOpen:error":
       if (
         (state.snapshot && state.snapshot.task.task_id !== action.taskId)
@@ -531,6 +552,7 @@ function isTaskInteractionAction(action: AppAction): action is TaskInteractionAc
     || action.type === "taskQueue:accepted"
     || action.type.startsWith("taskQueue:take:")
     || action.type === "taskOpen:start"
+    || action.type === "taskOpen:accepted"
     || action.type === "taskOpen:error"
     || action.type.startsWith("chatPage:")
     || action.type.startsWith("toolDetail:")
