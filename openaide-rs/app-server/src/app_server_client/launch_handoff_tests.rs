@@ -51,10 +51,17 @@ fn incompatible_server_with_replacement_endpoint_stops_then_launches_replacement
         fixture.runtime_dir.path(),
     )
     .unwrap();
+    let server_id = fixture
+        .endpoint_records
+        .read(fixture.state_root.fingerprint())
+        .unwrap()
+        .expect("running endpoint")
+        .server_id;
     let mut waiter = RemoveIncompatibleEndpointAfterWait {
         published: Some(published),
         calls: 0,
     };
+    let logs = crate::logging::capture_test_logs();
 
     let result = fixture
         .run_requiring_app_version("next-release", &mut waiter)
@@ -62,6 +69,25 @@ fn incompatible_server_with_replacement_endpoint_stops_then_launches_replacement
 
     assert!(matches!(result, LaunchHandoffResult::LaunchNew { .. }));
     assert_eq!(waiter.calls, 1);
+    // Tests share one log stream, so keep this replacement's events only.
+    let events = logs
+        .snapshot()
+        .into_iter()
+        .filter(|entry| entry["fields"]["server_id"] == server_id.as_str())
+        .collect::<Vec<_>>();
+    let requested = events
+        .iter()
+        .find(|entry| entry["event"] == "app_server_replacement_requested")
+        .expect("replacement request logged");
+    assert_eq!(requested["fields"]["reason_code"], "incompatible_app");
+    assert_eq!(requested["fields"]["request_outcome"], "accepted");
+    assert_eq!(requested["fields"]["required_app_version"], "next-release");
+    let finished = events
+        .iter()
+        .find(|entry| entry["event"] == "app_server_replacement_finished")
+        .expect("replacement result logged");
+    assert_eq!(finished["fields"]["outcome"], "launch_new");
+    assert_eq!(finished["fields"]["request_count"], 1);
 }
 
 #[test]

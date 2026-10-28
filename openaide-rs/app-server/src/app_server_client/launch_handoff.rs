@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
@@ -96,6 +96,28 @@ impl AttachOrLaunchHandoff {
         storage_writer: StorageWriterState,
         waiter: &mut W,
     ) -> Result<LaunchHandoffResult, LaunchHandoffError> {
+        let mut replacement = None;
+        let result = self.run_handoff(
+            fingerprint,
+            requirements,
+            storage_writer,
+            waiter,
+            &mut replacement,
+        );
+        if let Some(replacement) = replacement {
+            replacement.finish(&result);
+        }
+        result
+    }
+
+    fn run_handoff<W: LaunchWaiter>(
+        &self,
+        fingerprint: &StateRootFingerprint,
+        requirements: &AttachOrLaunchRequirements,
+        storage_writer: StorageWriterState,
+        waiter: &mut W,
+        replacement_log: &mut Option<ReplacementLog>,
+    ) -> Result<LaunchHandoffResult, LaunchHandoffError> {
         let mut wait_attempts = 0;
         loop {
             match self.runner.run_with_local_transports(
@@ -118,7 +140,14 @@ impl AttachOrLaunchHandoff {
                     return Ok(LaunchHandoffResult::Incompatible { target, reason });
                 }
                 AttachOrLaunchRunResult::ReplaceIncompatible { target, reason } => {
-                    let replacement = request_local_http_replacement(&target)?;
+                    let replacement = request_local_http_replacement(&target);
+                    // The loop re-requests on every wait; only the first is logged.
+                    replacement_log
+                        .get_or_insert_with(|| {
+                            ReplacementLog::requested(&target, reason, requirements, &replacement)
+                        })
+                        .requests += 1;
+                    let replacement = replacement?;
                     let max_wait_attempts = match replacement {
                         ReplacementRequestOutcome::AwaitLegacyShutdown => {
                             LEGACY_REPLACEMENT_MAX_WAIT_ATTEMPTS
@@ -144,6 +173,80 @@ impl AttachOrLaunchHandoff {
                 }
             }
         }
+    }
+}
+
+/// One takeover of an incompatible App Server, from its first request to the handoff result.
+///
+/// The App Server being replaced only records that it was asked to stop, so this is
+/// the one record of which version replaced it and whether the replacement then started.
+struct ReplacementLog {
+    started: Instant,
+    server_id: String,
+    requests: usize,
+}
+
+impl ReplacementLog {
+    fn requested(
+        target: &EndpointTarget,
+        reason: AttachOrLaunchFailure,
+        requirements: &AttachOrLaunchRequirements,
+        outcome: &Result<ReplacementRequestOutcome, super::replacement::ReplacementRequestError>,
+    ) -> Self {
+        crate::logging::warn(
+            "app_server_replacement_requested",
+            serde_json::json!({
+                "server_id": target.server_id,
+                "reason_code": failure_reason_code(reason),
+                "running_protocol_version": target.protocol_version,
+                "running_app_version": target.app_version,
+                "required_protocol_version": requirements.required_protocol_version,
+                "required_app_version": requirements.required_app_version,
+                "request_outcome": match outcome {
+                    Ok(ReplacementRequestOutcome::Accepted) => "accepted",
+                    Ok(ReplacementRequestOutcome::AwaitLegacyShutdown) => "await_legacy_shutdown",
+                    Ok(ReplacementRequestOutcome::Unreachable) => "unreachable",
+                    Err(_) => "request_failed",
+                },
+            }),
+        );
+        Self {
+            started: Instant::now(),
+            server_id: target.server_id.clone(),
+            requests: 0,
+        }
+    }
+
+    fn finish(self, result: &Result<LaunchHandoffResult, LaunchHandoffError>) {
+        let outcome = match result {
+            Ok(LaunchHandoffResult::LaunchNew { .. }) => "launch_new",
+            Ok(LaunchHandoffResult::AttachExisting { .. }) => "attach_existing",
+            Ok(LaunchHandoffResult::Fail { .. }) => "failed",
+            Ok(LaunchHandoffResult::Incompatible { .. }) => "incompatible",
+            Err(LaunchHandoffError::ReplacementStillStopping { .. }) => "still_stopping",
+            Err(LaunchHandoffError::Replacement(_)) => "request_failed",
+            Err(_) => "handoff_error",
+        };
+        let fields = serde_json::json!({
+            "server_id": self.server_id,
+            "outcome": outcome,
+            "request_count": self.requests,
+            "duration_ms": self.started.elapsed().as_millis(),
+        });
+        if outcome == "launch_new" {
+            crate::logging::info("app_server_replacement_finished", fields);
+        } else {
+            crate::logging::warn("app_server_replacement_finished", fields);
+        }
+    }
+}
+
+fn failure_reason_code(reason: AttachOrLaunchFailure) -> &'static str {
+    match reason {
+        AttachOrLaunchFailure::IncompatibleProtocol => "incompatible_protocol",
+        AttachOrLaunchFailure::IncompatibleApp => "incompatible_app",
+        AttachOrLaunchFailure::AuthOrPermissionFailure => "auth_or_permission_failure",
+        AttachOrLaunchFailure::StorageStateRootBlocked => "storage_state_root_blocked",
     }
 }
 

@@ -18,7 +18,7 @@ struct Server {
     address: SocketAddr,
     gateway: SharedRpcGateway,
     _state_dir: tempfile::TempDir,
-    _shutdown: mpsc::Receiver<()>,
+    _shutdown: mpsc::Receiver<crate::app_lifecycle::ShutdownCause>,
 }
 
 impl Server {

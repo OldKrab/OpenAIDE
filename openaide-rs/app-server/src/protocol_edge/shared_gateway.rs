@@ -17,7 +17,7 @@ use openaide_app_server_protocol::methods::{
 use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
 use serde_json::{json, Value};
 
-use crate::app_lifecycle::{LifecycleState, ShutdownCompletion};
+use crate::app_lifecycle::{LifecycleState, ShutdownCause, ShutdownCompletion};
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome, ConnectionId};
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestDelivery;
@@ -789,11 +789,11 @@ impl SharedRpcGateway {
             && !gateway.client_hub.has_initialized_clients()
     }
 
-    pub fn shutdown(&self) -> Result<ShutdownCompletion, RuntimeError> {
+    pub fn shutdown(&self, cause: ShutdownCause) -> Result<ShutdownCompletion, RuntimeError> {
         // Terminals never keep App Server alive (ADR-0071); clients warn before stopping it.
         // Close them outside the protocol lock.
         self.terminals().close_all();
-        self.lock().shutdown()
+        self.lock().shutdown(cause)
     }
 
     #[cfg(test)]
