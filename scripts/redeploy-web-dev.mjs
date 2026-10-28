@@ -4,8 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const webPort = Number(process.env.OPENAIDE_WEB_PORT ?? "5474");
-const vitePort = Number(process.env.OPENAIDE_WEB_VITE_PORT ?? "5473");
+// Its own ports, apart from local-web.sh and every role's: it stops whatever listens on them.
+const webPort = Number(process.env.OPENAIDE_WEB_PORT ?? "5384");
+const vitePort = Number(process.env.OPENAIDE_WEB_VITE_PORT ?? "5383");
 const stateRoot = process.env.OPENAIDE_WEB_STATE_ROOT ?? path.join(repoRoot, ".openaide-web-dev-single", "state");
 const runtimeRoot = process.env.OPENAIDE_WEB_RUNTIME_ROOT ?? path.join(repoRoot, ".openaide-web-dev-single", "runtime");
 const logDir = path.join(repoRoot, ".openaide-web-dev-single", "logs");
@@ -71,19 +72,15 @@ function webShellEnv() {
   return env;
 }
 
+/** Stops what listens on this script's ports and its children. Every other Web Shell, such as
+ * a deployed instance and the Agents it runs, is left alone even though its command matches. */
 function stopExistingWebApps() {
   const processRows = listProcesses();
   const listenerPids = new Set([
     ...listListenerPids(webPort),
     ...listListenerPids(vitePort),
   ]);
-  const matchedPids = new Set();
-  for (const row of processRows.values()) {
-    if (listenerPids.has(row.pid) || isOpenAideWebProcess(row.command)) {
-      matchedPids.add(row.pid);
-    }
-  }
-  const allTargets = descendantsOf(processRows, matchedPids);
+  const allTargets = descendantsOf(processRows, listenerPids);
   const safeTargets = [...allTargets].filter((pid) => pid !== process.pid && pid !== process.ppid);
   if (safeTargets.length === 0) return [];
   killPids(safeTargets, "SIGTERM");
@@ -113,17 +110,12 @@ function listListenerPids(port) {
   if (result.status !== 0) return [];
   const pids = [];
   for (const line of result.stdout.split("\n")) {
-    if (!line.includes(`:${port}`)) continue;
+    if (!new RegExp(`:${port}\\s`).test(line)) continue;
     for (const match of line.matchAll(/pid=(\d+)/g)) {
       pids.push(Number(match[1]));
     }
   }
   return pids;
-}
-
-function isOpenAideWebProcess(command) {
-  return command.includes("npm run dev --workspace openaide-web")
-    || (command.includes("vite") && command.includes("--host 127.0.0.1") && command.includes(`--port ${vitePort}`));
 }
 
 function descendantsOf(processRows, roots) {
