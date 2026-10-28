@@ -804,6 +804,27 @@ test("copies fenced Markdown code independently at desktop and constrained width
   expect(geometry.buttonInsidePre).toBe(true);
 });
 
+test("keeps a reply's duration below an ending that has no line to share", async ({ page }) => {
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:footer-after-list");
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+  const reply = page.locator(".chat-agent-block").filter({ hasText: "Two questions are still open" });
+  // The footer reserves its row only once the settled duration is shown.
+  await expect(reply.locator(".chat-action-time")).toHaveCount(1);
+  const footerClearsText = () => reply.evaluate((block) => {
+    const text = block.querySelector(":scope > .chat-agent");
+    const footer = block.querySelector(":scope > .chat-message-actions");
+    if (!text || !footer) throw new Error("Reply structure is incomplete.");
+    return footer.getBoundingClientRect().top >= text.getBoundingClientRect().bottom - 0.5;
+  });
+
+  await reply.hover();
+  expect(await footerClearsText()).toBe(true);
+  await page.setViewportSize({ width: 360, height: 640 });
+  expect(await footerClearsText()).toBe(true);
+});
+
 test("fits and inspects a Mermaid diagram inline and expanded without source dead space", async ({ page }) => {
   await page.setViewportSize({ width: 1_200, height: 800 });
   await openPreparedNewTask(page);
