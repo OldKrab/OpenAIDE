@@ -39,6 +39,9 @@ delegate_systemd_restart() {
   if [[ -n "${OPENAIDE_ACP_TRACE_DIR:-}" ]]; then
     helper_env_args+=(--setenv "OPENAIDE_ACP_TRACE_DIR=$OPENAIDE_ACP_TRACE_DIR")
   fi
+  if [[ -n "$app_server_path" ]]; then
+    helper_env_args+=(--setenv "OPENAIDE_APP_SERVER_PATH=$app_server_path")
+  fi
 
   # This helper is outside Target's cgroup, so it survives stopping the service it replaces.
   systemd-run --user \
