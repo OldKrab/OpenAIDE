@@ -38,7 +38,8 @@ impl Default for HistoryFile {
     }
 }
 
-// Full frames are the original schema-1 journal representation and remain readable.
+// Full frames are the original schema-1 journal representation and remain readable;
+// current writers publish such a change as the snapshot instead.
 // Streamed Agent text uses a semantic append so each chunk does not rewrite all
 // previous output. Its metadata is committed in the same newline-delimited frame.
 #[derive(Debug, Serialize, Deserialize)]
@@ -186,21 +187,16 @@ pub(super) fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
     Ok(history)
 }
 
+/// Appends streamed text. Other changes publish the snapshot instead of a full frame.
 pub(super) fn append_history_frame(
     path: &Path,
     history: &HistoryFile,
-    append: Option<TextAppend>,
+    append_text: TextAppend,
 ) -> Result<(), RuntimeError> {
-    let frame = match append {
-        Some(append_text) => HistoryFrame::AppendText {
-            revision: history.revision,
-            append_text,
-            message_meta: history.message_meta.clone(),
-        },
-        None => HistoryFrame::Full {
-            revision: history.revision,
-            history,
-        },
+    let frame = HistoryFrame::<&HistoryFile>::AppendText {
+        revision: history.revision,
+        append_text,
+        message_meta: history.message_meta.clone(),
     };
     let bytes = serde_json::to_vec(&frame)?;
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;

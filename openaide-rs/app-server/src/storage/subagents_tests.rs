@@ -77,6 +77,11 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
     .unwrap();
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let journal_len = || {
+        std::fs::metadata(history_dir.join("history.journal"))
+            .unwrap()
+            .len()
+    };
     for index in 0..62 {
         if index == 31 {
             reopened
@@ -92,17 +97,15 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
                     false,
                 )
                 .unwrap();
+            assert_eq!(journal_len(), 0, "a full change publishes the snapshot");
         }
         reopened
             .append_subagent_message_part("task_1", "child-session", child_text("!"))
             .unwrap();
     }
-    assert_eq!(
-        std::fs::metadata(history_dir.join("history.journal"))
-            .unwrap()
-            .len(),
-        0,
-        "the fixture crossed the real compaction boundary"
+    assert!(
+        journal_len() > 0,
+        "streamed text since the snapshot is journaled"
     );
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("?"))
@@ -147,8 +150,9 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
         .join("task-store-v1/tasks/task_1/subagents")
         .join(&record.subagent_id);
     let mut old_journal = Vec::new();
-    for index in 0..64 {
-        if index == 63 {
+    // Creating the message publishes the snapshot; 64 streamed appends follow it.
+    for index in 0..65 {
+        if index == 64 {
             old_journal = std::fs::read(history_dir.join("history.journal")).unwrap();
         }
         store
@@ -156,7 +160,7 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
             .unwrap();
     }
     drop(store);
-    // Compaction published revision 64 but process death left the previous
+    // Compaction published revision 65 but process death left the previous
     // journal generation in place. The snapshot already owns this prefix.
     std::fs::write(history_dir.join("history.journal"), old_journal).unwrap();
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -165,7 +169,7 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
             .subagent_history("task_1", &record.subagent_id)
             .unwrap()
             .revision,
-        64
+        65
     );
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("!"))
@@ -173,11 +177,73 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
     let history = reopened
         .subagent_history("task_1", &record.subagent_id)
         .unwrap();
-    assert_eq!(history.revision, 65);
+    assert_eq!(history.revision, 66);
     assert!(matches!(
         &history.messages[0].chat.message,
         NormalizedMessage::AgentMessage { parts, .. }
-            if parts == &[AgentMessagePart::Text { text: format!("{}!", "x".repeat(64)) }]
+            if parts == &[AgentMessagePart::Text { text: format!("{}!", "x".repeat(65)) }]
+    ));
+}
+
+#[test]
+fn repeated_full_changes_keep_the_journal_from_copying_the_history() {
+    let temp = tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = store
+        .record_subagent_spawn(
+            "task_1",
+            "root-session",
+            "child-session",
+            "Researcher".to_string(),
+            "Inspect".to_string(),
+            SubagentCapabilitiesRecord::default(),
+            Vec::new(),
+        )
+        .unwrap();
+    store
+        .append_subagent_message_part(
+            "task_1",
+            "child-session",
+            child_text(&"x".repeat(1024 * 1024)),
+        )
+        .unwrap();
+    let history_dir = temp
+        .path()
+        .join("task-store-v1/tasks/task_1/subagents")
+        .join(&record.subagent_id);
+    // Each upsert stands for a tool status update to a Subagent with a large history.
+    for status in 0..8 {
+        store
+            .append_subagent_message(
+                "task_1",
+                "child-session",
+                NormalizedMessage::User {
+                    id: "user-message".to_string(),
+                    text: format!("status {status}"),
+                    created_at: "2".to_string(),
+                    attachments: Vec::new(),
+                },
+                true,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(history_dir.join("history.journal"))
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+    drop(store);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let history = reopened
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+    assert_eq!(history.revision, 9);
+    assert_eq!(history.messages.len(), 2);
+    assert!(matches!(
+        &history.messages[1].chat.message,
+        NormalizedMessage::User { text, .. } if text == "status 7"
     ));
 }
 

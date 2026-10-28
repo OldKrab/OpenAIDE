@@ -530,6 +530,7 @@ impl Store {
         mutate: impl FnOnce(&mut HistoryFile) -> Result<Option<TextAppend>, RuntimeError>,
     ) -> Result<SubagentRecord, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
+        let started_at = std::time::Instant::now();
         let _guard = self
             .inner
             .subagent_write_lock
@@ -555,11 +556,39 @@ impl Store {
         let append = mutate(&mut history)?;
         history.revision = history.revision.saturating_add(1);
         history.journal_frames = history.journal_frames.saturating_add(1);
-        append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &history, append)?;
-        if history.journal_frames >= COMPACT_AFTER_FRAMES {
-            history.journal_frames = 0;
-            crate::storage::atomic::write_json(&history_dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
-            durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
+        let compacted = match append {
+            Some(append) if history.journal_frames < COMPACT_AFTER_FRAMES => {
+                append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &history, append)?;
+                false
+            }
+            // Only streamed text has a frame smaller than the history. A full frame
+            // would repeat the whole history in the journal, and every later load
+            // replays each copy, so publish it as the snapshot instead. A load then
+            // reads one history plus at most the streamed text since it.
+            // TODO: Journal message upserts as their own frames; a tool status update
+            // still rewrites every message of a large Subagent history.
+            _ => {
+                history.journal_frames = 0;
+                crate::storage::atomic::write_json(
+                    &history_dir.join(HISTORY_SNAPSHOT_FILE),
+                    &history,
+                )?;
+                durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
+                true
+            }
+        };
+        let elapsed = started_at.elapsed();
+        if elapsed.as_millis() >= 50 {
+            crate::logging::warn(
+                "subagent_history_commit_slow",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "subagent_id": record.subagent_id,
+                    "duration_ms": elapsed.as_millis(),
+                    "message_count": history.messages.len(),
+                    "compacted": compacted,
+                }),
+            );
         }
         record.history_revision = history.revision;
         record.history_available = true;
