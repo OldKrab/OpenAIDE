@@ -635,6 +635,14 @@
   width: 96px;
 }
 
+/* An answer that ends in a list, heading, quote, table or code block has no last line to share,
+   so the hover row gets its own. The rules for narrow and touch layouts below keep it in flow. */
+@media (min-width: 761px) and (hover: hover) and (pointer: fine) {
+  .chat-agent-block:has(> .chat-message-actions .chat-action-time):not(:has(> .chat-agent:nth-last-child(2) > p:last-child)) {
+    padding-block-end: 20px;
+  }
+}
+
 .chat-stop-duration {
   color: var(--oa-muted);
   font-variant-numeric: tabular-nums;

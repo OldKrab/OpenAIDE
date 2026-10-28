@@ -334,6 +334,17 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:footer-after-list")) {
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Two questions are still open:\n\n- **First:** a short item.\n- **Second:** should the reply's last line stay readable beside its duration and `deploy/local-web.env`?",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:mermaid-preview")) {
     textUpdate(
       sessionId,
