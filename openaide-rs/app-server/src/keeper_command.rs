@@ -191,6 +191,8 @@ fn spawn_keeper(mode: Mode) -> Result<String, &'static str> {
         }
     }
     command
+        // This App Server again, so it keeps this instance's settings.
+        .envs(openaide_app_server::instance_env::for_own_launch())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

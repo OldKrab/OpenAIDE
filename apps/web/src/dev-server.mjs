@@ -23,6 +23,7 @@ import {
 } from "./dev-server-auth.mjs";
 import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
+import { appServerEnvironment } from "./app-server-environment.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 import { createRuntimeLogger } from "./runtime-logger.mjs";
 import { createMobileStatus } from './mobile-status.mjs';
@@ -418,20 +419,9 @@ async function startAppServer() {
 }
 
 function spawnAppServer() {
-  const {
-    OPENAIDE_PROJECT_ROOTS: _projectRoots,
-    ...baseEnv
-  } = process.env;
-  const webProjectRoots = process.env.OPENAIDE_WEB_PROJECT_ROOTS;
   return spawn(appServerPath, [], {
     cwd: repoRoot,
-    env: {
-      ...baseEnv,
-      ...(webProjectRoots ? { OPENAIDE_PROJECT_ROOTS: webProjectRoots } : {}),
-      OPENAIDE_STORAGE_ROOT: stateRoot,
-      OPENAIDE_RUNTIME_ROOT: runtimeRoot,
-      OPENAIDE_APP_SERVER_PROTOCOL: "app-server-handoff",
-    },
+    env: appServerEnvironment(process.env, { stateRoot, runtimeRoot }),
     stdio: ["pipe", "pipe", "inherit"],
   });
 }

@@ -102,6 +102,8 @@ pub(crate) fn start() -> Result<Connection, LaunchError> {
     let executable = std::env::current_exe().map_err(|_| LaunchError::Spawn)?;
     let mut command = Command::new(executable);
     command
+        // This App Server again, so it keeps this instance's settings.
+        .envs(openaide_app_server::instance_env::for_own_launch())
         .env(
             crate::APP_SERVER_PROTOCOL_MODE_ENV,
             crate::APP_SERVER_HANDOFF_MODE,

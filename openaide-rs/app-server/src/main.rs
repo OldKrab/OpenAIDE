@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
+use openaide_app_server::instance_env;
 use openaide_app_server::protocol_edge::stdio::{
     AcpHostRequestTransport, ProtocolEdgeStdioDispatcher,
 };
@@ -17,16 +18,16 @@ mod keeper_command;
 mod protocol_edge_process;
 mod remote_command;
 
-pub(crate) const APP_SERVER_PROTOCOL_MODE_ENV: &str = "OPENAIDE_APP_SERVER_PROTOCOL";
-const LEGACY_PROTOCOL_MODE_ENV: &str = "OPENAIDE_RUNTIME_PROTOCOL";
+pub(crate) const APP_SERVER_PROTOCOL_MODE_ENV: &str = instance_env::PROTOCOL_MODE;
 const APP_SERVER_PROTOCOL_MODE: &str = "app-server-protocol";
 pub(crate) const APP_SERVER_HANDOFF_MODE: &str = "app-server-handoff";
 const SHELL_CONTROL_STDIO_MODE: &str = "shell-control-stdio";
-const RUNTIME_ROOT_ENV: &str = "OPENAIDE_RUNTIME_ROOT";
 const BUILD_COMMIT: &str = env!("OPENAIDE_BUILD_COMMIT");
 
 fn main() {
-    let storage_root = env::var_os("OPENAIDE_STORAGE_ROOT")
+    // Before any thread starts; see instance_env.
+    let taken_settings = instance_env::take_from_process();
+    let storage_root = instance_env::var_os(instance_env::STORAGE_ROOT)
         .map(PathBuf::from)
         .unwrap_or_else(default_storage_root);
     openaide_app_server::logging::init_file_logger(&storage_root);
@@ -37,6 +38,7 @@ fn main() {
             "build_commit": BUILD_COMMIT,
             // Tells apart overlapping processes on one state root, such as a replacement.
             "pid": std::process::id(),
+            "instance_setting_count": taken_settings,
         }),
     );
 
@@ -161,7 +163,7 @@ fn with_roots(
     storage_root: &std::path::Path,
     command: impl FnOnce(&StateRoot, &std::path::Path) -> i32,
 ) -> i32 {
-    let runtime_root = env::var_os(RUNTIME_ROOT_ENV)
+    let runtime_root = instance_env::var_os(instance_env::RUNTIME_ROOT)
         .map(PathBuf::from)
         .unwrap_or_else(default_runtime_root);
     match StateRoot::resolve(storage_root) {
@@ -185,7 +187,7 @@ enum ProtocolEdgeStartup {
 
 fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) {
     let startup_started = Instant::now();
-    let runtime_root = env::var_os(RUNTIME_ROOT_ENV)
+    let runtime_root = instance_env::var_os(instance_env::RUNTIME_ROOT)
         .map(PathBuf::from)
         .unwrap_or_else(default_runtime_root);
     let state_root = match StateRoot::resolve(&storage_root) {
@@ -325,7 +327,9 @@ fn spawn_storage_fatal_supervisor(
 }
 
 fn protocol_mode() -> Result<String, env::VarError> {
-    env::var(APP_SERVER_PROTOCOL_MODE_ENV).or_else(|_| env::var(LEGACY_PROTOCOL_MODE_ENV))
+    instance_env::var(instance_env::PROTOCOL_MODE)
+        .or_else(|| instance_env::var(instance_env::LEGACY_PROTOCOL_MODE))
+        .ok_or(env::VarError::NotPresent)
 }
 
 fn default_storage_root() -> PathBuf {
