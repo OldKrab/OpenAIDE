@@ -24,6 +24,6 @@ A Frontend that returns to a Task it has already seen tells `state/subscribe` th
 
 ## Consequences
 
-- `task/open` still returns its own complete snapshot. The full saving needs `task/open` to stop carrying Task state, which is decided separately.
+- `task/open` still returned its own complete snapshot when this was decided. [ADR-0074](0074-task-open-is-an-acknowledgement.md) removes it, which completes the saving.
 - The rule "every change to the Task snapshot advances the Task revision" becomes load-bearing: a Task field that changed without a revision would stay stale behind a **current** reply. Fields outside the revision, like pending requests, must be resent with every reply.
 - Each subscribe logs its outcome, the baseline reason when one is sent, the known and current revisions, the number and bytes of missed events, and its duration, so a slow switch shows which path it took.
