@@ -16,6 +16,30 @@ pub enum InitializeAdmission {
     Rejected(ProtocolError),
 }
 
+/// Why the process owner stopped this App Server; recorded on the Stopping transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownCause {
+    /// The last client stopped heartbeating and expired.
+    LastClientExpired,
+    /// The last client detached while the server was draining.
+    LastClientDetached,
+    /// A starting App Server of another version took over this state root.
+    ReplacementRequested,
+    /// Every shutdown sender dropped, so nothing can request a stop any more.
+    RequestersGone,
+}
+
+impl ShutdownCause {
+    pub fn reason_code(self) -> &'static str {
+        match self {
+            Self::LastClientExpired => "last_client_expired",
+            Self::LastClientDetached => "last_client_detached",
+            Self::ReplacementRequested => "replacement_requested",
+            Self::RequestersGone => "requesters_gone",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShutdownRequestOutcome {
     AlreadyStopping,

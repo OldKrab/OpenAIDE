@@ -16,7 +16,7 @@ const CONNECTION_ID: &str = "socket-client-1";
 struct Server {
     address: SocketAddr,
     _state_dir: tempfile::TempDir,
-    _shutdown: mpsc::Receiver<()>,
+    _shutdown: mpsc::Receiver<crate::app_lifecycle::ShutdownCause>,
 }
 
 impl Server {

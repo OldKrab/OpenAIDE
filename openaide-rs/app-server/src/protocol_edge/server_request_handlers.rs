@@ -9,7 +9,9 @@ use openaide_app_server_protocol::server_requests::{
 use openaide_app_server_protocol::snapshot::{PendingRequestScope, TaskSnapshot};
 use openaide_app_server_protocol::state::SubscriptionScope;
 
-use crate::app_lifecycle::{LifecycleState, ShutdownCompletion, ShutdownRequestOutcome};
+use crate::app_lifecycle::{
+    LifecycleState, ShutdownCause, ShutdownCompletion, ShutdownRequestOutcome,
+};
 #[cfg(test)]
 use crate::client_lifecycle::Delivery;
 use crate::client_lifecycle::{AppServerTime, ClientContext, ClientExpiryOutcome, ConnectionId};
@@ -80,7 +82,7 @@ impl RpcGateway {
         )
     }
 
-    pub fn shutdown(&mut self) -> Result<ShutdownCompletion, RuntimeError> {
+    pub fn shutdown(&mut self, cause: ShutdownCause) -> Result<ShutdownCompletion, RuntimeError> {
         let previous = self.lifecycle.state();
         if matches!(
             self.lifecycle.request_shutdown(),
@@ -93,7 +95,7 @@ impl RpcGateway {
             serde_json::json!({
                 "from_status": format!("{previous:?}"),
                 "to_status": "Stopping",
-                "reason_code": "shutdown_requested",
+                "reason_code": cause.reason_code(),
             }),
         );
         match self.shutdown.shutdown() {

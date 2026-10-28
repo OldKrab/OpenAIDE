@@ -35,6 +35,8 @@ fn main() {
         serde_json::json!({
             "app_version": env!("CARGO_PKG_VERSION"),
             "build_commit": BUILD_COMMIT,
+            // Tells apart overlapping processes on one state root, such as a replacement.
+            "pid": std::process::id(),
         }),
     );
 

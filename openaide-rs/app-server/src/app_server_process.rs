@@ -4,6 +4,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::app_lifecycle::ShutdownCause;
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome};
 use crate::protocol_edge::local_http::listener::{handle_app_stream, LocalHttpProbeListener};
 use crate::protocol_edge::local_http::LocalHttpAppHandler;
@@ -27,7 +28,7 @@ pub struct PublishedAppServerEndpoint {
     server_id: String,
     auth_token: String,
     gateway: SharedRpcGateway,
-    shutdown: Receiver<()>,
+    shutdown: Receiver<ShutdownCause>,
 }
 
 impl PublishedAppServerEndpoint {
@@ -65,8 +66,19 @@ impl PublishedAppServerEndpoint {
         &self,
     ) -> Result<crate::app_lifecycle::ShutdownCompletion, crate::protocol::errors::RuntimeError>
     {
-        let _ = self.shutdown.recv();
-        self.gateway.shutdown()
+        let cause = self
+            .shutdown
+            .recv()
+            .unwrap_or(ShutdownCause::RequestersGone);
+        // `server_id` is the id a replacing App Server logs as its target.
+        crate::logging::info(
+            "app_server_stop_requested",
+            serde_json::json!({
+                "server_id": self.server_id,
+                "reason_code": cause.reason_code(),
+            }),
+        );
+        self.gateway.shutdown(cause)
     }
 }
 
@@ -214,7 +226,10 @@ fn local_http_error_fields(
 }
 
 /// Expires abandoned product clients and wakes the process owner after a bounded drain turn.
-fn start_client_liveness_expirer(gateway: SharedRpcGateway, shutdown_sender: mpsc::Sender<()>) {
+fn start_client_liveness_expirer(
+    gateway: SharedRpcGateway,
+    shutdown_sender: mpsc::Sender<ShutdownCause>,
+) {
     gateway.request_task_storage_maintenance();
     thread::spawn(move || {
         let mut last_native_catalog_refresh = Instant::now();
@@ -249,7 +264,7 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway, shutdown_sender: mps
 fn request_shutdown_after_last_client(
     gateway: &SharedRpcGateway,
     expired: &[ClientExpiryOutcome],
-    shutdown_sender: &mpsc::Sender<()>,
+    shutdown_sender: &mpsc::Sender<ShutdownCause>,
     settle_interval: Duration,
 ) -> bool {
     if !expired.iter().any(|outcome| {
@@ -266,7 +281,10 @@ fn request_shutdown_after_last_client(
     if !settle_interval.is_zero() {
         thread::sleep(settle_interval);
     }
-    gateway.should_shutdown_after_last_client() && shutdown_sender.send(()).is_ok()
+    gateway.should_shutdown_after_last_client()
+        && shutdown_sender
+            .send(ShutdownCause::LastClientExpired)
+            .is_ok()
 }
 
 fn native_session_catalog_refresh_due(elapsed: Duration) -> bool {

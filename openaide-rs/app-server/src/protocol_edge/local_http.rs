@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::mpsc::Sender;
 
+use crate::app_lifecycle::ShutdownCause;
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 
@@ -34,7 +35,7 @@ pub struct LocalHttpProbeHandler {
     gateway: SharedRpcGateway,
     auth_token: String,
     replacement_token: String,
-    replacement_requested: Sender<()>,
+    shutdown_requested: Sender<ShutdownCause>,
 }
 
 #[derive(Clone)]
@@ -50,7 +51,7 @@ impl LocalHttpAppHandler {
         auth_token: impl Into<String>,
         server_id: impl Into<String>,
         replacement_token: impl Into<String>,
-        replacement_requested: Sender<()>,
+        shutdown_requested: Sender<ShutdownCause>,
     ) -> Self {
         let auth_token = auth_token.into();
         Self {
@@ -58,7 +59,7 @@ impl LocalHttpAppHandler {
                 gateway.clone(),
                 auth_token.clone(),
                 replacement_token,
-                replacement_requested,
+                shutdown_requested,
             ),
             protocol: LocalHttpProtocolHandler::new(gateway, auth_token, server_id),
             uploads: ChunkUploadRegistry::default(),
@@ -77,7 +78,10 @@ impl LocalHttpAppHandler {
                     .protocol
                     .handle(authorization, Some(connection_id), body);
                 if self.probe.gateway.should_shutdown_after_last_client() {
-                    let _ = self.probe.replacement_requested.send(());
+                    let _ = self
+                        .probe
+                        .shutdown_requested
+                        .send(ShutdownCause::LastClientDetached);
                 }
                 response
             }
@@ -113,7 +117,10 @@ impl LocalHttpAppHandler {
     /// the drain-after-last-client check that request handling performs.
     pub(crate) fn client_frame_handled(&self) {
         if self.probe.gateway.should_shutdown_after_last_client() {
-            let _ = self.probe.replacement_requested.send(());
+            let _ = self
+                .probe
+                .shutdown_requested
+                .send(ShutdownCause::LastClientDetached);
         }
     }
 
@@ -287,13 +294,13 @@ impl LocalHttpProbeHandler {
         gateway: SharedRpcGateway,
         auth_token: impl Into<String>,
         replacement_token: impl Into<String>,
-        replacement_requested: Sender<()>,
+        shutdown_requested: Sender<ShutdownCause>,
     ) -> Self {
         Self {
             gateway,
             auth_token: auth_token.into(),
             replacement_token: replacement_token.into(),
-            replacement_requested,
+            shutdown_requested,
         }
     }
 
@@ -314,8 +321,8 @@ impl LocalHttpProbeHandler {
             || {
                 // Acknowledge before the process owner drains agents and storage; that
                 // shutdown may outlive the handoff transport timeout.
-                self.replacement_requested
-                    .send(())
+                self.shutdown_requested
+                    .send(ShutdownCause::ReplacementRequested)
                     .map_err(|error| error.to_string())
             },
         )
@@ -328,7 +335,7 @@ impl Clone for LocalHttpProbeHandler {
             gateway: self.gateway.clone(),
             auth_token: self.auth_token.clone(),
             replacement_token: self.replacement_token.clone(),
-            replacement_requested: self.replacement_requested.clone(),
+            shutdown_requested: self.shutdown_requested.clone(),
         }
     }
 }
