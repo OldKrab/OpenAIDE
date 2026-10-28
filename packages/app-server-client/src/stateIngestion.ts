@@ -38,31 +38,35 @@ export type SubscriptionEventApplyResult =
       event: AppServerEvent;
     };
 
-/**
- * Installs a subscribe reply. A Task resume is rebuilt from `retained`, the copy the
- * client offered as its known revision; `undefined` means it could not be, and the
- * caller must subscribe again for a baseline.
- */
+/** Installs a subscribe reply that carries a complete baseline. */
 export function createSubscriptionIngestionState(
-  result: StateSubscribeResult,
+  result: StateSubscribeResult & { snapshot: ReplicaSnapshot },
   context: SubscriptionIngestionContext,
-  retained?: ReplicaSnapshot,
-): SubscriptionIngestionState | undefined {
-  let snapshot: ReplicaSnapshot;
-  if (result.snapshot.kind === "taskResume") {
-    if (retained?.kind !== "task") return undefined;
-    const update = resumeTaskSnapshot(retained, result.snapshot.resume);
-    if (update.kind === "resyncRequired") return undefined;
-    snapshot = update.snapshot;
-  } else {
-    snapshot = result.snapshot;
-  }
+): SubscriptionIngestionState {
   return {
     context,
     scope: result.scope,
     cursor: result.cursor,
-    snapshot,
+    snapshot: result.snapshot,
   };
+}
+
+/**
+ * Installs any subscribe reply. A Task resume is rebuilt from `retained`, the copy
+ * the client offered as its known revision (ADR-0073); `undefined` means it could
+ * not be, and the caller must subscribe again for a baseline.
+ */
+export function installSubscriptionReply(
+  result: StateSubscribeResult,
+  context: SubscriptionIngestionContext,
+  retained?: ReplicaSnapshot,
+): SubscriptionIngestionState | undefined {
+  const { snapshot } = result;
+  if (snapshot.kind !== "taskResume") return createSubscriptionIngestionState({ ...result, snapshot }, context);
+  if (retained?.kind !== "task") return undefined;
+  const update = resumeTaskSnapshot(retained, snapshot.resume);
+  if (update.kind === "resyncRequired") return undefined;
+  return createSubscriptionIngestionState({ ...result, snapshot: update.snapshot }, context);
 }
 
 export function applySubscriptionEvent(

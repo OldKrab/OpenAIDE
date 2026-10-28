@@ -1,6 +1,6 @@
 import {
   applySubscriptionEvent,
-  createSubscriptionIngestionState,
+  installSubscriptionReply,
   type SubscriptionIngestionState,
 } from "./stateIngestion.js";
 import { subscriptionScopesEqual } from "./subscriptionScope.js";
@@ -341,7 +341,7 @@ export function createAppServerSession(
         if (!snapshot) throw new Error("App Server session is not initialized");
         const offered = retained;
         retained = undefined;
-        const state = createSubscriptionIngestionState(result, {
+        const state = installSubscriptionReply(result, {
           stateRootId: snapshot.stateRoot.stateRootId,
           clientInstanceId: snapshot.client.clientInstanceId,
         }, offered);
