@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 
 use openaide_app_server::storage_runtime::StateRoot;
 
-use crate::app_server_handoff::{self, HandoffStart};
+use crate::app_server_handoff::{self, HandoffStart, ReportingHandoff};
 
 /// Where the App Server answers same-machine clients.
 pub(crate) struct Connection {
@@ -34,17 +34,52 @@ impl LaunchError {
     }
 }
 
-/// Joins the running App Server without starting one.
-pub(crate) fn attach(state_root: &StateRoot, runtime_root: &Path) -> Option<Connection> {
+/// What a command that neither starts nor replaces an App Server finds.
+pub(crate) enum Found {
+    Joined(Connection),
+    NotRunning,
+    /// A live App Server of another version, left running.
+    OtherVersion {
+        protocol_version: String,
+    },
+}
+
+/// Joins the running App Server without starting or replacing one: a short
+/// command run with another binary must not stop the App Server a service keeps.
+pub(crate) fn running(state_root: &StateRoot, runtime_root: &Path) -> Result<Found, &'static str> {
+    running_from(app_server_handoff::attach_or_launch_reporting(
+        state_root,
+        runtime_root,
+    ))
+}
+
+fn running_from(handoff: Result<ReportingHandoff, &'static str>) -> Result<Found, &'static str> {
+    Ok(match handoff? {
+        ReportingHandoff::Attached(connection) => Found::Joined(joined(&connection)),
+        // Dropping the launch lock leaves starting to whoever asks for it.
+        ReportingHandoff::LaunchHere(_lock) => Found::NotRunning,
+        ReportingHandoff::Incompatible(server) => Found::OtherVersion {
+            protocol_version: server.protocol_version,
+        },
+    })
+}
+
+/// Joins the running App Server without starting one. One of another version
+/// is replaced, as when an App Shell of this version starts.
+fn attach(state_root: &StateRoot, runtime_root: &Path) -> Option<Connection> {
     match app_server_handoff::attach_or_launch(state_root, runtime_root) {
-        HandoffStart::Attached(connection) => Some(Connection {
-            endpoint_url: connection.endpoint_url().to_string(),
-            auth_token: connection.auth_token().to_string(),
-            started: false,
-            _launcher: None,
-        }),
+        HandoffStart::Attached(connection) => Some(joined(&connection)),
         // Dropping the launch lock leaves starting to whoever asks for it.
         HandoffStart::LaunchHere(_lock) => None,
+    }
+}
+
+fn joined(connection: &app_server_handoff::LocalHttpHandoffConnection) -> Connection {
+    Connection {
+        endpoint_url: connection.endpoint_url().to_string(),
+        auth_token: connection.auth_token().to_string(),
+        started: false,
+        _launcher: None,
     }
 }
 
@@ -114,3 +149,7 @@ fn detach_from_terminal(command: &mut Command) {
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }
+
+#[cfg(test)]
+#[path = "launch_tests.rs"]
+mod tests;
