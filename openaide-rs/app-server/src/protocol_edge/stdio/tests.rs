@@ -1656,11 +1656,9 @@ fn task_mark_read_acknowledges_unread_task_over_stdio() {
         .to_string(),
     );
 
+    // The reply is an acknowledgement (ADR-0074); the store holds the change.
     let response = response(&responses[0]);
-    assert_eq!(
-        response["result"]["result"]["task"]["task"]["unread"],
-        false
-    );
+    assert_eq!(response["result"]["result"], json!({}));
     drop(dispatcher);
     assert!(
         !Store::open(temp.path().to_path_buf())

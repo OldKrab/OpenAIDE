@@ -1,12 +1,8 @@
 import { useEffect, useRef } from "react";
 import { TASK_MARK_READ, type BackendConnection, type TaskId } from "@openaide/app-server-client";
-import type { Dispatch } from "react";
-import type { AppAction } from "../state/appReducer";
-import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 
 type TaskAttentionReadReceiptOptions = {
   backendConnection?: Pick<BackendConnection, "request">;
-  dispatch: Dispatch<AppAction>;
   revision?: number;
   taskId?: string;
   unread: boolean;
@@ -15,7 +11,6 @@ type TaskAttentionReadReceiptOptions = {
 /** Acknowledges output only after user activity that still belongs to this Task. */
 export function useTaskAttentionReadReceipt({
   backendConnection,
-  dispatch,
   revision,
   taskId,
   unread,
@@ -38,14 +33,9 @@ export function useTaskAttentionReadReceipt({
       if (ownerDocument?.visibilityState === "hidden") return;
       if (pendingReceipt.current === receiptKey) return;
       pendingReceipt.current = receiptKey;
-      void backendConnection.request(TASK_MARK_READ, { taskId: taskId as TaskId }).then((result) => {
-        if (cancelled) return;
-        dispatch({
-          type: "snapshot",
-          snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
-          intent: "refresh",
-        });
-      }).catch(() => {
+      // The reply is an acknowledgement (ADR-0074): cleared unread arrives on the
+      // Task subscription like every other Task change.
+      void backendConnection.request(TASK_MARK_READ, { taskId: taskId as TaskId }).catch(() => {
         // Keep unread authoritative and let the next attention event retry.
       }).finally(() => {
         if (pendingReceipt.current === receiptKey) pendingReceipt.current = undefined;
@@ -74,5 +64,5 @@ export function useTaskAttentionReadReceipt({
       window.removeEventListener("keydown", acknowledge, true);
       ownerDocument?.removeEventListener("visibilitychange", deferAcknowledge);
     };
-  }, [backendConnection, dispatch, revision, taskId, unread]);
+  }, [backendConnection, revision, taskId, unread]);
 }

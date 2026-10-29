@@ -584,19 +584,17 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for task reload");
-        let task = match self
+        if let Err(error) = self
             .task_open
             .reload_native_session_for_client(&client.client_instance_id, params)
         {
-            Ok(task) => task,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        let task = self.task_with_pending_requests(task);
+            return self.error(connection_id, id, meta, error);
+        }
         self.result::<TaskReloadNativeSessionResult>(
             connection_id,
             id,
             meta,
-            TaskReloadNativeSessionResult { task },
+            TaskReloadNativeSessionResult {},
         )
     }
 
@@ -618,15 +616,13 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for task mark-read");
-        let task = match self
+        if let Err(error) = self
             .task_open
             .mark_read_for_client(&client.client_instance_id, params)
         {
-            Ok(task) => task,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        let task = self.task_with_pending_requests(task);
-        self.result::<TaskMarkReadResult>(connection_id, id, meta, TaskMarkReadResult { task })
+            return self.error(connection_id, id, meta, error);
+        }
+        self.result::<TaskMarkReadResult>(connection_id, id, meta, TaskMarkReadResult {})
     }
 
     pub(super) fn handle_task_chat_page(

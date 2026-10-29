@@ -1,6 +1,5 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
-use openaide_app_server_protocol::snapshot::TaskSnapshot;
 use openaide_app_server_protocol::task::{
     TaskMarkReadParams, TaskOpenParams, TaskReloadNativeSessionParams,
 };
@@ -16,7 +15,7 @@ use crate::tasks::mutation::TaskMutationResult;
 use crate::tasks::native_session_service::HistoryRefreshRequest;
 use crate::tasks::native_session_service::OpenSessionResumeOutcome;
 
-use super::{internal_error, protocol_error_from_runtime, TaskProductApi};
+use super::{protocol_error_from_runtime, TaskProductApi};
 
 pub(crate) trait TaskOpenWorkflow: Send + Sync {
     /// Commits the open and acknowledges it (ADR-0074). The Task subscription carries
@@ -26,16 +25,18 @@ pub(crate) trait TaskOpenWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskOpenParams,
     ) -> Result<(), ProtocolError>;
+    /// Commits clearing unread and attention, and acknowledges it like the open.
     fn mark_read_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskMarkReadParams,
-    ) -> Result<TaskSnapshot, ProtocolError>;
+    ) -> Result<(), ProtocolError>;
+    /// Replays the Native Session and acknowledges it like the open.
     fn reload_native_session_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
         _params: TaskReloadNativeSessionParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         Err(ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::CapabilityUnavailable,
             message: "Task Native Session reload is unavailable".to_string(),
@@ -50,12 +51,11 @@ impl TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskMarkReadParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         self.read_task_for_client(&task_id, client_instance_id)?;
-        let result = self
-            .mutations
-            .commit_existing_task(&task_id, super::response_snapshot_options(), |ctx| {
+        self.mutations
+            .commit_existing_task(&task_id, acknowledgement_only(), |ctx| {
                 if ctx.task().tombstoned {
                     return Err(RuntimeError::TaskNotFound(task_id.clone()));
                 }
@@ -68,10 +68,7 @@ impl TaskProductApi {
                 Ok(TaskMutationResult::Changed)
             })
             .map_err(protocol_error_from_runtime)?;
-        let snapshot = result
-            .response_snapshot
-            .ok_or_else(|| internal_error("missing task mark-read snapshot"))?;
-        self.project_task_snapshot(snapshot)
+        Ok(())
     }
 
     pub(super) fn open_task(
@@ -90,12 +87,8 @@ impl TaskProductApi {
             return Ok(());
         }
 
-        let acknowledgement_only = crate::tasks::mutation::TaskCommitOptions {
-            refresh_message_history: true,
-            response_snapshot_tail_limit: None,
-        };
         self.mutations
-            .commit_existing_task(&task_id, acknowledgement_only, |ctx| {
+            .commit_existing_task(&task_id, acknowledgement_only(), |ctx| {
                 if ctx.task().tombstoned {
                     return Err(RuntimeError::TaskNotFound(task_id.clone()));
                 }
@@ -427,6 +420,14 @@ fn log_open_load_started(task: &TaskRecord, generation: u64, trigger: &'static s
     );
 }
 
+/// Commit options for a request that is acknowledged without a Task copy (ADR-0074).
+fn acknowledgement_only() -> crate::tasks::mutation::TaskCommitOptions {
+    crate::tasks::mutation::TaskCommitOptions {
+        refresh_message_history: true,
+        response_snapshot_tail_limit: None,
+    }
+}
+
 fn task_allows_history_recovery(task: &TaskRecord) -> bool {
     !matches!(
         task.lifecycle,
@@ -450,7 +451,7 @@ impl TaskOpenWorkflow for TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskMarkReadParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         self.mark_task_read(client_instance_id, params)
     }
 
@@ -458,7 +459,7 @@ impl TaskOpenWorkflow for TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskReloadNativeSessionParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         self.reload_native_session(client_instance_id, params)
     }
 }
