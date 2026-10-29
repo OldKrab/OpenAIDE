@@ -116,8 +116,10 @@ pub struct AgentNativeSubagentSpawned {
     /// The provider uses a repeated announcement to signal a parent-to-child interaction.
     /// This stays typed at the Agent boundary instead of leaking provider metadata downstream.
     pub parent_interaction: bool,
-    /// The parent's own Tool rows already show this delegation in its Chat, so
-    /// the Task must not add a "Delegated to" row. True for the released ACP form.
+    /// The parent's transcript already records this delegation as a Tool row,
+    /// so the Task must not add a "Delegated to" row. True for the released ACP
+    /// form: the row is the Agent's own tool call, or, when the adapter hides
+    /// that call, the row App Server builds from the parent's session messages.
     pub parent_records_delegation: bool,
     pub capabilities: AgentNativeSubagentCapabilities,
     pub details: Vec<AgentNativeSubagentDetail>,

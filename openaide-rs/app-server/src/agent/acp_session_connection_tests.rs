@@ -613,8 +613,13 @@ fn load_replay_absorbs_released_subagent_announcements_and_child_messages() {
     let capture = load_replay.lock().unwrap();
     let capture = capture.get("session_1").unwrap();
     assert!(capture.subagent_session_ids.contains("child_1"));
+    // The root's own announcement joins the replay for its delegation rows;
+    // the child's stream does not.
     assert!(
-        capture.updates.is_empty(),
+        matches!(
+            capture.updates.as_slice(),
+            [SessionUpdate::SubagentUpdate(_)]
+        ),
         "stored Subagent history, not the replay, is authoritative"
     );
 }

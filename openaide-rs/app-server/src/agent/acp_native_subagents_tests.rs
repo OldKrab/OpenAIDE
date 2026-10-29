@@ -7,9 +7,16 @@ pub(super) struct CaptureSink {
     pub(super) details: Mutex<Vec<AgentNativeSubagentDetailsUpdate>>,
     pub(super) states: Mutex<Vec<AgentNativeSubagentState>>,
     pub(super) identities: Mutex<Vec<crate::agent::events::AgentNativeSubagentIdentityUpdate>>,
+    /// What a root session projection emitted.
+    pub(super) root_updates: Mutex<Vec<AgentEvent>>,
 }
 
 impl AgentSessionEventSink for CaptureSink {
+    fn session_update(&self, event: AgentEvent) -> Result<(), RuntimeError> {
+        self.root_updates.lock().unwrap().push(event);
+        Ok(())
+    }
+
     fn subagent_session_update(
         &self,
         _session_id: &str,

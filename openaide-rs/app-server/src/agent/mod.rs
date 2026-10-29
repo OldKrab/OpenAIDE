@@ -32,6 +32,7 @@ pub(crate) mod acp_live_prompt_projection;
 pub(crate) mod acp_message_identity;
 mod acp_native_subagent_stop;
 pub(crate) mod acp_native_subagents;
+pub(crate) mod acp_native_subagents_delegation;
 mod acp_npx_cache_repair;
 mod acp_process_diagnostics;
 mod acp_process_lifetime;
