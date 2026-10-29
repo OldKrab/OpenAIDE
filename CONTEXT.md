@@ -308,6 +308,14 @@ _Avoid_: Password, token, invite link
 A Linux computer reached over SSH where an App Shell installs, starts, and keeps the App Server, and holds its token like a same-machine App Shell. It is not a Remote Device: no Pairing Code is involved.
 _Avoid_: Remote host, server, SSH remote
 
+**Computer**:
+A machine whose App Server an App Shell can use: the device it runs on, a computer reached as a Remote Device, or an SSH Computer. Exactly one Computer is in use at a time; switching to another leaves the work on the first running.
+_Avoid_: Server, host, place, merging several Computers into one navigation
+
+**Place**:
+The Task, Project, or New Task Project an App Shell last had open on a Computer, to which it returns when that Computer is in use again. It is kept on the device.
+_Avoid_: Using place for the Computer itself
+
 **Desktop Update**:
 A newer official OpenAIDE Desktop App release offered inside the installed Desktop App. The user may review its Release Notes, initiate download and staging, and restart OpenAIDE to apply it.
 _Avoid_: Silently replacing a running release, treating a downloaded update as already applied

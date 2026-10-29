@@ -14,6 +14,7 @@ use crate::agent::acp_live_prompt_projection::project_plan_entry;
 use crate::agent::acp_message_identity::{
     stable_agent_message_id, stable_compaction_id, stable_message_id,
 };
+use crate::agent::acp_native_subagents_delegation::{is_delegation_row, ReplayDelegations};
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
@@ -69,6 +70,17 @@ impl ReplayProjection {
             replay.project(update, &created_at, &tool_calls, codex_subagents.as_ref());
         }
         replay.finalize_fallback_ids();
+        let (rows, ignored) = replay.delegations.counts();
+        if rows + ignored > 0 {
+            crate::logging::info(
+                "acp_replayed_subagent_delegations",
+                serde_json::json!({
+                    "session_id": self.session_id,
+                    "rows": rows,
+                    "ignored_messages": ignored,
+                }),
+            );
+        }
         ReplayProjectionResult {
             messages: replay.messages,
             plan: AgentReplayPlanState {
@@ -93,6 +105,9 @@ struct ReplayBuffer {
     current_plan: Option<AgentPlan>,
     completed_plan_message_id: Option<String>,
     next_plan_ordinal: usize,
+    /// Rebuilds the delegation rows the live router builds from the root's
+    /// session messages, with the same ids.
+    delegations: ReplayDelegations,
 }
 
 impl ReplayBuffer {
@@ -109,6 +124,7 @@ impl ReplayBuffer {
             current_plan: None,
             completed_plan_message_id: None,
             next_plan_ordinal: 0,
+            delegations: ReplayDelegations::default(),
         }
     }
 
@@ -143,6 +159,16 @@ impl ReplayBuffer {
             ),
             SessionUpdate::ToolCall(tool_call) => {
                 self.end_anonymous_text_run();
+                if is_delegation_row(&tool_call)
+                    && tool_calls
+                        .lock()
+                        .expect("ACP tool call state lock poisoned")
+                        .get(&tool_call.tool_call_id.to_string())
+                        .is_some_and(|existing| !is_delegation_row(existing))
+                {
+                    // As live: the Agent's real tool call keeps its row.
+                    return;
+                }
                 remember_tool_call(tool_calls, tool_call.clone());
                 match codex_subagents
                     .map(|state| state.project_tool_call(&tool_call))
@@ -213,6 +239,19 @@ impl ReplayBuffer {
                 self.end_anonymous_text_run();
                 if let Some((compaction_id, change)) = project_compaction_summary_chunk(chunk) {
                     self.apply_compaction(&compaction_id, change, created_at);
+                }
+            }
+            SessionUpdate::SubagentUpdate(update) => {
+                self.end_anonymous_text_run();
+                if let Some(row) = self.delegations.subagent_update(&update) {
+                    self.project(row, created_at, tool_calls, codex_subagents);
+                }
+            }
+            SessionUpdate::SessionMessage(message) => {
+                self.end_anonymous_text_run();
+                let session_id = self.session_id.clone();
+                if let Some(row) = self.delegations.session_message(&session_id, message) {
+                    self.project(row, created_at, tool_calls, codex_subagents);
                 }
             }
             _ => self.end_anonymous_text_run(),

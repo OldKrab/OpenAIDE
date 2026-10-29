@@ -151,7 +151,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
     fn subagent_spawned(&self, event: AgentNativeSubagentSpawned) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let now = now_string();
-        // A released-form child gets its prompt as a child message, not here.
+        // A released-form child gets its prompt as a child message, not here;
+        // the parent's delegation row is the Agent's tool call or the row App
+        // Server builds from the parent's session messages.
         let prompt_unavailable = !event.parent_records_delegation && event.delegated_task.is_none();
         let child_already_exists = match self
             .mutations
@@ -211,7 +213,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                     Some(cancel),
                 )?;
             }
-            // The parent's own Tool rows show this delegation in its Chat.
+            // The parent's Tool row shows this delegation in its Chat: the
+            // Agent's own tool call, or the row App Server builds from the
+            // parent's session messages when the adapter hides that call.
             return Ok(());
         }
         if parent_interaction {

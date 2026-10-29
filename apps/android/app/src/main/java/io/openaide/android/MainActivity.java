@@ -6,8 +6,6 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
-import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -21,18 +19,12 @@ import android.webkit.WebResourceError;
 import android.webkit.ConsoleMessage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.TextView;
-import android.widget.ScrollView;
-import android.widget.ImageView;
 import android.widget.Toast;
-import android.view.Gravity;
-import android.view.View;
-import android.view.ViewGroup;
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,9 +40,8 @@ public final class MainActivity extends Activity {
     private ConnectionProfile profile;
     private ConnectionStore connections;
     private boolean visible;
-    private TextView status;
-    private Button connect;
-    private Button setup;
+    /** The native screen shown while no workspace is open; it also owns the switch to another computer. */
+    private ConnectionScreen screen;
     private WebView browser;
     private ValueCallback<Uri[]> fileCallback;
     private long pickerStarted;
@@ -86,6 +77,14 @@ public final class MainActivity extends Activity {
         connections = new ConnectionStore(this);
         try { profile = connections.load(); }
         catch (RuntimeException error) { profile = ConnectionProfile.local(); credentialsUnavailable = true; }
+        screen = new ConnectionScreen(this, connections, diagnostics, new ConnectionScreen.Host() {
+            @Override public void openWorkspace() { requestConnection(); }
+            @Override public void openConnectionSettings() {
+                pendingSettings = null;
+                openSetup(getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false) ? "settings" : "welcome");
+            }
+            @Override public void selectionChanged() { changeConnection(); }
+        });
         showConnection();
         AppUpdateJob.schedule(this);
         AppUpdates.get(this).checkIfDue();
@@ -105,68 +104,7 @@ public final class MainActivity extends Activity {
         if (downloads != null) { downloads.dispose(); downloads = null; }
         if (browser != null) { browser.destroy(); browser = null; }
         resourcePolicy.clear();
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setGravity(Gravity.CENTER);
-        int padding = dp(24);
-        layout.setPadding(padding, padding * 2, padding, padding);
-        layout.setBackgroundColor(shellBackground());
-        ImageView icon = new ImageView(this);
-        icon.setImageResource(R.mipmap.ic_launcher);
-        icon.setContentDescription("OpenAIDE");
-        layout.addView(icon, centered(dp(72), dp(72), 0));
-        TextView title = new TextView(this);
-        title.setText("OpenAIDE");
-        title.setTextSize(24);
-        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        title.setTextColor(shellText());
-        title.setGravity(Gravity.CENTER);
-        layout.addView(title, centered(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 16));
-        TextView instructions = new TextView(this);
-        instructions.setText("Your agent workspace");
-        instructions.setGravity(Gravity.CENTER);
-        instructions.setTextSize(15);
-        instructions.setTextColor(shellMuted());
-        layout.addView(instructions, centered(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 4));
-        status = new TextView(this);
-        status.setTextSize(15);
-        status.setGravity(Gravity.CENTER);
-        status.setTextColor(shellMuted());
-        layout.addView(status, centered(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 32));
-        connect = new Button(this);
-        connect.setText("Open workspace");
-        connect.setAllCaps(false);
-        connect.setTextSize(15);
-        connect.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        connect.setTextColor(shellBackground());
-        connect.setStateListAnimator(null);
-        android.graphics.drawable.GradientDrawable fill = new android.graphics.drawable.GradientDrawable();
-        fill.setColor(shellText());
-        fill.setCornerRadius(dp(26));
-        connect.setBackground(fill);
-        connect.setOnClickListener(view -> requestConnection());
-        layout.addView(connect, centered(dp(260), dp(52), 28));
-        setup = new Button(this);
-        setup.setText("Connection settings");
-        setup.setAllCaps(false);
-        setup.setTextSize(15);
-        setup.setTextColor(shellText());
-        setup.setStateListAnimator(null);
-        setup.setBackgroundColor(Color.TRANSPARENT);
-        setup.setOnClickListener(view -> {
-            pendingSettings = null;
-            openSetup(getSharedPreferences("connection", MODE_PRIVATE).getBoolean("configured", false) ? "settings" : "welcome");
-        });
-        layout.addView(setup, centered(dp(260), dp(48), 4));
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(layout);
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets;
-        });
-        setContentView(scroll);
+        screen.show();
     }
 
     /** Shows a phone Settings tab: "remote" for connection controls, "general" for updates. */
@@ -340,7 +278,7 @@ public final class MainActivity extends Activity {
         }
         if (request != 1) return;
         if (request == 1 && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) connect();
-        else status.setText("Open App permissions and allow running commands in Termux, then connect again.");
+        else screen.status("Open App permissions and allow running commands in Termux, then connect again.");
     }
 
     private void connect() {
@@ -349,13 +287,11 @@ public final class MainActivity extends Activity {
         connected = false;
         final int attempt = ++generation;
         final long started = SystemClock.elapsedRealtime();
-        connect.setEnabled(false);
-        connect.setVisibility(View.GONE);
-        status.setText("Opening your workspace…");
+        screen.progress("Opening your workspace…");
         Log.i("OpenAIDE", "connection_start attempt=" + attempt);
         if (profile.kind == ConnectionProfile.Kind.PAIRED) { connectPaired(attempt, started); return; }
         if (profile.kind == ConnectionProfile.Kind.SSH) { connectSsh(attempt, started); return; }
-        status.setText("Starting your local workspace…");
+        screen.status("Starting your local workspace…");
         LocalServer.connect(this, problem -> {
             if (attempt != generation || isDestroyed()) return;
             if (problem == null) { opened(attempt, started); return; }
@@ -380,6 +316,8 @@ public final class MainActivity extends Activity {
         connecting = false;
         connected = true;
         getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("configured", true).apply();
+        // Filed under the computer in use, so a later failure can say when it last worked.
+        connections.recordConnected(connections.inUseTarget(), System.currentTimeMillis());
         Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
         diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
         startBackgroundWork();
@@ -391,10 +329,10 @@ public final class MainActivity extends Activity {
     /** A paired computer needs no probe: reaching its App Server over the trusted connection is the check. */
     private void connectPaired(int attempt, long started) {
         String name = RemotePairing.selectedName(this);
-        status.setText("Connecting to " + (name == null || name.isEmpty() ? "your computer" : name) + "…");
-        RemotePairing.connect(this, problem -> {
+        screen.status("Connecting to " + (name == null || name.isEmpty() ? "your computer" : name) + "…");
+        RemotePairing.connect(this, (problem, reason) -> {
             if (attempt != generation || isDestroyed()) return;
-            if (problem != null) { fail(attempt, problem); return; }
+            if (problem != null) { fail(attempt, problem, reason); return; }
             opened(attempt, started);
         });
     }
@@ -403,14 +341,14 @@ public final class MainActivity extends Activity {
     private void connectSsh(int attempt, long started) {
         SshComputers.Computer computer = connections.sshComputer();
         String name = computer == null ? "the computer" : computer.name;
-        status.setText("Connecting to " + name + "…");
+        screen.status("Connecting to " + name + "…");
         SshServer.connect(this, stage -> {
-            if (attempt == generation && !isDestroyed()) status.setText(sshStage(stage, name));
+            if (attempt == generation && !isDestroyed()) screen.status(sshStage(stage, name));
             return kotlin.Unit.INSTANCE;
         }, (problem, reason) -> {
             if (attempt != generation || isDestroyed()) return;
             if (problem == null) { opened(attempt, started); return; }
-            fail(attempt, problem);
+            fail(attempt, problem, reason);
             if ("update_required".equals(reason)) offerSshUpdate(name);
         });
     }
@@ -449,25 +387,24 @@ public final class MainActivity extends Activity {
             connected = false;
             diagnostics.record("connection", "refused", 0, 0);
             showConnection();
-            connect.setText("Try again");
-            status.setText(RemotePairing.message(failure, RemotePairing.selectedName(this)));
+            screen.failed(RemotePairing.message(failure, RemotePairing.selectedName(this)), profile.kind,
+                failure.name().toLowerCase(Locale.ROOT), generation);
         });
     }
 
-    private void fail(int attempt, String message) {
+    /** [reason] is the failure class when the connection knows one, else null (see {@link ConnectionFailure}). */
+    private void fail(int attempt, String message, String reason) {
         runOnUiThread(() -> {
             if (attempt != generation) return;
             connecting = false;
             Log.w("OpenAIDE", "connection_end outcome=failed attempt=" + attempt);
-            connect.setEnabled(true);
-            connect.setVisibility(View.VISIBLE);
-            setup.setVisibility(View.VISIBLE);
-            connect.setText("Try again");
-            status.setText(message);
+            String shown = screen.failed(message, profile.kind, reason, attempt);
             diagnostics.record("connection", "failed", attempt, 0);
-            if (browser != null) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            if (browser != null) Toast.makeText(this, shown, Toast.LENGTH_LONG).show();
         });
     }
+
+    private void fail(int attempt, String message) { fail(attempt, message, null); }
 
     @SuppressLint("SetJavaScriptEnabled")
     private void showBrowser() {
@@ -565,7 +502,7 @@ public final class MainActivity extends Activity {
         });
         LinearLayout frame = new LinearLayout(this);
         frame.setOrientation(LinearLayout.VERTICAL);
-        frame.setBackgroundColor(shellBackground());
+        frame.setBackgroundColor(ShellColors.background(this));
         frame.setOnApplyWindowInsetsListener((view, insets) -> {
             view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
@@ -663,27 +600,9 @@ public final class MainActivity extends Activity {
         else super.onBackPressed();
     }
 
-    private boolean darkTheme() {
-        return (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
-            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-    }
-
-    // Neutral colors matching the setup screens: the primary button is text-on-background inverted.
-    private int shellBackground() { return darkTheme() ? 0xff1b1d22 : 0xfff6f7f9; }
-    private int shellText() { return darkTheme() ? 0xffeceef1 : 0xff23262d; }
-    private int shellMuted() { return darkTheme() ? 0xff9da3ae : 0xff666d7a; }
-
-    private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density); }
-
-    private LinearLayout.LayoutParams centered(int width, int height, int topMarginDp) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height);
-        params.gravity = Gravity.CENTER_HORIZONTAL;
-        params.topMargin = dp(topMarginDp);
-        return params;
-    }
-
     @Override protected void onDestroy() {
         backNavigation.dispose();
+        screen.dispose();
         // TODO: clear only this activity's listener. A recreated activity registers in
         // onCreate before the old one is destroyed, so this can drop the newer listener
         // and a later removal or version mismatch would go unreported until restart.

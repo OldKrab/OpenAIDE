@@ -22,6 +22,8 @@ type TaskRouteLifecycleOptions = {
   backendReady: boolean;
   backendStateGeneration: number;
   bootstrap: WebviewBootstrap;
+  /** Whether the connection may read as ready once this route stops holding it back. */
+  connectionSettled(): boolean;
   createSnapshotRequestId(taskId?: string, intent?: SnapshotIntent): number;
   dispatch: Dispatch<AppAction>;
   failedSubscriptionBaselines: MutableRefObject<Map<string, string>>;
@@ -47,6 +49,7 @@ export function useTaskRouteLifecycle({
   backendReady,
   backendStateGeneration,
   bootstrap,
+  connectionSettled,
   createSnapshotRequestId,
   dispatch,
   failedSubscriptionBaselines,
@@ -156,9 +159,8 @@ export function useTaskRouteLifecycle({
     if (bootstrap.surface !== "task" || !bootstrap.taskId) {
       lastRequestedRouteTaskKey.current = undefined;
       routeOpenInFlight.current = undefined;
-      if (backendInitialized.current && failedSubscriptionBaselines.current.size === 0) {
-        setBackendConnectionState({ status: "ready" });
-      }
+      // Leaving a Task drops its subscription's hold on the connection, not a lost session's.
+      if (connectionSettled()) setBackendConnectionState({ status: "ready" });
       return;
     }
     const taskId = bootstrap.taskId;

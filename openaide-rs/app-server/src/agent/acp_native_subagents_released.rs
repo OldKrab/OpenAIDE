@@ -6,14 +6,22 @@
 //! parent messages it again. `session_message` and `session_message_chunk` on
 //! the child carry what another session sent it, which opens each run with the
 //! child's User message.
+//!
+//! A parent's own session messages to and from its children become
+//! delegation Tool rows in the parent's transcript; see
+//! `acp_native_subagents_delegation`.
 
 use std::sync::Arc;
 
 use super::{claude_details, native_state_name, AcpNativeSubagentRouter, ChildRoute};
-use super::{SubagentEventSink, SUBAGENT_NOT_OFFERED};
+use super::{RoutedSessionNotification, SubagentEventSink, SUBAGENT_NOT_OFFERED};
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
+use crate::agent::acp_native_subagents_delegation::{
+    counterpart, description_patch, released_state, subagent_name, ChildDelegation, DelegationRow,
+    UNTITLED_SUBAGENT,
+};
 use crate::agent::acp_schema::{
-    ContentBlock, IdleStopReason, MaybeUndefined, SessionId, StateUpdate, SubagentUpdate,
+    ContentBlock, MaybeUndefined, SessionId, SessionNotification, StateUpdate, SubagentUpdate,
 };
 use crate::agent::events::{
     AgentNativeSubagentCapabilities, AgentNativeSubagentIdentityUpdate, AgentNativeSubagentSpawned,
@@ -22,25 +30,25 @@ use crate::agent::events::{
 use crate::agent::AgentEventSink;
 use crate::protocol::errors::RuntimeError;
 
-/// The name a child gets when its parent gives it no title.
-const UNTITLED_SUBAGENT: &str = "Subagent";
-
-/// One message another session sent to a child, in either released shape.
+/// One session message on `session_id`, in either released shape.
 pub(super) struct ReleasedSessionMessage {
     pub(super) session_id: String,
     pub(super) message_id: String,
     pub(super) sender_session_id: Option<SessionId>,
     pub(super) recipient_session_id: Option<SessionId>,
     pub(super) content: Vec<ContentBlock>,
+    /// A `session_message_chunk`: part of a message, not all of it.
+    pub(super) chunk: bool,
 }
 
 impl AcpNativeSubagentRouter {
-    /// Applies one `subagent_update` that `parent_session_id` reported.
+    /// Applies one `subagent_update` that `parent_session_id` reported. A
+    /// terminal state closes the child's open launch row in the parent.
     pub(super) fn route_released_update(
         &self,
         parent_session_id: String,
         update: SubagentUpdate,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<RoutedSessionNotification, RuntimeError> {
         let child_session_id = update.session_id.to_string();
         let known_parent = self.known_child_parent(&child_session_id)?;
         match known_parent {
@@ -52,12 +60,122 @@ impl AcpNativeSubagentRouter {
             Some(_) => self.patch_released_identity(&child_session_id, &update)?,
             None => self.announce_released(&parent_session_id, &child_session_id, &update)?,
         }
-        match update.state {
+        let close = match update.state {
             MaybeUndefined::Value(state) => {
-                self.released_state_changed(parent_session_id, child_session_id, &state)
+                self.released_state_changed(&parent_session_id, &child_session_id, &state)?
             }
             // `null` withdraws the state report; the stored status stays.
-            MaybeUndefined::Null | MaybeUndefined::Undefined => Ok(()),
+            MaybeUndefined::Null | MaybeUndefined::Undefined => None,
+        };
+        match close {
+            Some((root_session_id, row)) => self.deliver_delegation_row(
+                &parent_session_id,
+                &root_session_id,
+                &child_session_id,
+                row,
+            ),
+            None => Ok(RoutedSessionNotification::Handled),
+        }
+    }
+
+    /// Builds the delegation row for a session message between `session_id`
+    /// and one of its own children. `None` when the message is not such a
+    /// delegation and `session_id` is a child that may receive it as its own
+    /// message instead. A root session's other messages are logged and dropped.
+    pub(super) fn route_delegation_message(
+        &self,
+        message: &ReleasedSessionMessage,
+    ) -> Result<Option<RoutedSessionNotification>, RuntimeError> {
+        let session_id = message.session_id.as_str();
+        let sender = message.sender_session_id.as_ref().map(|id| &*id.0);
+        let recipient = message.recipient_session_id.as_ref().map(|id| &*id.0);
+        let counterpart = counterpart(session_id, sender, recipient);
+        let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
+        let session_is_child = state.children.contains_key(session_id);
+        // `own`: the message is between this session and its own child, so
+        // it is never also this session's incoming User message.
+        let (reason, own) = match counterpart {
+            None => ("unaddressed", false),
+            Some((child_session_id, outgoing)) => match state.children.get_mut(child_session_id) {
+                None if outgoing => ("unknown_recipient", false),
+                None => ("unknown_sender", false),
+                Some(route) if route.parent_session_id != session_id => ("other_parent", false),
+                // The adapter sends a delegation whole; a part cannot open or
+                // complete a row on its own.
+                Some(_) if message.chunk => ("chunked_message", true),
+                Some(route) => match route.delegation.message_row(
+                    &route.name,
+                    outgoing,
+                    &message.message_id,
+                    message.content.clone(),
+                ) {
+                    Ok(row) => {
+                        let root_session_id = route.root_session_id.clone();
+                        drop(state);
+                        return self
+                            .deliver_delegation_row(
+                                session_id,
+                                &root_session_id,
+                                child_session_id,
+                                row,
+                            )
+                            .map(Some);
+                    }
+                    Err(reason) => (reason, true),
+                },
+            },
+        };
+        drop(state);
+        if session_is_child && !own {
+            return Ok(None);
+        }
+        crate::logging::info(
+            "acp_subagent_message_ignored",
+            serde_json::json!({
+                "session_id": session_id,
+                "subagent_session_id": counterpart.map(|(child, _)| child),
+                "reason": reason,
+            }),
+        );
+        Ok(Some(RoutedSessionNotification::Handled))
+    }
+
+    /// Puts a delegation row into `parent_session_id`'s transcript. A child
+    /// parent's row goes to its own history projection. A root parent's row
+    /// returns as a root notification, so it takes the single ordered root
+    /// pipeline (live projection, persistence, Tool status logging) instead of
+    /// being emitted beside it.
+    fn deliver_delegation_row(
+        &self,
+        parent_session_id: &str,
+        root_session_id: &str,
+        child_session_id: &str,
+        row: DelegationRow,
+    ) -> Result<RoutedSessionNotification, RuntimeError> {
+        crate::logging::info(
+            "acp_subagent_delegation_projected",
+            serde_json::json!({
+                "root_session_id": root_session_id,
+                "subagent_session_id": child_session_id,
+                "kind": row.kind.name(),
+                "status": row.status(),
+            }),
+        );
+        let parent_projection = self
+            .inner
+            .lock()
+            .expect("ACP Subagent router poisoned")
+            .children
+            .get(parent_session_id)
+            .map(|route| route.projection.clone());
+        match parent_projection {
+            Some(projection) => {
+                projection.emit(row.update)?;
+                Ok(RoutedSessionNotification::Handled)
+            }
+            None => Ok(RoutedSessionNotification::Root(Box::new(
+                SessionNotification::new(parent_session_id.to_string(), row.update),
+            ))),
         }
     }
 
@@ -87,6 +205,10 @@ impl AcpNativeSubagentRouter {
             .is_some_and(|recipient| *recipient.0 != *message.session_id);
         if outgoing || addressed_elsewhere {
             // The child's own Tool rows already show what it sent.
+            // TODO: an adapter that hides the child's SubagentHandback call
+            // sends its report only as this outgoing view, so the child
+            // history loses it. Render it as the child's own row once that
+            // presentation is agreed in docs/task-chat-flow.md.
             crate::logging::info(
                 "acp_subagent_message_ignored",
                 serde_json::json!({
@@ -138,18 +260,8 @@ impl AcpNativeSubagentRouter {
         update: &SubagentUpdate,
     ) -> Result<(), RuntimeError> {
         let (root_session_id, root_sink) = self.root_for_parent(parent_session_id)?;
-        let name = update
-            .title
-            .value()
-            .map(|title| title.trim())
-            .filter(|title| !title.is_empty())
-            .unwrap_or(UNTITLED_SUBAGENT)
-            .to_string();
-        let delegated_task = update
-            .description
-            .value()
-            .map(|description| description.trim().to_string())
-            .filter(|description| !description.is_empty());
+        let name = subagent_name(update.title.value().map(String::as_str));
+        let delegated_task = description_patch(&update.description).flatten();
         let cancel = update
             .capabilities
             .value()
@@ -158,8 +270,11 @@ impl AcpNativeSubagentRouter {
             parent_native_session_id: parent_session_id.to_string(),
             native_session_id: child_session_id.to_string(),
             name: name.clone(),
-            delegated_task,
+            delegated_task: delegated_task.clone(),
             parent_interaction: false,
+            // The parent transcript records the delegation: as the Agent's own
+            // tool call, or as the row App Server builds from the parent's
+            // session messages when the adapter hides that call.
             parent_records_delegation: true,
             capabilities: AgentNativeSubagentCapabilities {
                 cancel,
@@ -174,6 +289,7 @@ impl AcpNativeSubagentRouter {
         });
         let projection =
             LivePromptProjection::for_native_subagent(&self.agent_id, event_sink, false);
+        let delegation = ChildDelegation::new(delegated_task.clone());
         let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
         if !state.negotiated {
             return Err(RuntimeError::InvalidParams(
@@ -200,6 +316,7 @@ impl AcpNativeSubagentRouter {
                 projection,
                 started_at: std::time::Instant::now(),
                 state: None,
+                delegation,
             });
         Ok(())
     }
@@ -232,15 +349,18 @@ impl AcpNativeSubagentRouter {
         if name.is_none() && delegated_task.is_none() && cancel.is_none() {
             return Ok(());
         }
-        if let Some(name) = &name {
-            if let Some(route) = self
-                .inner
-                .lock()
-                .expect("ACP Subagent router poisoned")
-                .children
-                .get_mut(child_session_id)
-            {
+        if let Some(route) = self
+            .inner
+            .lock()
+            .expect("ACP Subagent router poisoned")
+            .children
+            .get_mut(child_session_id)
+        {
+            if let Some(name) = &name {
                 route.name = name.clone();
+            }
+            if let Some(description) = description_patch(&update.description) {
+                route.delegation.description = description;
             }
         }
         let Some((_, root_sink)) = self.root_sink_for_child(child_session_id) else {
@@ -256,12 +376,14 @@ impl AcpNativeSubagentRouter {
         })
     }
 
+    /// Applies a reported work state. Returns the row that closes the child's
+    /// open launch when the work ended, with the root session id.
     fn released_state_changed(
         &self,
-        parent_session_id: String,
-        child_session_id: String,
+        parent_session_id: &str,
+        child_session_id: &str,
         state: &StateUpdate,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Option<(String, DelegationRow)>, RuntimeError> {
         let (next, stop_reason) = released_state(state);
         let Some(next) = next else {
             crate::logging::warn(
@@ -270,24 +392,30 @@ impl AcpNativeSubagentRouter {
                     "subagent_session_id": child_session_id,
                 }),
             );
-            return Ok(());
+            return Ok(None);
         };
-        let (root_session_id, previous, run_duration_ms) = {
+        let (root_session_id, previous, run_duration_ms, close) = {
             let mut router = self.inner.lock().expect("ACP Subagent router poisoned");
-            let route = router.children.get_mut(&child_session_id).ok_or_else(|| {
+            let route = router.children.get_mut(child_session_id).ok_or_else(|| {
                 RuntimeError::InvalidParams("unknown ACP Subagent lifecycle".to_string())
             })?;
             let previous = route.state.replace(next);
             if previous == Some(next) {
                 // `running` and `requires_action` share one product status.
-                return Ok(());
+                return Ok(None);
             }
             let run_duration_ms = (previous == Some(AgentNativeSubagentState::Running))
                 .then(|| route.started_at.elapsed().as_millis());
             if next == AgentNativeSubagentState::Running {
                 route.started_at = std::time::Instant::now();
             }
-            (route.root_session_id.clone(), previous, run_duration_ms)
+            let close = route.delegation.close_row(next);
+            (
+                route.root_session_id.clone(),
+                previous,
+                run_duration_ms,
+                close,
+            )
         };
         let root_sink = self
             .sinks
@@ -297,8 +425,8 @@ impl AcpNativeSubagentRouter {
             .cloned()
             .ok_or_else(|| RuntimeError::NotReady("Task event sink is unavailable".to_string()))?;
         root_sink.subagent_state_changed(AgentNativeSubagentStateUpdate {
-            parent_native_session_id: parent_session_id,
-            native_session_id: child_session_id.clone(),
+            parent_native_session_id: parent_session_id.to_string(),
+            native_session_id: child_session_id.to_string(),
             state: next,
         })?;
         crate::logging::info(
@@ -312,37 +440,7 @@ impl AcpNativeSubagentRouter {
                 "run_duration_ms": run_duration_ms,
             }),
         );
-        Ok(())
-    }
-}
-
-/// Maps a released work state to the product status and a stop-reason
-/// category for logs. `None` means the state kind is not one this build knows.
-fn released_state(state: &StateUpdate) -> (Option<AgentNativeSubagentState>, Option<&'static str>) {
-    match state {
-        StateUpdate::Running(_) | StateUpdate::RequiresAction(_) => {
-            (Some(AgentNativeSubagentState::Running), None)
-        }
-        StateUpdate::Idle(idle) => {
-            let (status, reason) = match &idle.stop_reason {
-                // Idle without a reason: the work ended without a reported failure.
-                None => (AgentNativeSubagentState::Completed, "none"),
-                Some(IdleStopReason::EndTurn) => (AgentNativeSubagentState::Completed, "end_turn"),
-                Some(IdleStopReason::Cancelled) => {
-                    (AgentNativeSubagentState::Cancelled, "cancelled")
-                }
-                Some(IdleStopReason::Error(_)) => (AgentNativeSubagentState::Failed, "error"),
-                Some(IdleStopReason::Refusal) => (AgentNativeSubagentState::Failed, "refusal"),
-                Some(IdleStopReason::MaxTokens) => (AgentNativeSubagentState::Failed, "max_tokens"),
-                Some(IdleStopReason::MaxTurnRequests) => {
-                    (AgentNativeSubagentState::Failed, "max_turn_requests")
-                }
-                Some(_) => (AgentNativeSubagentState::Failed, "unrecognized"),
-            };
-            (Some(status), Some(reason))
-        }
-        StateUpdate::Unknown(_) => (Some(AgentNativeSubagentState::Disconnected), None),
-        _ => (None, None),
+        Ok(close.map(|row| (root_session_id, row)))
     }
 }
 

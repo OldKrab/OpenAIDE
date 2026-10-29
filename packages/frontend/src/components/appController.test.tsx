@@ -7,6 +7,7 @@ import {
   ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_RELEASE,
   AppServerProtocolError,
+  TransportLinkError,
   createAppServerSession,
   PERMISSION_REQUEST,
   PROJECT_ADD,
@@ -1637,6 +1638,98 @@ describe("app controller mounted lifecycle", () => {
     expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(openCount + 1);
     expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
     expect(request.mock.calls.some(([method]) => method === TASK_SEND)).toBe(false);
+  });
+
+  it("shows a session whose recovery gave up as a classified connection problem until Retry recovers it", async () => {
+    let invalidate: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;
+    let fail: Parameters<BackendConnection["handleRecoveryFailed"]>[0] | undefined;
+    let recover: Parameters<BackendConnection["handleRecoveryBaseline"]>[0] | undefined;
+    let linkDown = false;
+    const retryRecovery = vi.fn(() => {
+      linkDown = false;
+      invalidate?.({ reason: "httpSessionExpired" });
+      return true;
+    });
+    const initialize = vi.fn(async () => ({ snapshot: clientSnapshot() }));
+    backendConnection = {
+      initialize,
+      request: vi.fn(async (method: string, params?: { scope?: unknown }) => {
+        if (linkDown) throw new TransportLinkError("interrupted", "socket closed (1006)");
+        if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+        if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope as never, "cursor_1");
+        return new Promise(() => undefined);
+      }) as unknown as BackendConnection["request"],
+      handleNotification: () => () => undefined,
+      handleGenerationInvalidated: (listener) => { invalidate = listener; return () => undefined; },
+      handleRecoveryFailed: (listener) => { fail = listener; return () => undefined; },
+      handleRecoveryBaseline: (listener) => { recover = listener; return () => undefined; },
+      retryRecovery,
+      close: vi.fn(),
+    };
+    bootstrap = navigationBootstrap();
+    await act(async () => { create(<ControllerProbe />); });
+    expect(latestController?.state.appServerError).toBeUndefined();
+
+    await act(async () => {
+      linkDown = true;
+      invalidate?.({ reason: "httpSessionExpired" });
+      fail?.({ reason: "httpSessionExpired", error: new TransportLinkError("interrupted", "socket closed (1006)") });
+    });
+    expect(latestController?.backendConnectionState.status).toBe("unavailable");
+    expect(latestController?.state.appServerError).toBe("socket closed (1006)");
+    expect(latestController?.state.appServerProblem).toMatchObject({ kind: "unreachable" });
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "webview.telemetry",
+      payload: expect.objectContaining({
+        event: "app_server_session_status_changed",
+        status: "unavailable",
+        problem_kind: "unreachable",
+      }),
+    });
+
+    // Retry outside a Task route restores the session rather than initializing again.
+    await act(async () => { latestController?.retryTaskOpen(); });
+    expect(retryRecovery).toHaveBeenCalledOnce();
+    expect(initialize).toHaveBeenCalledOnce();
+    expect(latestController?.backendConnectionState.status).toBe("reconnecting");
+    await act(async () => {
+      recover?.({ reason: "httpSessionExpired", result: { snapshot: clientSnapshot() } });
+    });
+    expect(latestController?.backendConnectionState.status).toBe("ready");
+    expect(latestController?.state.appServerError).toBeUndefined();
+    expect(latestController?.state.appServerProblem).toBeUndefined();
+    expect(latestController?.state.taskListError).toBeUndefined();
+  });
+
+  it("names the versions when a lost session's App Server refuses this client", async () => {
+    let invalidate: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;
+    let fail: Parameters<BackendConnection["handleRecoveryFailed"]>[0] | undefined;
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: vi.fn(() => new Promise(() => undefined)) as unknown as BackendConnection["request"],
+      handleNotification: () => () => undefined,
+      handleGenerationInvalidated: (listener) => { invalidate = listener; return () => undefined; },
+      handleRecoveryFailed: (listener) => { fail = listener; return () => undefined; },
+      probe: vi.fn(async () => ({ stateRootFingerprint: "root", protocolVersion: "2.0", appVersion: "0.40.0", lifecycle: "running" as const })),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+    await act(async () => { create(<ControllerProbe />); });
+
+    await act(async () => {
+      invalidate?.({ reason: "appServerRestarted" });
+      fail?.({ reason: "appServerRestarted", error: new AppServerProtocolError({
+        error: { code: "incompatibleProtocol", message: "Update OpenAIDE on your computer", recoverable: false },
+      }) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.appServerError).toBe("Update OpenAIDE on your computer");
+    expect(latestController?.state.appServerProblem).toMatchObject({
+      kind: "incompatible",
+      server: { protocol: "2.0", appVersion: "0.40.0" },
+      update: "computer",
+    });
   });
 
   it.each(["open", "baseline"] as const)("returns a missing routed Task to New Task after %s recovery", async (missingAt) => {

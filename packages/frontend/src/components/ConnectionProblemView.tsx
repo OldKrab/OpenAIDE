@@ -6,6 +6,9 @@ import { ConnectionPage, thisDevice, type ConnectionEnd } from "./ConnectionPage
 /**
  * The place the Frontend tried to use. A named computer comes from the shell's computers
  * capability; without one the App Server is unnamed, and `self` means it runs on this device.
+ *
+ * TODO: rename to ConnectionComputer (and `place`/`places` props to `computer`/`computers`):
+ * CONTEXT.md names this a Computer, and Place means the Task or Project last open on one.
  */
 export type ConnectionPlace = { name: string; self?: "phone" | "computer" };
 

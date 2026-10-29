@@ -109,6 +109,11 @@ impl DesktopConnections {
             .map(|in_use| (in_use.connection.clone(), in_use.client_instance_id.clone()))
     }
 
+    /// Holds off switches and bootstraps while another change of the App Server in use runs.
+    pub(crate) async fn exclusive(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.switching.lock().await
+    }
+
     /// The paired computer the window uses, `Some(None)` for this computer, and
     /// `None` before the first bootstrap.
     pub(crate) fn computer_in_use(&self) -> Option<Option<String>> {
