@@ -11,13 +11,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
 use super::super::{Store, StoreInner};
-use super::{load_upgraded_history, task_dir, HISTORY_JOURNAL_FILE, SUBAGENTS_DIR};
+use super::history::journal_budget;
+use super::{
+    load_upgraded_history, task_dir, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE, SUBAGENTS_DIR,
+};
 use crate::protocol::errors::RuntimeError;
-
-/// A current journal holds at most `COMPACT_AFTER_FRAMES` frames of streamed text,
-/// so a larger one is almost always a journal of full-history frames. The load
-/// decides; the size only keeps the pass from reading small journals.
-const UPGRADE_CANDIDATE_BYTES: u64 = 1 << 20;
 
 impl Store {
     /// Starts the pass on its own thread. It holds the Store only while upgrading
@@ -100,7 +98,7 @@ pub(super) fn sweep(store: &Weak<StoreInner>, tasks_root: &Path) {
     }
 }
 
-/// History directories whose journal is large enough to hold full-history frames.
+/// History directories whose journal outgrew what a current writer leaves.
 fn upgrade_candidates(tasks_root: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut candidates = Vec::new();
     let tasks = match fs::read_dir(tasks_root) {
@@ -114,10 +112,15 @@ fn upgrade_candidates(tasks_root: &Path) -> std::io::Result<Vec<PathBuf>> {
         };
         for subagent in subagents {
             let history_dir = subagent?.path();
-            let journal_bytes = fs::metadata(history_dir.join(HISTORY_JOURNAL_FILE))
-                .map(|metadata| metadata.len())
-                .unwrap_or_default();
-            if journal_bytes >= UPGRADE_CANDIDATE_BYTES {
+            let bytes = |file| {
+                fs::metadata(history_dir.join(file))
+                    .map(|metadata| metadata.len())
+                    .unwrap_or_default()
+            };
+            // A current writer compacts before its journal outgrows this budget, so
+            // a larger journal is almost always one of full-history frames. The
+            // load decides; the size only keeps the pass from reading the rest.
+            if bytes(HISTORY_JOURNAL_FILE) > journal_budget(bytes(HISTORY_SNAPSHOT_FILE)) {
                 candidates.push(history_dir);
             }
         }

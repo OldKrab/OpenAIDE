@@ -3,7 +3,7 @@ use tempfile::tempdir;
 use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage};
 use crate::storage::Store;
 
-use super::{SubagentCapabilitiesRecord, SubagentStatusRecord};
+use super::{SubagentCapabilitiesRecord, SubagentStatusRecord, COMPACT_AFTER_FRAMES};
 
 #[test]
 fn streamed_child_text_writes_only_the_new_output_and_survives_reopen() {
@@ -97,7 +97,10 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
                     false,
                 )
                 .unwrap();
-            assert_eq!(journal_len(), 0, "a full change publishes the snapshot");
+            assert!(
+                journal_len() > 0,
+                "a message change is journaled, not published as the snapshot"
+            );
         }
         reopened
             .append_subagent_message_part("task_1", "child-session", child_text("!"))
@@ -150,9 +153,10 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
         .join("task-store-v1/tasks/task_1/subagents")
         .join(&record.subagent_id);
     let mut old_journal = Vec::new();
-    // Creating the message publishes the snapshot; 64 streamed appends follow it.
-    for index in 0..65 {
-        if index == 64 {
+    // Creating the message and the streamed appends after it fill the journal
+    // until the last change compacts it.
+    for index in 0..COMPACT_AFTER_FRAMES {
+        if index == COMPACT_AFTER_FRAMES - 1 {
             old_journal = std::fs::read(history_dir.join("history.journal")).unwrap();
         }
         store
@@ -160,7 +164,7 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
             .unwrap();
     }
     drop(store);
-    // Compaction published revision 65 but process death left the previous
+    // Compaction published the last revision but process death left the previous
     // journal generation in place. The snapshot already owns this prefix.
     std::fs::write(history_dir.join("history.journal"), old_journal).unwrap();
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -169,7 +173,7 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
             .subagent_history("task_1", &record.subagent_id)
             .unwrap()
             .revision,
-        65
+        COMPACT_AFTER_FRAMES
     );
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("!"))
@@ -177,16 +181,18 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
     let history = reopened
         .subagent_history("task_1", &record.subagent_id)
         .unwrap();
-    assert_eq!(history.revision, 66);
+    assert_eq!(history.revision, COMPACT_AFTER_FRAMES + 1);
     assert!(matches!(
         &history.messages[0].chat.message,
         NormalizedMessage::AgentMessage { parts, .. }
-            if parts == &[AgentMessagePart::Text { text: format!("{}!", "x".repeat(65)) }]
+            if parts == &[AgentMessagePart::Text {
+                text: format!("{}!", "x".repeat(COMPACT_AFTER_FRAMES as usize)),
+            }]
     ));
 }
 
 #[test]
-fn repeated_full_changes_keep_the_journal_from_copying_the_history() {
+fn a_message_update_journals_only_that_message() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let record = store
@@ -211,8 +217,15 @@ fn repeated_full_changes_keep_the_journal_from_copying_the_history() {
         .path()
         .join("task-store-v1/tasks/task_1/subagents")
         .join(&record.subagent_id);
+    let snapshot = std::fs::read(history_dir.join("history.snapshot")).unwrap();
+    let journal_len = || {
+        std::fs::metadata(history_dir.join("history.journal"))
+            .unwrap()
+            .len()
+    };
     // Each upsert stands for a tool status update to a Subagent with a large history.
     for status in 0..8 {
+        let before = journal_len();
         store
             .append_subagent_message(
                 "task_1",
@@ -226,13 +239,14 @@ fn repeated_full_changes_keep_the_journal_from_copying_the_history() {
                 true,
             )
             .unwrap();
-        assert_eq!(
-            std::fs::metadata(history_dir.join("history.journal"))
-                .unwrap()
-                .len(),
-            0
-        );
+        let written = journal_len() - before;
+        assert!(written < 4096, "a small update wrote {written} bytes");
     }
+    assert_eq!(
+        std::fs::read(history_dir.join("history.snapshot")).unwrap(),
+        snapshot,
+        "the large history is not rewritten"
+    );
     drop(store);
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -245,6 +259,32 @@ fn repeated_full_changes_keep_the_journal_from_copying_the_history() {
         &history.messages[1].chat.message,
         NormalizedMessage::User { text, .. } if text == "status 7"
     ));
+}
+
+/// Publishes the message frames a journal holds as the snapshot, as compaction
+/// would, so a test can write an older history shape into one file.
+fn fold_journal_into_snapshot(history_dir: &std::path::Path) {
+    let snapshot_path = history_dir.join("history.snapshot");
+    let journal_path = history_dir.join("history.journal");
+    let mut history: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    for line in std::fs::read_to_string(&journal_path).unwrap().lines() {
+        let frame: serde_json::Value = serde_json::from_str(line).unwrap();
+        let message = frame["upsert"].clone();
+        assert!(message.is_object(), "the test journal holds message frames");
+        let messages = history["messages"].as_array_mut().unwrap();
+        match messages
+            .iter_mut()
+            .find(|stored| stored["chat"]["identity"] == message["chat"]["identity"])
+        {
+            Some(stored) => *stored = message,
+            None => messages.push(message),
+        }
+        history["revision"] = frame["revision"].clone();
+        history["messageMeta"] = frame["messageMeta"].clone();
+    }
+    std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
+    std::fs::write(&journal_path, b"").unwrap();
 }
 
 fn child_text(text: &str) -> NormalizedMessage {
@@ -588,13 +628,9 @@ fn a_subagent_history_with_inline_images_moves_them_to_task_files_on_load() {
     // A history written before ADR-0075 kept the image bytes inline.
     let snapshot_path = history_dir.join("history.snapshot");
     drop(store);
+    fold_journal_into_snapshot(&history_dir);
     let mut history: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
-    let journal = std::fs::read_to_string(history_dir.join("history.journal")).unwrap();
-    assert!(
-        journal.is_empty(),
-        "creating the message published the snapshot"
-    );
     history["messages"][0]["chat"]["message"]["parts"]
         .as_array_mut()
         .unwrap()
@@ -655,10 +691,9 @@ fn a_subagent_image_reference_gains_its_size_on_load() {
         crate::storage::chat_images::store(&task_dir, &crate::media::tests::encoded_png(6, 2))
             .unwrap();
     // A reference as the first release of ADR-0075 stored it: no width or height.
-    let snapshot_path = task_dir
-        .join("subagents")
-        .join(&record.subagent_id)
-        .join("history.snapshot");
+    let history_dir = task_dir.join("subagents").join(&record.subagent_id);
+    fold_journal_into_snapshot(&history_dir);
+    let snapshot_path = history_dir.join("history.snapshot");
     let mut history: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
     history["messages"][0]["chat"]["message"]["parts"]
@@ -694,4 +729,229 @@ fn a_subagent_image_reference_gains_its_size_on_load() {
         published["messages"][0]["chat"]["message"]["parts"][1]["width"], 6,
         "the size is durable"
     );
+}
+
+fn spawn_researcher(store: &Store) -> super::SubagentRecord {
+    store
+        .record_subagent_spawn(
+            "task_1",
+            "root-session",
+            "child-session",
+            "Researcher".to_string(),
+            "Inspect".to_string(),
+            SubagentCapabilitiesRecord::default(),
+            Vec::new(),
+        )
+        .unwrap()
+}
+
+fn history_dir(root: &std::path::Path, subagent_id: &str) -> std::path::PathBuf {
+    root.join("task-store-v1/tasks/task_1/subagents")
+        .join(subagent_id)
+}
+
+#[test]
+fn plan_and_permission_changes_are_journaled_and_survive_reopen() {
+    use crate::protocol::model::{
+        ActivityStatus, ActivityStep, AgentPlan, AgentPlanEntry, AgentPlanPriority,
+        AgentPlanStatus, ToolPermissionDecision, ToolPermissionOutcome,
+    };
+
+    let temp = tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = spawn_researcher(&store);
+    store
+        .append_subagent_message(
+            "task_1",
+            "child-session",
+            NormalizedMessage::Activity {
+                id: "activity-1".to_string(),
+                title: "Run tests".to_string(),
+                status: ActivityStatus::Running,
+                created_at: "1".to_string(),
+                collapsed: false,
+                steps: vec![ActivityStep::Tool {
+                    tool_call_id: Some("call-1".to_string()),
+                    name: "execute".to_string(),
+                    status: ActivityStatus::Running,
+                    presentation: None,
+                    description: None,
+                    input_summary: None,
+                    output_preview: None,
+                    detail_artifact_id: None,
+                    details: None,
+                    permission_outcomes: Vec::new(),
+                    background_outcome: None,
+                    pending: true,
+                }],
+            },
+            false,
+        )
+        .unwrap();
+    let plan = AgentPlan {
+        entries: vec![AgentPlanEntry {
+            content: "Run the suite".to_string(),
+            priority: AgentPlanPriority::High,
+            status: AgentPlanStatus::InProgress,
+        }],
+    };
+    store
+        .set_subagent_plan("task_1", "child-session", plan.clone())
+        .unwrap();
+    store
+        .record_subagent_permission_outcome(
+            "task_1",
+            "child-session",
+            "call-1",
+            ToolPermissionOutcome {
+                request_id: "request-1".to_string(),
+                decision: ToolPermissionDecision::Approved,
+                option_id: None,
+                option_label: None,
+                resolved_at: "2".to_string(),
+            },
+        )
+        .unwrap();
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    let journal = std::fs::read_to_string(dir.join("history.journal")).unwrap();
+    let kinds = journal
+        .lines()
+        .map(|line| {
+            let frame: serde_json::Value = serde_json::from_str(line).unwrap();
+            ["upsert", "setPlan", "appendText"]
+                .into_iter()
+                .find(|kind| frame.get(*kind).is_some())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, ["upsert", "setPlan", "upsert"]);
+    drop(store);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let history = reopened
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+    assert_eq!(history.revision, 3);
+    assert_eq!(history.current_plan, Some(plan));
+    assert!(matches!(
+        &history.messages[0].chat.message,
+        NormalizedMessage::Activity { steps, .. }
+            if matches!(&steps[..], [ActivityStep::Tool { permission_outcomes, .. }]
+                if permission_outcomes.len() == 1 && permission_outcomes[0].request_id == "request-1")
+    ));
+
+    reopened
+        .set_subagent_plan(
+            "task_1",
+            "child-session",
+            AgentPlan {
+                entries: Vec::new(),
+            },
+        )
+        .unwrap();
+    drop(reopened);
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    assert_eq!(
+        reopened
+            .subagent_history("task_1", &record.subagent_id)
+            .unwrap()
+            .current_plan,
+        None,
+        "a journaled clear survives reopen"
+    );
+}
+
+#[test]
+fn a_schema_one_history_becomes_schema_two_before_its_first_message_frame() {
+    let temp = tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = spawn_researcher(&store);
+    drop(store);
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    let snapshot_path = dir.join("history.snapshot");
+    let set_schema = |version: u16| {
+        let mut history: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+        history["schemaVersion"] = version.into();
+        std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
+    };
+    let schema = || {
+        let history: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+        history["schemaVersion"].as_u64().unwrap()
+    };
+    let journal_len = || {
+        std::fs::metadata(dir.join("history.journal"))
+            .unwrap()
+            .len()
+    };
+    // As an App Server that wrote only full-history and text frames left it.
+    set_schema(1);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    reopened
+        .append_subagent_message_part("task_1", "child-session", child_text("first"))
+        .unwrap();
+    assert_eq!(schema(), 2, "the snapshot is republished as schema 2");
+    assert_eq!(journal_len(), 0, "before any message frame is journaled");
+    reopened
+        .append_subagent_message_part("task_1", "child-session", child_text(" second"))
+        .unwrap();
+    assert!(journal_len() > 0, "a schema 2 history journals its changes");
+    drop(reopened);
+
+    // A later schema is refused, as a schema 1 App Server refuses schema 2.
+    set_schema(3);
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let error = reopened
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("Unsupported Subagent history schema"));
+}
+
+#[test]
+fn a_change_larger_than_the_journal_budget_publishes_the_snapshot() {
+    let temp = tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = spawn_researcher(&store);
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    store
+        .append_subagent_message_part("task_1", "child-session", child_text("small"))
+        .unwrap();
+    assert!(
+        std::fs::metadata(dir.join("history.journal"))
+            .unwrap()
+            .len()
+            > 0
+    );
+
+    // Larger than the 1 MiB budget a small snapshot allows its journal.
+    store
+        .append_subagent_message(
+            "task_1",
+            "child-session",
+            NormalizedMessage::User {
+                id: "user-message".to_string(),
+                text: "x".repeat(2 << 20),
+                created_at: "2".to_string(),
+                attachments: Vec::new(),
+            },
+            false,
+        )
+        .unwrap();
+    assert_eq!(
+        std::fs::metadata(dir.join("history.journal"))
+            .unwrap()
+            .len(),
+        0
+    );
+    drop(store);
+    let history = Store::open(temp.path().to_path_buf())
+        .unwrap()
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+    assert_eq!(history.revision, 2);
+    assert_eq!(history.messages.len(), 2);
 }

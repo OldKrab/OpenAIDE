@@ -13,8 +13,9 @@ use super::Store;
 mod history;
 mod sweep;
 use history::{
-    advance_history_meta, append_history_frame, durable_create_empty, load_upgraded_history,
-    HistoryFile, TextAppend, COMPACT_AFTER_FRAMES, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE,
+    advance_history_meta, append_history_frame, durable_create_empty, encode_change_frame,
+    journal_has_room, load_upgraded_history, HistoryChange, HistoryFile, TextAppend,
+    COMPACT_AFTER_FRAMES, HISTORY_JOURNAL_FILE, HISTORY_SCHEMA_VERSION, HISTORY_SNAPSHOT_FILE,
 };
 
 const SUBAGENTS_DIR: &str = "subagents";
@@ -337,7 +338,7 @@ impl Store {
                     message.preserve_created_at_from(&stored.chat.message);
                     stored.chat.message = message;
                     advance_history_meta(history);
-                    return Ok(None);
+                    return Ok(HistoryChange::Upsert(identity));
                 }
             }
             let sequence = history
@@ -350,14 +351,14 @@ impl Store {
                 chat: crate::protocol::model::ChatMessage {
                     cursor: cursor::from_sequence(sequence),
                     message_id: identity.clone(),
-                    identity,
+                    identity: identity.clone(),
                     message_type: message.message_type().to_string(),
                     message,
                     timing: Default::default(),
                 },
             });
             advance_history_meta(history);
-            Ok(None)
+            Ok(HistoryChange::Upsert(identity))
         })
     }
 
@@ -395,14 +396,14 @@ impl Store {
                                     text: chunk.clone(),
                                 });
                             }
-                            Some(TextAppend {
+                            HistoryChange::AppendText(TextAppend {
                                 identity,
                                 role: *role,
                                 text: chunk,
                             })
                         } else {
                             parts.push(part);
-                            None
+                            HistoryChange::Upsert(identity)
                         }
                     }
                     (
@@ -417,7 +418,7 @@ impl Store {
                     ) => {
                         text.push_str(&chunk);
                         attachments.extend(incoming_attachments);
-                        None
+                        HistoryChange::Upsert(identity)
                     }
                     _ => {
                         return Err(RuntimeError::Storage(
@@ -438,14 +439,14 @@ impl Store {
                 chat: crate::protocol::model::ChatMessage {
                     cursor: cursor::from_sequence(sequence),
                     message_id: identity.clone(),
-                    identity,
+                    identity: identity.clone(),
                     message_type: message.message_type().to_string(),
                     message,
                     timing: Default::default(),
                 },
             });
             advance_history_meta(history);
-            Ok(None)
+            Ok(HistoryChange::Upsert(identity))
         })
     }
 
@@ -457,7 +458,7 @@ impl Store {
     ) -> Result<SubagentRecord, RuntimeError> {
         self.mutate_subagent_history(task_id, native_session_id, |history| {
             history.current_plan = (!plan.entries.is_empty()).then_some(plan);
-            Ok(None)
+            Ok(HistoryChange::Plan)
         })
     }
 
@@ -469,18 +470,22 @@ impl Store {
         outcome: crate::protocol::model::ToolPermissionOutcome,
     ) -> Result<SubagentRecord, RuntimeError> {
         self.mutate_subagent_history(task_id, native_session_id, |history| {
-            let Some(outcomes) = history.messages.iter_mut().find_map(|stored| {
-                let NormalizedMessage::Activity { steps, .. } = &mut stored.chat.message else {
+            let Some((identity, outcomes)) = history.messages.iter_mut().find_map(|stored| {
+                let chat = &mut stored.chat;
+                let NormalizedMessage::Activity { steps, .. } = &mut chat.message else {
                     return None;
                 };
-                steps.iter_mut().find_map(|step| match step {
-                    crate::protocol::model::ActivityStep::Tool {
-                        tool_call_id: Some(id),
-                        permission_outcomes,
-                        ..
-                    } if id == tool_call_id => Some(permission_outcomes),
-                    _ => None,
-                })
+                steps
+                    .iter_mut()
+                    .find_map(|step| match step {
+                        crate::protocol::model::ActivityStep::Tool {
+                            tool_call_id: Some(id),
+                            permission_outcomes,
+                            ..
+                        } if id == tool_call_id => Some(permission_outcomes),
+                        _ => None,
+                    })
+                    .map(|outcomes| (chat.identity.clone(), outcomes))
             }) else {
                 return Err(RuntimeError::Storage(
                     "Subagent permission outcome has no matching tool call".to_string(),
@@ -495,7 +500,7 @@ impl Store {
                 outcomes.push(outcome);
             }
             advance_history_meta(history);
-            Ok(None)
+            Ok(HistoryChange::Upsert(identity))
         })
     }
 
@@ -529,7 +534,7 @@ impl Store {
         &self,
         task_id: &str,
         native_session_id: &str,
-        mutate: impl FnOnce(&mut HistoryFile) -> Result<Option<TextAppend>, RuntimeError>,
+        mutate: impl FnOnce(&mut HistoryFile) -> Result<HistoryChange, RuntimeError>,
     ) -> Result<SubagentRecord, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
         let started_at = std::time::Instant::now();
@@ -555,10 +560,11 @@ impl Store {
                 return Err(error);
             }
         };
-        let append = mutate(&mut history)?;
+        let change = mutate(&mut history)?;
+        let change_kind = change.kind();
         // A changed message may carry new image bytes; they become files before
-        // the snapshot that references them (ADR-0075).
-        if append.is_none() {
+        // the frame or snapshot that references them (ADR-0075).
+        if !matches!(change, HistoryChange::AppendText(_)) {
             crate::storage::chat_images::externalize_messages(
                 &task_dir(&root),
                 &mut history.messages,
@@ -566,27 +572,29 @@ impl Store {
         }
         history.revision = history.revision.saturating_add(1);
         history.journal_frames = history.journal_frames.saturating_add(1);
-        let compacted = match append {
-            Some(append) if history.journal_frames < COMPACT_AFTER_FRAMES => {
-                append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &history, append)?;
-                false
-            }
-            // Only streamed text has a frame smaller than the history. A full frame
-            // would repeat the whole history in the journal, and every later load
-            // replays each copy, so publish it as the snapshot instead. A load then
-            // reads one history plus at most the streamed text since it.
-            // TODO: Journal message upserts as their own frames; a tool status update
-            // still rewrites every message of a large Subagent history.
-            _ => {
-                history.journal_frames = 0;
-                crate::storage::atomic::write_json(
-                    &history_dir.join(HISTORY_SNAPSHOT_FILE),
-                    &history,
-                )?;
-                durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
+        // A schema 1 history is published once as schema 2 before its journal takes a
+        // frame that schema 1 readers do not know.
+        let frame = if history.schema_version == HISTORY_SCHEMA_VERSION
+            && history.journal_frames < COMPACT_AFTER_FRAMES
+        {
+            encode_change_frame(&history, change)?
+        } else {
+            None
+        };
+        let frame_bytes = frame.as_ref().map_or(0, Vec::len);
+        let journaled = match frame {
+            Some(frame) if journal_has_room(&history_dir, frame.len() as u64)? => {
+                append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &frame)?;
                 true
             }
+            _ => false,
         };
+        if !journaled {
+            history.schema_version = HISTORY_SCHEMA_VERSION;
+            history.journal_frames = 0;
+            crate::storage::atomic::write_json(&history_dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
+            durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
+        }
         let elapsed = started_at.elapsed();
         if elapsed.as_millis() >= 50 {
             crate::logging::warn(
@@ -596,7 +604,9 @@ impl Store {
                     "subagent_id": record.subagent_id,
                     "duration_ms": elapsed.as_millis(),
                     "message_count": history.messages.len(),
-                    "compacted": compacted,
+                    "change": change_kind,
+                    "frame_bytes": frame_bytes,
+                    "compacted": !journaled,
                 }),
             );
         }
