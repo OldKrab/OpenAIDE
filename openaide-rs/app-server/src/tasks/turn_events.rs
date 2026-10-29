@@ -106,6 +106,8 @@ pub(crate) struct TaskSessionEventSink {
     server_requests: ServerRequestRuntime,
     /// Receives account limits an Agent reports on this session; they belong to the Agent.
     agent_statuses: AgentStatusCache,
+    /// Without it every Subagent change is published, as when nothing reports presence.
+    subscription_presence: Option<crate::state_sync::TaskSubscriptionPresence>,
     text_chunk_routes: TextChunkRoutes,
     subagent_text_chunk_routes: Mutex<HashMap<String, TextChunkRoutes>>,
     emission_lock: Mutex<()>,
@@ -125,6 +127,7 @@ impl TaskSessionEventSink {
             native_catalog: None,
             server_requests,
             agent_statuses: AgentStatusCache::default(),
+            subscription_presence: None,
             text_chunk_routes: TextChunkRoutes::new(session_id),
             subagent_text_chunk_routes: Mutex::default(),
             emission_lock: Mutex::new(()),
@@ -141,6 +144,14 @@ impl TaskSessionEventSink {
 
     pub(crate) fn with_agent_statuses(mut self, agent_statuses: AgentStatusCache) -> Self {
         self.agent_statuses = agent_statuses;
+        self
+    }
+
+    pub(crate) fn with_subscription_presence(
+        mut self,
+        subscription_presence: Option<crate::state_sync::TaskSubscriptionPresence>,
+    ) -> Self {
+        self.subscription_presence = subscription_presence;
         self
     }
 }

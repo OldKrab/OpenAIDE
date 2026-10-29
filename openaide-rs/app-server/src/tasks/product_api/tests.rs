@@ -4264,7 +4264,6 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         ..Default::default()
     });
     let (notifier, updates) = TaskUpdateNotifier::channel();
-    let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
@@ -4272,8 +4271,8 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         agent.clone(),
         notifier,
     )
-    .unwrap()
-    .with_task_subscription_presence(task_subscription_presence.clone());
+    .unwrap();
+    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4361,7 +4360,6 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
         block_set_config: AtomicBool::new(true),
         ..Default::default()
     });
-    let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
@@ -4369,8 +4367,8 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
-    .unwrap()
-    .with_task_subscription_presence(task_subscription_presence.clone());
+    .unwrap();
+    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4454,7 +4452,6 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
         commands_catalog: Some(command_catalog()),
         ..Default::default()
     });
-    let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
     let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
@@ -4463,8 +4460,8 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
         agent.clone(),
         notifier,
     )
-    .unwrap()
-    .with_task_subscription_presence(task_subscription_presence.clone());
+    .unwrap();
+    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),

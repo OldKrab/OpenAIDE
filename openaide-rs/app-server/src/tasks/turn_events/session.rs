@@ -592,6 +592,16 @@ impl TaskSessionEventSink {
         .map_err(|error| RuntimeError::Internal(error.message))?;
         self.mutations.publish_subagent_catalog(catalog);
 
+        // Reloading and projecting a whole history for every streamed chunk is the
+        // expensive part, and nobody may be watching. A client that subscribes later
+        // reads a baseline that already holds this change.
+        if self
+            .subscription_presence
+            .as_ref()
+            .is_some_and(|presence| !presence.watches_subagent_history(&self.task_id, subagent_id))
+        {
+            return Ok(());
+        }
         let history = self
             .mutations
             .store()
