@@ -100,7 +100,7 @@ export function useSubagentSessions({
         onSnapshot(snapshot, event) {
           if (snapshot.kind !== "subagentHistory") return;
           setHistory(snapshot.history);
-          if (event?.payload.kind !== "subagentHistoryUpdated") return;
+          if (event?.payload.kind !== "subagentHistoryChanged") return;
           const presentation = latestTextPresentation(
             snapshot.history.chat.items,
             event.cursor,

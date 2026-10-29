@@ -173,7 +173,7 @@ function updateChatItemText(task: TaskSnapshot, messageId: string, text: string)
   };
 }
 
-function appendTextToMessageParts(parts: MessagePart[], text: string): MessagePart[] {
+export function appendTextToMessageParts(parts: MessagePart[], text: string): MessagePart[] {
   const last = parts.at(-1);
   if (last?.kind !== "text") return [...parts, { kind: "text", text }];
   return [...parts.slice(0, -1), { ...last, text: last.text + text }];

@@ -49,10 +49,18 @@ impl RpcGateway {
                 },
                 now,
             ),
-            TaskUpdateKind::SubagentHistoryChanged { history } => self.publish_task_payload(
+            TaskUpdateKind::SubagentHistoryChanged {
+                subagent_id,
+                chat,
+                current_plan,
+            } => self.publish_task_payload(
                 &task_id,
-                AppServerEventPayload::SubagentHistoryUpdated {
-                    history: history.clone(),
+                AppServerEventPayload::SubagentHistoryChanged {
+                    task_id: task_id.clone(),
+                    subagent_id: subagent_id.clone(),
+                    revision: update.revision,
+                    chat: chat.clone(),
+                    current_plan: current_plan.clone(),
                 },
                 now,
             ),

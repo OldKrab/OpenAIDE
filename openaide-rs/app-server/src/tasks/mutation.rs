@@ -583,11 +583,16 @@ impl TaskMutations {
         self.notifier.subagent_catalog_changed(catalog);
     }
 
-    pub(crate) fn publish_subagent_history(
+    pub(crate) fn publish_subagent_history_change(
         &self,
-        history: openaide_app_server_protocol::snapshot::SubagentHistorySnapshot,
+        task_id: &str,
+        subagent_id: &str,
+        revision: u64,
+        chat: Vec<openaide_app_server_protocol::events::TaskChatChange>,
+        current_plan: Option<Option<openaide_app_server_protocol::snapshot::AgentPlanSnapshot>>,
     ) {
-        self.notifier.subagent_history_changed(history);
+        self.notifier
+            .subagent_history_changed(task_id, subagent_id, revision, chat, current_plan);
     }
 
     pub(crate) fn lock(&self) -> MutexGuard<'_, ()> {

@@ -690,8 +690,11 @@ fn payload_matches_subscription(
             subagent_id,
         } => matches!(
             payload,
-            AppServerEventPayload::SubagentHistoryUpdated { history }
-                if &history.task_id == task_id && &history.subagent_id == subagent_id
+            AppServerEventPayload::SubagentHistoryChanged {
+                task_id: changed_task_id,
+                subagent_id: changed_subagent_id,
+                ..
+            } if changed_task_id == task_id && changed_subagent_id == subagent_id
         ),
         SubscriptionScope::ToolDetail {
             task_id,

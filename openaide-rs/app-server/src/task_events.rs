@@ -48,8 +48,11 @@ pub enum TaskUpdateKind {
     SubagentCatalogChanged {
         catalog: openaide_app_server_protocol::snapshot::SubagentCatalogSnapshot,
     },
+    /// One committed Subagent History revision; `TaskUpdate::revision` is its revision.
     SubagentHistoryChanged {
-        history: openaide_app_server_protocol::snapshot::SubagentHistorySnapshot,
+        subagent_id: openaide_app_server_protocol::ids::SubagentId,
+        chat: Vec<openaide_app_server_protocol::events::TaskChatChange>,
+        current_plan: Option<Option<openaide_app_server_protocol::snapshot::AgentPlanSnapshot>>,
     },
     /// Native Session membership or ordering changed for one Project.
     NavigationProjectEntriesChanged {
@@ -187,12 +190,20 @@ impl TaskUpdateNotifier {
 
     pub(crate) fn subagent_history_changed(
         &self,
-        history: openaide_app_server_protocol::snapshot::SubagentHistorySnapshot,
+        task_id: &str,
+        subagent_id: &str,
+        revision: u64,
+        chat: Vec<openaide_app_server_protocol::events::TaskChatChange>,
+        current_plan: Option<Option<openaide_app_server_protocol::snapshot::AgentPlanSnapshot>>,
     ) {
         self.publish(TaskUpdate {
-            task_id: history.task_id.as_str().to_string(),
-            revision: history.revision,
-            kind: TaskUpdateKind::SubagentHistoryChanged { history },
+            task_id: task_id.to_string(),
+            revision,
+            kind: TaskUpdateKind::SubagentHistoryChanged {
+                subagent_id: subagent_id.into(),
+                chat,
+                current_plan,
+            },
         });
     }
 

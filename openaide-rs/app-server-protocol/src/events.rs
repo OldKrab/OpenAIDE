@@ -2,15 +2,14 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{
-    ClientInstanceId, EventCursor, MessageId, StateRootId, TaskId, WorktreeRepositoryId,
+    ClientInstanceId, EventCursor, MessageId, StateRootId, SubagentId, TaskId, WorktreeRepositoryId,
 };
 use crate::snapshot::{
     AgentCollectionSnapshot, AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot,
     ClientSnapshot, PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
-    SubagentHistorySnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot,
-    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationSnapshot,
-    TaskSendCapabilitySnapshot, TaskSummary,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage, TaskHistorySyncSnapshot,
+    TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot, TaskNavigationSnapshot,
+    TaskPermissionPolicy, TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
@@ -102,8 +101,17 @@ pub enum AppServerEventPayload {
     SubagentCatalogUpdated {
         catalog: SubagentCatalogSnapshot,
     },
-    SubagentHistoryUpdated {
-        history: SubagentHistorySnapshot,
+    /// Advances one Subagent History by exactly one revision (ADR-0046). A client
+    /// whose copy is not at `revision - 1` re-reads the history instead.
+    SubagentHistoryChanged {
+        task_id: TaskId,
+        subagent_id: SubagentId,
+        revision: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        chat: Vec<TaskChatChange>,
+        /// Outer option controls delta presence; inner option clears the Agent Plan.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current_plan: Option<Option<AgentPlanSnapshot>>,
     },
     ToolDetailUpdated {
         task_id: TaskId,

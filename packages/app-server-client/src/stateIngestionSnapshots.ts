@@ -9,6 +9,7 @@ import {
   replaceNavigationProjectEntries,
   updateExistingNavigationTask,
 } from "./stateIngestionTaskNavigation.js";
+import { updateSubagentHistorySnapshot } from "./stateIngestionSubagentHistory.js";
 import { updateTaskSnapshot } from "./stateIngestionTask.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
 import { changed, unchanged } from "./stateIngestionTypes.js";
@@ -52,12 +53,7 @@ export function updateSubscriptionSnapshot(
         ? changed({ kind: "subagentCatalog", catalog: payload.catalog })
         : unchanged(snapshot);
     case "subagentHistory":
-      return payload.kind === "subagentHistoryUpdated"
-        && payload.history.taskId === snapshot.history.taskId
-        && payload.history.subagentId === snapshot.history.subagentId
-        && payload.history.revision >= snapshot.history.revision
-        ? changed({ kind: "subagentHistory", history: payload.history })
-        : unchanged(snapshot);
+      return updateSubagentHistorySnapshot(snapshot, payload);
     case "toolDetail":
       if ((payload.kind !== "toolDetailUpdated" && payload.kind !== "toolDetailChanged")
         || payload.taskId !== snapshot.taskId
