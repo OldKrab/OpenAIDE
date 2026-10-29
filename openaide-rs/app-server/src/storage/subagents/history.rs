@@ -8,11 +8,23 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentMessagePart, AgentMessageRole, AgentPlan, NormalizedMessage};
 use crate::storage::records::{MessageMeta, StoredMessage};
 
-use super::{validate_schema, SCHEMA_VERSION};
-
 pub(super) const HISTORY_SNAPSHOT_FILE: &str = "history.snapshot";
 pub(super) const HISTORY_JOURNAL_FILE: &str = "history.journal";
-pub(super) const COMPACT_AFTER_FRAMES: u64 = 64;
+/// Bounds replay work; the byte budget below bounds replay size.
+pub(super) const COMPACT_AFTER_FRAMES: u64 = 256;
+/// Schema 2 journals may hold message and plan frames. Schema 1 journals hold only
+/// full-history and text frames; an App Server that knows only schema 1 rejects a
+/// schema 2 history instead of misreading frames it does not know.
+pub(super) const HISTORY_SCHEMA_VERSION: u16 = 2;
+/// The smallest journal worth keeping beside a snapshot before compacting.
+const MIN_JOURNAL_BUDGET_BYTES: u64 = 1 << 20;
+
+/// How many journal bytes a snapshot of this size may carry. Compacting only once
+/// the journal would outgrow its snapshot keeps the rewritten bytes proportional
+/// to the change bytes, and a load reads at most about twice the snapshot.
+pub(super) fn journal_budget(snapshot_bytes: u64) -> u64 {
+    snapshot_bytes.max(MIN_JOURNAL_BUDGET_BYTES)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +40,7 @@ pub(super) struct HistoryFile {
 impl Default for HistoryFile {
     fn default() -> Self {
         Self {
-            schema_version: SCHEMA_VERSION,
+            schema_version: HISTORY_SCHEMA_VERSION,
             revision: 0,
             journal_frames: 0,
             messages: Vec::new(),
@@ -39,12 +51,12 @@ impl Default for HistoryFile {
 }
 
 // Full frames are the original schema-1 journal representation and remain readable;
-// current writers publish such a change as the snapshot instead.
-// Streamed Agent text uses a semantic append so each chunk does not rewrite all
-// previous output. Its metadata is committed in the same newline-delimited frame.
+// current writers journal only what changed. Streamed Agent text uses a semantic
+// append, any other message change carries that one message, and a plan change
+// carries the plan. Metadata is committed in the same newline-delimited frame.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged, rename_all_fields = "camelCase")]
-enum HistoryFrame<H> {
+enum HistoryFrame<H, M, P> {
     Full {
         revision: u64,
         history: H,
@@ -54,12 +66,52 @@ enum HistoryFrame<H> {
         append_text: TextAppend,
         message_meta: MessageMeta,
     },
+    Upsert {
+        revision: u64,
+        upsert: M,
+        message_meta: MessageMeta,
+    },
+    SetPlan {
+        revision: u64,
+        set_plan: PlanChange<P>,
+    },
 }
 
-impl<H> HistoryFrame<H> {
+/// A required wrapper, so a frame without `setPlan` cannot read as a cleared plan.
+#[derive(Debug, Serialize, Deserialize)]
+struct PlanChange<P> {
+    plan: Option<P>,
+}
+
+type StoredFrame = HistoryFrame<HistoryFile, StoredMessage, AgentPlan>;
+
+impl<H, M, P> HistoryFrame<H, M, P> {
     fn revision(&self) -> u64 {
         match self {
-            Self::Full { revision, .. } | Self::AppendText { revision, .. } => *revision,
+            Self::Full { revision, .. }
+            | Self::AppendText { revision, .. }
+            | Self::Upsert { revision, .. }
+            | Self::SetPlan { revision, .. } => *revision,
+        }
+    }
+}
+
+/// What one history mutation changed, so the journal records only that.
+pub(super) enum HistoryChange {
+    /// Streamed Agent text appended to the identified message.
+    AppendText(TextAppend),
+    /// The message with this identity was added or replaced.
+    Upsert(String),
+    /// The current plan was replaced or cleared.
+    Plan,
+}
+
+impl HistoryChange {
+    pub(super) fn kind(&self) -> &'static str {
+        match self {
+            Self::AppendText(_) => "append_text",
+            Self::Upsert(_) => "upsert",
+            Self::Plan => "plan",
         }
     }
 }
@@ -114,7 +166,7 @@ pub(super) struct JournalReplay {
 fn load_history(dir: &Path) -> Result<(HistoryFile, JournalReplay), RuntimeError> {
     let bytes = fs::read(dir.join(HISTORY_SNAPSHOT_FILE))?;
     let mut history: HistoryFile = serde_json::from_slice(&bytes)?;
-    validate_schema(history.schema_version)?;
+    validate_history_schema(history.schema_version)?;
     let snapshot_revision = history.revision;
     let journal = dir.join(HISTORY_JOURNAL_FILE);
     let file = fs::File::open(&journal)?;
@@ -143,7 +195,7 @@ fn load_history(dir: &Path) -> Result<(HistoryFile, JournalReplay), RuntimeError
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let frame: HistoryFrame<HistoryFile> = serde_json::from_slice(&line)?;
+        let frame: StoredFrame = serde_json::from_slice(&line)?;
         let revision = frame.revision();
         if revision <= snapshot_revision {
             // Snapshot publication precedes journal replacement. An interrupted
@@ -158,7 +210,7 @@ fn load_history(dir: &Path) -> Result<(HistoryFile, JournalReplay), RuntimeError
         }
         match frame {
             HistoryFrame::Full { history: next, .. } => {
-                validate_schema(next.schema_version)?;
+                validate_history_schema(next.schema_version)?;
                 if revision != next.revision {
                     return Err(RuntimeError::Storage(
                         "Subagent history frame revision is inconsistent".to_string(),
@@ -166,6 +218,7 @@ fn load_history(dir: &Path) -> Result<(HistoryFile, JournalReplay), RuntimeError
                 }
                 history = next;
                 repeated_frames += 1;
+                continue;
             }
             HistoryFrame::AppendText {
                 append_text,
@@ -174,10 +227,26 @@ fn load_history(dir: &Path) -> Result<(HistoryFile, JournalReplay), RuntimeError
             } => {
                 append_text.apply(&mut history)?;
                 history.message_meta = message_meta;
-                history.revision = revision;
-                history.journal_frames = history.journal_frames.saturating_add(1);
             }
+            HistoryFrame::Upsert {
+                upsert,
+                message_meta,
+                ..
+            } => {
+                match history
+                    .messages
+                    .iter_mut()
+                    .find(|stored| stored.chat.identity == upsert.chat.identity)
+                {
+                    Some(stored) => *stored = upsert,
+                    None => history.messages.push(upsert),
+                }
+                history.message_meta = message_meta;
+            }
+            HistoryFrame::SetPlan { set_plan, .. } => history.current_plan = set_plan.plan,
         }
+        history.revision = revision;
+        history.journal_frames = history.journal_frames.saturating_add(1);
     }
     // codex-acp previously projected the encrypted causal-root placeholder as if it
     // were child-authored User text. The identity is adapter-owned, so suppressing
@@ -258,23 +327,70 @@ pub(super) fn load_upgraded_history(
     Ok((history, true))
 }
 
-/// Appends streamed text. Other changes publish the snapshot instead of a full frame.
-pub(super) fn append_history_frame(
-    path: &Path,
+/// Encodes the frame for a change already applied to `history`, newline included.
+/// `None` means the change has no frame of its own and the snapshot is published.
+pub(super) fn encode_change_frame(
     history: &HistoryFile,
-    append_text: TextAppend,
-) -> Result<(), RuntimeError> {
-    let frame = HistoryFrame::<&HistoryFile>::AppendText {
-        revision: history.revision,
-        append_text,
-        message_meta: history.message_meta.clone(),
+    change: HistoryChange,
+) -> Result<Option<Vec<u8>>, RuntimeError> {
+    let revision = history.revision;
+    let message_meta = history.message_meta.clone();
+    let frame = match change {
+        HistoryChange::AppendText(append_text) => HistoryFrame::AppendText {
+            revision,
+            append_text,
+            message_meta,
+        },
+        HistoryChange::Upsert(identity) => {
+            let Some(upsert) = history
+                .messages
+                .iter()
+                .find(|stored| stored.chat.identity == identity)
+            else {
+                return Ok(None);
+            };
+            HistoryFrame::Upsert {
+                revision,
+                upsert,
+                message_meta,
+            }
+        }
+        HistoryChange::Plan => HistoryFrame::SetPlan {
+            revision,
+            set_plan: PlanChange {
+                plan: history.current_plan.as_ref(),
+            },
+        },
     };
-    let bytes = serde_json::to_vec(&frame)?;
+    let frame: HistoryFrame<(), &StoredMessage, &AgentPlan> = frame;
+    let mut bytes = serde_json::to_vec(&frame)?;
+    bytes.push(b'\n');
+    Ok(Some(bytes))
+}
+
+/// Whether the journal can take `frame_bytes` more before it outgrows its snapshot.
+pub(super) fn journal_has_room(dir: &Path, frame_bytes: u64) -> Result<bool, RuntimeError> {
+    let snapshot = fs::metadata(dir.join(HISTORY_SNAPSHOT_FILE))?.len();
+    let journal = fs::metadata(dir.join(HISTORY_JOURNAL_FILE))?.len();
+    Ok(journal.saturating_add(frame_bytes) <= journal_budget(snapshot))
+}
+
+/// Appends one encoded frame; it is accepted once its newline is durable.
+pub(super) fn append_history_frame(path: &Path, frame: &[u8]) -> Result<(), RuntimeError> {
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    file.write_all(&bytes)?;
-    file.write_all(b"\n")?;
+    file.write_all(frame)?;
     file.sync_all()?;
     Ok(())
+}
+
+fn validate_history_schema(version: u16) -> Result<(), RuntimeError> {
+    if (1..=HISTORY_SCHEMA_VERSION).contains(&version) {
+        Ok(())
+    } else {
+        Err(RuntimeError::Storage(
+            "Unsupported Subagent history schema".to_string(),
+        ))
+    }
 }
 
 pub(super) fn advance_history_meta(history: &mut HistoryFile) {

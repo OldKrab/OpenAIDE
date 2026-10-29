@@ -127,9 +127,12 @@ fn a_journal_of_full_history_frames_becomes_the_snapshot_when_loaded() {
 #[test]
 fn the_sweep_upgrades_a_large_legacy_journal_nobody_opens() {
     let temp = tempdir().unwrap();
-    // Four frames of a 300 KB message repeat it ten times: over the 1 MiB threshold.
+    // Four frames of a 300 KB message repeat it ten times: over the journal budget.
     let (store, subagent_id, history_dir) = legacy_subagent(temp.path(), 4, 300_000);
-    assert!(journal_len(&history_dir) > super::UPGRADE_CANDIDATE_BYTES);
+    let snapshot_len = std::fs::metadata(history_dir.join("history.snapshot"))
+        .unwrap()
+        .len();
+    assert!(journal_len(&history_dir) > super::super::history::journal_budget(snapshot_len));
 
     sweep(
         &Arc::downgrade(&store.inner),
