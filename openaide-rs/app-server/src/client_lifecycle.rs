@@ -73,6 +73,8 @@ pub enum ClientExpiryOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientExpiryBatch {
+    /// Clients whose heartbeats stopped, with the end of their new reconnect grace.
+    pub entered_reconnect_grace: Vec<(ClientInstanceId, AppServerTime)>,
     pub expired: Vec<ClientInstanceId>,
     pub last_client_expired: bool,
 }
@@ -297,11 +299,10 @@ impl ClientHub {
             .map(|(client_instance_id, _)| client_instance_id.clone())
             .collect::<Vec<_>>();
 
+        let grace_expires_at = AppServerTime(now.0 + self.liveness_policy.reconnect_grace_ms);
         for client_instance_id in &entered_reconnect_grace {
             if let Some(record) = self.clients.get_mut(client_instance_id) {
-                record.reconnect_expires_at = Some(AppServerTime(
-                    now.0 + self.liveness_policy.reconnect_grace_ms,
-                ));
+                record.reconnect_expires_at = Some(grace_expires_at);
             }
             self.connections
                 .retain(|_, value| value != client_instance_id);
@@ -325,6 +326,10 @@ impl ClientHub {
         }
 
         ClientExpiryBatch {
+            entered_reconnect_grace: entered_reconnect_grace
+                .into_iter()
+                .map(|client_instance_id| (client_instance_id, grace_expires_at))
+                .collect(),
             last_client_expired: !expired.is_empty() && self.clients.is_empty(),
             expired,
         }

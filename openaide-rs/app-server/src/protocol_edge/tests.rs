@@ -3024,6 +3024,37 @@ fn authenticated_transport_activity_refreshes_client_liveness() {
 }
 
 #[test]
+fn a_silent_client_logs_entering_reconnect_grace_and_its_expiry() {
+    let logs = crate::logging::capture_test_logs();
+    let mut gateway = initialized_gateway("client-silent", "conn-silent");
+
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(11))
+        .is_empty());
+    assert_eq!(gateway.expire_inactive_clients(AppServerTime(21)).len(), 1);
+
+    let events = logs
+        .snapshot()
+        .into_iter()
+        .filter(|entry| entry.to_string().contains("client-silent"))
+        .collect::<Vec<_>>();
+    let event = |name: &str| {
+        events
+            .iter()
+            .find(|entry| entry["event"] == name)
+            .unwrap_or_else(|| panic!("missing {name} in {events:?}"))
+            .clone()
+    };
+    let entered = event("client_reconnect_grace_entered");
+    assert_eq!(entered["fields"]["reason"], "heartbeat_timeout");
+    assert_eq!(entered["fields"]["grace_ms"], 10);
+    assert_eq!(
+        event("client_liveness_expired")["fields"]["client_instance_ids"],
+        json!(["client-silent"])
+    );
+}
+
+#[test]
 fn completed_request_refreshes_liveness_after_a_stale_request_start() {
     let gateway = SharedRpcGateway::new(initialized_gateway("client-1", "conn-1"));
 
