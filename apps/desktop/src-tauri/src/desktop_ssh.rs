@@ -335,30 +335,58 @@ pub(crate) fn desktop_ssh_failure(state: tauri::State<'_, DesktopSshState>) -> O
     state.failure.lock().ok()?.clone()
 }
 
-/// Replaces the App Server on the SSH Computer in use on the next start. The
-/// WebView asks only after showing what the replacement interrupts.
-// TODO(ssh-computers): reconnect in place through `DesktopConnections::switch`
-// instead of restarting Desktop, once a switch can target the computer in use.
+/// Replaces the App Server on the SSH Computer in use. The WebView asks only after
+/// showing what the replacement interrupts. Connected, it reconnects in place and the
+/// window follows the new forward (`desktop-app-server-replaced`), as after a sleep;
+/// on the startup page, where nothing is connected, the window reloads to start again,
+/// and that start applies the update. Answers `replaced` or `reload`.
 #[tauri::command]
-pub(crate) fn desktop_ssh_update(
+pub(crate) async fn desktop_ssh_update(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
-) -> Result<(), String> {
-    let mut preferences = state
-        .preferences
-        .lock()
-        .map_err(|_| "desktop bootstrap preferences unavailable")?;
-    let id = preferences
-        .remote()
-        .filter(|computer| computer.ssh.is_some())
-        .map(|computer| computer.id.clone())
-        .ok_or_else(|| "No SSH computer is in use.".to_string())?;
-    preferences.ssh_replace = Some(id);
-    write_bootstrap_preferences(&state.preferences_path, &preferences)?;
-    drop(preferences);
+    connections: tauri::State<'_, DesktopConnections>,
+) -> Result<&'static str, String> {
+    let _exclusive = connections.exclusive().await;
+    let computer = {
+        let mut preferences = state
+            .preferences
+            .lock()
+            .map_err(|_| "desktop bootstrap preferences unavailable")?;
+        let computer = preferences
+            .remote()
+            .filter(|computer| computer.ssh.is_some())
+            .cloned()
+            .ok_or_else(|| "No SSH computer is in use.".to_string())?;
+        preferences.ssh_replace = Some(computer.id.clone());
+        write_bootstrap_preferences(&state.preferences_path, &preferences)?;
+        computer
+    };
     desktop_log!("desktop_ssh_update_confirmed");
-    crate::restart_desktop(&app);
-    Ok(())
+    if connections.computer_in_use() != Some(Some(computer.id.clone())) {
+        desktop_log!("desktop_ssh_update_completed outcome=reload");
+        return Ok("reload");
+    }
+    let started = Instant::now();
+    let destination = computer.ssh.clone().unwrap_or_default();
+    let connection = match connect(&app, &computer, &destination, false).await {
+        Ok(connection) => connection,
+        Err(message) => {
+            desktop_log!(
+                "desktop_ssh_update_completed outcome=failure duration_ms={}",
+                started.elapsed().as_millis()
+            );
+            return Err(message);
+        }
+    };
+    let window_follows = connections.replace_ssh(&computer.id, connection.clone());
+    if window_follows {
+        let _ = app.emit("desktop-app-server-replaced", &connection);
+    }
+    desktop_log!(
+        "desktop_ssh_update_completed outcome=replaced window_follows={window_follows} duration_ms={}",
+        started.elapsed().as_millis()
+    );
+    Ok("replaced")
 }
 
 /// Ends the keeper on an SSH Computer. Its App Server then stops once no App
