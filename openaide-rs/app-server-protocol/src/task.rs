@@ -483,6 +483,23 @@ pub struct ToolDetailSnapshot {
     pub terminal_outputs: Vec<TerminalOutputSnapshot>,
 }
 
+/// Loads one stored image of a Task by the id a Chat reference names (ADR-0075).
+/// Its Task Chat or a Subagent history of that Task may reference it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskImageParams {
+    pub task_id: TaskId,
+    pub image_id: String,
+}
+
+/// The image's bytes as base64. The reference that named the image carries its
+/// media type, and an id always names the same bytes, so a client may cache it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskImageResult {
+    pub data: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskToolImagePreviewParams {

@@ -378,7 +378,10 @@ fn released_tool_presentation_snapshot_migrates_when_task_opens() {
     );
     let migrated: serde_json::Value =
         serde_json::from_slice(&std::fs::read(snapshot_path).unwrap()).unwrap();
-    assert_eq!(migrated["schemaVersion"], serde_json::json!(2));
+    assert_eq!(
+        migrated["schemaVersion"],
+        serde_json::json!(super::super::split::CHAT_SCHEMA_VERSION)
+    );
     assert_eq!(
         migrated.pointer("/messages/0/chat/message/steps/0/presentation"),
         Some(&serde_json::json!({
@@ -569,7 +572,10 @@ fn released_tool_presentation_journal_migrates_when_task_opens() {
     assert!(!task_dir.join("task.journal").exists());
     let migrated: serde_json::Value =
         serde_json::from_slice(&std::fs::read(task_dir.join("chat.snapshot")).unwrap()).unwrap();
-    assert_eq!(migrated["schemaVersion"], serde_json::json!(2));
+    assert_eq!(
+        migrated["schemaVersion"],
+        serde_json::json!(super::super::split::CHAT_SCHEMA_VERSION)
+    );
     store.shutdown().unwrap();
 }
 
@@ -1192,7 +1198,7 @@ fn replacing_a_large_message_history_completes_without_quadratic_delay() {
     store.shutdown().unwrap();
 }
 
-fn task_projection(task_id: &str) -> TaskProjection {
+pub(in crate::storage::task_journal) fn task_projection(task_id: &str) -> TaskProjection {
     TaskProjection {
         task: TaskRecord {
             task_id: task_id.to_string(),

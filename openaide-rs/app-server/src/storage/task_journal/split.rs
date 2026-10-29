@@ -18,7 +18,9 @@ pub(super) const TASK_FILE: &str = "task.json";
 pub(super) const CHAT_SNAPSHOT_FILE: &str = "chat.snapshot";
 pub(super) const CHAT_JOURNAL_FILE: &str = "chat.journal";
 const TASK_SCHEMA_VERSION: u16 = 1;
-pub(super) const CHAT_SCHEMA_VERSION: u16 = 2;
+/// Version 3 stores Chat images as references (ADR-0075). A version 2 Chat
+/// reads unchanged; hydration moves any inline images out and compacts it.
+pub(super) const CHAT_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -475,7 +477,9 @@ pub(super) fn compact(
         JournalKind::Compaction,
         super::frame::FaultPoint::CompactionPublishParentSync,
     )?;
-    sync_directory(task_dir)
+    sync_directory(task_dir)?;
+    super::images::sweep_unreferenced(task_dir, projection);
+    Ok(())
 }
 
 pub(super) fn compaction_is_worthwhile(task_dir: &Path) -> Result<bool, RuntimeError> {
@@ -655,6 +659,11 @@ fn load_chat_snapshot(path: &Path) -> Result<(ChatSnapshotFile, bool), RuntimeEr
         })?;
     let migrated = match version {
         CHAT_SCHEMA_VERSION => false,
+        2 => {
+            // Its images move at hydration, which publishes a version 3 generation.
+            value["schemaVersion"] = Value::from(CHAT_SCHEMA_VERSION);
+            false
+        }
         1 => {
             migrate_v1_tool_presentations(&mut value);
             value["schemaVersion"] = Value::from(CHAT_SCHEMA_VERSION);

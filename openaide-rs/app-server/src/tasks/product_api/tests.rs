@@ -7426,12 +7426,13 @@ fn send_commits_inline_image_as_image_chat_content() {
             "/tmp/openaide-unit-workspace/app",
         ))
         .unwrap();
+    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
-        TaskUpdateNotifier::disabled(),
+        notifier,
     )
     .unwrap();
     let accepted = api
@@ -7449,14 +7450,41 @@ fn send_commits_inline_image_as_image_chat_content() {
     assert_eq!(accepted.task.chat.items[0].parts.len(), 2);
     let MessagePart::Image {
         media_type,
-        data_url,
+        image_id,
+        size_bytes,
         uri,
     } = &accepted.task.chat.items[0].parts[1]
     else {
         panic!("expected Image part");
     };
     assert_eq!(media_type, "image/png");
-    assert_eq!(data_url, "data:image/png;base64,aW1hZ2U=");
+    assert_eq!(*size_bytes, 5);
+    assert_eq!(
+        store.read_chat_image("task-existing", image_id).unwrap(),
+        Some(b"image".to_vec()),
+        "Chat names the Task's stored image instead of carrying its bytes"
+    );
+    // Live subscribers receive the change drafted before the journal stored the
+    // bytes; it must name the same stored image as the committed Chat.
+    let published = std::iter::from_fn(|| updates.try_recv().ok())
+        .find_map(|update| {
+            let TaskUpdateKind::Changed(change) = update.kind else {
+                return None;
+            };
+            change.changes.chat.into_iter().find_map(|chat| match chat {
+                openaide_app_server_protocol::events::TaskChatChange::Append { item }
+                    if item.role == openaide_app_server_protocol::snapshot::ChatRole::User =>
+                {
+                    Some(item)
+                }
+                _ => None,
+            })
+        })
+        .expect("Send must publish the user message");
+    assert_eq!(
+        published.parts[1], accepted.task.chat.items[0].parts[1],
+        "the published user message names the stored image"
+    );
     assert_eq!(uri, &None);
     wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Inactive);
     assert!(
@@ -7517,14 +7545,20 @@ fn send_commits_inline_image_without_an_empty_text_part() {
     assert_eq!(accepted.task.chat.items[0].parts.len(), 1);
     let MessagePart::Image {
         media_type,
-        data_url,
+        image_id,
+        size_bytes,
         uri,
     } = &accepted.task.chat.items[0].parts[0]
     else {
         panic!("expected inline Image message part");
     };
     assert_eq!(media_type, "image/png");
-    assert_eq!(data_url, "data:image/png;base64,aW1hZ2U=");
+    assert_eq!(*size_bytes, 5);
+    assert_eq!(
+        store.read_chat_image("task-existing", image_id).unwrap(),
+        Some(b"image".to_vec()),
+        "Chat names the Task's stored image instead of carrying its bytes"
+    );
     assert_eq!(uri, &None);
     assert_eq!(accepted.task.task.title, None);
     assert_eq!(store.read_task("task-existing").unwrap().title, None);

@@ -54,9 +54,20 @@ export type AgentMessageRole = "agent" | "thought";
 /** Ordered App Server-owned content for one logical ACP Agent or Thought message. */
 export type AgentMessagePart =
   | { kind: "text"; text: string }
-  | { kind: "image"; media_type: string; data_url: string; uri?: string }
+  /** A stored image of the Task (ADR-0075); Frontend loads its bytes by `image_id` when shown. */
+  | { kind: "image"; media_type: string; image_id: string; size_bytes: number; uri?: string }
   | { kind: "resource"; uri: string; name?: string; title?: string; description?: string; media_type?: string; size_bytes?: number; text?: string }
   | { kind: "unsupported"; content_type: string; media_type?: string; uri?: string };
+
+/**
+ * `Attachment.payload` of a sent Image the App Server stored for its Task (ADR-0075).
+ * It carries no bytes; Frontend loads them by `imageId` when the attachment is shown.
+ */
+export type StoredImageAttachmentPayload = {
+  imageId: string;
+  mimeType: string;
+  sizeBytes?: number;
+};
 
 export type ActivityStep =
   | { kind: "text"; text: string; level?: "info" | "warning" | "error" | "agent_boundary" }

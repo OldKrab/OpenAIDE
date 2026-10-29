@@ -159,20 +159,21 @@ use crate::task::{
     TaskArchiveOlderProtectedTask, TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult,
     TaskAttentionWaitParams, TaskAttentionWaitResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams, TaskClosePlanResult,
-    TaskLifecycleChanged, TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskNavigationSection,
-    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
-    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
-    TaskQueueSendSelection, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
-    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
-    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskStopBackgroundCommandParams,
-    TaskStopBackgroundCommandResult, TaskStopSubagentParams, TaskStopSubagentResult,
-    TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
-    TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
+    TaskImageParams, TaskImageResult, TaskLifecycleChanged, TaskListLifecycle, TaskListParams,
+    TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
+    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    TaskNavigationSection, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
+    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
+    TaskQueueRemoveResult, TaskQueueSendSelection, TaskQueueTakeParams, TaskQueueTakeResult,
+    TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
+    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
+    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult, TaskStopSubagentParams,
+    TaskStopSubagentResult, TaskTitleSelection, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
+    WorkspaceFileSearchState,
 };
 use crate::terminals::{
     TerminalAttach, TerminalCollectionSnapshot, TerminalStatus, TerminalSummary, TerminalTarget,
@@ -559,6 +560,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskClosePlanResult>(output, config);
     push_decl::<TaskToolImagePreviewParams>(output, config);
     push_decl::<TaskToolImagePreviewResult>(output, config);
+    push_decl::<TaskImageParams>(output, config);
+    push_decl::<TaskImageResult>(output, config);
     push_decl::<ProjectFilesParams>(output, config);
     push_decl::<ProjectFilesResult>(output, config);
     push_decl::<ProjectChangeBase>(output, config);

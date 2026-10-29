@@ -12,8 +12,9 @@ use super::Store;
 
 mod history;
 use history::{
-    advance_history_meta, append_history_frame, durable_create_empty, load_history, HistoryFile,
-    TextAppend, COMPACT_AFTER_FRAMES, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE,
+    advance_history_meta, append_history_frame, durable_create_empty,
+    load_history_with_image_references, HistoryFile, TextAppend, COMPACT_AFTER_FRAMES,
+    HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE,
 };
 
 const SUBAGENTS_DIR: &str = "subagents";
@@ -127,7 +128,8 @@ impl Store {
                 "Subagent history is unavailable".to_string(),
             ));
         }
-        let history = load_history(&root.join(subagent_id))?;
+        let history =
+            load_history_with_image_references(&task_dir(&root), &root.join(subagent_id))?;
         Ok(SubagentHistoryProjection {
             revision: history.revision,
             messages: history.messages,
@@ -149,7 +151,9 @@ impl Store {
             .subagent_write_lock
             .lock()
             .expect("Subagent store lock poisoned");
-        let history = load_history(&self.subagent_root(task_id).join(subagent_id))?;
+        let root = self.subagent_root(task_id);
+        let history =
+            load_history_with_image_references(&task_dir(&root), &root.join(subagent_id))?;
         let end = history
             .messages
             .iter()
@@ -544,7 +548,7 @@ impl Store {
             .find(|entry| entry.native_session_id == native_session_id)
             .ok_or_else(|| RuntimeError::TaskNotFound("subagent native session".to_string()))?;
         let history_dir = root.join(&record.subagent_id);
-        let mut history = match load_history(&history_dir) {
+        let mut history = match load_history_with_image_references(&task_dir(&root), &history_dir) {
             Ok(history) => history,
             Err(error) => {
                 record.history_available = false;
@@ -554,6 +558,14 @@ impl Store {
             }
         };
         let append = mutate(&mut history)?;
+        // A changed message may carry new image bytes; they become files before
+        // the snapshot that references them (ADR-0075).
+        if append.is_none() {
+            crate::storage::chat_images::externalize_messages(
+                &task_dir(&root),
+                &mut history.messages,
+            )?;
+        }
         history.revision = history.revision.saturating_add(1);
         history.journal_frames = history.journal_frames.saturating_add(1);
         let compacted = match append {
@@ -608,6 +620,46 @@ impl Store {
             .join(task_id)
             .join(SUBAGENTS_DIR)
     }
+}
+
+/// Returns which of `image_ids` any Subagent history of the Task still names, so
+/// the Chat compaction sweep keeps those image files (ADR-0075). It scans the
+/// stored bytes instead of parsing them, and runs only for old files Chat no
+/// longer references.
+pub(crate) fn subagent_image_references(
+    task_dir: &Path,
+    image_ids: &[String],
+) -> Result<std::collections::HashSet<String>, RuntimeError> {
+    let mut found = std::collections::HashSet::new();
+    let entries = match fs::read_dir(task_dir.join(SUBAGENTS_DIR)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(found),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        for file in [HISTORY_SNAPSHOT_FILE, HISTORY_JOURNAL_FILE] {
+            match fs::read(entry.path().join(file)) {
+                Ok(bytes) => {
+                    crate::storage::chat_images::ids_mentioned_in(&bytes, image_ids, &mut found)
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// The Task directory that owns a Subagent root, where its images live.
+fn task_dir(subagent_root: &Path) -> PathBuf {
+    subagent_root
+        .parent()
+        .expect("Subagent root is inside its Task directory")
+        .to_path_buf()
 }
 
 fn load_catalog(root: &Path) -> Result<CatalogFile, RuntimeError> {

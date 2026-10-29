@@ -1,6 +1,7 @@
 pub(crate) mod agent_config_preferences;
 pub mod app_preferences;
 pub mod atomic;
+pub(crate) mod chat_images;
 pub mod composer_history;
 pub mod cursor;
 pub mod id;

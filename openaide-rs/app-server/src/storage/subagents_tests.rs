@@ -564,3 +564,69 @@ fn subagent_history_pages_before_the_selected_cursor() {
     assert!(page.has_before);
     assert_eq!(page.total_count, 3);
 }
+
+#[test]
+fn a_subagent_history_with_inline_images_moves_them_to_task_files_on_load() {
+    let temp = tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = store
+        .record_subagent_spawn(
+            "task_1",
+            "root-session",
+            "child-session",
+            "Researcher".to_string(),
+            "Inspect".to_string(),
+            SubagentCapabilitiesRecord::default(),
+            Vec::new(),
+        )
+        .unwrap();
+    store
+        .append_subagent_message_part("task_1", "child-session", child_text("Rendered:"))
+        .unwrap();
+    let task_dir = temp.path().join("task-store-v1/tasks/task_1");
+    let history_dir = task_dir.join("subagents").join(&record.subagent_id);
+    // A history written before ADR-0075 kept the image bytes inline.
+    let snapshot_path = history_dir.join("history.snapshot");
+    drop(store);
+    let mut history: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    let journal = std::fs::read_to_string(history_dir.join("history.journal")).unwrap();
+    assert!(
+        journal.is_empty(),
+        "creating the message published the snapshot"
+    );
+    history["messages"][0]["chat"]["message"]["parts"]
+        .as_array_mut()
+        .unwrap()
+        .push(
+            serde_json::json!({ "kind": "image", "media_type": "image/png", "data": "aW1hZ2U=" }),
+        );
+    std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let loaded = reopened
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+
+    let NormalizedMessage::AgentMessage { parts, .. } = &loaded.messages[0].chat.message else {
+        panic!("expected the child reply");
+    };
+    let AgentMessagePart::Image {
+        data,
+        image_id: Some(image_id),
+        ..
+    } = &parts[1]
+    else {
+        panic!("expected an image reference");
+    };
+    assert!(data.is_empty());
+    assert_eq!(
+        reopened.read_chat_image("task_1", image_id).unwrap(),
+        Some(b"image".to_vec())
+    );
+    let published = std::fs::read_to_string(&snapshot_path).unwrap();
+    assert!(
+        !published.contains("aW1hZ2U="),
+        "the migrated history is durable"
+    );
+}

@@ -19,6 +19,7 @@ use crate::tasks::snapshot::{build_snapshot, snapshot_from_record_and_chat};
 
 pub(crate) use chat_projection::{project_chat_item, project_tool_details};
 
+mod chat_image;
 mod tool_image_preview;
 
 /// Projects one committed lazy artifact into the complete replica baseline.
@@ -128,6 +129,16 @@ pub trait TaskSnapshotSource: Send + Sync {
         _artifact_id: &str,
     ) -> Result<Option<ToolImagePreview>, ProtocolError> {
         Ok(None)
+    }
+
+    /// Reads one stored Chat image of a Task the client may access (ADR-0075).
+    fn chat_image_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _image_id: &str,
+    ) -> Result<Vec<u8>, ProtocolError> {
+        Err(chat_image::not_found())
     }
 
     /// Resolves the Task Workspace for a File Viewer open without exposing a client path authority.
@@ -409,6 +420,15 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             .read_tool_artifact(task_id.as_str(), artifact_id)
             .map_err(task_snapshot_error)?;
         Ok(tool_image_preview::load_tool_image_preview(&task, &details))
+    }
+
+    fn chat_image_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        image_id: &str,
+    ) -> Result<Vec<u8>, ProtocolError> {
+        chat_image::load(&self.store, client_instance_id, task_id, image_id)
     }
 
     fn workspace_root_for_client(

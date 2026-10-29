@@ -7,10 +7,9 @@ import {
 } from "../services/appServerStateSubscriptions";
 import { bindAppServerReplicaEpoch, type AppAction, type SnapshotIntent } from "../state/appReducer";
 import { newTaskNavigationTarget, type AsyncOperationOwner } from "../state/asyncOperationOwner";
-import { clientDiagnosticsFor, type ClientDiagnosticFields } from "../intents/clientDiagnosticsIntents";
-import { sendWebviewTelemetry } from "../state/hostMessageRouter";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
-import { openNewTaskSurface, postHostMessage } from "../services/hostBridge";
+import { openNewTaskSurface } from "../services/hostBridge";
 import type {
   AppControllerBackendConnection,
   BackendConnectionState,
@@ -38,19 +37,7 @@ type TaskRouteLifecycleOptions = {
  * A Task switch's lifecycle event, for the App Shell's telemetry and, through the
  * connection, the App Server log, where it lines up with the requests it waited on.
  */
-function routeTelemetry(
-  backendConnection: AppControllerBackendConnection | undefined,
-  event: string,
-  fields: ClientDiagnosticFields,
-) {
-  sendWebviewTelemetry(postHostMessage, event, fields);
-  if (!backendConnection) return;
-  clientDiagnosticsFor(backendConnection, (error) => {
-    sendWebviewTelemetry(postHostMessage, "client_diagnostics_forward_failed", {
-      error_name: error instanceof Error ? error.name : typeof error,
-    });
-  }).record(event, fields);
-}
+const routeTelemetry = recordFrontendLifecycleEvent;
 
 /** Owns the subscription, open request, readiness, and retry policy for the routed Task. */
 export function useTaskRouteLifecycle({

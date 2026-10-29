@@ -7,6 +7,7 @@
 mod artifact;
 mod catalog;
 mod frame;
+mod images;
 mod model;
 mod projection;
 mod scheduler;

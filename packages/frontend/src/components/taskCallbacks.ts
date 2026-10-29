@@ -41,6 +41,8 @@ import {
   sendTaskPromptIntent,
 } from "../intents/taskMutationIntents";
 import { requestComposerHistory } from "../intents/taskReadIntents";
+import { requestChatImage } from "../intents/chatImageIntents";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
 import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
 import { mapProtocolConfigOptions } from "../state/appServerProtocolMapping";
@@ -202,6 +204,13 @@ export function createTaskCallbacks({
         // Preview is an optional enhancement; Tool text remains the recovery surface.
         return undefined;
       }
+    },
+    loadChatImage: (taskId, imageId) => {
+      if (!backendConnection?.request) return Promise.reject(new Error(appServerRequiredMessage()));
+      // The session object itself keys the diagnostics batch shared with route events.
+      const connection = backendConnection as Required<Pick<NonNullable<typeof backendConnection>, "request">>;
+      return requestChatImage(connection, taskId, imageId, (event, fields) =>
+        recordFrontendLifecycleEvent(connection, event, fields));
     },
     subscribeToolDetail: (artifactId) => {
       if (!state.snapshot) return () => undefined;

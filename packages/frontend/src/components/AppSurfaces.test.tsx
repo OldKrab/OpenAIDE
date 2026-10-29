@@ -1681,6 +1681,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         cancel: vi.fn(),
         loadChatPage: vi.fn(),
         loadToolImagePreview: vi.fn(async () => undefined),
+        loadChatImage: vi.fn(async () => "aW1hZ2U="),
         subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
         moveAttachment: vi.fn(),

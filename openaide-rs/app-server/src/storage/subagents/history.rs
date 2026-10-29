@@ -188,6 +188,33 @@ pub(super) fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
 }
 
 /// Appends streamed text. Other changes publish the snapshot instead of a full frame.
+/// Loads a history whose images are references. A history written before
+/// ADR-0075 still holds inline images; they move into the Task's image files and
+/// the result is published as the snapshot, so the next load reads references.
+/// Callers hold the Subagent write lock.
+pub(super) fn load_history_with_image_references(
+    task_dir: &Path,
+    dir: &Path,
+) -> Result<HistoryFile, RuntimeError> {
+    let mut history = load_history(dir)?;
+    if !crate::storage::chat_images::has_inline_images(&history.messages) {
+        return Ok(history);
+    }
+    let started_at = std::time::Instant::now();
+    let moved = crate::storage::chat_images::externalize_messages(task_dir, &mut history.messages)?;
+    history.journal_frames = 0;
+    crate::storage::atomic::write_json(&dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
+    durable_create_empty(&dir.join(HISTORY_JOURNAL_FILE))?;
+    crate::logging::info(
+        "subagent_history_images_migrated",
+        serde_json::json!({
+            "moved_count": moved,
+            "duration_ms": started_at.elapsed().as_millis(),
+        }),
+    );
+    Ok(history)
+}
+
 pub(super) fn append_history_frame(
     path: &Path,
     history: &HistoryFile,
