@@ -218,7 +218,11 @@ fn tool_details(tool_call: &ToolCall) -> Option<Box<ActivityToolDetails>> {
         .map(tool_content_detail)
         .collect::<Vec<_>>();
     let input = tool_call.raw_input.as_ref().and_then(tool_input_detail);
-    let output = tool_call.raw_output.as_ref().and_then(tool_output_detail);
+    let output = tool_call
+        .raw_output
+        .as_ref()
+        .filter(|raw_output| !raw_output_repeats_content(raw_output, &tool_call.content))
+        .and_then(tool_output_detail);
     if locations.is_empty() && content.is_empty() && input.is_none() && output.is_none() {
         None
     } else {
@@ -228,6 +232,50 @@ fn tool_details(tool_call: &ToolCall) -> Option<Box<ActivityToolDetails>> {
             input,
             output,
         }))
+    }
+}
+
+/// Leaves shorter than this are block metadata, such as an image's `"type": "image"`.
+const MIN_REPEATED_LEAF_CHARS: usize = 32;
+
+/// Claude sends each result twice: as `content`, and as a non-object `rawOutput`
+/// holding the same text without its code fence, or the same image blocks. Storing
+/// both doubled every file read in Chat and in Subagent histories, so the copy is
+/// dropped when each of its long strings already appears in a text or image of
+/// `content`. An object `rawOutput` carries structured fields and is always kept.
+fn raw_output_repeats_content(raw_output: &Value, content: &[ToolCallContent]) -> bool {
+    if raw_output.is_object() {
+        return false;
+    }
+    let shown = content
+        .iter()
+        .filter_map(|content| match content {
+            ToolCallContent::Content(content) => match &content.content {
+                ContentBlock::Text(text) => Some(text.text.as_str()),
+                ContentBlock::Image(image) => Some(image.data.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut leaves = Vec::new();
+    string_leaves(raw_output, &mut leaves);
+    let is_shown = |leaf: &&str| shown.iter().any(|shown| shown.contains(*leaf));
+    leaves.iter().any(is_shown)
+        && leaves
+            .iter()
+            .filter(|leaf| leaf.chars().count() >= MIN_REPEATED_LEAF_CHARS)
+            .all(is_shown)
+}
+
+fn string_leaves<'a>(value: &'a Value, leaves: &mut Vec<&'a str>) {
+    match value {
+        Value::String(text) => leaves.push(text),
+        Value::Array(items) => items.iter().for_each(|item| string_leaves(item, leaves)),
+        Value::Object(fields) => fields
+            .values()
+            .for_each(|field| string_leaves(field, leaves)),
+        _ => {}
     }
 }
 
