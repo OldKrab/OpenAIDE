@@ -14,6 +14,7 @@ import javax.crypto.spec.GCMParameterSpec;
 
 final class ConnectionStore {
     private static final String RELAY_PREFIX = "server_relay_";
+    private static final String LAST_CONNECTED_PREFIX = "last_connected_";
     private final SharedPreferences preferences;
     /** The computer this phone is paired with: its key and the name it reported. */
     static final class PairedServer {
@@ -71,7 +72,7 @@ final class ConnectionStore {
     void forgetSsh(String id) {
         SharedPreferences.Editor edit = preferences.edit().putString("ssh_computers", SshComputers.format(SshComputers.without(sshComputers(), id)));
         if (id.equals(preferences.getString("ssh_id", ""))) edit.remove("ssh_id").putBoolean("paired", false);
-        edit.apply();
+        edit.remove(LAST_CONNECTED_PREFIX + ConnectionFailure.placeKey(ComputerSwitch.SSH_PREFIX + id)).apply();
     }
 
     /**
@@ -118,8 +119,26 @@ final class ConnectionStore {
         SharedPreferences.Editor edit = preferences.edit().putString("servers", PairedServers.format(PairedServers.without(pairedServers(), id)));
         PairedServer selected = pairedServer();
         if (selected != null && selected.id.equals(id)) edit.remove("server_id").remove("server_name").putBoolean("paired", false);
-        edit.remove(RELAY_PREFIX + id).apply();
+        edit.remove(RELAY_PREFIX + id).remove(LAST_CONNECTED_PREFIX + ConnectionFailure.placeKey(id)).apply();
     }
+
+    /**
+     * The place in use as a {@link ComputerSwitch} target: a paired computer's id, an SSH
+     * Computer's prefixed id, or null for this phone.
+     */
+    String inUseTarget() {
+        if (usesPaired()) return pairedServer().id;
+        SshComputers.Computer ssh = usesSsh() ? sshComputer() : null;
+        return ssh != null ? ComputerSwitch.SSH_PREFIX + ssh.id : null;
+    }
+
+    /** Files the time the workspace of [target] (null for this phone) last opened. */
+    void recordConnected(String target, long timeMillis) {
+        preferences.edit().putLong(LAST_CONNECTED_PREFIX + ConnectionFailure.placeKey(target), timeMillis).apply();
+    }
+
+    /** When the workspace of [target] last opened, or 0 when this phone has no record. */
+    long lastConnected(String target) { return preferences.getLong(LAST_CONNECTED_PREFIX + ConnectionFailure.placeKey(target), 0); }
 
     /** The relay a computer was last reached through, or null. It only shortens the next connect. */
     String relay(String id) { return preferences.getString(RELAY_PREFIX + id, null); }
