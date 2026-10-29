@@ -75,6 +75,7 @@ mod compaction;
 #[cfg(unix)]
 mod process_idle_runtime;
 mod steering_runtime;
+mod subagent_delegation_replay;
 mod task_chat_runtime;
 
 fn agent_message_text(message: &NormalizedMessage, role: AgentMessageRole) -> Option<&str> {

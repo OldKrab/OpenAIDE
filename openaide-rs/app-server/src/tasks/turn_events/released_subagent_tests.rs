@@ -101,6 +101,51 @@ fn released_child_adds_no_delegated_row_and_is_reused_across_runs() {
     });
 }
 
+/// The parent row the App Server builds from the parent's session messages
+/// lands in Task Chat as the Agent tool call's row did, beside the child,
+/// with no extra "Delegated to" row.
+#[test]
+fn the_parent_delegation_row_lands_in_task_chat_and_completes() {
+    use crate::agent::acp_native_subagents_delegation::{launch_tool_call, reply_update};
+    use crate::agent::acp_schema::{ContentBlock, TextContent};
+    use crate::agent::tool_details::tool_call_event;
+    use crate::protocol::model::ActivityStatus;
+
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    let text = |text: &str| vec![ContentBlock::Text(TextContent::new(text))];
+    sink.subagent_spawned(released_spawn(
+        "general-purpose",
+        Some("Fix the build"),
+        true,
+    ))
+    .unwrap();
+    let mut row = launch_tool_call("toolu_1", text("Make the build pass"), "Fix the build");
+    sink.session_update(tool_call_event(&row)).unwrap();
+    row.update(reply_update("toolu_1", text("Done.")).fields);
+    sink.session_update(tool_call_event(&row)).unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    let activities: Vec<_> = messages
+        .iter()
+        .filter_map(|stored| match &stored.chat.message {
+            NormalizedMessage::Activity { id, status, .. } => Some((id.as_str(), *status)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        activities,
+        [("acp_tool:session_1:toolu_1", ActivityStatus::Completed)]
+    );
+    assert_eq!(messages.len(), 1, "no Delegated to row");
+}
+
 #[test]
 fn released_identity_patches_and_reannouncement_update_the_stored_child() {
     let (_dir, store, mutations, server_requests) = test_runtime();

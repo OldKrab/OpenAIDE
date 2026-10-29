@@ -7,6 +7,7 @@ use crate::agent::acp_draft_subagents::{
 };
 use crate::agent::acp_host_capabilities::AcpSessionEventSinkMap;
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
+use crate::agent::acp_native_subagents_delegation::ChildDelegation;
 use crate::agent::acp_schema::{SessionNotification, SessionUpdate};
 use crate::agent::events::{
     AgentEvent, AgentNativeSubagentCapabilities, AgentNativeSubagentDetail,
@@ -48,9 +49,14 @@ struct ChildRoute {
     /// The last released-form status, so repeated reports of one status are
     /// applied once. The draft form does not track it.
     state: Option<AgentNativeSubagentState>,
+    /// The parent-side delegation rows of the released form. The draft form
+    /// announces delegations itself and leaves this empty.
+    delegation: ChildDelegation,
 }
 
 pub(super) enum RoutedSessionNotification {
+    /// A root session update, including a delegation row the router built for
+    /// a root parent, for the root session's ordered projection.
     Root(Box<SessionNotification>),
     Handled,
 }
@@ -100,8 +106,7 @@ impl AcpNativeSubagentRouter {
         let outer_meta = notification.meta;
         match notification.update {
             SessionUpdate::SubagentUpdate(update) => {
-                self.route_released_update(outer_session_id, update)?;
-                Ok(RoutedSessionNotification::Handled)
+                self.route_released_update(outer_session_id, update)
             }
             SessionUpdate::SessionMessage(message) => {
                 self.released_message(ReleasedSessionMessage {
@@ -110,6 +115,7 @@ impl AcpNativeSubagentRouter {
                     sender_session_id: message.sender_session_id,
                     recipient_session_id: message.recipient_session_id,
                     content: message.content.value().cloned().unwrap_or_default(),
+                    chunk: false,
                 })
             }
             SessionUpdate::SessionMessageChunk(chunk) => {
@@ -119,6 +125,7 @@ impl AcpNativeSubagentRouter {
                     sender_session_id: chunk.sender_session_id,
                     recipient_session_id: chunk.recipient_session_id,
                     content: vec![chunk.content],
+                    chunk: true,
                 })
             }
             SessionUpdate::SessionInfoUpdate(info)
@@ -149,14 +156,19 @@ impl AcpNativeSubagentRouter {
         }
     }
 
+    /// A session's delegation to or from one of its children becomes a Tool
+    /// row in its transcript. Any other message is a child's incoming message.
     fn released_message(
         &self,
         message: ReleasedSessionMessage,
     ) -> Result<RoutedSessionNotification, RuntimeError> {
+        if let Some(routed) = self.route_delegation_message(&message)? {
+            return Ok(routed);
+        }
         let session_id = message.session_id.clone();
         if !self.route_released_message(message)? {
-            // Only a child's transcript shows inter-session messages; a root
-            // session's own Tool rows already show what it sent.
+            // Unreachable for a root session, whose messages the delegation
+            // path above already took.
             crate::logging::info(
                 "acp_subagent_message_ignored",
                 serde_json::json!({
@@ -280,6 +292,7 @@ impl AcpNativeSubagentRouter {
                     projection: projection.clone(),
                     started_at: std::time::Instant::now(),
                     state: None,
+                    delegation: ChildDelegation::default(),
                 });
             first_announcement
         };

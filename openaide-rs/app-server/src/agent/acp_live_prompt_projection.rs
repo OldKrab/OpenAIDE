@@ -16,6 +16,7 @@ use crate::agent::acp_compaction_projection::{
 };
 use crate::agent::acp_config_projection::normalize_config_options;
 use crate::agent::acp_content_projection::project_content_block;
+use crate::agent::acp_native_subagents_delegation::is_delegation_row;
 use crate::agent::acp_terminal_output_adapter::terminal_append;
 #[cfg(test)]
 use crate::agent::acp_tool_call_projection::{merge_tool_call_update, remember_tool_call};
@@ -284,6 +285,9 @@ impl LivePromptProjection {
                 })?
             }
             SessionUpdate::ToolCall(tool_call) => {
+                if self.holds_agent_tool_call_for(&tool_call) {
+                    return Ok(());
+                }
                 let status_changed =
                     remember_tool_call_with_status_change(&self.tool_calls, tool_call.clone());
                 if self.agent_id == "codex" {
@@ -400,6 +404,34 @@ impl LivePromptProjection {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Whether `tool_call` is a delegation row App Server built while this
+    /// projection already holds the Agent's real tool call with that id. The
+    /// adapter shows the real call when a permission prompt needed it, and
+    /// that call keeps its own lifecycle; a second row would duplicate it.
+    fn holds_agent_tool_call_for(&self, tool_call: &ToolCall) -> bool {
+        if !is_delegation_row(tool_call) {
+            return false;
+        }
+        let tool_call_id = tool_call.tool_call_id.to_string();
+        let held = self
+            .tool_calls
+            .lock()
+            .expect("ACP tool call state lock poisoned")
+            .get(&tool_call_id)
+            .is_some_and(|existing| !is_delegation_row(existing));
+        if held {
+            logging::info(
+                "acp_subagent_delegation_row_skipped",
+                json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "tool_call_id": tool_call_id,
+                    "reason": "agent_tool_call_present",
+                }),
+            );
+        }
+        held
     }
 
     /// Account limits are optional decoration on a usage update: a malformed value is logged

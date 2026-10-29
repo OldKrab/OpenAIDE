@@ -543,8 +543,10 @@ fn session_trace(
 }
 
 /// Lets an active `session/load` capture absorb one update of the loaded
-/// session or of a child it announced. Only a root `update` joins the replay;
-/// child streams stay out of the main projection. Returns whether it was absorbed.
+/// session or of a child it announced. Only a root `update` joins the replay,
+/// including the root's `subagent_update`s, whose labels and states the
+/// replayed delegation rows need; child streams stay out of the main
+/// projection. Returns whether it was absorbed.
 fn absorbed_by_load_replay(
     load_replay: &LoadReplayCaptures,
     session_id: &str,
@@ -563,7 +565,8 @@ fn absorbed_by_load_replay(
         capture
             .subagent_session_ids
             .insert(child_session_id.to_string());
-    } else if let Some(update) = update.filter(|_| *capture.session_id.0 == *session_id) {
+    }
+    if let Some(update) = update.filter(|_| *capture.session_id.0 == *session_id) {
         capture.updates.push(update.clone());
     }
     true
