@@ -11,10 +11,10 @@ use crate::storage::records::StoredMessage;
 use super::Store;
 
 mod history;
+mod sweep;
 use history::{
-    advance_history_meta, append_history_frame, durable_create_empty,
-    load_history_with_image_references, HistoryFile, TextAppend, COMPACT_AFTER_FRAMES,
-    HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE,
+    advance_history_meta, append_history_frame, durable_create_empty, load_upgraded_history,
+    HistoryFile, TextAppend, COMPACT_AFTER_FRAMES, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE,
 };
 
 const SUBAGENTS_DIR: &str = "subagents";
@@ -128,8 +128,7 @@ impl Store {
                 "Subagent history is unavailable".to_string(),
             ));
         }
-        let history =
-            load_history_with_image_references(&task_dir(&root), &root.join(subagent_id))?;
+        let (history, _) = load_upgraded_history(&task_dir(&root), &root.join(subagent_id))?;
         Ok(SubagentHistoryProjection {
             revision: history.revision,
             messages: history.messages,
@@ -152,8 +151,7 @@ impl Store {
             .lock()
             .expect("Subagent store lock poisoned");
         let root = self.subagent_root(task_id);
-        let history =
-            load_history_with_image_references(&task_dir(&root), &root.join(subagent_id))?;
+        let (history, _) = load_upgraded_history(&task_dir(&root), &root.join(subagent_id))?;
         let end = history
             .messages
             .iter()
@@ -548,8 +546,8 @@ impl Store {
             .find(|entry| entry.native_session_id == native_session_id)
             .ok_or_else(|| RuntimeError::TaskNotFound("subagent native session".to_string()))?;
         let history_dir = root.join(&record.subagent_id);
-        let mut history = match load_history_with_image_references(&task_dir(&root), &history_dir) {
-            Ok(history) => history,
+        let mut history = match load_upgraded_history(&task_dir(&root), &history_dir) {
+            Ok((history, _)) => history,
             Err(error) => {
                 record.history_available = false;
                 catalog.revision = catalog.revision.saturating_add(1);

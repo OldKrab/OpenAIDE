@@ -101,7 +101,17 @@ impl TextAppend {
     }
 }
 
-pub(super) fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
+/// What replaying a journal found beyond the snapshot.
+#[derive(Debug, Default)]
+pub(super) struct JournalReplay {
+    /// The journal's complete bytes.
+    pub(super) bytes: u64,
+    /// Frames that repeat history the snapshot or a later frame holds: full frames
+    /// of the schema-1 writer, or a prefix an interrupted compaction left behind.
+    pub(super) repeated_frames: u64,
+}
+
+fn load_history(dir: &Path) -> Result<(HistoryFile, JournalReplay), RuntimeError> {
     let bytes = fs::read(dir.join(HISTORY_SNAPSHOT_FILE))?;
     let mut history: HistoryFile = serde_json::from_slice(&bytes)?;
     validate_schema(history.schema_version)?;
@@ -110,6 +120,7 @@ pub(super) fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
     let file = fs::File::open(&journal)?;
     let mut reader = BufReader::new(file);
     let mut complete_bytes = 0;
+    let mut repeated_frames = 0;
     let mut line = Vec::new();
     loop {
         line.clear();
@@ -137,6 +148,7 @@ pub(super) fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
         if revision <= snapshot_revision {
             // Snapshot publication precedes journal replacement. An interrupted
             // compaction may leave an already-materialized journal prefix.
+            repeated_frames += 1;
             continue;
         }
         if revision != history.revision.saturating_add(1) {
@@ -153,6 +165,7 @@ pub(super) fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
                     ));
                 }
                 history = next;
+                repeated_frames += 1;
             }
             HistoryFrame::AppendText {
                 append_text,
@@ -184,45 +197,65 @@ pub(super) fn load_history(dir: &Path) -> Result<HistoryFile, RuntimeError> {
             }
         }
     }
-    Ok(history)
+    Ok((
+        history,
+        JournalReplay {
+            bytes: complete_bytes,
+            repeated_frames,
+        },
+    ))
 }
 
-/// Loads a history whose images are references. A history written before
-/// ADR-0075 still holds inline images; they move into the Task's image files and
-/// the result is published as the snapshot, so the next load reads references.
-/// References stored before image dimensions were kept gain them the same way.
-/// Callers hold the Subagent write lock.
-pub(super) fn load_history_with_image_references(
+/// Loads a history in its current stored form, upgrading what older writers left:
+/// - A journal of full-history frames (schema-1 writers) repeats the whole history
+///   in every frame and is replayed on every load; it is published as the snapshot.
+/// - A history written before ADR-0075 still holds inline images; they move into
+///   the Task's image files. References stored without dimensions gain them.
+///
+/// An upgrade publishes the snapshot and resets the journal, so it happens once.
+/// Returns whether the history was rewritten. Callers hold the Subagent write lock.
+pub(super) fn load_upgraded_history(
     task_dir: &Path,
     dir: &Path,
-) -> Result<HistoryFile, RuntimeError> {
-    let mut history = load_history(dir)?;
-    if !crate::storage::chat_images::has_inline_images(&history.messages)
-        && !crate::storage::chat_images::has_references_without_dimensions(&history.messages)
-    {
-        return Ok(history);
+) -> Result<(HistoryFile, bool), RuntimeError> {
+    let (mut history, replay) = load_history(dir)?;
+    let images = crate::storage::chat_images::has_inline_images(&history.messages)
+        || crate::storage::chat_images::has_references_without_dimensions(&history.messages);
+    if replay.repeated_frames == 0 && !images {
+        return Ok((history, false));
     }
     let started_at = std::time::Instant::now();
-    let moved = crate::storage::chat_images::externalize_messages(task_dir, &mut history.messages)?;
-    let described =
-        crate::storage::chat_images::add_missing_dimensions(task_dir, &mut history.messages);
+    let (moved, described) = if images {
+        let moved =
+            crate::storage::chat_images::externalize_messages(task_dir, &mut history.messages)?;
+        let described =
+            crate::storage::chat_images::add_missing_dimensions(task_dir, &mut history.messages);
+        (moved, described)
+    } else {
+        (0, 0)
+    };
     // A file whose header cannot be read leaves its reference without a size;
-    // rewriting the history for it would repeat on every load.
-    if moved + described == 0 {
-        return Ok(history);
+    // rewriting the history for it alone would repeat on every load.
+    if replay.repeated_frames == 0 && moved + described == 0 {
+        return Ok((history, false));
     }
     history.journal_frames = 0;
     crate::storage::atomic::write_json(&dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
     durable_create_empty(&dir.join(HISTORY_JOURNAL_FILE))?;
     crate::logging::info(
-        "subagent_history_images_migrated",
+        "subagent_history_upgraded",
         serde_json::json!({
-            "moved_count": moved,
-            "described_count": described,
+            "task_id": task_dir.file_name().map(|name| name.to_string_lossy()),
+            "subagent_id": dir.file_name().map(|name| name.to_string_lossy()),
+            "repeated_frames": replay.repeated_frames,
+            "journal_bytes": replay.bytes,
+            "moved_image_count": moved,
+            "described_image_count": described,
+            "message_count": history.messages.len(),
             "duration_ms": started_at.elapsed().as_millis(),
         }),
     );
-    Ok(history)
+    Ok((history, true))
 }
 
 /// Appends streamed text. Other changes publish the snapshot instead of a full frame.
