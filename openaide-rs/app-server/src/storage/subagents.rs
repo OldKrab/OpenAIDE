@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{AgentPlan, NormalizedMessage};
+use crate::protocol::model::{AgentPlan, ChatMessage, NormalizedMessage};
 use crate::storage::cursor;
 use crate::storage::records::StoredMessage;
 
@@ -85,6 +85,29 @@ pub struct SubagentHistoryProjection {
     pub revision: u64,
     pub messages: Vec<StoredMessage>,
     pub current_plan: Option<AgentPlan>,
+}
+
+/// One committed Subagent History revision and its effect, so a writer can
+/// publish the revision without reloading the history.
+#[derive(Debug, Clone)]
+pub struct SubagentHistoryCommit {
+    /// The catalog entry after the commit; `history_revision` is the new revision.
+    pub record: SubagentRecord,
+    /// `None` when the effect cannot be described as a change, so a watching
+    /// client meets a revision gap and re-reads the history.
+    pub change: Option<CommittedSubagentChange>,
+}
+
+#[derive(Debug, Clone)]
+pub enum CommittedSubagentChange {
+    /// A message added after every existing message.
+    Append(ChatMessage),
+    /// A complete replacement of the message with the same identity.
+    Upsert(ChatMessage),
+    /// Text added to the last text part of the message.
+    AppendText { message_id: String, text: String },
+    /// The whole current plan; `None` clears it.
+    Plan(Option<AgentPlan>),
 }
 
 impl Store {
@@ -326,7 +349,7 @@ impl Store {
         native_session_id: &str,
         mut message: NormalizedMessage,
         upsert: bool,
-    ) -> Result<SubagentRecord, RuntimeError> {
+    ) -> Result<SubagentHistoryCommit, RuntimeError> {
         self.mutate_subagent_history(task_id, native_session_id, |history| {
             let identity = message.identity();
             if upsert {
@@ -367,7 +390,7 @@ impl Store {
         task_id: &str,
         native_session_id: &str,
         message: NormalizedMessage,
-    ) -> Result<SubagentRecord, RuntimeError> {
+    ) -> Result<SubagentHistoryCommit, RuntimeError> {
         self.mutate_subagent_history(task_id, native_session_id, |history| {
             let identity = message.identity();
             if let Some(stored) = history
@@ -455,7 +478,7 @@ impl Store {
         task_id: &str,
         native_session_id: &str,
         plan: AgentPlan,
-    ) -> Result<SubagentRecord, RuntimeError> {
+    ) -> Result<SubagentHistoryCommit, RuntimeError> {
         self.mutate_subagent_history(task_id, native_session_id, |history| {
             history.current_plan = (!plan.entries.is_empty()).then_some(plan);
             Ok(HistoryChange::Plan)
@@ -468,7 +491,7 @@ impl Store {
         native_session_id: &str,
         tool_call_id: &str,
         outcome: crate::protocol::model::ToolPermissionOutcome,
-    ) -> Result<SubagentRecord, RuntimeError> {
+    ) -> Result<SubagentHistoryCommit, RuntimeError> {
         self.mutate_subagent_history(task_id, native_session_id, |history| {
             let Some((identity, outcomes)) = history.messages.iter_mut().find_map(|stored| {
                 let chat = &mut stored.chat;
@@ -535,7 +558,7 @@ impl Store {
         task_id: &str,
         native_session_id: &str,
         mutate: impl FnOnce(&mut HistoryFile) -> Result<HistoryChange, RuntimeError>,
-    ) -> Result<SubagentRecord, RuntimeError> {
+    ) -> Result<SubagentHistoryCommit, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
         let started_at = std::time::Instant::now();
         let _guard = self
@@ -560,6 +583,7 @@ impl Store {
                 return Err(error);
             }
         };
+        let message_count = history.messages.len();
         let change = mutate(&mut history)?;
         let change_kind = change.kind();
         // A changed message may carry new image bytes; they become files before
@@ -570,6 +594,7 @@ impl Store {
                 &mut history.messages,
             )?;
         }
+        let committed = committed_change(&history, &change, message_count);
         history.revision = history.revision.saturating_add(1);
         history.journal_frames = history.journal_frames.saturating_add(1);
         // A schema 1 history is published once as schema 2 before its journal takes a
@@ -618,7 +643,10 @@ impl Store {
         let result = record.clone();
         catalog.revision = catalog.revision.saturating_add(1);
         write_catalog(&root, &catalog)?;
-        Ok(result)
+        Ok(SubagentHistoryCommit {
+            record: result,
+            change: committed,
+        })
     }
 
     fn subagent_root(&self, task_id: &str) -> PathBuf {
@@ -628,6 +656,37 @@ impl Store {
             .join(task_id)
             .join(SUBAGENTS_DIR)
     }
+}
+
+/// Describes what `change` did to `history`, which held `message_count` messages
+/// before it.
+fn committed_change(
+    history: &HistoryFile,
+    change: &HistoryChange,
+    message_count: usize,
+) -> Option<CommittedSubagentChange> {
+    let find = |identity: &str| {
+        history
+            .messages
+            .iter()
+            .find(|stored| stored.chat.identity == identity)
+            .map(|stored| &stored.chat)
+    };
+    Some(match change {
+        HistoryChange::AppendText(append) => CommittedSubagentChange::AppendText {
+            message_id: find(&append.identity)?.message_id.clone(),
+            text: append.text.clone(),
+        },
+        HistoryChange::Upsert(identity) => {
+            let message = find(identity)?.clone();
+            if history.messages.len() > message_count {
+                CommittedSubagentChange::Append(message)
+            } else {
+                CommittedSubagentChange::Upsert(message)
+            }
+        }
+        HistoryChange::Plan => CommittedSubagentChange::Plan(history.current_plan.clone()),
+    })
 }
 
 /// Returns which of `image_ids` any Subagent history of the Task still names, so

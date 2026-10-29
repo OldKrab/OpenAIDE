@@ -7,6 +7,7 @@ mod questions;
 #[cfg(test)]
 mod released_subagent_tests;
 mod session;
+mod subagent_publication;
 #[cfg(test)]
 mod tests;
 mod text_chunks;
@@ -283,10 +284,11 @@ impl TaskSessionEventSink {
             return self.upsert_session_tool(normalize_event(event, &now), &now);
         }
         if let AgentEvent::Subagent(subagent) = &event {
-            let target = self.append_codex_subagent_interaction(subagent, "Main Agent", &now)?;
+            let interacted =
+                self.append_codex_subagent_interaction(subagent, "Main Agent", &now)?;
             self.upsert_session_tool(normalize_event(event, &now), &now)?;
-            if let Some(subagent_id) = target {
-                self.publish_subagent_snapshots(&subagent_id)?;
+            if interacted {
+                self.publish_subagent_catalog()?;
             }
             return Ok(());
         }

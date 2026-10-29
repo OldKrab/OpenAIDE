@@ -130,9 +130,9 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
       return payload.kind === "subagentCatalogUpdated"
         && payload.catalog.taskId === scope.taskId;
     case "subagentHistory":
-      return payload.kind === "subagentHistoryUpdated"
-        && payload.history.taskId === scope.taskId
-        && payload.history.subagentId === scope.subagentId;
+      return payload.kind === "subagentHistoryChanged"
+        && payload.taskId === scope.taskId
+        && payload.subagentId === scope.subagentId;
     case "toolDetail":
       return (payload.kind === "toolDetailUpdated" || payload.kind === "toolDetailChanged")
         && payload.taskId === scope.taskId

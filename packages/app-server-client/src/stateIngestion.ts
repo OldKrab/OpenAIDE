@@ -34,7 +34,7 @@ export type SubscriptionEventApplyResult =
   | {
       kind: "resyncRequired";
       state: SubscriptionIngestionState;
-      reason: "cursorGap" | "cursorDidNotAdvance" | "missingChatItem" | "streamScopeMismatch" | "taskRevisionGap" | "toolDetailRevisionGap";
+      reason: "cursorGap" | "cursorDidNotAdvance" | "missingChatItem" | "streamScopeMismatch" | "taskRevisionGap" | "toolDetailRevisionGap" | "subagentHistoryRevisionGap";
       event: AppServerEvent;
     };
 

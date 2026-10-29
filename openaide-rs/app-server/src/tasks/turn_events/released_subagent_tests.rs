@@ -137,8 +137,14 @@ fn released_identity_patches_and_reannouncement_update_the_stored_child() {
     assert_eq!(store.subagent_catalog("task_1").unwrap().entries.len(), 1);
 }
 
-#[test]
-fn subagent_history_is_published_only_while_a_client_watches_it() {
+/// A sink whose Subagent history publications depend on `presence`.
+fn presence_sink() -> (
+    tempfile::TempDir,
+    crate::storage::Store,
+    crate::task_events::TaskUpdateReceiver,
+    crate::state_sync::TaskSubscriptionPresence,
+    TaskSessionEventSink,
+) {
     let dir = tempfile::tempdir().unwrap();
     let store = crate::storage::Store::open(dir.path().to_path_buf()).unwrap();
     let (notifier, updates) = crate::task_events::TaskUpdateNotifier::channel();
@@ -159,6 +165,12 @@ fn subagent_history_is_published_only_while_a_client_watches_it() {
         crate::server_requests::ServerRequestRuntime::new(),
     )
     .with_subscription_presence(Some(presence.clone()));
+    (dir, store, updates, presence, sink)
+}
+
+#[test]
+fn subagent_history_is_published_only_while_a_client_watches_it() {
+    let (_dir, store, updates, presence, sink) = presence_sink();
     let prompt = |text: &str, message_id: &str| {
         sink.subagent_session_update(
             "child_1",
@@ -201,4 +213,90 @@ fn subagent_history_is_published_only_while_a_client_watches_it() {
     prompt("Try again", "call_2");
     let (_, histories) = published();
     assert!(histories > 0, "a watched history is published");
+}
+
+#[test]
+fn a_watched_subagent_history_is_published_as_one_change_per_revision() {
+    use crate::protocol::model::{
+        AgentMessagePart, AgentMessageRole, AgentPlan, AgentPlanEntry, AgentPlanPriority,
+        AgentPlanStatus,
+    };
+    use crate::task_events::TaskUpdateKind;
+    use openaide_app_server_protocol::events::TaskChatChange;
+
+    let (_dir, store, updates, presence, sink) = presence_sink();
+    sink.subagent_spawned(released_spawn("general-purpose", None, true))
+        .unwrap();
+    let subagent_id = store
+        .subagent_record_by_native("task_1", "child_1")
+        .unwrap()
+        .subagent_id;
+    presence.watch_subagent_history_for_test("task_1", &subagent_id);
+    while updates.try_recv().is_ok() {}
+    let update = |event: AgentEvent| sink.subagent_session_update("child_1", event).unwrap();
+    let agent_text = |text: &str| AgentEvent::MessageChunk {
+        role: AgentMessageRole::Agent,
+        part: AgentMessagePart::Text {
+            text: text.to_string(),
+        },
+        source_message_id: Some("reply".to_string()),
+    };
+    let plan = |entries: Vec<AgentPlanEntry>| AgentEvent::Plan(AgentPlan { entries });
+
+    update(AgentEvent::UserMessageChunk {
+        text: "Fix".to_string(),
+        source_message_id: Some("prompt".to_string()),
+    });
+    update(AgentEvent::UserMessageChunk {
+        text: " it".to_string(),
+        source_message_id: Some("prompt".to_string()),
+    });
+    update(agent_text("Done"));
+    update(agent_text(" now"));
+    update(plan(vec![AgentPlanEntry {
+        content: "Run the tests".to_string(),
+        priority: AgentPlanPriority::High,
+        status: AgentPlanStatus::Pending,
+    }]));
+    update(plan(Vec::new()));
+
+    let mut changes = Vec::new();
+    while let Ok(update) = updates.try_recv() {
+        if let TaskUpdateKind::SubagentHistoryChanged {
+            subagent_id: changed,
+            chat,
+            current_plan,
+        } = update.kind
+        {
+            assert_eq!(changed.as_str(), subagent_id);
+            let kind = match (&chat[..], &current_plan) {
+                ([TaskChatChange::Append { .. }], None) => "append",
+                ([TaskChatChange::Upsert { .. }], None) => "upsert",
+                ([TaskChatChange::AppendText { text, .. }], None) if text == " now" => "appendText",
+                ([], Some(Some(_))) => "setPlan",
+                ([], Some(None)) => "clearPlan",
+                other => panic!("unexpected Subagent history change {other:?}"),
+            };
+            changes.push((update.revision, kind));
+        }
+    }
+    assert_eq!(
+        changes,
+        [
+            (1, "append"),
+            (2, "upsert"),
+            (3, "append"),
+            (4, "appendText"),
+            (5, "setPlan"),
+            (6, "clearPlan"),
+        ]
+    );
+    assert_eq!(
+        store
+            .subagent_history("task_1", &subagent_id)
+            .unwrap()
+            .revision,
+        6,
+        "every committed revision was published"
+    );
 }

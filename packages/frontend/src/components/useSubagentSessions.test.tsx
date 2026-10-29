@@ -133,7 +133,13 @@ function subagentHistoryEvent(cursor: string, snapshot: SubscriptionSnapshot): A
   if (snapshot.kind !== "subagentHistory") throw new Error("expected subagent history");
   return {
     cursor,
-    payload: { kind: "subagentHistoryUpdated", history: snapshot.history },
+    payload: {
+      kind: "subagentHistoryChanged",
+      taskId: snapshot.history.taskId,
+      subagentId: snapshot.history.subagentId,
+      revision: snapshot.history.revision,
+      chat: [{ kind: "appendText", messageId: "child-agent-message", text: " updated" }],
+    },
   } as unknown as AppServerEvent;
 }
 
